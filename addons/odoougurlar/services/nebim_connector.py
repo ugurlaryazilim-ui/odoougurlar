@@ -11,7 +11,7 @@ _logger = logging.getLogger(__name__)
 
 # Timeout for HTTP requests (seconds)
 CONNECT_TIMEOUT = 8       # Connect/login — kısa tutulmalı
-DATA_TIMEOUT = 30          # Veri gönder/al — biraz daha uzun
+DATA_TIMEOUT = 300         # Veri gönder/al — tüm ürünleri çekmek uzun sürer
 MAX_RETRIES = 2            # 2 deneme yeterli (toplam maks ~25s)
 
 # Session token cache: (token, expiry_timestamp)
