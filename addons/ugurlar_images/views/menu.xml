@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Ana Menü: Resimler -->
+    <menuitem id="menu_ugurlar_images_root"
+              name="Resimler"
+              web_icon="ugurlar_images,static/description/icon.png"
+              sequence="65"/>
+
+    <!-- Alt Menü: İşlemler -->
+    <menuitem id="menu_ugurlar_images_operations"
+              name="İşlemler"
+              parent="menu_ugurlar_images_root"
+              sequence="10"/>
+
+    <menuitem id="menu_bulk_image_upload"
+              name="📦 ZIP ile Toplu Görsel Yükle"
+              parent="menu_ugurlar_images_operations"
+              action="action_bulk_image_wizard"
+              sequence="10"/>
+
+    <!-- Alt Menü: Loglar -->
+    <menuitem id="menu_ugurlar_images_logs"
+              name="Loglar"
+              parent="menu_ugurlar_images_root"
+              sequence="20"/>
+
+    <menuitem id="menu_image_sync_log"
+              name="Yükleme Logları"
+              parent="menu_ugurlar_images_logs"
+              action="action_image_sync_log"
+              sequence="10"/>
+
+    <!-- Alt Menü: Ayarlar -->
+    <menuitem id="menu_ugurlar_images_config"
+              name="Yapılandırma"
+              parent="menu_ugurlar_images_root"
+              sequence="30"/>
+
+    <menuitem id="menu_image_settings"
+              name="Ayarlar"
+              parent="menu_ugurlar_images_config"
+              action="base.action_general_configuration"
+              sequence="10"/>
+
+</odoo>

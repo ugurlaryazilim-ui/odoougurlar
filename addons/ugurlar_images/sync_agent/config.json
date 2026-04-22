@@ -1,0 +1,14 @@
+{
+    "odoo_url": "https://odoo.ugurlar.com",
+    "odoo_db": "ugurlar",
+    "odoo_user": "admin",
+    "odoo_password": "BURAYA_ODOO_SIFRENIZI_YAZIN",
+    "watch_folder": "C:\\OdooResimler",
+    "done_folder": "C:\\OdooResimler\\Gonderilenler",
+    "error_folder": "C:\\OdooResimler\\Hatalilar",
+    "separator": "_",
+    "main_image_index": "1",
+    "match_field": "barcode",
+    "overwrite_existing": true,
+    "scan_interval_seconds": 3
+}

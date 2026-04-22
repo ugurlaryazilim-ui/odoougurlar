@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Log Tree -->
+    <record id="view_image_sync_log_tree" model="ir.ui.view">
+        <field name="name">ugurlar.image.sync.log.tree</field>
+        <field name="model">ugurlar.image.sync.log</field>
+        <field name="arch" type="xml">
+            <list string="Görsel Yükleme Logları" decoration-danger="state=='error'"
+                  decoration-success="state=='done'" decoration-info="state=='running'">
+                <field name="name"/>
+                <field name="sync_type"/>
+                <field name="state" widget="badge"
+                       decoration-danger="state=='error'"
+                       decoration-success="state=='done'"
+                       decoration-info="state=='running'"/>
+                <field name="total_files"/>
+                <field name="matched_count"/>
+                <field name="skipped_count"/>
+                <field name="error_count"/>
+                <field name="start_date"/>
+                <field name="end_date"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Log Form -->
+    <record id="view_image_sync_log_form" model="ir.ui.view">
+        <field name="name">ugurlar.image.sync.log.form</field>
+        <field name="model">ugurlar.image.sync.log</field>
+        <field name="arch" type="xml">
+            <form string="Görsel Yükleme Log Detayı">
+                <header>
+                    <field name="state" widget="statusbar"
+                           statusbar_visible="running,done,error"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="name"/>
+                            <field name="sync_type"/>
+                            <field name="start_date"/>
+                            <field name="end_date"/>
+                        </group>
+                        <group>
+                            <field name="total_files"/>
+                            <field name="matched_count"/>
+                            <field name="skipped_count"/>
+                            <field name="error_count"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Detay Log">
+                            <field name="detail_log" widget="text" nolabel="1"
+                                   style="font-family: monospace; white-space: pre-wrap;"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Log Action -->
+    <record id="action_image_sync_log" model="ir.actions.act_window">
+        <field name="name">Görsel Yükleme Logları</field>
+        <field name="res_model">ugurlar.image.sync.log</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+</odoo>

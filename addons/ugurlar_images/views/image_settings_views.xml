@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Resim modülü ayarlarını Ayarlar sayfasına ekle -->
+    <record id="res_config_settings_view_form_image" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.ugurlar_images</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="priority">90</field>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app data-string="Resimler" string="Resimler" data-key="ugurlar_images">
+
+                    <!-- Görsel Tarama Ayarları -->
+                    <block title="Görsel Tarama Ayarları"
+                           help="Dosya adından barkod ve sıra numarasını nasıl ayıracağını belirleyin.">
+                        <setting string="Görsel Ayracı"
+                                 help="Barkod ile sıra numarasını ayıran karakter (Örn: 8691234_1.jpg → ayraç: _ )">
+                            <field name="image_separator"/>
+                        </setting>
+                        <setting string="Ana Resim Sırası"
+                                 help="Hangi sıradaki görsel vitrin (ana) görseli olsun?">
+                            <field name="main_image_index"/>
+                        </setting>
+                        <setting string="Eşleştirme Alanı"
+                                 help="Dosya adındaki kod hangi ürün alanıyla eşleştirilsin?">
+                            <field name="image_match_field"/>
+                        </setting>
+                        <setting string="Üzerine Yaz"
+                                 help="Ürünün mevcut görseli varsa yeni gelen ile değiştirilsin mi?">
+                            <field name="image_overwrite"/>
+                        </setting>
+                    </block>
+
+                    <!-- Sync Agent Ayarları -->
+                    <block title="Sync Agent Ayarları (Windows Arka Plan)"
+                           help="Bilgisayarınızdaki bir klasörü izleyerek otomatik görsel yükleyen uygulama.">
+                        <setting string="Sync Agent"
+                                 help="Windows Sync Agent bağlantısını aktifleştirin.">
+                            <field name="sync_agent_enabled"/>
+                            <div invisible="not sync_agent_enabled">
+                                <div class="mt8">
+                                    <label for="sync_agent_api_key"/>
+                                    <field name="sync_agent_api_key" class="o_lg_field_full"/>
+                                </div>
+                                <div class="mt8">
+                                    <button name="action_generate_api_key"
+                                            type="object"
+                                            string="🔑 Yeni API Anahtarı Oluştur"
+                                            class="btn-primary"/>
+                                </div>
+                            </div>
+                        </setting>
+                    </block>
+
+                </app>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>

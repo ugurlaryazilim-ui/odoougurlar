@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- ZIP Yükleme Wizard Form -->
+    <record id="view_bulk_image_wizard_form" model="ir.ui.view">
+        <field name="name">ugurlar.bulk.image.wizard.form</field>
+        <field name="model">ugurlar.bulk.image.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Toplu Görsel Yükleme">
+                <group>
+                    <group string="📦 ZIP Dosyası Yükle">
+                        <field name="zip_file" filename="zip_filename"
+                               widget="binary"
+                               invisible="result_message"/>
+                        <field name="zip_filename" invisible="1"/>
+                    </group>
+                    <group string="ℹ️ Bilgi" invisible="result_message">
+                        <div class="alert alert-info" role="alert">
+                            <strong>Dosya Adlandırma Kuralı:</strong><br/>
+                            <code>BARKOD_SIRA.uzantı</code><br/><br/>
+                            <strong>Örnekler:</strong><br/>
+                            <code>8691234560001_1.jpg</code> → Ana resim<br/>
+                            <code>8691234560001_2.jpg</code> → Ek resim #2<br/>
+                            <code>8691234560001_3.png</code> → Ek resim #3<br/><br/>
+                            <em>Ayraç ve sıra numarası Ayarlar > Resimler menüsünden değiştirilebilir.</em>
+                        </div>
+                    </group>
+                </group>
+                <group invisible="not result_message">
+                    <field name="result_message" widget="text" nolabel="1"
+                           class="o_field_text" style="font-family: monospace; white-space: pre-wrap;"/>
+                </group>
+                <footer>
+                    <button string="🚀 Görselleri Yükle" name="action_import_images"
+                            type="object" class="btn-primary"
+                            invisible="result_message"/>
+                    <button string="Kapat" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- ZIP Yükleme Aksiyonu -->
+    <record id="action_bulk_image_wizard" model="ir.actions.act_window">
+        <field name="name">📦 ZIP ile Toplu Görsel Yükle</field>
+        <field name="res_model">ugurlar.bulk.image.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+</odoo>
