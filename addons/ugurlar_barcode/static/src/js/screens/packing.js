@@ -1,0 +1,650 @@
+/** @odoo-module **/
+
+import { Component, useState, xml, onMounted } from "@odoo/owl";
+import { BarcodeService, AudioFeedback } from "../barcode_service";
+
+export class PackingScreen extends Component {
+    static template = xml`
+        <div class="ub-screen">
+            <div class="ub-screen-header">
+                <button class="btn ub-btn-back" t-on-click="goBack">
+                    <i class="fa fa-arrow-left"></i>
+                </button>
+                <h2 class="ub-screen-title">
+                    <i class="fa fa-gift"></i> Paketleme &amp; Faturalama
+                </h2>
+            </div>
+
+            <!-- ROTA GİRİŞ -->
+            <t t-if="state.view === 'search'">
+                <div class="ub-search-form">
+                    <div class="ub-search-field">
+                        <label class="ub-field-label">Rota / Batch Numarası</label>
+                        <div class="ub-input-group">
+                            <input type="text" class="form-control ub-barcode-input"
+                                   placeholder="TOPLAMA-2026-04-06-0930..."
+                                   t-on-keydown="onRouteKey"
+                                   t-att-value="state.routeInput"
+                                   t-on-input="(ev) => this.state.routeInput = ev.target.value"/>
+                            <button class="btn btn-primary ub-scan-btn" t-on-click="searchRoute">
+                                <i class="fa fa-search"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div style="margin-top:0.5rem;">
+                        <button class="btn btn-sm" style="background:#714B67; color:#fff; white-space:nowrap;"
+                                t-on-click="() => this.props.navigate('cargo_label_designer')">
+                            <i class="fa fa-paint-brush"></i> Kargo Etiketi Tasarla
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Bugünkü batch listesi -->
+                <div class="ub-packing-batch-list" t-if="state.batches.length">
+                    <div class="ub-section-title-dark" style="margin-top:0.8rem;">
+                        <i class="fa fa-list"></i> Son Rotalar
+                    </div>
+                    <t t-foreach="state.batches" t-as="b" t-key="b.id">
+                        <div class="ub-picking-row" t-on-click="() => this.loadBatch(b.id)">
+                            <div class="ub-picking-info">
+                                <div class="ub-picking-name" t-esc="b.name"/>
+                                <div class="ub-picking-meta">
+                                    <span class="badge bg-info" t-esc="b.time_window"/>
+                                    <span class="badge bg-secondary" t-esc="b.state"/>
+                                </div>
+                            </div>
+                            <div class="ub-picking-count">
+                                <span class="badge bg-primary"
+                                      t-esc="b.total_orders + ' sipariş'"/>
+                            </div>
+                        </div>
+                    </t>
+                </div>
+
+                <t t-if="state.loading">
+                    <div class="ub-loading">
+                        <i class="fa fa-spinner fa-spin fa-2x"></i>
+                        <p>Yükleniyor...</p>
+                    </div>
+                </t>
+            </t>
+
+            <!-- ÜRÜN LİSTESİ + BARKOD EŞLEŞME -->
+            <t t-if="state.view === 'detail'">
+                <div class="ub-packing-header">
+                    <div class="ub-packing-route-info">
+                        <strong t-esc="state.batch.name"/>
+                        <span class="badge bg-info ms-2" t-esc="state.batch.time_window"/>
+                    </div>
+                    <div class="ub-packing-progress">
+                        <div class="ub-packing-progress-bar">
+                            <div class="ub-packing-progress-fill"
+                                 t-attf-style="width: {{progressPct}}%"/>
+                        </div>
+                        <span class="ub-packing-progress-text"
+                              t-esc="state.matched + '/' + state.total + ' ürün eşleşti'"/>
+                    </div>
+                </div>
+
+                <!-- Barkod tarama -->
+                <div class="ub-scan-area">
+                    <div class="ub-input-group">
+                        <input type="text" class="form-control ub-barcode-input"
+                               placeholder="Ürün barkodunu okutun..."
+                               t-on-keydown="onScanKey"
+                               t-att-value="state.scanInput"
+                               t-on-input="(ev) => this.state.scanInput = ev.target.value"/>
+                        <button class="btn btn-primary ub-scan-btn" t-on-click="onScan">
+                            <i class="fa fa-barcode"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <t t-if="state.scanMsg">
+                    <div t-attf-class="ub-scan-feedback {{state.scanOk ? 'ub-scan-ok' : 'ub-scan-fail'}}" style="flex-wrap: wrap;">
+                        <div class="d-flex align-items-center w-100 mb-2">
+                            <i t-attf-class="fa {{state.scanOk ? 'fa-check' : 'fa-times'}} me-2"></i>
+                            <span t-esc="state.scanMsg"/>
+                        </div>
+                        <t t-if="state.inc_picking_id">
+                            <button class="btn btn-warning w-100 fw-bold" t-on-click="() => this.onBackorder(state.inc_picking_id)">
+                                <i class="fa fa-exclamation-triangle"></i> Eksik Onayla (Backorder Yap)
+                            </button>
+                        </t>
+                    </div>
+                </t>
+
+                <!-- Ürün listesi -->
+                <div class="ub-product-list" t-if="state.items.length">
+                    <t t-foreach="state.items" t-as="item" t-key="item.move_id">
+                        <div t-attf-class="ub-product-row {{item.matched ? 'ub-line-done' : ''}}">
+                            <div class="ub-packing-check">
+                                <i t-attf-class="fa {{item.matched ? 'fa-check-square text-success' : 'fa-square-o text-muted'}} fa-lg"/>
+                            </div>
+                            <div class="ub-prod-info" style="flex:1;">
+                                <div class="ub-prod-name" t-esc="item.product_name"/>
+                                <div class="ub-prod-barcode">
+                                    <i class="fa fa-barcode"></i>
+                                    <span t-esc="item.barcode"/>
+                                </div>
+                                <div class="ub-packing-order-info" t-if="item.customer_name">
+                                    <small class="text-muted">
+                                        <i class="fa fa-user"></i>
+                                        <span t-esc="item.customer_name"/>
+                                        <span t-if="item.cargo_provider"
+                                              class="badge bg-secondary ms-1"
+                                              t-esc="item.cargo_provider"/>
+                                    </small>
+                                </div>
+                            </div>
+                            <div class="ub-prod-qty-detail d-flex align-items-center">
+                                <button class="btn btn-sm btn-outline-danger me-2" 
+                                        t-if="item.done_qty > 0" 
+                                        t-on-click="() => this.onDecreaseQty(item.picking_id, item.barcode)">
+                                    <i class="fa fa-minus"></i>
+                                </button>
+                                <div>
+                                    <span class="fw-bold" t-esc="item.done_qty"/>
+                                    /
+                                    <span t-esc="item.demand_qty"/>
+                                </div>
+                            </div>
+                        </div>
+                    </t>
+                </div>
+
+                <!-- Alt aksiyon bar -->
+                <div class="ub-action-bar" t-if="state.all_matched">
+                    <button class="btn btn-lg w-100 ub-packing-complete-btn"
+                            t-on-click="onComplete"
+                            t-att-disabled="state.loading">
+                        <i class="fa fa-check-circle"></i> Paketle &amp; Tamamla
+                    </button>
+                </div>
+
+                <div class="ub-action-bar" t-if="!state.all_matched">
+                    <button class="btn btn-outline-secondary btn-lg w-100" disabled="true">
+                        <i class="fa fa-clock-o"></i>
+                        Tüm ürünleri tarayın (<t t-esc="state.total - state.matched"/> kaldı)
+                    </button>
+                </div>
+
+                <!-- Etiket basma (tamamlandıktan sonra) -->
+                <t t-if="state.completed">
+                    <div class="ub-packing-label-section">
+                        <div class="ub-section-title-dark">
+                            <i class="fa fa-print"></i> Kargo Etiketleri
+                        </div>
+                        <t t-foreach="state.completedPickings" t-as="cp" t-key="cp.id">
+                            <div class="ub-picking-row">
+                                <div class="ub-picking-info">
+                                    <div class="ub-picking-name" t-esc="cp.name"/>
+                                    <div class="ub-picking-meta">
+                                        <span t-if="cp.cargo_tracking" class="badge bg-info">
+                                            <i class="fa fa-truck"></i>
+                                            <span t-esc="cp.cargo_tracking"/>
+                                        </span>
+                                    </div>
+                                </div>
+                                <button class="btn btn-sm btn-success" t-on-click="() => this.printLabel(cp.picking_id)">
+                                    <i class="fa fa-print"></i> Etiket
+                                </button>
+                            </div>
+                        </t>
+                    </div>
+                </t>
+            </t>
+
+            <t t-if="state.error">
+                <div class="ub-error-card">
+                    <i class="fa fa-exclamation-triangle"></i>
+                    <p t-esc="state.error"/>
+                </div>
+            </t>
+        </div>
+    `;
+
+    static props = { navigate: Function, scanner: Object };
+
+    setup() {
+        this.state = useState({
+            view: 'search',
+            loading: false,
+            error: null,
+            routeInput: '',
+            batches: [],
+            // detail
+            batch: null,
+            items: [],
+            total: 0,
+            matched: 0,
+            all_matched: false,
+            scanInput: '',
+            scanMsg: '',
+            scanOk: false,
+            // completed
+            completed: false,
+            completedPickings: [],
+        });
+
+        this._unsub = this.props.scanner.onScan(bc => {
+            if (this.state.view === 'detail') {
+                this.state.scanInput = bc;
+                this.onScan();
+            } else if (this.state.view === 'search') {
+                this.state.routeInput = bc;
+                this.searchRoute();
+            }
+        });
+
+        onMounted(() => this.loadBatchList());
+    }
+
+    goBack() {
+        if (this.state.view === 'detail') {
+            this.state.view = 'search';
+            this.state.error = null;
+            this.state.completed = false;
+        } else {
+            this.props.navigate('main');
+        }
+    }
+
+    get progressPct() {
+        if (!this.state.total) return 0;
+        return Math.round((this.state.matched / this.state.total) * 100);
+    }
+
+    // ─── BATCH LİSTESİ ──────────────────────────
+    async loadBatchList() {
+        try {
+            const res = await BarcodeService.call('/ugurlar_barcode/api/batch_list', {});
+            this.state.batches = res.batches || [];
+        } catch (e) {
+            // sessiz
+        }
+    }
+
+    onRouteKey(ev) {
+        if (ev.key === 'Enter') { ev.preventDefault(); this.searchRoute(); }
+    }
+
+    async searchRoute() {
+        const name = this.state.routeInput.trim();
+        if (!name) return;
+        this.state.loading = true;
+        this.state.error = null;
+        try {
+            const res = await BarcodeService.call('/ugurlar_barcode/api/packing_batch_detail', {
+                batch_name: name,
+            });
+            if (res.error) {
+                this.state.error = res.error;
+            } else {
+                this._setBatchDetail(res);
+            }
+        } catch (e) {
+            this.state.error = 'Bağlantı hatası';
+        }
+        this.state.loading = false;
+    }
+
+    async loadBatch(id) {
+        this.state.loading = true;
+        this.state.error = null;
+        try {
+            const res = await BarcodeService.call('/ugurlar_barcode/api/packing_batch_detail', {
+                batch_id: id,
+            });
+            if (res.error) {
+                this.state.error = res.error;
+            } else {
+                this._setBatchDetail(res);
+            }
+        } catch (e) {
+            this.state.error = 'Bağlantı hatası';
+        }
+        this.state.loading = false;
+    }
+
+    _setBatchDetail(res) {
+        this.state.batch = res.batch;
+        this.state.items = res.items;
+        this.state.total = res.total;
+        this.state.matched = res.matched;
+        this.state.all_matched = res.all_matched;
+        this.state.view = 'detail';
+        this.state.completed = false;
+        this.state.inc_picking_id = null;
+    }
+
+    // ─── BARKOD TARAMA ──────────────────────────
+    onScanKey(ev) {
+        if (ev.key === 'Enter') { ev.preventDefault(); this.onScan(); }
+    }
+
+    async onScan() {
+        if (!this.state.scanInput.trim()) return;
+        this.state.scanMsg = '';
+        try {
+            const res = await BarcodeService.call('/ugurlar_barcode/api/packing_scan', {
+                batch_id: this.state.batch.id,
+                barcode: this.state.scanInput.trim(),
+            });
+            if (res.error) {
+                this.state.scanMsg = res.error;
+                this.state.scanOk = false;
+                AudioFeedback.playError();
+            } else if (res.warning) {
+                this.state.scanMsg = res.message;
+                this.state.scanOk = true;
+                AudioFeedback.playSuccess();
+            } else {
+                this.state.scanMsg = `${res.product_name} — ${res.picking_name} (${res.done_qty}/${res.demand_qty})`;
+                this.state.scanOk = true;
+                AudioFeedback.playSuccess();
+
+                // Listeyi güncelle
+                for (const item of this.state.items) {
+                    if (item.move_id === undefined) continue;
+                }
+                const fresh = await BarcodeService.call('/ugurlar_barcode/api/packing_batch_detail', {
+                    batch_id: this.state.batch.id,
+                });
+                if (!fresh.error) {
+                    this.state.items = fresh.items;
+                    this.state.matched = fresh.matched;
+                    this.state.all_matched = fresh.all_matched;
+                }
+
+                // Eğer sipariş tamamen eşleştiyse kargo etiketini otomatik yazdır
+                if (res.picking_completed && res.picking_id) {
+                    this.state.scanMsg = res.picking_name + " siparişi eşleşti, etiket yazdırılıyor...";
+                    
+                    // Alt ekrandaki Kargo Etiketleri listesine anında ekle
+                    this.state.completed = true;
+                    this.state.inc_picking_id = null;
+                    if (!this.state.completedPickings) this.state.completedPickings = [];
+                    if (!this.state.completedPickings.find(p => p.picking_id === res.picking_id)) {
+                        const matchedItem = this.state.items.find(i => i.picking_id === res.picking_id);
+                        if (matchedItem) {
+                            this.state.completedPickings.unshift({
+                                id: res.picking_id,
+                                picking_id: res.picking_id,
+                                name: res.picking_name,
+                                cargo_tracking: matchedItem.cargo_tracking,
+                                cargo_provider: matchedItem.cargo_provider,
+                                customer_name: matchedItem.customer_name,
+                            });
+                        }
+                    }
+
+                    // Otomatik yazdırmayı tetikle (Kargo etiketi servisi bitince pop-up açacak)
+                    this.printLabel(res.picking_id);
+                } else if (res.picking_id && res.remaining_items && res.remaining_items.length > 0) {
+                    // Sipariş içerisinde okutulması gereken başka ürünler var
+                    this.state.scanMsg = `${res.product_name} paketlendi ancak ${res.picking_name} siparişi BİTMEDİ. Lütfen şunları da okutun: ${res.remaining_items.join(', ')}`;
+                    this.state.scanOk = false; // Farkındalık için kırmızı veya uyarı rengi
+                    this.state.inc_picking_id = res.picking_id;
+                    AudioFeedback.playError(); // Uyarı sesi
+                }
+            }
+        } catch (e) {
+            this.state.scanMsg = 'Hata';
+            this.state.scanOk = false;
+            this.state.inc_picking_id = null;
+            AudioFeedback.playError();
+        }
+        this.state.scanInput = '';
+    }
+
+    // ─── TAMAMLA ─────────────────────────────────
+    async onComplete() {
+        this.state.loading = true;
+        this.state.error = null;
+        try {
+            const res = await BarcodeService.call('/ugurlar_barcode/api/packing_complete', {
+                batch_id: this.state.batch.id,
+            });
+            if (res.errors && res.errors.length) {
+                this.state.error = res.errors.join('\n');
+            }
+            if (res.success || res.validated > 0) {
+                this.state.scanMsg = res.message;
+                this.state.scanOk = true;
+                this.state.completed = true;
+
+                // Etiket bilgilerini hazırla
+                const pickingInfos = [];
+                for (const item of this.state.items) {
+                    if (!pickingInfos.find(p => p.picking_id === item.picking_id)) {
+                        pickingInfos.push({
+                            id: item.picking_id,
+                            picking_id: item.picking_id,
+                            name: item.picking_name,
+                            cargo_tracking: item.cargo_tracking,
+                            cargo_provider: item.cargo_provider,
+                            customer_name: item.customer_name,
+                        });
+                    }
+                }
+                this.state.completedPickings = pickingInfos;
+            }
+        } catch (e) {
+            this.state.error = 'Tamamlama hatası';
+        }
+        this.state.loading = false;
+    }
+
+    // ─── EKSİK ONAYLA (BACKORDER) ────────────────
+    async onBackorder(pickingId) {
+        if (!confirm('Eksik ürünlerle siparişi onaylayıp kapatmak istediğinize emin misiniz?')) return;
+        this.state.loading = true;
+        this.state.scanMsg = 'Backorder oluşturuluyor...';
+        this.state.inc_picking_id = null;
+        
+        try {
+            const res = await BarcodeService.call('/ugurlar_barcode/api/packing_backorder', {
+                picking_id: pickingId,
+            });
+            if (res.error) {
+                this.state.scanMsg = res.error;
+                this.state.scanOk = false;
+            } else {
+                this.state.scanMsg = res.message;
+                this.state.scanOk = true;
+                
+                // Detayı yeniden yükle
+                const fresh = await BarcodeService.call('/ugurlar_barcode/api/packing_batch_detail', {
+                    batch_id: this.state.batch.id,
+                });
+                if (!fresh.error) {
+                    this.state.items = fresh.items;
+                    this.state.matched = fresh.matched;
+                    this.state.all_matched = fresh.all_matched;
+                }
+                
+                // Otomatik etiket listesine ekle ve yazdır
+                this.state.completed = true;
+                if (!this.state.completedPickings) this.state.completedPickings = [];
+                if (!this.state.completedPickings.find(p => p.picking_id === pickingId)) {
+                    const matchedItem = this.state.items.find(i => i.picking_id === pickingId);
+                    if (matchedItem) {
+                        this.state.completedPickings.unshift({
+                            id: pickingId,
+                            picking_id: pickingId,
+                            name: matchedItem.picking_name,
+                            cargo_tracking: matchedItem.cargo_tracking,
+                            cargo_provider: matchedItem.cargo_provider,
+                            customer_name: matchedItem.customer_name,
+                        });
+                    }
+                }
+                setTimeout(() => {
+                    this.printLabel(pickingId);
+                }, 100);
+            }
+        } catch (e) {
+            this.state.scanMsg = 'Bağlantı hatası';
+            this.state.scanOk = false;
+        }
+        this.state.loading = false;
+    }
+
+    // ─── GERİ AL (UNDO) MİKTAR DÜŞÜRME ────────────
+    async onDecreaseQty(pickingId, barcode) {
+        if (!confirm('Bu ürünün okutulmuş miktarını 1 azaltmak istediğinize emin misiniz?')) return;
+        this.state.loading = true;
+        try {
+            const res = await BarcodeService.call('/ugurlar_barcode/api/packing_undo', {
+                picking_id: pickingId,
+                barcode: barcode,
+            });
+            if (res.error) {
+                this.state.scanMsg = res.error;
+                this.state.scanOk = false;
+            } else {
+                this.state.scanMsg = res.message;
+                this.state.scanOk = true;
+                
+                // Refresh detail
+                const fresh = await BarcodeService.call('/ugurlar_barcode/api/packing_batch_detail', {
+                    batch_id: this.state.batch.id,
+                });
+                if (!fresh.error) {
+                    this.state.items = fresh.items;
+                    this.state.matched = fresh.matched;
+                    this.state.all_matched = fresh.all_matched;
+                }
+            }
+        } catch (e) {
+            this.state.scanMsg = 'Bağlantı hatası';
+            this.state.scanOk = false;
+        }
+        this.state.loading = false;
+    }
+
+    // ─── ETİKET BAS ─────────────────────────────
+    async printLabel(pickingId) {
+        try {
+            const data = await BarcodeService.call('/ugurlar_barcode/api/packing_label_data', {
+                picking_id: pickingId,
+            });
+            if (data.error) {
+                this.state.error = data.error;
+                return;
+            }
+            this._openLabelPrint(data);
+        } catch (e) {
+            this.state.error = 'Etiket verisi alınamadı';
+        }
+    }
+
+    _openLabelPrint(data) {
+        const cargoBarcode = data.cargo_tracking || '';
+        const barcodeHtml = cargoBarcode
+            ? `<div style="text-align:center; margin:8px 0;">
+                 <svg id="cargo-bc"></svg>
+               </div>`
+            : '';
+
+        const itemsHtml = data.items.map(i =>
+            `<tr><td>${i.product_name}</td><td style="text-align:center;">${i.qty}</td><td style="text-align:center;">${i.barcode}</td></tr>`
+        ).join('');
+
+        const html = `<!DOCTYPE html><html><head>
+            <meta charset="utf-8">
+            <title>Kargo Etiketi — ${data.picking_name}</title>
+            <style>
+                @page { size: 100mm 150mm; margin: 3mm; }
+                * { margin:0; padding:0; box-sizing:border-box; }
+                body { font-family: Arial, sans-serif; font-size: 11px; }
+                .label { width: 94mm; padding: 4mm; }
+                .header { display:flex; justify-content:space-between; border-bottom:2px solid #000; padding-bottom:4px; margin-bottom:6px; }
+                .header h2 { font-size:14px; margin:0; }
+                .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:4px 12px; margin-bottom:6px; }
+                .info-label { font-weight:bold; font-size:9px; color:#666; text-transform:uppercase; }
+                .info-value { font-size:11px; }
+                .cargo-section { text-align:center; border:2px solid #000; padding:6px; margin:6px 0; }
+                .cargo-section .tracking { font-size:16px; font-weight:bold; letter-spacing:1px; }
+                table { width:100%; border-collapse:collapse; margin-top:4px; }
+                th, td { border:1px solid #ccc; padding:3px 4px; font-size:9px; }
+                th { background:#f0f0f0; }
+            </style>
+        </head><body>
+            <div class="label">
+                <div class="header">
+                    <h2>${data.cargo_provider || 'KARGO'}</h2>
+                    <span>${data.picking_name}</span>
+                </div>
+
+                <div class="info-grid">
+                    <div>
+                        <div class="info-label">Sipariş No</div>
+                        <div class="info-value">${data.order_number || data.origin}</div>
+                    </div>
+                    <div>
+                        <div class="info-label">Müşteri</div>
+                        <div class="info-value">${data.customer_name || data.partner_name}</div>
+                    </div>
+                    <div>
+                        <div class="info-label">Tel</div>
+                        <div class="info-value">${data.partner_phone || '-'}</div>
+                    </div>
+                    <div>
+                        <div class="info-label">Adet</div>
+                        <div class="info-value">${data.total_qty} ürün</div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="info-label">Adres</div>
+                    <div class="info-value" style="font-size:10px;">${data.shipping_address || data.partner_address}</div>
+                    <div class="info-value">${[data.shipping_district, data.shipping_city].filter(x=>x).join(' / ')}</div>
+                </div>
+
+                <div class="cargo-section">
+                    <div class="info-label">Kargo Takip No</div>
+                    <div class="tracking">${cargoBarcode}</div>
+                    ${barcodeHtml}
+                </div>
+
+                <table>
+                    <thead><tr><th>Ürün</th><th>Adet</th><th>Barkod</th></tr></thead>
+                    <tbody>${itemsHtml}</tbody>
+                </table>
+            </div>
+        </body></html>`;
+
+        // Tabletlerde Popup Blocker'ı aşmak ve direk yazdırmak için görünür ama ufacık iframe kuralım
+        let iframe = document.getElementById('ub-print-iframe');
+        if (!iframe) {
+            iframe = document.createElement('iframe');
+            iframe.id = 'ub-print-iframe';
+            iframe.style.position = 'fixed';
+            iframe.style.right = '0';
+            iframe.style.bottom = '0';
+            iframe.style.width = '1px';
+            iframe.style.height = '1px';
+            iframe.style.opacity = '0.01';
+            iframe.style.border = '0';
+            iframe.style.pointerEvents = 'none';
+            document.body.appendChild(iframe);
+        }
+
+        const doc = iframe.contentWindow.document;
+        doc.open();
+        doc.write(html);
+        doc.close();
+
+        // document.write'tan sonra DOM'un oturmasını bekleyip direk iframe üzerinden yazdır
+        setTimeout(() => {
+            iframe.contentWindow.focus();
+            iframe.contentWindow.print();
+        }, 500);
+    }
+
+    willUnmount() {
+        if (this._unsub) this._unsub();
+    }
+}

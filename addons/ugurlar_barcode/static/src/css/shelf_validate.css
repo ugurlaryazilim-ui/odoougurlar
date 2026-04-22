@@ -1,0 +1,248 @@
+/* ===================================================================
+   Mobil — Raf Ürün Doğrulama Ekranı Stilleri
+   =================================================================== */
+
+/* ─── DOĞRULAMA TABLOSU ────────────────────────────────── */
+.ub-validate-table-wrap {
+    margin: 0.5rem 1.5rem 1rem;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    background: #fff;
+}
+
+.ub-validate-table-header {
+    background: linear-gradient(135deg, #714B67, #5a3c53);
+    color: #fff;
+    padding: 0.7rem 1.2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.ub-validate-table-header h3 {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.ub-validate-table-header .badge {
+    background: rgba(255, 255, 255, 0.25);
+    font-size: 0.8rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 10px;
+}
+
+.ub-validate-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+.ub-validate-table thead th {
+    background: #f8f9fa;
+    color: #555;
+    padding: 0.5rem 0.6rem;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 2px solid #e9ecef;
+    font-size: 0.73rem;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.ub-validate-table thead th:last-child {
+    text-align: center;
+}
+
+.ub-validate-table tbody td {
+    padding: 0.45rem 0.6rem;
+    border-bottom: 1px solid #f0f0f0;
+    vertical-align: middle;
+}
+
+.ub-validate-table tbody tr:nth-child(even) {
+    background: #fafafa;
+}
+
+.ub-validate-table tbody tr:hover {
+    background: #f5f0f4;
+}
+
+/* Doğrulanmış ürün satırı */
+.ub-validate-table tbody tr.ub-validated {
+    background: #d4edda !important;
+    border-left: 3px solid #27AE60;
+}
+
+.ub-validate-table tbody tr.ub-validated td {
+    color: #155724;
+    font-weight: 500;
+}
+
+/* Doğrulanmadı / bulunamadı animasyonu */
+.ub-validate-table tbody tr.ub-not-found {
+    background: #f8d7da !important;
+}
+
+.ub-validate-product-name {
+    font-weight: 500;
+    color: #333;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ub-validate-qty {
+    text-align: center;
+    font-weight: 600;
+    color: #714B67;
+}
+
+.ub-validate-counted {
+    text-align: center;
+    font-weight: 700;
+    min-width: 50px;
+}
+
+.ub-validate-counted.ub-counted-zero {
+    color: #999;
+}
+
+.ub-validate-counted.ub-counted-done {
+    color: #27AE60;
+}
+
+/* ─── HATA DURUMU (KIRMIZI EKRAN) ─────────────────────── */
+.ub-validate-notfound-banner {
+    margin: 0.5rem 1.5rem;
+    padding: 1rem 1.2rem;
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+    border-radius: 12px;
+    color: #fff;
+    text-align: center;
+    font-weight: 600;
+    font-size: 0.95rem;
+    animation: ub-shake 0.4s ease-in-out;
+}
+
+.ub-validate-notfound-banner .fa {
+    font-size: 1.5rem;
+    display: block;
+    margin-bottom: 0.4rem;
+}
+
+.ub-validate-notfound-banner .ub-notfound-barcode {
+    font-family: monospace;
+    font-size: 1.1rem;
+    background: rgba(255, 255, 255, 0.2);
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+    margin-top: 0.3rem;
+    display: inline-block;
+}
+
+@keyframes ub-shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-6px); }
+    40% { transform: translateX(6px); }
+    60% { transform: translateX(-4px); }
+    80% { transform: translateX(4px); }
+}
+
+/* ─── İLERLEME BARINI ─────────────────────────────────── */
+.ub-validate-progress {
+    margin: 0.5rem 1.5rem;
+    background: #e9ecef;
+    border-radius: 10px;
+    height: 8px;
+    overflow: hidden;
+}
+
+.ub-validate-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #27AE60, #2ECC71);
+    transition: width 0.4s ease;
+    border-radius: 10px;
+}
+
+/* ─── DOĞRULAMA STATS ──────────────────────────────────── */
+.ub-validate-stats {
+    display: flex;
+    gap: 0.8rem;
+    margin: 0.5rem 1.5rem;
+    flex-wrap: wrap;
+}
+
+.ub-validate-stat {
+    flex: 1;
+    min-width: 80px;
+    background: #fff;
+    border-radius: 10px;
+    padding: 0.6rem 0.8rem;
+    text-align: center;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+
+.ub-validate-stat-value {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #714B67;
+}
+
+.ub-validate-stat-value.ub-stat-done {
+    color: #27AE60;
+}
+
+.ub-validate-stat-value.ub-stat-remain {
+    color: #E67E22;
+}
+
+.ub-validate-stat-label {
+    font-size: 0.68rem;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+/* ─── TÜM DOĞRULANDI BANNER ───────────────────────────── */
+.ub-validate-complete {
+    margin: 0.5rem 1.5rem;
+    padding: 1rem;
+    background: linear-gradient(135deg, #27AE60, #219A52);
+    border-radius: 12px;
+    color: #fff;
+    text-align: center;
+}
+
+.ub-validate-complete .fa {
+    font-size: 2rem;
+    margin-bottom: 0.3rem;
+}
+
+.ub-validate-complete h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+/* ─── RESPONSIVE ───────────────────────────────────────── */
+@media (max-width: 480px) {
+    .ub-validate-table-wrap,
+    .ub-validate-stats,
+    .ub-validate-progress,
+    .ub-validate-notfound-banner,
+    .ub-validate-complete {
+        margin-left: 0.5rem;
+        margin-right: 0.5rem;
+    }
+    .ub-validate-product-name {
+        max-width: 120px;
+    }
+    .ub-validate-table thead th,
+    .ub-validate-table tbody td {
+        padding: 0.35rem 0.4rem;
+        font-size: 0.75rem;
+    }
+}

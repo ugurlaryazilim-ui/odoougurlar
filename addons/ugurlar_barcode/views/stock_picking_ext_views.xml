@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- ═══════ PICKING LIST INHERIT ═══════ -->
+    <record id="view_stock_picking_list_inherit" model="ir.ui.view">
+        <field name="name">stock.picking.list.ugurlar</field>
+        <field name="model">stock.picking</field>
+        <field name="inherit_id" ref="stock.vpicktree"/>
+        <field name="arch" type="xml">
+            <xpath expr="//list" position="inside">
+                <field name="availability_status" optional="show"
+                       decoration-success="availability_status == 'available'"
+                       decoration-warning="availability_status in ('partial', 'other_warehouse')"
+                       decoration-danger="availability_status == 'unavailable'"
+                       widget="badge"/>
+                <field name="source_warehouse_info" optional="show"/>
+                <field name="batch_schedule_time" optional="hide"/>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- ═══════ PICKING FORM INHERIT ═══════ -->
+    <record id="view_stock_picking_form_inherit" model="ir.ui.view">
+        <field name="name">stock.picking.form.ugurlar</field>
+        <field name="model">stock.picking</field>
+        <field name="inherit_id" ref="stock.view_picking_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//header" position="inside">
+                <button name="action_check_availability"
+                        string="🔍 Stok Kontrol"
+                        type="object"
+                        class="btn-secondary"/>
+            </xpath>
+            <xpath expr="//sheet" position="inside">
+                <group string="Toplama Bilgileri" name="picking_schedule_info"
+                       invisible="not availability_status">
+                    <group>
+                        <field name="availability_status"
+                               decoration-success="availability_status == 'available'"
+                               decoration-warning="availability_status in ('partial', 'other_warehouse')"
+                               decoration-danger="availability_status == 'unavailable'"
+                               widget="badge"/>
+                        <field name="source_warehouse_info"
+                               invisible="not source_warehouse_info"/>
+                    </group>
+                    <group>
+                        <field name="batch_schedule_time"/>
+                        <field name="packing_done"/>
+                        <field name="invoice_done"/>
+                    </group>
+                </group>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- ═══════ PICKING SEARCH INHERIT ═══════ -->
+    <record id="view_stock_picking_search_inherit" model="ir.ui.view">
+        <field name="name">stock.picking.search.ugurlar</field>
+        <field name="model">stock.picking</field>
+        <field name="inherit_id" ref="stock.view_picking_internal_search"/>
+        <field name="arch" type="xml">
+            <xpath expr="//search" position="inside">
+                <filter string="Stokta Mevcut" name="filter_available"
+                        domain="[('availability_status', '=', 'available')]"/>
+                <filter string="Başka Depoda" name="filter_other_warehouse"
+                        domain="[('availability_status', '=', 'other_warehouse')]"/>
+                <filter string="Stoksuz" name="filter_unavailable"
+                        domain="[('availability_status', '=', 'unavailable')]"/>
+                <filter string="Batch Atanmamış" name="filter_no_batch"
+                        domain="[('batch_id', '=', False)]"/>
+                <separator/>
+                <group>
+                    <filter string="Stok Durumu" name="group_availability"
+                            context="{'group_by': 'availability_status'}"/>
+                </group>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>

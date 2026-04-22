@@ -1,0 +1,48 @@
+müþteri þahýþ deðil ise
+ "IsIndividualAcc": "true",
+  "FirstName": "Serkan",
+  "LastName": "Durgut",
+  "IdentityNum": "11111111111",
+göndermenize gerek yok
+
+"AddressTypeCode": "1" ev adresi 2 Ýþ adresi, 2 adres gönderebilirsiniz
+"CustomerTypeCode": 3 mutlaka kullanýlmalý yoksa toptan müþteri olarak açacak
+ihracat iþlemi yaptýrmayacaktýr.
+
+
+
+post?{
+  "ModelType": 2,
+  "CurrAccCode":"",
+  "CurrAccDescription": "Serkan Durgut",
+  "IsIndividualAcc": "true",
+  "FirstName": "Serkan",
+  "LastName": "Durgut",
+  "IdentityNum": "11111111111",
+  "OfficeCode": "M",
+  "CurrencyCode": "TRY",
+  "CustomerTypeCode": 3,
+  "TaxNumber": "1111111111",
+  "PostalAddresses": [
+    {
+      "AddressTypeCode": "1",
+      "CountryCode": "RU",
+      "StateCode": "RU",
+      "CityCode": "RU",
+      "DistrictCode": "RU",
+      "Address": "Rusyada bir Adres"
+    }
+  ],
+  "Communications": [
+    {
+      "CommunicationTypeCode": 7,
+      "CommAddress": "05555555555",
+      "CanSendAdvert": false
+    },
+    {
+      "CommunicationTypeCode": 3,
+      "CommAddress": "serkan@bursabilgiislem.com",
+      "CanSendAdvert": false
+    }
+  ]
+}

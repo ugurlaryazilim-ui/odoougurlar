@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- MAĞAZA FORM VIEW -->
+    <record id="hepsiburada_store_form" model="ir.ui.view">
+        <field name="name">hepsiburada.store.form</field>
+        <field name="model">hepsiburada.store</field>
+        <field name="arch" type="xml">
+            <form string="Hepsiburada Mağaza">
+                <header>
+                    <button name="action_test_connection" type="object"
+                            string="🔌 Bağlantı Test Et" class="btn-primary"/>
+                    <button name="action_sync_now" type="object"
+                            string="🔄 Şimdi Senkronize Et" class="btn-secondary"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_view_orders" type="object"
+                                class="oe_stat_button" icon="fa-shopping-cart">
+                            <field name="order_count" widget="statinfo" string="Sipariş"/>
+                        </button>
+                        <button name="action_view_logs" type="object"
+                                class="oe_stat_button" icon="fa-history">
+                            <field name="log_count" widget="statinfo" string="Loglar"/>
+                        </button>
+                    </div>
+                    <widget name="web_ribbon" title="Arşiv" bg_color="text-bg-danger"
+                            invisible="active"/>
+                    
+                    <div class="oe_title">
+                        <h1><field name="name" placeholder="Mağaza Adı"/></h1>
+                    </div>
+
+                    <notebook>
+                        <!-- ── API Bağlantı ── -->
+                        <page string="API Bağlantı" name="api">
+                            <group>
+                                <group string="API Bilgileri">
+                                    <field name="merchant_id"/>
+                                    <field name="api_user"/>
+                                    <field name="api_password" password="True"/>
+                                    <field name="environment"/>
+                                </group>
+                                <group string="Senkronizasyon">
+                                    <field name="auto_sync"/>
+                                    <field name="sync_interval" invisible="not auto_sync"/>
+                                    <field name="last_sync"/>
+                                </group>
+                            </group>
+                            <group>
+                                <field name="active" widget="boolean_toggle" groups="base.group_no_one"/>
+                            </group>
+                        </page>
+
+                        <!-- ── Sipariş Ayarları ── -->
+                        <page string="Sipariş Ayarları" name="order_settings">
+                            <group>
+                                <group string="Sipariş İşleme">
+                                    <field name="auto_confirm"/>
+                                    <field name="auto_cancel"/>
+                                    <field name="order_day_range"/>
+                                    <field name="order_ref_type"/>
+                                </group>
+                                <group string="Komisyon">
+                                    <field name="process_commission"/>
+                                </group>
+                            </group>
+                            <group>
+                                <group string="İade Ayarları">
+                                    <field name="process_returns"/>
+                                    <field name="return_day_range" invisible="not process_returns"/>
+                                </group>
+                                <group string="Müşteri Ayarları">
+                                    <field name="customer_prefix"/>
+                                    <field name="micro_export_prefix"/>
+                                    <field name="skip_customer_email"/>
+                                </group>
+                            </group>
+                        </page>
+
+                        <!-- ── Kargo Ayarları ── -->
+                        <page string="Kargo Ayarları" name="cargo_settings">
+                            <group>
+                                <group string="Kargo Kodu">
+                                    <field name="auto_send_cargo"/>
+                                    <field name="cargo_include_order_number"/>
+                                </group>
+                                <group string="Koli Bilgisi">
+                                    <field name="default_package_count"/>
+                                    <field name="default_desi"/>
+                                </group>
+                            </group>
+                        </page>
+
+                        <!-- ── Finansal İşlemler ── -->
+                        <page string="Finansal İşlemler" name="financial_settings">
+                            <group>
+                                <group string="Finansal Senkronizasyon">
+                                    <field name="sync_financials"/>
+                                    <field name="financial_day_range" invisible="not sync_financials"/>
+                                    <field name="last_financial_sync"/>
+                                </group>
+                                <group string="Tahmini Hesaplama (Fatura kesilmemişse)">
+                                    <field name="platform_fee_rate"/>
+                                    <field name="cargo_unit_price"/>
+                                </group>
+                            </group>
+                        </page>
+
+                        <!-- ── Diğer ── -->
+                        <page string="Diğer" name="other">
+                            <group>
+                                <group>
+                                    <field name="sequence"/>
+                                    <field name="color"/>
+                                </group>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- MAĞAZA LIST VIEW -->
+    <record id="hepsiburada_store_list" model="ir.ui.view">
+        <field name="name">hepsiburada.store.list</field>
+        <field name="model">hepsiburada.store</field>
+        <field name="arch" type="xml">
+            <list string="Hepsiburada Mağazalar" decoration-muted="not active">
+                <field name="name"/>
+                <field name="environment"/>
+                <field name="auto_sync" widget="boolean_toggle"/>
+                <field name="last_sync"/>
+                <field name="active" column_invisible="True"/>
+                <button name="action_sync_now" type="object" icon="fa-refresh" title="Senkronize Et"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- ACTION -->
+    <record id="action_hepsiburada_stores" model="ir.actions.act_window">
+        <field name="name">Hepsiburada Mağazalar</field>
+        <field name="res_model">hepsiburada.store</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">İlk mağazanızı oluşturun!</p>
+            <p>Hepsiburada Merchant ID ve API şifrenizi girerek entegrasyonu başlatın.</p>
+        </field>
+    </record>
+
+</odoo>

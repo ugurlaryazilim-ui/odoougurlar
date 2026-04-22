@@ -1,0 +1,59 @@
+Merhabalar,
+ 
+Sizin için yeni bir Integrator Servis kurduk.
+ 
+Servise login olmak için aşağıdaki yöntemler mevcut
+ 
+ 
+--baglanti bilgileri
+---(Sunucudan)
+http://localhost:9091//IntegratorService/Connect?
+{
+                                                                              "ModelType": 1,
+                                                                              "DatabaseName": "UGURLAR",
+                                                                              "UserGroupCode": "ADM",
+                                                                              "UserName": "INT2",
+                                                                              "Password": "1234"
+}
+ 
+ 
+--(Networkden)
+ 
+http://192.168.1.225:9091//IntegratorService/Connect?
+{
+                                                                              "ModelType": 1,
+                                                                              "DatabaseName": "UGURLAR",
+                                                                              "UserGroupCode": "ADM",
+                                                                              "UserName": "INT2",
+                                                                              "Password": "1234"
+}
+ 
+ 
+--(Dışardan Haluk bey Hamurlabs iplerine 9091 porta erişmesi için izin vermeli)
+http://85.105.72.195:9091//IntegratorService/Connect?
+{
+                                                                              "ModelType": 1,
+                                                                              "DatabaseName": "UGURLAR",
+                                                                              "UserGroupCode": "ADM",
+                                                                              "UserName": "INT2",
+                                                                              "Password": "1234"
+}
+ 
+ 
+Sesion ID aldıktan sonra, RunProc? Metodu ile veri çekebilirsiniz
+ 
+Test için sunucuya
+/RunProc?
+{
+    "ProcName": "sp_GetInventory_Hamurlabs"
+ 
+}
+ 
+Modeli yollayınız. Tüm ürünlerin Depo depo envanterleri gelecektir
+ 
+Test başarılı olursa istediğiniz sp leri hazırlarız.
+ 
+Tek bir sp de tüm bilgiyi çekmek yerine. Ürün bilgisi ayrı stok bilgisi yarı vs. seklinde ayrı spler hazırlamak daha hızlı sonuç verir. 
+ 
+Test için bu adımları bir denemenizi rica ederiz. servis size cevap veriyor rmu 
+ 

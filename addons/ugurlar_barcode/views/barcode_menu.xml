@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- Barkod uygulaması client action -->
+        <record id="action_ugurlar_barcode" model="ir.actions.client">
+            <field name="name">Mobil</field>
+            <field name="tag">ugurlar_barcode_app</field>
+        </record>
+
+        <!-- Ana menü -->
+        <menuitem id="menu_ugurlar_barcode_root"
+                  name="Mobil"
+                  action="action_ugurlar_barcode"
+                  web_icon="ugurlar_barcode,static/description/icon.png"
+                  sequence="25"/>
+    </data>
+</odoo>

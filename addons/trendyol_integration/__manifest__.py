@@ -1,0 +1,27 @@
+# -*- coding: utf-8 -*-
+{
+    'name': 'Trendyol Entegrasyonu',
+    'version': '19.0.4.0.0',
+    'summary': 'Trendyol Çoklu Mağaza Sipariş ve Finans Entegrasyonu',
+    'description': 'Trendyol pazaryeri çoklu mağaza desteğiyle sipariş yönetimi, finansal işlem takibi ve senkronizasyon',
+    'author': 'Uğurlar',
+    'category': 'Sales',
+    'depends': ['sale_management', 'sale_stock', 'stock', 'delivery', 'contacts'],
+    'data': [
+        'security/ir.model.access.csv',
+        'data/cron_data.xml',
+        'views/trendyol_store_views.xml',
+        'views/trendyol_config_views.xml',
+        'views/trendyol_order_views.xml',
+        'views/trendyol_settlement_views.xml',
+        'views/sale_order_views.xml',
+        'views/trendyol_sync_log_views.xml',
+        'views/menu_views.xml',
+        'data/server_actions.xml',
+    ],
+    'installable': True,
+    'application': True,
+    'auto_install': False,
+    'license': 'LGPL-3',
+    'icon': '/trendyol_integration/static/description/trendyol.png',
+}

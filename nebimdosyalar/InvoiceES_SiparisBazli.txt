@@ -1,0 +1,42 @@
+http://localhost:9091//IntegratorService/Connect?
+{
+					"ModelType": 1,
+					"DatabaseName": "UGURLAR",
+					"UserGroupCode": "ADM",
+					"UserName": "INT4",
+					"Password": "1234"
+}
+
+
+
+/post?
+{
+    "ModelType": 24,
+    "CustomerCode": "1-3-231",
+    "OfficeCode": "M",
+    "StoreCode": "002",
+    "WarehouseCode": "002",
+    "Description": "",
+    "ExportFileNumber": "249",
+    "IncotermCode1": "FCA",
+    "ExportTypeCode": "001",
+    "TaxExemptionCode":"301",	
+    "InvoiceDate": "2023-09-11",
+    "OperationDate": "2023-09-11",
+    "IsOrderBase":true,
+    "IsShipmentBase":false,
+    "InvoiceHeaderExtension": {
+        "PaymentMeansCode": "10
+    },
+    "IsCompleted": true,
+    "BillingPostalAddressID": "27D20D31-5A5E-42E6-8DF1-B06700C6918E",
+    "ShippingPostalAddressID": "27D20D31-5A5E-42E6-8DF1-B06700C6918E",
+    "ShipmentMethodCode": "1",
+    "Lines": [
+        {
+            "OrderLineID": "42D3E609-A40F-4508-8587-B07A00AC253A",
+            "Qty1":1
+        }
+    ],
+   
+}

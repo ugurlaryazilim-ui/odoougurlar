@@ -1,0 +1,24 @@
+# -*- coding: utf-8 -*-
+{
+    'name': 'Flo Entegrasyonu',
+    'version': '19.0.1.0.0',
+    'summary': 'Flo Sipariş Entegrasyonu',
+    'description': 'Flo Pazaryeri API üzerinden siparişlerin çekilmesi, Odoo\'da oluşturulması ve Nebim entegrasyonuna hazır hale getirilmesi.',
+    'author': 'Uğurlar',
+    'category': 'Sales',
+    'depends': ['sale_management', 'sale_stock', 'stock', 'delivery', 'contacts'],
+    'data': [
+        'security/ir.model.access.csv',
+        'data/cron_data.xml',
+        'views/flo_config_views.xml',
+        'views/flo_store_views.xml',
+        'views/flo_order_views.xml',
+        'views/sale_order_views.xml',
+        'views/menu_views.xml',
+    ],
+    'icon': '/flo_integration/static/description/flo.png',
+    'installable': True,
+    'application': True,
+    'auto_install': False,
+    'license': 'LGPL-3',
+}

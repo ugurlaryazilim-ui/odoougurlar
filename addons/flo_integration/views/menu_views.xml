@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="action_flo_config_settings" model="ir.actions.act_window">
+        <field name="name">Flo Ayarları</field>
+        <field name="res_model">res.config.settings</field>
+        <field name="view_mode">form</field>
+        <field name="context">{'module': 'flo_integration'}</field>
+    </record>
+
+    <!-- Ana Menü -->
+    <menuitem id="menu_flo_root" name="Flo" web_icon="flo_integration,static/description/flo.png" sequence="60"/>
+
+    <!-- Alt Menüler -->
+    <menuitem id="menu_flo_stores" name="Mağazalar" parent="menu_flo_root" action="action_flo_store" sequence="10"/>
+    <menuitem id="menu_flo_orders" name="Flo Siparişleri" parent="menu_flo_root" action="action_flo_orders" sequence="20"/>
+    <menuitem id="menu_flo_settings" name="Ayarlar" parent="menu_flo_root" action="action_flo_config_settings" sequence="100"/>
+</odoo>

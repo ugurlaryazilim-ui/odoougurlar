@@ -1,0 +1,45 @@
+müþteri þahýþ deðil ise
+ "IsIndividualAcc": "true",
+  "FirstName": "Serkan",
+  "LastName": "Durgut",
+  "IdentityNum": "11111111111",
+göndermenize gerek yok
+
+"AddressTypeCode": "1" ev adresi 2 Ýþ adresi, 2 adres gönderebilirsiniz
+
+
+post?{
+  "ModelType": 2,
+  "CurrAccCode":"",
+  "CurrAccDescription": "Serkan Durgut",
+  "IsIndividualAcc": "true",
+  "FirstName": "Serkan",
+  "LastName": "Durgut",
+  "IdentityNum": "11111111111",
+  "OfficeCode": "M",
+  "CurrencyCode": "TRY",
+  "CustomerTypeCode": 0,
+  "TaxNumber": "1111111111",
+  "PostalAddresses": [
+    {
+      "AddressTypeCode": "1",
+      "CountryCode": "TR",
+      "StateCode": "TR.MR",
+      "CityCode": "TR.16",
+      "DistrictCode": "TR.01615",
+      "Address": "Korupark Avm Bursa"
+    }
+  ],
+  "Communications": [
+    {
+      "CommunicationTypeCode": 7,
+      "CommAddress": "05555555555",
+      "CanSendAdvert": false
+    },
+    {
+      "CommunicationTypeCode": 3,
+      "CommAddress": "serkan@bursabilgiislem.com",
+      "CanSendAdvert": false
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="action_idefix_config_settings" model="ir.actions.act_window">
+        <field name="name">Idefix Ayarları</field>
+        <field name="res_model">res.config.settings</field>
+        <field name="view_mode">form</field>
+        <field name="context">{'module': 'idefix_integration'}</field>
+    </record>
+
+    <!-- Ana Menü -->
+    <menuitem id="menu_idefix_root" name="Idefix" web_icon="idefix_integration,static/description/icon.png" sequence="60"/>
+
+    <!-- Alt Menüler -->
+    <menuitem id="menu_idefix_stores" name="Mağazalar" parent="menu_idefix_root" action="action_idefix_store" sequence="10"/>
+    <menuitem id="menu_idefix_orders" name="Idefix Siparişleri" parent="menu_idefix_root" action="action_idefix_orders" sequence="20"/>
+    <menuitem id="menu_idefix_settings" name="Ayarlar" parent="menu_idefix_root" action="action_idefix_config_settings" sequence="100"/>
+</odoo>

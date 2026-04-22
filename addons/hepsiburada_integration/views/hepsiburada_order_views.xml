@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_hepsiburada_order_form" model="ir.ui.view">
+        <field name="name">hepsiburada.order.form</field>
+        <field name="model">hepsiburada.order</field>
+        <field name="arch" type="xml">
+            <form string="Hepsiburada Siparişi" create="false" edit="false">
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="hb_order_number" readonly="1"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="merchant_id"/>
+                            <field name="sale_order_id"/>
+                            <field name="order_date"/>
+                            <field name="status"/>
+                        </group>
+                        <group>
+                            <field name="customer_name"/>
+                            <field name="customer_email"/>
+                            <field name="tax_office"/>
+                            <field name="tax_number"/>
+                        </group>
+                    </group>
+                    <group>
+                        <group string="Kargo Bilgileri">
+                            <field name="cargo_company"/>
+                            <field name="cargo_provider"/>
+                            <field name="cargo_tracking_number"/>
+                            <field name="package_number"/>
+                        </group>
+                        <group string="Ödeme">
+                            <field name="total_price" widget="monetary" options="{'currency_field': 'currency'}"/>
+                            <field name="currency" invisible="1"/>
+                        </group>
+                    </group>
+
+                    <notebook>
+                        <page string="Satırlar">
+                            <field name="line_ids">
+                                <list>
+                                    <field name="product_name"/>
+                                    <field name="sku" column_invisible="1"/>
+                                    <field name="merchant_sku"/>
+                                    <field name="quantity"/>
+                                    <field name="merchant_unit_price"/>
+                                    <field name="status"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Ham JSON">
+                            <field name="raw_payload"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_hepsiburada_order_list" model="ir.ui.view">
+        <field name="name">hepsiburada.order.list</field>
+        <field name="model">hepsiburada.order</field>
+        <field name="arch" type="xml">
+            <list string="Hepsiburada Siparişleri" create="false" edit="false">
+                <field name="hb_order_number"/>
+                <field name="order_date"/>
+                <field name="customer_name"/>
+                <field name="total_price" widget="monetary" options="{'currency_field': 'currency'}"/>
+                <field name="currency" column_invisible="1"/>
+                <field name="status"/>
+                <field name="sale_order_id"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="action_hepsiburada_order" model="ir.actions.act_window">
+        <field name="name">Hepsiburada Siparişleri</field>
+        <field name="res_model">hepsiburada.order</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- Cron Aktarma Aksiyonu -->
+    <record id="ir_cron_hepsiburada_order_sync" model="ir.cron">
+        <field name="name">Hepsiburada: Sipariş Senkronizasyonu</field>
+        <field name="model_id" ref="model_hepsiburada_order_sync"/>
+        <field name="state">code</field>
+        <field name="code">model.sync_orders()</field>
+        <field name="interval_number">30</field>
+        <field name="interval_type">minutes</field>
+        <field name="active" eval="True"/>
+    </record>
+
+    <record id="action_sync_hepsiburada_orders_manual" model="ir.actions.server">
+        <field name="name">Şimdi Senkronize Et (Hepsiburada)</field>
+        <field name="model_id" ref="model_hepsiburada_order_sync"/>
+        <field name="state">code</field>
+        <field name="code">
+            model.sync_orders()
+        </field>
+    </record>
+</odoo>

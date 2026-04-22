@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="res_config_settings_view_form_idefix" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.idefix</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app data-string="Idefix" string="Idefix" name="idefix_integration" data-key="idefix_integration">
+                    <block title="Depo Ayarları" name="idefix_warehouse">
+                        <setting string="Sipariş Depoları" help="Siparişlerin düşeceği depolar (tüm mağazalar için geçerli)">
+                            <div class="row mt16">
+                                <label for="idefix_warehouse_id" class="col-3 col-lg-3 o_light_label"/>
+                                <field name="idefix_warehouse_id" class="col-4"/>
+                            </div>
+                            <div class="row">
+                                <label for="idefix_backup_warehouse_id" class="col-3 col-lg-3 o_light_label"/>
+                                <field name="idefix_backup_warehouse_id" class="col-4"/>
+                            </div>
+                        </setting>
+                    </block>
+                    
+                    <block title="Toplu Senkronizasyon" name="idefix_sync">
+                        <setting string="Tüm Mağazalar" help="Tüm aktif mağazalardan siparişleri senkronize et">
+                            <div class="mt8">
+                                <button name="action_idefix_sync_all" icon="fa-refresh" type="object" string="Tüm Mağazaları Senkronize Et" class="btn-primary"/>
+                            </div>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+</odoo>

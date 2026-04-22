@@ -1,0 +1,276 @@
+/* ===================================================================
+   Uğurlar Barkod — Ürün Raf Taşıma Ekranı Stilleri
+   =================================================================== */
+
+/* ─── TRANSFER ADIM BİLGİ KUTUSU ──────────────────────── */
+.ub-transfer-info {
+    margin: 1rem 1.5rem;
+    padding: 1rem 1.2rem;
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    border-left: 4px solid #1ABC9C;
+}
+
+.ub-transfer-info-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0;
+}
+
+.ub-transfer-info-label {
+    font-size: 0.82rem;
+    color: #888;
+    min-width: 60px;
+    flex-shrink: 0;
+}
+
+.ub-transfer-info-value {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #333;
+}
+
+.ub-transfer-info-value.ub-target {
+    color: #1ABC9C;
+}
+
+.ub-transfer-arrow {
+    color: #1ABC9C;
+    font-size: 1.1rem;
+    margin: 0.3rem 0;
+    text-align: center;
+}
+
+/* ─── TRANSFER GEÇMİŞİ BÖLÜMÜ ────────────────────────── */
+.ub-transfer-history {
+    margin: 1rem 1.5rem;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    background: #fff;
+}
+
+.ub-transfer-history-header {
+    background: linear-gradient(135deg, #1ABC9C, #16a085);
+    color: #fff;
+    padding: 0.8rem 1.2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.ub-transfer-history-header h3 {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.ub-transfer-history-header h3 .fa {
+    margin-right: 0.4rem;
+}
+
+.ub-transfer-history-header .badge {
+    background: rgba(255, 255, 255, 0.25);
+    font-size: 0.8rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 10px;
+}
+
+.ub-transfer-history-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.ub-transfer-history-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+.ub-transfer-history-table thead th {
+    background: #f8f9fa;
+    color: #555;
+    padding: 0.55rem 0.8rem;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 2px solid #e9ecef;
+    white-space: nowrap;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.ub-transfer-history-table tbody td {
+    padding: 0.6rem 0.8rem;
+    border-bottom: 1px solid #f0f0f0;
+    vertical-align: middle;
+}
+
+.ub-transfer-history-table tbody tr:nth-child(even) {
+    background: #fafafa;
+}
+
+.ub-transfer-history-table tbody tr:hover {
+    background: #e8f8f5;
+}
+
+/* Ürün adı hücresi */
+.ub-transfer-product-cell {
+    font-weight: 500;
+    color: #333;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Kaynak → Hedef akış gösterimi */
+.ub-transfer-route-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.78rem;
+}
+
+.ub-transfer-route-from {
+    color: #888;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ub-transfer-route-arrow {
+    color: #1ABC9C;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.ub-transfer-route-to {
+    color: #1ABC9C;
+    font-weight: 600;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Adet hücresi */
+.ub-transfer-qty-cell {
+    font-weight: 700;
+    color: #714B67;
+    text-align: center;
+}
+
+/* Boş geçmiş */
+.ub-transfer-empty {
+    text-align: center;
+    padding: 2rem;
+    color: #bbb;
+}
+
+.ub-transfer-empty .fa {
+    font-size: 1.5rem;
+    display: block;
+    margin-bottom: 0.5rem;
+}
+
+/* ─── TAŞI BUTONU ──────────────────────────────────────── */
+.ub-btn-transfer {
+    background: linear-gradient(135deg, #1ABC9C, #16a085) !important;
+    border-color: #16a085 !important;
+    color: #fff !important;
+    font-weight: 600;
+    border-radius: 10px;
+    padding: 0.8rem !important;
+    font-size: 1rem;
+    transition: all 0.2s;
+}
+
+.ub-btn-transfer:hover {
+    background: linear-gradient(135deg, #16a085, #138d75) !important;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(26, 188, 156, 0.35);
+}
+
+.ub-btn-transfer:disabled {
+    opacity: 0.6;
+    transform: none;
+    box-shadow: none;
+}
+
+/* ─── NEDEN DROPDOWN ───────────────────────────────────── */
+.ub-reason-select {
+    border: 2px solid #e9ecef;
+    border-radius: 10px;
+    padding: 0.7rem 1rem;
+    font-size: 0.95rem;
+    transition: border-color 0.2s;
+    appearance: auto;
+}
+
+.ub-reason-select:focus {
+    border-color: #1ABC9C;
+    box-shadow: 0 0 0 3px rgba(26, 188, 156, 0.12);
+    outline: none;
+}
+
+/* ─── BAŞARI ANİMASYONU ────────────────────────────────── */
+.ub-transfer-success {
+    margin: 1rem 1.5rem;
+    padding: 1rem 1.2rem;
+    background: linear-gradient(135deg, #d4edda, #c3e6cb);
+    border-radius: 10px;
+    text-align: center;
+    color: #155724;
+    animation: ub-transfer-pop 0.3s ease;
+}
+
+.ub-transfer-success .fa {
+    font-size: 1.8rem;
+    display: block;
+    margin-bottom: 0.5rem;
+    color: #28a745;
+}
+
+@keyframes ub-transfer-pop {
+    0% { transform: scale(0.9); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+}
+
+/* ─── RESPONSIVE ───────────────────────────────────────── */
+@media (min-width: 768px) {
+    .ub-transfer-route-cell {
+        gap: 0.6rem;
+    }
+    .ub-transfer-route-from,
+    .ub-transfer-route-to {
+        max-width: 200px;
+    }
+    .ub-transfer-product-cell {
+        max-width: 300px;
+    }
+}
+
+@media (max-width: 480px) {
+    .ub-transfer-history {
+        margin: 0.5rem;
+    }
+    .ub-transfer-info {
+        margin: 0.5rem;
+    }
+    .ub-transfer-route-cell {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.1rem;
+    }
+    .ub-transfer-route-arrow {
+        display: none;
+    }
+    .ub-transfer-route-to::before {
+        content: "→ ";
+        color: #1ABC9C;
+    }
+}

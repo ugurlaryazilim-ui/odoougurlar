@@ -1,0 +1,377 @@
+/* ===================================================================
+   Uğurlar Barkod — Bileşen Stilleri (Tablo, Form, Buton, Kart)
+   =================================================================== */
+
+/* ─── SCAN AREA ────────────────────────────────────────── */
+.ub-scan-area {
+    padding: 1rem 1.5rem;
+    background: white;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.ub-input-group {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.ub-barcode-input {
+    flex: 1;
+    font-size: 1.1rem;
+    padding: 0.8rem 1rem;
+    border: 2px solid #dee2e6;
+    border-radius: 8px;
+    transition: border-color 0.2s;
+}
+
+.ub-barcode-input:focus {
+    border-color: #714B67;
+    box-shadow: 0 0 0 3px rgba(113, 75, 103, 0.15);
+    outline: none;
+}
+
+.ub-scan-btn {
+    padding: 0.8rem 1.2rem;
+    border-radius: 8px;
+    font-size: 1.1rem;
+    background: #714B67;
+    border-color: #714B67;
+}
+
+.ub-scan-btn:hover {
+    background: #5a3d54;
+    border-color: #5a3d54;
+}
+
+/* ─── BARKOD INPUT GRUP (ikon sağda) ────────────────────── */
+.ub-barcode-input-group {
+    display: flex;
+    gap: 0;
+    position: relative;
+}
+
+.ub-barcode-input-group .ub-input-icon {
+    position: absolute;
+    left: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #999;
+    font-size: 1.1rem;
+    z-index: 2;
+    pointer-events: none;
+}
+
+.ub-barcode-input-group .ub-barcode-input {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.ub-scan-icon-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    background: #714B67;
+    color: #fff;
+    border: 2px solid #714B67;
+    border-left: none;
+    border-radius: 0 8px 8px 0;
+    cursor: pointer;
+    font-size: 1.1rem;
+    transition: background 0.2s;
+}
+
+.ub-scan-icon-btn:hover {
+    background: #5c3d55;
+    border-color: #5c3d55;
+}
+
+/* ─── SEARCH FORM (HamurLabs benzeri) ────────────────────── */
+.ub-search-form {
+    padding: 1rem 1rem;
+    background: white;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.ub-search-field {
+    margin-bottom: 0.8rem;
+}
+
+.ub-field-label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #555;
+    margin-bottom: 0.3rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.ub-search-submit-btn {
+    width: 100%;
+    padding: 0.8rem;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    background: linear-gradient(135deg, #714B67, #875A7B);
+    border: none;
+    margin-top: 0.3rem;
+    transition: all 0.2s;
+    color: #fff;
+}
+
+.ub-search-submit-btn:hover {
+    background: linear-gradient(135deg, #5c3d55, #714B67);
+    transform: translateY(-1px);
+    box-shadow: 0 3px 8px rgba(113, 75, 103, 0.3);
+}
+
+/* ─── RESULT CARD ──────────────────────────────────────── */
+.ub-result-card {
+    margin: 1rem 1.5rem;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+}
+
+/* ─── PRODUCT HEADER ───────────────────────────────────── */
+.ub-product-header {
+    display: flex;
+    gap: 1rem;
+    padding: 1.2rem;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.ub-product-img {
+    width: 80px;
+    height: 80px;
+    object-fit: cover;
+    border-radius: 8px;
+    background: #f5f5f5;
+}
+
+.ub-product-info { flex: 1; min-width: 0; }
+
+.ub-product-name {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0 0 0.4rem;
+    line-height: 1.3;
+    word-wrap: break-word;
+}
+
+.ub-product-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-bottom: 0.4rem;
+}
+
+.ub-product-price {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #00A09D;
+}
+
+.ub-product-mini {
+    padding: 1rem 1.2rem;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.ub-product-mini h3 {
+    font-size: 1rem;
+    margin: 0 0 0.3rem;
+}
+
+.ub-product-category {
+    font-size: 0.8rem;
+    color: #888;
+    margin-bottom: 0.3rem;
+}
+
+.ub-product-category .fa { margin-right: 0.3rem; }
+
+/* ─── STOCK SUMMARY ────────────────────────────────────── */
+.ub-stock-summary {
+    padding: 1rem 1.2rem;
+    background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.ub-stock-total {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.ub-stock-label { font-weight: 600; color: #555; }
+
+.ub-stock-value {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: #00A09D;
+}
+
+/* ─── LOCATION / SHELF LISTS ──────────────────────────── */
+.ub-section-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #666;
+    padding: 0.8rem 1.2rem 0.4rem;
+    margin: 0;
+}
+
+.ub-location-row,
+.ub-shelf-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.8rem 1.2rem;
+    border-bottom: 1px solid #f5f5f5;
+}
+
+.ub-location-row:last-child,
+.ub-shelf-row:last-child { border-bottom: none; }
+
+.ub-loc-info,
+.ub-shelf-info { flex: 1; min-width: 0; }
+
+.ub-loc-info .fa,
+.ub-shelf-info .fa { color: #714B67; margin-right: 0.3rem; }
+
+.ub-loc-barcode,
+.ub-shelf-barcode { font-size: 0.8rem; color: #888; }
+
+.ub-loc-barcode .fa,
+.ub-shelf-barcode .fa { margin-right: 0.2rem; }
+
+.ub-loc-qty,
+.ub-shelf-qty,
+.ub-prod-qty { font-weight: 600; }
+
+.ub-shelf-name { font-size: 0.9rem; font-weight: 500; word-wrap: break-word; }
+.ub-shelf-wh { font-size: 0.8rem; color: #888; margin-top: 0.1rem; }
+
+/* ─── VARIANT TABLE (HamurLabs benzeri) ───────────────── */
+.ub-variants-section {
+    margin: 1rem 1rem 0;
+    padding-bottom: 2rem;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+    background: #fff;
+}
+
+.ub-variant-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.ub-variant-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.ub-variant-table thead th {
+    background: #714B67;
+    color: #fff;
+    padding: 0.6rem 0.8rem;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 2px solid #5c3d55;
+    white-space: nowrap;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.ub-variant-table tbody td {
+    padding: 0.5rem 0.8rem;
+    border-bottom: 1px solid #e9ecef;
+    vertical-align: middle;
+}
+
+.ub-variant-table-striped tbody tr:nth-child(even) { background: #f8f9fa; }
+.ub-variant-table tbody tr:hover { background: #e9ecef; }
+.ub-no-stock-row { opacity: 0.5; }
+
+.ub-barcode-cell {
+    font-family: 'Courier New', monospace;
+    font-size: 0.75rem;
+    color: #666;
+}
+
+.ub-cell-code { font-size: 0.82rem; font-weight: 500; color: #333; }
+.ub-stock-positive { color: #714B67; font-weight: 600; }
+.ub-stock-zero { color: #999; }
+
+.ub-section-title-dark {
+    background: #714B67;
+    color: #fff;
+    margin: 0;
+    padding: 0.7rem 1.2rem;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.ub-th-sortable { cursor: pointer; user-select: none; transition: background 0.15s; }
+.ub-th-sortable:hover { background: #5c3d55 !important; }
+.ub-th-sortable .fa { margin-left: 4px; font-size: 0.7rem; opacity: 0.7; }
+
+.ub-table-footer td {
+    background: #f0f0f0;
+    border-top: 2px solid #714B67;
+    padding: 0.6rem 0.8rem !important;
+    font-size: 0.9rem;
+}
+
+.ub-table-summary { font-size: 0.82rem; font-weight: 400; opacity: 0.9; }
+
+/* ─── İŞLEM BUTONLARI (HamurLabs tarzı) ──────────────── */
+.ub-action-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin: 1.5rem 1rem 2rem;
+}
+
+.ub-action-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.9rem 1rem;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #fff;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.ub-action-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 3px 8px rgba(0,0,0,0.2);
+    color: #fff;
+}
+
+.ub-action-putaway { background: linear-gradient(135deg, #27ae60, #2ecc71); }
+.ub-action-putaway:hover { background: linear-gradient(135deg, #1e8449, #27ae60); }
+.ub-action-remove { background: linear-gradient(135deg, #c0392b, #e74c3c); }
+.ub-action-remove:hover { background: linear-gradient(135deg, #96281b, #c0392b); }
+.ub-action-transfer { background: linear-gradient(135deg, #2980b9, #3498db); }
+.ub-action-transfer:hover { background: linear-gradient(135deg, #1f6fa0, #2980b9); }
+.ub-action-stock { background: linear-gradient(135deg, #714B67, #875A7B); }
+.ub-action-stock:hover { background: linear-gradient(135deg, #5c3d55, #714B67); }
+
+/* ─── ACTION BAR ───────────────────────────────────────── */
+.ub-action-bar {
+    padding: 1rem 1.5rem;
+    position: sticky;
+    bottom: 0;
+    background: #f8f9fa;
+    border-top: 1px solid #dee2e6;
+}

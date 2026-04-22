@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- FİNANSAL İŞLEM LIST VIEW                           -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <record id="trendyol_settlement_list" model="ir.ui.view">
+        <field name="name">trendyol.settlement.list</field>
+        <field name="model">trendyol.settlement</field>
+        <field name="arch" type="xml">
+            <list string="Finansal İşlemler"
+                  decoration-success="transaction_type == 'sale'"
+                  decoration-danger="transaction_type == 'penalty'">
+                <field name="transaction_date"/>
+                <field name="store_id" optional="show"/>
+                <field name="transaction_type" widget="badge"/>
+                <field name="description" optional="show"/>
+                <field name="order_number"/>
+                <field name="barcode" optional="hide"/>
+                <field name="credit" sum="Toplam Alacak"/>
+                <field name="debt" sum="Toplam Borç"/>
+                <field name="net_amount" sum="Net"/>
+                <field name="commission_rate" optional="hide"/>
+                <field name="commission_amount" optional="hide" sum="Komisyon"/>
+                <field name="seller_revenue" optional="show" sum="Hakediş"/>
+                <field name="payment_order_id" optional="hide"/>
+                <field name="receipt_id" optional="hide"/>
+                <field name="source" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- FİNANSAL İŞLEM FORM VIEW                           -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <record id="trendyol_settlement_form" model="ir.ui.view">
+        <field name="name">trendyol.settlement.form</field>
+        <field name="model">trendyol.settlement</field>
+        <field name="arch" type="xml">
+            <form string="Finansal İşlem" create="false" edit="false">
+                <sheet>
+                    <group>
+                        <group string="İşlem Bilgileri">
+                            <field name="trendyol_id"/>
+                            <field name="transaction_date"/>
+                            <field name="transaction_type"/>
+                            <field name="transaction_type_raw"/>
+                            <field name="description"/>
+                            <field name="source"/>
+                        </group>
+                        <group string="Sipariş">
+                            <field name="store_id"/>
+                            <field name="order_id"/>
+                            <field name="order_number"/>
+                            <field name="shipment_package_id"/>
+                            <field name="barcode"/>
+                        </group>
+                    </group>
+                    <group>
+                        <group string="Finansal">
+                            <field name="credit"/>
+                            <field name="debt"/>
+                            <field name="net_amount"/>
+                            <field name="commission_rate"/>
+                            <field name="commission_amount"/>
+                            <field name="seller_revenue"/>
+                        </group>
+                        <group string="Ödeme">
+                            <field name="receipt_id"/>
+                            <field name="payment_order_id"/>
+                            <field name="payment_date"/>
+                            <field name="payment_period"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- FİNANSAL İŞLEM SEARCH VIEW                         -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <record id="trendyol_settlement_search" model="ir.ui.view">
+        <field name="name">trendyol.settlement.search</field>
+        <field name="model">trendyol.settlement</field>
+        <field name="arch" type="xml">
+            <search string="Ara">
+                <field name="order_number"/>
+                <field name="barcode"/>
+                <filter string="Satış" name="filter_sale" domain="[('transaction_type', '=', 'sale')]"/>
+                <filter string="İade" name="filter_return" domain="[('transaction_type', '=', 'return')]"/>
+                <filter string="Platform" name="filter_platform" domain="[('transaction_type', '=', 'platform_fee')]"/>
+            </search>
+        </field>
+    </record>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- FİNANSAL İŞLEM ACTION                              -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <record id="action_trendyol_settlements" model="ir.actions.act_window">
+        <field name="name">Finansal İşlemler</field>
+        <field name="res_model">trendyol.settlement</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="trendyol_settlement_search"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Henüz finansal işlem yok</p>
+            <p>Mağaza ayarlarından finansal senkronizasyonu çalıştırın.</p>
+        </field>
+    </record>
+
+</odoo>

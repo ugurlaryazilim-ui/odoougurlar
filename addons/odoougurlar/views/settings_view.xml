@@ -1,0 +1,408 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+
+        <!-- ============================================================ -->
+        <!-- Nebim Ayarları - res.config.settings formuna ekleme          -->
+        <!-- ============================================================ -->
+        <record id="res_config_settings_view_form_nebim" model="ir.ui.view">
+            <field name="name">res.config.settings.view.form.inherit.odoougurlar</field>
+            <field name="model">res.config.settings</field>
+            <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+            <field name="arch" type="xml">
+                <xpath expr="//form" position="inside">
+                    <app data-string="Nebim Entegrasyon" string="Nebim Entegrasyon" name="odoougurlar" groups="base.group_system">
+                        <block title="Nebim V3 Bağlantı Ayarları" name="nebim_connection">
+                            <setting string="Nebim API URL" help="Nebim IntegratorService URL adresi">
+                                <div class="content-group">
+                                    <field name="nebim_url" placeholder="http://192.168.1.100:7800/IntegratorService"/>
+                                </div>
+                            </setting>
+                            <setting string="Veritabanı Adı" help="Nebim veritabanı adı">
+                                <div class="content-group">
+                                    <field name="nebim_database"/>
+                                </div>
+                            </setting>
+                            <setting string="Kullanıcı Grubu" help="Nebim kullanıcı grubu kodu">
+                                <div class="content-group">
+                                    <field name="nebim_user_group"/>
+                                </div>
+                            </setting>
+                            <setting string="Kullanıcı Adı" help="Nebim API kullanıcı adı">
+                                <div class="content-group">
+                                    <field name="nebim_username"/>
+                                </div>
+                            </setting>
+                            <setting string="Şifre" help="Nebim API şifresi">
+                                <div class="content-group">
+                                    <field name="nebim_password" password="True"/>
+                                </div>
+                            </setting>
+                            <setting string="Model Type" help="Nebim bağlantı ModelType değeri">
+                                <div class="content-group">
+                                    <field name="nebim_model_type"/>
+                                </div>
+                            </setting>
+                        </block>
+                        <block title="Stored Procedure İsimleri" name="nebim_procedures">
+                            <setting string="Ürün Detay SP" help="Ürün detaylarını getiren prosedür">
+                                <div class="content-group">
+                                    <field name="nebim_sp_item_details" placeholder="sp_GetItemDetails_Hamurlabs"/>
+                                </div>
+                            </setting>
+                            <setting string="Stok/Envanter SP" help="Stok ve envanter bilgisini getiren prosedür">
+                                <div class="content-group">
+                                    <field name="nebim_sp_inventory" placeholder="sp_GetInventory_Hamurlabs"/>
+                                </div>
+                            </setting>
+                            <setting string="Ürün Öznitelik SP" help="Ürün öznitelik tiplerini getiren prosedür">
+                                <div class="content-group">
+                                    <field name="nebim_sp_item_attribute" placeholder="sp_GetItemAttributeType_Hamurlabs"/>
+                                </div>
+                            </setting>
+                            <setting string="Müşteri SP" help="Müşteri bilgilerini getiren prosedür">
+                                <div class="content-group">
+                                    <field name="nebim_sp_customer" placeholder="sp_GetCustomer_Hamurlabs"/>
+                                </div>
+                            </setting>
+                            <setting string="Ülke SP" help="Ülke bilgilerini getiren prosedür">
+                                <div class="content-group">
+                                    <field name="nebim_sp_country" placeholder="sp_GetCountry_Hamurlabs"/>
+                                </div>
+                            </setting>
+                            <setting string="İlçe SP" help="İlçe bilgilerini getiren prosedür">
+                                <div class="content-group">
+                                    <field name="nebim_sp_district" placeholder="sp_GetDistrict_Hamurlabs"/>
+                                </div>
+                            </setting>
+                            <setting string="Tedarikçi SP" help="Tedarikçi bilgilerini getiren prosedür">
+                                <div class="content-group">
+                                    <field name="nebim_sp_vendor" placeholder="sp_GetVendorInfo_Hamurlabs"/>
+                                </div>
+                            </setting>
+                            <setting string="Depo SP" help="Depo bilgilerini getiren prosedür">
+                                <div class="content-group">
+                                    <field name="nebim_sp_warehouse" placeholder="sp_GetWarehouseInfo_Hamurlabs"/>
+                                </div>
+                            </setting>
+                        </block>
+                        <block title="Nebim Gönderim Ayarları" name="nebim_dispatch">
+                            <setting string="Cari İşle" help="Açık olduğunda pazaryeri siparişlerinden Nebim'e cari (müşteri kartı) gönderilir">
+                                <field name="nebim_sync_customer_enabled"/>
+                            </setting>
+                            <setting string="Sipariş İşle" help="Açık olduğunda pazaryeri siparişleri Nebim'e sipariş olarak aktarılır">
+                                <field name="nebim_sync_order_enabled"/>
+                            </setting>
+                            <setting string="Fatura İşle" help="Açık olduğunda fatura oluşturulup Nebim'e gönderilir">
+                                <field name="nebim_sync_invoice_enabled"/>
+                            </setting>
+                        </block>
+                        <block title="Senkronizasyon Ayarları" name="nebim_sync">
+                            <setting string="Otomatik Ürün Senkronizasyon" help="Saatte 1 kez otomatik ürün senkronizasyonu yapar">
+                                <field name="nebim_auto_sync"/>
+                            </setting>
+                            <setting string="Otomatik Stok Güncelleme" help="Belirli aralıklarla Nebim'den stok değişimleri otomatik çekilir">
+                                <field name="nebim_stock_auto_sync"/>
+                                <div class="content-group mt-2" invisible="not nebim_stock_auto_sync">
+                                    <label for="nebim_stock_sync_interval"/>
+                                    <field name="nebim_stock_sync_interval"/>
+                                </div>
+                            </setting>
+                            <setting string="Senkronizasyon Modu" help="Ürün Senkronizasyonu çalışma modu">
+                                <div class="content-group">
+                                    <field name="nebim_sync_mode"/>
+                                </div>
+                            </setting>
+                            <setting string="Test Ürün Sayısı" help="Test Ürün Çek butonuyla Nebim'den çekilecek ürün adedi">
+                                <div class="content-group">
+                                    <field name="nebim_test_product_count"/>
+                                </div>
+                            </setting>
+                            <setting string="Otomatik Log Temizliği" help="Tamamlanmış loglar 1 gün, hatalı loglar 7 gün sonra otomatik silinir">
+                                <field name="nebim_log_auto_cleanup"/>
+                            </setting>
+                        </block>
+                    </app>
+                </xpath>
+            </field>
+        </record>
+
+        <!-- ============================================================ -->
+        <!-- Lokasyon Barkod: Form View                                   -->
+        <!-- ============================================================ -->
+        <record id="view_location_form_barcode" model="ir.ui.view">
+            <field name="name">stock.location.form.barcode</field>
+            <field name="model">stock.location</field>
+            <field name="inherit_id" ref="stock.view_location_form"/>
+            <field name="arch" type="xml">
+                <xpath expr="//field[@name='name']" position="after">
+                    <field name="barcode" string="Barkod"/>
+                </xpath>
+            </field>
+        </record>
+
+        <!-- ============================================================ -->
+        <!-- Lokasyon Barkod: List/Tree View                              -->
+        <!-- ============================================================ -->
+        <record id="view_location_tree_barcode" model="ir.ui.view">
+            <field name="name">stock.location.tree.barcode</field>
+            <field name="model">stock.location</field>
+            <field name="inherit_id" ref="stock.view_location_tree2"/>
+            <field name="arch" type="xml">
+                <xpath expr="//field[@name='complete_name']" position="after">
+                    <field name="barcode" string="Barkod" optional="show"/>
+                </xpath>
+            </field>
+        </record>
+
+        <!-- ============================================================ -->
+        <!-- Nebim Dashboard / Kontrol Paneli                             -->
+        <!-- ============================================================ -->
+        <record id="view_nebim_dashboard" model="ir.ui.view">
+            <field name="name">odoougurlar.nebim.dashboard.form</field>
+            <field name="model">odoougurlar.nebim.dashboard</field>
+            <field name="arch" type="xml">
+                <form string="Nebim Kontrol Paneli" create="false" edit="true" delete="false">
+                    <header>
+                        <button name="action_test_product" type="object" string="Test Ürün Çek" class="btn-warning"/>
+                        <button name="action_fetch_warehouses" type="object" string="Depoları Çek" class="btn-info"/>
+                        <button name="action_sync_products" type="object" string="Ürün Senkronizasyonu" class="btn-primary" confirm="Ürün senkronizasyonu başlatılsın mı?"/>
+                        <button name="action_sync_stock_full" type="object" string="Tüm Stokları Çek" class="btn-success" confirm="Nebim'den TÜM ürün stokları çekilsin mi? (İlk Kurulum)"/>
+                        <button name="action_sync_stock" type="object" string="Stok Güncelle" class="btn-primary" confirm="Son değişen stoklar güncellensin mi?"/>
+                        <button name="action_sync_invoices" type="object" string="Faturaları Gönder" class="btn-primary" confirm="Bekleyen faturalar gönderilsin mi?"/>
+                        <button name="action_test_connection" type="object" string="Bağlantı Testi" class="btn-secondary"/>
+                        <button name="action_import_shelves" type="object" string="📦 Rafları Import Et" class="btn-warning" confirm="HamurLabs Excel dosyalarından raf lokasyonları ve ürün yerleşimleri import edilsin mi?"/>
+                    </header>
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>Nebim Entegrasyon Kontrol Paneli</h1>
+                        </div>
+                        <group>
+                            <group string="Son Senkronizasyon Bilgileri">
+                                <field name="last_product_sync"/>
+                                <field name="last_stock_sync"/>
+                                <field name="last_invoice_sync"/>
+                            </group>
+                            <group string="İstatistikler">
+                                <field name="total_synced_products"/>
+                                <field name="pending_invoices"/>
+                                <field name="total_errors_today"/>
+                            </group>
+                        </group>
+                        <group string="Ürün Kodu İle Çek" name="fetch_by_code">
+                            <group>
+                                <field name="nebim_fetch_code" placeholder="Ürün kodu girin (ör: 0/1015E veya virgülle ayrılmış)"/>
+                            </group>
+                            <group>
+                                <button name="action_fetch_by_code" type="object" string="🔍 Ürün Kodu İle Çek" class="btn-success"/>
+                            </group>
+                        </group>
+                        <notebook>
+                            <page string="Son Loglar" name="recent_logs">
+                                <field name="recent_log_ids" readonly="1">
+                                    <list decoration-danger="state == 'error'" decoration-success="state == 'done'" decoration-warning="state == 'partial'">
+                                        <field name="name"/>
+                                        <field name="sync_type"/>
+                                        <field name="state"/>
+                                        <field name="start_date"/>
+                                        <field name="records_processed"/>
+                                        <field name="records_failed"/>
+                                    </list>
+                                </field>
+                            </page>
+                        </notebook>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <record id="action_nebim_dashboard" model="ir.actions.act_window">
+            <field name="name">Nebim Kontrol Paneli</field>
+            <field name="res_model">odoougurlar.nebim.dashboard</field>
+            <field name="view_mode">form</field>
+            <field name="target">current</field>
+        </record>
+
+        <!-- ============================================================ -->
+        <!-- Nebim Senkronizasyon Logları - List View                     -->
+        <!-- ============================================================ -->
+        <record id="view_sync_log_list" model="ir.ui.view">
+            <field name="name">odoougurlar.sync.log.list</field>
+            <field name="model">odoougurlar.sync.log</field>
+            <field name="arch" type="xml">
+                <list string="Nebim Senkronizasyon Logları" decoration-danger="state == 'error'" decoration-success="state == 'done'" decoration-warning="state == 'partial'" decoration-info="state == 'running'">
+                    <field name="name"/>
+                    <field name="sync_type"/>
+                    <field name="state"/>
+                    <field name="start_date"/>
+                    <field name="end_date"/>
+                    <field name="records_processed"/>
+                    <field name="records_created"/>
+                    <field name="records_updated"/>
+                    <field name="records_failed"/>
+                </list>
+            </field>
+        </record>
+
+        <!-- Nebim Senkronizasyon Logları - Form View -->
+        <record id="view_sync_log_form" model="ir.ui.view">
+            <field name="name">odoougurlar.sync.log.form</field>
+            <field name="model">odoougurlar.sync.log</field>
+            <field name="arch" type="xml">
+                <form string="Nebim Senkronizasyon Logu">
+                    <header>
+                        <field name="state" widget="statusbar" statusbar_visible="running,done,error"/>
+                    </header>
+                    <sheet>
+                        <group>
+                            <group>
+                                <field name="name"/>
+                                <field name="sync_type"/>
+                                <field name="start_date"/>
+                                <field name="end_date"/>
+                            </group>
+                            <group>
+                                <field name="records_processed"/>
+                                <field name="records_created"/>
+                                <field name="records_updated"/>
+                                <field name="records_failed"/>
+                            </group>
+                        </group>
+                        <notebook>
+                            <page string="İşlem Detayları" name="details">
+                                <field name="log_details"/>
+                            </page>
+                            <page string="Hata Detayları" name="errors" invisible="state != 'error'">
+                                <field name="error_details"/>
+                            </page>
+                        </notebook>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <record id="action_sync_log" model="ir.actions.act_window">
+            <field name="name">Senkronizasyon Logları</field>
+            <field name="res_model">odoougurlar.sync.log</field>
+            <field name="view_mode">list,form</field>
+        </record>
+
+        <!-- ============================================================ -->
+        <!-- Nebim Ürünleri                                               -->
+        <!-- ============================================================ -->
+        <record id="action_nebim_products" model="ir.actions.act_window">
+            <field name="name">Nebim Ürünleri</field>
+            <field name="res_model">product.template</field>
+            <field name="view_mode">list,form</field>
+            <field name="domain">[('nebim_synced', '=', True)]</field>
+        </record>
+
+        <!-- ============================================================ -->
+        <!-- Nebim Faturaları                                             -->
+        <!-- ============================================================ -->
+        <record id="action_nebim_invoices_pending" model="ir.actions.act_window">
+            <field name="name">Bekleyen Faturalar</field>
+            <field name="res_model">account.move</field>
+            <field name="view_mode">list,form</field>
+            <field name="domain">[('move_type', '=', 'out_invoice'), ('state', '=', 'posted'), ('nebim_sent', '=', False)]</field>
+        </record>
+
+        <record id="action_nebim_invoices_sent" model="ir.actions.act_window">
+            <field name="name">Gönderilmiş Faturalar</field>
+            <field name="res_model">account.move</field>
+            <field name="view_mode">list,form</field>
+            <field name="domain">[('move_type', '=', 'out_invoice'), ('nebim_sent', '=', True)]</field>
+        </record>
+
+        <!-- ============================================================ -->
+        <!-- Ayarlar kısayol action                                        -->
+        <!-- ============================================================ -->
+        <record id="action_nebim_settings" model="ir.actions.act_window">
+            <field name="name">Nebim Bağlantı Ayarları</field>
+            <field name="res_model">res.config.settings</field>
+            <field name="view_mode">form</field>
+            <field name="context">{'module': 'odoougurlar'}</field>
+        </record>
+
+        <!-- ============================================================ -->
+        <!-- Zamanlanmış Görevler kısayolu                                -->
+        <!-- ============================================================ -->
+        <record id="action_nebim_cron_jobs" model="ir.actions.act_window">
+            <field name="name">Zamanlanmış Görevler</field>
+            <field name="res_model">ir.cron</field>
+            <field name="view_mode">list,form</field>
+            <field name="domain">[('name', 'ilike', 'Nebim')]</field>
+        </record>
+
+        <!-- ============================================================ -->
+        <!-- MENÜLER                                                       -->
+        <!-- ============================================================ -->
+
+        <!-- Ana Menü -->
+        <menuitem id="menu_nebim_root"
+                  name="Nebim Entegrasyon"
+                  sequence="100"/>
+
+        <!-- Kontrol Paneli -->
+        <menuitem id="menu_nebim_dashboard"
+                  name="Kontrol Paneli"
+                  parent="menu_nebim_root"
+                  action="action_nebim_dashboard"
+                  sequence="1"/>
+
+        <!-- Senkronizasyon Alt Menü -->
+        <menuitem id="menu_nebim_sync"
+                  name="Senkronizasyon"
+                  parent="menu_nebim_root"
+                  sequence="10"/>
+
+        <menuitem id="menu_nebim_sync_logs"
+                  name="Senkronizasyon Logları"
+                  parent="menu_nebim_sync"
+                  action="action_sync_log"
+                  sequence="1"/>
+
+        <menuitem id="menu_nebim_cron"
+                  name="Zamanlanmış Görevler"
+                  parent="menu_nebim_sync"
+                  action="action_nebim_cron_jobs"
+                  sequence="2"/>
+
+        <!-- Veriler Alt Menü -->
+        <menuitem id="menu_nebim_data"
+                  name="Veriler"
+                  parent="menu_nebim_root"
+                  sequence="20"/>
+
+        <menuitem id="menu_nebim_products"
+                  name="Nebim Ürünleri"
+                  parent="menu_nebim_data"
+                  action="action_nebim_products"
+                  sequence="1"/>
+
+        <menuitem id="menu_nebim_invoices_pending"
+                  name="Bekleyen Faturalar"
+                  parent="menu_nebim_data"
+                  action="action_nebim_invoices_pending"
+                  sequence="2"/>
+
+        <menuitem id="menu_nebim_invoices_sent"
+                  name="Gönderilmiş Faturalar"
+                  parent="menu_nebim_data"
+                  action="action_nebim_invoices_sent"
+                  sequence="3"/>
+
+        <!-- Yapılandırma Alt Menü -->
+        <menuitem id="menu_nebim_config"
+                  name="Yapılandırma"
+                  parent="menu_nebim_root"
+                  sequence="90"/>
+
+        <menuitem id="menu_nebim_settings"
+                  name="Nebim Bağlantı Ayarları"
+                  parent="menu_nebim_config"
+                  action="action_nebim_settings"
+                  sequence="1"/>
+
+    </data>
+</odoo>

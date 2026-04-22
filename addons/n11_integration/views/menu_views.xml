@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="action_n11_config_settings" model="ir.actions.act_window">
+        <field name="name">N11 Ayarları</field>
+        <field name="res_model">res.config.settings</field>
+        <field name="view_mode">form</field>
+        <field name="context">{'module': 'n11_integration'}</field>
+    </record>
+
+    <!-- Ana Menü -->
+    <menuitem id="menu_n11_root" name="N11" web_icon="n11_integration,static/description/n11.png" sequence="60"/>
+
+    <!-- Alt Menüler -->
+    <menuitem id="menu_n11_stores" name="Mağazalar" parent="menu_n11_root" action="action_n11_store" sequence="10"/>
+    <menuitem id="menu_n11_orders" name="N11 Siparişleri" parent="menu_n11_root" action="action_n11_orders" sequence="20"/>
+    <menuitem id="menu_n11_settings" name="Ayarlar" parent="menu_n11_root" action="action_n11_config_settings" sequence="100"/>
+</odoo>

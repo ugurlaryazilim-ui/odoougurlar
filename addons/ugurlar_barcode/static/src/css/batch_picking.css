@@ -1,0 +1,338 @@
+/* ═══════════════════════════════════════════════════════
+   ROTA TOPLAMA (BATCH PICKING) — Hamurlabs Tarzı
+   ═══════════════════════════════════════════════════════ */
+
+.bp-screen {
+    width: 100%;
+}
+
+.bp-screen .ub-screen-header {
+    margin-bottom: 10px;
+}
+
+/* ─── BATCH LİSTESİ ─── */
+.bp-batch-list {
+    padding: 8px;
+}
+
+.bp-batch-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    border-left: 5px solid #2196F3;
+    cursor: pointer;
+    transition: transform 0.15s;
+}
+.bp-batch-card:active {
+    transform: scale(0.98);
+}
+.bp-batch-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+.bp-batch-name {
+    font-size: 18px;
+    font-weight: 700;
+    color: #333;
+}
+.bp-state-draft { background: #ff9800; color: #fff; padding: 2px 10px; border-radius: 12px; font-size: 12px; }
+.bp-state-in_progress { background: #2196F3; color: #fff; padding: 2px 10px; border-radius: 12px; font-size: 12px; }
+.bp-state-done { background: #4CAF50; color: #fff; padding: 2px 10px; border-radius: 12px; font-size: 12px; }
+
+.bp-batch-meta {
+    display: flex;
+    gap: 12px;
+    color: #666;
+    font-size: 13px;
+    margin-bottom: 8px;
+}
+.bp-batch-meta i { margin-right: 3px; }
+
+.bp-batch-action {
+    text-align: right;
+}
+.bp-btn-collect {
+    padding: 6px 24px;
+    font-weight: 600;
+    font-size: 14px;
+    border-radius: 8px;
+}
+
+/* ─── ÜST BAR ─── */
+.bp-top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: #5e3551; /* Ugurlar Odoo Mor */
+    color: #fff;
+    font-weight: 600;
+}
+.bp-route-name { font-size: 16px; }
+.bp-progress-text { font-size: 14px; color: #aaa; }
+
+/* ─── İLERLEME ÇUBUĞU ─── */
+.bp-progress-bar {
+    height: 6px;
+    background: #333;
+    width: 100%;
+}
+.bp-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #4CAF50, #8BC34A);
+    transition: width 0.4s ease;
+    border-radius: 0 3px 3px 0;
+}
+
+/* ═══ RENK BANTLARI ═══ */
+.bp-band {
+    padding: 10px 14px;
+    font-weight: 700;
+    font-size: 15px;
+    text-align: center;
+    letter-spacing: 0.5px;
+}
+
+/* YEŞİL — Lokasyon */
+.bp-band-location {
+    background: linear-gradient(135deg, #2e7d32, #43a047);
+    color: #fff;
+    font-size: 16px;
+}
+.bp-band-location i { margin-right: 6px; }
+
+/* TURUNCU — Miktar */
+.bp-band-qty {
+    background: linear-gradient(135deg, #e65100, #f57c00);
+    color: #fff;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.bp-shelf-label { font-size: 14px; }
+.bp-qty-label { font-size: 16px; }
+.bp-qty-label strong { font-size: 20px; }
+
+/* Barkod satırı */
+.bp-barcode-info {
+    padding: 6px 14px;
+    background: #f5f5f5;
+    font-size: 14px;
+    color: #555;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+/* MOR — Varyant */
+.bp-band-variant {
+    background: linear-gradient(135deg, #4a148c, #7b1fa2);
+    color: #fff;
+    font-size: 14px;
+}
+
+/* ─── BARKOD INPUT SATIRI ─── */
+.bp-scan-row {
+    display: flex;
+    gap: 6px;
+    padding: 8px 10px;
+    background: #fafafa;
+    align-items: center;
+}
+.bp-btn-skip {
+    font-weight: 600;
+    font-size: 13px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    white-space: nowrap;
+}
+.bp-scan-input-wrap {
+    flex: 1;
+}
+.bp-scan-input {
+    font-size: 16px;
+    padding: 8px 12px;
+    border: 2px solid #ff9800;
+    border-radius: 8px;
+    text-align: center;
+}
+.bp-scan-input:focus {
+    border-color: #e65100;
+    box-shadow: 0 0 0 3px rgba(255, 152, 0, 0.25);
+    outline: none;
+}
+.bp-btn-go {
+    padding: 8px 16px;
+    font-size: 18px;
+    border-radius: 8px;
+}
+
+/* ─── TARAMA SONUCU ─── */
+.bp-scan-feedback {
+    padding: 8px 14px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 14px;
+    animation: bp-fade-in 0.3s ease;
+}
+.bp-scan-ok {
+    background: #e8f5e9;
+    color: #2e7d32;
+    border-bottom: 2px solid #4CAF50;
+}
+.bp-scan-fail {
+    background: #ffebee;
+    color: #c62828;
+    border-bottom: 2px solid #f44336;
+    animation: bp-shake 0.4s ease;
+}
+
+@keyframes bp-fade-in {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+@keyframes bp-shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-8px); }
+    75% { transform: translateX(8px); }
+}
+
+/* ─── ÜRÜN GÖRSELİ ─── */
+.bp-product-image {
+    text-align: center;
+    padding: 10px;
+    background: #fff;
+    min-height: 140px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.bp-product-image img {
+    max-width: 200px;
+    max-height: 200px;
+    object-fit: contain;
+    border-radius: 8px;
+}
+
+/* ─── ROTA TABLOSU ─── */
+.bp-route-table {
+    font-size: 12px;
+    border-top: 2px solid #ddd;
+    max-height: 200px;
+    overflow-y: auto;
+}
+.bp-route-table-header {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1.5fr 0.7fr 0.7fr;
+    padding: 6px 8px;
+    background: #5e3551; /* Ugurlar Odoo Mor */
+    color: #fff;
+    font-weight: 600;
+    font-size: 11px;
+    position: sticky;
+    top: 0;
+}
+.bp-route-table-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1.5fr 0.7fr 0.7fr;
+    padding: 5px 8px;
+    border-bottom: 1px solid #eee;
+    align-items: center;
+    font-size: 12px;
+}
+.bp-row-active {
+    background: #fff8e1 !important;
+    border-left: 4px solid #ff9800;
+    font-weight: 600;
+}
+.bp-row-done {
+    background: #e8f5e9;
+    color: #2e7d32;
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+.bp-cell-barcode {
+    font-family: monospace;
+    font-size: 11px;
+}
+
+/* ─── TÜM ÜRÜNLER TOPLANDI ─── */
+.bp-all-done {
+    text-align: center;
+    padding: 40px 20px;
+    color: #2e7d32;
+}
+.bp-all-done i {
+    color: #4CAF50;
+    margin-bottom: 10px;
+}
+.bp-all-done h3 {
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+
+/* ─── ÖZET EKRANI ─── */
+.bp-summary {
+    text-align: center;
+    padding: 30px 20px;
+}
+.bp-summary-icon {
+    font-size: 60px;
+    color: #4CAF50;
+    margin-bottom: 10px;
+}
+.bp-summary h3 {
+    font-weight: 700;
+    color: #333;
+    margin-bottom: 20px;
+}
+.bp-summary-stats {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    margin-bottom: 20px;
+}
+.bp-stat {
+    background: #e8f5e9;
+    border-radius: 12px;
+    padding: 16px 24px;
+    min-width: 80px;
+}
+.bp-stat-warn {
+    background: #fff3e0;
+}
+.bp-stat-partial {
+    background: #e3f2fd;
+}
+.bp-stat-value {
+    display: block;
+    font-size: 28px;
+    font-weight: 800;
+    color: #333;
+}
+.bp-stat-label {
+    font-size: 12px;
+    color: #666;
+    text-transform: uppercase;
+}
+.bp-summary-msg {
+    color: #666;
+    margin-bottom: 24px;
+}
+.bp-summary-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 300px;
+    margin: 0 auto;
+}
+.bp-summary-actions .btn {
+    font-weight: 600;
+    border-radius: 10px;
+    padding: 12px;
+}

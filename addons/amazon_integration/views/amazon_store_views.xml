@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="view_amazon_store_list" model="ir.ui.view">
+            <field name="name">amazon.store.list</field>
+            <field name="model">amazon.store</field>
+            <field name="arch" type="xml">
+                <list string="Amazon Mağazaları">
+                    <field name="name"/>
+                    <field name="region"/>
+                    <field name="environment"/>
+                    <field name="last_sync"/>
+                    <field name="active" widget="boolean_toggle"/>
+                </list>
+            </field>
+        </record>
+
+        <record id="view_amazon_store_form" model="ir.ui.view">
+            <field name="name">amazon.store.form</field>
+            <field name="model">amazon.store</field>
+            <field name="arch" type="xml">
+                <form string="Amazon Mağazası">
+                    <header>
+                        <button name="test_connection" string="Bağlantıyı Test Et" type="object" class="oe_highlight"/>
+                        <button name="action_sync_orders" string="Siparişleri Senkronize Et" type="object" class="oe_highlight"/>
+                    </header>
+                    <sheet>
+                        <div class="oe_button_box" name="button_box">
+                            <!-- Link to orders, etc mapping can be added here if needed -->
+                        </div>
+                        <widget name="web_ribbon" title="Archived" bg_color="bg-danger" invisible="active == True"/>
+                        <div class="oe_title">
+                            <h1>
+                                <field name="name" placeholder="Mağaza Adı (Örn: Amazon TR)..."/>
+                            </h1>
+                        </div>
+                        <group>
+                            <group>
+                                <field name="environment"/>
+                                <field name="region"/>
+                                <field name="marketplace_id"/>
+                                <field name="company_id" groups="base.group_multi_company"/>
+                                <field name="active" invisible="1"/>
+                            </group>
+                        </group>
+                        
+                        <notebook>
+                            <page string="API Bağlantı Ayarları (Login With Amazon / SP-API)" name="api_settings">
+                                <group>
+                                    <field name="lwa_client_id" password="True"/>
+                                    <field name="lwa_client_secret" password="True"/>
+                                    <field name="refresh_token" password="True"/>
+                                </group>
+                                <div class="text-muted" style="margin-top: 10px;">
+                                    <strong>Not:</strong> Güvenlik sebebiyle şifreler gizli tutulmaktadır.
+                                </div>
+                            </page>
+                            <page string="AWS IAM Yetkilendirmesi (Gelişmiş)" name="aws_settings">
+                                <div class="alert alert-info" role="alert" style="margin-bottom: 10px;">
+                                    Bu alanları sadece uygulamanız AWS IAM Rollerine ve AWS Signature V4 teknolojisine ihtiyaç duyduğunda doldurun. Eğer LWA Token (Role-less) temelli kurulum kullanıyorsanız boş bırakın.
+                                </div>
+                                <group>
+                                    <field name="aws_access_key" password="True"/>
+                                    <field name="aws_secret_key" password="True"/>
+                                    <field name="aws_role_arn"/>
+                                </group>
+                            </page>
+                            <page string="Sipariş Ayarları" name="order_settings">
+                                <group>
+                                    <field name="order_day_range"/>
+                                    <field name="order_ref_type"/>
+                                    <field name="default_warehouse_id"/>
+                                    <field name="default_pricelist_id"/>
+                                    <field name="partner_sequence_id"/>
+                                </group>
+                            </page>
+                            
+                            <page string="Kargo Ayarları" name="cargo_settings">
+                                <group>
+                                    <field name="cargo_company_id"/>
+                                </group>
+                            </page>
+                            
+                            <page string="Finans &amp; Muhasebe Ayarları" name="finance_settings">
+                                <group>
+                                    <field name="expense_account_id"/>
+                                    <field name="commission_account_id"/>
+                                    <field name="sales_journal_id"/>
+                                </group>
+                            </page>
+                            
+                            <page string="Senkronizasyon Durumu" name="sync_status">
+                                <group>
+                                    <field name="last_sync" readonly="1"/>
+                                </group>
+                            </page>
+                        </notebook>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <record id="action_amazon_store" model="ir.actions.act_window">
+            <field name="name">Amazon Mağazaları</field>
+            <field name="res_model">amazon.store</field>
+            <field name="view_mode">list,form</field>
+        </record>
+    </data>
+</odoo>

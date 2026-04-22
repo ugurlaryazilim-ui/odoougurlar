@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- ============================================================ -->
+    <!-- TOPLU İŞLEMLER — Aksiyonlar dropdown menüsünde görünür       -->
+    <!-- ============================================================ -->
+
+    <!-- 🔄 Toplu Tekrar Dene -->
+    <record id="action_server_retry_sync" model="ir.actions.server">
+        <field name="name">🔄 Toplu Tekrar Dene</field>
+        <field name="model_id" ref="model_trendyol_order"/>
+        <field name="binding_model_id" ref="model_trendyol_order"/>
+        <field name="binding_view_types">list,form</field>
+        <field name="state">code</field>
+        <field name="code">
+if records:
+    action = records.action_retry_sync()
+    if action:
+        action
+        </field>
+    </record>
+
+    <!-- 🔄 Trendyol'dan Durumu Güncelle -->
+    <record id="action_server_refresh_trendyol" model="ir.actions.server">
+        <field name="name">🔄 Trendyol'dan Güncelle</field>
+        <field name="model_id" ref="model_trendyol_order"/>
+        <field name="binding_model_id" ref="model_trendyol_order"/>
+        <field name="binding_view_types">list,form</field>
+        <field name="state">code</field>
+        <field name="code">
+if records:
+    action = records.action_refresh_from_trendyol()
+    if action:
+        action
+        </field>
+    </record>
+
+    <!-- 🗑️ Hatalı Kayıtları Sil -->
+    <record id="action_server_delete_errors" model="ir.actions.server">
+        <field name="name">🗑️ Hatalıları Sil</field>
+        <field name="model_id" ref="model_trendyol_order"/>
+        <field name="binding_model_id" ref="model_trendyol_order"/>
+        <field name="binding_view_types">list</field>
+        <field name="state">code</field>
+        <field name="code">
+if records:
+    action = records.action_delete_error_orders()
+    if action:
+        action
+        </field>
+    </record>
+
+    <!-- ✅ Synced Olarak İşaretle -->
+    <record id="action_server_mark_synced" model="ir.actions.server">
+        <field name="name">✅ Senkronize İşaretle</field>
+        <field name="model_id" ref="model_trendyol_order"/>
+        <field name="binding_model_id" ref="model_trendyol_order"/>
+        <field name="binding_view_types">list,form</field>
+        <field name="state">code</field>
+        <field name="code">
+if records:
+    action = records.action_mark_synced()
+    if action:
+        action
+        </field>
+    </record>
+
+</odoo>

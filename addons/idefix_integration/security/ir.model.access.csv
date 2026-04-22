@@ -1,0 +1,6 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_idefix_store,idefix.store,model_idefix_store,base.group_user,1,1,1,1
+access_idefix_order,idefix.order,model_idefix_order,base.group_user,1,1,1,1
+access_idefix_order_line,idefix.order_line,model_idefix_order_line,base.group_user,1,1,1,1
+access_idefix_settlement,idefix.settlement,model_idefix_settlement,base.group_user,1,1,1,1
+access_idefix_refund,idefix.refund,model_idefix_refund,base.group_user,1,1,1,1

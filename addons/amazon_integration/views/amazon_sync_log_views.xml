@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="view_amazon_sync_log_list" model="ir.ui.view">
+            <field name="name">amazon.sync.log.list</field>
+            <field name="model">amazon.sync.log</field>
+            <field name="arch" type="xml">
+                <list string="Senkronizasyon Logları" decoration-danger="state == 'error'" decoration-success="state == 'done'" decoration-info="state == 'running'">
+                    <field name="create_date" string="Tarih"/>
+                    <field name="store_id"/>
+                    <field name="sync_type"/>
+                    <field name="state"/>
+                    <field name="processed_count"/>
+                    <field name="success_count"/>
+                    <field name="error_count"/>
+                </list>
+            </field>
+        </record>
+
+        <record id="view_amazon_sync_log_form" model="ir.ui.view">
+            <field name="name">amazon.sync.log.form</field>
+            <field name="model">amazon.sync.log</field>
+            <field name="arch" type="xml">
+                <form string="Senkronizasyon Logu">
+                    <header>
+                        <field name="state" widget="statusbar"/>
+                    </header>
+                    <sheet>
+                        <group>
+                            <group>
+                                <field name="store_id" readonly="1"/>
+                                <field name="sync_type" readonly="1"/>
+                                <field name="create_date" readonly="1"/>
+                            </group>
+                            <group>
+                                <field name="processed_count" readonly="1"/>
+                                <field name="success_count" readonly="1"/>
+                                <field name="error_count" readonly="1"/>
+                            </group>
+                        </group>
+                        <notebook>
+                            <page string="Detaylar/Hatalar">
+                                <field name="details" readonly="1" widget="text"/>
+                            </page>
+                        </notebook>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <record id="action_amazon_sync_log" model="ir.actions.act_window">
+            <field name="name">Amazon Senkronizasyon Logları</field>
+            <field name="res_model">amazon.sync.log</field>
+            <field name="view_mode">list,form</field>
+        </record>
+    </data>
+</odoo>

@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_amazon_store,amazon.store,model_amazon_store,base.group_user,1,1,1,1
+access_amazon_sync_log,amazon.sync.log,model_amazon_sync_log,base.group_user,1,1,1,1

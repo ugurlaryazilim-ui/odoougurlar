@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Trendyol Ayarlar Action — context ile doğrudan Trendyol sekmesine gider -->
+    <record id="action_trendyol_settings" model="ir.actions.act_window">
+        <field name="name">Trendyol Ayarları</field>
+        <field name="res_model">res.config.settings</field>
+        <field name="view_mode">form</field>
+        <field name="context">{'module': 'trendyol_integration'}</field>
+    </record>
+
+    <!-- Ana Menü -->
+    <menuitem id="menu_trendyol_root"
+              name="Trendyol"
+              web_icon="trendyol_integration,static/description/trendyol.png"
+              sequence="45"/>
+
+    <!-- Mağazalar -->
+    <menuitem id="menu_trendyol_stores"
+              name="Mağazalar"
+              parent="menu_trendyol_root"
+              action="action_trendyol_stores"
+              sequence="5"/>
+
+    <!-- Siparişler Alt Menü -->
+    <menuitem id="menu_trendyol_orders"
+              name="Siparişler"
+              parent="menu_trendyol_root"
+              sequence="10"/>
+
+    <menuitem id="menu_trendyol_orders_new"
+              name="Yeni Siparişler"
+              parent="menu_trendyol_orders"
+              action="action_trendyol_orders"
+              sequence="10"/>
+
+    <menuitem id="menu_trendyol_orders_all"
+              name="Tüm Siparişler"
+              parent="menu_trendyol_orders"
+              action="action_trendyol_orders_all"
+              sequence="20"/>
+
+    <!-- Operasyonlar Alt Menü -->
+    <menuitem id="menu_trendyol_operations"
+              name="Operasyonlar"
+              parent="menu_trendyol_root"
+              sequence="15"/>
+
+    <menuitem id="menu_trendyol_pickings"
+              name="Toplama Listeleri"
+              parent="menu_trendyol_operations"
+              action="action_trendyol_pickings"
+              sequence="10"/>
+
+    <menuitem id="menu_trendyol_pickings_all"
+              name="Tüm Teslimat Emirleri"
+              parent="menu_trendyol_operations"
+              action="action_trendyol_pickings_all"
+              sequence="20"/>
+
+    <!-- Senkronizasyon Alt Menü -->
+    <menuitem id="menu_trendyol_sync"
+              name="Senkronizasyon"
+              parent="menu_trendyol_root"
+              sequence="20"/>
+
+    <menuitem id="menu_trendyol_sync_logs"
+              name="Senkronizasyon Logları"
+              parent="menu_trendyol_sync"
+              action="action_trendyol_sync_logs"
+              sequence="10"/>
+
+    <menuitem id="menu_trendyol_settlements"
+              name="Finansal İşlemler"
+              parent="menu_trendyol_sync"
+              action="action_trendyol_settlements"
+              sequence="15"/>
+
+    <menuitem id="menu_trendyol_cron"
+              name="Zamanlanmış Görevler"
+              parent="menu_trendyol_sync"
+              action="action_trendyol_cron_jobs"
+              sequence="20"/>
+
+    <!-- Ayarlar -->
+    <menuitem id="menu_trendyol_config"
+              name="Ayarlar"
+              parent="menu_trendyol_root"
+              action="action_trendyol_settings"
+              sequence="90"/>
+
+</odoo>

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Sync Log List View -->
+    <record id="hepsiburada_sync_log_list" model="ir.ui.view">
+        <field name="name">hepsiburada.sync.log.list</field>
+        <field name="model">hepsiburada.sync.log</field>
+        <field name="arch" type="xml">
+            <list string="Senkronizasyon Logları"
+                  decoration-danger="state == 'error'"
+                  decoration-success="state == 'done'"
+                  decoration-info="state == 'running'">
+                <field name="name"/>
+                <field name="store_id"/>
+                <field name="sync_type"/>
+                <field name="state" widget="badge"
+                       decoration-success="state == 'done'"
+                       decoration-danger="state == 'error'"
+                       decoration-info="state == 'running'"/>
+                <field name="start_date"/>
+                <field name="end_date"/>
+                <field name="records_processed"/>
+                <field name="records_created"/>
+                <field name="records_updated"/>
+                <field name="records_failed"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Sync Log Form View -->
+    <record id="hepsiburada_sync_log_form" model="ir.ui.view">
+        <field name="name">hepsiburada.sync.log.form</field>
+        <field name="model">hepsiburada.sync.log</field>
+        <field name="arch" type="xml">
+            <form string="Senkronizasyon Logu">
+                <header>
+                    <field name="state" widget="statusbar" statusbar_visible="running,done,error"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="name"/>
+                            <field name="store_id"/>
+                            <field name="sync_type"/>
+                            <field name="start_date"/>
+                            <field name="end_date"/>
+                        </group>
+                        <group>
+                            <field name="records_processed"/>
+                            <field name="records_created"/>
+                            <field name="records_updated"/>
+                            <field name="records_failed"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="İşlem Detayları" name="details">
+                            <field name="log_details"/>
+                        </page>
+                        <page string="Hata Detayları" name="errors" invisible="state != 'error'">
+                            <field name="error_details"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Sync Log Action -->
+    <record id="action_hepsiburada_sync_logs" model="ir.actions.act_window">
+        <field name="name">Senkronizasyon Logları</field>
+        <field name="res_model">hepsiburada.sync.log</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- Zamanlanmış Görevler Action -->
+    <record id="action_hepsiburada_cron_jobs" model="ir.actions.act_window">
+        <field name="name">Zamanlanmış Görevler</field>
+        <field name="res_model">ir.cron</field>
+        <field name="view_mode">list,form</field>
+        <field name="domain">[('name', 'ilike', 'Hepsiburada')]</field>
+    </record>
+
+    <!-- Hepsiburada Toplama Listeleri (Picking/Teslimat Emirleri) -->
+    <record id="action_hepsiburada_pickings" model="ir.actions.act_window">
+        <field name="name">Toplama Listeleri</field>
+        <field name="res_model">stock.picking</field>
+        <field name="view_mode">list,form</field>
+        <field name="domain">[('sale_id.hb_order_id', '!=', False)]</field>
+        <field name="context">{'search_default_available': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Toplama listesi yok</p>
+            <p>Hepsiburada siparişleri onaylandığında otomatik olarak toplama listeleri oluşturulur.</p>
+        </field>
+    </record>
+
+    <!-- Hepsiburada Teslimat Emirleri (Tümü) -->
+    <record id="action_hepsiburada_pickings_all" model="ir.actions.act_window">
+        <field name="name">Tüm Teslimat Emirleri</field>
+        <field name="res_model">stock.picking</field>
+        <field name="view_mode">list,form</field>
+        <field name="domain">[('sale_id.hb_order_id', '!=', False)]</field>
+    </record>
+
+</odoo>

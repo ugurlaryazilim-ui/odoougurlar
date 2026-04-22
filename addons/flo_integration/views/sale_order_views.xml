@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="flo_sale_order_form" model="ir.ui.view">
+        <field name="name">flo.sale.order.form</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_order_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//notebook" position="inside">
+                <page string="Flo" name="flo_integration" invisible="not flo_order_id">
+                    <group>
+                        <field name="flo_store_id"/>
+                        <field name="flo_order_id"/>
+                    </group>
+                </page>
+            </xpath>
+        </field>
+    </record>
+</odoo>

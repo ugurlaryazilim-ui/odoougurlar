@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- Test Sonuç Wizard View -->
+        <record id="view_test_result_wizard" model="ir.ui.view">
+            <field name="name">odoougurlar.test.result.wizard.form</field>
+            <field name="model">odoougurlar.test.result.wizard</field>
+            <field name="arch" type="xml">
+                <form string="Test Sonuçları">
+                    <sheet>
+                        <group>
+                            <field name="title" invisible="1"/>
+                        </group>
+                        <notebook>
+                            <page string="Sonuç Özeti" name="summary">
+                                <field name="result_text" widget="text" readonly="1" nolabel="1"/>
+                            </page>
+                            <page string="Ham JSON Verisi" name="json">
+                                <field name="result_json" widget="text" readonly="1" nolabel="1"/>
+                            </page>
+                        </notebook>
+                    </sheet>
+                    <footer>
+                        <button string="Kapat" class="btn-primary" special="cancel"/>
+                    </footer>
+                </form>
+            </field>
+        </record>
+    </data>
+</odoo>

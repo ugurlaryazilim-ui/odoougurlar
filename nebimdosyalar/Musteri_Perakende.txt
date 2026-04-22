@@ -1,0 +1,35 @@
+
+post?{
+  "ModelType": 3,
+  "CurrAccCode":"",
+  "CurrAccDescription": "Serkan Durgut",
+  "IsIndividualAcc": "true",
+  "FirstName": "Serkan",
+  "LastName": "Durgut",
+  "IdentityNum": "11111111111",
+  "OfficeCode": "M",
+  "CurrencyCode": "TRY",
+  "TaxNumber": "1111111111",
+  "PostalAddresses": [
+    {
+      "AddressTypeCode": "1",
+      "CountryCode": "TR",
+      "StateCode": "TR.MR",
+      "CityCode": "TR.16",
+      "DistrictCode": "TR.01615",
+      "Address": "Korupark Avm Bursa"
+    }
+  ],
+  "Communications": [
+    {
+      "CommunicationTypeCode": 7,
+      "CommAddress": "05555555555",
+      "CanSendAdvert": false
+    },
+    {
+      "CommunicationTypeCode": 3,
+      "CommAddress": "serkan@bursabilgiislem.com",
+      "CanSendAdvert": false
+    }
+  ]
+}

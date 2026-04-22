@@ -1,0 +1,35 @@
+http://localhost:9091//IntegratorService/Connect?
+{
+					"ModelType": 1,
+					"DatabaseName": "UGURLAR",
+					"UserGroupCode": "ADM",
+					"UserName": "INT4",
+					"Password": "1234"
+}
+--------------------------------------------------
+/RunProc?
+{
+    "ProcName": "sp_GetWarehouseInfo_Hamurlabs"
+ 
+}
+
+depo bilgilerini listeler
+--------------------------------------------------
+
+/post?
+{
+"ModelType": 59,
+"ShippingDate":"2023-10-16",
+"IsTransferApproved": false,
+"ShipmentMethodCode":"1",
+"Description": "Deneme Transfer",
+"ShippingPostalAddressID": "08DFD623-F558-4D27-B114-AC7100B521CE", 	//Transferi Alan Deponun Adresi
+"OfficeCode": "001",							//Gönderen Ofis Kodu 				
+"StoreCode": "M01",							//Gönderen Maðaza Kodu 		 
+"WarehouseCode": "D001",						//Gönderen Depo Kodu
+"ToStoreCode": "002",							//Transferi Alan Maðaza Kodu		
+"ToWarehouseCode": "002",						//Transferi Alan Depo Kodu			
+"IsCompleted": true,
+"StoreTransferType": 0,
+"Lines":[{"UsedBarcode":"5715370634193","Qty1":1},{"UsedBarcode":"5715370633677","Qty1":1}]
+}

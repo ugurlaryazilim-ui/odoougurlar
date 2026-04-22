@@ -1,0 +1,38 @@
+http://localhost:9091//IntegratorService/Connect?
+{
+					"ModelType": 1,
+					"DatabaseName": "UGURLAR",
+					"UserGroupCode": "ADM",
+					"UserName": "INT4",
+					"Password": "1234"
+}
+
+/post?
+{
+  "ModelType": 8,
+  "CustomerCode": "1-4-14617",
+  "Description": "Deneme Perakende Fatura",
+  "InvoiceDate": "2023-10-16",  
+  "OfficeCode":"M",
+  "StoreCode":"002",
+  "WarehouseCode":"002",
+  "POSTerminalID":1,
+  "ShipmentMethodCode":"2",
+  "DeliveryCompanyCode":"YRT",
+  "IsOrderBase": true,
+  "IsSalesViaInternet": true,
+  "Lines": [
+    {
+      "OrderLineID": "6db74cb6-c82f-45a5-9b01-aa7600c5313d",
+      "Qty1": 1
+    }
+  ],
+   "SalesViaInternetInfo": {
+    "SalesURL": "www.test.com.tr",
+    "PaymentTypeCode": 1,
+    "PaymentTypeDescription": "KREDIKARTI/BANKAKARTI",
+    "PaymentDate": "\/Date(1509102971000)\/",
+    "SendDate": "\/Date(1509120356101)\/"
+  },
+  "IsCompleted": true
+}

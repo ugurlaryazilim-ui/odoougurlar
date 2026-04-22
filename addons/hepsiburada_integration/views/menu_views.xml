@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Ana Menü -->
+    <menuitem id="menu_hepsiburada_root" 
+              name="Hepsiburada" 
+              sequence="50" 
+              web_icon="hepsiburada_integration,static/description/hepsiburada.png"/>
+
+    <!-- Mağazalar -->
+    <menuitem id="menu_hepsiburada_stores"
+              name="Mağazalar"
+              parent="menu_hepsiburada_root"
+              action="action_hepsiburada_stores"
+              sequence="5"/>
+
+    <!-- Siparişler Alt Menü -->
+    <menuitem id="menu_hepsiburada_orders"
+              name="Siparişler"
+              parent="menu_hepsiburada_root"
+              sequence="10"/>
+
+    <menuitem id="menu_hepsiburada_orders_all"
+              name="Tüm Siparişler"
+              parent="menu_hepsiburada_orders"
+              action="action_hepsiburada_order"
+              sequence="10"/>
+
+    <!-- Operasyonlar Alt Menü -->
+    <menuitem id="menu_hepsiburada_operations"
+              name="Operasyonlar"
+              parent="menu_hepsiburada_root"
+              sequence="15"/>
+
+    <menuitem id="menu_hepsiburada_pickings"
+              name="Toplama Listeleri"
+              parent="menu_hepsiburada_operations"
+              action="action_hepsiburada_pickings"
+              sequence="10"/>
+
+    <menuitem id="menu_hepsiburada_pickings_all"
+              name="Tüm Teslimat Emirleri"
+              parent="menu_hepsiburada_operations"
+              action="action_hepsiburada_pickings_all"
+              sequence="20"/>
+
+    <!-- Senkronizasyon Alt Menü -->
+    <menuitem id="menu_hepsiburada_sync"
+              name="Senkronizasyon"
+              parent="menu_hepsiburada_root"
+              sequence="20"/>
+
+    <menuitem id="menu_hepsiburada_sync_logs"
+              name="Senkronizasyon Logları"
+              parent="menu_hepsiburada_sync"
+              action="action_hepsiburada_sync_logs"
+              sequence="10"/>
+
+    <menuitem id="menu_hepsiburada_cron"
+              name="Zamanlanmış Görevler"
+              parent="menu_hepsiburada_sync"
+              action="action_hepsiburada_cron_jobs"
+              sequence="20"/>
+
+    <!-- Ayarlar -->
+    <menuitem id="menu_hepsiburada_config"
+              name="Ayarlar"
+              parent="menu_hepsiburada_root"
+              action="action_hepsiburada_settings"
+              sequence="90"/>
+
+</odoo>

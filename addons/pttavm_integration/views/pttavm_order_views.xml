@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="pttavm_order_form" model="ir.ui.view">
+        <field name="name">pttavm.order.form</field>
+        <field name="model">pttavm.order</field>
+        <field name="arch" type="xml">
+            <form string="Pttavm Siparişi" create="false" edit="false">
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="order_number"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="store_id"/>
+                            <field name="sale_order_id"/>
+                            <field name="order_date"/>
+                            <field name="order_status"/>
+                        </group>
+                        <group>
+                            <field name="customer_name"/>
+                            <field name="customer_email"/>
+                            <field name="cargo_provider"/>
+                            <field name="cargo_tracking_number"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Satırlar">
+                            <field name="line_ids">
+                                <list>
+                                    <field name="product_name"/>
+                                    <field name="product_code"/>
+                                    <field name="quantity"/>
+                                    <field name="sale_price"/>
+                                    <field name="status"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Raw JSON">
+                            <field name="raw_data" widget="text"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="pttavm_order_tree" model="ir.ui.view">
+        <field name="name">pttavm.order.tree</field>
+        <field name="model">pttavm.order</field>
+        <field name="arch" type="xml">
+            <list string="Pttavm Siparişleri" create="false" edit="false">
+                <header>
+                    <button name="action_refresh_from_pttavm" type="object" string="Pttavm'dan Güncelle" class="btn-primary"/>
+                    <button name="action_retry_sync" type="object" string="Hatalıları Tekrar Dene" class="btn-secondary"/>
+                    <button name="action_delete_error_orders" type="object" string="Hatalıları Sil" class="btn-danger"/>
+                </header>
+                <field name="order_number"/>
+                <field name="order_date"/>
+                <field name="customer_name"/>
+                <field name="total_price"/>
+                <field name="order_status"/>
+                <field name="store_id"/>
+                <field name="sale_order_id"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="action_pttavm_retry_sync" model="ir.actions.server">
+        <field name="name">Tekrar Dene</field>
+        <field name="model_id" ref="pttavm_integration.model_pttavm_order"/>
+        <field name="binding_model_id" ref="pttavm_integration.model_pttavm_order"/>
+        <field name="state">code</field>
+        <field name="code">
+            if records:
+                action = records.action_retry_sync()
+        </field>
+    </record>
+
+    <record id="action_pttavm_refresh" model="ir.actions.server">
+        <field name="name">Pttavm'dan Güncelle</field>
+        <field name="model_id" ref="pttavm_integration.model_pttavm_order"/>
+        <field name="binding_model_id" ref="pttavm_integration.model_pttavm_order"/>
+        <field name="state">code</field>
+        <field name="code">
+            if records:
+                action = records.action_refresh_from_pttavm()
+        </field>
+    </record>
+
+    <record id="action_pttavm_orders" model="ir.actions.act_window">
+        <field name="name">Pttavm Siparişleri</field>
+        <field name="res_model">pttavm.order</field>
+        <field name="view_mode">list,form</field>
+    </record>
+</odoo>

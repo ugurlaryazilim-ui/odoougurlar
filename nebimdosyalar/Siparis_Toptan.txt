@@ -1,0 +1,38 @@
+﻿line bloğunu şu şekilde de kullanabilirsiniz
+Lines: 
+    [
+        {
+            ItemTypeCode: 1,
+            ItemCode: 12235157,
+            ColorCode: 0001,
+            ItemDim1Code: 5XL,
+            ItemDim2Code: ,
+            ItemDim3Code: ,
+            Qty1: 1,
+            PriceVI: 869.24,
+            LDisRate1: 0,
+            SalesPersonCode: TRD
+        },
+
+
+post?
+{
+"ModelType":5,
+"CustomerCode":"1-3-280",
+"OrderDate":"2023-10-12",
+"OfficeCode":"M",
+"StoreCode":"002",
+"OrdererStoreCode":"002",
+"WarehouseCode":"002",
+"ShipmentMethodCode":"2",
+"DeliveryCompanyCode":"YRT",
+"IsCompleted":true,
+"IsCreditSale":true,
+"DocumentNumber":"Deneme Sipariş",
+"Description":"Deneme Sipariş",
+"BillingPostalAddressID":"76A2614C-B2E8-4FD6-9877-B09900592940",
+"ShippingPostalAddressID":"76A2614C-B2E8-4FD6-9877-B09900592940",
+"IsSalesViaInternet":true,
+"OrdersViaInternetInfo":{"SalesURL":"https://trendyol.com/","PaymentTypeCode":1,"PaymentTypeDescription":"KREDIKARTI/BANKAKARTI","PaymentAgent":"TredyolMp","PaymentDate":"2023-10-12","SendDate":"2023-10-12"},
+"Lines":[{"UsedBarcode":"5715370634193","PriceVI":869.24,"Qty1":1,"SalesPersonCode":"TRD"},{"UsedBarcode":"5715370633677","PriceVI":869.24,"Qty1":1,"SalesPersonCode":"TRD"}]
+}

@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="pttavm_store_form" model="ir.ui.view">
+        <field name="name">pttavm.store.form</field>
+        <field name="model">pttavm.store</field>
+        <field name="arch" type="xml">
+            <form string="Pttavm Mağaza">
+                <header>
+                    <button name="action_test_connection" type="object" string="Bağlantı Test Et" class="btn-primary"/>
+                    <button name="action_sync_now" type="object" string="Şimdi Senkronize Et" class="btn-secondary"/>
+                    <button name="action_sync_financials" type="object" string="Finansal Senkron" class="btn-secondary"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button class="oe_stat_button" icon="fa-shopping-cart">
+                            <field name="order_count" widget="statinfo" string="Siparişler"/>
+                        </button>
+                        <button class="oe_stat_button" icon="fa-money">
+                            <field name="settlement_count" widget="statinfo" string="Finans"/>
+                        </button>
+                    </div>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" placeholder="Mağaza Adı"/>
+                        </h1>
+                    </div>
+                    <notebook>
+                        <page string="API ve Temel Ayarlar">
+                            <group>
+                                <group string="API Bilgileri (Sipariş)">
+                                    <field name="api_key"/>
+                                    <field name="access_token" password="True"/>
+                                </group>
+                                <group string="API Bilgileri (Kargo)">
+                                    <field name="cargo_username"/>
+                                    <field name="cargo_password" password="True"/>
+                                    <field name="pttavm_warehouse_id"/>
+                                </group>
+                                <group string="Senkronizasyon">
+                                    <field name="auto_sync"/>
+                                    <field name="sync_interval" invisible="not auto_sync"/>
+                                    <field name="order_day_range"/>
+                                    <field name="last_sync" readonly="1"/>
+                                    <field name="active"/>
+                                </group>
+                            </group>
+                        </page>
+                        <page string="Sipariş ve Müşteri">
+                            <group>
+                                <group string="Müşteri / Fatura">
+                                    <field name="customer_prefix"/>
+                                    <field name="skip_customer_email"/>
+                                </group>
+                                <group string="Sipariş İşleme">
+                                    <field name="auto_confirm"/>
+                                    <field name="auto_cancel"/>
+                                </group>
+                            </group>
+                        </page>
+                        <page string="İade ve Kargo">
+                            <group>
+                                <group string="İade Ayarları">
+                                    <field name="process_returns"/>
+                                    <field name="return_day_range"/>
+                                </group>
+                                <group string="Kargo Otomasyonu">
+                                    <field name="auto_send_cargo"/>
+                                    <field name="cargo_include_order_number"/>
+                                    <field name="default_package_count"/>
+                                    <field name="default_desi"/>
+                                </group>
+                            </group>
+                        </page>
+                        <page string="Finans / Mutabakat">
+                            <group>
+                                <group string="Finans Senkronizasyonu">
+                                    <field name="sync_financials"/>
+                                    <field name="financial_day_range"/>
+                                    <field name="last_financial_sync" readonly="1"/>
+                                </group>
+                                <group string="Komisyon ve Kesintiler">
+                                    <field name="platform_fee_rate"/>
+                                    <field name="cargo_unit_price"/>
+                                </group>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="pttavm_store_tree" model="ir.ui.view">
+        <field name="name">pttavm.store.tree</field>
+        <field name="model">pttavm.store</field>
+        <field name="arch" type="xml">
+            <list string="Pttavm Mağazaları">
+                <field name="sequence" widget="handle"/>
+                <field name="name"/>
+                <field name="auto_sync"/>
+                <field name="last_sync"/>
+                <field name="active"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="action_pttavm_store" model="ir.actions.act_window">
+        <field name="name">Pttavm Mağazaları</field>
+        <field name="res_model">pttavm.store</field>
+        <field name="view_mode">list,form</field>
+    </record>
+</odoo>

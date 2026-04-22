@@ -1,0 +1,354 @@
+"""Toplama Zamanlaması — Saatli batch oluşturma sistemi."""
+import logging
+import pytz
+from datetime import datetime, timedelta, time as dt_time
+
+from odoo import api, fields, models, _
+from odoo.exceptions import UserError
+
+IST = pytz.timezone('Europe/Istanbul')
+
+_logger = logging.getLogger(__name__)
+
+
+class PickingSchedule(models.Model):
+    _name = 'ugurlar.picking.schedule'
+    _description = 'Toplama Zamanlaması'
+    _order = 'sequence, id'
+
+    name = fields.Char(string='Plan Adı', required=True, default='Günlük Toplama Planı')
+    sequence = fields.Integer(default=10)
+    active = fields.Boolean(default=True)
+
+    warehouse_id = fields.Many2one(
+        'stock.warehouse', string='Toplama Deposu', required=True,
+        help='Siparişlerin toplandığı ana depo (İNTERNET MAĞAZA DEPO)',
+    )
+    fallback_warehouse_id = fields.Many2one(
+        'stock.warehouse', string='Yedek Depo',
+        help='Ana depoda stok yoksa kontrol edilecek depo (HEYKEL MAĞAZA DEPO)',
+    )
+
+    schedule_line_ids = fields.One2many(
+        'ugurlar.picking.schedule.line', 'schedule_id',
+        string='Toplama Saatleri',
+    )
+
+    last_batch_date = fields.Date(string='Son Batch Tarihi', readonly=True)
+    last_batch_time = fields.Char(string='Son Batch Saati', readonly=True)
+    batch_tolerance_minutes = fields.Integer(
+        string='Batch Tolerans (dk)',
+        default=120,
+        help='Zamanlanmış saatin üzerinden bu dakikadan fazla geçtiyse batch oluşturulmaz. '
+             'Cron sarkmasına karşı güvenlik marjı.',
+    )
+
+    def action_create_batch_now(self):
+        """Manuel buton: Şimdi toplama listesi oluştur."""
+        self.ensure_one()
+        batch = self._create_batch_for_current_window()
+        if batch:
+            return {
+                'type': 'ir.actions.act_window',
+                'res_model': 'stock.picking.batch',
+                'res_id': batch.id,
+                'view_mode': 'form',
+                'target': 'current',
+            }
+        raise UserError(_('Bu zaman diliminde bekleyen sipariş bulunamadı.'))
+
+    # ═══════════════════════════════════════════════════════
+    # CRON
+    # ═══════════════════════════════════════════════════════
+
+    @api.model
+    def _cron_run(self):
+        """Cron tarafından çağrılır — aktif zamanlamaları kontrol et."""
+        schedules = self.search([('active', '=', True)])
+        for schedule in schedules:
+            try:
+                schedule._check_and_create_batch()
+            except Exception as e:
+                _logger.exception("Toplama zamanlayıcı hatası [%s]: %s",
+                                  schedule.name, e)
+
+    def _check_and_create_batch(self):
+        """Saat geldi mi kontrol et, geldiyse batch oluştur."""
+        self.ensure_one()
+        if not self.schedule_line_ids:
+            return
+
+        now = datetime.now(pytz.UTC).astimezone(IST)
+        current_time = now.time()
+        today = now.date()
+
+        # Saatleri sıralı al
+        sorted_times = self.schedule_line_ids.sorted(
+            key=lambda l: l.hour * 60 + l.minute)
+
+        for line in sorted_times:
+            schedule_time = dt_time(line.hour, line.minute)
+            time_key = f"{line.hour:02d}:{line.minute:02d}"
+
+            # Şu an bu saatten sonra mıyız?
+            if current_time >= schedule_time:
+                # Bu saat için bugün batch oluşmuş mu?
+                if (self.last_batch_date == today and
+                        self.last_batch_time == time_key):
+                    continue
+
+                # Önceki kontrol zamanı (bir önceki zaman diliminin başı)
+                # gelmiş mi? (120 dk / 2 saat toleransla, cron sarkmalarına karşı)
+                time_diff = (
+                    current_time.hour * 60 + current_time.minute -
+                    schedule_time.hour * 60 - schedule_time.minute
+                )
+                if time_diff > self.batch_tolerance_minutes:
+                    # 120 dk'dan fazla geçmiş, muhtemelen daha önce çalıştı
+                    # Son batch kontrolü yapılmıyor, devam et
+                    continue
+
+                # Batch oluştur
+                batch = self._create_batch_for_window(line, today, now)
+                if batch:
+                    self.sudo().write({
+                        'last_batch_date': today,
+                        'last_batch_time': time_key,
+                    })
+                    _logger.info(
+                        "Toplama batch oluşturuldu: %s — %s [%s]",
+                        batch.name, time_key, self.name)
+
+    # ═══════════════════════════════════════════════════════
+    # BATCH OLUŞTURMA
+    # ═══════════════════════════════════════════════════════
+
+    def _get_time_window(self, target_line):
+        """Verilen saat satırı için zaman penceresini hesapla.
+
+        Döndürür: (window_start_dt, window_end_dt, window_label)
+        """
+        self.ensure_one()
+        sorted_lines = self.schedule_line_ids.sorted(
+            key=lambda l: l.hour * 60 + l.minute)
+
+        if not sorted_lines:
+            return None, None, ''
+
+        target_idx = None
+        for i, line in enumerate(sorted_lines):
+            if line.id == target_line.id:
+                target_idx = i
+                break
+
+        if target_idx is None:
+            return None, None, ''
+
+        now = datetime.now(pytz.UTC).astimezone(IST)
+        today = now.date()
+
+        # Pencere sonu = bu saat
+        window_end = datetime.combine(
+            today, dt_time(target_line.hour, target_line.minute))
+
+        # Pencere başı = bir önceki saat (veya önceki günün son saati)
+        if target_idx == 0:
+            # İlk saat → pencere başı = önceki günün son saati + 1 dk
+            last_line = sorted_lines[-1]
+            prev_dt = datetime.combine(
+                today - timedelta(days=1),
+                dt_time(last_line.hour, last_line.minute))
+            window_start = prev_dt + timedelta(minutes=1)
+        else:
+            prev_line = sorted_lines[target_idx - 1]
+            window_start = datetime.combine(
+                today,
+                dt_time(prev_line.hour, prev_line.minute)) + timedelta(minutes=1)
+
+        # Pencere etiketi
+        start_str = window_start.strftime('%H:%M')
+        end_str = window_end.strftime('%H:%M')
+        window_label = f"{start_str}-{end_str}"
+
+        return window_start, window_end, window_label
+
+    def _create_batch_for_current_window(self):
+        """Manuel buton için — şu anki zaman penceresindeki batch."""
+        self.ensure_one()
+        now = datetime.now(pytz.UTC).astimezone(IST)
+        current_time = now.time()
+
+        sorted_lines = self.schedule_line_ids.sorted(
+            key=lambda l: l.hour * 60 + l.minute)
+
+        # Şu anki saate en yakın henüz geçmemiş veya yeni geçmiş pencereyi bul
+        target_line = None
+        for line in sorted_lines:
+            schedule_time = dt_time(line.hour, line.minute)
+            if current_time >= schedule_time:
+                target_line = line
+
+        if not target_line:
+            target_line = sorted_lines[-1] if sorted_lines else None
+
+        if target_line:
+            return self._create_batch_for_window(target_line, now.date(), now)
+        return None
+
+    def _create_batch_for_window(self, schedule_line, today, now_tz):
+        """Belirli bir zaman penceresi icin batch olustur.
+
+        Her zaman diliminde 2 ayri batch olusturulur:
+        1) Ana depoda (INTERNET) stoku olanlar
+        2) Yedek depoda (HEYKEL) stoku olanlar
+        """
+        self.ensure_one()
+
+        window_start, window_end, window_label = self._get_time_window(
+            schedule_line)
+        if not window_start:
+            return None
+
+        # UTC'ye cevir (Odoo DB'de UTC saklar)
+        window_start_utc = IST.localize(window_start).astimezone(
+            pytz.UTC).replace(tzinfo=None)
+        window_end_utc = IST.localize(window_end).astimezone(
+            pytz.UTC).replace(tzinfo=None)
+
+        # Bu depodan cikis yapacak, henuz batch'e atanmamis picking'ler
+        Picking = self.env['stock.picking'].sudo()
+
+        # Deponun outgoing picking type'ini bul
+        picking_type = self.env['stock.picking.type'].search([
+            ('warehouse_id', '=', self.warehouse_id.id),
+            ('code', '=', 'outgoing'),
+        ], limit=1)
+
+        if not picking_type:
+            _logger.warning("Depo %s icin outgoing picking type bulunamadi",
+                            self.warehouse_id.name)
+            return None
+
+        # Batch'e atanmamis, onaylanmis picking'leri al
+        # NOT: create_date filtresi YOK — tum bekleyen picking'ler dahil
+        # Saat penceresi sadece batch'in NE ZAMAN olusturuldugunu belirler
+        domain = [
+            ('picking_type_id', '=', picking_type.id),
+            ('state', 'in', ['confirmed', 'waiting', 'assigned']),
+            ('batch_id', '=', False),
+        ]
+        pickings = Picking.search(domain)
+
+        if not pickings:
+            _logger.info("Zaman dilimi %s: Bekleyen siparis yok", window_label)
+            return None
+
+        # Stok kontrolu ve gruplama
+        primary_pickings = self.env['stock.picking']     # INTERNET DEPO'da var
+        fallback_pickings = self.env['stock.picking']    # HEYKEL DEPO'da var
+
+        for picking in pickings:
+            status = picking._check_availability_status(
+                self.warehouse_id, self.fallback_warehouse_id)
+
+            if status == 'available':
+                try:
+                    picking.action_assign()
+                except Exception:
+                    pass
+                primary_pickings |= picking
+            elif status in ('other_warehouse', 'partial'):
+                fallback_pickings |= picking
+            # 'unavailable' olanlar hicbir batch'e EKLENMEZ
+
+        created_batches = []
+
+        # ── BATCH 1: ANA DEPO (INTERNET MAGAZA DEPO) ──
+        if primary_pickings:
+            batch_name = self.env['ir.sequence'].next_by_code(
+                'ugurlar.picking.batch.route') or 'R00000'
+
+            wh_name = self.warehouse_id.name or 'Ana Depo'
+            batch = self.env['stock.picking.batch'].sudo().create({
+                'name': batch_name,
+                'picking_type_id': picking_type.id,
+                'schedule_time': window_end_utc,
+                'time_window': window_label,
+                'company_id': self.warehouse_id.company_id.id,
+                'source_info': f'{wh_name} - {len(primary_pickings)} siparis ({window_label})',
+            })
+
+            primary_pickings.write({
+                'batch_id': batch.id,
+                'batch_schedule_time': window_end_utc,
+            })
+
+            _logger.info(
+                "Batch %s olusturuldu: %d siparis — %s (%s)",
+                batch_name, len(primary_pickings), wh_name, window_label)
+            created_batches.append(batch)
+
+        # ── BATCH 2: YEDEK DEPO (HEYKEL MAGAZA DEPO) ──
+        if fallback_pickings and self.fallback_warehouse_id:
+            batch_name = self.env['ir.sequence'].next_by_code(
+                'ugurlar.picking.batch.route') or 'R00000'
+
+            fb_name = self.fallback_warehouse_id.name or 'Yedek Depo'
+            batch = self.env['stock.picking.batch'].sudo().create({
+                'name': batch_name,
+                'picking_type_id': picking_type.id,
+                'schedule_time': window_end_utc,
+                'time_window': window_label,
+                'company_id': self.warehouse_id.company_id.id,
+                'source_info': f'{fb_name} - {len(fallback_pickings)} siparis ({window_label})',
+            })
+
+            fallback_pickings.write({
+                'batch_id': batch.id,
+                'batch_schedule_time': window_end_utc,
+            })
+
+            _logger.info(
+                "Batch %s olusturuldu: %d siparis — %s (%s)",
+                batch_name, len(fallback_pickings), fb_name, window_label)
+            created_batches.append(batch)
+
+        if not created_batches:
+            _logger.info("Zaman dilimi %s: Uygun siparis yok", window_label)
+            return None
+
+        # Ilk batch'i dondur (UI yonlendirmesi icin)
+        return created_batches[0]
+
+
+class PickingScheduleLine(models.Model):
+    _name = 'ugurlar.picking.schedule.line'
+    _description = 'Toplama Saati'
+    _order = 'hour, minute'
+
+    schedule_id = fields.Many2one(
+        'ugurlar.picking.schedule', string='Plan',
+        required=True, ondelete='cascade',
+    )
+    hour = fields.Integer(string='Saat', required=True, default=9)
+    minute = fields.Integer(string='Dakika', required=True, default=0)
+    display_time = fields.Char(
+        string='Saat', compute='_compute_display_time', store=True,
+    )
+
+    @api.depends('hour', 'minute')
+    def _compute_display_time(self):
+        for rec in self:
+            rec.display_time = f"{rec.hour:02d}:{rec.minute:02d}"
+
+    @api.constrains('hour', 'minute')
+    def _check_time_range(self):
+        for rec in self:
+            if not (0 <= rec.hour <= 23):
+                raise UserError(_('Saat 0-23 arasında olmalı'))
+            if not (0 <= rec.minute <= 59):
+                raise UserError(_('Dakika 0-59 arasında olmalı'))
+
+
+
+

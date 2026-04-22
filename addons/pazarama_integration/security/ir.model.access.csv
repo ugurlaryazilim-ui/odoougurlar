@@ -1,0 +1,6 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_pazarama_store,pazarama.store,model_pazarama_store,base.group_user,1,1,1,1
+access_pazarama_order,pazarama.order,model_pazarama_order,base.group_user,1,1,1,1
+access_pazarama_order_line,pazarama.order_line,model_pazarama_order_line,base.group_user,1,1,1,1
+access_pazarama_settlement,pazarama.settlement,model_pazarama_settlement,base.group_user,1,1,1,1
+access_pazarama_refund,pazarama.refund,model_pazarama_refund,base.group_user,1,1,1,1

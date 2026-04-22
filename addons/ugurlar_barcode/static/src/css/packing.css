@@ -1,0 +1,96 @@
+/* ═══════════════════════════════════════════════
+   PAKETLEME & FATURALAMA EKRANI
+   ═══════════════════════════════════════════════ */
+
+.ub-packing-header {
+    background: linear-gradient(135deg, #2c3e50, #3498db);
+    color: #fff;
+    padding: 0.8rem 1rem;
+    border-radius: 10px;
+    margin: 0.6rem 0.8rem;
+}
+
+.ub-packing-route-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 1.05rem;
+}
+
+.ub-packing-progress {
+    margin-top: 0.5rem;
+}
+
+.ub-packing-progress-bar {
+    height: 8px;
+    background: rgba(255,255,255,0.2);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.ub-packing-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #2ecc71, #27ae60);
+    border-radius: 4px;
+    transition: width 0.4s ease;
+}
+
+.ub-packing-progress-text {
+    display: block;
+    text-align: center;
+    font-size: 0.78rem;
+    margin-top: 0.3rem;
+    opacity: 0.9;
+}
+
+.ub-packing-check {
+    display: flex;
+    align-items: center;
+    padding-right: 0.6rem;
+}
+
+.ub-packing-order-info {
+    margin-top: 0.2rem;
+}
+
+.ub-packing-complete-btn {
+    background: linear-gradient(135deg, #27ae60, #2ecc71) !important;
+    color: #fff !important;
+    border: none !important;
+    font-weight: bold;
+    border-radius: 12px;
+}
+
+.ub-packing-complete-btn:hover {
+    background: linear-gradient(135deg, #219a52, #25b85c) !important;
+    transform: scale(1.02);
+}
+
+.ub-packing-label-section {
+    margin: 0.8rem 0;
+    border-top: 2px solid rgba(255,255,255,0.1);
+    padding-top: 0.6rem;
+}
+
+.ub-packing-batch-list {
+    padding: 0 0.8rem;
+}
+
+/* Eşleşmiş ürün satırı */
+.ub-product-row.ub-line-done {
+    background: linear-gradient(135deg,
+        rgba(39, 174, 96, 0.08),
+        rgba(46, 204, 113, 0.12)) !important;
+    border-left: 3px solid #27ae60 !important;
+}
+
+/* Scan feedback animasyon */
+.ub-scan-feedback {
+    animation: ub-packing-flash 0.3s ease;
+}
+
+@keyframes ub-packing-flash {
+    0% { transform: scale(0.95); opacity: 0.5; }
+    50% { transform: scale(1.02); }
+    100% { transform: scale(1); opacity: 1; }
+}

@@ -1,0 +1,239 @@
+/* ===================================================================
+   Mobil — Tüm Rafı Taşı Ekranı Stilleri
+   =================================================================== */
+
+/* ─── UYARI BANNER ─────────────────────────────────────── */
+.ub-shelf-move-warning {
+    margin: 1rem 1.5rem;
+    padding: 0.8rem 1.2rem;
+    background: linear-gradient(135deg, #fff3cd, #ffeeba);
+    border-radius: 10px;
+    border-left: 4px solid #ffc107;
+    color: #856404;
+    font-size: 0.88rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.ub-shelf-move-warning .fa {
+    font-size: 1.1rem;
+}
+
+/* ─── RAF BİLGİ KARTI ─────────────────────────────────── */
+.ub-shelf-move-info {
+    margin: 1rem 1.5rem;
+    padding: 1rem 1.2rem;
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    border-left: 4px solid #E67E22;
+}
+
+.ub-shelf-move-info-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0;
+}
+
+.ub-shelf-move-info-label {
+    font-size: 0.82rem;
+    color: #888;
+    min-width: 80px;
+    flex-shrink: 0;
+}
+
+.ub-shelf-move-info-value {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #333;
+}
+
+.ub-shelf-move-info-value.ub-source {
+    color: #E67E22;
+}
+
+.ub-shelf-move-info-value.ub-target {
+    color: #27AE60;
+}
+
+.ub-shelf-move-info-value.ub-count {
+    color: #714B67;
+    font-size: 1rem;
+}
+
+.ub-shelf-move-arrow {
+    color: #E67E22;
+    font-size: 1.1rem;
+    margin: 0.3rem 0;
+    text-align: center;
+}
+
+/* ─── ÜRÜN LİSTESİ ÖN İZLEME ──────────────────────────── */
+.ub-shelf-move-preview {
+    margin: 1rem 1.5rem;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    background: #fff;
+}
+
+.ub-shelf-move-preview-header {
+    background: linear-gradient(135deg, #E67E22, #D35400);
+    color: #fff;
+    padding: 0.7rem 1.2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.ub-shelf-move-preview-header h3 {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.ub-shelf-move-preview-header .badge {
+    background: rgba(255, 255, 255, 0.25);
+    font-size: 0.8rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 10px;
+}
+
+.ub-shelf-move-preview-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+.ub-shelf-move-preview-table thead th {
+    background: #f8f9fa;
+    color: #555;
+    padding: 0.5rem 0.8rem;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 2px solid #e9ecef;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.ub-shelf-move-preview-table tbody td {
+    padding: 0.5rem 0.8rem;
+    border-bottom: 1px solid #f0f0f0;
+    vertical-align: middle;
+}
+
+.ub-shelf-move-preview-table tbody tr:nth-child(even) {
+    background: #fafafa;
+}
+
+.ub-shelf-move-preview-table tbody tr:hover {
+    background: #fef5ec;
+}
+
+.ub-shelf-move-qty {
+    font-weight: 700;
+    color: #714B67;
+    text-align: center;
+}
+
+.ub-shelf-move-product {
+    font-weight: 500;
+    color: #333;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ─── TAŞI BUTONU ──────────────────────────────────────── */
+.ub-btn-shelf-move {
+    background: linear-gradient(135deg, #E67E22, #D35400) !important;
+    border-color: #D35400 !important;
+    color: #fff !important;
+    font-weight: 600;
+    border-radius: 10px;
+    padding: 0.8rem !important;
+    font-size: 1rem;
+    transition: all 0.2s;
+}
+
+.ub-btn-shelf-move:hover {
+    background: linear-gradient(135deg, #D35400, #A04000) !important;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(230, 126, 34, 0.35);
+}
+
+.ub-btn-shelf-move:disabled {
+    opacity: 0.6;
+    transform: none;
+    box-shadow: none;
+}
+
+/* ─── SONUÇ KARTI ──────────────────────────────────────── */
+.ub-shelf-move-result {
+    margin: 1rem 1.5rem;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    background: #fff;
+}
+
+.ub-shelf-move-result-header {
+    background: linear-gradient(135deg, #27AE60, #219A52);
+    color: #fff;
+    padding: 0.8rem 1.2rem;
+    text-align: center;
+}
+
+.ub-shelf-move-result-header h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.ub-shelf-move-result-header .fa {
+    font-size: 1.5rem;
+    display: block;
+    margin-bottom: 0.4rem;
+}
+
+.ub-shelf-move-result-stats {
+    display: flex;
+    justify-content: center;
+    gap: 2rem;
+    padding: 1rem;
+    background: #f0faf4;
+}
+
+.ub-shelf-move-stat {
+    text-align: center;
+}
+
+.ub-shelf-move-stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #27AE60;
+}
+
+.ub-shelf-move-stat-label {
+    font-size: 0.75rem;
+    color: #666;
+    text-transform: uppercase;
+}
+
+/* ─── RESPONSIVE ───────────────────────────────────────── */
+@media (max-width: 480px) {
+    .ub-shelf-move-info,
+    .ub-shelf-move-preview,
+    .ub-shelf-move-warning,
+    .ub-shelf-move-result {
+        margin: 0.5rem;
+    }
+    .ub-shelf-move-product {
+        max-width: 130px;
+    }
+}

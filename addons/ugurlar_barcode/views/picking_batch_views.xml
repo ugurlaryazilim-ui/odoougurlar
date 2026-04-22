@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- ═══════ BATCH FORM INHERIT ═══════ -->
+    <record id="view_picking_batch_form_inherit" model="ir.ui.view">
+        <field name="name">stock.picking.batch.form.ugurlar</field>
+        <field name="model">stock.picking.batch</field>
+        <field name="inherit_id" ref="stock_picking_batch.stock_picking_batch_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//sheet" position="inside">
+                <group string="Toplama Bilgileri" name="picking_schedule_info">
+                    <group>
+                        <field name="source_info"/>
+                        <field name="time_window"/>
+                        <field name="schedule_time"/>
+                    </group>
+                    <group>
+                        <field name="total_orders"/>
+                        <field name="total_items"/>
+                        <field name="available_count"/>
+                        <field name="other_warehouse_count"/>
+                        <field name="unavailable_count"/>
+                    </group>
+                </group>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- ═══════ BATCH LIST INHERIT ═══════ -->
+    <record id="view_picking_batch_list_inherit" model="ir.ui.view">
+        <field name="name">stock.picking.batch.list.ugurlar</field>
+        <field name="model">stock.picking.batch</field>
+        <field name="inherit_id" ref="stock_picking_batch.stock_picking_batch_tree"/>
+        <field name="arch" type="xml">
+            <xpath expr="//list" position="inside">
+                <field name="time_window" optional="show"/>
+                <field name="source_info" optional="show"/>
+                <field name="total_orders" optional="show"/>
+                <field name="total_items" optional="show"/>
+                <field name="available_count" optional="hide"/>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- ═══════ BATCH ACTION (Toplama Listeleri menüsü) ═══════ -->
+    <record id="action_picking_batch_dashboard" model="ir.actions.act_window">
+        <field name="name">Toplama Listeleri</field>
+        <field name="res_model">stock.picking.batch</field>
+        <field name="view_mode">list,form</field>
+        <field name="domain">[('time_window', '!=', False)]</field>
+        <field name="context">{'search_default_filter_today': 1}</field>
+    </record>
+
+    <!-- ═══════ BATCH SEARCH (bugün filtresi) ═══════ -->
+    <record id="view_picking_batch_search_inherit" model="ir.ui.view">
+        <field name="name">stock.picking.batch.search.ugurlar</field>
+        <field name="model">stock.picking.batch</field>
+        <field name="inherit_id" ref="stock_picking_batch.stock_picking_batch_filter"/>
+        <field name="arch" type="xml">
+            <xpath expr="//search" position="inside">
+                <filter string="Bugün" name="filter_today"
+                        domain="[('schedule_time', '&gt;=', (context_today()).strftime('%%Y-%%m-%%d')),
+                                 ('schedule_time', '&lt;', (context_today() + datetime.timedelta(days=1)).strftime('%%Y-%%m-%%d'))]"/>
+                <filter string="Toplama Planı" name="filter_scheduled"
+                        domain="[('time_window', '!=', False)]"/>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- ═══════ MENÜ ═══════ -->
+    <menuitem id="menu_picking_batch_dashboard"
+              name="Toplama Listeleri"
+              parent="ugurlar_barcode.menu_ugurlar_barcode_root"
+              action="action_picking_batch_dashboard"
+              sequence="5"/>
+
+</odoo>

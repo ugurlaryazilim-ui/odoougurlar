@@ -1,0 +1,6 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_pttavm_store,pttavm.store,model_pttavm_store,base.group_user,1,1,1,1
+access_pttavm_order,pttavm.order,model_pttavm_order,base.group_user,1,1,1,1
+access_pttavm_order_line,pttavm.order_line,model_pttavm_order_line,base.group_user,1,1,1,1
+access_pttavm_settlement,pttavm.settlement,model_pttavm_settlement,base.group_user,1,1,1,1
+access_pttavm_refund,pttavm.refund,model_pttavm_refund,base.group_user,1,1,1,1

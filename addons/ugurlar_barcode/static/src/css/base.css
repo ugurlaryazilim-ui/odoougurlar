@@ -1,0 +1,287 @@
+/* ===================================================================
+   Uğurlar Barkod — Temel Stiller (Layout, Container, Header, Menu)
+   =================================================================== */
+
+/* ─── APP CONTAINER ────────────────────────────────────── */
+.ub-app {
+    min-height: 100vh;
+    background: #f8f9fa;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    height: 100%;
+}
+
+/* Odoo action container'ların scroll'u engellemesini override et */
+.o_action_manager .o_action:has(.ub-app),
+.o_action_manager:has(.ub-app) {
+    overflow: auto !important;
+    height: auto !important;
+}
+
+.o_action_manager:has(.ub-app) .o_action {
+    overflow: auto !important;
+    height: auto !important;
+}
+
+/* ─── HEADER ───────────────────────────────────────────── */
+.ub-header {
+    background: linear-gradient(135deg, #714B67, #875A7B);
+    color: white;
+    padding: 2rem 1.5rem;
+    text-align: center;
+}
+
+.ub-title {
+    font-size: 1.8rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.ub-title .fa {
+    margin-right: 0.5rem;
+}
+
+.ub-subtitle {
+    margin: 0.3rem 0 0;
+    opacity: 0.85;
+    font-size: 0.95rem;
+}
+
+/* ─── SEARCH BAR ───────────────────────────────────────── */
+.ub-search-bar {
+    padding: 0.8rem 1.5rem;
+}
+
+.ub-search-input-wrap {
+    position: relative;
+}
+
+.ub-search-icon {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #999;
+    font-size: 0.95rem;
+}
+
+.ub-search-input {
+    width: 100%;
+    padding: 0.7rem 1rem 0.7rem 2.5rem;
+    border: 2px solid #e9ecef;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    background: white;
+    transition: border-color 0.2s;
+}
+
+.ub-search-input:focus {
+    border-color: #714B67;
+    box-shadow: 0 0 0 3px rgba(113, 75, 103, 0.12);
+    outline: none;
+}
+
+.ub-no-results {
+    text-align: center;
+    padding: 2rem;
+    color: #999;
+}
+
+.ub-no-results .fa {
+    font-size: 1.5rem;
+    display: block;
+    margin-bottom: 0.5rem;
+}
+
+/* ─── MENU GRID ────────────────────────────────────────── */
+.ub-menu-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    padding: 1.5rem;
+}
+
+.ub-menu-card {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    transition: all 0.2s ease;
+    border: 2px solid transparent;
+}
+
+.ub-menu-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.ub-menu-card:active {
+    transform: scale(0.97);
+}
+
+.ub-card-icon {
+    font-size: 2rem;
+    margin-bottom: 0.8rem;
+}
+
+.ub-card-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin-bottom: 0.3rem;
+}
+
+.ub-card-desc {
+    font-size: 0.8rem;
+    color: #666;
+}
+
+/* Kart renkleri */
+.ub-card-search .ub-card-icon { color: #00A09D; }
+.ub-card-search:hover { border-color: #00A09D; }
+
+.ub-card-shelf .ub-card-icon { color: #714B67; }
+.ub-card-shelf:hover { border-color: #714B67; }
+
+.ub-card-control .ub-card-icon { color: #017E84; }
+.ub-card-control:hover { border-color: #017E84; }
+
+.ub-card-putaway .ub-card-icon { color: #E4A900; }
+.ub-card-putaway:hover { border-color: #E4A900; }
+
+.ub-card-picking .ub-card-icon { color: #21B6A8; }
+.ub-card-picking:hover { border-color: #21B6A8; }
+
+.ub-card-counting .ub-card-icon { color: #875A7B; }
+.ub-card-counting:hover { border-color: #875A7B; }
+
+.ub-card-movements .ub-card-icon { color: #E67E22; }
+.ub-card-movements:hover { border-color: #E67E22; }
+
+.ub-card-labels .ub-card-icon { color: #3498DB; }
+.ub-card-labels:hover { border-color: #3498DB; }
+
+.ub-card-bulk .ub-card-icon { color: #2ECC71; }
+.ub-card-bulk:hover { border-color: #2ECC71; }
+
+.ub-card-performance .ub-card-icon { color: #F39C12; }
+.ub-card-performance:hover { border-color: #F39C12; }
+
+.ub-card-transfer .ub-card-icon { color: #1ABC9C; }
+.ub-card-transfer:hover { border-color: #1ABC9C; }
+
+.ub-card-move-all .ub-card-icon { color: #E67E22; }
+.ub-card-move-all:hover { border-color: #E67E22; }
+
+.ub-card-validate .ub-card-icon { color: #16A085; }
+.ub-card-validate:hover { border-color: #16A085; }
+
+.ub-card-bulk-putaway .ub-card-icon { color: #8E44AD; }
+.ub-card-bulk-putaway:hover { border-color: #8E44AD; }
+
+.ub-card-clear-all .ub-card-icon { color: #e74c3c; }
+.ub-card-clear-all:hover { border-color: #e74c3c; }
+
+.ub-card-packing .ub-card-icon { color: #2c3e50; }
+.ub-card-packing:hover { border-color: #2c3e50; }
+
+.ub-card-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+/* ─── SCREEN LAYOUT ────────────────────────────────────── */
+.ub-screen {
+    padding-bottom: 4rem;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.ub-screen-header {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    padding: 1rem 1.5rem;
+    background: white;
+    border-bottom: 1px solid #dee2e6;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.ub-btn-back {
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    color: #714B67;
+    padding: 0.5rem;
+}
+
+.ub-screen-title {
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin: 0;
+    color: #333;
+}
+
+.ub-screen-title .fa {
+    color: #714B67;
+    margin-right: 0.4rem;
+}
+
+/* ─── LOADING / ERROR / SUCCESS ─────────────────────────── */
+.ub-loading {
+    text-align: center;
+    padding: 3rem;
+    color: #714B67;
+}
+
+.ub-loading p {
+    margin-top: 0.8rem;
+    font-size: 0.95rem;
+}
+
+.ub-error-card {
+    margin: 1rem 1.5rem;
+    padding: 1.5rem;
+    background: #fff3cd;
+    border-radius: 10px;
+    text-align: center;
+    color: #856404;
+}
+
+.ub-error-card .fa {
+    font-size: 1.5rem;
+    margin-bottom: 0.5rem;
+    display: block;
+}
+
+.ub-success-card {
+    margin: 1rem 1.5rem;
+    padding: 1.5rem;
+    background: #d4edda;
+    border-radius: 10px;
+    text-align: center;
+    color: #155724;
+}
+
+.ub-success-card .fa {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+    display: block;
+}
+
+/* ─── GENEL ODOO BUTON STİLİ ─────────────────────────── */
+.ub-screen .btn-primary {
+    background: #714B67 !important;
+    border-color: #714B67 !important;
+}
+
+.ub-screen .btn-primary:hover {
+    background: #5c3d55 !important;
+    border-color: #5c3d55 !important;
+}
+
+.text-end { text-align: right !important; }

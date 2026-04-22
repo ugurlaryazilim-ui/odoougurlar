@@ -1,0 +1,6 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_n11_store,n11.store,model_n11_store,base.group_user,1,1,1,1
+access_n11_order,n11.order,model_n11_order,base.group_user,1,1,1,1
+access_n11_order_line,n11.order_line,model_n11_order_line,base.group_user,1,1,1,1
+access_n11_settlement,n11.settlement,model_n11_settlement,base.group_user,1,1,1,1
+access_n11_refund,n11.refund,model_n11_refund,base.group_user,1,1,1,1

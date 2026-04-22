@@ -1,0 +1,622 @@
+/* ===================================================================
+   Uğurlar Barkod — Ekrana Özel Stiller + Responsif + Kamera
+   =================================================================== */
+
+/* ─── RAF BİLGİ BÖLÜMÜ (HamurLabs tarzı) ────────────── */
+.ub-shelf-info-section {
+    margin: 1rem;
+    padding: 1rem 1.2rem;
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    border-left: 4px solid #714B67;
+}
+
+.ub-shelf-detail-row {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.35rem 0;
+    font-size: 0.92rem;
+    align-items: baseline;
+}
+
+.ub-shelf-detail-row + .ub-shelf-detail-row {
+    border-top: 1px solid #f0f0f0;
+}
+
+.ub-shelf-detail-label {
+    font-weight: 600;
+    color: #714B67;
+    min-width: 110px;
+    flex-shrink: 0;
+}
+
+/* ─── RAFLAMA EKRANI ─────────────────────────────────── */
+.ub-step-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    background: #714B67;
+    color: #fff;
+    border-radius: 50%;
+    font-size: 0.75rem;
+    font-weight: 700;
+    margin-right: 0.4rem;
+}
+
+.ub-mode-toggle {
+    margin-left: auto;
+    display: flex;
+    gap: 0.3rem;
+}
+
+.ub-mode-active-green {
+    background: #27ae60 !important;
+    border-color: #27ae60 !important;
+    color: #fff !important;
+}
+
+.ub-mode-active-red {
+    background: #e74c3c !important;
+    border-color: #e74c3c !important;
+    color: #fff !important;
+}
+
+.ub-qty-section {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+}
+
+.ub-qty-input-wide {
+    width: 100px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 1.1rem;
+}
+
+/* ─── PUTAWAY STYLES ────────────────────────────────────── */
+.ub-step-label {
+    font-size: 0.85rem;
+    color: #714B67;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+}
+
+.ub-scanned-product {
+    padding: 0.5rem 0;
+    color: #28a745;
+    font-weight: 500;
+    font-size: 0.9rem;
+    margin-bottom: 0.5rem;
+}
+
+.ub-scanned-product .fa { margin-right: 0.3rem; }
+
+.ub-qty-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.8rem;
+}
+
+.ub-qty-row label { font-weight: 600; font-size: 0.9rem; white-space: nowrap; }
+
+.ub-qty-input {
+    width: 80px;
+    text-align: center;
+    border-radius: 8px;
+    border: 2px solid #dee2e6;
+    padding: 0.5rem;
+}
+
+.ub-qty-input-sm {
+    width: 70px;
+    text-align: center;
+    border-radius: 8px;
+    border: 2px solid #dee2e6;
+    padding: 0.6rem 0.4rem;
+}
+
+/* ─── SHELF HEADER ─────────────────────────────────────── */
+.ub-shelf-header {
+    padding: 1.2rem;
+    background: linear-gradient(135deg, #714B67, #875A7B);
+    color: white;
+}
+
+.ub-shelf-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.8rem; }
+.ub-shelf-title .fa { margin-right: 0.4rem; }
+.ub-shelf-summary { display: flex; gap: 2rem; }
+.ub-stat { text-align: center; }
+.ub-stat-value { display: block; font-size: 1.5rem; font-weight: 700; }
+.ub-stat-label { font-size: 0.8rem; opacity: 0.85; }
+
+/* ─── EMPTY STATE ──────────────────────────────────────── */
+.ub-no-stock {
+    text-align: center;
+    padding: 2rem;
+    color: #999;
+}
+
+.ub-no-stock .fa {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+    display: block;
+}
+
+/* ─── HISTORY ──────────────────────────────────────────── */
+.ub-history { margin: 0 1.5rem; }
+.ub-history-row { padding: 0.6rem 0; border-bottom: 1px solid #f0f0f0; font-size: 0.85rem; }
+.ub-history-row .fa { margin-right: 0.4rem; }
+
+/* ─── PICKING STYLES ─────────────────────────────────── */
+.ub-picking-list { margin: 0 1.5rem; }
+
+.ub-picking-row {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    padding: 1rem;
+    margin-bottom: 0.5rem;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.ub-picking-row:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); transform: translateY(-1px); }
+.ub-picking-info { flex: 1; min-width: 0; }
+.ub-picking-name { font-weight: 600; font-size: 0.95rem; }
+.ub-picking-meta { font-size: 0.8rem; color: #888; margin-top: 0.2rem; display: flex; gap: 0.5rem; }
+
+.ub-picking-detail-header { padding: 0.8rem 1.5rem; background: #714B67; color: white; font-size: 0.95rem; }
+
+.ub-scan-feedback {
+    margin: 0.5rem 1.5rem;
+    padding: 0.7rem 1rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.ub-scan-ok { background: #d4edda; color: #155724; }
+.ub-scan-fail { background: #f8d7da; color: #721c24; }
+.ub-prod-qty-detail { font-weight: 700; font-size: 1rem; white-space: nowrap; }
+.ub-line-done { background: #f0fdf4; border-left: 3px solid #28a745; }
+
+/* Product list rows */
+.ub-product-row {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    padding: 0.8rem 1.2rem;
+    border-bottom: 1px solid #f5f5f5;
+}
+
+.ub-product-row:last-child { border-bottom: none; }
+
+.ub-product-thumb {
+    width: 48px;
+    height: 48px;
+    object-fit: cover;
+    border-radius: 6px;
+    background: #f5f5f5;
+}
+
+.ub-prod-info { flex: 1; min-width: 0; }
+.ub-prod-name { font-size: 0.9rem; font-weight: 500; line-height: 1.3; word-wrap: break-word; }
+.ub-prod-barcode { font-size: 0.8rem; color: #888; margin-top: 0.1rem; }
+
+/* ─── SAYIM EKRANI ───────────────────────────────────── */
+.ub-count-stats {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.8rem;
+}
+
+.ub-count-stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    background: #f8f6f7;
+    border-radius: 8px;
+    flex: 1;
+}
+
+.ub-count-stat-num { font-size: 1.4rem; font-weight: 700; color: #714B67; }
+.ub-count-stat-num.ub-count-done { color: #27ae60; }
+.ub-count-stat-lbl { font-size: 0.72rem; color: #888; text-transform: uppercase; font-weight: 600; }
+
+.ub-count-input-group { display: flex; align-items: center; gap: 0.3rem; justify-content: center; }
+.ub-count-input { width: 70px; text-align: center; font-weight: 600; font-size: 0.95rem; padding: 0.3rem 0.4rem; }
+.ub-count-ok-btn { font-weight: 700; padding: 0.3rem 0.7rem; font-size: 0.85rem; }
+.ub-row-counted { background: #f0faf0 !important; }
+.ub-row-counted td { color: #1e7e34; }
+
+/* Eski sayım stilleri (uyumluluk) */
+.ub-count-list { margin: 0 1.5rem; }
+.ub-count-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.7rem 0; border-bottom: 1px solid #f0f0f0; }
+.ub-count-info { flex: 1; }
+.ub-count-bc { font-family: monospace; font-size: 0.9rem; }
+.ub-count-qty { font-weight: 600; }
+.ub-count-results { margin: 0 1.5rem; }
+.ub-count-result-row { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid #f5f5f5; font-size: 0.85rem; }
+
+/* Rafta olmayan (yeni eklenen) ürün kırmızı */
+.ub-row-new-product {
+    background: #fff5f5 !important;
+}
+
+.ub-row-new-product td {
+    color: #c0392b;
+}
+
+/* ─── KAMERA BARKOD TARAYICI OVERLAY ─────────────────── */
+.ub-camera-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.95);
+    z-index: 99999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.ub-camera-header {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.2rem;
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 600;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 2;
+}
+
+.ub-camera-close-btn {
+    background: rgba(255, 255, 255, 0.2);
+    border: none;
+    color: #fff;
+    font-size: 1.4rem;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+}
+
+.ub-camera-close-btn:hover { background: rgba(255, 255, 255, 0.4); }
+
+#ub-cam-video {
+    width: 100%;
+    max-width: 640px;
+    max-height: 70vh;
+    object-fit: cover;
+    border-radius: 8px;
+}
+
+.ub-camera-target {
+    position: absolute;
+    width: 260px;
+    height: 160px;
+    border: 3px solid rgba(113, 75, 103, 0.8);
+    border-radius: 12px;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4);
+    z-index: 1;
+    animation: ub-scan-pulse 2s ease-in-out infinite;
+}
+
+@keyframes ub-scan-pulse {
+    0%, 100% { border-color: rgba(113, 75, 103, 0.8); }
+    50% { border-color: rgba(255, 255, 255, 0.9); }
+}
+
+.ub-camera-status {
+    position: absolute;
+    bottom: 2rem;
+    left: 0;
+    right: 0;
+    text-align: center;
+    color: #fff;
+    font-size: 0.95rem;
+    font-weight: 500;
+    z-index: 2;
+}
+
+/* ─── FİLTRE ÇUBUĞU ─────────────────────────────────── */
+.ub-filter-bar { padding: 1rem 1.5rem; background: white; border-bottom: 1px solid #dee2e6; }
+.ub-filter-row { display: flex; gap: 0.8rem; margin-bottom: 0.8rem; }
+.ub-filter-field { flex: 1; }
+
+.ub-select {
+    border: 2px solid #dee2e6;
+    border-radius: 8px;
+    padding: 0.6rem 0.8rem;
+    font-size: 0.95rem;
+    transition: border-color 0.2s;
+}
+
+.ub-select:focus {
+    border-color: #714B67;
+    box-shadow: 0 0 0 3px rgba(113, 75, 103, 0.15);
+    outline: none;
+}
+
+/* ─── İSTATİSTİK KARTLARI ────────────────────────────── */
+.ub-stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+    padding: 1rem 1.5rem;
+}
+
+.ub-stat-card {
+    text-align: center;
+    padding: 0.8rem 0.5rem;
+    border-radius: 10px;
+    background: white;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+
+.ub-stat-num { font-size: 1.5rem; font-weight: 700; }
+.ub-stat-txt { font-size: 0.75rem; color: #666; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
+
+.ub-stat-in .ub-stat-num { color: #28a745; }
+.ub-stat-out .ub-stat-num { color: #dc3545; }
+.ub-stat-int .ub-stat-num { color: #E67E22; }
+.ub-stat-total .ub-stat-num { color: #714B67; }
+
+/* ─── HAREKET LİSTESİ ────────────────────────────────── */
+.ub-movements-list { margin: 0 1.5rem; }
+
+.ub-movement-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.8rem;
+    padding: 0.8rem 1rem;
+    margin-bottom: 0.5rem;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    border-left: 3px solid transparent;
+}
+
+.ub-move-incoming { border-left-color: #28a745; }
+.ub-move-outgoing { border-left-color: #dc3545; }
+.ub-move-internal { border-left-color: #E67E22; }
+
+.ub-move-icon {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: #f8f9fa; flex-shrink: 0; margin-top: 0.2rem;
+}
+
+.ub-move-incoming .ub-move-icon { color: #28a745; }
+.ub-move-outgoing .ub-move-icon { color: #dc3545; }
+.ub-move-internal .ub-move-icon { color: #E67E22; }
+
+.ub-move-info { flex: 1; min-width: 0; }
+.ub-move-product { font-weight: 600; font-size: 0.9rem; line-height: 1.3; word-wrap: break-word; }
+.ub-move-route { font-size: 0.78rem; color: #888; margin-top: 0.1rem; }
+.ub-move-meta { font-size: 0.75rem; color: #aaa; margin-top: 0.2rem; }
+.ub-move-qty { flex-shrink: 0; margin-top: 0.3rem; }
+
+/* ─── ETİKET EKRANI ──────────────────────────────────── */
+.ub-label-list { margin: 0 1.5rem; }
+.ub-label-row { display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 0; border-bottom: 1px solid #f0f0f0; }
+.ub-label-bc { font-family: monospace; font-size: 0.95rem; }
+.ub-label-preview { margin: 0 1.5rem; }
+.ub-label-card { background: white; border: 2px dashed #dee2e6; border-radius: 10px; padding: 1rem; margin-bottom: 0.8rem; text-align: center; }
+.ub-label-card-top { margin-bottom: 0.5rem; }
+.ub-label-name { font-weight: 600; font-size: 0.9rem; line-height: 1.3; }
+.ub-label-code { font-size: 0.8rem; color: #888; }
+.ub-label-barcode-display { font-family: monospace; font-size: 1rem; color: #333; margin: 0.5rem 0; display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
+.ub-label-price { font-size: 1.1rem; font-weight: 700; color: #00A09D; }
+
+/* ─── PERFORMANS EKRANI ──────────────────────────────── */
+.ub-perf-total { text-align: center; padding: 1.5rem; background: linear-gradient(135deg, #714B67, #875A7B); color: white; margin: 0 1.5rem 1rem; border-radius: 12px; }
+.ub-perf-big-number { font-size: 3rem; font-weight: 700; }
+.ub-perf-big-label { font-size: 0.9rem; opacity: 0.85; margin-top: 0.2rem; }
+.ub-perf-section { margin: 0 1.5rem 1rem; }
+.ub-type-bars { padding: 0; }
+.ub-type-bar-item { margin-bottom: 0.8rem; }
+.ub-type-bar-label { display: flex; justify-content: space-between; font-size: 0.85rem; font-weight: 500; margin-bottom: 0.2rem; }
+.ub-type-bar-count { font-weight: 700; color: #714B67; }
+.ub-type-bar-track { height: 8px; background: #e9ecef; border-radius: 4px; overflow: hidden; }
+.ub-type-bar-fill { height: 100%; background: linear-gradient(90deg, #714B67, #875A7B); border-radius: 4px; min-width: 4px; transition: width 0.5s ease; }
+
+.ub-operator-card { display: flex; align-items: center; gap: 0.8rem; padding: 1rem; background: white; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); margin-bottom: 0.6rem; }
+.ub-op-rank { flex-shrink: 0; }
+.ub-rank-badge { display: inline-flex; width: 32px; height: 32px; border-radius: 50%; align-items: center; justify-content: center; font-weight: 700; font-size: 0.9rem; background: #e9ecef; color: #555; }
+.ub-rank-gold { background: #FFD700; color: #7A6100; }
+.ub-rank-silver { background: #C0C0C0; color: #555; }
+.ub-rank-bronze { background: #CD7F32; color: #fff; }
+.ub-op-info { flex: 1; min-width: 0; }
+.ub-op-name { font-weight: 600; font-size: 0.95rem; }
+.ub-op-meta { font-size: 0.78rem; color: #888; margin-top: 0.1rem; }
+.ub-op-types { margin-top: 0.3rem; display: flex; flex-wrap: wrap; }
+.ub-op-total { text-align: center; flex-shrink: 0; }
+.ub-op-total-num { display: block; font-size: 1.5rem; font-weight: 700; color: #714B67; }
+.ub-op-total-label { font-size: 0.7rem; color: #999; text-transform: uppercase; }
+
+/* ─── RESPONSIVE ───────────────────────────────────────── */
+@media (max-width: 480px) {
+    .ub-menu-grid { grid-template-columns: repeat(2, 1fr); gap: 0.8rem; padding: 1rem; }
+    .ub-menu-card { padding: 1.2rem 0.8rem; }
+    .ub-card-icon { font-size: 1.6rem; }
+    .ub-product-header { flex-direction: column; align-items: center; text-align: center; }
+    .ub-product-meta { justify-content: center; }
+    .ub-attr-grid { grid-template-columns: 1fr; }
+    .ub-variant-table { font-size: 0.78rem; }
+    .ub-variant-table thead th,
+    .ub-variant-table tbody td { padding: 0.4rem 0.5rem; }
+    .ub-stats-row { grid-template-columns: repeat(2, 1fr); }
+    .ub-table-pagination { flex-direction: column; gap: 0.5rem; }
+}
+
+@media (min-width: 768px) {
+    .ub-menu-grid { grid-template-columns: repeat(3, 1fr); }
+    .ub-search-form { padding: 1rem 1.5rem; }
+    .ub-variants-section { margin: 1.5rem 1.5rem 0; }
+}
+
+@media (min-width: 1200px) {
+    .ub-menu-grid { grid-template-columns: repeat(4, 1fr); }
+    .ub-variants-section { margin: 1.5rem 2rem 0; }
+}
+
+/* ─── HAREKET TABLO BADGE'LERİ ───────────────────────── */
+.ub-badge-in {
+    background: #d4edda;
+    color: #155724;
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.ub-badge-out {
+    background: #f8d7da;
+    color: #721c24;
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.ub-badge-int {
+    background: #fff3cd;
+    color: #856404;
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+/* Satır renklendirmesi */
+.ub-move-row-in { border-left: 3px solid #28a745; }
+.ub-move-row-out { border-left: 3px solid #dc3545; }
+.ub-move-row-int { border-left: 3px solid #E67E22; }
+
+.ub-variant-table tbody tr.ub-move-row-in:hover { background: #f0fdf4; }
+.ub-variant-table tbody tr.ub-move-row-out:hover { background: #fff5f5; }
+.ub-variant-table tbody tr.ub-move-row-int:hover { background: #fffaf0; }
+.ub-variant-table tbody tr[class*="ub-move-row"] { cursor: pointer; }
+
+/* ─── PAGINATION ─────────────────────────────────────── */
+.ub-table-pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.7rem 1rem;
+    background: #f8f9fa;
+    border-top: 1px solid #e9ecef;
+    font-size: 0.85rem;
+}
+
+.ub-page-info {
+    color: #666;
+    font-weight: 500;
+}
+
+.ub-page-btns {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.ub-page-current {
+    font-weight: 600;
+    color: #714B67;
+    padding: 0 0.3rem;
+}
+
+/* ─── DETAY MODAL OVERLAY ────────────────────────────── */
+.ub-detail-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.ub-detail-card {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    width: 100%;
+    max-width: 440px;
+    max-height: 85vh;
+    overflow-y: auto;
+}
+
+.ub-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.2rem;
+    background: #714B67;
+    color: #fff;
+    border-radius: 12px 12px 0 0;
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.ub-detail-body {
+    padding: 1rem 1.2rem;
+}
+
+.ub-detail-body .ub-shelf-detail-row {
+    padding: 0.5rem 0;
+}
+
+/* ─── ETİKET ÖNİZLEME KART (şablon tabanlı) ─────────── */
+.ub-label-preview-card {
+    position: relative;
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    overflow: hidden;
+    font-family: Arial, sans-serif;
+}
+
+.ub-label-qty-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    background: #714B67;
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 10px;
+    line-height: 1.2;
+    z-index: 5;
+}

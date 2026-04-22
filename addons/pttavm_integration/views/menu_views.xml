@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="action_pttavm_config_settings" model="ir.actions.act_window">
+        <field name="name">Pttavm Ayarları</field>
+        <field name="res_model">res.config.settings</field>
+        <field name="view_mode">form</field>
+        <field name="context">{'module': 'pttavm_integration'}</field>
+    </record>
+
+    <!-- Ana Menü -->
+    <menuitem id="menu_pttavm_root" name="Pttavm" web_icon="pttavm_integration,static/description/icon.png" sequence="60"/>
+
+    <!-- Alt Menüler -->
+    <menuitem id="menu_pttavm_stores" name="Mağazalar" parent="menu_pttavm_root" action="action_pttavm_store" sequence="10"/>
+    <menuitem id="menu_pttavm_orders" name="Pttavm Siparişleri" parent="menu_pttavm_root" action="action_pttavm_orders" sequence="20"/>
+    <menuitem id="menu_pttavm_settings" name="Ayarlar" parent="menu_pttavm_root" action="action_pttavm_config_settings" sequence="100"/>
+</odoo>

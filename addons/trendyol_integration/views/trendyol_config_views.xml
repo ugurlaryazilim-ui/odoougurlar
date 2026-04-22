@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Ayarlar Formu -->
+    <record id="res_config_settings_view_form_trendyol" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.trendyol</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app data-string="Trendyol" string="Trendyol" name="trendyol_integration" data-key="trendyol_integration" logo="/trendyol_integration/static/description/trendyol.png" icon="/trendyol_integration/static/description/trendyol.png">
+                    <block title="Depo Ayarları" name="trendyol_warehouse_block">
+                        <setting string="Sipariş Depoları" help="Siparişlerin düşeceği depolar (tüm mağazalar için geçerli)">
+                            <div class="row mt16">
+                                <label for="trendyol_warehouse_id" class="col-3 col-lg-3 o_light_label"/>
+                                <field name="trendyol_warehouse_id" class="col-4"/>
+                            </div>
+                            <div class="row">
+                                <label for="trendyol_backup_warehouse_id" class="col-3 col-lg-3 o_light_label"/>
+                                <field name="trendyol_backup_warehouse_id" class="col-4"/>
+                            </div>
+                        </setting>
+                    </block>
+
+                    <block title="Toplu Senkronizasyon" name="trendyol_sync_all_block">
+                        <setting string="Tüm Mağazalar" help="Tüm aktif mağazalardan siparişleri senkronize et">
+                            <div class="mt8">
+                                <button name="action_trendyol_sync_all" type="object"
+                                        string="🔄 Tüm Mağazaları Senkronize Et" class="btn-secondary"/>
+                            </div>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>

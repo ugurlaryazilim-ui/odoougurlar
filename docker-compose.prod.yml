@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:16
+    container_name: odoougurlar-db-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: odoo
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-odoo} # Coolify'da Environment Variable belirleyebilirsiniz
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U odoo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  odoo:
+    build: .
+    container_name: odoougurlar-odoo-prod
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # NGINX kaldırıldı çünkü Coolify'ın kendi Proxy'si (Traefik) 8069'a SSL bağlayacak!
+    expose:
+      - "8069"
+    volumes:
+      - odoo-data:/var/lib/odoo
+      - ./config:/etc/odoo
+      # - ./addons:/mnt/extra-addons Kaldırıldı! Çünkü Dockerfile addons klasörünü imajın İÇİNE gömüyor.
+    environment:
+      HOST: db
+      USER: odoo
+      PASSWORD: ${DB_PASSWORD:-odoo}
+
+volumes:
+  db-data:
+  odoo-data:

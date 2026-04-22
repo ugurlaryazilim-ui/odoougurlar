@@ -1,0 +1,9 @@
+id,name,model_id/id,group_id/id,perm_read,perm_write,perm_create,perm_unlink
+access_barcode_operation_user,ugurlar.barcode.operation user,model_ugurlar_barcode_operation,stock.group_stock_user,1,1,1,0
+access_barcode_operation_manager,ugurlar.barcode.operation manager,model_ugurlar_barcode_operation,stock.group_stock_manager,1,1,1,1
+access_label_template_user,ugurlar.label.template user,model_ugurlar_label_template,stock.group_stock_user,1,1,1,0
+access_label_template_manager,ugurlar.label.template manager,model_ugurlar_label_template,stock.group_stock_manager,1,1,1,1
+access_picking_schedule_user,ugurlar.picking.schedule user,model_ugurlar_picking_schedule,stock.group_stock_user,1,0,0,0
+access_picking_schedule_manager,ugurlar.picking.schedule manager,model_ugurlar_picking_schedule,stock.group_stock_manager,1,1,1,1
+access_picking_schedule_line_user,ugurlar.picking.schedule.line user,model_ugurlar_picking_schedule_line,stock.group_stock_user,1,0,0,0
+access_picking_schedule_line_manager,ugurlar.picking.schedule.line manager,model_ugurlar_picking_schedule_line,stock.group_stock_manager,1,1,1,1

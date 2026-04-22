@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- UGO Fatura Numarası Sequence -->
+    <record id="sequence_ugo_invoice" model="ir.sequence">
+        <field name="name">UGO Fatura Serisi</field>
+        <field name="code">ugo.invoice.sequence</field>
+        <field name="prefix">UGO%(year)s</field>
+        <field name="padding">9</field>
+        <field name="number_next">1</field>
+        <field name="number_increment">1</field>
+    </record>
+</odoo>

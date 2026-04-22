@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="pttavm_sale_order_form" model="ir.ui.view">
+        <field name="name">pttavm.sale.order.form</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_order_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//notebook" position="inside">
+                <page string="Pttavm" name="pttavm_integration" invisible="not pttavm_order_id">
+                    <group>
+                        <field name="pttavm_store_id"/>
+                        <field name="pttavm_order_id"/>
+                    </group>
+                </page>
+            </xpath>
+        </field>
+    </record>
+</odoo>

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- ═══════ SCHEDULE FORM ═══════ -->
+    <record id="view_picking_schedule_form" model="ir.ui.view">
+        <field name="name">ugurlar.picking.schedule.form</field>
+        <field name="model">ugurlar.picking.schedule</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="action_create_batch_now"
+                            string="📦 Şimdi Toplama Listesi Oluştur"
+                            type="object"
+                            class="btn-primary"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="name" placeholder="Plan adı..."/></h1>
+                    </div>
+                    <group>
+                        <group string="Depo Ayarları">
+                            <field name="warehouse_id"/>
+                            <field name="fallback_warehouse_id"/>
+                        </group>
+                        <group string="Durum">
+                            <field name="active"/>
+                            <field name="last_batch_date"/>
+                            <field name="last_batch_time"/>
+                        </group>
+                    </group>
+
+                    <notebook>
+                        <page string="Toplama Saatleri" name="schedule_times">
+                            <field name="schedule_line_ids">
+                                <list editable="bottom">
+                                    <field name="hour"/>
+                                    <field name="minute"/>
+                                    <field name="display_time" string="Görüntü"/>
+                                </list>
+                            </field>
+                            <div class="alert alert-info mt-2" role="alert">
+                                <strong>💡 İpucu:</strong>
+                                Her saat bir toplama penceresi sonunu belirtir.
+                                Örneğin 09:30, 12:30, 16:00 girildiğinde:
+                                <ul class="mb-0 mt-1">
+                                    <li>16:01 — 09:30 arası siparişler → 09:30 batch'i</li>
+                                    <li>09:31 — 12:30 arası siparişler → 12:30 batch'i</li>
+                                    <li>12:31 — 16:00 arası siparişler → 16:00 batch'i</li>
+                                </ul>
+                            </div>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- ═══════ SCHEDULE LIST ═══════ -->
+    <record id="view_picking_schedule_list" model="ir.ui.view">
+        <field name="name">ugurlar.picking.schedule.list</field>
+        <field name="model">ugurlar.picking.schedule</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name"/>
+                <field name="warehouse_id"/>
+                <field name="fallback_warehouse_id"/>
+                <field name="last_batch_date"/>
+                <field name="last_batch_time"/>
+                <field name="active"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- ═══════ ACTION ═══════ -->
+    <record id="action_picking_schedule" model="ir.actions.act_window">
+        <field name="name">Toplama Zamanlaması</field>
+        <field name="res_model">ugurlar.picking.schedule</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- ═══════ MENÜ ═══════ -->
+    <menuitem id="menu_barcode_config"
+              name="Ayarlar"
+              parent="ugurlar_barcode.menu_ugurlar_barcode_root"
+              sequence="100"/>
+
+    <menuitem id="menu_picking_schedule"
+              name="Toplama Zamanlaması"
+              parent="menu_barcode_config"
+              action="action_picking_schedule"
+              sequence="20"/>
+
+</odoo>

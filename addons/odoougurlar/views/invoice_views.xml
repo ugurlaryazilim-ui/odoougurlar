@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Fatura Form View - Nebim alanları ve tekrar gönder butonu -->
+    <record id="view_account_move_form_nebim" model="ir.ui.view">
+        <field name="name">account.move.form.inherit.nebim</field>
+        <field name="model">account.move</field>
+        <field name="inherit_id" ref="account.view_move_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//header" position="inside">
+                <button name="action_retry_nebim_send" type="object"
+                        string="🔄 Nebim'e Tekrar Gönder"
+                        class="btn-warning"
+                        invisible="nebim_sent or move_type != 'out_invoice' or state != 'posted'"
+                        confirm="Bu fatura Nebim'e tekrar gönderilsin mi?"/>
+            </xpath>
+            <xpath expr="//sheet" position="inside">
+                <group string="Nebim Entegrasyon" name="nebim_info" invisible="move_type != 'out_invoice'">
+                    <group>
+                        <field name="nebim_sent"/>
+                        <field name="nebim_sent_date"/>
+                        <field name="nebim_invoice_number"/>
+                    </group>
+                    <group>
+                        <field name="nebim_error" invisible="not nebim_error"/>
+                        <field name="nebim_response" invisible="not nebim_response"/>
+                    </group>
+                </group>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Fatura List View - Nebim sütunları -->
+    <record id="view_account_move_tree_nebim" model="ir.ui.view">
+        <field name="name">account.move.list.inherit.nebim</field>
+        <field name="model">account.move</field>
+        <field name="inherit_id" ref="account.view_move_tree"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='state']" position="after">
+                <field name="nebim_sent" string="Nebim" optional="show"/>
+                <field name="nebim_invoice_number" string="Nebim Fatura No" optional="show"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

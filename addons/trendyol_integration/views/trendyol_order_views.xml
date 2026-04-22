@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- TREE VIEW -->
+    <record id="trendyol_order_tree" model="ir.ui.view">
+        <field name="name">trendyol.order.list</field>
+        <field name="model">trendyol.order</field>
+        <field name="arch" type="xml">
+            <list string="Trendyol Siparişleri"
+                  decoration-danger="state == 'error'"
+                  decoration-muted="trendyol_status == 'cancelled'">
+                <field name="order_date"/>
+                <field name="name"/>
+                <field name="trendyol_order_number"/>
+                <field name="customer_name"/>
+                <field name="total_amount" sum="Toplam"/>
+                <field name="trendyol_status" widget="badge"
+                       decoration-success="trendyol_status in ('delivered', 'shipped')"
+                       decoration-warning="trendyol_status in ('created', 'picking')"
+                       decoration-info="trendyol_status == 'invoiced'"
+                       decoration-danger="trendyol_status in ('cancelled', 'unsupplied', 'returned')"/>
+                <field name="cargo_provider" optional="show"/>
+                <field name="store_name" optional="show"/>
+                <field name="seller_id" optional="show"/>
+                <field name="total_commission" optional="hide" sum="Toplam Komisyon"/>
+                <field name="commission_rate" optional="hide"/>
+                <field name="net_amount" optional="hide" sum="Net Toplam"/>
+                <field name="sale_order_id" optional="show"/>
+                <field name="state" widget="badge"
+                       decoration-success="state == 'synced'"
+                       decoration-danger="state == 'error'"
+                       optional="show"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- FORM VIEW -->
+    <record id="trendyol_order_form" model="ir.ui.view">
+        <field name="name">trendyol.order.form</field>
+        <field name="model">trendyol.order</field>
+        <field name="arch" type="xml">
+            <form string="Trendyol Sipariş">
+                <header>
+                    <button name="action_retry_sync" type="object"
+                            string="🔄 Tekrar Dene" class="btn-primary"
+                            invisible="state != 'error'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,synced"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="name" readonly="1"/></h1>
+                    </div>
+
+                    <group>
+                        <group string="Sipariş Bilgileri">
+                            <field name="trendyol_order_number"/>
+                            <field name="shipment_package_id"/>
+                            <field name="trendyol_status"/>
+                            <field name="order_date"/>
+                            <field name="sale_order_id"/>
+                        </group>
+                        <group string="Mağaza &amp; Müşteri">
+                            <field name="store_id"/>
+                            <field name="store_name" invisible="1"/>
+                            <field name="seller_id"/>
+                            <separator/>
+                            <field name="customer_name"/>
+                            <field name="customer_email"/>
+                            <field name="trendyol_customer_id"/>
+                            <field name="partner_id"/>
+                            <field name="commercial"/>
+                        </group>
+                    </group>
+
+                    <group>
+                        <group string="Teslimat">
+                            <field name="shipping_address"/>
+                            <field name="shipping_city"/>
+                            <field name="shipping_district"/>
+                        </group>
+                        <group string="Kargo">
+                            <field name="cargo_provider"/>
+                            <field name="cargo_tracking_number"/>
+                            <field name="cargo_tracking_link" widget="url"/>
+                        </group>
+                    </group>
+
+                    <group>
+                        <group string="Finansal">
+                            <field name="total_amount"/>
+                            <field name="total_discount"/>
+                            <field name="total_commission"/>
+                            <field name="commission_rate"/>
+                            <field name="net_amount"/>
+                            <field name="currency_code"/>
+                        </group>
+                        <group string="Kurumsal Fatura" invisible="not commercial">
+                            <field name="company_name"/>
+                            <field name="tax_number"/>
+                            <field name="tax_office"/>
+                        </group>
+                    </group>
+
+                    <!-- Sipariş Özeti -->
+                    <group string="💰 Sipariş Özeti">
+                        <group>
+                            <field name="net_amount" string="Toplam Net Tutar"/>
+                            <field name="platform_fee"/>
+                            <field name="shipping_cost"/>
+                        </group>
+                        <group>
+                            <field name="return_cargo_cost"/>
+                            <field name="penalty_amount"/>
+                            <field name="seller_revenue"/>
+                            <field name="final_net_amount"/>
+                        </group>
+                    </group>
+
+                    <notebook>
+                        <page string="Ürün Kalemleri" name="lines">
+                            <field name="line_ids">
+                                <list>
+                                    <field name="barcode"/>
+                                    <field name="product_name"/>
+                                    <field name="product_size"/>
+                                    <field name="product_color"/>
+                                    <field name="quantity"/>
+                                    <field name="unit_price"/>
+                                    <field name="discount"/>
+                                    <field name="vat_rate"/>
+                                    <field name="commission_rate" optional="show"/>
+                                    <field name="commission_amount" optional="show"/>
+                                    <field name="product_id"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Finansal İşlemler" name="settlements">
+                            <field name="settlement_ids">
+                                <list create="false" edit="false">
+                                    <field name="transaction_date"/>
+                                    <field name="transaction_type" widget="badge"/>
+                                    <field name="description"/>
+                                    <field name="credit"/>
+                                    <field name="debt"/>
+                                    <field name="commission_amount"/>
+                                    <field name="seller_revenue"/>
+                                    <field name="payment_order_id"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Fatura Adresi" name="invoice_addr">
+                            <field name="invoice_address"/>
+                        </page>
+                        <page string="Hata" name="error" invisible="state != 'error'">
+                            <field name="error_message"/>
+                        </page>
+                        <page string="JSON" name="raw">
+                            <field name="raw_data" widget="text"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- SEARCH VIEW -->
+    <record id="trendyol_order_search" model="ir.ui.view">
+        <field name="name">trendyol.order.search</field>
+        <field name="model">trendyol.order</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name"/>
+                <field name="trendyol_order_number"/>
+                <field name="customer_name"/>
+                <field name="cargo_tracking_number"/>
+                <field name="store_id"/>
+                <field name="seller_id"/>
+                <filter string="Oluşturuldu" name="filter_created" domain="[('trendyol_status', '=', 'created')]"/>
+                <filter string="Kargoda" name="filter_shipped" domain="[('trendyol_status', '=', 'shipped')]"/>
+                <filter string="Teslim Edildi" name="filter_delivered" domain="[('trendyol_status', '=', 'delivered')]"/>
+                <filter string="İptal" name="filter_cancelled" domain="[('trendyol_status', 'in', ['cancelled', 'unsupplied'])]"/>
+                <filter string="Hatalı" name="filter_error" domain="[('state', '=', 'error')]"/>
+                <separator/>
+                <group>
+                    <filter string="Mağaza" name="group_store" context="{'group_by': 'store_id'}"/>
+                    <filter string="Durum" name="group_status" context="{'group_by': 'trendyol_status'}"/>
+                    <filter string="Tarih" name="group_date" context="{'group_by': 'order_date:day'}"/>
+                    <filter string="Kargo" name="group_cargo" context="{'group_by': 'cargo_provider'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- ACTIONS -->
+    <record id="action_trendyol_orders" model="ir.actions.act_window">
+        <field name="name">Trendyol Siparişleri</field>
+        <field name="res_model">trendyol.order</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="trendyol_order_search"/>
+        <field name="context">{}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Henüz Trendyol siparişi yok</p>
+            <p>Mağazalar bölümünden API bilgilerinizi girerek senkronizasyonu başlatın.</p>
+        </field>
+    </record>
+
+    <record id="action_trendyol_orders_all" model="ir.actions.act_window">
+        <field name="name">Tüm Siparişler</field>
+        <field name="res_model">trendyol.order</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="trendyol_order_search"/>
+    </record>
+
+</odoo>

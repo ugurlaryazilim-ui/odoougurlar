@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_sale_order_form_nebim" model="ir.ui.view">
+        <field name="name">sale.order.form.nebim.ext</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_order_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//notebook" position="inside">
+                <page string="Nebim Entegrasyonu" name="nebim_integration">
+                    <group>
+                        <group>
+                            <field name="nebim_customer_sent"/>
+                            <field name="nebim_customer_code" invisible="not nebim_customer_sent"/>
+                            <field name="nebim_order_sent"/>
+                        </group>
+                        <group>
+                            <field name="nebim_order_response"/>
+                        </group>
+                    </group>
+                </page>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Sipariş Listesi (Tree) Eklemeleri -->
+    <record id="view_order_tree_nebim" model="ir.ui.view">
+        <field name="name">sale.order.tree.nebim.ext</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_order_tree"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='partner_id']" position="after">
+                <field name="nebim_customer_code" optional="show" string="Nebim Cari Kodu"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_quotation_tree_nebim" model="ir.ui.view">
+        <field name="name">sale.quotation.tree.nebim.ext</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_quotation_tree_with_onboarding"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='partner_id']" position="after">
+                <field name="nebim_customer_code" optional="show" string="Nebim Cari Kodu"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

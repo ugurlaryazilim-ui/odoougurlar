@@ -1,0 +1,17 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_sync_log_admin,odoougurlar.sync.log admin,model_odoougurlar_sync_log,base.group_system,1,1,1,1
+access_sync_log_user,odoougurlar.sync.log user,model_odoougurlar_sync_log,base.group_user,1,0,0,0
+access_dashboard_admin,odoougurlar.nebim.dashboard admin,model_odoougurlar_nebim_dashboard,base.group_system,1,1,1,1
+access_dashboard_user,odoougurlar.nebim.dashboard user,model_odoougurlar_nebim_dashboard,base.group_user,1,0,1,0
+access_test_wizard_admin,odoougurlar.test.result.wizard admin,model_odoougurlar_test_result_wizard,base.group_system,1,1,1,1
+access_test_wizard_user,odoougurlar.test.result.wizard user,model_odoougurlar_test_result_wizard,base.group_user,1,0,1,0
+access_product_queue_admin,odoougurlar.product.queue admin,model_odoougurlar_product_queue,base.group_system,1,1,1,1
+access_product_queue_user,odoougurlar.product.queue user,model_odoougurlar_product_queue,base.group_user,1,0,0,0
+access_marketplace_mapping_admin,odoougurlar.marketplace.mapping admin,model_odoougurlar_marketplace_mapping,base.group_system,1,1,1,1
+access_marketplace_mapping_user,odoougurlar.marketplace.mapping user,model_odoougurlar_marketplace_mapping,base.group_user,1,0,0,0
+access_nebim_district_admin,odoougurlar.nebim.district admin,model_odoougurlar_nebim_district,base.group_system,1,1,1,1
+access_nebim_district_user,odoougurlar.nebim.district user,model_odoougurlar_nebim_district,base.group_user,1,0,0,0
+access_nebim_country_admin,odoougurlar.nebim.country admin,model_odoougurlar_nebim_country,base.group_system,1,1,1,1
+access_nebim_country_user,odoougurlar.nebim.country user,model_odoougurlar_nebim_country,base.group_user,1,0,0,0
+access_odoougurlar_tax_mapping_admin,odoougurlar.tax.mapping admin,model_odoougurlar_tax_mapping,base.group_system,1,1,1,1
+access_odoougurlar_tax_mapping_user,odoougurlar.tax.mapping user,model_odoougurlar_tax_mapping,base.group_user,1,0,0,0

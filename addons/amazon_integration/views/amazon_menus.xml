@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- Root Menu -->
+        <menuitem id="menu_amazon_root"
+                  name="Amazon"
+                  web_icon="amazon_integration,static/description/icon.png"
+                  sequence="260"/>
+
+        <!-- Menü Başlıkları -->
+        <menuitem id="menu_amazon_orders"
+                  name="Siparişler"
+                  parent="menu_amazon_root"
+                  sequence="10"/>
+
+        <menuitem id="menu_amazon_config"
+                  name="Ayarlar"
+                  parent="menu_amazon_root"
+                  sequence="100"/>
+
+        <!-- Alt Menüler (Görünümlerle bağlanacak) -->
+        <menuitem id="menu_amazon_store"
+                  name="Mağazalar"
+                  parent="menu_amazon_config"
+                  action="action_amazon_store"
+                  sequence="10"/>
+
+        <menuitem id="menu_amazon_sync_log"
+                  name="Senkronizasyon Logları"
+                  parent="menu_amazon_config"
+                  action="action_amazon_sync_log"
+                  sequence="20"/>
+    </data>
+</odoo>

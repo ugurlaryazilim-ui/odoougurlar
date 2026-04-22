@@ -1,0 +1,189 @@
+/* ===================================================================
+   Mobil — Toplu Raf Silme Ekranı Stilleri
+   =================================================================== */
+
+/* ─── UYARI BANNER ─────────────────────────────────────── */
+.ub-shelf-clear-warning {
+    margin: 0.5rem 1.5rem;
+    padding: 0.8rem 1.2rem;
+    background: linear-gradient(135deg, #fde8e8, #f8d7da);
+    border-radius: 10px;
+    border-left: 4px solid #e74c3c;
+    color: #721c24;
+    font-size: 0.88rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.ub-shelf-clear-warning .fa {
+    font-size: 1.1rem;
+    color: #e74c3c;
+}
+
+/* ─── ÖN İZLEME TABLOSU ───────────────────────────────── */
+.ub-shelf-clear-preview {
+    margin: 0.5rem 1.5rem 1rem;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    background: #fff;
+}
+
+.ub-shelf-clear-preview-header {
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+    color: #fff;
+    padding: 0.7rem 1.2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.ub-shelf-clear-preview-header h3 {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.ub-shelf-clear-preview-header .badge {
+    background: rgba(255, 255, 255, 0.25);
+    font-size: 0.8rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 10px;
+}
+
+.ub-shelf-clear-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+.ub-shelf-clear-table thead th {
+    background: #f8f9fa;
+    color: #555;
+    padding: 0.5rem 0.6rem;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 2px solid #e9ecef;
+    font-size: 0.73rem;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.ub-shelf-clear-table tbody td {
+    padding: 0.45rem 0.6rem;
+    border-bottom: 1px solid #f0f0f0;
+    vertical-align: middle;
+}
+
+.ub-shelf-clear-table tbody tr:nth-child(even) {
+    background: #fafafa;
+}
+
+.ub-shelf-clear-table tbody tr:hover {
+    background: #fef0f0;
+}
+
+.ub-shelf-clear-product {
+    font-weight: 500;
+    color: #333;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ub-shelf-clear-qty {
+    text-align: center;
+    font-weight: 700;
+    color: #e74c3c;
+}
+
+/* ─── SİL BUTONU ───────────────────────────────────────── */
+.ub-btn-shelf-clear {
+    background: linear-gradient(135deg, #e74c3c, #c0392b) !important;
+    border-color: #c0392b !important;
+    color: #fff !important;
+    font-weight: 600;
+    border-radius: 10px;
+    padding: 0.8rem !important;
+    font-size: 1rem;
+    transition: all 0.2s;
+}
+
+.ub-btn-shelf-clear:hover {
+    background: linear-gradient(135deg, #c0392b, #922b21) !important;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(231, 76, 60, 0.35);
+}
+
+.ub-btn-shelf-clear:disabled {
+    opacity: 0.6;
+    transform: none;
+    box-shadow: none;
+}
+
+/* ─── SONUÇ ────────────────────────────────────────────── */
+.ub-shelf-clear-result {
+    margin: 1rem 1.5rem;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    background: #fff;
+    text-align: center;
+}
+
+.ub-shelf-clear-result-header {
+    background: linear-gradient(135deg, #27AE60, #219A52);
+    color: #fff;
+    padding: 1rem;
+}
+
+.ub-shelf-clear-result-header .fa {
+    font-size: 2rem;
+    display: block;
+    margin-bottom: 0.3rem;
+}
+
+.ub-shelf-clear-result-header h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.ub-shelf-clear-result-stats {
+    display: flex;
+    justify-content: center;
+    gap: 2rem;
+    padding: 1rem;
+}
+
+.ub-shelf-clear-stat {
+    text-align: center;
+}
+
+.ub-shelf-clear-stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #e74c3c;
+}
+
+.ub-shelf-clear-stat-label {
+    font-size: 0.75rem;
+    color: #666;
+    text-transform: uppercase;
+}
+
+/* ─── RESPONSIVE ───────────────────────────────────────── */
+@media (max-width: 480px) {
+    .ub-shelf-clear-preview,
+    .ub-shelf-clear-warning,
+    .ub-shelf-clear-result {
+        margin-left: 0.5rem;
+        margin-right: 0.5rem;
+    }
+    .ub-shelf-clear-product {
+        max-width: 120px;
+    }
+}
