@@ -27,8 +27,8 @@ services:
       - "8069"
     volumes:
       - odoo-data:/var/lib/odoo
-      - ./config:/etc/odoo
       # - ./addons:/mnt/extra-addons Kaldırıldı! Çünkü Dockerfile addons klasörünü imajın İÇİNE gömüyor.
+      # - ./config:/etc/odoo Kaldırıldı! Dockerfile içinde kopyalanıyor ve dosya hakları veriliyor. Modern deploymentlar için doğru yöntem. 
     environment:
       HOST: db
       USER: odoo
