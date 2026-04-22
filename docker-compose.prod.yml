@@ -22,9 +22,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    # NGINX kaldırıldı çünkü Coolify'ın kendi Proxy'si (Traefik) 8069'a SSL bağlayacak!
-    expose:
-      - "8069"
+    ports:
+      - "8069:8069"
     volumes:
       - odoo-data:/var/lib/odoo
     environment:
