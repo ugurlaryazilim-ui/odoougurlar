@@ -33,23 +33,12 @@ class ProductImage(models.Model):
     )
 
 
-class ProductTemplateImageExtend(models.Model):
-    """product.template'e ek görsel alanı ekler."""
-    _inherit = 'product.template'
-
-    product_template_image_ids = fields.One2many(
-        'product.image',
-        'product_tmpl_id',
-        string='Alternatif Görseller',
-    )
-
-
 class ProductProductImageExtend(models.Model):
-    """product.product (varyant) üzerinde ek görsellere erişim."""
+    """product.product (varyant/barkod) bazlı ek görsel bağlantısı."""
     _inherit = 'product.product'
 
-    product_template_image_ids = fields.One2many(
-        related='product_tmpl_id.product_template_image_ids',
+    product_variant_image_ids = fields.One2many(
+        'product.image',
+        'product_variant_id',
         string='Alternatif Görseller',
-        readonly=False,
     )

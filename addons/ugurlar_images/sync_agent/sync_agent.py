@@ -186,12 +186,12 @@ class OdooImageSync:
             )
             _logger.info("✅ ANA RESİM: %s → %s (%s)", filename, barcode, product['name'])
         else:
-            # Ek resim ekle
+            # Ek resim ekle — VARYANT (barkod) bazlı
             if self.has_product_image:
                 self._execute(
                     'product.image', 'create',
                     {
-                        'product_tmpl_id': tmpl_id,
+                        'product_variant_id': product['id'],
                         'name': f'{barcode}{separator}{order}',
                         'image_1920': img_b64,
                     },
@@ -200,8 +200,8 @@ class OdooImageSync:
             else:
                 # product.image yoksa ana görseli güncelle (son yüklenen kazanır)
                 self._execute(
-                    'product.template', 'write',
-                    [tmpl_id],
+                    'product.product', 'write',
+                    [product['id']],
                     {'image_1920': img_b64},
                 )
                 _logger.info("✅ RESİM #%d (ana olarak): %s → %s (%s)", order, filename, barcode, product['name'])
