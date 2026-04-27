@@ -1,0 +1,12 @@
+services:
+  sync-agent:
+    build: .
+    container_name: ugurlar-image-sync
+    restart: unless-stopped
+    volumes:
+      # Windows klasörünü container'a bağla
+      - C:\OdooResimler:/data/images
+      # Config dosyasını bağla
+      - ./config.json:/app/config.json
+    environment:
+      - TZ=Europe/Istanbul
