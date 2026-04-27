@@ -26,3 +26,14 @@
 2026-04-27 09:01:00,842 [INFO] ✅ RESİM #4 (ana olarak): 8699248262237_4.png → 8699248262237 (Yelek Ekol 26KEKL05065)
 2026-04-27 09:01:08,014 [INFO] ✅ RESİM #5 (ana olarak): 8699248262237_5.png → 8699248262237 (Yelek Ekol 26KEKL05065)
 2026-04-27 09:01:08,015 [INFO] ── Tamamlandı: 4/4 başarılı ──
+2026-04-27 09:08:47,397 [INFO] Odoo'ya bağlanılıyor: https://odoo.ugurlar.com (DB: ugurlar)
+2026-04-27 09:08:48,077 [INFO] Odoo bağlantısı başarılı. UID: 2
+2026-04-27 09:08:48,738 [INFO] product.image modeli mevcut — ek resimler destekleniyor.
+2026-04-27 09:08:48,739 [INFO] Klasör izleniyor: C:\OdooResimler (her 3 saniyede bir)
+2026-04-27 09:08:48,739 [INFO] ── 5 yeni görsel bulundu ──
+2026-04-27 09:08:53,160 [INFO] ✅ ANA RESİM: 8699248262237_1.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 09:08:58,398 [INFO] ✅ EK RESİM #2: 8699248262237_2.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 09:09:03,478 [INFO] ✅ EK RESİM #3: 8699248262237_3.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 09:09:08,451 [INFO] ✅ EK RESİM #4: 8699248262237_4.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 09:09:14,043 [INFO] ✅ EK RESİM #5: 8699248262237_5.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 09:09:14,043 [INFO] ── Tamamlandı: 5/5 başarılı ──

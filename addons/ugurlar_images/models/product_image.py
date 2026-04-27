@@ -42,3 +42,14 @@ class ProductTemplateImageExtend(models.Model):
         'product_tmpl_id',
         string='Alternatif Görseller',
     )
+
+
+class ProductProductImageExtend(models.Model):
+    """product.product (varyant) üzerinde ek görsellere erişim."""
+    _inherit = 'product.product'
+
+    product_template_image_ids = fields.One2many(
+        related='product_tmpl_id.product_template_image_ids',
+        string='Alternatif Görseller',
+        readonly=False,
+    )
