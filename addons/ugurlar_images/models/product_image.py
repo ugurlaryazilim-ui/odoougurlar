@@ -6,12 +6,7 @@ _logger = logging.getLogger(__name__)
 
 
 class ProductImage(models.Model):
-    """Ürünlere birden fazla alternatif görsel ekleme desteği.
-
-    Bu model Odoo'nun standart 'product.image' modelini sağlar.
-    Eğer başka bir modül (ör: website_sale) zaten tanımlıyorsa,
-    Odoo otomatik olarak birleştirir.
-    """
+    """Ürünlere birden fazla alternatif görsel ekleme desteği."""
     _name = 'product.image'
     _description = 'Ürün Görseli'
     _order = 'sequence, id'
@@ -33,10 +28,29 @@ class ProductImage(models.Model):
     )
 
 
+class ProductTemplateImageExtend(models.Model):
+    """product.template üzerinde ek görseller (şablon bazlı)."""
+    _inherit = 'product.template'
+
+    product_template_image_ids = fields.One2many(
+        'product.image',
+        'product_tmpl_id',
+        string='Şablon Görselleri',
+    )
+
+
 class ProductProductImageExtend(models.Model):
-    """product.product (varyant/barkod) bazlı ek görsel bağlantısı."""
+    """product.product (varyant/barkod) bazlı ek görseller."""
     _inherit = 'product.product'
 
+    # Eski view'larla uyumluluk — şablon görselleri
+    product_template_image_ids = fields.One2many(
+        related='product_tmpl_id.product_template_image_ids',
+        string='Şablon Görselleri',
+        readonly=False,
+    )
+
+    # Barkod bazlı görseller — ASIL kullanılan alan
     product_variant_image_ids = fields.One2many(
         'product.image',
         'product_variant_id',
