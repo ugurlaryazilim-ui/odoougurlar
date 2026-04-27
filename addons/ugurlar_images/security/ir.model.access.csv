@@ -2,3 +2,5 @@ id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_ugurlar_image_sync_log_user,ugurlar.image.sync.log.user,model_ugurlar_image_sync_log,base.group_user,1,0,0,0
 access_ugurlar_image_sync_log_manager,ugurlar.image.sync.log.manager,model_ugurlar_image_sync_log,base.group_system,1,1,1,1
 access_ugurlar_bulk_image_wizard,ugurlar.bulk.image.wizard,model_ugurlar_bulk_image_wizard,base.group_system,1,1,1,1
+access_product_image_user,product.image.user,model_product_image,base.group_user,1,0,0,0
+access_product_image_manager,product.image.manager,model_product_image,base.group_system,1,1,1,1

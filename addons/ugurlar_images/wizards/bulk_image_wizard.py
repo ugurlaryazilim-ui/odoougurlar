@@ -150,13 +150,18 @@ class BulkImageWizard(models.TransientModel):
                         variant.product_tmpl_id.image_1920 = img_b64
                         details.append(f'  ✓ {fname} → {barcode} (ANA RESİM)')
                     else:
-                        # Ek resim — product.image tablosuna
-                        self.env['product.image'].create({
-                            'product_tmpl_id': variant.product_tmpl_id.id,
-                            'name': f'{barcode}_{order}',
-                            'image_1920': img_b64,
-                        })
-                        details.append(f'  ✓ {fname} → {barcode} (ek resim #{order})')
+                        # Ek resim — product.image tablosuna (varsa)
+                        if 'product.image' in self.env:
+                            self.env['product.image'].create({
+                                'product_tmpl_id': variant.product_tmpl_id.id,
+                                'name': f'{barcode}_{order}',
+                                'image_1920': img_b64,
+                            })
+                            details.append(f'  ✓ {fname} → {barcode} (ek resim #{order})')
+                        else:
+                            # product.image yoksa ana görseli güncelle
+                            variant.product_tmpl_id.image_1920 = img_b64
+                            details.append(f'  ✓ {fname} → {barcode} (resim #{order}, ana olarak)')
 
                 matched += 1
 

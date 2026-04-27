@@ -24,6 +24,7 @@
     'data': [
         'security/ir.model.access.csv',
         'views/image_settings_views.xml',
+        'views/product_image_views.xml',
         'views/bulk_image_wizard_views.xml',
         'views/image_sync_log_views.xml',
         'views/menu.xml',

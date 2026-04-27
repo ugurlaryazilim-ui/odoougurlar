@@ -78,6 +78,7 @@ class OdooImageSync:
         self.config = config
         self.uid = None
         self.models = None
+        self.has_product_image = False  # product.image modülü var mı?
         self._connect()
 
     def _connect(self):
@@ -97,6 +98,15 @@ class OdooImageSync:
 
         self.models = xmlrpc.client.ServerProxy(f'{url}/xmlrpc/2/object')
         _logger.info("Odoo bağlantısı başarılı. UID: %d", self.uid)
+
+        # product.image modeli gerçekten kullanılabilir mi kontrol et
+        try:
+            self._execute('product.image', 'fields_get', attributes=['string'])
+            self.has_product_image = True
+            _logger.info("product.image modeli mevcut — ek resimler destekleniyor.")
+        except Exception:
+            self.has_product_image = False
+            _logger.info("product.image modeli yok — tüm resimler ana resim olarak yüklenecek.")
 
     def _execute(self, model, method, *args, **kwargs):
         """Odoo XML-RPC execute_kw wrapper."""
@@ -177,15 +187,24 @@ class OdooImageSync:
             _logger.info("✅ ANA RESİM: %s → %s (%s)", filename, barcode, product['name'])
         else:
             # Ek resim ekle
-            self._execute(
-                'product.image', 'create',
-                {
-                    'product_tmpl_id': tmpl_id,
-                    'name': f'{barcode}{separator}{order}',
-                    'image_1920': img_b64,
-                },
-            )
-            _logger.info("✅ EK RESİM #%d: %s → %s (%s)", order, filename, barcode, product['name'])
+            if self.has_product_image:
+                self._execute(
+                    'product.image', 'create',
+                    {
+                        'product_tmpl_id': tmpl_id,
+                        'name': f'{barcode}{separator}{order}',
+                        'image_1920': img_b64,
+                    },
+                )
+                _logger.info("✅ EK RESİM #%d: %s → %s (%s)", order, filename, barcode, product['name'])
+            else:
+                # product.image yoksa ana görseli güncelle (son yüklenen kazanır)
+                self._execute(
+                    'product.template', 'write',
+                    [tmpl_id],
+                    {'image_1920': img_b64},
+                )
+                _logger.info("✅ RESİM #%d (ana olarak): %s → %s (%s)", order, filename, barcode, product['name'])
 
         return True, 'basarili'
 

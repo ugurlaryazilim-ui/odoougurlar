@@ -1,8 +1,8 @@
 {
     "odoo_url": "https://odoo.ugurlar.com",
     "odoo_db": "ugurlar",
-    "odoo_user": "admin",
-    "odoo_password": "BURAYA_ODOO_SIFRENIZI_YAZIN",
+    "odoo_user": "eticarettr@ugurlargrup.com",
+    "odoo_password": "Ug147865**",
     "watch_folder": "C:\\OdooResimler",
     "done_folder": "C:\\OdooResimler\\Gonderilenler",
     "error_folder": "C:\\OdooResimler\\Hatalilar",

@@ -1,0 +1,28 @@
+2026-04-27 08:56:23,585 [INFO] Odoo'ya bağlanılıyor: https://odoo.ugurlar.com (DB: ugurlar)
+2026-04-27 08:56:24,443 [INFO] Odoo bağlantısı başarılı. UID: 2
+2026-04-27 08:56:24,445 [INFO] Klasör izleniyor: C:\OdooResimler (her 3 saniyede bir)
+2026-04-27 08:56:24,447 [INFO] ── 5 yeni görsel bulundu ──
+2026-04-27 08:56:27,861 [INFO] ✅ ANA RESİM: 8699248262237_1.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 08:56:32,997 [ERROR] Hata (8699248262237_2.png): <Fault 2: "Object product.image doesn't exist">
+2026-04-27 08:56:37,221 [ERROR] Hata (8699248262237_3.png): <Fault 2: "Object product.image doesn't exist">
+2026-04-27 08:56:40,870 [ERROR] Hata (8699248262237_4.png): <Fault 2: "Object product.image doesn't exist">
+2026-04-27 08:56:45,201 [ERROR] Hata (8699248262237_5.png): <Fault 2: "Object product.image doesn't exist">
+2026-04-27 08:56:45,202 [INFO] ── Tamamlandı: 1/5 başarılı ──
+2026-04-27 08:59:16,586 [INFO] Odoo'ya bağlanılıyor: https://odoo.ugurlar.com (DB: ugurlar)
+2026-04-27 08:59:17,247 [INFO] Odoo bağlantısı başarılı. UID: 2
+2026-04-27 08:59:17,639 [INFO] product.image modeli mevcut — ek resimler destekleniyor.
+2026-04-27 08:59:17,643 [INFO] Klasör izleniyor: C:\OdooResimler (her 3 saniyede bir)
+2026-04-27 08:59:17,643 [INFO] ── 4 yeni görsel bulundu ──
+2026-04-27 08:59:23,534 [ERROR] Hata (8699248262237_2.png): <Fault 2: "Object product.image doesn't exist">
+2026-04-27 08:59:30,663 [ERROR] Hata (8699248262237_3.png): <Fault 2: "Object product.image doesn't exist">
+2026-04-27 08:59:36,145 [ERROR] Hata (8699248262237_4.png): <Fault 2: "Object product.image doesn't exist">
+2026-04-27 09:00:32,146 [INFO] Odoo'ya bağlanılıyor: https://odoo.ugurlar.com (DB: ugurlar)
+2026-04-27 09:00:32,822 [INFO] Odoo bağlantısı başarılı. UID: 2
+2026-04-27 09:00:33,232 [INFO] product.image modeli yok — tüm resimler ana resim olarak yüklenecek.
+2026-04-27 09:00:33,232 [INFO] Klasör izleniyor: C:\OdooResimler (her 3 saniyede bir)
+2026-04-27 09:00:33,233 [INFO] ── 4 yeni görsel bulundu ──
+2026-04-27 09:00:41,047 [INFO] ✅ RESİM #2 (ana olarak): 8699248262237_2.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 09:00:49,748 [INFO] ✅ RESİM #3 (ana olarak): 8699248262237_3.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 09:01:00,842 [INFO] ✅ RESİM #4 (ana olarak): 8699248262237_4.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 09:01:08,014 [INFO] ✅ RESİM #5 (ana olarak): 8699248262237_5.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 09:01:08,015 [INFO] ── Tamamlandı: 4/4 başarılı ──
