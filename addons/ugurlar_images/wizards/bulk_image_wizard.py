@@ -143,11 +143,11 @@ class BulkImageWizard(models.TransientModel):
                     is_main = (str(order) == main_index)
 
                     if is_main:
-                        # Ana resim (vitrin görseli) — product.template üzerinde
+                        # Ana resim — VARYANT (barkod) bazlı
                         if variant.image_1920 and not overwrite:
                             details.append(f'  ✓ {fname} → {barcode} (mevcut, atlandı)')
                             continue
-                        variant.product_tmpl_id.image_1920 = img_b64
+                        variant.image_1920 = img_b64
                         details.append(f'  ✓ {fname} → {barcode} (ANA RESİM)')
                     else:
                         # Ek resim — VARYANT (barkod) bazlı

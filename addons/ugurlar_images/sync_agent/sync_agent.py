@@ -178,10 +178,10 @@ class OdooImageSync:
                 _logger.info("Atlandı (mevcut var): %s → %s", filename, barcode)
                 return True, 'atlandi'
 
-            # Ana resmi güncelle
+            # Ana resmi güncelle — VARYANT (barkod) bazlı
             self._execute(
-                'product.template', 'write',
-                [tmpl_id],
+                'product.product', 'write',
+                [product['id']],
                 {'image_1920': img_b64},
             )
             _logger.info("✅ ANA RESİM: %s → %s (%s)", filename, barcode, product['name'])
