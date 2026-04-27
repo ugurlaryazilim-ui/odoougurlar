@@ -9,22 +9,27 @@
         <field name="priority">90</field>
         <field name="arch" type="xml">
             <xpath expr="//form" position="inside">
-                <app data-string="Resimler" string="Resimler" data-key="ugurlar_images">
+                <app data-string="Resimler" string="Resimler" name="ugurlar_images" groups="base.group_system">
 
                     <!-- Görsel Tarama Ayarları -->
-                    <block title="Görsel Tarama Ayarları"
-                           help="Dosya adından barkod ve sıra numarasını nasıl ayıracağını belirleyin.">
+                    <block title="Görsel Tarama Ayarları" name="image_scan_settings">
                         <setting string="Görsel Ayracı"
-                                 help="Barkod ile sıra numarasını ayıran karakter (Örn: 8691234_1.jpg → ayraç: _ )">
-                            <field name="image_separator"/>
+                                 help="Barkod ile sıra numarasını ayıran karakter">
+                            <div class="content-group">
+                                <field name="image_separator"/>
+                            </div>
                         </setting>
                         <setting string="Ana Resim Sırası"
-                                 help="Hangi sıradaki görsel vitrin (ana) görseli olsun?">
-                            <field name="main_image_index"/>
+                                 help="Hangi sıradaki görsel vitrin görseli olsun?">
+                            <div class="content-group">
+                                <field name="main_image_index"/>
+                            </div>
                         </setting>
                         <setting string="Eşleştirme Alanı"
                                  help="Dosya adındaki kod hangi ürün alanıyla eşleştirilsin?">
-                            <field name="image_match_field"/>
+                            <div class="content-group">
+                                <field name="image_match_field"/>
+                            </div>
                         </setting>
                         <setting string="Üzerine Yaz"
                                  help="Ürünün mevcut görseli varsa yeni gelen ile değiştirilsin mi?">
@@ -33,20 +38,17 @@
                     </block>
 
                     <!-- Sync Agent Ayarları -->
-                    <block title="Sync Agent Ayarları (Windows Arka Plan)"
-                           help="Bilgisayarınızdaki bir klasörü izleyerek otomatik görsel yükleyen uygulama.">
+                    <block title="Sync Agent Ayarları (Windows Arka Plan)" name="sync_agent_settings">
                         <setting string="Sync Agent"
                                  help="Windows Sync Agent bağlantısını aktifleştirin.">
                             <field name="sync_agent_enabled"/>
-                            <div invisible="not sync_agent_enabled">
-                                <div class="mt8">
-                                    <label for="sync_agent_api_key"/>
-                                    <field name="sync_agent_api_key" class="o_lg_field_full"/>
-                                </div>
+                            <div class="content-group mt-2" invisible="not sync_agent_enabled">
+                                <label for="sync_agent_api_key"/>
+                                <field name="sync_agent_api_key"/>
                                 <div class="mt8">
                                     <button name="action_generate_api_key"
                                             type="object"
-                                            string="🔑 Yeni API Anahtarı Oluştur"
+                                            string="Yeni API Anahtarı Oluştur"
                                             class="btn-primary"/>
                                 </div>
                             </div>
