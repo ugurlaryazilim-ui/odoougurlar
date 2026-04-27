@@ -59,6 +59,21 @@ class ShelfImportProcessor(models.AbstractModel):
             df = pd.read_excel(filepath, engine='openpyxl')
             _logger.info("  %d satır okundu", len(df))
 
+            # ── Sütun ismi normalleştirme (TR ↔ EN desteği) ──
+            column_map = {
+                # İngilizce → Türkçe (kodun beklediği form)
+                'Path': 'Yol',
+                'Name': 'Adı',
+                'Unique Code': 'Tekil Barkod',
+                'Total Quantity': 'Toplam Adet',
+                'Type': 'Sipariş Tipi',
+                'Code': 'Kod',
+                'Is Pick': 'Toplama mı',
+                'Warehouse': 'Depo',
+            }
+            df.rename(columns=column_map, inplace=True)
+            _logger.info("  Sütunlar: %s", ', '.join(df.columns[:5]))
+
             # Ana stok lokasyonunu bul
             wh_code = DEPOT_MAP.get(depot_name)
             warehouse = self.env['stock.warehouse'].sudo().search(
