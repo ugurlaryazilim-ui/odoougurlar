@@ -40,7 +40,7 @@
     <menuitem id="menu_image_settings"
               name="Ayarlar"
               parent="menu_ugurlar_images_config"
-              action="base.action_general_configuration"
+              action="base_setup.action_general_configuration"
               sequence="10"/>
 
 </odoo>
