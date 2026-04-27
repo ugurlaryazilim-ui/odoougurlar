@@ -103,3 +103,26 @@
 2026-04-27 10:28:40,038 [INFO] ✅ EK RESİM #3: 8699248262237_3.png → 8699248262237 (Yelek Ekol 26KEKL05065)
 2026-04-27 10:28:40,038 [ERROR] Hata (8699248262237_3.png): [WinError 2] Sistem belirtilen dosyayı bulamıyor
 2026-04-27 10:28:40,038 [INFO] ── Tamamlandı: 0/1 başarılı ──
+2026-04-27 10:32:29,537 [INFO] Agent durduruldu.
+2026-04-27 10:39:04,197 [INFO] ── 1 yeni görsel bulundu ──
+2026-04-27 10:39:19,922 [INFO] Odoo'ya bağlanılıyor: https://odoo.ugurlar.com (DB: ugurlar)
+2026-04-27 10:39:20,542 [INFO] ✅ EK RESİM #3: 8699248262237_3.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:39:20,543 [INFO] ── Tamamlandı: 1/1 başarılı ──
+2026-04-27 10:39:21,527 [INFO] Odoo bağlantısı başarılı. UID: 2
+2026-04-27 10:39:21,931 [INFO] product.image modeli mevcut — ek resimler destekleniyor.
+2026-04-27 10:39:21,931 [INFO] Klasör izleniyor: C:\OdooResimler (her 3 saniyede bir)
+2026-04-27 10:39:21,932 [INFO] ── 4 yeni görsel bulundu ──
+2026-04-27 10:39:23,544 [INFO] ── 4 yeni görsel bulundu ──
+2026-04-27 10:39:35,927 [INFO] ✅ ANA RESİM: 8699248262237_1.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:39:36,402 [INFO] 🗑️ 6 eski kayıt silindi: 8699248262237_2
+2026-04-27 10:39:38,265 [INFO] ✅ EK RESİM #2: 8699248262237_2.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:39:38,684 [INFO] 🗑️ 5 eski kayıt silindi: 8699248262237_4
+2026-04-27 10:39:39,208 [ERROR] Hata (8699248262237_1.png): [Errno 2] No such file or directory: 'C:\\OdooResimler\\8699248262237_1.png'
+2026-04-27 10:39:40,170 [INFO] ✅ EK RESİM #4: 8699248262237_4.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:39:40,289 [ERROR] Hata (8699248262237_2.png): [Errno 2] No such file or directory: 'C:\\OdooResimler\\8699248262237_2.png'
+2026-04-27 10:39:40,497 [INFO] 🗑️ 5 eski kayıt silindi: 8699248262237_5
+2026-04-27 10:39:41,632 [ERROR] Hata (8699248262237_4.png): [Errno 2] No such file or directory: 'C:\\OdooResimler\\8699248262237_4.png'
+2026-04-27 10:39:42,061 [INFO] ✅ EK RESİM #5: 8699248262237_5.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:39:42,061 [INFO] ── Tamamlandı: 4/4 başarılı ──
+2026-04-27 10:39:42,892 [ERROR] Hata (8699248262237_5.png): [Errno 2] No such file or directory: 'C:\\OdooResimler\\8699248262237_5.png'
+2026-04-27 10:39:42,893 [INFO] ── Tamamlandı: 0/4 başarılı ──

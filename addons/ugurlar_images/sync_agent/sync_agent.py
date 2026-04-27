@@ -287,6 +287,8 @@ class OdooImageSync:
         watch = self.config['watch_folder']
         done = self.config['done_folder']
         error = self.config['error_folder']
+        separator = self.config['separator']
+        main_index = self.config['main_image_index']
 
         # Klasörleri oluştur
         os.makedirs(watch, exist_ok=True)
@@ -305,31 +307,107 @@ class OdooImageSync:
         if not files:
             return 0
 
-        # Dosyaları barkod+sıra bazlı sırala (aynı barkodlar birlikte)
-        files.sort(key=lambda p: os.path.basename(p))
+        # Dosyaları barkod bazlı grupla
+        barcode_groups = {}  # barcode → [(order, filepath), ...]
+        for fpath in files:
+            fname = os.path.basename(fpath)
+            name, ext = os.path.splitext(fname)
+            parts = name.rsplit(separator, 1)
+            if len(parts) == 2:
+                barcode = parts[0].strip()
+                try:
+                    order = int(parts[1].strip())
+                except ValueError:
+                    barcode = name
+                    order = int(main_index)
+            else:
+                barcode = name
+                order = int(main_index)
 
-        _logger.info("── %d yeni görsel bulundu ──", len(files))
+            if barcode:
+                barcode_groups.setdefault(barcode, []).append((order, fpath))
+
+        _logger.info("── %d görsel bulundu (%d barkod) ──", len(files), len(barcode_groups))
 
         success = 0
-        for fpath in files:
-            try:
-                ok, reason = self.upload_image(fpath)
-                fname = os.path.basename(fpath)
+        for barcode, items in barcode_groups.items():
+            # Barkoda göre sırala
+            items.sort(key=lambda x: x[0])
 
-                if ok and reason != 'urun_yok':
+            # Ürünü bul
+            product = self.find_product(barcode)
+            if not product:
+                _logger.warning("Ürün bulunamadı (barkod: %s) — %d dosya atlanıyor", barcode, len(items))
+                for _, fpath in items:
+                    try:
+                        shutil.move(fpath, os.path.join(error, os.path.basename(fpath)))
+                    except Exception:
+                        pass
+                continue
+
+            tmpl_id = product['product_tmpl_id'][0]
+
+            # ── TÜM ESKİ EK RESİMLERİ SİL ──
+            # Bu varyant veya template'e bağlı tüm product.image kayıtlarını temizle
+            if self.has_product_image:
+                old_images = self._execute(
+                    'product.image', 'search',
+                    [
+                        '|',
+                        ('product_variant_id', '=', product['id']),
+                        ('product_tmpl_id', '=', tmpl_id),
+                    ],
+                )
+                if old_images:
+                    self._execute('product.image', 'unlink', old_images)
+                    _logger.info("🗑️ %d eski ek resim silindi: %s", len(old_images), barcode)
+
+            # ── DOSYALARI İŞLE ──
+            for order, fpath in items:
+                fname = os.path.basename(fpath)
+                try:
+                    img_b64 = compress_image(fpath)
+                    is_main = (str(order) == main_index)
+
+                    if is_main:
+                        # Ana resim → image_variant_1920
+                        self._execute(
+                            'product.product', 'write',
+                            [product['id']],
+                            {'image_variant_1920': img_b64},
+                        )
+                        _logger.info("✅ ANA RESİM: %s → %s (%s)", fname, barcode, product['name'])
+                    else:
+                        # Ek resim → product.image (temiz oluştur)
+                        if self.has_product_image:
+                            img_name = f'{barcode}{separator}{order}'
+                            self._execute(
+                                'product.image', 'create',
+                                {
+                                    'product_variant_id': product['id'],
+                                    'name': img_name,
+                                    'image_1920': img_b64,
+                                },
+                            )
+                            _logger.info("✅ EK RESİM #%d: %s → %s (%s)", order, fname, barcode, product['name'])
+                        else:
+                            self._execute(
+                                'product.product', 'write',
+                                [product['id']],
+                                {'image_variant_1920': img_b64},
+                            )
+                            _logger.info("✅ RESİM #%d (ana olarak): %s → %s", order, fname, barcode)
+
                     shutil.move(fpath, os.path.join(done, fname))
                     success += 1
-                else:
-                    shutil.move(fpath, os.path.join(error, fname))
-            except Exception as e:
-                _logger.error("Hata (%s): %s", os.path.basename(fpath), str(e))
-                try:
-                    shutil.move(fpath, os.path.join(error, os.path.basename(fpath)))
-                except Exception:
-                    pass
+                except Exception as e:
+                    _logger.error("Hata (%s): %s", fname, str(e))
+                    try:
+                        shutil.move(fpath, os.path.join(error, fname))
+                    except Exception:
+                        pass
 
         _logger.info("── Tamamlandı: %d/%d başarılı ──", success, len(files))
-        # Her tarama sonrasında cache temizle (yeni ürünler eklenmiş olabilir)
         self._product_cache.clear()
         return success
 
