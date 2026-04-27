@@ -62,3 +62,44 @@
 2026-04-27 10:08:05,146 [INFO] ✅ ANA RESİM: 8699248262237_1.png → 8699248262237 (Yelek Ekol 26KEKL05065)
 2026-04-27 10:08:13,765 [INFO] ✅ EK RESİM #2: 8699248262237_2.png → 8699248262237 (Yelek Ekol 26KEKL05065)
 2026-04-27 10:08:22,686 [INFO] Agent durduruldu.
+2026-04-27 10:08:47,648 [INFO] Odoo'ya bağlanılıyor: https://odoo.ugurlar.com (DB: ugurlar)
+2026-04-27 10:08:48,322 [INFO] Odoo bağlantısı başarılı. UID: 2
+2026-04-27 10:08:48,725 [INFO] product.image modeli mevcut — ek resimler destekleniyor.
+2026-04-27 10:08:48,730 [INFO] Klasör izleniyor: C:\OdooResimler (her 3 saniyede bir)
+2026-04-27 10:08:48,730 [INFO] ── 3 yeni görsel bulundu ──
+2026-04-27 10:08:51,102 [INFO] ✅ EK RESİM #3: 8699248262237_3.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:08:55,103 [INFO] ✅ EK RESİM #4: 8699248262237_4.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:08:58,972 [INFO] ✅ EK RESİM #5: 8699248262237_5.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:08:58,974 [INFO] ── Tamamlandı: 3/3 başarılı ──
+2026-04-27 10:09:34,984 [INFO] ── 5 yeni görsel bulundu ──
+2026-04-27 10:09:43,264 [INFO] ✅ ANA RESİM: 8699248262237_1.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:09:49,676 [INFO] ✅ EK RESİM #2: 8699248262237_2.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:10:00,846 [INFO] ✅ EK RESİM #3: 8699248262237_3.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:10:16,941 [INFO] ✅ EK RESİM #4: 8699248262237_4.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:10:32,462 [INFO] ✅ EK RESİM #5: 8699248262237_5.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:10:32,463 [INFO] ── Tamamlandı: 5/5 başarılı ──
+2026-04-27 10:24:08,656 [INFO] ── 5 yeni görsel bulundu ──
+2026-04-27 10:24:19,141 [INFO] ✅ ANA RESİM: 8699248262237_1.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:24:25,145 [INFO] Odoo'ya bağlanılıyor: https://odoo.ugurlar.com (DB: ugurlar)
+2026-04-27 10:24:25,809 [INFO] Odoo bağlantısı başarılı. UID: 2
+2026-04-27 10:24:26,244 [INFO] product.image modeli mevcut — ek resimler destekleniyor.
+2026-04-27 10:24:26,245 [INFO] Klasör izleniyor: C:\OdooResimler (her 3 saniyede bir)
+2026-04-27 10:24:26,246 [INFO] ── 4 yeni görsel bulundu ──
+2026-04-27 10:24:27,070 [INFO] ✅ EK RESİM #2: 8699248262237_2.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:24:29,297 [ERROR] Hata (8699248262237_2.png): [Errno 2] No such file or directory: 'C:\\OdooResimler\\8699248262237_2.png'
+2026-04-27 10:24:30,656 [INFO] ✅ EK RESİM #3: 8699248262237_3.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:24:31,711 [INFO] ✅ EK RESİM #4: 8699248262237_4.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:24:32,667 [INFO] ✅ EK RESİM #5: 8699248262237_5.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:24:32,668 [INFO] ── Tamamlandı: 3/4 başarılı ──
+2026-04-27 10:24:36,787 [INFO] ✅ EK RESİM #3: 8699248262237_3.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:24:36,787 [ERROR] Hata (8699248262237_3.png): [WinError 2] Sistem belirtilen dosyayı bulamıyor
+2026-04-27 10:24:39,953 [ERROR] Hata (8699248262237_4.png): [Errno 2] No such file or directory: 'C:\\OdooResimler\\8699248262237_4.png'
+2026-04-27 10:24:44,441 [ERROR] Hata (8699248262237_5.png): [Errno 2] No such file or directory: 'C:\\OdooResimler\\8699248262237_5.png'
+2026-04-27 10:24:44,442 [INFO] ── Tamamlandı: 2/5 başarılı ──
+2026-04-27 10:27:50,486 [INFO] ── 1 yeni görsel bulundu ──
+2026-04-27 10:27:50,717 [INFO] ── 1 yeni görsel bulundu ──
+2026-04-27 10:28:18,449 [INFO] ✅ EK RESİM #3 (güncellendi): 8699248262237_3.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:28:18,449 [INFO] ── Tamamlandı: 1/1 başarılı ──
+2026-04-27 10:28:40,038 [INFO] ✅ EK RESİM #3: 8699248262237_3.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:28:40,038 [ERROR] Hata (8699248262237_3.png): [WinError 2] Sistem belirtilen dosyayı bulamıyor
+2026-04-27 10:28:40,038 [INFO] ── Tamamlandı: 0/1 başarılı ──

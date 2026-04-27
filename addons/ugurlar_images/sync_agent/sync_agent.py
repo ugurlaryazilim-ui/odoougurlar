@@ -243,37 +243,35 @@ class OdooImageSync:
             # Ek resim ekle — VARYANT (barkod) bazlı
             if self.has_product_image:
                 img_name = f'{barcode}{separator}{order}'
+                tmpl_id = product['product_tmpl_id'][0]
 
-                # ── MÜKERRER KONTROLÜ ──
-                # Aynı isimde resim varsa güncelle, yoksa oluştur
+                # ── MÜKERRER KONTROLÜ (agresif) ──
+                # Hem variant hem template bazlı ESKİ kayıtları bul
                 existing = self._execute(
                     'product.image', 'search',
                     [
+                        '|',
                         ('product_variant_id', '=', product['id']),
+                        ('product_tmpl_id', '=', tmpl_id),
                         ('name', '=', img_name),
                     ],
-                    limit=1,
                 )
 
                 if existing:
-                    # Mevcut kaydı güncelle
-                    self._execute(
-                        'product.image', 'write',
-                        existing,
-                        {'image_1920': img_b64},
-                    )
-                    _logger.info("✅ EK RESİM #%d (güncellendi): %s → %s (%s)", order, filename, barcode, product['name'])
-                else:
-                    # Yeni kayıt oluştur
-                    self._execute(
-                        'product.image', 'create',
-                        {
-                            'product_variant_id': product['id'],
-                            'name': img_name,
-                            'image_1920': img_b64,
-                        },
-                    )
-                    _logger.info("✅ EK RESİM #%d: %s → %s (%s)", order, filename, barcode, product['name'])
+                    # Tüm eski mükerrerleri sil
+                    self._execute('product.image', 'unlink', existing)
+                    _logger.info("🗑️ %d eski kayıt silindi: %s", len(existing), img_name)
+
+                # Temiz tek kayıt oluştur
+                self._execute(
+                    'product.image', 'create',
+                    {
+                        'product_variant_id': product['id'],
+                        'name': img_name,
+                        'image_1920': img_b64,
+                    },
+                )
+                _logger.info("✅ EK RESİM #%d: %s → %s (%s)", order, filename, barcode, product['name'])
             else:
                 self._execute(
                     'product.product', 'write',
