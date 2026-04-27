@@ -14,6 +14,7 @@ Dosya adlandırma: BARKOD_SIRA.uzantı
 """
 
 import base64
+import io
 import json
 import logging
 import os
@@ -35,6 +36,9 @@ _logger = logging.getLogger('OdooImageSync')
 
 # ── Desteklenen formatlar ──
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff'}
+
+# Resim sıkıştırma için max boyut (piksel)
+MAX_IMAGE_SIZE = 1920
 
 # ── Varsayılan config ──
 DEFAULT_CONFIG = {
@@ -71,6 +75,51 @@ def load_config(path='config.json'):
     return config
 
 
+def compress_image(filepath):
+    """Görseli sıkıştırarak base64 olarak döner. Pillow varsa optimize eder."""
+    try:
+        from PIL import Image
+
+        img = Image.open(filepath)
+
+        # EXIF rotasyonu uygula
+        try:
+            from PIL import ExifTags
+            for orientation in ExifTags.TAGS.keys():
+                if ExifTags.TAGS[orientation] == 'Orientation':
+                    break
+            exif = img._getexif()
+            if exif and orientation in exif:
+                rot = exif[orientation]
+                if rot == 3:
+                    img = img.rotate(180, expand=True)
+                elif rot == 6:
+                    img = img.rotate(270, expand=True)
+                elif rot == 8:
+                    img = img.rotate(90, expand=True)
+        except Exception:
+            pass
+
+        # Boyutlandır (maks 1920px)
+        w, h = img.size
+        if w > MAX_IMAGE_SIZE or h > MAX_IMAGE_SIZE:
+            img.thumbnail((MAX_IMAGE_SIZE, MAX_IMAGE_SIZE), Image.LANCZOS)
+
+        # RGBA ise RGB'ye dönüştür
+        if img.mode in ('RGBA', 'P'):
+            img = img.convert('RGB')
+
+        # JPEG olarak sıkıştır (kalite 85)
+        buf = io.BytesIO()
+        img.save(buf, format='JPEG', quality=85, optimize=True)
+        return base64.b64encode(buf.getvalue()).decode('ascii')
+
+    except ImportError:
+        # Pillow yoksa direkt oku
+        with open(filepath, 'rb') as f:
+            return base64.b64encode(f.read()).decode('ascii')
+
+
 class OdooImageSync:
     """Odoo XML-RPC ile görsel yükleme motoru."""
 
@@ -78,7 +127,9 @@ class OdooImageSync:
         self.config = config
         self.uid = None
         self.models = None
-        self.has_product_image = False  # product.image modülü var mı?
+        self.has_product_image = False
+        # Ürün cache — aynı barkodu tekrar sorgulamak yerine cache'ten al
+        self._product_cache = {}
         self._connect()
 
     def _connect(self):
@@ -120,7 +171,10 @@ class OdooImageSync:
         )
 
     def find_product(self, barcode):
-        """Barkod ile ürün varyantını bul."""
+        """Barkod ile ürün varyantını bul. Cache kullanır."""
+        if barcode in self._product_cache:
+            return self._product_cache[barcode]
+
         field = self.config['match_field']
         ids = self._execute(
             'product.product', 'search',
@@ -132,7 +186,9 @@ class OdooImageSync:
                 ids[:1],
                 fields=['id', 'name', 'product_tmpl_id', 'image_1920'],
             )
-            return products[0] if products else None
+            if products:
+                self._product_cache[barcode] = products[0]
+                return products[0]
         return None
 
     def upload_image(self, filepath):
@@ -165,12 +221,10 @@ class OdooImageSync:
             _logger.warning("Ürün bulunamadı: %s (barkod: %s)", filename, barcode)
             return False, 'urun_yok'
 
-        # Görseli oku
-        with open(filepath, 'rb') as f:
-            img_b64 = base64.b64encode(f.read()).decode('ascii')
+        # Görseli sıkıştır ve oku
+        img_b64 = compress_image(filepath)
 
         is_main = (str(order) == main_index)
-        tmpl_id = product['product_tmpl_id'][0]
 
         if is_main:
             # Mevcut resim kontrolü
@@ -179,8 +233,6 @@ class OdooImageSync:
                 return True, 'atlandi'
 
             # Ana resmi güncelle — VARYANT bazlı (image_variant_1920)
-            # image_1920 computed alandır ve template'e yazar!
-            # image_variant_1920 ise sadece bu varyanta özeldir.
             self._execute(
                 'product.product', 'write',
                 [product['id']],
@@ -190,21 +242,43 @@ class OdooImageSync:
         else:
             # Ek resim ekle — VARYANT (barkod) bazlı
             if self.has_product_image:
-                self._execute(
-                    'product.image', 'create',
-                    {
-                        'product_variant_id': product['id'],
-                        'name': f'{barcode}{separator}{order}',
-                        'image_1920': img_b64,
-                    },
+                img_name = f'{barcode}{separator}{order}'
+
+                # ── MÜKERRER KONTROLÜ ──
+                # Aynı isimde resim varsa güncelle, yoksa oluştur
+                existing = self._execute(
+                    'product.image', 'search',
+                    [
+                        ('product_variant_id', '=', product['id']),
+                        ('name', '=', img_name),
+                    ],
+                    limit=1,
                 )
-                _logger.info("✅ EK RESİM #%d: %s → %s (%s)", order, filename, barcode, product['name'])
+
+                if existing:
+                    # Mevcut kaydı güncelle
+                    self._execute(
+                        'product.image', 'write',
+                        existing,
+                        {'image_1920': img_b64},
+                    )
+                    _logger.info("✅ EK RESİM #%d (güncellendi): %s → %s (%s)", order, filename, barcode, product['name'])
+                else:
+                    # Yeni kayıt oluştur
+                    self._execute(
+                        'product.image', 'create',
+                        {
+                            'product_variant_id': product['id'],
+                            'name': img_name,
+                            'image_1920': img_b64,
+                        },
+                    )
+                    _logger.info("✅ EK RESİM #%d: %s → %s (%s)", order, filename, barcode, product['name'])
             else:
-                # product.image yoksa ana görseli güncelle (son yüklenen kazanır)
                 self._execute(
                     'product.product', 'write',
                     [product['id']],
-                    {'image_1920': img_b64},
+                    {'image_variant_1920': img_b64},
                 )
                 _logger.info("✅ RESİM #%d (ana olarak): %s → %s (%s)", order, filename, barcode, product['name'])
 
@@ -233,6 +307,9 @@ class OdooImageSync:
         if not files:
             return 0
 
+        # Dosyaları barkod+sıra bazlı sırala (aynı barkodlar birlikte)
+        files.sort(key=lambda p: os.path.basename(p))
+
         _logger.info("── %d yeni görsel bulundu ──", len(files))
 
         success = 0
@@ -254,6 +331,8 @@ class OdooImageSync:
                     pass
 
         _logger.info("── Tamamlandı: %d/%d başarılı ──", success, len(files))
+        # Her tarama sonrasında cache temizle (yeni ürünler eklenmiş olabilir)
+        self._product_cache.clear()
         return success
 
 
