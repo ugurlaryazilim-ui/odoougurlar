@@ -1,4 +1,5 @@
 import logging
+import secrets
 
 from odoo import models, fields, api
 
@@ -75,7 +76,6 @@ class ResConfigSettings(models.TransientModel):
 
     def action_generate_api_key(self):
         """Sync Agent için rastgele bir API anahtarı üretir."""
-        import secrets
         key = secrets.token_urlsafe(32)
         self.env['ir.config_parameter'].sudo().set_param(
             'ugurlar_images.sync_agent_api_key', key

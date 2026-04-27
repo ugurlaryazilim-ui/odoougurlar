@@ -1,6 +1,6 @@
 import logging
 
-from odoo import models, fields
+from odoo import models, fields, api
 
 _logger = logging.getLogger(__name__)
 
@@ -10,6 +10,7 @@ class ProductImage(models.Model):
     _name = 'product.image'
     _description = 'Ürün Görseli'
     _order = 'sequence, id'
+    _rec_name = 'name'
 
     name = fields.Char(string='Açıklama', required=True)
     sequence = fields.Integer(string='Sıra', default=10)
@@ -27,15 +28,10 @@ class ProductImage(models.Model):
         ondelete='cascade',
     )
 
-
-class ProductTemplateImageExtend(models.Model):
-    """product.template üzerinde ek görseller (şablon bazlı)."""
-    _inherit = 'product.template'
-
-    product_template_image_ids = fields.One2many(
-        'product.image',
-        'product_tmpl_id',
-        string='Şablon Görselleri',
+    # Odoo 19: models.Constraint (eski _sql_constraints kaldırıldı)
+    _unique_variant_name = models.Constraint(
+        'UNIQUE(product_variant_id, name)',
+        'Bu varyant için bu isimde sadece bir görsel olabilir!',
     )
 
 
@@ -43,14 +39,7 @@ class ProductProductImageExtend(models.Model):
     """product.product (varyant/barkod) bazlı ek görseller."""
     _inherit = 'product.product'
 
-    # Eski view'larla uyumluluk — şablon görselleri
-    product_template_image_ids = fields.One2many(
-        related='product_tmpl_id.product_template_image_ids',
-        string='Şablon Görselleri',
-        readonly=False,
-    )
-
-    # Barkod bazlı görseller — ASIL kullanılan alan
+    # Barkod bazlı görseller — her varyantın kendi görselleri
     product_variant_image_ids = fields.One2many(
         'product.image',
         'product_variant_id',

@@ -1,0 +1,22 @@
+# Sync Agent config (contains credentials)
+addons/ugurlar_images/sync_agent/config.json
+config.json
+
+# Sync Agent logs
+addons/ugurlar_images/sync_agent/sync_agent.log
+sync_agent.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store

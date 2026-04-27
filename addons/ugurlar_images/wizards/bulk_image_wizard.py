@@ -25,7 +25,7 @@ class BulkImageWizard(models.TransientModel):
 
     # ----- Ayar yardımcıları -----
 
-    # Selection key → gerçek karakter
+    # Selection key → gerçek karakter (image_settings.py'deki ile aynı)
     SEPARATOR_MAP = {'underscore': '_', 'dash': '-', 'dot': '.'}
     INDEX_MAP = {'idx0': '0', 'idx1': '1'}
 
@@ -46,6 +46,53 @@ class BulkImageWizard(models.TransientModel):
     def _get_overwrite(self):
         ICP = self.env['ir.config_parameter'].sudo()
         return ICP.get_param('ugurlar_images.image_overwrite', 'True') == 'True'
+
+    # ----- Renk kardeşi bulma -----
+
+    def _find_color_siblings(self, variant):
+        """
+        Bir varyantın aynı renkteki kardeşlerini bul.
+        Odoo 19 product.template.attribute.value üzerinden çalışır.
+
+        Returns: recordset of product.product (kendisi HARİÇ)
+        """
+        color_attr_name = 'Renk'  # TODO: config'den alınabilir
+        ptavs = variant.product_template_attribute_value_ids
+
+        if not ptavs:
+            return self.env['product.product']
+
+        # 'Renk' özelliğine ait PTAV'ı bul
+        color_ptav = ptavs.filtered(
+            lambda p: p.attribute_id.name.lower() in (color_attr_name.lower(), 'color', 'colour')
+        )
+
+        if not color_ptav:
+            return self.env['product.product']
+
+        # Aynı template + aynı renk değerine sahip diğer varyantları bul
+        siblings = self.env['product.product'].search([
+            ('product_tmpl_id', '=', variant.product_tmpl_id.id),
+            ('product_template_attribute_value_ids', 'in', color_ptav.ids),
+            ('id', '!=', variant.id),
+        ])
+
+        return siblings
+
+    def _clean_variant_images(self, variant):
+        """Bir varyantın tüm eski ek resimlerini sil."""
+        if 'product.image' not in self.env:
+            return 0
+
+        old_images = self.env['product.image'].search([
+            '|',
+            ('product_variant_id', '=', variant.id),
+            ('product_tmpl_id', '=', variant.product_tmpl_id.id),
+        ])
+        count = len(old_images)
+        if old_images:
+            old_images.unlink()
+        return count
 
     # ----- Ana işlem -----
 
@@ -139,29 +186,53 @@ class BulkImageWizard(models.TransientModel):
                 # Görselleri sırala
                 images.sort(key=lambda x: x[0])
 
-                for order, fname, img_b64 in images:
-                    is_main = (str(order) == main_index)
+                # ── Hedef varyantları belirle (renk yayma) ──
+                target_variants = variant
+                siblings = self._find_color_siblings(variant)
+                if siblings:
+                    target_variants |= siblings
+                    sib_barcodes = ', '.join(s.barcode or s.name for s in siblings)
+                    details.append(f'  🎨 {barcode} renk kardeşleri: {sib_barcodes}')
 
-                    if is_main:
-                        # Ana resim — VARYANT (barkod) bazlı
-                        if variant.image_variant_1920 and not overwrite:
-                            details.append(f'  ✓ {fname} → {barcode} (mevcut, atlandı)')
-                            continue
-                        variant.image_variant_1920 = img_b64
-                        details.append(f'  ✓ {fname} → {barcode} (ANA RESİM)')
-                    else:
-                        # Ek resim — VARYANT (barkod) bazlı
-                        if 'product.image' in self.env:
-                            self.env['product.image'].create({
-                                'product_variant_id': variant.id,
-                                'name': f'{barcode}_{order}',
-                                'image_1920': img_b64,
-                            })
-                            details.append(f'  ✓ {fname} → {barcode} (ek resim #{order})')
+                # ── TÜM HEDEF VARYANTLARIN ESKİ RESİMLERİNİ SİL ──
+                for tv in target_variants:
+                    self._clean_variant_images(tv)
+
+                # ── GÖRSELLERİ YÜKLE ──
+                for tv in target_variants:
+                    tv_barcode = tv.barcode or tv.name
+                    is_self = (tv.id == variant.id)
+
+                    for order, fname, img_b64 in images:
+                        is_main = (str(order) == main_index)
+
+                        if is_main:
+                            if tv.image_variant_1920 and not overwrite:
+                                if is_self:
+                                    details.append(f'  ✓ {fname} → {tv_barcode} (mevcut, atlandı)')
+                                continue
+                            tv.image_variant_1920 = img_b64
+                            if is_self:
+                                details.append(f'  ✓ {fname} → {tv_barcode} (ANA RESİM)')
+                            else:
+                                details.append(f'    🎨 ANA → {tv_barcode} (renk kardeşi)')
                         else:
-                            # product.image yoksa ana görseli güncelle
-                            variant.image_variant_1920 = img_b64
-                            details.append(f'  ✓ {fname} → {barcode} (resim #{order}, ana olarak)')
+                            # Ek resim — VARYANT (barkod) bazlı
+                            if 'product.image' in self.env:
+                                img_name = f'{tv_barcode}_{order}'
+                                self.env['product.image'].create({
+                                    'product_variant_id': tv.id,
+                                    'name': img_name,
+                                    'image_1920': img_b64,
+                                })
+                                if is_self:
+                                    details.append(f'  ✓ {fname} → {tv_barcode} (ek resim #{order})')
+                                else:
+                                    details.append(f'    🎨 EK #{order} → {tv_barcode} (renk kardeşi)')
+                            else:
+                                tv.image_variant_1920 = img_b64
+                                if is_self:
+                                    details.append(f'  ✓ {fname} → {tv_barcode} (resim #{order}, ana olarak)')
 
                 matched += 1
 
