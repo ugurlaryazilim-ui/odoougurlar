@@ -144,10 +144,10 @@ class BulkImageWizard(models.TransientModel):
 
                     if is_main:
                         # Ana resim — VARYANT (barkod) bazlı
-                        if variant.image_1920 and not overwrite:
+                        if variant.image_variant_1920 and not overwrite:
                             details.append(f'  ✓ {fname} → {barcode} (mevcut, atlandı)')
                             continue
-                        variant.image_1920 = img_b64
+                        variant.image_variant_1920 = img_b64
                         details.append(f'  ✓ {fname} → {barcode} (ANA RESİM)')
                     else:
                         # Ek resim — VARYANT (barkod) bazlı
@@ -160,7 +160,7 @@ class BulkImageWizard(models.TransientModel):
                             details.append(f'  ✓ {fname} → {barcode} (ek resim #{order})')
                         else:
                             # product.image yoksa ana görseli güncelle
-                            variant.image_1920 = img_b64
+                            variant.image_variant_1920 = img_b64
                             details.append(f'  ✓ {fname} → {barcode} (resim #{order}, ana olarak)')
 
                 matched += 1
