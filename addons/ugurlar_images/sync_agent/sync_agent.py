@@ -298,7 +298,7 @@ class OdooImageSync:
             return len(old_images)
         return 0
 
-    def _upload_to_variant(self, variant_id, barcode, img_b64, order, separator):
+    def _upload_to_variant(self, variant_id, barcode, img_b64, order, separator, tmpl_id=None):
         """Tek bir varyanta ana veya ek resim yükle."""
         main_index = self.config['main_image_index']
         is_main = (str(order) == main_index)
@@ -309,6 +309,23 @@ class OdooImageSync:
                 [variant_id],
                 {'image_variant_1920': img_b64},
             )
+
+            # ── TEMPLATE KAPAK GÖRSELİ ──
+            # Template'in henüz görseli yoksa, ilk yüklenen ana resmi
+            # template'e de yaz (ürünler listesinde görünsün)
+            if tmpl_id:
+                tmpl_data = self._execute(
+                    'product.template', 'read',
+                    [tmpl_id],
+                    fields=['image_1920'],
+                )
+                if tmpl_data and not tmpl_data[0].get('image_1920'):
+                    self._execute(
+                        'product.template', 'write',
+                        [tmpl_id],
+                        {'image_1920': img_b64},
+                    )
+                    _logger.info("🖼️ Template kapak görseli ayarlandı (tmpl_id=%d)", tmpl_id)
         else:
             if self.has_product_image:
                 img_name = f'{barcode}{separator}{order}'
@@ -430,7 +447,7 @@ class OdooImageSync:
 
                 for order, fname, fpath, img_b64 in image_data:
                     try:
-                        self._upload_to_variant(tv_id, tv_barcode, img_b64, order, separator)
+                        self._upload_to_variant(tv_id, tv_barcode, img_b64, order, separator, tmpl_id=tmpl_id)
 
                         is_main = (str(order) == main_index)
                         if is_self:
