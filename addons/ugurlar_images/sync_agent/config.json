@@ -10,5 +10,7 @@
     "main_image_index": "1",
     "match_field": "barcode",
     "overwrite_existing": true,
-    "scan_interval_seconds": 3
+    "scan_interval_seconds": 3,
+    "color_propagation": true,
+    "color_attribute_name": "Renk"
 }

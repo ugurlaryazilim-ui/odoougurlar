@@ -126,3 +126,44 @@
 2026-04-27 10:39:42,061 [INFO] ── Tamamlandı: 4/4 başarılı ──
 2026-04-27 10:39:42,892 [ERROR] Hata (8699248262237_5.png): [Errno 2] No such file or directory: 'C:\\OdooResimler\\8699248262237_5.png'
 2026-04-27 10:39:42,893 [INFO] ── Tamamlandı: 0/4 başarılı ──
+2026-04-27 10:44:38,812 [INFO] Agent durduruldu.
+2026-04-27 10:48:25,021 [INFO] ── 5 yeni görsel bulundu ──
+2026-04-27 10:48:30,941 [INFO] ✅ ANA RESİM: 8699248262237_1.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:48:36,235 [INFO] ✅ EK RESİM #2: 8699248262237_2.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:48:46,662 [INFO] ✅ EK RESİM #3: 8699248262237_3.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:48:54,002 [INFO] ✅ EK RESİM #4: 8699248262237_4.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:49:00,067 [INFO] ✅ EK RESİM #5: 8699248262237_5.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:49:00,069 [INFO] ── Tamamlandı: 5/5 başarılı ──
+2026-04-27 10:49:31,339 [INFO] Odoo'ya bağlanılıyor: https://odoo.ugurlar.com (DB: ugurlar)
+2026-04-27 10:49:32,011 [INFO] Odoo bağlantısı başarılı. UID: 2
+2026-04-27 10:49:32,428 [INFO] product.image modeli mevcut — ek resimler destekleniyor.
+2026-04-27 10:49:32,431 [INFO] Klasör izleniyor: C:\OdooResimler (her 3 saniyede bir)
+2026-04-27 10:50:51,096 [INFO] ── 5 yeni görsel bulundu ──
+2026-04-27 10:50:53,451 [INFO] ── 5 görsel bulundu (1 barkod) ──
+2026-04-27 10:50:54,132 [INFO] 🗑️ 9 eski ek resim silindi: 8699248262237
+2026-04-27 10:50:55,569 [INFO] ✅ ANA RESİM: 8699248262237_1.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:50:56,644 [INFO] ✅ EK RESİM #2: 8699248262237_2.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:50:57,475 [INFO] ✅ EK RESİM #3: 8699248262237_3.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:50:57,945 [INFO] ✅ ANA RESİM: 8699248262237_1.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:50:57,945 [ERROR] Hata (8699248262237_1.png): [WinError 2] Sistem belirtilen dosyayı bulamıyor
+2026-04-27 10:50:58,129 [INFO] ✅ EK RESİM #4: 8699248262237_4.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:50:58,943 [INFO] ✅ EK RESİM #5: 8699248262237_5.png → 8699248262237 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:50:58,944 [INFO] ── Tamamlandı: 5/5 başarılı ──
+2026-04-27 10:51:01,747 [ERROR] Hata (8699248262237_2.png): [Errno 2] No such file or directory: 'C:\\OdooResimler\\8699248262237_2.png'
+2026-04-27 10:51:05,474 [ERROR] Hata (8699248262237_3.png): [Errno 2] No such file or directory: 'C:\\OdooResimler\\8699248262237_3.png'
+2026-04-27 10:51:10,162 [ERROR] Hata (8699248262237_4.png): [Errno 2] No such file or directory: 'C:\\OdooResimler\\8699248262237_4.png'
+2026-04-27 10:51:14,008 [ERROR] Hata (8699248262237_5.png): [Errno 2] No such file or directory: 'C:\\OdooResimler\\8699248262237_5.png'
+2026-04-27 10:51:14,009 [INFO] ── Tamamlandı: 0/5 başarılı ──
+2026-04-27 10:53:13,978 [INFO] ── 4 görsel bulundu (1 barkod) ──
+2026-04-27 10:53:14,037 [INFO] ── 4 yeni görsel bulundu ──
+2026-04-27 10:53:15,642 [INFO] ✅ ANA RESİM: 8699248262282_1.jpg → 8699248262282 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:53:16,712 [INFO] ✅ EK RESİM #2: 8699248262282_2.jpg → 8699248262282 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:53:17,773 [INFO] ✅ ANA RESİM: 8699248262282_1.jpg → 8699248262282 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:53:17,778 [ERROR] Hata (8699248262282_1.jpg): [WinError 2] Sistem belirtilen dosyayı bulamıyor
+2026-04-27 10:53:17,817 [INFO] ✅ EK RESİM #3: 8699248262282_3.jpg → 8699248262282 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:53:18,787 [INFO] ✅ EK RESİM #4: 8699248262282_4.jpg → 8699248262282 (Yelek Ekol 26KEKL05065)
+2026-04-27 10:53:18,787 [INFO] ── Tamamlandı: 4/4 başarılı ──
+2026-04-27 10:53:19,402 [ERROR] Hata (8699248262282_2.jpg): [Errno 2] No such file or directory: 'C:\\OdooResimler\\8699248262282_2.jpg'
+2026-04-27 10:53:21,182 [ERROR] Hata (8699248262282_3.jpg): [Errno 2] No such file or directory: 'C:\\OdooResimler\\8699248262282_3.jpg'
+2026-04-27 10:53:22,295 [ERROR] Hata (8699248262282_4.jpg): [Errno 2] No such file or directory: 'C:\\OdooResimler\\8699248262282_4.jpg'
+2026-04-27 10:53:22,295 [INFO] ── Tamamlandı: 0/4 başarılı ──
