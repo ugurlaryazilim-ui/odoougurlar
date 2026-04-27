@@ -9,7 +9,27 @@
         <field name="arch" type="xml">
             <xpath expr="//notebook" position="inside">
                 <page string="Alternatif Görseller" name="extra_images">
-                    <field name="product_template_image_ids" widget="many2many_binary" nolabel="1"/>
+                    <field name="product_template_image_ids" nolabel="1">
+                        <kanban>
+                            <field name="id"/>
+                            <field name="name"/>
+                            <field name="sequence" widget="handle"/>
+                            <field name="image_1920"/>
+                            <templates>
+                                <t t-name="card">
+                                    <field name="image_1920" widget="image" options="{'size': [200, 200]}"/>
+                                    <field name="name"/>
+                                </t>
+                            </templates>
+                        </kanban>
+                        <form string="Görsel Detay">
+                            <group>
+                                <field name="name"/>
+                                <field name="sequence"/>
+                                <field name="image_1920" widget="image"/>
+                            </group>
+                        </form>
+                    </field>
                 </page>
             </xpath>
         </field>
