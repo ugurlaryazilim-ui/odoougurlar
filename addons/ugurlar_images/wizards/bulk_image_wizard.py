@@ -25,13 +25,19 @@ class BulkImageWizard(models.TransientModel):
 
     # ----- Ayar yardımcıları -----
 
+    # Selection key → gerçek karakter
+    SEPARATOR_MAP = {'underscore': '_', 'dash': '-', 'dot': '.'}
+    INDEX_MAP = {'idx0': '0', 'idx1': '1'}
+
     def _get_separator(self):
         ICP = self.env['ir.config_parameter'].sudo()
-        return ICP.get_param('ugurlar_images.image_separator', '_')
+        key = ICP.get_param('ugurlar_images.image_separator', 'underscore')
+        return self.SEPARATOR_MAP.get(key, '_')
 
     def _get_main_index(self):
         ICP = self.env['ir.config_parameter'].sudo()
-        return ICP.get_param('ugurlar_images.main_image_index', '1')
+        key = ICP.get_param('ugurlar_images.main_image_index', 'idx1')
+        return self.INDEX_MAP.get(key, '1')
 
     def _get_match_field(self):
         ICP = self.env['ir.config_parameter'].sudo()

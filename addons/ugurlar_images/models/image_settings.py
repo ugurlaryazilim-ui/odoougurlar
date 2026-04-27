@@ -4,6 +4,13 @@ from odoo import models, fields, api
 
 _logger = logging.getLogger(__name__)
 
+# Selection key → gerçek karakter eşleştirmesi
+SEPARATOR_MAP = {
+    'underscore': '_',
+    'dash': '-',
+    'dot': '.',
+}
+
 
 class ResConfigSettings(models.TransientModel):
     """Resim modülü ayarları — Odoo Ayarlar menüsünden yönetilir."""
@@ -13,23 +20,23 @@ class ResConfigSettings(models.TransientModel):
     #  Görsel Tarama Ayarları
     # -----------------------------------------------------------------
     image_separator = fields.Selection([
-        ('_', 'Alt Tire ( _ )'),
-        ('-', 'Tire ( - )'),
-        ('.', 'Nokta ( . )'),
+        ('underscore', 'Alt Tire ( _ )'),
+        ('dash', 'Tire ( - )'),
+        ('dot', 'Nokta ( . )'),
     ],
         string='Görsel Ayracı',
         config_parameter='ugurlar_images.image_separator',
-        default='_',
+        default='underscore',
         help='Ürün barkodu ile resim sırasını ayıran karakter.\n'
-             'Örnek: 8691234_1.jpg  →  ayraç: _',
+             'Örnek: 8691234_1.jpg  →  ayraç: Alt Tire',
     )
     main_image_index = fields.Selection([
-        ('0', '0 (sıfırdan başla)'),
-        ('1', '1 (birden başla)'),
+        ('idx0', '0 (sıfırdan başla)'),
+        ('idx1', '1 (birden başla)'),
     ],
         string='Ana Resim Sırası',
         config_parameter='ugurlar_images.main_image_index',
-        default='1',
+        default='idx1',
         help='Dosya adındaki hangi numara ana ürün görseli (vitrin) olsun?\n'
              'Örn: "1" seçerseniz barkod_1.jpg ana resim olur.',
     )
@@ -83,3 +90,4 @@ class ResConfigSettings(models.TransientModel):
                 'sticky': True,
             },
         }
+
