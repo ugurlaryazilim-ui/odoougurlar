@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <data noupdate="1">
+        <!-- Sipariş numarası sequence -->
+        <record id="seq_tailor_order" model="ir.sequence">
+            <field name="name">Terzi Sipariş Numarası</field>
+            <field name="code">ugurlar.tailor.order</field>
+            <field name="prefix">TRZ-</field>
+            <field name="padding">5</field>
+            <field name="number_next">1</field>
+            <field name="number_increment">1</field>
+        </record>
+
+        <!-- Varsayılan Terzi Hizmetleri -->
+        <record id="service_paca_kisaltma" model="ugurlar.tailor.service">
+            <field name="name">Paça Kısaltma</field>
+            <field name="price">50.00</field>
+            <field name="sequence">1</field>
+        </record>
+        <record id="service_bel_daraltma" model="ugurlar.tailor.service">
+            <field name="name">Bel Daraltma</field>
+            <field name="price">75.00</field>
+            <field name="sequence">2</field>
+        </record>
+        <record id="service_boy_kisaltma" model="ugurlar.tailor.service">
+            <field name="name">Boy Kısaltma</field>
+            <field name="price">60.00</field>
+            <field name="sequence">3</field>
+        </record>
+        <record id="service_kol_kisaltma" model="ugurlar.tailor.service">
+            <field name="name">Kol Kısaltma</field>
+            <field name="price">45.00</field>
+            <field name="sequence">4</field>
+        </record>
+        <record id="service_fermuar_degisimi" model="ugurlar.tailor.service">
+            <field name="name">Fermuar Değişimi</field>
+            <field name="price">80.00</field>
+            <field name="sequence">5</field>
+        </record>
+        <record id="service_dikis_tamiri" model="ugurlar.tailor.service">
+            <field name="name">Dikiş Tamiri</field>
+            <field name="price">40.00</field>
+            <field name="sequence">6</field>
+        </record>
+        <record id="service_etek_kisaltma" model="ugurlar.tailor.service">
+            <field name="name">Etek Kısaltma</field>
+            <field name="price">55.00</field>
+            <field name="sequence">7</field>
+        </record>
+        <record id="service_beden_kucultme" model="ugurlar.tailor.service">
+            <field name="name">Beden Küçültme</field>
+            <field name="price">100.00</field>
+            <field name="sequence">8</field>
+        </record>
+        <record id="service_beden_buyutme" model="ugurlar.tailor.service">
+            <field name="name">Beden Büyütme</field>
+            <field name="price">110.00</field>
+            <field name="sequence">9</field>
+        </record>
+        <record id="service_yirtik_onarim" model="ugurlar.tailor.service">
+            <field name="name">Yırtık Onarım</field>
+            <field name="price">35.00</field>
+            <field name="sequence">10</field>
+        </record>
+    </data>
+</odoo>

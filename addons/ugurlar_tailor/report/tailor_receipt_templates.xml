@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <template id="report_tailor_receipt">
+        <t t-call="web.html_container">
+            <t t-foreach="docs" t-as="order">
+                <t t-call="ugurlar_tailor.report_tailor_receipt_document"/>
+            </t>
+        </t>
+    </template>
+
+    <template id="report_tailor_receipt_document">
+        <div class="page" style="font-family: monospace; font-size: 12px; max-width: 300px; margin: 0 auto; padding: 10px;">
+
+            <!-- Başlık -->
+            <div style="text-align: center; margin-bottom: 10px;">
+                <h2 style="margin: 0; font-size: 18px;">TERZİ FİŞİ</h2>
+                <div style="border-bottom: 2px dashed #333; margin: 5px 0;"/>
+            </div>
+
+            <!-- Sipariş Bilgileri -->
+            <div style="margin-bottom: 8px;">
+                <strong>Sipariş No:</strong> <span t-field="order.name"/><br/>
+                <strong>Tarih:</strong> <span t-field="order.create_date" t-options='{"format": "dd.MM.yyyy HH:mm"}'/><br/>
+                <strong>Fatura No:</strong> <span t-field="order.invoice_no"/><br/>
+                <strong>Ürün:</strong> <span t-field="order.product_name"/>
+            </div>
+
+            <div style="border-bottom: 1px dashed #999; margin: 5px 0;"/>
+
+            <!-- Müşteri ve Personel -->
+            <div style="margin-bottom: 8px;">
+                <strong>MÜŞTERİ &amp; PERSONEL</strong><br/>
+                Müşteri: <span t-field="order.customer_name"/><br/>
+                Telefon: <span t-field="order.customer_phone"/><br/>
+                Satış Pers: <span t-esc="order.sales_person or '-'"/><br/>
+                Terzi: <span t-esc="order.tailor_id.name or 'N/A'"/><br/>
+                Barkod: <span t-esc="order.product_code or order.product_barcode"/>
+            </div>
+
+            <div style="border-bottom: 1px dashed #999; margin: 5px 0;"/>
+
+            <!-- Yapılacak İşlemler -->
+            <div style="margin-bottom: 8px;">
+                <strong>YAPILACAK İŞLEMLER</strong><br/>
+                <div style="border-bottom: 1px dashed #ccc; margin: 3px 0;"/>
+                <t t-foreach="order.line_ids" t-as="line">
+                    <div style="display: flex; justify-content: space-between;">
+                        <span><t t-esc="line_index + 1"/>. <t t-esc="line.service_name"/></span>
+                        <span><t t-esc="'%.2f' % line.price"/> TL</span>
+                    </div>
+                </t>
+                <div style="border-bottom: 1px dashed #999; margin: 5px 0;"/>
+                <div style="text-align: right; font-weight: bold;">
+                    TOPLAM: <span t-esc="'%.2f' % order.total_price"/> TL
+                </div>
+            </div>
+
+            <!-- Notlar -->
+            <t t-if="order.notes">
+                <div style="border-bottom: 1px dashed #999; margin: 5px 0;"/>
+                <div style="margin-bottom: 8px;">
+                    <strong>NOT:</strong><br/>
+                    <span t-field="order.notes"/>
+                </div>
+            </t>
+
+            <div style="border-bottom: 1px dashed #999; margin: 5px 0;"/>
+
+            <!-- Alt Bilgi -->
+            <div style="text-align: center; margin-top: 10px; font-size: 10px;">
+                <p>Ürününüzü teslim alırken<br/>bu fişi getiriniz.</p>
+                <p style="font-weight: bold;">Teşekkür ederiz.</p>
+            </div>
+        </div>
+    </template>
+</odoo>

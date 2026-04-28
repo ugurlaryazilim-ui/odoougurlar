@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- ═══════════════ Service List View ═══════════════ -->
+    <record id="view_tailor_service_list" model="ir.ui.view">
+        <field name="name">ugurlar.tailor.service.list</field>
+        <field name="model">ugurlar.tailor.service</field>
+        <field name="arch" type="xml">
+            <list string="Terzi Hizmetleri" editable="bottom">
+                <field name="sequence" widget="handle"/>
+                <field name="name"/>
+                <field name="price"/>
+                <field name="active"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- ═══════════════ Service Form View ═══════════════ -->
+    <record id="view_tailor_service_form" model="ir.ui.view">
+        <field name="name">ugurlar.tailor.service.form</field>
+        <field name="model">ugurlar.tailor.service</field>
+        <field name="arch" type="xml">
+            <form string="Terzi Hizmeti">
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="name"/>
+                            <field name="price"/>
+                        </group>
+                        <group>
+                            <field name="sequence"/>
+                            <field name="active"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- ═══════════════ Service Search View ═══════════════ -->
+    <record id="view_tailor_service_search" model="ir.ui.view">
+        <field name="name">ugurlar.tailor.service.search</field>
+        <field name="model">ugurlar.tailor.service</field>
+        <field name="arch" type="xml">
+            <search string="Hizmet Ara">
+                <field name="name"/>
+                <filter string="Aktif" name="active" domain="[('active', '=', True)]"/>
+            </search>
+        </field>
+    </record>
+
+    <!-- ═══════════════ Service Action ═══════════════ -->
+    <record id="action_tailor_service" model="ir.actions.act_window">
+        <field name="name">Hizmetler</field>
+        <field name="res_model">ugurlar.tailor.service</field>
+        <field name="view_mode">list,form</field>
+        <field name="context">{'search_default_active': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                İlk terzi hizmetinizi ekleyin!
+            </p>
+            <p>Paça kısaltma, bel daraltma gibi terzi hizmetlerini tanımlayın.</p>
+        </field>
+    </record>
+</odoo>

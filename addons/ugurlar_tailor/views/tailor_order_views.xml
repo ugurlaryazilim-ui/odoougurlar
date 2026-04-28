@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- ═══════════════ Order List View ═══════════════ -->
+    <record id="view_tailor_order_list" model="ir.ui.view">
+        <field name="name">ugurlar.tailor.order.list</field>
+        <field name="model">ugurlar.tailor.order</field>
+        <field name="arch" type="xml">
+            <list string="Terzi Siparişleri" decoration-info="state == 'pending'" decoration-warning="state == 'in_progress'" decoration-success="state == 'completed'" decoration-muted="state == 'delivered'">
+                <field name="name"/>
+                <field name="invoice_no"/>
+                <field name="product_name"/>
+                <field name="customer_name"/>
+                <field name="tailor_id"/>
+                <field name="total_price"/>
+                <field name="state" widget="badge" decoration-info="state == 'pending'" decoration-warning="state == 'in_progress'" decoration-success="state == 'completed'" decoration-muted="state == 'delivered'"/>
+                <field name="create_date"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- ═══════════════ Order Form View ═══════════════ -->
+    <record id="view_tailor_order_form" model="ir.ui.view">
+        <field name="name">ugurlar.tailor.order.form</field>
+        <field name="model">ugurlar.tailor.order</field>
+        <field name="arch" type="xml">
+            <form string="Terzi Siparişi">
+                <header>
+                    <button name="action_send_to_tailor" string="Terziye Gönder" type="object" class="btn-primary" invisible="state != 'pending'"/>
+                    <button name="action_mark_completed" string="Hazır" type="object" class="btn-primary" invisible="state != 'in_progress'"/>
+                    <button name="action_mark_delivered" string="Teslim Edildi" type="object" class="btn-primary" invisible="state != 'completed'"/>
+                    <button name="action_reset_to_pending" string="Sıfırla" type="object" class="btn-secondary" invisible="state == 'pending'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="pending,in_progress,completed,delivered"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="name" readonly="1"/></h1>
+                    </div>
+                    <group>
+                        <group string="Fatura Bilgileri">
+                            <field name="invoice_no"/>
+                            <field name="product_barcode"/>
+                            <field name="product_code"/>
+                            <field name="product_name"/>
+                        </group>
+                        <group string="Müşteri Bilgileri">
+                            <field name="customer_name"/>
+                            <field name="customer_phone"/>
+                            <field name="sales_person"/>
+                        </group>
+                    </group>
+                    <group>
+                        <group string="Terzi">
+                            <field name="tailor_id"/>
+                        </group>
+                        <group string="Tarihler">
+                            <field name="completed_at"/>
+                            <field name="delivered_at"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Hizmetler" name="services">
+                            <field name="line_ids">
+                                <list editable="bottom">
+                                    <field name="service_id"/>
+                                    <field name="service_name" column_invisible="True"/>
+                                    <field name="price"/>
+                                </list>
+                            </field>
+                            <group class="oe_subtotal_footer">
+                                <field name="total_price" class="oe_subtotal_footer_separator"/>
+                            </group>
+                        </page>
+                        <page string="Notlar" name="notes">
+                            <field name="notes" placeholder="Sipariş hakkında notlar..."/>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <!-- ═══════════════ Order Search View ═══════════════ -->
+    <record id="view_tailor_order_search" model="ir.ui.view">
+        <field name="name">ugurlar.tailor.order.search</field>
+        <field name="model">ugurlar.tailor.order</field>
+        <field name="arch" type="xml">
+            <search string="Sipariş Ara">
+                <field name="name"/>
+                <field name="invoice_no"/>
+                <field name="customer_name"/>
+                <field name="product_barcode"/>
+                <field name="sales_person"/>
+                <field name="tailor_id"/>
+                <separator/>
+                <filter string="Bekliyor" name="pending" domain="[('state', '=', 'pending')]"/>
+                <filter string="Terzide" name="in_progress" domain="[('state', '=', 'in_progress')]"/>
+                <filter string="Hazır" name="completed" domain="[('state', '=', 'completed')]"/>
+                <filter string="Teslim" name="delivered" domain="[('state', '=', 'delivered')]"/>
+                <separator/>
+                <filter string="Bugün" name="today" domain="[('create_date', '&gt;=', (context_today()).strftime('%%Y-%%m-%%d'))]"/>
+                <separator/>
+                <group expand="0" string="Grupla">
+                    <filter string="Durum" name="group_state" context="{'group_by': 'state'}"/>
+                    <filter string="Terzi" name="group_tailor" context="{'group_by': 'tailor_id'}"/>
+                    <filter string="Satış Personeli" name="group_sales" context="{'group_by': 'sales_person'}"/>
+                    <filter string="Tarih" name="group_date" context="{'group_by': 'create_date:day'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- ═══════════════ Order Action ═══════════════ -->
+    <record id="action_tailor_order" model="ir.actions.act_window">
+        <field name="name">Siparişler</field>
+        <field name="res_model">ugurlar.tailor.order</field>
+        <field name="view_mode">list,form</field>
+        <field name="context">{'search_default_pending': 1, 'search_default_in_progress': 1, 'search_default_completed': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Henüz terzi siparişi yok
+            </p>
+            <p>Mobil arayüzden veya buradan yeni sipariş oluşturabilirsiniz.</p>
+        </field>
+    </record>
+</odoo>

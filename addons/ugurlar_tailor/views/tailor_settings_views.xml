@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- ═══════════════ Settings View ═══════════════ -->
+    <record id="view_tailor_settings" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.ugurlar.tailor</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app data-string="Terzi Takip" string="Terzi Takip" data-key="ugurlar_tailor">
+                    <block title="Nebim MSSQL Bağlantısı" name="tailor_mssql_settings">
+                        <setting string="SQL Server Bağlantısı" help="Terzi fatura verilerinin çekileceği Nebim SQL Server ayarları">
+                            <div class="content-group">
+                                <div class="row mt16">
+                                    <label for="tailor_mssql_server" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="tailor_mssql_server" placeholder="192.168.0.100"/>
+                                </div>
+                                <div class="row">
+                                    <label for="tailor_mssql_port" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="tailor_mssql_port"/>
+                                </div>
+                                <div class="row">
+                                    <label for="tailor_mssql_database" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="tailor_mssql_database" placeholder="NEBIM_DB"/>
+                                </div>
+                                <div class="row">
+                                    <label for="tailor_mssql_user" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="tailor_mssql_user" placeholder="sa"/>
+                                </div>
+                                <div class="row">
+                                    <label for="tailor_mssql_password" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="tailor_mssql_password" password="True"/>
+                                </div>
+                                <div class="row">
+                                    <label for="tailor_mssql_view_name" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="tailor_mssql_view_name" placeholder="vw_TerziFaturalar"/>
+                                </div>
+                            </div>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+</odoo>

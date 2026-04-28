@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- ═══════════════ Client Action (OWL Frontend) ═══════════════ -->
+    <record id="action_tailor_mobile" model="ir.actions.client">
+        <field name="name">Terzi Mobil</field>
+        <field name="tag">ugurlar_tailor.TailorAction</field>
+    </record>
+
+    <!-- ═══════════════ Root Menu ═══════════════ -->
+    <menuitem id="menu_tailor_root"
+              name="Terzi Takip"
+              web_icon="ugurlar_tailor,static/description/icon.png"
+              sequence="95"/>
+
+    <!-- ═══════════════ Mobil Giriş ═══════════════ -->
+    <menuitem id="menu_tailor_mobile"
+              name="Terzi Mobil"
+              parent="menu_tailor_root"
+              action="action_tailor_mobile"
+              sequence="5"/>
+
+    <!-- ═══════════════ Siparişler ═══════════════ -->
+    <menuitem id="menu_tailor_orders"
+              name="Siparişler"
+              parent="menu_tailor_root"
+              action="action_tailor_order"
+              sequence="10"/>
+
+    <!-- ═══════════════ Tanımlar ═══════════════ -->
+    <menuitem id="menu_tailor_config"
+              name="Tanımlar"
+              parent="menu_tailor_root"
+              sequence="50"/>
+
+    <menuitem id="menu_tailor_tailors"
+              name="Terziler"
+              parent="menu_tailor_config"
+              action="action_ugurlar_tailor"
+              sequence="10"/>
+
+    <menuitem id="menu_tailor_services"
+              name="Hizmetler"
+              parent="menu_tailor_config"
+              action="action_tailor_service"
+              sequence="20"/>
+</odoo>

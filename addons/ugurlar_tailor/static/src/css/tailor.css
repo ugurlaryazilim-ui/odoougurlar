@@ -1,0 +1,361 @@
+/* ═══════════════════════════════════════════════
+   Terzi Takip — OWL Frontend Styles
+   ═══════════════════════════════════════════════ */
+
+:root {
+    --tailor-primary: #6366f1;
+    --tailor-primary-dark: #4f46e5;
+    --tailor-success: #10b981;
+    --tailor-success-dark: #059669;
+    --tailor-warning: #f59e0b;
+    --tailor-danger: #ef4444;
+    --tailor-bg: #f8fafc;
+    --tailor-card-bg: #ffffff;
+    --tailor-text: #1e293b;
+    --tailor-text-secondary: #64748b;
+    --tailor-border: #e2e8f0;
+    --tailor-radius: 12px;
+    --tailor-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    --tailor-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.tailor-app {
+    background: var(--tailor-bg);
+    min-height: 100vh;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: var(--tailor-text);
+}
+
+/* ── Screen ── */
+.tailor-screen {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 16px;
+}
+
+/* ── Header ── */
+.tailor-header {
+    text-align: center;
+    padding: 32px 16px;
+}
+
+.tailor-header h1 {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 0 0 8px;
+    color: var(--tailor-primary);
+}
+
+.tailor-subtitle {
+    color: var(--tailor-text-secondary);
+    font-size: 14px;
+    margin: 0;
+}
+
+/* ── Menu Grid ── */
+.tailor-menu-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    padding: 16px 0;
+}
+
+.tailor-menu-card {
+    background: var(--tailor-card-bg);
+    border-radius: var(--tailor-radius);
+    padding: 24px;
+    text-align: center;
+    cursor: pointer;
+    box-shadow: var(--tailor-shadow);
+    transition: transform 0.2s, box-shadow 0.2s;
+    border: 2px solid transparent;
+}
+
+.tailor-menu-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--tailor-shadow-lg);
+}
+
+.tailor-card-primary { border-color: var(--tailor-primary); }
+.tailor-card-secondary { border-color: var(--tailor-success); }
+
+.tailor-card-icon {
+    font-size: 40px;
+    margin-bottom: 12px;
+}
+
+.tailor-card-title {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.tailor-card-desc {
+    font-size: 13px;
+    color: var(--tailor-text-secondary);
+}
+
+/* ── Toolbar ── */
+.tailor-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--tailor-border);
+    margin-bottom: 16px;
+}
+
+.tailor-toolbar h2 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+}
+
+/* ── Buttons ── */
+.tailor-btn {
+    border: none;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+    white-space: nowrap;
+}
+
+.tailor-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.tailor-btn-primary { background: var(--tailor-primary); color: #fff; }
+.tailor-btn-primary:hover:not(:disabled) { background: var(--tailor-primary-dark); }
+.tailor-btn-success { background: var(--tailor-success); color: #fff; }
+.tailor-btn-success:hover:not(:disabled) { background: var(--tailor-success-dark); }
+.tailor-btn-back { background: var(--tailor-border); color: var(--tailor-text); }
+.tailor-btn-back:hover { background: #cbd5e1; }
+.tailor-btn-sm { padding: 6px 12px; font-size: 12px; }
+.tailor-btn-lg { padding: 14px 24px; font-size: 16px; width: 100%; }
+
+/* ── Inputs ── */
+.tailor-input, .tailor-select {
+    border: 1px solid var(--tailor-border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    width: 100%;
+    box-sizing: border-box;
+    background: #fff;
+}
+
+.tailor-input:focus, .tailor-select:focus {
+    outline: none;
+    border-color: var(--tailor-primary);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.tailor-input-sm { padding: 6px 10px; font-size: 13px; }
+
+/* ── Search Box ── */
+.tailor-search-box {
+    display: flex;
+    gap: 8px;
+}
+
+.tailor-search-box .tailor-input { flex: 1; }
+
+/* ── Invoice List ── */
+.tailor-invoice-list {
+    margin-top: 16px;
+}
+
+.tailor-invoice-card {
+    background: var(--tailor-card-bg);
+    border: 1px solid var(--tailor-border);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.tailor-invoice-card:hover { background: #f1f5f9; }
+
+.tailor-invoice-meta {
+    font-size: 13px;
+    color: var(--tailor-text-secondary);
+}
+
+/* ── Invoice Info Bar ── */
+.tailor-invoice-info {
+    background: #eef2ff;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 16px;
+    font-size: 13px;
+}
+
+/* ── Item Cards ── */
+.tailor-item-card {
+    background: var(--tailor-card-bg);
+    border: 1px solid var(--tailor-border);
+    border-radius: var(--tailor-radius);
+    padding: 16px;
+    margin-bottom: 12px;
+}
+
+.tailor-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.tailor-item-barcode {
+    font-size: 12px;
+    color: var(--tailor-text-secondary);
+}
+
+.tailor-item-row {
+    margin-bottom: 10px;
+}
+
+.tailor-item-row label {
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 4px;
+    display: block;
+}
+
+/* ── Service Grid ── */
+.tailor-service-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.tailor-service-check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+}
+
+.tailor-service-check:hover { background: #f1f5f9; }
+
+.tailor-item-total {
+    text-align: right;
+    font-size: 15px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--tailor-border);
+}
+
+/* ── Submit Bar ── */
+.tailor-submit-bar {
+    position: sticky;
+    bottom: 0;
+    padding: 16px 0;
+    background: var(--tailor-bg);
+}
+
+/* ── Filters ── */
+.tailor-filters {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.tailor-filters .tailor-input { flex: 1; }
+.tailor-filters .tailor-select { width: 140px; flex-shrink: 0; }
+
+/* ── Order Cards ── */
+.tailor-order-card {
+    background: var(--tailor-card-bg);
+    border: 1px solid var(--tailor-border);
+    border-radius: var(--tailor-radius);
+    padding: 14px;
+    margin-bottom: 10px;
+    box-shadow: var(--tailor-shadow);
+}
+
+.tailor-order-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.tailor-order-body {
+    font-size: 13px;
+    color: var(--tailor-text-secondary);
+    line-height: 1.6;
+}
+
+.tailor-order-services {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+}
+
+.tailor-service-tag {
+    background: #eef2ff;
+    color: var(--tailor-primary);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.tailor-order-actions {
+    margin-top: 10px;
+    text-align: right;
+}
+
+/* ── Badges ── */
+.tailor-badge {
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.badge-pending { background: #dbeafe; color: #1d4ed8; }
+.badge-in-progress { background: #fef3c7; color: #92400e; }
+.badge-completed { background: #d1fae5; color: #065f46; }
+.badge-delivered { background: #e2e8f0; color: #475569; }
+
+/* ── Pagination ── */
+.tailor-pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 0;
+    font-size: 14px;
+}
+
+/* ── Utils ── */
+.tailor-loading, .tailor-empty {
+    text-align: center;
+    padding: 40px;
+    color: var(--tailor-text-secondary);
+    font-size: 15px;
+}
+
+/* ── Mobile Responsive ── */
+@media (max-width: 600px) {
+    .tailor-menu-grid { grid-template-columns: 1fr; }
+    .tailor-service-grid { grid-template-columns: 1fr; }
+    .tailor-filters { flex-direction: column; }
+    .tailor-filters .tailor-select { width: 100%; }
+    .tailor-search-box { flex-direction: column; }
+}

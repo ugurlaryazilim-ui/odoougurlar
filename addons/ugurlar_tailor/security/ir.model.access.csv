@@ -1,0 +1,11 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_tailor_user,ugurlar.tailor.user,model_ugurlar_tailor,ugurlar_tailor.group_tailor_user,1,0,0,0
+access_tailor_manager,ugurlar.tailor.manager,model_ugurlar_tailor,ugurlar_tailor.group_tailor_manager,1,1,1,1
+access_tailor_service_user,ugurlar.tailor.service.user,model_ugurlar_tailor_service,ugurlar_tailor.group_tailor_user,1,0,0,0
+access_tailor_service_manager,ugurlar.tailor.service.manager,model_ugurlar_tailor_service,ugurlar_tailor.group_tailor_manager,1,1,1,1
+access_tailor_price_user,ugurlar.tailor.price.user,model_ugurlar_tailor_price,ugurlar_tailor.group_tailor_user,1,0,0,0
+access_tailor_price_manager,ugurlar.tailor.price.manager,model_ugurlar_tailor_price,ugurlar_tailor.group_tailor_manager,1,1,1,1
+access_tailor_order_user,ugurlar.tailor.order.user,model_ugurlar_tailor_order,ugurlar_tailor.group_tailor_user,1,1,1,0
+access_tailor_order_manager,ugurlar.tailor.order.manager,model_ugurlar_tailor_order,ugurlar_tailor.group_tailor_manager,1,1,1,1
+access_tailor_order_line_user,ugurlar.tailor.order.line.user,model_ugurlar_tailor_order_line,ugurlar_tailor.group_tailor_user,1,1,1,0
+access_tailor_order_line_manager,ugurlar.tailor.order.line.manager,model_ugurlar_tailor_order_line,ugurlar_tailor.group_tailor_manager,1,1,1,1
