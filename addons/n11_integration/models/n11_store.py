@@ -1,7 +1,8 @@
-# -*- coding: utf-8 -*-
+import logging
+from datetime import datetime, timedelta
+
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
-import logging
 
 _logger = logging.getLogger(__name__)
 
@@ -15,8 +16,8 @@ class N11Store(models.Model):
     active = fields.Boolean(default=True)
 
     # API Credentials
-    n11_app_key = fields.Char(string='App Key', help="N11 API App Key", required=True)
-    n11_app_secret = fields.Char(string='App Secret', help="N11 API App Secret", required=True)
+    n11_app_key = fields.Char(string='App Key', help="N11 API App Key", required=True, groups='base.group_system')
+    n11_app_secret = fields.Char(string='App Secret', help="N11 API App Secret", required=True, groups='base.group_system')
 
     # ─── Senkronizasyon Ayarları ─────────────────────────
     auto_sync = fields.Boolean(string='Otomatik Sipariş Senkronizasyonu', default=True)
@@ -29,7 +30,7 @@ class N11Store(models.Model):
     auto_cancel = fields.Boolean(string='İptalleri Otomatik İptal Et', default=True)
 
     # ─── Müşteri Ayarları ────────────────────────────────
-    customer_prefix = fields.Char(string='Müşteri Kodu Ön Ek', default='PTT-', help='N11 müşterilerinin kodlarına eklenen ek')
+    customer_prefix = fields.Char(string='Müşteri Kodu Ön Ek', default='N11-', help='N11 müşterilerinin kodlarına eklenen ek')
     skip_customer_email = fields.Boolean(string='Mail Adresi İşlenmesin', default=False, help='Müşteri oluşturulurken e-posta adresi kaydedilmez (KVKK)')
 
     # ─── İade Ayarları ───────────────────────────────────
@@ -50,35 +51,48 @@ class N11Store(models.Model):
     cargo_unit_price = fields.Float(string='Kargo Birim Fiyatı (desi)', default=110.39, digits=(10, 2))
     last_financial_sync = fields.Datetime(string='Son Finansal Senkron', readonly=True)
 
+    # ─── İlişkiler ───────────────────────────────────────
+    order_ids = fields.One2many('n11.order', 'store_id', string='Siparişler')
+    settlement_ids = fields.One2many('n11.settlement', 'store_id', string='Finansal İşlemler')
+
     # ─── Counts ──────────────────────────────────────────
     order_count = fields.Integer(string='Sipariş Sayısı', compute='_compute_order_count')
     settlement_count = fields.Integer(string='Finansal Kayıt', compute='_compute_counts')
 
+    @api.depends('order_ids')
     def _compute_order_count(self):
+        data = self.env['n11.order'].sudo()._read_group(
+            [('store_id', 'in', self.ids)],
+            groupby=['store_id'], aggregates=['__count'],
+        )
+        counts = {store.id: count for store, count in data}
         for store in self:
-            store.order_count = self.env['n11.order'].search_count([('store_id', '=', store.id)])
+            store.order_count = counts.get(store.id, 0)
 
+    @api.depends('settlement_ids')
     def _compute_counts(self):
+        data = self.env['n11.settlement'].sudo()._read_group(
+            [('store_id', 'in', self.ids)],
+            groupby=['store_id'], aggregates=['__count'],
+        )
+        counts = {store.id: count for store, count in data}
         for store in self:
-            store.settlement_count = self.env['n11.settlement'].search_count([('store_id', '=', store.id)])
+            store.settlement_count = counts.get(store.id, 0)
 
     def get_api(self):
         """N11Api client objesini oluştur ve döndür."""
         self.ensure_one()
         if not self.n11_app_key or not self.n11_app_secret:
             raise UserError(_("N11 App Key ve App Secret boş olamaz."))
-            
-        api = self.env['n11.api'].sudo().create_api(self)
-        return api
+        from .n11_api import N11APIClient
+        return N11APIClient(self)
 
     def action_test_connection(self):
         """Bağlantıyı ve yetkilendirmeyi sına."""
         self.ensure_one()
         try:
-            from datetime import datetime, timedelta
             api_client = self.get_api()
             
-            # orders search method takes startDate and endDate, max 40 days
             start_date = datetime.now() - timedelta(days=1)
             end_date = datetime.now()
             
@@ -117,95 +131,6 @@ class N11Store(models.Model):
         }
 
     def action_sync_financials(self):
+        """N11 için finansal mutabakat servisi henüz desteklenmiyor."""
         self.ensure_one()
         raise UserError(_("N11 için finansal mutabakat servisi bu sürümde desteklenmemektedir. Lütfen paneli kullanınız."))
-
-        data_list = res.get('data', [])
-        
-        # N11 data is sometimes inside {'data': [...]} or just a list
-        if isinstance(data_list, dict) and 'data' in data_list:
-            data_list = data_list['data']
-        elif isinstance(data_list, dict) and 'paymentAgreements' in data_list:
-            data_list = data_list['paymentAgreements']
-
-        if not data_list or not isinstance(data_list, list):
-            return {
-                'type': 'ir.actions.client',
-                'tag': 'display_notification',
-                'params': {
-                    'title': _('Finansal Senkronizasyon'),
-                    'message': 'Belirtilen tarih aralığında yeni finansal işlem (Payment Agreement) bulunamadı.',
-                    'sticky': False,
-                    'type': 'info',
-                }
-            }
-
-        created = 0
-        updated = 0
-        settlement_model = self.env['n11.settlement']
-
-        for item in data_list:
-            trx_id = str(item.get('id') or item.get('paymentAgreementId') or '')
-            order_id = item.get('orderId') or ''
-            
-            # Bazı kayıtlarda id olmayabiliyor, trx_id ve order_id birlikte kontrol edelim
-            domain = [('store_id', '=', self.id)]
-            if trx_id:
-                domain.append(('trx_id', '=', trx_id))
-            elif order_id:
-                domain.append(('order_id', '=', order_id))
-            else:
-                continue # no identifier
-
-            existing = settlement_model.search(domain, limit=1)
-            
-            # Tarih dönüşümleri
-            trx_date_str = item.get('transactionDate') or item.get('agreementDate')
-            trx_date = False
-            if trx_date_str:
-                try:
-                    trx_date = datetime.strptime(trx_date_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
-                except:
-                    pass
-
-            transferred_date_str = item.get('allowanceDate') or item.get('paymentDate')
-            transferred_date = False
-            if transferred_date_str:
-                try:
-                    transferred_date = datetime.strptime(transferred_date_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
-                except:
-                    pass
-
-            vals = {
-                'store_id': self.id,
-                'order_id': order_id,
-                'trx_id': trx_id,
-                'amount': item.get('totalAmount') or item.get('amount') or 0.0,
-                'installment_number': item.get('installmentNumber', 1),
-                'commission_amount': item.get('commissionAmount', 0.0),
-                'coupon_discount': item.get('couponDiscount', 0.0),
-                'status': item.get('status') or item.get('paymentStatus') or 'Unknown',
-                'transaction_date': trx_date,
-                'transferred_date': transferred_date,
-                'raw_data': json.dumps(item, ensure_ascii=False)
-            }
-
-            if existing:
-                existing.write(vals)
-                updated += 1
-            else:
-                settlement_model.create(vals)
-                created += 1
-
-        self.sudo().write({'last_financial_sync': fields.Datetime.now()})
-
-        return {
-            'type': 'ir.actions.client',
-            'tag': 'display_notification',
-            'params': {
-                'title': _('Finansal Senkronizasyon Başarılı'),
-                'message': f"Yeni İşlem: {created}\nGüncellenen: {updated}",
-                'sticky': False,
-                'type': 'success',
-            }
-        }

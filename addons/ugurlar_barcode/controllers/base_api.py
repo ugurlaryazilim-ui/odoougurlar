@@ -57,11 +57,13 @@ class BarcodeApiBase(http.Controller):
         Product = request.env['product.product'].sudo()
         product = Product.search([('barcode', '=', barcode)], limit=1)
         if not product:
-            # Performans Optimizasyonu: Sadece barkodu içeren ürünleri DB'den çek
-            products = Product.search([('nebim_barcode', 'ilike', barcode)])
-            for p in products:
-                if barcode in (p.nebim_barcode or '').split(','):
-                    return p
+            # nebim_barcode: virgülle ayrılmış çoklu barkod alanı
+            product = Product.search([('nebim_barcode', '=', barcode)], limit=1)
+            if not product:
+                products = Product.search([('nebim_barcode', 'ilike', barcode)])
+                for p in products:
+                    if barcode in (p.nebim_barcode or '').split(','):
+                        return p
         if not product:
             product = Product.search([('default_code', '=', barcode)], limit=1)
         return product
@@ -83,21 +85,37 @@ class BarcodeApiBase(http.Controller):
         if cache is not None and tmpl.id in cache:
             return cache[tmpl.id]
         marka = ''
-        for line in tmpl.attribute_line_ids:
-            if line.attribute_id.name == 'Marka' and line.attribute_id.create_variant == 'no_variant':
-                marka = ', '.join(line.value_ids.mapped('name'))
-                break
+        marka_line = tmpl.attribute_line_ids.filtered(
+            lambda l: l.attribute_id.name == 'Marka' and l.attribute_id.create_variant == 'no_variant'
+        )
+        if marka_line:
+            marka = ', '.join(marka_line[0].value_ids.mapped('name'))
         if cache is not None:
             cache[tmpl.id] = marka
         return marka
 
     # ═══ GÜVENLİ STOK İŞLEMLERİ ═══
 
-    def _safe_update_quant(self, product, location, qty_delta):
-        """Stok miktarını güvenli şekilde güncelle.
+    def _lock_quant(self, product_id, location_id, positive_only=False):
+        """Row-level lock al ve quant id + miktarını döndür.
 
-        Odoo'nun _update_available_quantity API'sini kullanır.
-        Concurrency lock ile race-condition önlenir.
+        FOR UPDATE concurrency için gerekli — ORM'de doğrudan karşılığı yok.
+        Sadece lock + id çekmek için raw SQL, geri kalan ORM ile yapılır.
+
+        Returns:
+            (quant_id, quantity) veya None
+        """
+        sql = ("SELECT id, quantity FROM stock_quant "
+               "WHERE product_id=%s AND location_id=%s")
+        params = [product_id, location_id]
+        if positive_only:
+            sql += " AND quantity > 0"
+        sql += " FOR UPDATE"
+        request.env.cr.execute(sql, params)
+        return request.env.cr.fetchone()
+
+    def _safe_update_quant(self, product, location, qty_delta):
+        """Stok miktarını güvenli şekilde güncelle (concurrency-safe, ORM tabanlı).
 
         Args:
             product: product.product recordset
@@ -109,21 +127,16 @@ class BarcodeApiBase(http.Controller):
         """
         StockQuant = request.env['stock.quant'].sudo()
 
-        # Concurrency Lock
-        request.env.cr.execute(
-            "SELECT id, quantity FROM stock_quant WHERE product_id=%s AND location_id=%s FOR UPDATE",
-            (product.id, location.id)
-        )
-        row = request.env.cr.fetchone()
+        row = self._lock_quant(product.id, location.id)
 
         if row:
             existing = StockQuant.browse(row[0])
             new_qty = existing.quantity + qty_delta
             if new_qty <= 0:
-                existing.sudo().unlink()
+                existing.unlink()
                 return 0
             else:
-                existing.sudo().write({'quantity': new_qty})
+                existing.write({'quantity': new_qty})
                 return new_qty
         elif qty_delta > 0:
             StockQuant.create({
@@ -135,9 +148,7 @@ class BarcodeApiBase(http.Controller):
         return 0
 
     def _safe_move_quant(self, product, source_loc, target_loc, quantity):
-        """Ürünü bir raftan diğerine güvenli şekilde taşı.
-
-        Her iki taraf da concurrency lock ile korunur.
+        """Ürünü bir raftan diğerine güvenli şekilde taşı (concurrency-safe, ORM tabanlı).
 
         Args:
             product: product.product
@@ -148,12 +159,10 @@ class BarcodeApiBase(http.Controller):
         Returns:
             (success: bool, error_msg: str or None)
         """
+        StockQuant = request.env['stock.quant'].sudo()
+
         # Kaynak kontrol ve lock
-        request.env.cr.execute(
-            "SELECT id, quantity FROM stock_quant WHERE product_id=%s AND location_id=%s AND quantity > 0 FOR UPDATE",
-            (product.id, source_loc.id)
-        )
-        source_row = request.env.cr.fetchone()
+        source_row = self._lock_quant(product.id, source_loc.id, positive_only=True)
 
         if not source_row:
             return False, f'{product.name} kaynak rafta bulunamadı'
@@ -162,7 +171,6 @@ class BarcodeApiBase(http.Controller):
         if source_qty < quantity:
             return False, f'Yetersiz stok! Kaynak: {source_qty}, İstenen: {quantity}'
 
-        StockQuant = request.env['stock.quant'].sudo()
         source_quant = StockQuant.browse(source_row[0])
 
         # Kaynaktan düş
@@ -173,11 +181,7 @@ class BarcodeApiBase(http.Controller):
             source_quant.write({'quantity': new_source})
 
         # Hedefe ekle (lock ile)
-        request.env.cr.execute(
-            "SELECT id, quantity FROM stock_quant WHERE product_id=%s AND location_id=%s FOR UPDATE",
-            (product.id, target_loc.id)
-        )
-        target_row = request.env.cr.fetchone()
+        target_row = self._lock_quant(product.id, target_loc.id)
 
         if target_row:
             target_quant = StockQuant.browse(target_row[0])
@@ -190,4 +194,14 @@ class BarcodeApiBase(http.Controller):
             })
 
         return True, None
+
+    def _log_chatter(self, record, body, subtype='mail.mt_note'):
+        """Kayıt chatter'ına bildirim yaz (güvenli)."""
+        try:
+            record.sudo().message_post(
+                body=body, message_type='notification',
+                subtype_xmlid=subtype)
+        except Exception as e:
+            _logger.warning('Chatter log hatası: %s', e)
+
 

@@ -35,15 +35,21 @@ class SaleOrder(models.Model):
 
         # Pazaryeri siparişi mi kontrol et
         marketplace_name = None
-        if hasattr(order, 'trendyol_order_id') and order.trendyol_order_id:
-            marketplace_name = 'Trendyol'
-        elif hasattr(order, 'hb_order_id') and order.hb_order_id:
-            marketplace_name = 'Hepsiburada'
-        elif hasattr(order, 'amazon_order_id') and order.amazon_order_id:
-            marketplace_name = 'Amazon'
-        elif hasattr(order, 'pazarama_order_id') and order.pazarama_order_id:
-            marketplace_name = 'Pazarama'
-        
+        _mp_fields = [
+            ('trendyol_order_id', 'Trendyol'),
+            ('hb_order_id', 'Hepsiburada'),
+            ('amazon_order_id', 'Amazon'),
+            ('pazarama_order_id', 'Pazarama'),
+            ('n11_order_id', 'N11'),
+            ('flo_order_id', 'Flo'),
+            ('idefix_order_id', 'Idefix'),
+            ('pttavm_order_id', 'PttAvm'),
+        ]
+        for field, name in _mp_fields:
+            if hasattr(order, field) and getattr(order, field):
+                marketplace_name = name
+                break
+
         if not marketplace_name:
             return
 

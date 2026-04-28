@@ -4,7 +4,7 @@ import pytz
 from datetime import datetime, timedelta, time as dt_time
 
 from odoo import api, fields, models, _
-from odoo.exceptions import UserError
+from odoo.exceptions import UserError, ValidationError
 
 IST = pytz.timezone('Europe/Istanbul')
 
@@ -72,6 +72,7 @@ class PickingSchedule(models.Model):
                 _logger.exception("Toplama zamanlayıcı hatası [%s]: %s",
                                   schedule.name, e)
 
+    @api.private
     def _check_and_create_batch(self):
         """Saat geldi mi kontrol et, geldiyse batch oluştur."""
         self.ensure_one()
@@ -326,6 +327,11 @@ class PickingScheduleLine(models.Model):
     _description = 'Toplama Saati'
     _order = 'hour, minute'
 
+    _unique_time = models.Constraint(
+        'UNIQUE(schedule_id, hour, minute)',
+        'Aynı saat/dakika kombinasyonu zaten mevcut!',
+    )
+
     schedule_id = fields.Many2one(
         'ugurlar.picking.schedule', string='Plan',
         required=True, ondelete='cascade',
@@ -345,10 +351,6 @@ class PickingScheduleLine(models.Model):
     def _check_time_range(self):
         for rec in self:
             if not (0 <= rec.hour <= 23):
-                raise UserError(_('Saat 0-23 arasında olmalı'))
+                raise ValidationError(_('Saat 0-23 arasında olmalı'))
             if not (0 <= rec.minute <= 59):
-                raise UserError(_('Dakika 0-59 arasında olmalı'))
-
-
-
-
+                raise ValidationError(_('Dakika 0-59 arasında olmalı'))

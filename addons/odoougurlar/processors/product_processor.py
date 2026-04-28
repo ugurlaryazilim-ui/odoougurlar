@@ -54,6 +54,7 @@ class ProductProcessor(models.AbstractModel):
     # =================================================================
     #  Cache
     # =================================================================
+    @api.private
     def _init_cache(self):
         """Batch başında 1 kez çağrılır — tüm lookup'ları _CACHE'e yükler."""
         global _CACHE
@@ -98,6 +99,7 @@ class ProductProcessor(models.AbstractModel):
             len(_CACHE['barcodes']),
         )
 
+    @api.private
     def _ensure_cache(self):
         """Cache yoksa oluştur (test butonu için)."""
         if not _CACHE.get('loaded'):
@@ -137,6 +139,7 @@ class ProductProcessor(models.AbstractModel):
 
         return stats
 
+    @api.private
     def _process_product_group(self, item_code, variants):
         """Bir ItemCode → 1 template + N varyant."""
         self._ensure_cache()
@@ -225,6 +228,7 @@ class ProductProcessor(models.AbstractModel):
     # =================================================================
     #  ProductAtt Nitelikleri
     # =================================================================
+    @api.private
     def _sync_product_attributes(self, template, nebim_item):
         """ProductAtt01-20 → no_variant nitelikler."""
         for json_field, attr_name in self.PRODUCT_ATT_MAP.items():
@@ -239,6 +243,7 @@ class ProductProcessor(models.AbstractModel):
     # =================================================================
     #  Attribute Line (Cache'li)
     # =================================================================
+    @api.private
     def _sync_attribute_line(self, template, attr_name, values, create_variant='always'):
         """Template'e attribute line ekler/günceller — cache ile 0 sorgu."""
         global _CACHE
@@ -302,6 +307,7 @@ class ProductProcessor(models.AbstractModel):
     # =================================================================
     #  Varyant Detay (Barcode cache'li)
     # =================================================================
+    @api.private
     def _map_variant_details(self, template, nebim_variants):
         """Varyantlara ItemSku, Barcode eşler — barcode cache ile 0 sorgu."""
         global _CACHE
@@ -354,6 +360,7 @@ class ProductProcessor(models.AbstractModel):
                     else:
                         raise
 
+    @api.private
     def _find_variant(self, template, color_name, size_name):
         """Renk ve bedene göre doğru varyantı bulur."""
         variants = template.product_variant_ids
@@ -375,6 +382,7 @@ class ProductProcessor(models.AbstractModel):
     # =================================================================
     #  Kategori + Vergi (Cache'li)
     # =================================================================
+    @api.private
     def _cached_category(self, category_name):
         """Kategori: cache'den al veya oluştur."""
         global _CACHE
@@ -386,6 +394,7 @@ class ProductProcessor(models.AbstractModel):
             _CACHE['categs'][category_name] = categ
         return categ
 
+    @api.private
     def _cached_taxes(self, vat_rate):
         """KDV: cache'den al veya oluştur."""
         global _CACHE
@@ -422,6 +431,7 @@ class ProductProcessor(models.AbstractModel):
 
         return sale_tax, purchase_tax
 
+    @api.private
     def _cached_tax_group(self, rate):
         """Vergi grubu: cache'den al veya oluştur."""
         global _CACHE

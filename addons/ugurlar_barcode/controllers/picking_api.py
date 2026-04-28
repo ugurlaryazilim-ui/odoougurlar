@@ -14,7 +14,7 @@ class PickingApiController(BarcodeApiBase):
     """Sipariş toplama API'leri."""
 
     # ─── SİPARİŞ TOPLAMA — LİSTE ─────────────────────────
-    @http.route('/ugurlar_barcode/api/picking_list', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/picking_list', type='json', auth='user')
     def picking_list(self, **kw):
         """Bekleyen toplama siparişlerini listele."""
         pickings = request.env['stock.picking'].sudo().search([
@@ -37,7 +37,7 @@ class PickingApiController(BarcodeApiBase):
         return {'pickings': result, 'total': len(result)}
 
     # ─── SİPARİŞ TOPLAMA — DETAY ─────────────────────────
-    @http.route('/ugurlar_barcode/api/picking_detail', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/picking_detail', type='json', auth='user')
     def picking_detail(self, picking_id=0, **kw):
         """Toplama siparişi detayı — ürün satırları."""
         picking = request.env['stock.picking'].sudo().browse(int(picking_id))
@@ -70,7 +70,7 @@ class PickingApiController(BarcodeApiBase):
         }
 
     # ─── SİPARİŞ TOPLAMA — ÜRÜN TARA ─────────────────────
-    @http.route('/ugurlar_barcode/api/picking_scan', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/picking_scan', type='json', auth='user')
     def picking_scan(self, picking_id=0, barcode='', quantity=1, **kw):
         """Toplama sırasında ürün barkodu tara → qty artır."""
         # Duplicate guard: aynı barkod 500ms içinde tekrar taranırsa atla
@@ -128,7 +128,7 @@ class PickingApiController(BarcodeApiBase):
         }
 
     # ─── SİPARİŞ TOPLAMA — DOĞRULA ──────────────────────
-    @http.route('/ugurlar_barcode/api/picking_validate', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/picking_validate', type='json', auth='user')
     def picking_validate(self, picking_id=0, **kw):
         """Toplama tamamlandı → siparişi doğrula."""
         picking = request.env['stock.picking'].sudo().browse(int(picking_id))

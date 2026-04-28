@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+
 """Trendyol sipariş senkronizasyon logic'i — API'den çekme, işleme, güncelleme."""
 import json
 import logging
@@ -161,6 +161,7 @@ class TrendyolOrderSync(models.Model):
             'errors': error_count,
         }
 
+    @api.private
     def _sync_cancelled_orders(self, api, store, start_date=None):
         """İptal edilen siparişleri senkronize et (sayfalama ile)."""
         updated = 0
@@ -190,6 +191,7 @@ class TrendyolOrderSync(models.Model):
 
         return {'updated': updated}
 
+    @api.private
     def _sync_returned_orders(self, api, store, start_date=None):
         """İade edilen siparişleri senkronize et."""
         created = 0
@@ -222,6 +224,7 @@ class TrendyolOrderSync(models.Model):
 
         return {'created': created, 'updated': updated}
 
+    @api.private
     def _cancel_odoo_order(self, trendyol_order, store=None):
         """Odoo siparişini iptal et."""
         if store and not store.auto_cancel:

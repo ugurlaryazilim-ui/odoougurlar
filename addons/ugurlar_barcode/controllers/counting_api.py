@@ -15,7 +15,7 @@ class CountingApiController(BarcodeApiBase):
     """Sayım API'leri."""
 
     # ─── SAYIM KAYDET ────────────────────────────────────
-    @http.route('/ugurlar_barcode/api/count_save', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/count_save', type='json', auth='user')
     def count_save(self, shelf_barcode='', items=None, **kw):
         """Sayım kaydet: raf barkodu + [{barcode, quantity}]."""
         if not shelf_barcode or not items:
@@ -99,7 +99,7 @@ class CountingApiController(BarcodeApiBase):
         }
 
     # ─── SAYIM LİSTESİ (HamurLabs tarzı geçmiş) ─────────
-    @http.route('/ugurlar_barcode/api/count_list', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/count_list', type='json', auth='user')
     def count_list(self, days=30, **kw):
         """Geçmiş sayımları listele — raf bazında gruplu."""
         date_from = datetime.now() - timedelta(days=int(days))

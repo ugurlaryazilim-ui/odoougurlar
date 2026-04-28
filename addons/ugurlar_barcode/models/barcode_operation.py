@@ -34,13 +34,13 @@ class BarcodeOperation(models.Model):
         ('error', 'Hata'),
     ], string='Durum', default='done')
 
-    @api.model
-    def _cron_cleanup_old_operations(self, days=90):
-        """90 günden eski operasyon kayıtlarını temizle.
+    @api.autovacuum
+    def _gc_old_operations(self):
+        """Eski operasyon kayıtlarını otomatik temizle (Odoo autovacuum).
 
-        Sadece read-only operasyonları (search, shelf_search, shelf_control)
-        siler. Yazma operasyonları (putaway, remove, counting vb.) korunur.
+        Read-only operasyonlar 90 gün, yazma operasyonları 180 gün sonra silinir.
         """
+        days = 90
         cutoff = fields.Datetime.now() - timedelta(days=days)
 
         # Read-only operasyonlar: güvenle silinebilir

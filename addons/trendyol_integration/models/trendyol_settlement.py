@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 import logging
+from collections import defaultdict
 
 from datetime import datetime, timedelta, timezone
 
@@ -65,10 +65,10 @@ class TrendyolSettlement(models.Model):
     payment_date = fields.Datetime(string='Ödeme Tarihi', readonly=True)
     payment_period = fields.Integer(string='Vade (Gün)', readonly=True)
 
-    _sql_constraints = [
-        ('trendyol_id_source_unique', 'unique(trendyol_id, source, store_id)',
-         'Bu finansal işlem zaten kayıtlı!'),
-    ]
+    _unique_tx = models.Constraint(
+        'UNIQUE(trendyol_id, source, store_id)',
+        'Bu finansal işlem zaten kayıtlı!',
+    )
 
     @api.depends('debt', 'credit')
     def _compute_net(self):
@@ -113,6 +113,7 @@ class TrendyolSettlement(models.Model):
         (['deduction'], 'platform_fee'),
     ]
 
+    @api.private
     def _classify_transaction_type(self, raw_type, description=''):
         """Ham Trendyol işlem türünü sınıflandırmaya çevir."""
         raw = (raw_type or '').strip()
@@ -144,6 +145,7 @@ class TrendyolSettlement(models.Model):
     # SİPARİŞ EŞLEŞTİRME
     # ═══════════════════════════════════════════════════════
 
+    @api.private
     def _find_order(self, store, package_id='', order_number=''):
         """Sipariş eşleştirme: önce shipmentPackageId, sonra orderNumber."""
         TrendyolOrder = self.env['trendyol.order']
@@ -224,6 +226,7 @@ class TrendyolSettlement(models.Model):
             'error_details': '\n'.join(errors),
         }
 
+    @api.private
     def _fetch_paginated_settlements(self, api, start_date, end_date, types, store):
         """Sayfalama ile settlements verisi çek."""
         created = 0
@@ -249,6 +252,7 @@ class TrendyolSettlement(models.Model):
                         created += 1
         return created
 
+    @api.private
     def _fetch_paginated_otherfinancials(self, api, start_date, end_date, tx_type, store):
         """Sayfalama ile otherfinancials verisi çek."""
         created = 0
@@ -275,6 +279,7 @@ class TrendyolSettlement(models.Model):
                         created += 1
         return created
 
+    @api.private
     def _process_cargo_invoices(self, api, store):
         """Kargo faturası seri numaralarını bul ve sipariş bazlı detay çek.
 
@@ -322,6 +327,7 @@ class TrendyolSettlement(models.Model):
 
         return created
 
+    @api.private
     def _process_cargo_items(self, items, serial_number, invoice, store):
         """Tek bir kargo faturasının kalemlerini işle."""
         created = 0
@@ -370,6 +376,7 @@ class TrendyolSettlement(models.Model):
                                 unique_id, e)
         return created
 
+    @api.private
     def _relink_unlinked_settlements(self, store):
         """Sipariş bağlantısı olmayan settlement'ları orderlara bağla."""
         unlinked = self.search([
@@ -395,6 +402,7 @@ class TrendyolSettlement(models.Model):
             _logger.info("Finansal kayıt eşleştirme [%s]: %s kayıt bağlandı",
                           store.name, linked_count)
 
+    @api.private
     def _process_settlement_item(self, data, store, source):
         """Tek bir finansal kayıt işle. Dönüş: True=oluşturuldu, False=zaten var."""
         tid = str(data.get('id', ''))
@@ -456,6 +464,7 @@ class TrendyolSettlement(models.Model):
                             store.name, tid, e)
             return False
 
+    @api.private
     def _update_order_financial_summary(self, store):
         """Sipariş bazlı finansal özetleri güncelle (optimize).
 
@@ -470,7 +479,6 @@ class TrendyolSettlement(models.Model):
             return
 
         # Python'da order_id bazlı gruplama (N+1 yerine tek sorgu)
-        from collections import defaultdict
         order_map = defaultdict(list)
         for s in all_settlements:
             order_map[s.order_id].append(s)
@@ -555,10 +563,10 @@ class TrendyolSettlement(models.Model):
         except Exception as e:
             _logger.exception("Finansal cron hatası: %s", e)
 
-    @api.model
-    def _cron_cleanup_old_logs(self, days=90):
-        """90 günden eski sync loglarını temizle."""
-        cutoff = datetime.now() - timedelta(days=days)
+    @api.autovacuum
+    def _gc_old_sync_logs(self):
+        """Eski sync loglarını otomatik temizle (Odoo autovacuum)."""
+        cutoff = datetime.now() - timedelta(days=90)
         SyncLog = self.env['trendyol.sync.log'].sudo()
         old_logs = SyncLog.search([('create_date', '<', cutoff)])
         count = len(old_logs)

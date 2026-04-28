@@ -1,12 +1,8 @@
-# -*- coding: utf-8 -*-
 import base64
 import json
 import logging
 import requests
 from datetime import datetime, timedelta
-
-from odoo import api, fields, models, _
-from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 
@@ -15,16 +11,22 @@ PAZARAMA_API_URL = 'https://isortagimapi.pazarama.com'
 
 
 class PazaramaAPIClient:
-    """Pazarama REST API Client."""
+    """Pazarama REST API Client — connection pooling ile."""
 
-    def __init__(self, store, env):
+    def __init__(self, store):
         self.store = store
-        self.env = env
         self.client_id = store.client_id
         self.client_secret = store.client_secret
 
+        # Connection pooling — TCP bağlantıları yeniden kullanılır
+        self._session = requests.Session()
+        self._session.headers.update({
+            'Content-Type': 'application/json',
+        })
+
     def get_access_token(self):
         """Token alma veya var olan geçerli tokenı kullanma."""
+        from odoo import fields
         now = fields.Datetime.now()
         
         # Geçerli token varsa onu kullan
@@ -32,15 +34,13 @@ class PazaramaAPIClient:
             return self.store.access_token
 
         # Yeni token iste
-        headers = {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        }
-        
-        # Form Auth
-        # clientId ve clientSecret basic auth olarak gonderilecek
         credentials = f"{self.client_id}:{self.client_secret}"
         encoded = base64.b64encode(credentials.encode()).decode()
-        headers['Authorization'] = f'Basic {encoded}'
+        
+        headers = {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Authorization': f'Basic {encoded}',
+        }
         
         data = {
             'grant_type': 'client_credentials',
@@ -54,19 +54,18 @@ class PazaramaAPIClient:
                 if result.get('success') and 'data' in result:
                     data_obj = result.get('data')
                     access_token = data_obj.get('accessToken')
-                    expires_in = data_obj.get('expiresIn', 3600)  # Gelen değer genelde saniye
+                    expires_in = data_obj.get('expiresIn', 3600)
                     
-                    # Databasede güncelle
-                    expiry_dt = now + timedelta(seconds=expires_in - 60) # 1 dk erken bitsin
+                    # Databasede güncelle — env.cr.commit() KULLANMIYORUZ!
+                    # Transaction içinde kalması doğru davranıştır.
+                    expiry_dt = now + timedelta(seconds=expires_in - 60)
                     self.store.sudo().write({
                         'access_token': access_token,
                         'token_expiry': expiry_dt
                     })
-                    # Yeni aldığın an return etmeden önce commit edebiliriz ki bir sonraki hata durumunda tekrar uğraşmasın
-                    self.env.cr.commit()
                     return access_token
                 else:
-                    _logger.error("Pazarama Token Hatası (Bağarısız Model): %s %s", resp.status_code, resp.text)
+                    _logger.error("Pazarama Token Hatası (Başarısız Model): %s %s", resp.status_code, resp.text)
                     return None
             else:
                 _logger.error("Pazarama Token Hatası: %s %s", resp.status_code, resp.text)
@@ -81,15 +80,11 @@ class PazaramaAPIClient:
             return {'success': False, 'error': 'Yetkilendirme (Token) başarısız.'}
 
         url = f"{PAZARAMA_API_URL}{endpoint}"
-        headers = {
-            'Authorization': f'Bearer {token}',
-            'Content-Type': 'application/json',
-        }
+        self._session.headers['Authorization'] = f'Bearer {token}'
 
         try:
-            resp = requests.request(
+            resp = self._session.request(
                 method, url,
-                headers=headers,
                 params=params,
                 json=data,
                 timeout=45,
@@ -132,8 +127,8 @@ class PazaramaAPIClient:
             "orderNumber": order_number,
             "item": {
                 "orderItemId": order_item_id,
-                "status": 5, # Kargoya Verildi
-                "deliveryType": 1, # Cargo
+                "status": 5,  # Kargoya Verildi
+                "deliveryType": 1,  # Cargo
                 "shippingTrackingNumber": tracking_number,
                 "trackingUrl": tracking_url,
                 "cargoCompanyId": cargo_company_id
@@ -172,7 +167,6 @@ class PazaramaAPIClient:
 
     def update_refund_status(self, refund_id, status_code, reject_type=0):
         """İade Durumu Güncelleme"""
-        # status code -> 2: Onayla, 3: Reddet
         body = {
             "refundId": refund_id,
             "status": status_code
@@ -180,12 +174,3 @@ class PazaramaAPIClient:
         if reject_type > 0:
             body["RefundRejectType"] = reject_type
         return self._request('POST', '/order/updateRefund', data=body)
-
-
-class PazaramaAPIModel(models.AbstractModel):
-    """PazaramaAPI nesnesini oluşturacak Odoo Factory"""
-    _name = 'pazarama.api'
-    _description = 'Pazarama API Factory'
-
-    def create_api(self, store):
-        return PazaramaAPIClient(store, self.env)

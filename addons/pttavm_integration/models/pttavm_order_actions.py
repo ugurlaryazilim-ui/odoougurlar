@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+
 """Pttavm sipariş toplu işlemleri — retry, refresh, delete, mark."""
 import json
 import logging
@@ -29,8 +29,8 @@ class PttavmOrderActions(models.Model):
                     fail += 1
                     continue
                 
-                # Sadece Odoo'da faturalandırma aşamasına girenleri içeri al (Örn: orderStatus == 3 'Sipariş Alındı' ise)
-                if order.order_status in [3, 12]:
+                # Sadece Odoo'da faturalandırma aşamasına girenleri içeri al
+                if order.order_status in ['kargo_yapilmasi_bekleniyor', 'havale_onayi_bekleniyor', 'onay_surecinde']:
                     # Create odoo sale order from pttavm_order_sync method 
                     shipment_addr = package_data.get('shipmentAddress') or {}
                     billing_addr = package_data.get('billingAddress') or {}

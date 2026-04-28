@@ -1,11 +1,15 @@
-# -*- coding: utf-8 -*-
-from odoo import models, fields, api
+import logging
+import re
+from datetime import datetime, timedelta
+
 import requests
 from requests.auth import HTTPBasicAuth
+
+from odoo import models, fields, api
 from odoo.exceptions import UserError
-import logging
 
 _logger = logging.getLogger(__name__)
+
 
 class HepsiburadaStore(models.Model):
     _name = 'hepsiburada.store'
@@ -14,9 +18,9 @@ class HepsiburadaStore(models.Model):
     name = fields.Char(string='Mağaza Adı', required=True, help="Odoo'daki tanımlayıcı adı")
     active = fields.Boolean(default=True, string='Aktif')
 
-    merchant_id = fields.Char(string='Merchant ID', required=True, help="Hepsiburada Satıcı ID (GUID)")
-    api_user = fields.Char(string='API Kullanıcı Adı', required=True)
-    api_password = fields.Char(string='API Şifre', required=True)
+    merchant_id = fields.Char(string='Merchant ID', required=True, groups='base.group_system', help="Hepsiburada Satıcı ID (GUID)")
+    api_user = fields.Char(string='API Kullanıcı Adı', required=True, groups='base.group_system')
+    api_password = fields.Char(string='API Şifre', required=True, groups='base.group_system')
     environment = fields.Selection([
         ('test', 'Test Ortamı'),
         ('prod', 'Canlı Ortam')
@@ -125,33 +129,68 @@ class HepsiburadaStore(models.Model):
     )
     last_financial_sync = fields.Datetime(string='Son Finansal Senkron', readonly=True)
 
+    # ─── İlişkiler ───
+    log_ids = fields.One2many('hepsiburada.sync.log', 'store_id', string='Loglar')
+
     order_count = fields.Integer(compute='_compute_order_count', string='Siparişler')
     log_count = fields.Integer(compute='_compute_log_count', string='Loglar')
 
+    @api.depends()
     def _compute_order_count(self):
+        data = self.env['sale.order'].sudo()._read_group(
+            [('hb_store_id', 'in', [s.merchant_id for s in self])],
+            groupby=['hb_store_id'], aggregates=['__count'],
+        )
+        counts = {merchant_id: count for merchant_id, count in data}
         for store in self:
-            store.order_count = self.env['sale.order'].search_count([('hb_store_id', '=', store.merchant_id)])
+            store.order_count = counts.get(store.merchant_id, 0)
 
+    @api.depends('log_ids')
     def _compute_log_count(self):
+        data = self.env['hepsiburada.sync.log'].sudo()._read_group(
+            [('store_id', 'in', self.ids)],
+            groupby=['store_id'], aggregates=['__count'],
+        )
+        counts = {store.id: count for store, count in data}
         for store in self:
-            store.log_count = self.env['hepsiburada.sync.log'].search_count([('store_id', '=', store.id)])
+            store.log_count = counts.get(store.id, 0)
+
+    def _get_api_domain(self):
+        """Ortama göre doğru domain'i döndür."""
+        self.ensure_one()
+        if self.environment == 'test':
+            return "oms-external-sit.hepsiburada.com"
+        return "oms-external.hepsiburada.com"
+
+    def _get_clean_credentials(self):
+        """API kimlik bilgilerini temizle ve döndür."""
+        self.ensure_one()
+        clean_merchant = re.sub(r'[\s\u200B-\u200D\uFEFF]+', '', self.merchant_id) if self.merchant_id else ''
+        clean_user = re.sub(r'[\s\u200B-\u200D\uFEFF]+', '', self.api_user) if self.api_user else ''
+        clean_pass = re.sub(r'[\s\u200B-\u200D\uFEFF]+', '', self.api_password) if self.api_password else ''
+        return clean_merchant, clean_user, clean_pass
+
+    def _get_session(self):
+        """Connection pooling ile API session oluştur."""
+        self.ensure_one()
+        clean_merchant, clean_user, clean_pass = self._get_clean_credentials()
+        session = requests.Session()
+        session.auth = HTTPBasicAuth(clean_merchant, clean_pass)
+        session.headers.update({
+            "Accept": "application/json",
+            "User-Agent": clean_user,
+        })
+        return session, clean_merchant
 
     def action_test_connection(self):
         """API bilgilerini test et"""
         self.ensure_one()
-        domain = "oms-external-sit.hepsiburada.com" if self.environment == 'test' else "oms-external.hepsiburada.com"
+        domain = self._get_api_domain()
+        clean_merchant, clean_user, clean_pass = self._get_clean_credentials()
         
-        import copy, re
-        
-        # Remove all whitespace characters and invisible zero-width characters completely
-        clean_merchant_id = re.sub(r'[\s\u200B-\u200D\uFEFF]+', '', self.merchant_id) if self.merchant_id else ''
-        clean_user = re.sub(r'[\s\u200B-\u200D\uFEFF]+', '', self.api_user) if self.api_user else ''
-        clean_pass = re.sub(r'[\s\u200B-\u200D\uFEFF]+', '', self.api_password) if self.api_password else ''
-        
-        url = f"https://{domain}/orders/merchantId/{clean_merchant_id}"
+        url = f"https://{domain}/orders/merchantId/{clean_merchant}"
         
         try:
-            from datetime import datetime, timedelta
             end_date = datetime.utcnow()
             begin_date = end_date - timedelta(days=1)
             
@@ -162,17 +201,15 @@ class HepsiburadaStore(models.Model):
                 'endDate': end_date.strftime('%Y-%m-%dT%H:%M:%S')
             }
 
-            # 2024 Güncellemesi: Username -> MerchantId, Password -> Servis Anahtarı, User-Agent -> Entegratör Adı
             response = requests.get(
                 url,
-                auth=HTTPBasicAuth(clean_merchant_id, clean_pass),
+                auth=HTTPBasicAuth(clean_merchant, clean_pass),
                 params=params,
                 headers={"Accept": "application/json", "User-Agent": clean_user},
                 timeout=10
             )
 
             if response.status_code == 200 or response.status_code == 400:
-                # 200 (Sipariş var) veya 400 (Tarih formatı eski vs, ama Auth geçti)
                 if response.status_code == 400 and 'GetPackageLinesBadRequestError' not in response.text:
                     raise UserError(f"❌ Bağlantı Hatası: HTTP {response.status_code}\nDetay: {response.text}")
                 

@@ -1,6 +1,11 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
-access_hepsiburada_store,hepsiburada.store,model_hepsiburada_store,base.group_user,1,1,1,1
-access_hepsiburada_sync_log,hepsiburada.sync.log,model_hepsiburada_sync_log,base.group_user,1,1,1,1
-access_hepsiburada_order,hepsiburada.order,model_hepsiburada_order,base.group_user,1,1,1,1
-access_hepsiburada_order_line,hepsiburada.order_line,model_hepsiburada_order_line,base.group_user,1,1,1,1
-access_hepsiburada_order_sync,hepsiburada.order_sync,model_hepsiburada_order_sync,base.group_user,1,1,1,1
+access_hepsiburada_store,hepsiburada.store,model_hepsiburada_store,base.group_user,1,0,0,0
+access_hepsiburada_store_manager,hepsiburada.store.manager,model_hepsiburada_store,sales_team.group_sale_manager,1,1,1,1
+access_hepsiburada_sync_log,hepsiburada.sync.log,model_hepsiburada_sync_log,base.group_user,1,0,0,0
+access_hepsiburada_sync_log_manager,hepsiburada.sync.log.manager,model_hepsiburada_sync_log,sales_team.group_sale_manager,1,1,1,1
+access_hepsiburada_order,hepsiburada.order,model_hepsiburada_order,base.group_user,1,1,1,0
+access_hepsiburada_order_manager,hepsiburada.order.manager,model_hepsiburada_order,sales_team.group_sale_manager,1,1,1,1
+access_hepsiburada_order_line,hepsiburada.order_line,model_hepsiburada_order_line,base.group_user,1,1,1,0
+access_hepsiburada_order_line_manager,hepsiburada.order_line.manager,model_hepsiburada_order_line,sales_team.group_sale_manager,1,1,1,1
+access_hepsiburada_order_sync,hepsiburada.order_sync,model_hepsiburada_order_sync,base.group_user,1,0,0,0
+access_hepsiburada_order_sync_manager,hepsiburada.order_sync.manager,model_hepsiburada_order_sync,sales_team.group_sale_manager,1,1,1,1

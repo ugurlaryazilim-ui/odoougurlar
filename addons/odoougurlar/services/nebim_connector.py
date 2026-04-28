@@ -18,6 +18,10 @@ MAX_RETRIES = 2            # 2 deneme yeterli (toplam maks ~25s)
 _session_cache = {'token': None, 'expires': 0}
 SESSION_TTL = 300  # 5 dakika
 
+# HTTP connection pooling — TCP bağlantıları yeniden kullanılır
+_http_session = requests.Session()
+_http_session.headers.update({'Content-Type': 'application/json'})
+
 
 class NebimConnector(models.AbstractModel):
     """
@@ -34,6 +38,7 @@ class NebimConnector(models.AbstractModel):
     _name = 'odoougurlar.nebim.connector'
     _description = 'Nebim V3 API Connector'
 
+    @api.private
     def _get_config(self):
         """Nebim bağlantı ayarlarını ir.config_parameter'dan okur."""
         ICP = self.env['ir.config_parameter'].sudo()
@@ -49,6 +54,7 @@ class NebimConnector(models.AbstractModel):
             raise UserError('Nebim API URL yapılandırılmamış! Ayarlar > Nebim bölümünden URL girin.')
         return config
 
+    @api.private
     def _get_sp_name(self, key):
         """Stored procedure adını ayarlardan okur."""
         ICP = self.env['ir.config_parameter'].sudo()
@@ -65,6 +71,7 @@ class NebimConnector(models.AbstractModel):
         param_name = f'odoougurlar.nebim_sp_{key}'
         return ICP.get_param(param_name, defaults.get(key, ''))
 
+    @api.private
     def _get_root_url(self, url):
         """
         URL'den root kısmını alır (IntegratorService öncesi).
@@ -79,6 +86,7 @@ class NebimConnector(models.AbstractModel):
         parts = url.rsplit('/', 1)
         return parts[0] if len(parts) == 2 else url
 
+    @api.private
     def _connect(self, force=False):
         """
         Nebim IntegratorService'e bağlanır ve session token döner.
@@ -109,7 +117,7 @@ class NebimConnector(models.AbstractModel):
 
         for attempt in range(1, MAX_RETRIES + 1):
             try:
-                resp = requests.post(url, json=payload, timeout=CONNECT_TIMEOUT)
+                resp = _http_session.post(url, json=payload, timeout=CONNECT_TIMEOUT)
                 resp.raise_for_status()
                 data = resp.json()
 
@@ -142,6 +150,7 @@ class NebimConnector(models.AbstractModel):
                 else:
                     raise Exception(f'Nebim bağlantı hatası ({MAX_RETRIES} deneme sonrası): {str(e)}')
 
+    @api.private
     def _build_session_url(self, token, endpoint):
         """
         SessionID ile doğru Nebim URL'ini oluşturur.
@@ -171,15 +180,13 @@ class NebimConnector(models.AbstractModel):
         if params:
             payload['Parameters'] = params
 
-        headers = {
-            'Content-Type': 'application/json',
-        }
+        headers = {}
 
         _logger.info("Nebim SP çalıştırılıyor: %s → %s", proc_name, url)
 
         for attempt in range(1, MAX_RETRIES + 1):
             try:
-                resp = requests.post(
+                resp = _http_session.post(
                     url, json=payload, headers=headers, timeout=DATA_TIMEOUT
                 )
                 resp.raise_for_status()
@@ -213,15 +220,13 @@ class NebimConnector(models.AbstractModel):
         token = self._connect()
         url = self._build_session_url(token, endpoint)
 
-        headers = {
-            'Content-Type': 'application/json',
-        }
+        headers = {}
 
         _logger.info("Nebim'e veri gönderiliyor: %s → %s", endpoint, url)
 
         for attempt in range(1, MAX_RETRIES + 1):
             try:
-                resp = requests.post(
+                resp = _http_session.post(
                     url, json=payload, headers=headers, timeout=DATA_TIMEOUT
                 )
                 resp.raise_for_status()

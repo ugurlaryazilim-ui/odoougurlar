@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+
 import base64
 import json
 import logging
@@ -22,22 +22,24 @@ class TrendyolAPI:
         self.api_secret = api_secret
         self.seller_id = seller_id
         self.base_url = TRENDYOL_PROD_URL if is_prod else TRENDYOL_STAGE_URL
-
-    def _get_headers(self):
-        credentials = f"{self.api_key}:{self.api_secret}"
+        # Connection pooling — TCP bağlantıları yeniden kullanılır
+        self._session = requests.Session()
+        credentials = f"{api_key}:{api_secret}"
         encoded = base64.b64encode(credentials.encode()).decode()
-        return {
+        self._session.headers.update({
             'Authorization': f'Basic {encoded}',
             'Content-Type': 'application/json',
-            'User-Agent': f'{self.seller_id} - OdooIntegration',
-        }
+            'User-Agent': f'{seller_id} - OdooIntegration',
+        })
+
+    def _get_headers(self):
+        return self._session.headers
 
     def _request(self, method, endpoint, params=None, data=None):
         url = f"{self.base_url}{endpoint}"
         try:
-            resp = requests.request(
+            resp = self._session.request(
                 method, url,
-                headers=self._get_headers(),
                 params=params,
                 json=data,
                 timeout=30,

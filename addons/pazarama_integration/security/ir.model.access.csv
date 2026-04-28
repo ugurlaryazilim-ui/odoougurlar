@@ -1,6 +1,11 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
-access_pazarama_store,pazarama.store,model_pazarama_store,base.group_user,1,1,1,1
-access_pazarama_order,pazarama.order,model_pazarama_order,base.group_user,1,1,1,1
-access_pazarama_order_line,pazarama.order_line,model_pazarama_order_line,base.group_user,1,1,1,1
-access_pazarama_settlement,pazarama.settlement,model_pazarama_settlement,base.group_user,1,1,1,1
-access_pazarama_refund,pazarama.refund,model_pazarama_refund,base.group_user,1,1,1,1
+access_pazarama_store,pazarama.store,model_pazarama_store,base.group_user,1,0,0,0
+access_pazarama_store_manager,pazarama.store.manager,model_pazarama_store,sales_team.group_sale_manager,1,1,1,1
+access_pazarama_order,pazarama.order,model_pazarama_order,base.group_user,1,1,1,0
+access_pazarama_order_manager,pazarama.order.manager,model_pazarama_order,sales_team.group_sale_manager,1,1,1,1
+access_pazarama_order_line,pazarama.order_line,model_pazarama_order_line,base.group_user,1,1,1,0
+access_pazarama_order_line_manager,pazarama.order_line.manager,model_pazarama_order_line,sales_team.group_sale_manager,1,1,1,1
+access_pazarama_settlement,pazarama.settlement,model_pazarama_settlement,base.group_user,1,0,0,0
+access_pazarama_settlement_manager,pazarama.settlement.manager,model_pazarama_settlement,sales_team.group_sale_manager,1,1,1,1
+access_pazarama_refund,pazarama.refund,model_pazarama_refund,base.group_user,1,0,0,0
+access_pazarama_refund_manager,pazarama.refund.manager,model_pazarama_refund,sales_team.group_sale_manager,1,1,1,1

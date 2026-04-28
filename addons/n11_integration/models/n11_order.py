@@ -1,10 +1,10 @@
-# -*- coding: utf-8 -*-
 from odoo import models, fields
 
 class N11Order(models.Model):
     _name = 'n11.order'
     _description = 'N11 Siparişi'
     _order = 'order_date desc'
+    _rec_name = 'order_number'
 
     store_id = fields.Many2one('n11.store', string='Mağaza', required=True, ondelete='cascade')
     sale_order_id = fields.Many2one('sale.order', string='Odoo Siparişi', readonly=True, ondelete='set null')

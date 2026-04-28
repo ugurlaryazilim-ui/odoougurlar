@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Flo sipariş toplu işlemleri — retry, refresh, delete, mark."""
 import json
 import logging
@@ -29,15 +28,17 @@ class FloOrderActions(models.Model):
                     fail += 1
                     continue
                 
-                # Sadece Odoo'da faturalandırma aşamasına girenleri içeri al (Örn: orderStatus == 3 'Sipariş Alındı' ise)
-                if order.order_status in [3, 12]:
-                    # Create odoo sale order from flo_order_sync method 
+                # FLO string status kullanıyor — string karşılaştırma
+                if order.order_status in ['Created', 'Picking']:
                     shipment_addr = package_data.get('shipmentAddress') or {}
-                    billing_addr = package_data.get('billingAddress') or {}
-                    customer_email = package_data.get('customerEmail') or shipment_addr.get('customerEmail') or ''
-                    phone_number = shipment_addr.get('phoneNumber') or ''
+                    billing_addr = package_data.get('invoiceAddress') or package_data.get('billingAddress') or {}
+                    customer_email = package_data.get('customerEmail') or ''
+                    phone_number = shipment_addr.get('phone') or shipment_addr.get('phoneNumber') or ''
 
-                    sale_order = self._create_odoo_sale_order(order, store, shipment_addr, billing_addr, customer_email, phone_number)
+                    sale_order = self._create_odoo_sale_order(
+                        order, store, shipment_addr, billing_addr,
+                        customer_email, phone_number, package_data
+                    )
                     order.write({
                         'sale_order_id': sale_order.id,
                         'store_id': store.id,
@@ -86,36 +87,33 @@ class FloOrderActions(models.Model):
                 if not order.order_number:
                     continue
                 try:
-                    # Flo getOrders endpointini saat araligiyla verebiliriz ama orderNumber a gore filtremiz yok (Payload'da startDate, endDate istiyor).
-                    # Belgede orderNumber desteklendigini gorduk:
-                    # Request (Order / Saat&Dakika): "orderNumber": 735071747, "startDate":...
-                    # So we can pass orderNumber in getOrdersForApi.
-                    body = {
-                        'pageSize': 1,
-                        'pageNumber': 1,
-                        'orderNumber': order.order_number
-                    }
-                    result = api._request('POST', '/order/getOrdersForApi', data=body)
+                    # FLO'nun kendi /orders endpoint'ini kullan
+                    result = api.get_orders(
+                        start_date=order.order_date,
+                        end_date=fields.Datetime.now(),
+                        page=1, size=50
+                    )
                     
-                    if result['success']:
-                        content = result.get('data', {}).get('data', [])
-                        if content:
-                            pkg = content[0]
-                            new_status = pkg.get('orderStatus')
+                    if result.get('success'):
+                        content = result.get('data', {}).get('content', [])
+                        # orderNumber ile eşleştir
+                        pkg = None
+                        for item in content:
+                            if str(item.get('orderNumber')) == order.order_number:
+                                pkg = item
+                                break
+                        
+                        if pkg:
+                            new_status = pkg.get('shipmentPackageStatus')
                             vals = {
                                 'order_status': new_status if new_status else order.order_status,
                                 'raw_data': json.dumps(pkg, ensure_ascii=False),
                             }
                             
-                            # Update items
-                            # (Cargo tracking comes grouped under items, picking first one broadly)
-                            items = pkg.get('items', [])
-                            if items:
-                                first_cargo = items[0].get('cargo', {})
-                                if first_cargo.get('trackingNumber'):
-                                    vals['cargo_tracking_number'] = str(first_cargo['trackingNumber'])
-                                if first_cargo.get('companyName'):
-                                    vals['cargo_provider'] = first_cargo['companyName']
+                            if pkg.get('cargoTrackingNumber'):
+                                vals['cargo_tracking_number'] = str(pkg['cargoTrackingNumber'])
+                            if pkg.get('cargoProviderName'):
+                                vals['cargo_provider'] = pkg['cargoProviderName']
 
                             order.write(vals)
                             updated += 1

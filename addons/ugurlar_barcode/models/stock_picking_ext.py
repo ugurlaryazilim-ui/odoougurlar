@@ -65,29 +65,49 @@ class StockPickingExt(models.Model):
             })
             return 'unavailable'
 
+        # ── TOPLU STOK SORGUSU (N+1 önleme) ──
+        product_ids = self.move_ids.mapped('product_id').ids
+        primary_stock_loc = primary_warehouse.lot_stock_id
+
+        # Ana depo: tüm ürünler için tek sorgu
+        primary_qty_map = {}
+        if primary_stock_loc:
+            primary_quants = Quant.search([
+                ('product_id', 'in', product_ids),
+                ('location_id', 'child_of', primary_stock_loc.id),
+            ])
+            for q in primary_quants:
+                primary_qty_map.setdefault(q.product_id.id, 0)
+                primary_qty_map[q.product_id.id] += (q.quantity - q.reserved_quantity)
+
+        # Yedek depo: tüm ürünler için tek sorgu
+        fallback_qty_map = {}
+        fallback_names = set()
+        if fallback_warehouse and fallback_warehouse.lot_stock_id:
+            fb_quants = Quant.search([
+                ('product_id', 'in', product_ids),
+                ('location_id', 'child_of', fallback_warehouse.lot_stock_id.id),
+            ])
+            for q in fb_quants:
+                fallback_qty_map.setdefault(q.product_id.id, 0)
+                fallback_qty_map[q.product_id.id] += (q.quantity - q.reserved_quantity)
+
         total_lines = len(self.move_ids)
         available_in_primary = 0
         available_in_fallback = 0
-        fallback_names = set()
 
         for move in self.move_ids:
-            product = move.product_id
             demand = move.product_uom_qty
-
-            # 1) Ana depodaki stok
-            primary_qty = self._get_available_qty(
-                Quant, product, primary_warehouse)
+            primary_qty = max(0, primary_qty_map.get(move.product_id.id, 0))
 
             if primary_qty >= demand:
                 available_in_primary += 1
                 continue
 
-            # 2) Yedek depodaki stok
-            if fallback_warehouse:
-                fallback_qty = self._get_available_qty(
-                    Quant, product, fallback_warehouse)
-                if fallback_qty >= demand:
-                    available_in_fallback += 1
+            fallback_qty = max(0, fallback_qty_map.get(move.product_id.id, 0))
+            if fallback_qty >= demand:
+                available_in_fallback += 1
+                if fallback_warehouse:
                     fallback_names.add(fallback_warehouse.name)
 
         # Durum belirle
@@ -112,21 +132,6 @@ class StockPickingExt(models.Model):
         })
 
         return status
-
-    def _get_available_qty(self, Quant, product, warehouse):
-        """Bir depodaki kullanılabilir stok miktarını döndür."""
-        # Deponun stok lokasyonunu bul
-        stock_location = warehouse.lot_stock_id
-        if not stock_location:
-            return 0
-
-        # Alt lokasyonlar dahil toplam stok
-        quants = Quant.search([
-            ('product_id', '=', product.id),
-            ('location_id', 'child_of', stock_location.id),
-        ])
-        total = sum(q.quantity - q.reserved_quantity for q in quants)
-        return max(0, total)
 
     def action_check_availability(self):
         """Manuel buton: Stok durumunu kontrol et."""

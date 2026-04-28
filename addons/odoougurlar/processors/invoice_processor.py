@@ -66,6 +66,7 @@ class InvoiceProcessor(models.AbstractModel):
 
         return stats
 
+    @api.private
     def _build_invoice_payload(self, invoice):
         """
         Odoo faturasını Nebim JSON formatına dönüştürür.
@@ -75,10 +76,28 @@ class InvoiceProcessor(models.AbstractModel):
         """
         sale_order = invoice.line_ids.sale_line_ids.order_id[:1]
             
+        # Pazaryeri tespiti — sale_order üzerindeki pazaryeri alanlarına bakarak
+        marketplace_name = 'Trendyol'  # varsayılan fallback
+        if sale_order:
+            _mp_fields = [
+                ('trendyol_order_id', 'Trendyol'),
+                ('hb_order_id', 'Hepsiburada'),
+                ('amazon_store_id', 'Amazon'),
+                ('pazarama_order_id', 'Pazarama'),
+                ('n11_order_id', 'N11'),
+                ('flo_order_id', 'Flo'),
+                ('idefix_order_id', 'Idefix'),
+                ('pttavm_order_id', 'PttAvm'),
+            ]
+            for field, name in _mp_fields:
+                if hasattr(sale_order, field) and getattr(sale_order, field):
+                    marketplace_name = name
+                    break
+
         mapping = False
         if sale_order:
             mapping = self.env['odoougurlar.marketplace.mapping'].sudo().find_mapping(
-                'Trendyol', sale_order.partner_id.country_id.id
+                marketplace_name, sale_order.partner_id.country_id.id
             )
 
         # Müşteri kodunu önce sale_order'dan al (Nebim cari oluştururken kaydettiğimiz)
@@ -109,6 +128,7 @@ class InvoiceProcessor(models.AbstractModel):
     # İHRACAT FATURASI (ModelType 24) — HamurLabs formatına uyumlu
     # ═══════════════════════════════════════════════════════════════
 
+    @api.private
     def _build_export_invoice(self, invoice, sale_order, mapping, customer_code, address_id):
         """ModelType 24 — İhracat Faturası (Mikro İhracat dahil).
         
@@ -239,13 +259,14 @@ class InvoiceProcessor(models.AbstractModel):
         }
         
         _logger.info("İhracat faturası payload hazırlandı: %s (MT24)", invoice.name)
-        _logger.info(f"FATURA MT24 PAYLOAD: {payload}")
+        _logger.debug("FATURA MT24 PAYLOAD: %s", payload)
         return payload
 
     # ═══════════════════════════════════════════════════════════════
     # PERAKENDE FATURASI (ModelType 8) — Mevcut format korunuyor
     # ═══════════════════════════════════════════════════════════════
 
+    @api.private
     def _build_retail_invoice(self, invoice, sale_order, mapping, customer_code, model_type, address_id):
         """ModelType 8 — Perakende Fatura (e-Arşiv)."""
         

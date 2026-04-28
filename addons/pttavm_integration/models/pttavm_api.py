@@ -1,12 +1,8 @@
-# -*- coding: utf-8 -*-
 import base64
 import json
 import logging
 import requests
 from datetime import datetime, timedelta
-
-from odoo import api, fields, models, _
-from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 
@@ -15,16 +11,32 @@ PTTAVM_SHIPMENT_API_URL = 'https://shipment.pttavm.com/api/v1'
 
 
 class PttavmAPIClient:
-    """Pttavm REST API Client."""
+    """Pttavm REST API Client — connection pooling ile."""
 
-    def __init__(self, store, env):
+    def __init__(self, store):
         self.store = store
-        self.env = env
         self.api_key = store.api_key
         self.access_token = store.access_token
-        
         self.cargo_username = store.cargo_username
         self.cargo_password = store.cargo_password
+
+        # Connection pooling — TCP bağlantıları yeniden kullanılır
+        self._session = requests.Session()
+        self._session.headers.update({
+            'Api-Key': self.api_key or '',
+            'Access-Token': self.access_token or '',
+            'Content-Type': 'application/json',
+        })
+
+        # Shipment API session (Basic Auth)
+        self._shipment_session = requests.Session()
+        if self.cargo_username and self.cargo_password:
+            credentials = f"{self.cargo_username}:{self.cargo_password}"
+            encoded = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
+            self._shipment_session.headers.update({
+                'Authorization': f'Basic {encoded}',
+                'Content-Type': 'application/json',
+            })
 
     def _request(self, method, endpoint, params=None, data=None):
         """Integration API Request"""
@@ -32,17 +44,12 @@ class PttavmAPIClient:
             return {'success': False, 'error': 'Yetkilendirme (Api-Key, Access-Token) boş olamaz.'}
 
         url = f"{PTTAVM_INTEGRATION_API_URL}{endpoint}"
-        headers = {
-            'Api-Key': self.api_key,
-            'Access-Token': self.access_token,
-            'Content-Type': 'application/json',
-            'X-Correlation-Id': 'odoo-' + fields.Datetime.now().strftime('%Y%m%d%H%M%S')
-        }
+        # Correlation ID her istekte farklı olmalı
+        self._session.headers['X-Correlation-Id'] = 'odoo-' + datetime.now().strftime('%Y%m%d%H%M%S%f')
 
         try:
-            resp = requests.request(
+            resp = self._session.request(
                 method, url,
-                headers=headers,
                 params=params,
                 json=data,
                 timeout=45,
@@ -64,19 +71,10 @@ class PttavmAPIClient:
             return {'success': False, 'error': 'Kargo Username ve Password boş olamaz.'}
 
         url = f"{PTTAVM_SHIPMENT_API_URL}{endpoint}"
-        
-        credentials = f"{self.cargo_username}:{self.cargo_password}"
-        encoded = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
-        
-        headers = {
-            'Authorization': f'Basic {encoded}',
-            'Content-Type': 'application/json',
-        }
 
         try:
-            resp = requests.request(
+            resp = self._shipment_session.request(
                 method, url,
-                headers=headers,
                 json=data,
                 timeout=45,
             )
@@ -151,12 +149,3 @@ class PttavmAPIClient:
             "order_id": order_id
         }
         return self._shipment_request('POST', '/update-no-shipping-order', data=data)
-
-
-class PttavmAPIModel(models.AbstractModel):
-    """PttavmAPI nesnesini oluşturacak Odoo Factory"""
-    _name = 'pttavm.api'
-    _description = 'Pttavm API Factory'
-
-    def create_api(self, store):
-        return PttavmAPIClient(store, self.env)

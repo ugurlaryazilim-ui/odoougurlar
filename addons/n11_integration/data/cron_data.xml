@@ -6,7 +6,6 @@
             <field name="model_id" ref="model_n11_order"/>
             <field name="state">code</field>
             <field name="code">model.sync_orders_from_n11()</field>
-            <field name="user_id" ref="base.user_root"/>
             <field name="interval_number">30</field>
             <field name="interval_type">minutes</field>
             <field name="active" eval="False"/>

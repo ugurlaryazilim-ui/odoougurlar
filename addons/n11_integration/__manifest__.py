@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-{
+﻿{
     'name': 'N11 Entegrasyonu',
     'version': '19.0.1.0.0',
     'summary': 'N11 Sipariş Entegrasyonu',

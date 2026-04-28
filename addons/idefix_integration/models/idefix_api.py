@@ -1,48 +1,42 @@
-# -*- coding: utf-8 -*-
 import base64
-import json
 import logging
 import requests
-from datetime import datetime, timedelta
-
-from odoo import api, fields, models, _
-from odoo.exceptions import UserError
+from datetime import datetime
 
 _logger = logging.getLogger(__name__)
 
 IDEFIX_API_URL = 'https://merchantapi.idefix.com/oms'
 
-class IdefixAPIClient:
-    """Idefix REST API Client."""
 
-    def __init__(self, store, env):
+class IdefixAPIClient:
+    """Idefix REST API Client — connection pooling ile."""
+
+    def __init__(self, store):
         self.store = store
-        self.env = env
-        self.client_id = store.client_id # This acts as API_KEY
-        self.client_secret = store.client_secret # API_SECRET
+        self.client_id = store.client_id
+        self.client_secret = store.client_secret
         self.vendor_id = store.vendor_id
 
-    def get_headers(self):
-        """Token oluşturma: VENDOR TOKEN = base64_encode(ApiKEY:ApiSecret)"""
+        # Connection pooling — TCP bağlantıları yeniden kullanılır
         credentials = f"{self.client_id}:{self.client_secret}"
         encoded = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
-        return {
+
+        self._session = requests.Session()
+        self._session.headers.update({
             'X-API-KEY': encoded,
             'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        }
+            'Accept': 'application/json',
+        })
 
     def _request(self, method, endpoint, params=None, data=None):
         if not self.vendor_id:
             return {'success': False, 'error': 'Satıcı ID (Vendor ID) tanımlanmamış.'}
 
         url = f"{IDEFIX_API_URL}/{self.vendor_id}{endpoint}"
-        headers = self.get_headers()
 
         try:
-            resp = requests.request(
+            resp = self._session.request(
                 method, url,
-                headers=headers,
                 params=params,
                 json=data,
                 timeout=45,
@@ -106,11 +100,11 @@ class IdefixAPIClient:
         }
         return self._request('GET', '/claim-list', params=params)
 
-
-class IdefixAPIModel(models.AbstractModel):
-    """IdefixAPI nesnesini oluşturacak Odoo Factory"""
-    _name = 'idefix.api'
-    _description = 'Idefix API Factory'
-
-    def create_api(self, store):
-        return IdefixAPIClient(store, self.env)
+    def get_payment_agreements(self, start_date, end_date):
+        """Finansal mutabakat verileri — Idefix henüz bu servisi sunmuyorsa boş döner."""
+        _logger.warning("Idefix get_payment_agreements: Bu servis henüz Idefix API'de desteklenmiyor olabilir.")
+        params = {
+            "startDate": start_date.strftime('%Y/%m/%d %H:%M:%S') if isinstance(start_date, datetime) else start_date,
+            "endDate": end_date.strftime('%Y/%m/%d %H:%M:%S') if isinstance(end_date, datetime) else end_date
+        }
+        return self._request('GET', '/payment-agreements', params=params)

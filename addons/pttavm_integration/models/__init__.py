@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-from . import pttavm_api
 from . import pttavm_store
 from . import pttavm_order
 from . import pttavm_order_sync

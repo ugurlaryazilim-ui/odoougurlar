@@ -1,10 +1,10 @@
-# -*- coding: utf-8 -*-
 from odoo import models, fields
 
 class FloOrder(models.Model):
     _name = 'flo.order'
     _description = 'Flo Siparişi'
     _order = 'order_date desc'
+    _rec_name = 'order_number'
 
     store_id = fields.Many2one('flo.store', string='Mağaza', required=True, ondelete='cascade')
     sale_order_id = fields.Many2one('sale.order', string='Odoo Siparişi', readonly=True, ondelete='set null')

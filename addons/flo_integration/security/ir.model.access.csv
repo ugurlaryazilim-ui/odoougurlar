@@ -1,6 +1,11 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
-access_flo_store,flo.store,model_flo_store,base.group_user,1,1,1,1
-access_flo_order,flo.order,model_flo_order,base.group_user,1,1,1,1
-access_flo_order_line,flo.order_line,model_flo_order_line,base.group_user,1,1,1,1
-access_flo_settlement,flo.settlement,model_flo_settlement,base.group_user,1,1,1,1
-access_flo_refund,flo.refund,model_flo_refund,base.group_user,1,1,1,1
+access_flo_store,flo.store,model_flo_store,base.group_user,1,0,0,0
+access_flo_store_manager,flo.store.manager,model_flo_store,sales_team.group_sale_manager,1,1,1,1
+access_flo_order,flo.order,model_flo_order,base.group_user,1,1,1,0
+access_flo_order_manager,flo.order.manager,model_flo_order,sales_team.group_sale_manager,1,1,1,1
+access_flo_order_line,flo.order_line,model_flo_order_line,base.group_user,1,1,1,0
+access_flo_order_line_manager,flo.order_line.manager,model_flo_order_line,sales_team.group_sale_manager,1,1,1,1
+access_flo_settlement,flo.settlement,model_flo_settlement,base.group_user,1,0,0,0
+access_flo_settlement_manager,flo.settlement.manager,model_flo_settlement,sales_team.group_sale_manager,1,1,1,1
+access_flo_refund,flo.refund,model_flo_refund,base.group_user,1,0,0,0
+access_flo_refund_manager,flo.refund.manager,model_flo_refund,sales_team.group_sale_manager,1,1,1,1

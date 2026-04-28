@@ -1,10 +1,11 @@
-from odoo import models, fields, api, _
-from odoo.exceptions import UserError
-import requests
-import json
 import logging
 
+import requests
+from odoo import models, fields, api, _
+from odoo.exceptions import UserError
+
 _logger = logging.getLogger(__name__)
+
 
 class AmazonStore(models.Model):
     _name = 'amazon.store'
@@ -26,15 +27,17 @@ class AmazonStore(models.Model):
         ('fe', 'Uzak Doğu - FE')
     ], string='SP-API Bölgesi', default='eu', required=True)
     
-    marketplace_id = fields.Char('Marketplace ID', required=True, default='A33AVAJ2PDY3EV') # TR Market ID
+    marketplace_id = fields.Char('Marketplace ID', required=True, default='A33AVAJ2PDY3EV')
     
-    lwa_client_id = fields.Char('LWA Client ID', required=True)
-    lwa_client_secret = fields.Char('LWA Client Secret', required=True)
-    refresh_token = fields.Char('Refresh Token', required=True)
+    # API Credentials — groups ile korunmuş
+    lwa_client_id = fields.Char('LWA Client ID', required=True, groups='base.group_system')
+    lwa_client_secret = fields.Char('LWA Client Secret', required=True, groups='base.group_system')
+    refresh_token = fields.Char('Refresh Token', required=True, groups='base.group_system')
     
-    aws_access_key = fields.Char('AWS Access Key', help="Zorunlu değil, sadece özel IAM Role olan eski uygulamalarda.")
-    aws_secret_key = fields.Char('AWS Secret Key')
-    aws_role_arn = fields.Char('AWS Role ARN')
+    aws_access_key = fields.Char('AWS Access Key', groups='base.group_system',
+                                 help="Zorunlu değil, sadece özel IAM Role olan eski uygulamalarda.")
+    aws_secret_key = fields.Char('AWS Secret Key', groups='base.group_system')
+    aws_role_arn = fields.Char('AWS Role ARN', groups='base.group_system')
 
     # Sipariş Ayarları
     order_day_range = fields.Integer('Geçmiş Sipariş Süresi (Gün)', default=14)
@@ -89,29 +92,24 @@ class AmazonStore(models.Model):
             data = res.json()
             return data.get("access_token")
         except Exception as e:
-            raise UserError(f"Amazon Access Token alınamadı: {str(e)}")
+            raise UserError(_("Amazon Access Token alınamadı: %s") % str(e))
 
     def test_connection(self):
         self.ensure_one()
         try:
             token = self.generate_access_token()
             if not token:
-                raise UserError("Token boş döndü.")
+                raise UserError(_("Token boş döndü."))
                 
             return {
                 'type': 'ir.actions.client',
                 'tag': 'display_notification',
                 'params': {
-                    'title': 'Başarılı',
-                    'message': 'Amazon LWA bağlantısı başarıyla kuruldu ve Token alındı!',
+                    'title': _('Başarılı'),
+                    'message': _('Amazon LWA bağlantısı başarıyla kuruldu ve Token alındı!'),
                     'type': 'success',
                     'sticky': False,
                 }
             }
         except Exception as e:
             raise UserError(str(e))
-
-class SaleOrder(models.Model):
-    _inherit = 'sale.order'
-    
-    amazon_store_id = fields.Many2one('amazon.store', string='Amazon Mağazası')

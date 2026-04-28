@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-from odoo import models, fields
+﻿from odoo import models, fields
 
 class N11Refund(models.Model):
     _name = 'n11.refund'

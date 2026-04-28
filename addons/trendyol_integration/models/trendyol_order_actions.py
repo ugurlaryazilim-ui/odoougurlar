@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-"""Trendyol sipariş toplu işlemleri — retry, refresh, delete, mark."""
+﻿"""Trendyol sipariş toplu işlemleri — retry, refresh, delete, mark."""
 import json
 import logging
 

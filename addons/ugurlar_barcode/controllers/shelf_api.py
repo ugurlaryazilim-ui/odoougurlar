@@ -14,7 +14,7 @@ class ShelfApiController(BarcodeApiBase):
     """Raf arama, kontrol, raflama ve raftan kaldırma API'leri."""
 
     # ─── RAF ARAMA (ürün barkodu ile raf bul) ─────────────
-    @http.route('/ugurlar_barcode/api/shelf_search', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/shelf_search', type='json', auth='user')
     def shelf_search(self, barcode='', **kw):
         """Ürün barkodu ile ürünün bulunduğu rafları bul (HamurLabs uyumlu)."""
         if not barcode:
@@ -83,7 +83,7 @@ class ShelfApiController(BarcodeApiBase):
         }
 
     # ─── RAF KONTROL (raf barkodu ile ürünleri listele) ───
-    @http.route('/ugurlar_barcode/api/shelf_control', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/shelf_control', type='json', auth='user')
     def shelf_control(self, barcode='', **kw):
         """Raf barkodu/adı ile o raftaki ürünleri listele (HamurLabs uyumlu)."""
         if not barcode:
@@ -135,7 +135,7 @@ class ShelfApiController(BarcodeApiBase):
         }
 
     # ─── RAFLAMA (ürün → raf) ─────────────────────────────
-    @http.route('/ugurlar_barcode/api/putaway', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/putaway', type='json', auth='user')
     def putaway(self, product_barcode='', shelf_barcode='', quantity=1, **kw):
         """Ürünü rafa yerleştir (concurrency-safe)."""
         if not product_barcode or not shelf_barcode:
@@ -165,18 +165,14 @@ class ShelfApiController(BarcodeApiBase):
             'state': 'done',
         })
 
-        # Urun chatter log
-        try:
-            user = request.env.user
-            msg = Markup(
-                '<b>📦 Raflama:</b> <em>%s</em> tarafindan '
-                '<b>%d</b> adet '
-                '<b>%s</b> rafina yerlestirildi.'
-            ) % (user.name, int(quantity), dest_location.complete_name)
-            product.sudo().message_post(
-                body=msg, message_type='notification', subtype_xmlid='mail.mt_note')
-        except Exception as e:
-            _logger.warning('Chatter log hatasi: %s', e)
+        # Ürün chatter log
+        user = request.env.user
+        msg = Markup(
+            '<b>📦 Raflama:</b> <em>%s</em> tarafından '
+            '<b>%d</b> adet '
+            '<b>%s</b> rafına yerleştirildi.'
+        ) % (user.name, int(quantity), dest_location.complete_name)
+        self._log_chatter(product, msg)
 
         return {
             'success': True,
@@ -187,7 +183,7 @@ class ShelfApiController(BarcodeApiBase):
         }
 
     # ─── RAFTAN KALDIRMA ──────────────────────────────────
-    @http.route('/ugurlar_barcode/api/remove_from_shelf', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/remove_from_shelf', type='json', auth='user')
     def remove_from_shelf(self, product_barcode='', shelf_barcode='', quantity=1, **kw):
         """Ürünü raftan kaldır (concurrency-safe)."""
         if not product_barcode or not shelf_barcode:
@@ -205,12 +201,8 @@ class ShelfApiController(BarcodeApiBase):
         if not location:
             return {'error': f'Raf bulunamadı: {shelf_barcode}'}
 
-        # Mevcut stok kontrolü
-        request.env.cr.execute(
-            "SELECT quantity FROM stock_quant WHERE product_id=%s AND location_id=%s AND quantity > 0",
-            (product.id, location.id)
-        )
-        row = request.env.cr.fetchone()
+        # Mevcut stok kontrolü (ORM — lock ile)
+        row = self._lock_quant(product.id, location.id, positive_only=True)
         if not row:
             return {'error': 'Bu üründe rafta stok yok'}
 
@@ -226,18 +218,14 @@ class ShelfApiController(BarcodeApiBase):
             'state': 'done',
         })
 
-        # Urun chatter log
-        try:
-            user = request.env.user
-            msg = Markup(
-                '<b>📤 Raftan Kaldirma:</b> <em>%s</em> tarafindan '
-                '<b>%d</b> adet '
-                '<b>%s</b> rafindan kaldirildi.'
-            ) % (user.name, int(quantity), location.complete_name)
-            product.sudo().message_post(
-                body=msg, message_type='notification', subtype_xmlid='mail.mt_note')
-        except Exception as e:
-            _logger.warning('Chatter log hatasi: %s', e)
+        # Ürün chatter log
+        user = request.env.user
+        msg = Markup(
+            '<b>📤 Raftan Kaldırma:</b> <em>%s</em> tarafından '
+            '<b>%d</b> adet '
+            '<b>%s</b> rafından kaldırıldı.'
+        ) % (user.name, int(quantity), location.complete_name)
+        self._log_chatter(product, msg)
 
         return {
             'success': True,
@@ -245,7 +233,7 @@ class ShelfApiController(BarcodeApiBase):
         }
 
     # ─── RAF TAŞIMA (kaynak → hedef) ──────────────────────
-    @http.route('/ugurlar_barcode/api/shelf_transfer', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/shelf_transfer', type='json', auth='user')
     def shelf_transfer(self, product_barcode='', source_shelf_barcode='',
                        target_shelf_barcode='', quantity=1, reason='', **kw):
         """Ürünü bir raftan başka bir rafa taşı (concurrency-safe)."""
@@ -287,26 +275,22 @@ class ShelfApiController(BarcodeApiBase):
             'state': 'done',
         })
 
-        # Urun chatter log
-        try:
-            user = request.env.user
-            reason_map = {
-                'reorganize': 'Reorganizasyon', 'demand': 'Talep Degisimi',
-                'damage': 'Hasar', 'return': 'Iade',
-                'season': 'Sezon Degisimi', 'other': 'Diger',
-            }
-            reason_txt = reason_map.get(reason, '')
-            msg = Markup(
-                '<b>🔄 Raf Tasima:</b> <em>%s</em> tarafindan '
-                '<b>%d</b> adet '
-                '<b>%s</b> &rarr; <b>%s</b> tasindi.'
-            ) % (user.name, int(quantity), source_loc.complete_name, target_loc.complete_name)
-            if reason_txt:
-                msg += Markup(' <i>(Neden: %s)</i>') % reason_txt
-            product.sudo().message_post(
-                body=msg, message_type='notification', subtype_xmlid='mail.mt_note')
-        except Exception as e:
-            _logger.warning('Chatter log hatasi: %s', e)
+        # Ürün chatter log
+        user = request.env.user
+        reason_map = {
+            'reorganize': 'Reorganizasyon', 'demand': 'Talep Değişimi',
+            'damage': 'Hasar', 'return': 'İade',
+            'season': 'Sezon Değişimi', 'other': 'Diğer',
+        }
+        reason_txt = reason_map.get(reason, '')
+        msg = Markup(
+            '<b>🔄 Raf Taşıma:</b> <em>%s</em> tarafından '
+            '<b>%d</b> adet '
+            '<b>%s</b> &rarr; <b>%s</b> taşındı.'
+        ) % (user.name, int(quantity), source_loc.complete_name, target_loc.complete_name)
+        if reason_txt:
+            msg += Markup(' <i>(Neden: %s)</i>') % reason_txt
+        self._log_chatter(product, msg)
 
         return {
             'success': True,
@@ -318,7 +302,7 @@ class ShelfApiController(BarcodeApiBase):
         }
 
     # ─── TÜM RAFI TAŞI ──────────────────────────────────────
-    @http.route('/ugurlar_barcode/api/shelf_move_all', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/shelf_move_all', type='json', auth='user')
     def shelf_move_all(self, source_barcode='', target_barcode='', reason='', **kw):
         """Kaynak raftaki TÜM ürünleri hedef rafa taşı (concurrency-safe)."""
         source_barcode = (source_barcode or '').strip()
@@ -380,18 +364,14 @@ class ShelfApiController(BarcodeApiBase):
             })
 
             # Varyant chatter log
-            try:
-                msg = Markup(
-                    '<b>&#x1F69A; Tum Raf Tasima:</b> <em>%s</em> tarafindan '
-                    '<b>%d</b> adet '
-                    '<b>%s</b> &rarr; <b>%s</b> tasindi.'
-                ) % (user.name, int(qty), source_loc.complete_name, target_loc.complete_name)
-                if reason_txt:
-                    msg += Markup(' <i>(Neden: %s)</i>') % reason_txt
-                product.sudo().message_post(
-                    body=msg, message_type='notification', subtype_xmlid='mail.mt_note')
-            except Exception as e:
-                _logger.warning('Chatter log hatasi: %s', e)
+            msg = Markup(
+                '<b>&#x1F69A; Tüm Raf Taşıma:</b> <em>%s</em> tarafından '
+                '<b>%d</b> adet '
+                '<b>%s</b> &rarr; <b>%s</b> taşındı.'
+            ) % (user.name, int(qty), source_loc.complete_name, target_loc.complete_name)
+            if reason_txt:
+                msg += Markup(' <i>(Neden: %s)</i>') % reason_txt
+            self._log_chatter(product, msg)
 
             moved_count += 1
             total_quantity += qty
@@ -406,7 +386,7 @@ class ShelfApiController(BarcodeApiBase):
         }
 
     # ─── TOPLU RAF SİLME ─────────────────────────────────────
-    @http.route('/ugurlar_barcode/api/shelf_clear_all', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/shelf_clear_all', type='json', auth='user')
     def shelf_clear_all(self, shelf_barcode='', **kw):
         """Raftaki TÜM ürünleri kaldır (concurrency-safe)."""
         shelf_barcode = (shelf_barcode or '').strip()
@@ -446,16 +426,12 @@ class ShelfApiController(BarcodeApiBase):
             })
 
             # Varyant chatter log
-            try:
-                msg = Markup(
-                    '<b>&#x1F5D1; Toplu Raf Silme:</b> <em>%s</em> tarafindan '
-                    '<b>%d</b> adet '
-                    '<b>%s</b> rafindan kaldirildi.'
-                ) % (user.name, int(qty), location.complete_name)
-                product.sudo().message_post(
-                    body=msg, message_type='notification', subtype_xmlid='mail.mt_note')
-            except Exception as e:
-                _logger.warning('Chatter log hatasi: %s', e)
+            msg = Markup(
+                '<b>&#x1F5D1; Toplu Raf Silme:</b> <em>%s</em> tarafından '
+                '<b>%d</b> adet '
+                '<b>%s</b> rafından kaldırıldı.'
+            ) % (user.name, int(qty), location.complete_name)
+            self._log_chatter(product, msg)
 
             # Güvenli kaldırma (lock ile)
             self._safe_update_quant(product, location, -qty)

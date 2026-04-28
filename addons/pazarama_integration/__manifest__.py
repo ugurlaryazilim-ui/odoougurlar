@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-{
+﻿{
     'name': 'Pazarama Entegrasyonu',
     'version': '19.0.1.0.0',
     'summary': 'Pazarama Sipariş Entegrasyonu',

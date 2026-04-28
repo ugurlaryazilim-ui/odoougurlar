@@ -1,7 +1,9 @@
-# -*- coding: utf-8 -*-
+import json
+import logging
+from datetime import datetime, timedelta
+
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
-import logging
 
 _logger = logging.getLogger(__name__)
 
@@ -15,31 +17,31 @@ class FloStore(models.Model):
     active = fields.Boolean(default=True)
 
     # API Credentials (Basic Auth)
-    flo_username = fields.Char(string='Kullanıcı Adı', help="FLO API Kullanıcı Adı")
-    flo_password = fields.Char(string='Şifre', help="FLO API Şifresi")
-    flo_seller_id = fields.Char(string='Satıcı ID', help="FLO Satıcı (Merchant) ID")
+    flo_username = fields.Char(string='Kullanıcı Adı', groups='base.group_system', help="FLO API Kullanıcı Adı")
+    flo_password = fields.Char(string='Şifre', groups='base.group_system', help="FLO API Şifresi")
+    flo_seller_id = fields.Char(string='Satıcı ID', groups='base.group_system', help="FLO Satıcı (Merchant) ID")
 
     # ─── Senkronizasyon Ayarları ─────────────────────────
     auto_sync = fields.Boolean(string='Otomatik Sipariş Senkronizasyonu', default=True)
-    sync_interval = fields.Integer(string='Senkron Aralığı (dk)', default=1, help='Bu değer cron ile senkronize çalışarak hangi sıklıkta Flo API\'ye çıkılacağını gösterir.')
-    order_day_range = fields.Integer(string='Senkronizasyon Gün Aralığı', default=1, help="Geçmişe dönük kaç günlük sipariş çekilecek?")
+    sync_interval = fields.Integer(string='Senkron Aralığı (dk)', default=1)
+    order_day_range = fields.Integer(string='Senkronizasyon Gün Aralığı', default=1)
     last_sync = fields.Datetime(string='Son Senkronizasyon', readonly=True)
     
     # ─── Sipariş Ayarları ────────────────────────────────
-    auto_confirm = fields.Boolean(string='Siparişi Otomatik Onayla', default=True, help="Odoo'ya düşen siparişler otomatik onaylanır ve Nebim sürecini tetikler.")
+    auto_confirm = fields.Boolean(string='Siparişi Otomatik Onayla', default=True)
     auto_cancel = fields.Boolean(string='İptalleri Otomatik İptal Et', default=True)
 
     # ─── Müşteri Ayarları ────────────────────────────────
-    customer_prefix = fields.Char(string='Müşteri Kodu Ön Ek', default='PTT-', help='Flo müşterilerinin kodlarına eklenen ek')
-    skip_customer_email = fields.Boolean(string='Mail Adresi İşlenmesin', default=False, help='Müşteri oluşturulurken e-posta adresi kaydedilmez (KVKK)')
+    customer_prefix = fields.Char(string='Müşteri Kodu Ön Ek', default='FLO-', help='Flo müşterilerinin kodlarına eklenen ek')
+    skip_customer_email = fields.Boolean(string='Mail Adresi İşlenmesin', default=False)
 
     # ─── İade Ayarları ───────────────────────────────────
-    process_returns = fields.Boolean(string='İadeleri İşle', default=False, help='İade edilen siparişleri çekip listele')
+    process_returns = fields.Boolean(string='İadeleri İşle', default=False)
     return_day_range = fields.Integer(string='İade Gün Aralığı', default=3)
     
     # ─── Kargo Ayarları ──────────────────────────────────
-    auto_send_cargo = fields.Boolean(string='Otomatik Kargo Kodu Gönder', default=True, help='Depo Picking (Toplama) tamamlandığında kargo bilgisini flo paneline otomatik yollar')
-    flo_warehouse_id = fields.Integer(string='Flo Depo ID', help='Flo Kargo API Barkod oluşturmada kullanılacak Depo ID')
+    auto_send_cargo = fields.Boolean(string='Otomatik Kargo Kodu Gönder', default=True)
+    flo_warehouse_id = fields.Integer(string='Flo Depo ID')
     cargo_include_order_number = fields.Boolean(string='Kargo Koduna Sipariş No Ekle', default=False)
     default_package_count = fields.Integer(string='Varsayılan Koli Sayısı', default=1)
     default_desi = fields.Float(string='Varsayılan Desi', default=1.0)
@@ -51,35 +53,47 @@ class FloStore(models.Model):
     cargo_unit_price = fields.Float(string='Kargo Birim Fiyatı (desi)', default=110.39, digits=(10, 2))
     last_financial_sync = fields.Datetime(string='Son Finansal Senkron', readonly=True)
 
+    # ─── İlişkiler ───────────────────────────────────────
+    order_ids = fields.One2many('flo.order', 'store_id', string='Siparişler')
+    settlement_ids = fields.One2many('flo.settlement', 'store_id', string='Finansal İşlemler')
+
     # ─── Counts ──────────────────────────────────────────
     order_count = fields.Integer(string='Sipariş Sayısı', compute='_compute_order_count')
     settlement_count = fields.Integer(string='Finansal Kayıt', compute='_compute_counts')
 
+    @api.depends('order_ids')
     def _compute_order_count(self):
+        data = self.env['flo.order'].sudo()._read_group(
+            [('store_id', 'in', self.ids)],
+            groupby=['store_id'], aggregates=['__count'],
+        )
+        counts = {store.id: count for store, count in data}
         for store in self:
-            store.order_count = self.env['flo.order'].search_count([('store_id', '=', store.id)])
+            store.order_count = counts.get(store.id, 0)
 
+    @api.depends('settlement_ids')
     def _compute_counts(self):
+        data = self.env['flo.settlement'].sudo()._read_group(
+            [('store_id', 'in', self.ids)],
+            groupby=['store_id'], aggregates=['__count'],
+        )
+        counts = {store.id: count for store, count in data}
         for store in self:
-            store.settlement_count = self.env['flo.settlement'].search_count([('store_id', '=', store.id)])
+            store.settlement_count = counts.get(store.id, 0)
 
     def get_api(self):
         """FloApi client objesini oluştur ve döndür."""
         self.ensure_one()
         if not self.flo_username or not self.flo_password:
             raise UserError(_("Flo Kullanıcı Adı ve Şifresi boş olamaz."))
-            
-        api = self.env['flo.api'].sudo().create_api(self)
-        return api
+        from .flo_api import FloAPIClient
+        return FloAPIClient(self)
 
     def action_test_connection(self):
         """Bağlantıyı ve yetkilendirmeyi sına."""
         self.ensure_one()
         try:
-            from datetime import datetime, timedelta
             api_client = self.get_api()
-            
-            # orders search method takes startDate and endDate, max 40 days
             start_date = datetime.now() - timedelta(days=1)
             end_date = datetime.now()
             
@@ -119,8 +133,6 @@ class FloStore(models.Model):
 
     def action_sync_financials(self):
         self.ensure_one()
-        from datetime import datetime, timedelta
-        import json
         
         api = self.get_api()
         start_date = datetime.now() - timedelta(days=self.financial_day_range or 15)
@@ -132,7 +144,6 @@ class FloStore(models.Model):
 
         data_list = res.get('data', [])
         
-        # Flo data is sometimes inside {'data': [...]} or just a list
         if isinstance(data_list, dict) and 'data' in data_list:
             data_list = data_list['data']
         elif isinstance(data_list, dict) and 'paymentAgreements' in data_list:
@@ -144,7 +155,7 @@ class FloStore(models.Model):
                 'tag': 'display_notification',
                 'params': {
                     'title': _('Finansal Senkronizasyon'),
-                    'message': 'Belirtilen tarih aralığında yeni finansal işlem (Payment Agreement) bulunamadı.',
+                    'message': 'Belirtilen tarih aralığında yeni finansal işlem bulunamadı.',
                     'sticky': False,
                     'type': 'info',
                 }
@@ -158,24 +169,22 @@ class FloStore(models.Model):
             trx_id = str(item.get('id') or item.get('paymentAgreementId') or '')
             order_id = item.get('orderId') or ''
             
-            # Bazı kayıtlarda id olmayabiliyor, trx_id ve order_id birlikte kontrol edelim
             domain = [('store_id', '=', self.id)]
             if trx_id:
                 domain.append(('trx_id', '=', trx_id))
             elif order_id:
                 domain.append(('order_id', '=', order_id))
             else:
-                continue # no identifier
+                continue
 
             existing = settlement_model.search(domain, limit=1)
             
-            # Tarih dönüşümleri
             trx_date_str = item.get('transactionDate') or item.get('agreementDate')
             trx_date = False
             if trx_date_str:
                 try:
                     trx_date = datetime.strptime(trx_date_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
-                except:
+                except Exception:
                     pass
 
             transferred_date_str = item.get('allowanceDate') or item.get('paymentDate')
@@ -183,7 +192,7 @@ class FloStore(models.Model):
             if transferred_date_str:
                 try:
                     transferred_date = datetime.strptime(transferred_date_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
-                except:
+                except Exception:
                     pass
 
             vals = {

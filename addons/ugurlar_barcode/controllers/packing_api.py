@@ -10,10 +10,46 @@ from .base_api import BarcodeApiBase
 _logger = logging.getLogger(__name__)
 
 
+# Marketplace order field registry — yeni pazaryeri eklendiğinde sadece buraya ekle
+_MARKETPLACE_REGISTRY = [
+    ('trendyol_order_id', 'trendyol_order_number', 'Trendyol'),
+    ('hb_order_id', 'hb_order_number', 'Hepsiburada'),
+    ('amazon_order_id', 'amazon_order_number', 'Amazon'),
+    ('pazarama_order_id', 'order_number', 'Pazarama'),
+    ('n11_order_id', 'order_number', 'N11'),
+    ('flo_order_id', 'order_number', 'Flo'),
+    ('idefix_order_id', 'order_number', 'Idefix'),
+    ('pttavm_order_id', 'order_number', 'PttAvm'),
+]
+
+
+def _extract_marketplace_info(sale_order):
+    """Sale order'dan marketplace sipariş bilgilerini çek.
+
+    Returns:
+        dict: cargo_tracking, cargo_provider, customer_name, order_number, marketplace_name
+    """
+    for field, num_field, name in _MARKETPLACE_REGISTRY:
+        if hasattr(sale_order, field) and getattr(sale_order, field):
+            order = getattr(sale_order, field)
+            return {
+                'marketplace_name': name,
+                'cargo_tracking': getattr(order, 'cargo_tracking_number', '') or '',
+                'cargo_provider': getattr(order, 'cargo_provider', '') or '',
+                'customer_name': getattr(order, 'customer_name', '') or '',
+                'order_number': getattr(order, num_field, '') or '',
+            }
+    return {
+        'marketplace_name': 'Trendyol',  # Fallback
+        'cargo_tracking': '', 'cargo_provider': '',
+        'customer_name': '', 'order_number': '',
+    }
+
+
 class PackingApiController(BarcodeApiBase):
     """Paketleme & Faturalama API'leri."""
 
-    @http.route('/ugurlar_barcode/api/packing_batch_detail', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/packing_batch_detail', type='json', auth='user')
     def packing_batch_detail(self, batch_name='', batch_id=0, **kw):
         """Rota numarası veya ID ile batch detayı getir."""
         Batch = request.env['stock.picking.batch'].sudo()
@@ -51,37 +87,11 @@ class PackingApiController(BarcodeApiBase):
 
             if picking.origin and picking.origin in sales_dict:
                 sale = sales_dict[picking.origin]
-                # Multi-marketplace: Trendyol, Hepsiburada, Amazon
-                if hasattr(sale, 'trendyol_order_id') and sale.trendyol_order_id:
-                    torder = sale.trendyol_order_id
-                    cargo_tracking = torder.cargo_tracking_number or ''
-                    cargo_provider = torder.cargo_provider or ''
-                    customer_name = torder.customer_name or ''
-                    order_number = torder.trendyol_order_number or ''
-                elif hasattr(sale, 'hb_order_id') and sale.hb_order_id:
-                    hborder = sale.hb_order_id
-                    cargo_tracking = getattr(hborder, 'cargo_tracking_number', '') or ''
-                    cargo_provider = getattr(hborder, 'cargo_provider', '') or ''
-                    customer_name = getattr(hborder, 'customer_name', '') or ''
-                    order_number = getattr(hborder, 'hb_order_number', '') or ''
-                elif hasattr(sale, 'amazon_order_id') and sale.amazon_order_id:
-                    amzorder = sale.amazon_order_id
-                    cargo_tracking = getattr(amzorder, 'cargo_tracking_number', '') or ''
-                    cargo_provider = getattr(amzorder, 'cargo_provider', '') or ''
-                    customer_name = getattr(amzorder, 'customer_name', '') or ''
-                    order_number = getattr(amzorder, 'amazon_order_number', '') or ''
-                elif hasattr(sale, 'pazarama_order_id') and sale.pazarama_order_id:
-                    porder = sale.pazarama_order_id
-                    cargo_tracking = getattr(porder, 'cargo_tracking_number', '') or ''
-                    cargo_provider = getattr(porder, 'cargo_provider', '') or ''
-                    customer_name = getattr(porder, 'customer_name', '') or ''
-                    order_number = getattr(porder, 'order_number', '') or ''
-                elif hasattr(sale, 'n11_order_id') and sale.n11_order_id:
-                    n11order = sale.n11_order_id
-                    cargo_tracking = getattr(n11order, 'cargo_tracking_number', '') or ''
-                    cargo_provider = getattr(n11order, 'cargo_provider', '') or ''
-                    customer_name = getattr(n11order, 'customer_name', '') or ''
-                    order_number = getattr(n11order, 'order_number', '') or ''
+                mp_info = _extract_marketplace_info(sale)
+                cargo_tracking = mp_info['cargo_tracking']
+                cargo_provider = mp_info['cargo_provider']
+                customer_name = mp_info['customer_name']
+                order_number = mp_info['order_number']
 
             for move in picking.move_ids:
                 product = move.product_id
@@ -120,7 +130,7 @@ class PackingApiController(BarcodeApiBase):
             'all_matched': matched == total,
         }
 
-    @http.route('/ugurlar_barcode/api/packing_scan', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/packing_scan', type='json', auth='user')
     def packing_scan(self, batch_id=0, barcode='', **kw):
         """Paketleme sırasında ürün barkodu tara → eşleştir."""
         # Duplicate guard: aynı barkod 500ms içinde tekrar taranırsa atla
@@ -209,7 +219,7 @@ class PackingApiController(BarcodeApiBase):
                 self._trigger_nebim_sync(target_picking)
 
             except Exception as e:
-                _logger.error(f"Auto-validate/sync error for {target_picking.name}: {e}")
+                _logger.error("Auto-validate/sync error for %s: %s", target_picking.name, e)
 
         # Tüm batch kontrolü
         all_matched = all(
@@ -233,7 +243,7 @@ class PackingApiController(BarcodeApiBase):
             'all_matched': all_matched,
         }
 
-    @http.route('/ugurlar_barcode/api/packing_undo', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/packing_undo', type='json', auth='user')
     def packing_undo(self, picking_id=0, barcode='', **kw):
         """Paketlemede yanlış okutulan ürünü geri alır (Miktar -1)."""
         picking = request.env['stock.picking'].sudo().browse(int(picking_id))
@@ -269,7 +279,7 @@ class PackingApiController(BarcodeApiBase):
 
         return {'success': True, 'message': f'{product.name} siparişten 1 adet eksiltildi.'}
 
-    @http.route('/ugurlar_barcode/api/packing_backorder', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/packing_backorder', type='json', auth='user')
     def packing_backorder(self, picking_id=0, **kw):
         """Kısmi olarak tamamlanmış siparişi kapatır ve geriye kalanları backorder (eksik) yapar."""
         picking = request.env['stock.picking'].sudo().browse(int(picking_id))
@@ -294,12 +304,12 @@ class PackingApiController(BarcodeApiBase):
             ) % user.name
             picking.message_post(body=msg, message_type='notification')
             
-            return {'success': True, 'message': f'{picking.name} eksik ürünlerle onaylandı (Backorder oluşturuldu).'}
-        except Exception as e:
-            _logger.error(f"Backorder error for {picking.name}: {e}")
-            return {'error': f'Eksik onaylama hatası: {str(e)}'}
+            return {'success': True, 'message': '%s eksik ürünlerle onaylandı (Backorder oluşturuldu).' % picking.name}
+        except Exception:
+            _logger.exception("Backorder error for %s", picking.name)
+            return {'error': 'Eksik onaylama hatası'}
 
-    @http.route('/ugurlar_barcode/api/packing_complete', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/packing_complete', type='json', auth='user')
     def packing_complete(self, batch_id=0, **kw):
         """Paketleme tamamla — picking'leri doğrula."""
         batch = request.env['stock.picking.batch'].sudo().browse(int(batch_id))
@@ -332,8 +342,7 @@ class PackingApiController(BarcodeApiBase):
                     validated += 1
                 
             except Exception as e:
-                import traceback
-                _logger.error(f"Sipariş Onay/Senkronizasyon Hatası {picking.name}:\n{traceback.format_exc()}")
+                _logger.exception("Sipariş Onay/Senkronizasyon Hatası %s:", picking.name)
                 errors.append(f"{picking.name}: {str(e)}")
 
         return {
@@ -344,7 +353,7 @@ class PackingApiController(BarcodeApiBase):
             'message': f'{validated} sipariş paketlendi ve doğrulandı',
         }
 
-    @http.route('/ugurlar_barcode/api/packing_label_data', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/packing_label_data', type='json', auth='user')
     def packing_label_data(self, picking_id=0, **kw):
         """Kargo etiketi için sipariş verilerini döndür."""
         picking = request.env['stock.picking'].sudo().browse(int(picking_id))
@@ -383,40 +392,19 @@ class PackingApiController(BarcodeApiBase):
                 ('name', '=', picking.origin)
             ], limit=1)
             if sale:
-                # Multi-marketplace: Trendyol, Hepsiburada, Amazon
-                if hasattr(sale, 'trendyol_order_id') and sale.trendyol_order_id:
-                    torder = sale.trendyol_order_id
-                    data['cargo_tracking'] = torder.cargo_tracking_number or ''
-                    data['cargo_provider'] = torder.cargo_provider or ''
-                    data['order_number'] = torder.trendyol_order_number or ''
-                    data['customer_name'] = torder.customer_name or ''
-                    data['shipping_address'] = torder.shipping_address or ''
-                    data['shipping_city'] = torder.shipping_city or ''
-                    data['shipping_district'] = torder.shipping_district or ''
-                elif hasattr(sale, 'hb_order_id') and sale.hb_order_id:
-                    hborder = sale.hb_order_id
-                    data['cargo_tracking'] = getattr(hborder, 'cargo_tracking_number', '') or ''
-                    data['cargo_provider'] = getattr(hborder, 'cargo_provider', '') or ''
-                    data['order_number'] = getattr(hborder, 'hb_order_number', '') or ''
-                    data['customer_name'] = getattr(hborder, 'customer_name', '') or ''
-                elif hasattr(sale, 'amazon_order_id') and sale.amazon_order_id:
-                    amzorder = sale.amazon_order_id
-                    data['cargo_tracking'] = getattr(amzorder, 'cargo_tracking_number', '') or ''
-                    data['cargo_provider'] = getattr(amzorder, 'cargo_provider', '') or ''
-                    data['order_number'] = getattr(amzorder, 'amazon_order_number', '') or ''
-                    data['customer_name'] = getattr(amzorder, 'customer_name', '') or ''
-                elif hasattr(sale, 'pazarama_order_id') and sale.pazarama_order_id:
-                    porder = sale.pazarama_order_id
-                    data['cargo_tracking'] = getattr(porder, 'cargo_tracking_number', '') or ''
-                    data['cargo_provider'] = getattr(porder, 'cargo_provider', '') or ''
-                    data['order_number'] = getattr(porder, 'order_number', '') or ''
-                    data['customer_name'] = getattr(porder, 'customer_name', '') or ''
-                elif hasattr(sale, 'n11_order_id') and sale.n11_order_id:
-                    n11order = sale.n11_order_id
-                    data['cargo_tracking'] = getattr(n11order, 'cargo_tracking_number', '') or ''
-                    data['cargo_provider'] = getattr(n11order, 'cargo_provider', '') or ''
-                    data['order_number'] = getattr(n11order, 'order_number', '') or ''
-                    data['customer_name'] = getattr(n11order, 'customer_name', '') or ''
+                mp_info = _extract_marketplace_info(sale)
+                data['cargo_tracking'] = mp_info['cargo_tracking']
+                data['cargo_provider'] = mp_info['cargo_provider']
+                data['order_number'] = mp_info['order_number']
+                data['customer_name'] = mp_info['customer_name']
+                # Trendyol-specific shipping fields
+                for field, num_field, name in _MARKETPLACE_REGISTRY:
+                    if name == 'Trendyol' and hasattr(sale, field) and getattr(sale, field):
+                        torder = getattr(sale, field)
+                        data['shipping_address'] = getattr(torder, 'shipping_address', '') or ''
+                        data['shipping_city'] = getattr(torder, 'shipping_city', '') or ''
+                        data['shipping_district'] = getattr(torder, 'shipping_district', '') or ''
+                        break
 
         # Ürün listesi
         items = []
@@ -471,18 +459,9 @@ class PackingApiController(BarcodeApiBase):
         order_enabled = ICP.get_param('odoougurlar.nebim_sync_order_enabled', 'False') == 'True'
         invoice_enabled = ICP.get_param('odoougurlar.nebim_sync_invoice_enabled', 'False') == 'True'
         
-        # Pazaryeri tespiti
-        marketplace_name = None
-        if hasattr(sale_order, 'trendyol_order_id') and sale_order.trendyol_order_id:
-            marketplace_name = 'Trendyol'
-        elif hasattr(sale_order, 'hb_order_id') and sale_order.hb_order_id:
-            marketplace_name = 'Hepsiburada'
-        elif hasattr(sale_order, 'amazon_order_id') and sale_order.amazon_order_id:
-            marketplace_name = 'Amazon'
-        elif hasattr(sale_order, 'pazarama_order_id') and sale_order.pazarama_order_id:
-            marketplace_name = 'Pazarama'
-        else:
-            marketplace_name = 'Trendyol' # Fallback
+        # Pazaryeri tespiti (registry tabanlı)
+        mp_info = _extract_marketplace_info(sale_order)
+        marketplace_name = mp_info['marketplace_name']
         
         # Mapping Bul
         mapping = picking.env['odoougurlar.marketplace.mapping'].sudo().find_mapping(

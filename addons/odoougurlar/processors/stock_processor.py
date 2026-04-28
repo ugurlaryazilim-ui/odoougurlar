@@ -27,6 +27,7 @@ class StockProcessor(models.AbstractModel):
     # =================================================================
     #  Cache
     # =================================================================
+    @api.private
     def _init_stock_cache(self, force=False):
         """Tüm eşleme verilerini belleğe yükler."""
         global _STOCK_CACHE
@@ -235,6 +236,8 @@ class StockProcessor(models.AbstractModel):
                         quant.write({'quantity': qty})
                     except Exception as e:
                         _logger.warning("Quant güncelleme hatası id=%d: %s", qid, str(e))
+                # BİLİNÇLİ TERCİH: Büyük stok batch'lerinde (10K+ satır) bellek taşmasını
+                # engellemek için chunk sonrası commit yapılır. Partial update riski kabul edilir.
                 self.env.cr.commit()
 
         if batch_creates:
@@ -250,6 +253,7 @@ class StockProcessor(models.AbstractModel):
                         })
                     except Exception as e:
                         _logger.warning("Quant oluşturma hatası prod=%d loc=%d: %s", prod_id, loc_id, str(e))
+                # BİLİNÇLİ TERCİH: Bkz. yukarıdaki açıklama.
                 self.env.cr.commit()
 
         if not_found_samples:
@@ -268,6 +272,7 @@ class StockProcessor(models.AbstractModel):
         )
         return stats
 
+    @api.private
     def _find_product_id(self, item):
         """Cache'den varyant ID'si bulur — 0 sorgu."""
         barcode1 = (item.get('Barcode1') or '').strip()

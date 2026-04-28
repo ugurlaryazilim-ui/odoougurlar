@@ -1,7 +1,9 @@
-# -*- coding: utf-8 -*-
+import json
+import logging
+from datetime import datetime, timedelta
+
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
-import logging
 
 _logger = logging.getLogger(__name__)
 
@@ -15,12 +17,12 @@ class PazaramaStore(models.Model):
     active = fields.Boolean(default=True)
 
     # API Credentials
-    client_id = fields.Char(string='Client ID (API Key)', required=True, help="isortagim.pazarama.com panelinden alınır")
-    client_secret = fields.Char(string='Client Secret (API Secret)', required=True)
+    client_id = fields.Char(string='Client ID (API Key)', required=True, groups='base.group_system', help="isortagim.pazarama.com panelinden alınır")
+    client_secret = fields.Char(string='Client Secret (API Secret)', required=True, groups='base.group_system')
     
     # Tokens
-    access_token = fields.Char(string='Access Token', readonly=True)
-    token_expiry = fields.Datetime(string='Token Bitiş Tarihi', readonly=True)
+    access_token = fields.Char(string='Access Token', readonly=True, groups='base.group_system')
+    token_expiry = fields.Datetime(string='Token Bitiş Tarihi', readonly=True, groups='base.group_system')
 
     # ─── Senkronizasyon Ayarları ─────────────────────────
     auto_sync = fields.Boolean(string='Otomatik Sipariş Senkronizasyonu', default=True)
@@ -53,26 +55,41 @@ class PazaramaStore(models.Model):
     cargo_unit_price = fields.Float(string='Kargo Birim Fiyatı (desi)', default=110.39, digits=(10, 2))
     last_financial_sync = fields.Datetime(string='Son Finansal Senkron', readonly=True)
 
-    # ─── Counts ──────────────────────────────────────────
+    # ─── İlişkiler ───────────────────────────────────────────
+    order_ids = fields.One2many('pazarama.order', 'store_id', string='Siparişler')
+    settlement_ids = fields.One2many('pazarama.settlement', 'store_id', string='Finansal İşlemler')
+
+    # ─── Counts ──────────────────────────────────────────────
     order_count = fields.Integer(string='Sipariş Sayısı', compute='_compute_order_count')
     settlement_count = fields.Integer(string='Finansal Kayıt', compute='_compute_counts')
 
+    @api.depends('order_ids')
     def _compute_order_count(self):
+        data = self.env['pazarama.order'].sudo()._read_group(
+            [('store_id', 'in', self.ids)],
+            groupby=['store_id'], aggregates=['__count'],
+        )
+        counts = {store.id: count for store, count in data}
         for store in self:
-            store.order_count = self.env['pazarama.order'].search_count([('store_id', '=', store.id)])
+            store.order_count = counts.get(store.id, 0)
 
+    @api.depends('settlement_ids')
     def _compute_counts(self):
+        data = self.env['pazarama.settlement'].sudo()._read_group(
+            [('store_id', 'in', self.ids)],
+            groupby=['store_id'], aggregates=['__count'],
+        )
+        counts = {store.id: count for store, count in data}
         for store in self:
-            store.settlement_count = self.env['pazarama.settlement'].search_count([('store_id', '=', store.id)])
+            store.settlement_count = counts.get(store.id, 0)
 
     def get_api(self):
         """PazaramaApi client objesini oluştur ve döndür."""
         self.ensure_one()
         if not self.client_id or not self.client_secret:
             raise UserError(_("Client ID ve Client Secret boş olamaz."))
-            
-        api = self.env['pazarama.api'].sudo().create_api(self)
-        return api
+        from .pazarama_api import PazaramaAPIClient
+        return PazaramaAPIClient(self)
 
     def action_test_connection(self):
         """Bağlantıyı ve yetkilendirmeyi sına."""
@@ -115,8 +132,6 @@ class PazaramaStore(models.Model):
 
     def action_sync_financials(self):
         self.ensure_one()
-        from datetime import datetime, timedelta
-        import json
         
         api = self.get_api()
         start_date = datetime.now() - timedelta(days=self.financial_day_range or 15)
@@ -171,7 +186,7 @@ class PazaramaStore(models.Model):
             if trx_date_str:
                 try:
                     trx_date = datetime.strptime(trx_date_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
-                except:
+                except Exception:
                     pass
 
             transferred_date_str = item.get('allowanceDate') or item.get('paymentDate')
@@ -179,7 +194,7 @@ class PazaramaStore(models.Model):
             if transferred_date_str:
                 try:
                     transferred_date = datetime.strptime(transferred_date_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
-                except:
+                except Exception:
                     pass
 
             vals = {

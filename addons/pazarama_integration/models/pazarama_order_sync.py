@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+
 import json
 import logging
 from datetime import datetime, timedelta
@@ -65,6 +65,7 @@ class PazaramaOrderSync(models.Model):
         store.sudo().write({'last_sync': fields.Datetime.now()})
         return {'created': created_count, 'updated': updated_count, 'errors': error_count}
 
+    @api.private
     def _process_order_json(self, order_json, store):
         """Gelen tekil JSON'u işler, PazaramaOrder ve SaleOrder yaratır."""
         order_id = order_json.get('orderId')
@@ -168,6 +169,7 @@ class PazaramaOrderSync(models.Model):
                 
         return 'created'
 
+    @api.private
     def _create_odoo_sale_order(self, p_order, store, ship_addr, bill_addr, customer_email, phone):
         """Odoo Sale Order & Res Partner yaratır."""
         
@@ -187,11 +189,14 @@ class PazaramaOrderSync(models.Model):
         # KVKK: Email gizleme
         final_email = '' if store.skip_customer_email else customer_email
 
-        partner_domain = [('name', '=ilike', p_order.customer_name)]
-        if phone:
-            partner_domain = ['|'] + partner_domain + [('phone', '=', phone)]
-            
-        partner = partner_env.search(partner_domain, limit=1)
+        # Müşteri eşleştirme — önce ref ile, sonra phone, sonra name
+        partner = False
+        if customer_ref:
+            partner = partner_env.search([('ref', '=', customer_ref)], limit=1)
+        if not partner and phone:
+            partner = partner_env.search([('phone', '=', phone)], limit=1)
+        if not partner:
+            partner = partner_env.search([('name', '=ilike', p_order.customer_name)], limit=1)
         
         if not partner:
             partner = partner_env.create({
@@ -241,20 +246,36 @@ class PazaramaOrderSync(models.Model):
             'order_line': [],
         }
         
+        # Batch ürün arama (N+1 önleme) — önce barcode, sonra nebim, sonra default_code
+        Product = self.env['product.product'].sudo()
+        codes = [line.product_code for line in p_order.line_ids if line.product_code]
+        product_map = {}
+        if codes:
+            products = Product.search([('barcode', 'in', codes)])
+            for p in products:
+                if p.barcode:
+                    product_map[p.barcode] = p
+            # nebim_barcode fallback
+            missing = [c for c in codes if c not in product_map]
+            if missing and 'nebim_barcode' in Product._fields:
+                for bc in missing:
+                    p = Product.search([('nebim_barcode', '=', bc)], limit=1)
+                    if not p:
+                        p = Product.search([('nebim_barcode', 'ilike', bc)], limit=1)
+                    if p:
+                        product_map[bc] = p
+            # default_code fallback
+            still_missing = [c for c in codes if c not in product_map]
+            if still_missing:
+                products = Product.search([('default_code', 'in', still_missing)])
+                for p in products:
+                    if p.default_code:
+                        product_map[p.default_code] = p
+
         for line in p_order.line_ids:
-            # Urunu bul
-            product = self.env['product.product'].search([
-                ('default_code', '=', line.product_code)
-            ], limit=1)
+            product = product_map.get(line.product_code)
             
             if not product:
-                product = self.env['product.product'].search([
-                    ('barcode', '=', line.product_code)
-                ], limit=1)
-            
-            if not product:
-                # Eger urun bulunamazsa hata veya taslak urun eklenebilir,
-                # Bu demo icin basit tutalim
                 _logger.warning("Pazarama Urun Bulunamadi: %s", line.product_code)
                 continue
                 

@@ -15,7 +15,7 @@ class OperationsApiController(BarcodeApiBase):
     """Stok hareketleri, etiket, toplu işlem ve performans API'leri."""
 
     # ─── STOK HAREKET RAPORU ──────────────────────────────
-    @http.route('/ugurlar_barcode/api/stock_movements', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/stock_movements', type='json', auth='user')
     def stock_movements(self, days=7, product_barcode='', move_type='all', limit=200, **kw):
         """Stok hareketlerini listele (HamurLabs uyumlu gelişmiş yapı)."""
         days = int(days)
@@ -101,7 +101,7 @@ class OperationsApiController(BarcodeApiBase):
 
 
     # ─── TOPLU BARKOD İŞLEM ──────────────────────────────
-    @http.route('/ugurlar_barcode/api/bulk_scan', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/bulk_scan', type='json', auth='user')
     def bulk_scan(self, items=None, operation='info', shelf_barcode='', **kw):
         """Toplu barkod işlemi."""
         if not items:
@@ -181,7 +181,7 @@ class OperationsApiController(BarcodeApiBase):
         }
 
     # ─── OPERATÖR PERFORMANS ─────────────────────────────
-    @http.route('/ugurlar_barcode/api/operator_performance', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/operator_performance', type='json', auth='user')
     def operator_performance(self, days=7, **kw):
         """Operatör performans istatistikleri."""
         date_from = datetime.now() - timedelta(days=int(days))

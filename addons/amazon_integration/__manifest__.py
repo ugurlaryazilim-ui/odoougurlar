@@ -1,6 +1,6 @@
 {
     'name': 'Amazon SP-API Integration',
-    'version': '19.0.1.0',
+    'version': '19.0.1.0.0',
     'category': 'Sales/Integration',
     'summary': 'Amazon Selling Partner API (SP-API) entegrasyonu',
     'author': 'Odoo Ugurlar',
@@ -15,4 +15,5 @@
     'installable': True,
     'application': True,
     'auto_install': False,
+    'license': 'LGPL-3',
 }

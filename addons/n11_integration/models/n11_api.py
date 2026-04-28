@@ -1,25 +1,27 @@
-# -*- coding: utf-8 -*-
-import base64
-import json
 import logging
 import requests
-from datetime import datetime, timedelta
-
-from odoo import api, fields, models, _
-from odoo.exceptions import UserError
+from datetime import datetime
 
 _logger = logging.getLogger(__name__)
 
 N11_API_URL = 'https://api.n11.com'
 
-class N11APIClient:
-    """N11 REST API Client."""
 
-    def __init__(self, store, env):
+class N11APIClient:
+    """N11 REST API Client — connection pooling ile."""
+
+    def __init__(self, store):
         self.store = store
-        self.env = env
         self.app_key = store.n11_app_key
         self.app_secret = store.n11_app_secret
+
+        # Connection pooling — TCP bağlantıları yeniden kullanılır
+        self._session = requests.Session()
+        self._session.headers.update({
+            'appkey': self.app_key or '',
+            'appsecret': self.app_secret or '',
+            'Content-Type': 'application/json',
+        })
 
     def _request(self, method, endpoint, params=None, data=None):
         """API Request over Headers Auth"""
@@ -28,16 +30,9 @@ class N11APIClient:
 
         url = f"{N11_API_URL}{endpoint}"
 
-        headers = {
-            'appkey': self.app_key,
-            'appsecret': self.app_secret,
-            'Content-Type': 'application/json',
-        }
-
         try:
-            resp = requests.request(
+            resp = self._session.request(
                 method, url,
-                headers=headers,
                 params=params,
                 json=data,
                 timeout=45,
@@ -86,12 +81,3 @@ class N11APIClient:
             "status": "Picking"
         }
         return self._request('PUT', '/rest/order/v1/update', data=data)
-
-
-class N11APIModel(models.AbstractModel):
-    """N11API nesnesini oluşturacak Odoo Factory"""
-    _name = 'n11.api'
-    _description = 'N11 API Factory'
-
-    def create_api(self, store):
-        return N11APIClient(store, self.env)

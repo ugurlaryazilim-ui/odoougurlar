@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-from . import flo_api
 from . import flo_store
 from . import flo_order
 from . import flo_order_sync

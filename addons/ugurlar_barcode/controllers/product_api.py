@@ -12,7 +12,7 @@ _logger = logging.getLogger(__name__)
 class ProductApiController(BarcodeApiBase):
     """Ürün stok arama API'si."""
 
-    @http.route('/ugurlar_barcode/api/product_search', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/product_search', type='json', auth='user')
     def product_search(self, barcode='', search_type='barcode', **kw):
         """Ürün ara → stok + raf + varyant bilgisi döndür.
         search_type: 'barcode' → sadece o varyant

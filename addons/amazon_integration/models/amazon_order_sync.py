@@ -1,12 +1,18 @@
-from odoo import models, fields, api, _
-from odoo.exceptions import UserError
-from datetime import datetime, timedelta
-import requests
 import json
 import logging
-from dateutil import parser
-import boto3
-from urllib.parse import urlparse
+from datetime import datetime, timedelta
+
+import requests
+from dateutil import parser as date_parser
+
+from odoo import models, fields, api, _
+from odoo.exceptions import UserError
+
+try:
+    import boto3
+except ImportError:
+    boto3 = None
+
 try:
     from requests_auth_aws_sigv4 import AWSSigV4
 except ImportError:
@@ -14,12 +20,18 @@ except ImportError:
 
 _logger = logging.getLogger(__name__)
 
-class AmazonStore(models.Model):
+
+class AmazonOrderSync(models.Model):
     _inherit = 'amazon.store'
 
+    @api.private
     def _get_aws_auth(self):
         """AWS IAM Credentials provided ise STS AssumeRole işlemi yaparak AWSSigV4 nesnesi döner."""
         if not self.aws_access_key or not self.aws_secret_key:
+            return None
+        
+        if not AWSSigV4:
+            _logger.warning("requests_auth_aws_sigv4 paketi yüklü değil. AWS Auth devre dışı.")
             return None
             
         region_map = {
@@ -30,7 +42,7 @@ class AmazonStore(models.Model):
         aws_region = region_map.get(self.region, 'us-east-1')
         
         try:
-            if self.aws_role_arn:
+            if self.aws_role_arn and boto3:
                 sts_client = boto3.client(
                     'sts',
                     aws_access_key_id=self.aws_access_key,
@@ -57,7 +69,7 @@ class AmazonStore(models.Model):
                     aws_secret_access_key=self.aws_secret_key
                 )
         except Exception as e:
-            _logger.error(f"AWS Auth Error: {e}")
+            _logger.error("AWS Auth Error: %s", e)
             return None
 
     def action_sync_orders(self):
@@ -69,11 +81,15 @@ class AmazonStore(models.Model):
         
         try:
             access_token = self.generate_access_token()
-            headers = {
+            
+            # Connection pooling — tek session ile tüm istekler
+            session = requests.Session()
+            session.headers.update({
                 'x-amz-access-token': access_token,
                 'User-Agent': 'OdooUgurlar/1.0',
                 'Content-Type': 'application/json'
-            }
+            })
+            
             auth = self._get_aws_auth()
             
             base_url = self.get_api_endpoint()
@@ -93,7 +109,7 @@ class AmazonStore(models.Model):
             log_msgs = []
             
             while True:
-                response = requests.get(endpoint, headers=headers, auth=auth, params=params, timeout=30)
+                response = session.get(endpoint, auth=auth, params=params, timeout=30)
                 if response.status_code != 200:
                     err = f"API Hatası HTTP {response.status_code}: {response.text}"
                     _logger.error(err)
@@ -109,11 +125,12 @@ class AmazonStore(models.Model):
                     
                 for order in orders:
                     try:
-                        p, s, e, m = self._process_single_order(order, headers, auth, base_url)
-                        total_fetched += p
-                        success_count += s
-                        error_count += e
-                        log_msgs.extend(m)
+                        with self.env.cr.savepoint():
+                            p, s, e, m = self._process_single_order(order, session, auth, base_url)
+                            total_fetched += p
+                            success_count += s
+                            error_count += e
+                            log_msgs.extend(m)
                     except Exception as ex:
                         error_count += 1
                         log_msgs.append(f"Order Parse Error ({order.get('AmazonOrderId')}): {ex}")
@@ -135,7 +152,7 @@ class AmazonStore(models.Model):
                 'type': 'ir.actions.client',
                 'tag': 'display_notification',
                 'params': {
-                    'title': 'Senkronizasyon Başarılı',
+                    'title': _('Senkronizasyon Başarılı'),
                     'message': f"{success_count} sipariş işlendi.",
                     'type': 'success',
                     'sticky': False,
@@ -145,7 +162,8 @@ class AmazonStore(models.Model):
             sync_log.mark_error(str(e))
             raise UserError(str(e))
             
-    def _process_single_order(self, order_data, headers, auth, base_url):
+    @api.private
+    def _process_single_order(self, order_data, session, auth, base_url):
         processed = 1
         created = 0
         failed = 0
@@ -161,17 +179,15 @@ class AmazonStore(models.Model):
         ], limit=1)
         
         if existing_order:
-            # Sadece durumu veya kargo takip numarasını güncelle vb. (Örnek)
             if existing_order.state not in ['done', 'cancel']:
                 if status == 'Canceled' and existing_order.state != 'cancel':
                     existing_order.action_cancel()
             return processed, 0, 0, msgs
 
-        # Canceled ise ve ERP'de yoksa almana gerek yok (Opsiyonel)
+        # Canceled ise ve ERP'de yoksa alma
         if status == 'Canceled':
             return processed, 0, 0, msgs
 
-        # Siparişin detaylı verisi Odoo'ya işleniyor.
         buyer_info = order_data.get('BuyerInfo', {})
         shipping_address = order_data.get('ShippingAddress', {})
         
@@ -180,26 +196,50 @@ class AmazonStore(models.Model):
         # Müşteri Yarat/Bul
         partner = self._get_or_create_partner(buyer_name, buyer_info, shipping_address)
         
-        # Order Items'ları çek (Ayrı API isteği gerektirir)
-        items_val = self._fetch_order_items(amazon_order_id, headers, auth, base_url)
+        # Order Items'ları çek (session ile — connection pooling)
+        items_val = self._fetch_order_items(amazon_order_id, session, auth, base_url)
         if not items_val:
             return processed, 0, 1, [f"{amazon_order_id} ürün detayları alınamadı, atlandı."]
-            
+
+        # Batch ürün arama — N+1 önleme
+        Product = self.env['product.product'].sudo()
+        all_skus = [item.get('SellerSKU') for item in items_val if item.get('SellerSKU')]
+        product_map = {}
+        if all_skus:
+            # default_code ile toplu arama
+            products = Product.search([('default_code', 'in', all_skus)])
+            for p in products:
+                if p.default_code:
+                    product_map[p.default_code] = p
+            # barcode fallback
+            missing = [s for s in all_skus if s not in product_map]
+            if missing:
+                products = Product.search([('barcode', 'in', missing)])
+                for p in products:
+                    if p.barcode:
+                        product_map[p.barcode] = p
+            # nebim_barcode fallback
+            still_missing = [s for s in all_skus if s not in product_map]
+            if still_missing and 'nebim_barcode' in Product._fields:
+                for bc in still_missing:
+                    p = Product.search([('nebim_barcode', '=', bc)], limit=1)
+                    if not p:
+                        p = Product.search([('nebim_barcode', 'ilike', bc)], limit=1)
+                    if p:
+                        product_map[bc] = p
+
         order_lines = []
         for item in items_val:
             sku = item.get('SellerSKU')
-            asin = item.get('ASIN')
             qty = item.get('QuantityOrdered', 1)
             item_price = item.get('ItemPrice', {}).get('Amount', '0.0')
             
-            # Ürünü Odoo'da Bul
-            product = self.env['product.product'].search([('default_code', '=', sku)], limit=1)
+            product = product_map.get(sku)
             if not product:
-                # ASIN ile yedek bulma stratejisi eklenebilir veya dummy ürün atılabilir.
-                msgs.append(f"{amazon_order_id} siparişinde {sku} SKU'lu ürün Odoo'da BULUNAMADI. Placeholder atandı.")
-                product = self.env.ref('amazon_integration.product_amazon_dummy', raise_if_not_found=False)
-                if not product:
-                    product = self.env['product.product'].search([], limit=1) # Fallback
+                # Ürün bulunamazsa loglayıp devam et — rastgele ürün atama TEHLİKELİ
+                msgs.append(f"{amazon_order_id} siparişinde {sku} SKU'lu ürün Odoo'da BULUNAMADI. Satır atlandı.")
+                _logger.warning("Amazon ürün bulunamadı: %s (Sipariş: %s)", sku, amazon_order_id)
+                continue
             
             unit_price = float(item_price) / float(qty) if qty > 0 else float(item_price)
                     
@@ -209,9 +249,18 @@ class AmazonStore(models.Model):
                 'price_unit': unit_price,
                 'name': item.get('Title', product.name)
             }))
-            
+
+        if not order_lines:
+            return processed, 0, 1, [f"{amazon_order_id} hiçbir ürün eşleştirilemedi, sipariş oluşturulmadı."]
+
+        # Tarih dönüşümü — tzinfo=None (False DEĞİL!)
         order_date_raw = order_data.get('PurchaseDate')
-        order_date = parser.parse(order_date_raw).replace(tzinfo=False) if order_date_raw else fields.Datetime.now()
+        order_date = fields.Datetime.now()
+        if order_date_raw:
+            try:
+                order_date = date_parser.parse(order_date_raw).replace(tzinfo=None)
+            except Exception:
+                order_date = fields.Datetime.now()
         
         sale_order = self.env['sale.order'].create({
             'partner_id': partner.id,
@@ -225,25 +274,31 @@ class AmazonStore(models.Model):
             'order_line': order_lines,
         })
         
-        # Eğer satıcı tarafından direkt kargolanacaksa
+        # MFN (satıcı kargosu) ise otomatik onayla
         if order_data.get('FulfillmentChannel') == 'MFN':
             sale_order.action_confirm()
 
         created = 1
         return processed, created, failed, msgs
-        
+
+    @api.private
     def _get_or_create_partner(self, name, buyer_info, address_info):
+        ResPartner = self.env['res.partner']
+        email = buyer_info.get('BuyerEmail', '')
         phone = address_info.get('Phone', '')
         city = address_info.get('City', '')
-        email = buyer_info.get('BuyerEmail', f"{name.replace(' ', '').lower()}@amazon.local")
         
-        domain = [('email', '=', email)]
-        if phone:
-            domain = ['|', ('phone', '=', phone)] + domain
-            
-        partner = self.env['res.partner'].search(domain, limit=1)
+        # Müşteri eşleştirme — önce email, sonra phone, sonra name
+        partner = False
+        if email:
+            partner = ResPartner.search([('email', '=', email)], limit=1)
+        if not partner and phone:
+            partner = ResPartner.search([('phone', '=', phone)], limit=1)
         if not partner:
-            partner = self.env['res.partner'].create({
+            partner = ResPartner.search([('name', '=ilike', name)], limit=1)
+            
+        if not partner:
+            partner = ResPartner.create({
                 'name': name,
                 'email': email,
                 'phone': phone,
@@ -255,9 +310,13 @@ class AmazonStore(models.Model):
             })
         return partner
 
-    def _fetch_order_items(self, amazon_order_id, headers, auth, base_url):
+    @api.private
+    def _fetch_order_items(self, amazon_order_id, session, auth, base_url):
         endpoint = f"{base_url}/orders/v0/orders/{amazon_order_id}/orderItems"
-        res = requests.get(endpoint, headers=headers, auth=auth, timeout=20)
-        if res.status_code == 200:
-            return res.json().get('payload', {}).get('OrderItems', [])
+        try:
+            res = session.get(endpoint, auth=auth, timeout=20)
+            if res.status_code == 200:
+                return res.json().get('payload', {}).get('OrderItems', [])
+        except Exception as e:
+            _logger.error("Amazon OrderItems fetch hatası (%s): %s", amazon_order_id, e)
         return None

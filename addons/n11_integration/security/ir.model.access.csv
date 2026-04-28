@@ -1,6 +1,11 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
-access_n11_store,n11.store,model_n11_store,base.group_user,1,1,1,1
-access_n11_order,n11.order,model_n11_order,base.group_user,1,1,1,1
-access_n11_order_line,n11.order_line,model_n11_order_line,base.group_user,1,1,1,1
-access_n11_settlement,n11.settlement,model_n11_settlement,base.group_user,1,1,1,1
-access_n11_refund,n11.refund,model_n11_refund,base.group_user,1,1,1,1
+access_n11_store,n11.store,model_n11_store,base.group_user,1,0,0,0
+access_n11_store_manager,n11.store.manager,model_n11_store,sales_team.group_sale_manager,1,1,1,1
+access_n11_order,n11.order,model_n11_order,base.group_user,1,1,1,0
+access_n11_order_manager,n11.order.manager,model_n11_order,sales_team.group_sale_manager,1,1,1,1
+access_n11_order_line,n11.order_line,model_n11_order_line,base.group_user,1,1,1,0
+access_n11_order_line_manager,n11.order_line.manager,model_n11_order_line,sales_team.group_sale_manager,1,1,1,1
+access_n11_settlement,n11.settlement,model_n11_settlement,base.group_user,1,0,0,0
+access_n11_settlement_manager,n11.settlement.manager,model_n11_settlement,sales_team.group_sale_manager,1,1,1,1
+access_n11_refund,n11.refund,model_n11_refund,base.group_user,1,0,0,0
+access_n11_refund_manager,n11.refund.manager,model_n11_refund,sales_team.group_sale_manager,1,1,1,1

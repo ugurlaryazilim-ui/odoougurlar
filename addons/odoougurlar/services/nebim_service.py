@@ -134,6 +134,7 @@ class NebimService(models.AbstractModel):
     # -----------------------------------------------------------------
     #  Log Yardımcıları
     # -----------------------------------------------------------------
+    @api.private
     def _create_log(self, name, sync_type):
         """Yeni senkronizasyon log kaydı oluşturur."""
         return self.env['odoougurlar.sync.log'].sudo().create({
@@ -143,6 +144,7 @@ class NebimService(models.AbstractModel):
             'start_date': fields.Datetime.now(),
         })
 
+    @api.private
     def _finish_log(self, log, state, stats=None, error=None, note=None):
         """Log kaydını tamamlar."""
         vals = {

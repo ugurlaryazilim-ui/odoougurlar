@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-"""Pazarama sipariş toplu işlemleri — retry, refresh, delete, mark."""
+﻿"""Pazarama sipariş toplu işlemleri — retry, refresh, delete, mark."""
 import json
 import logging
 

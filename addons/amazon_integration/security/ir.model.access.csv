@@ -1,3 +1,5 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
-access_amazon_store,amazon.store,model_amazon_store,base.group_user,1,1,1,1
-access_amazon_sync_log,amazon.sync.log,model_amazon_sync_log,base.group_user,1,1,1,1
+access_amazon_store,amazon.store,model_amazon_store,base.group_user,1,0,0,0
+access_amazon_store_manager,amazon.store.manager,model_amazon_store,sales_team.group_sale_manager,1,1,1,1
+access_amazon_sync_log,amazon.sync.log,model_amazon_sync_log,base.group_user,1,0,0,0
+access_amazon_sync_log_manager,amazon.sync.log.manager,model_amazon_sync_log,sales_team.group_sale_manager,1,1,1,1

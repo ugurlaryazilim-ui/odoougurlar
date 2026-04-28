@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-import logging
+﻿import logging
 from odoo import api, fields, models, _
 from odoo.exceptions import UserError
 from .trendyol_api import TrendyolAPI
@@ -138,9 +137,10 @@ class TrendyolStore(models.Model):
     settlement_ids = fields.One2many('trendyol.settlement', 'store_id', string='Finansal İşlemler')
     settlement_count = fields.Integer(string='Finansal Kayıt', compute='_compute_settlement_count')
 
-    _sql_constraints = [
-        ('seller_id_unique', 'unique(seller_id)', 'Bu Seller ID zaten kayıtlı!'),
-    ]
+    _unique_seller = models.Constraint(
+        'UNIQUE(seller_id)',
+        'Bu Seller ID zaten kayıtlı!',
+    )
 
     @api.depends('order_ids')
     def _compute_order_count(self):
@@ -152,6 +152,7 @@ class TrendyolStore(models.Model):
         for store in self:
             store.order_count = counts.get(store.id, 0)
 
+    @api.depends('settlement_ids')
     def _compute_settlement_count(self):
         data = self.env['trendyol.settlement'].sudo()._read_group(
             [('store_id', 'in', self.ids)],

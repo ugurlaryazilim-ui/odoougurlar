@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+
 import json
 import logging
 
@@ -104,10 +104,10 @@ class TrendyolOrder(models.Model):
     ], string='Durum', default='draft')
     error_message = fields.Text(string='Hata Mesajı')
 
-    _sql_constraints = [
-        ('shipment_package_id_unique', 'unique(shipment_package_id)',
-         'Bu paket ID zaten kayıtlı!'),
-    ]
+    _unique_package = models.Constraint(
+        'UNIQUE(shipment_package_id)',
+        'Bu paket ID zaten kayıtlı!',
+    )
 
     # ═══════════════════════════════════════════════════════
     # PAKET İŞLEME (Sync ve action metodları ayrı dosyalarda)
@@ -116,6 +116,7 @@ class TrendyolOrder(models.Model):
     # ═══════════════════════════════════════════════════════
 
 
+    @api.private
     def _process_package(self, package_data, store):
         """Tek bir sipariş paketini işle."""
         package_id = str(package_data.get('id') or package_data.get('shipmentPackageId', ''))
@@ -134,22 +135,27 @@ class TrendyolOrder(models.Model):
             if not existing.store_id:
                 vals['store_id'] = store.id
 
-            # Komisyon bilgisi güncelle (order-level)
+            # Komisyon bilgisi güncelle (order-level + line-level)
             if store.process_commission:
                 commission_vals = self._extract_commission(package_data)
                 vals.update(commission_vals)
-                # Line-level komisyon oranı güncelle
+                # Line-level komisyon oranı güncelle (O(n) — dict lookup)
+                line_map = {}
+                for odoo_line in existing.line_ids:
+                    if odoo_line.trendyol_line_id:
+                        line_map[odoo_line.trendyol_line_id] = odoo_line
+                    if odoo_line.barcode:
+                        line_map[odoo_line.barcode] = odoo_line
+
                 for api_line in package_data.get('lines', []):
+                    rate = api_line.get('commission', 0)
+                    if not rate:
+                        continue
                     line_id_str = str(api_line.get('lineId') or api_line.get('id', ''))
                     barcode = api_line.get('barcode', '')
-                    rate = api_line.get('commission', 0)
-                    if rate:
-                        for odoo_line in existing.line_ids:
-                            if (odoo_line.trendyol_line_id == line_id_str or
-                                    odoo_line.barcode == barcode):
-                                if odoo_line.commission_rate != rate:
-                                    odoo_line.write({'commission_rate': rate})
-                                break
+                    odoo_line = line_map.get(line_id_str) or line_map.get(barcode)
+                    if odoo_line and odoo_line.commission_rate != rate:
+                        odoo_line.write({'commission_rate': rate})
 
             if vals:
                 existing.write(vals)
@@ -178,6 +184,7 @@ class TrendyolOrder(models.Model):
 
         return 'created'
 
+    @api.private
     def _extract_commission(self, data):
         """Trendyol verisinden komisyon bilgilerini çıkar.
 
@@ -214,6 +221,7 @@ class TrendyolOrder(models.Model):
             'net_amount': net_amount,
         }
 
+    @api.private
     def _prepare_order_vals(self, data, store):
         """Trendyol verisinden trendyol.order vals hazırla."""
         order_number = str(data.get('orderNumber', ''))
@@ -316,6 +324,7 @@ class TrendyolOrder(models.Model):
 
         return vals
 
+    @api.private
     def _create_sale_order(self, package_data, store):
         """Trendyol siparişinden Odoo sale.order oluştur."""
         self.ensure_one()
@@ -385,6 +394,7 @@ class TrendyolOrder(models.Model):
         _logger.info("Odoo sipariş oluşturuldu [%s]: %s → %s", store.name, self.name, sale_order.name)
         return sale_order
 
+    @api.private
     def _find_or_create_partner(self, data, store):
         """Müşteri bul veya oluştur. Hem fatura hem teslimat adresini yönetir."""
         Partner = self.env['res.partner'].sudo()
@@ -427,6 +437,7 @@ class TrendyolOrder(models.Model):
 
         return result
 
+    @api.private
     def _extract_customer_name(self, data, inv_addr):
         """Müşteri adını fatura adresinden veya root'tan çıkar."""
         inv_fname = inv_addr.get('firstName', '').strip()
@@ -435,6 +446,7 @@ class TrendyolOrder(models.Model):
             return f"{inv_fname} {inv_lname}".strip()
         return f"{data.get('customerFirstName', '')} {data.get('customerLastName', '')}".strip()
 
+    @api.private
     def _resolve_country_state(self, country_code, city):
         """Ülke ve il çözümle."""
         code = (country_code or 'TR').upper()
@@ -447,6 +459,7 @@ class TrendyolOrder(models.Model):
                 state_id = state.id
         return country, state_id
 
+    @api.private
     def _find_existing_partner(self, Partner, customer_ref, customer_id, email, store):
         """Mevcut müşteriyi ref, comment veya email ile bul."""
         partner = Partner.search([('ref', '=', customer_ref)], limit=1)
@@ -558,12 +571,13 @@ class TrendyolOrder(models.Model):
 
         return result
 
+    @api.private
     def _find_product_by_barcode(self, barcode, merchant_sku=''):
         """Barkod ile ürün bul. Bulunamazsa merchantSku dene.
 
         Arama sırası:
         1. barcode alanı (exact match)
-        2. nebim_barcode alanı (virgülle ayrılmış barkod listesi, ilike)
+        2. nebim_barcode alanı (exact match, sonra ilike)
         3. default_code (merchantSku)
         """
         Product = self.env['product.product'].sudo()
@@ -572,9 +586,11 @@ class TrendyolOrder(models.Model):
             product = Product.search([('barcode', '=', barcode)], limit=1)
             if product:
                 return product
-            # nebim_barcode desteği (virgülle ayrılmış çoklu barkod)
+            # nebim_barcode desteği — önce exact, sonra ilike
             if 'nebim_barcode' in Product._fields:
-                product = Product.search([('nebim_barcode', 'ilike', barcode)], limit=1)
+                product = Product.search([('nebim_barcode', '=', barcode)], limit=1)
+                if not product:
+                    product = Product.search([('nebim_barcode', 'ilike', barcode)], limit=1)
                 if product:
                     return product
 
@@ -586,6 +602,7 @@ class TrendyolOrder(models.Model):
         _logger.warning("Ürün bulunamadı: barcode=%s, sku=%s", barcode, merchant_sku)
         return False
 
+    @api.private
     def _batch_find_products(self, lines):
         """Birden fazla kalem için ürünleri toplu olarak bul.
 
@@ -603,6 +620,16 @@ class TrendyolOrder(models.Model):
             for p in products:
                 if p.barcode:
                     product_map[p.barcode] = p
+
+            # nebim_barcode fallback — batch
+            missing_barcodes = [b for b in barcodes if b not in product_map]
+            if missing_barcodes and 'nebim_barcode' in Product._fields:
+                for bc in missing_barcodes:
+                    product = Product.search([('nebim_barcode', '=', bc)], limit=1)
+                    if not product:
+                        product = Product.search([('nebim_barcode', 'ilike', bc)], limit=1)
+                    if product:
+                        product_map[bc] = product
 
         # Henüz bulunamayanlar için SKU ile dene
         missing_skus = [s for s in skus if s not in product_map]

@@ -1,43 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <!-- Trendyol Sipariş Senkronizasyon Cron -->
-    <record id="cron_trendyol_sync_orders" model="ir.cron">
-        <field name="name">Trendyol: Sipariş Senkronizasyonu</field>
-        <field name="model_id" ref="model_trendyol_order"/>
-        <field name="state">code</field>
-        <field name="code">model.cron_sync_trendyol_orders()</field>
-        <field name="interval_number">15</field>
-        <field name="interval_type">minutes</field>
-        <field name="active" eval="True"/>
-    </record>
+    <data noupdate="1">
+        <!-- Trendyol Sipariş Senkronizasyon Cron -->
+        <record id="cron_trendyol_sync_orders" model="ir.cron">
+            <field name="name">Trendyol: Sipariş Senkronizasyonu</field>
+            <field name="model_id" ref="model_trendyol_order"/>
+            <field name="state">code</field>
+            <field name="code">model.cron_sync_trendyol_orders()</field>
+            <field name="interval_number">15</field>
+            <field name="interval_type">minutes</field>
+            <field name="active" eval="True"/>
+        </record>
 
-    <!-- Trendyol Finansal Senkronizasyon Cron -->
-    <record id="cron_trendyol_sync_financials" model="ir.cron">
-        <field name="name">Trendyol: Finansal İşlem Senkronizasyonu</field>
-        <field name="model_id" ref="model_trendyol_settlement"/>
-        <field name="state">code</field>
-        <field name="code">model.cron_sync_financials()</field>
-        <field name="interval_number">6</field>
-        <field name="interval_type">hours</field>
-        <field name="active" eval="True"/>
-    </record>
+        <!-- Trendyol Finansal Senkronizasyon Cron -->
+        <record id="cron_trendyol_sync_financials" model="ir.cron">
+            <field name="name">Trendyol: Finansal İşlem Senkronizasyonu</field>
+            <field name="model_id" ref="model_trendyol_settlement"/>
+            <field name="state">code</field>
+            <field name="code">model.cron_sync_financials()</field>
+            <field name="interval_number">6</field>
+            <field name="interval_type">hours</field>
+            <field name="active" eval="True"/>
+        </record>
 
-    <!-- Sync Log Sequence -->
-    <record id="seq_trendyol_sync_log" model="ir.sequence">
-        <field name="name">Trendyol Sync Log</field>
-        <field name="code">trendyol.sync.log</field>
-        <field name="prefix">TY-LOG-</field>
-        <field name="padding">4</field>
-    </record>
+        <!-- Sync Log Sequence -->
+        <record id="seq_trendyol_sync_log" model="ir.sequence">
+            <field name="name">Trendyol Sync Log</field>
+            <field name="code">trendyol.sync.log</field>
+            <field name="prefix">TY-LOG-</field>
+            <field name="padding">4</field>
+        </record>
 
-    <!-- Sync Log Temizlik Cron -->
-    <record id="cron_trendyol_cleanup_logs" model="ir.cron">
-        <field name="name">Trendyol: Log Temizliği (90 gün)</field>
-        <field name="model_id" ref="model_trendyol_settlement"/>
-        <field name="state">code</field>
-        <field name="code">model._cron_cleanup_old_logs()</field>
-        <field name="interval_number">7</field>
-        <field name="interval_type">days</field>
-        <field name="active" eval="True"/>
-    </record>
+        <!-- Log temizliği artık @api.autovacuum ile otomatik -->
+    </data>
 </odoo>

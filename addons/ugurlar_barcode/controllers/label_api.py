@@ -14,7 +14,7 @@ class LabelApiController(BarcodeApiBase):
     """Etiket yazdırma ve şablon yönetim API'leri."""
 
     # ─── ETİKET VERİSİ (ürün bilgileri) ───────────────
-    @http.route('/ugurlar_barcode/api/label_data', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/label_data', type='json', auth='user')
     def label_data(self, barcodes=None, **kw):
         """Barkodlardan ürün bilgilerini çek (tüm alanlar)."""
         if not barcodes:
@@ -85,7 +85,7 @@ class LabelApiController(BarcodeApiBase):
         }
 
     # ─── ŞABLON LİSTELE ──────────────────────────────
-    @http.route('/ugurlar_barcode/api/label_template_list', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/label_template_list', type='json', auth='user')
     def label_template_list(self, **kw):
         """Kayıtlı etiket şablonlarını listele."""
         templates = request.env['ugurlar.label.template'].sudo().search([])
@@ -103,7 +103,7 @@ class LabelApiController(BarcodeApiBase):
         return {'templates': result, 'total': len(result)}
 
     # ─── ŞABLON KAYDET ────────────────────────────────
-    @http.route('/ugurlar_barcode/api/label_template_save', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/label_template_save', type='json', auth='user')
     def label_template_save(self, template_id=0, name='', width_mm=60, height_mm=40,
                             elements=None, is_default=False, **kw):
         """Şablon kaydet veya güncelle."""
@@ -138,7 +138,7 @@ class LabelApiController(BarcodeApiBase):
         return {'success': True, 'id': tmpl.id, 'message': 'Şablon oluşturuldu'}
 
     # ─── ŞABLON SİL ──────────────────────────────────
-    @http.route('/ugurlar_barcode/api/label_template_delete', type='jsonrpc', auth='user')
+    @http.route('/ugurlar_barcode/api/label_template_delete', type='json', auth='user')
     def label_template_delete(self, template_id=0, **kw):
         """Şablon sil."""
         if not template_id:

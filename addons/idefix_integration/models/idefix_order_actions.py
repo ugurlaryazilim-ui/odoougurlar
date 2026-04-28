@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Idefix sipariş toplu işlemleri — retry, refresh, delete, mark."""
 import json
 import logging
@@ -29,15 +28,17 @@ class IdefixOrderActions(models.Model):
                     fail += 1
                     continue
                 
-                # Sadece Odoo'da faturalandırma aşamasına girenleri içeri al (Örn: orderStatus == 3 'Sipariş Alındı' ise)
-                if order.order_status in [3, 12]:
-                    # Create odoo sale order from idefix_order_sync method 
-                    shipment_addr = package_data.get('shipmentAddress') or {}
-                    billing_addr = package_data.get('billingAddress') or {}
-                    customer_email = package_data.get('customerEmail') or shipment_addr.get('customerEmail') or ''
-                    phone_number = shipment_addr.get('phoneNumber') or ''
+                # Idefix string status kullanıyor — string karşılaştırma
+                if order.order_status in ['created', 'shipment_ready']:
+                    shipment_addr = package_data.get('shippingAddress') or {}
+                    billing_addr = package_data.get('invoiceAddress') or {}
+                    customer_email = package_data.get('customerContactMail') or ''
+                    phone_number = shipment_addr.get('phone') or ''
 
-                    sale_order = self._create_odoo_sale_order(order, store, shipment_addr, billing_addr, customer_email, phone_number)
+                    sale_order = self._create_odoo_sale_order(
+                        order, store, shipment_addr, billing_addr,
+                        customer_email, phone_number
+                    )
                     order.write({
                         'sale_order_id': sale_order.id,
                         'store_id': store.id,
@@ -83,39 +84,37 @@ class IdefixOrderActions(models.Model):
                 continue
 
             for order in data['orders']:
-                if not order.order_number:
+                if not order.order_id:
                     continue
                 try:
-                    # Idefix getOrders endpointini saat araligiyla verebiliriz ama orderNumber a gore filtremiz yok (Payload'da startDate, endDate istiyor).
-                    # Belgede orderNumber desteklendigini gorduk:
-                    # Request (Order / Saat&Dakika): "orderNumber": 735071747, "startDate":...
-                    # So we can pass orderNumber in getOrdersForApi.
-                    body = {
-                        'pageSize': 1,
-                        'pageNumber': 1,
-                        'orderNumber': order.order_number
-                    }
-                    result = api._request('POST', '/order/getOrdersForApi', data=body)
+                    # Idefix'in kendi list endpoint'ini kullan
+                    result = api.get_orders(
+                        start_date=order.order_date,
+                        end_date=fields.Datetime.now(),
+                        page=1, limit=50
+                    )
                     
-                    if result['success']:
-                        content = result.get('data', {}).get('data', [])
-                        if content:
-                            pkg = content[0]
-                            new_status = pkg.get('orderStatus')
+                    if result.get('success'):
+                        items = result.get('data', {}).get('items', [])
+                        # order_id ile eşleştir
+                        pkg = None
+                        for item in items:
+                            if str(item.get('id')) == order.order_id:
+                                pkg = item
+                                break
+                        
+                        if pkg:
+                            new_status = pkg.get('status')
                             vals = {
                                 'order_status': new_status if new_status else order.order_status,
                                 'raw_data': json.dumps(pkg, ensure_ascii=False),
                             }
                             
-                            # Update items
-                            # (Cargo tracking comes grouped under items, picking first one broadly)
-                            items = pkg.get('items', [])
-                            if items:
-                                first_cargo = items[0].get('cargo', {})
-                                if first_cargo.get('trackingNumber'):
-                                    vals['cargo_tracking_number'] = str(first_cargo['trackingNumber'])
-                                if first_cargo.get('companyName'):
-                                    vals['cargo_provider'] = first_cargo['companyName']
+                            # Kargo bilgisi
+                            if pkg.get('cargoTrackingNumber'):
+                                vals['cargo_tracking_number'] = str(pkg['cargoTrackingNumber'])
+                            if pkg.get('cargoCompany'):
+                                vals['cargo_provider'] = pkg['cargoCompany']
 
                             order.write(vals)
                             updated += 1

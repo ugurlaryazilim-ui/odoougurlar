@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-from . import n11_api
 from . import n11_store
 from . import n11_order
 from . import n11_order_sync

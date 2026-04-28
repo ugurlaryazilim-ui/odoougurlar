@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-{
+﻿{
     'name': 'Trendyol Entegrasyonu',
     'version': '19.0.4.0.0',
     'summary': 'Trendyol Çoklu Mağaza Sipariş ve Finans Entegrasyonu',

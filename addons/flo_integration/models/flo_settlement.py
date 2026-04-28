@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-from odoo import models, fields
+﻿from odoo import models, fields
 
 class FloSettlement(models.Model):
     _name = 'flo.settlement'

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-from . import idefix_api
 from . import idefix_store
 from . import idefix_order
 from . import idefix_order_sync

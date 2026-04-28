@@ -1,6 +1,11 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
-access_idefix_store,idefix.store,model_idefix_store,base.group_user,1,1,1,1
-access_idefix_order,idefix.order,model_idefix_order,base.group_user,1,1,1,1
-access_idefix_order_line,idefix.order_line,model_idefix_order_line,base.group_user,1,1,1,1
-access_idefix_settlement,idefix.settlement,model_idefix_settlement,base.group_user,1,1,1,1
-access_idefix_refund,idefix.refund,model_idefix_refund,base.group_user,1,1,1,1
+access_idefix_store,idefix.store,model_idefix_store,base.group_user,1,0,0,0
+access_idefix_store_manager,idefix.store.manager,model_idefix_store,sales_team.group_sale_manager,1,1,1,1
+access_idefix_order,idefix.order,model_idefix_order,base.group_user,1,1,1,0
+access_idefix_order_manager,idefix.order.manager,model_idefix_order,sales_team.group_sale_manager,1,1,1,1
+access_idefix_order_line,idefix.order_line,model_idefix_order_line,base.group_user,1,1,1,0
+access_idefix_order_line_manager,idefix.order_line.manager,model_idefix_order_line,sales_team.group_sale_manager,1,1,1,1
+access_idefix_settlement,idefix.settlement,model_idefix_settlement,base.group_user,1,0,0,0
+access_idefix_settlement_manager,idefix.settlement.manager,model_idefix_settlement,sales_team.group_sale_manager,1,1,1,1
+access_idefix_refund,idefix.refund,model_idefix_refund,base.group_user,1,0,0,0
+access_idefix_refund_manager,idefix.refund.manager,model_idefix_refund,sales_team.group_sale_manager,1,1,1,1

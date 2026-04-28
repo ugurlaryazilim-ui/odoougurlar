@@ -1,7 +1,6 @@
-# -*- coding: utf-8 -*-
 {
     'name': 'Hepsiburada.com Entegrasyonu',
-    'version': '1.0',
+    'version': '19.0.1.0.0',
     'category': 'Sales',
     'summary': 'Hepsiburada API Entegrasyonu (Sipariş Yönetimi)',
     'description': """
