@@ -213,11 +213,6 @@ class BulkImageWizard(models.TransientModel):
                                 continue
                             tv.image_variant_1920 = img_b64
 
-                            # Template kapak görseli — yoksa ilk yüklenen ana resmi ata
-                            if not variant.product_tmpl_id.image_1920:
-                                variant.product_tmpl_id.image_1920 = img_b64
-                                details.append(f'  🖼️ Template kapak görseli ayarlandı')
-
                             if is_self:
                                 details.append(f'  ✓ {fname} → {tv_barcode} (ANA RESİM)')
                             else:

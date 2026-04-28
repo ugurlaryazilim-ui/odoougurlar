@@ -309,23 +309,6 @@ class OdooImageSync:
                 [variant_id],
                 {'image_variant_1920': img_b64},
             )
-
-            # ── TEMPLATE KAPAK GÖRSELİ ──
-            # Template'in henüz görseli yoksa, ilk yüklenen ana resmi
-            # template'e de yaz (ürünler listesinde görünsün)
-            if tmpl_id:
-                tmpl_data = self._execute(
-                    'product.template', 'read',
-                    [tmpl_id],
-                    fields=['image_1920'],
-                )
-                if tmpl_data and not tmpl_data[0].get('image_1920'):
-                    self._execute(
-                        'product.template', 'write',
-                        [tmpl_id],
-                        {'image_1920': img_b64},
-                    )
-                    _logger.info("🖼️ Template kapak görseli ayarlandı (tmpl_id=%d)", tmpl_id)
         else:
             if self.has_product_image:
                 img_name = f'{barcode}{separator}{order}'
