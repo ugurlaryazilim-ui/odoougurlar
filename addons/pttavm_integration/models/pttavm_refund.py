@@ -1,4 +1,4 @@
-﻿from odoo import models, fields
+from odoo import models, fields
 
 class PttavmRefund(models.Model):
     _name = 'pttavm.refund'

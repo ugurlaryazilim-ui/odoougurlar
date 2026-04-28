@@ -1,4 +1,4 @@
-﻿from odoo import models, fields
+from odoo import models, fields
 
 class N11Settlement(models.Model):
     _name = 'n11.settlement'

@@ -1,4 +1,4 @@
-﻿{
+{
     'name': 'Pttavm Entegrasyonu',
     'version': '19.0.1.0.0',
     'summary': 'Pttavm Sipariş Entegrasyonu',

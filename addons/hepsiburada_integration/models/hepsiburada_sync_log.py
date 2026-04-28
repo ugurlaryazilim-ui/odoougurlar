@@ -1,4 +1,4 @@
-﻿from odoo import models, fields
+from odoo import models, fields
 
 class HepsiburadaSyncLog(models.Model):
     _name = 'hepsiburada.sync.log'

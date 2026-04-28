@@ -1,4 +1,4 @@
-﻿from odoo import models, fields
+from odoo import models, fields
 
 class IdefixRefund(models.Model):
     _name = 'idefix.refund'

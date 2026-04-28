@@ -1,4 +1,4 @@
-﻿from . import trendyol_store
+from . import trendyol_store
 from . import trendyol_config
 from . import trendyol_order
 from . import trendyol_order_sync

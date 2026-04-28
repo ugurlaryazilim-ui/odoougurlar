@@ -1,4 +1,4 @@
-﻿from odoo import models, fields
+from odoo import models, fields
 
 class IdefixSettlement(models.Model):
     _name = 'idefix.settlement'

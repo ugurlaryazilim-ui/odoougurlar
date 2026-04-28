@@ -1,4 +1,4 @@
-﻿from odoo import models, fields
+from odoo import models, fields
 
 class PazaramaRefund(models.Model):
     _name = 'pazarama.refund'

@@ -1,4 +1,4 @@
-﻿from odoo import models, fields
+from odoo import models, fields
 
 class FloRefund(models.Model):
     _name = 'flo.refund'
