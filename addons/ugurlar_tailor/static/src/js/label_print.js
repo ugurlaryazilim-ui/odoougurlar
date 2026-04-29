@@ -2,25 +2,35 @@
 
 /**
  * Terzi etiket yazdirma — iframe + window.print() yontemi.
- * Barcode modulundeki yaklasimla ayni.
- * Tek veya coklu siparis destekler.
+ * 
+ * Yapi:
+ *   - Her siparis icin: 1x Terzi nushasi + 1x Magaza nushasi
+ *   - Tum siparisler icin: 1x Musteri OZET nushasi (tek etiket)
  */
 
-function _buildLabelHtml(data) {
-    const copies = [
-        { title: 'TERZİ NÜSHASI', bg: '#e74c3c', note: 'Bu nüsha terzide kalır' },
-        { title: 'MAĞAZA NÜSHASI', bg: '#2980b9', note: 'Ürünle birlikte mağazaya döner' },
-        { title: 'MÜŞTERİ NÜSHASI', bg: '#27ae60', note: 'Bu nüsha müşteride kalır' },
-    ];
+function _buildOrderLabel(data, copyType) {
+    const config = {
+        terzi: {
+            title: 'TERZİ NÜSHASI',
+            bg: '#e74c3c',
+            line1: '1. Nüsha terzide kalacak',
+            line2: 'Lütfen terzi işlemi bittikten sonra bir nüsha sizde bir nüsha ürün ile birlikte mağazaya gönderiniz.',
+        },
+        magaza: {
+            title: 'MAĞAZA NÜSHASI',
+            bg: '#2980b9',
+            line1: '2. Nüsha ürünle birlikte mağazaya geri gidecek',
+            line2: 'Lütfen terzi işlemi bittikten sonra bir nüsha sizde bir nüsha ürün ile birlikte mağazaya gönderiniz.',
+        },
+    };
+
+    const c = config[copyType];
 
     const servicesHtml = data.services.map(s =>
-        `<div style="display:flex;justify-content:space-between;padding:1px 4px;">
-            <span>${s.name}</span>
-            <span>${s.price.toFixed(2)} TL</span>
-        </div>`
+        `<div style="padding:1px 4px;">• ${s.name}</div>`
     ).join('');
 
-    return copies.map(c => `
+    return `
         <div class="label">
             <div class="label-hdr" style="background:${c.bg};">${c.title}</div>
             <div class="label-store">UĞURLAR</div>
@@ -40,12 +50,53 @@ function _buildLabelHtml(data) {
             <hr class="label-div"/>
             <div class="label-section">YAPILACAK İŞLEMLER</div>
             ${servicesHtml}
-            <div class="label-total">TOPLAM: ${data.total_price.toFixed(2)} TL</div>
+            <hr class="label-div"/>
             <div class="label-dt">${data.date}</div>
-            <div class="label-ft">${c.note}</div>
+            <div class="label-note-main">${c.line1}</div>
+            <div class="label-note-sub">${c.line2}</div>
+            <div class="label-thanks">TEŞEKKÜR EDERİZ</div>
             ${data.notes ? `<hr class="label-div"/><div style="font-size:10px;"><b>Not:</b> ${data.notes}</div>` : ''}
         </div>
-    `).join('');
+    `;
+}
+
+function _buildCustomerSummaryLabel(dataArray) {
+    // Musteri bilgisi ilk siparisten alinir (hepsi ayni musteri)
+    const first = dataArray[0];
+
+    // Her urun icin islemler listesi
+    const itemsHtml = dataArray.map(d => {
+        const svcs = d.services.map(s => `• ${s.name}`).join('<br/>');
+        return `
+            <div style="margin-bottom:6px; padding:4px; border:1px dashed #ccc; border-radius:4px;">
+                <div style="font-weight:bold;">${d.product_code || d.product_name} <span style="font-weight:normal;color:#666;font-size:10px;">(${d.product_barcode})</span></div>
+                <div style="font-size:10px;color:#555;">Terzi: ${d.tailor_name}</div>
+                <div style="font-size:10px;margin-top:2px;">${svcs}</div>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="label">
+            <div class="label-hdr" style="background:#27ae60;">MÜŞTERİ NÜSHASI</div>
+            <div class="label-store">UĞURLAR</div>
+            <div class="label-sub">Terzi Takip Sistemi</div>
+            <hr class="label-div"/>
+            <div class="label-r"><span class="ll">Fatura No:</span><span class="vv">${first.invoice_no}</span></div>
+            <hr class="label-div"/>
+            <div class="label-r"><span class="ll">Müşteri:</span><span class="vv">${first.customer_name}</span></div>
+            ${first.customer_phone ? `<div class="label-r"><span class="ll">Müşteri No:</span><span class="vv">${first.customer_phone}</span></div>` : ''}
+            ${first.sales_person ? `<div class="label-r"><span class="ll">Satış Per.:</span><span class="vv">${first.sales_person}</span></div>` : ''}
+            <hr class="label-div"/>
+            <div class="label-section">SİPARİŞ ÖZETİ (${dataArray.length} ürün)</div>
+            ${itemsHtml}
+            <hr class="label-div"/>
+            <div class="label-dt">${first.date}</div>
+            <div class="label-note-main">3. Nüsha müşteride kalacak</div>
+            <div class="label-note-sub">İşlemler bittiğinde ürünlerinizi mağazamızdan teslim alabilirsiniz.</div>
+            <div class="label-thanks">TEŞEKKÜR EDERİZ</div>
+        </div>
+    `;
 }
 
 function _printHtml(labelsHtml, title) {
@@ -109,26 +160,32 @@ function _printHtml(labelsHtml, title) {
                 font-size: 12px;
                 clear: both;
             }
-            .label-total {
-                font-size: 14px;
-                font-weight: bold;
-                text-align: right;
-                padding: 6px 0;
-                border-top: 2px solid #000;
-                border-bottom: 2px solid #000;
-                margin: 4px 0;
-            }
             .label-dt {
                 text-align: center;
                 font-size: 10px;
                 margin-top: 4px;
             }
-            .label-ft {
+            .label-note-main {
+                text-align: center;
+                font-size: 13px;
+                font-weight: bold;
+                margin-top: 8px;
+                padding: 4px 0;
+            }
+            .label-note-sub {
                 text-align: center;
                 font-size: 9px;
-                color: #666;
-                margin-top: 4px;
-                font-style: italic;
+                color: #333;
+                padding: 2px 8px;
+                line-height: 1.3;
+            }
+            .label-thanks {
+                text-align: center;
+                font-size: 14px;
+                font-weight: bold;
+                margin-top: 8px;
+                padding: 4px 0;
+                letter-spacing: 1px;
             }
         </style>
     </head><body>
@@ -162,19 +219,31 @@ function _printHtml(labelsHtml, title) {
 }
 
 /**
- * Tek siparis etiketi yazdir (3 nusha).
+ * Tek siparis etiketi yazdir: 1x Terzi + 1x Magaza + 1x Musteri.
  */
 export function printTailorLabel(data) {
-    const labelsHtml = _buildLabelHtml(data);
-    _printHtml(labelsHtml, `Terzi Etiket — ${data.name}`);
+    const terzi = _buildOrderLabel(data, 'terzi');
+    const magaza = _buildOrderLabel(data, 'magaza');
+    const musteri = _buildCustomerSummaryLabel([data]);
+    _printHtml(terzi + magaza + musteri, `Terzi Etiket — ${data.name}`);
 }
 
 /**
- * Birden fazla siparis etiketi yazdir (her biri 3 nusha).
- * Hepsi tek bir print job icerisinde.
+ * Birden fazla siparis etiketi yazdir.
+ * Her siparis icin 1x Terzi + 1x Magaza nushasi,
+ * Sona tek bir MUSTERI OZET nushasi (tum urunler tek etikette).
  */
 export function printMultipleTailorLabels(dataArray) {
-    const allLabels = dataArray.map(d => _buildLabelHtml(d)).join('');
+    // Her siparis icin terzi + magaza nushalari
+    let allLabels = '';
+    for (const data of dataArray) {
+        allLabels += _buildOrderLabel(data, 'terzi');
+        allLabels += _buildOrderLabel(data, 'magaza');
+    }
+
+    // En sona tek bir musteri ozet nushasi
+    allLabels += _buildCustomerSummaryLabel(dataArray);
+
     const names = dataArray.map(d => d.name).join(', ');
     _printHtml(allLabels, `Terzi Etiketler — ${names}`);
 }
