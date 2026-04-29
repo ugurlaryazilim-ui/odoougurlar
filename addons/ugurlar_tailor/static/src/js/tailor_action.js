@@ -1,7 +1,7 @@
 /** @odoo-module **/
 
 import { registry } from "@web/core/registry";
-import { Component, useState, onMounted } from "@odoo/owl";
+import { Component, useState } from "@odoo/owl";
 import { useService } from "@web/core/utils/hooks";
 import { TailorMainMenu } from "./screens/tailor_main_menu";
 import { TailorNewOrder } from "./screens/tailor_new_order";
@@ -12,10 +12,9 @@ export class TailorAction extends Component {
     static components = { TailorMainMenu, TailorNewOrder, TailorOrderList };
 
     setup() {
-        this.rpc = useService("rpc");
         this.notification = useService("notification");
         this.state = useState({
-            screen: "main_menu", // main_menu | new_order | order_list
+            screen: "main_menu",
         });
     }
 

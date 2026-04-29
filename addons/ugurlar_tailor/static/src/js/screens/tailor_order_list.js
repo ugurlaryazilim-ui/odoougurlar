@@ -2,6 +2,7 @@
 
 import { Component, useState, onMounted } from "@odoo/owl";
 import { useService } from "@web/core/utils/hooks";
+import { rpc } from "@web/core/network/rpc";
 
 export class TailorOrderList extends Component {
     static template = "ugurlar_tailor.TailorOrderList";
@@ -10,7 +11,6 @@ export class TailorOrderList extends Component {
     };
 
     setup() {
-        this.rpc = useService("rpc");
         this.notification = useService("notification");
         this.state = useState({
             orders: [],
@@ -28,7 +28,7 @@ export class TailorOrderList extends Component {
     async loadOrders() {
         this.state.loading = true;
         try {
-            const result = await this.rpc("/ugurlar_tailor/orders", {
+            const result = await rpc("/ugurlar_tailor/orders", {
                 status: this.state.statusFilter || false,
                 search: this.state.search,
                 page: this.state.page,
@@ -37,23 +37,23 @@ export class TailorOrderList extends Component {
             this.state.orders = result.orders || [];
             this.state.total = result.total || 0;
         } catch (e) {
-            this.notification.add("Siparişler yüklenemedi: " + e.message, { type: "danger" });
+            this.notification.add("Siparisler yuklenemedi: " + e.message, { type: "danger" });
         }
         this.state.loading = false;
     }
 
     async updateStatus(orderId, newStatus) {
         try {
-            const result = await this.rpc("/ugurlar_tailor/update_status", {
+            const result = await rpc("/ugurlar_tailor/update_status", {
                 order_id: orderId,
                 status: newStatus,
             });
             if (result.success) {
-                this.notification.add("Durum güncellendi!", { type: "success" });
+                this.notification.add("Durum guncellendi!", { type: "success" });
                 await this.loadOrders();
             }
         } catch (e) {
-            this.notification.add("Durum güncelleme hatası: " + e.message, { type: "danger" });
+            this.notification.add("Durum guncelleme hatasi: " + e.message, { type: "danger" });
         }
     }
 
@@ -70,7 +70,7 @@ export class TailorOrderList extends Component {
         const labels = {
             pending: "Bekliyor",
             in_progress: "Terzide",
-            completed: "Hazır",
+            completed: "Hazir",
             delivered: "Teslim",
         };
         return labels[status] || status;
