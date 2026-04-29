@@ -5,14 +5,12 @@
         <record id="group_tailor_user" model="res.groups">
             <field name="name">Terzi / Kullanici</field>
             <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
-            <field name="users" eval="[(4, ref('base.user_admin'))]"/>
         </record>
 
         <!-- Terzi Yonetici Grubu -->
         <record id="group_tailor_manager" model="res.groups">
             <field name="name">Terzi / Yonetici</field>
             <field name="implied_ids" eval="[(4, ref('group_tailor_user'))]"/>
-            <field name="users" eval="[(4, ref('base.user_admin'))]"/>
         </record>
     </data>
 </odoo>
