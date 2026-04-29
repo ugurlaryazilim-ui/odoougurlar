@@ -81,6 +81,7 @@ function _buildCustomerSummaryLabel(dataArray) {
             <div class="label-store">UĞURLAR</div>
             <div class="label-sub">Terzi Takip Sistemi</div>
             <hr class="label-div"/>
+            <div class="label-r"><span class="ll">Sipariş No:</span><span class="vv" style="font-size:13px;font-weight:bold;">${dataArray.map(d => d.name).join(', ')}</span></div>
             <div class="label-r"><span class="ll">Fatura No:</span><span class="vv">${first.invoice_no}</span></div>
             <hr class="label-div"/>
             <div class="label-r"><span class="ll">Müşteri:</span><span class="vv">${first.customer_name}</span></div>
