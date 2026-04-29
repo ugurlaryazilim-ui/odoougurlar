@@ -66,10 +66,11 @@ function _buildCustomerSummaryLabel(dataArray) {
     const itemsHtml = dataArray.map(d => {
         const svcs = d.services.map(s => `• ${s.name}`).join('<br/>');
         return `
-            <div style="margin-bottom:6px; padding:4px; border:1px dashed #ccc; border-radius:4px;">
-                <div style="font-weight:bold;">${d.product_code || d.product_name} <span style="font-weight:normal;color:#666;font-size:10px;">(${d.product_barcode})</span></div>
-                <div style="font-size:10px;color:#555;">Terzi: ${d.tailor_name}</div>
-                <div style="font-size:10px;margin-top:2px;">${svcs}</div>
+            <div style="margin-bottom:8px; padding:6px; border:2px dashed #000; border-radius:4px;">
+                <div style="font-weight:900;font-size:14px;">${d.product_code || d.product_name}</div>
+                <div style="font-size:12px;font-weight:600;">(${d.product_barcode})</div>
+                <div style="font-size:13px;font-weight:800;margin-top:3px;">Terzi: ${d.tailor_name}</div>
+                <div style="font-size:12px;font-weight:600;margin-top:3px;">${svcs}</div>
             </div>
         `;
     }).join('');
