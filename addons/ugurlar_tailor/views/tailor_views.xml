@@ -22,12 +22,11 @@
             <form string="Terzi">
                 <sheet>
                     <div class="oe_button_box" name="button_box">
-                        <button name="%(ugurlar_tailor.action_tailor_order)d"
-                                type="action"
+                        <button name="action_view_orders"
+                                type="object"
                                 class="oe_stat_button"
-                                icon="fa-scissors"
-                                context="{'search_default_tailor_id': active_id}">
-                            <field name="order_count" widget="statinfo" string="Sipariş"/>
+                                icon="fa-scissors">
+                            <field name="order_count" widget="statinfo" string="Siparis"/>
                         </button>
                     </div>
                     <widget name="web_ribbon" title="Arşivlenmiş" bg_color="text-bg-danger" invisible="active"/>

@@ -9,6 +9,7 @@ class UgurlarTailor(models.Model):
     """Terzi tanımları — dış atölye veya kişi."""
     _name = 'ugurlar.tailor'
     _description = 'Terzi'
+    _inherit = ['mail.thread', 'mail.activity.mixin']
     _order = 'name'
 
     name = fields.Char(string='Terzi Adı', required=True, tracking=True)
@@ -33,6 +34,18 @@ class UgurlarTailor(models.Model):
     def _compute_order_count(self):
         for rec in self:
             rec.order_count = len(rec.order_ids)
+
+    def action_view_orders(self):
+        """Stat button — terziye ait siparişleri göster."""
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'Siparisler',
+            'res_model': 'ugurlar.tailor.order',
+            'view_mode': 'list,form',
+            'domain': [('tailor_id', '=', self.id)],
+            'context': {'default_tailor_id': self.id},
+        }
 
     _unique_name = models.Constraint(
         'UNIQUE(name)',
