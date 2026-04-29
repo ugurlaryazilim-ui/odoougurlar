@@ -2,235 +2,215 @@
 <odoo>
     <data>
         <template id="report_tailor_label">
-            <html>
-                <head>
-                    <meta charset="UTF-8"/>
-                    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
-                    <style>
-                        @page {
-                            size: 80mm auto;
-                            margin: 2mm;
-                        }
-                        body {
-                            font-family: Arial, Helvetica, sans-serif;
-                            font-size: 11px;
-                            color: #000;
-                            line-height: 1.4;
-                            margin: 0;
-                            padding: 0;
-                        }
-                        .tailor-label {
-                            width: 76mm;
-                            padding: 0;
-                            margin: 0 auto;
-                            page-break-after: always;
-                        }
-                        .label-header {
-                            text-align: center;
-                            padding: 6px 0;
-                            margin-bottom: 4px;
-                            color: #fff;
-                            font-weight: bold;
-                            font-size: 16px;
-                            letter-spacing: 1px;
-                        }
-                        .label-store {
-                            text-align: center;
-                            font-size: 14px;
-                            font-weight: bold;
-                            margin-bottom: 2px;
-                        }
-                        .label-subtitle {
-                            text-align: center;
-                            font-size: 10px;
-                            margin-bottom: 4px;
-                        }
-                        .label-divider {
-                            border: none;
-                            border-top: 1px dashed #000;
-                            margin: 4px 0;
-                        }
-                        .label-row {
-                            width: 100%;
-                            padding: 1px 0;
-                            overflow: hidden;
-                        }
-                        .label-row .lbl {
-                            font-weight: bold;
-                            float: left;
-                            width: 80px;
-                        }
-                        .label-row .val {
-                            margin-left: 85px;
-                        }
-                        .svc-item {
-                            overflow: hidden;
-                            padding: 1px 4px;
-                        }
-                        .svc-item .svc-name {
-                            float: left;
-                        }
-                        .svc-item .svc-price {
-                            float: right;
-                        }
-                        .label-total {
-                            font-size: 14px;
-                            font-weight: bold;
-                            text-align: right;
-                            padding: 6px 0;
-                            border-top: 2px solid #000;
-                            border-bottom: 2px solid #000;
-                            margin: 4px 0;
-                            clear: both;
-                        }
-                        .label-barcode {
-                            text-align: center;
-                            margin: 6px 0;
-                        }
-                        .label-footer {
-                            text-align: center;
-                            font-size: 9px;
-                            color: #666;
-                            margin-top: 4px;
-                            font-style: italic;
-                        }
-                        .label-date {
-                            text-align: center;
-                            font-size: 10px;
-                            margin-top: 4px;
-                        }
-                        .label-section-title {
-                            font-weight: bold;
-                            text-align: center;
-                            padding: 3px 0;
-                            font-size: 12px;
-                            clear: both;
-                        }
-                    </style>
-                </head>
-                <body>
-                    <t t-foreach="docs" t-as="o">
-                        <!-- NUSHA 1: TERZI -->
-                        <div class="tailor-label">
-                            <t t-call="ugurlar_tailor.report_tailor_label_copy">
-                                <t t-set="copy_title">TERZI NUSHASI</t>
-                                <t t-set="copy_bg">#e74c3c</t>
-                                <t t-set="copy_note">Bu nusha terzide kalir</t>
-                            </t>
-                        </div>
+            <t t-call="web.html_container">
+                <t t-foreach="docs" t-as="o">
+                    <!-- NUSHA 1: TERZI -->
+                    <div class="page tailor-label">
+                        <t t-call="ugurlar_tailor.report_tailor_label_copy">
+                            <t t-set="copy_title">TERZI NUSHASI</t>
+                            <t t-set="copy_bg">#e74c3c</t>
+                            <t t-set="copy_note">Bu nusha terzide kalir</t>
+                        </t>
+                    </div>
 
-                        <!-- NUSHA 2: MAGAZA -->
-                        <div class="tailor-label">
-                            <t t-call="ugurlar_tailor.report_tailor_label_copy">
-                                <t t-set="copy_title">MAGAZA NUSHASI</t>
-                                <t t-set="copy_bg">#2980b9</t>
-                                <t t-set="copy_note">Urunle birlikte magazaya doner</t>
-                            </t>
-                        </div>
+                    <!-- NUSHA 2: MAGAZA -->
+                    <div class="page tailor-label">
+                        <t t-call="ugurlar_tailor.report_tailor_label_copy">
+                            <t t-set="copy_title">MAGAZA NUSHASI</t>
+                            <t t-set="copy_bg">#2980b9</t>
+                            <t t-set="copy_note">Urunle birlikte magazaya doner</t>
+                        </t>
+                    </div>
 
-                        <!-- NUSHA 3: MUSTERI -->
-                        <div class="tailor-label">
-                            <t t-call="ugurlar_tailor.report_tailor_label_copy">
-                                <t t-set="copy_title">MUSTERI NUSHASI</t>
-                                <t t-set="copy_bg">#27ae60</t>
-                                <t t-set="copy_note">Bu nusha musteride kalir</t>
-                            </t>
-                        </div>
-                    </t>
-                </body>
-            </html>
+                    <!-- NUSHA 3: MUSTERI -->
+                    <div class="page tailor-label">
+                        <t t-call="ugurlar_tailor.report_tailor_label_copy">
+                            <t t-set="copy_title">MUSTERI NUSHASI</t>
+                            <t t-set="copy_bg">#27ae60</t>
+                            <t t-set="copy_note">Bu nusha musteride kalir</t>
+                        </t>
+                    </div>
+                </t>
+            </t>
         </template>
 
         <!-- ETIKET GOVDESI -->
         <template id="report_tailor_label_copy">
-            <div class="label-header" t-attf-style="background-color: #{copy_bg};">
+            <style>
+                .tailor-label {
+                    font-family: 'DejaVu Sans', Arial, sans-serif;
+                    font-size: 11px;
+                    width: 76mm;
+                    padding: 0;
+                    margin: 0 auto;
+                    color: #000;
+                    line-height: 1.4;
+                    page-break-after: always;
+                }
+                .label-hdr {
+                    text-align: center;
+                    padding: 6px 0;
+                    margin-bottom: 4px;
+                    color: #fff;
+                    font-weight: bold;
+                    font-size: 16px;
+                    letter-spacing: 1px;
+                }
+                .label-store {
+                    text-align: center;
+                    font-size: 14px;
+                    font-weight: bold;
+                    margin-bottom: 2px;
+                }
+                .label-sub {
+                    text-align: center;
+                    font-size: 10px;
+                    margin-bottom: 4px;
+                }
+                .label-div {
+                    border: none;
+                    border-top: 1px dashed #000;
+                    margin: 4px 0;
+                }
+                .label-r {
+                    overflow: hidden;
+                    padding: 1px 0;
+                }
+                .label-r .ll {
+                    font-weight: bold;
+                    float: left;
+                    width: 80px;
+                }
+                .label-r .vv {
+                    margin-left: 85px;
+                }
+                .svc-i {
+                    overflow: hidden;
+                    padding: 1px 4px;
+                }
+                .svc-i .sn {
+                    float: left;
+                }
+                .svc-i .sp {
+                    float: right;
+                }
+                .label-tot {
+                    font-size: 14px;
+                    font-weight: bold;
+                    text-align: right;
+                    padding: 6px 0;
+                    border-top: 2px solid #000;
+                    border-bottom: 2px solid #000;
+                    margin: 4px 0;
+                    clear: both;
+                }
+                .label-bc {
+                    text-align: center;
+                    margin: 6px 0;
+                }
+                .label-ft {
+                    text-align: center;
+                    font-size: 9px;
+                    color: #666;
+                    margin-top: 4px;
+                    font-style: italic;
+                }
+                .label-dt {
+                    text-align: center;
+                    font-size: 10px;
+                    margin-top: 4px;
+                }
+                .label-st {
+                    font-weight: bold;
+                    text-align: center;
+                    padding: 3px 0;
+                    font-size: 12px;
+                    clear: both;
+                }
+            </style>
+
+            <div class="label-hdr" t-attf-style="background-color: #{copy_bg};">
                 <t t-out="copy_title"/>
             </div>
 
             <div class="label-store">UGURLAR</div>
-            <div class="label-subtitle">Terzi Takip Sistemi</div>
+            <div class="label-sub">Terzi Takip Sistemi</div>
+            <hr class="label-div"/>
 
-            <hr class="label-divider"/>
-
-            <div class="label-row">
-                <span class="lbl">Siparis No:</span>
-                <span class="val" style="font-size:13px; font-weight:bold;">
-                    <t t-out="o.name"/>
-                </span>
+            <div class="label-r">
+                <span class="ll">Siparis No:</span>
+                <span class="vv" style="font-size:13px; font-weight:bold;"><t t-out="o.name"/></span>
+            </div>
+            <div class="label-r">
+                <span class="ll">Fatura No:</span>
+                <span class="vv"><t t-out="o.invoice_no"/></span>
             </div>
 
-            <div class="label-row">
-                <span class="lbl">Fatura No:</span>
-                <span class="val"><t t-out="o.invoice_no"/></span>
-            </div>
+            <hr class="label-div"/>
 
-            <hr class="label-divider"/>
-
-            <div class="label-row">
-                <span class="lbl">Musteri:</span>
-                <span class="val"><t t-out="o.customer_name"/></span>
+            <div class="label-r">
+                <span class="ll">Musteri:</span>
+                <span class="vv"><t t-out="o.customer_name"/></span>
             </div>
             <t t-if="o.customer_phone">
-                <div class="label-row">
-                    <span class="lbl">Telefon:</span>
-                    <span class="val"><t t-out="o.customer_phone"/></span>
+                <div class="label-r">
+                    <span class="ll">Telefon:</span>
+                    <span class="vv"><t t-out="o.customer_phone"/></span>
                 </div>
             </t>
             <t t-if="o.sales_person">
-                <div class="label-row">
-                    <span class="lbl">Satis Per.:</span>
-                    <span class="val"><t t-out="o.sales_person"/></span>
+                <div class="label-r">
+                    <span class="ll">Satis Per.:</span>
+                    <span class="vv"><t t-out="o.sales_person"/></span>
                 </div>
             </t>
 
-            <hr class="label-divider"/>
+            <hr class="label-div"/>
 
-            <div class="label-row">
-                <span class="lbl">Urun:</span>
-                <span class="val"><t t-out="o.product_code or o.product_name or ''"/></span>
+            <div class="label-r">
+                <span class="ll">Urun:</span>
+                <span class="vv"><t t-out="o.product_code or o.product_name or ''"/></span>
             </div>
-            <div class="label-row">
-                <span class="lbl">Barkod:</span>
-                <span class="val"><t t-out="o.product_barcode"/></span>
-            </div>
-
-            <hr class="label-divider"/>
-
-            <div class="label-row">
-                <span class="lbl">Terzi:</span>
-                <span class="val" style="font-weight:bold; font-size:12px;">
-                    <t t-out="o.tailor_id.name if o.tailor_id else '-'"/>
-                </span>
+            <div class="label-r">
+                <span class="ll">Barkod:</span>
+                <span class="vv"><t t-out="o.product_barcode"/></span>
             </div>
 
-            <hr class="label-divider"/>
+            <hr class="label-div"/>
 
-            <div class="label-section-title">YAPILACAK ISLEMLER</div>
+            <div class="label-r">
+                <span class="ll">Terzi:</span>
+                <span class="vv" style="font-weight:bold; font-size:12px;"><t t-out="o.tailor_id.name if o.tailor_id else '-'"/></span>
+            </div>
+
+            <hr class="label-div"/>
+
+            <div class="label-st">YAPILACAK ISLEMLER</div>
             <t t-foreach="o.line_ids" t-as="line">
-                <div class="svc-item">
-                    <span class="svc-name"><t t-out="line.service_name"/></span>
-                    <span class="svc-price"><t t-out="'%.2f TL' % line.price"/></span>
+                <div class="svc-i">
+                    <span class="sn"><t t-out="line.service_name"/></span>
+                    <span class="sp"><t t-out="'%.2f TL' % line.price"/></span>
                 </div>
             </t>
 
-            <div class="label-total">
+            <div class="label-tot">
                 TOPLAM: <t t-out="'%.2f TL' % o.total_price"/>
             </div>
 
-            <div class="label-barcode">
+            <div class="label-bc">
                 <img t-att-src="'/report/barcode/?type=%s&amp;value=%s&amp;width=%s&amp;height=%s&amp;humanreadable=1' % ('Code128', o.name, 280, 50)" alt="Barkod"/>
             </div>
 
-            <div class="label-date">
+            <div class="label-dt">
                 <t t-out="o.create_date.strftime('%d.%m.%Y %H:%M')"/>
             </div>
 
-            <div class="label-footer">
+            <div class="label-ft">
                 <t t-out="copy_note"/>
             </div>
 
             <t t-if="o.notes">
-                <hr class="label-divider"/>
+                <hr class="label-div"/>
                 <div style="font-size:10px;">
                     <b>Not:</b> <t t-out="o.notes"/>
                 </div>
