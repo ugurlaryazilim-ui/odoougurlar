@@ -1,15 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
     <data>
-        <!-- Terzi Kullanıcı Grubu -->
+        <!-- Terzi Kullanici Grubu -->
         <record id="group_tailor_user" model="res.groups">
-            <field name="name">Terzi / Kullanıcı</field>
+            <field name="name">Terzi / Kullanici</field>
+            <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
+            <field name="users" eval="[(4, ref('base.user_admin'))]"/>
         </record>
 
-        <!-- Terzi Yönetici Grubu -->
+        <!-- Terzi Yonetici Grubu -->
         <record id="group_tailor_manager" model="res.groups">
-            <field name="name">Terzi / Yönetici</field>
+            <field name="name">Terzi / Yonetici</field>
             <field name="implied_ids" eval="[(4, ref('group_tailor_user'))]"/>
+            <field name="users" eval="[(4, ref('base.user_admin'))]"/>
         </record>
     </data>
 </odoo>
