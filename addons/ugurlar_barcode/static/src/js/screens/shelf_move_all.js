@@ -327,14 +327,26 @@ export class ShelfMoveAll extends Component {
         const readerEl = overlay.querySelector('#ub-camera-reader');
         const statusEl = overlay.querySelector('.ub-camera-status');
 
-        if ('BarcodeDetector' in window) {
+        const onDetected = (code) => {
+            if (target === 'source') {
+                this.state.sourceBarcode = code;
+                this.loadSourceShelf();
+            } else {
+                this.state.targetBarcode = code;
+                this.loadTargetShelf();
+            }
+        };
+
+        const useBarcodeDetector = ('BarcodeDetector' in window) && !/iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+        if (useBarcodeDetector) {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'environment' }
-                });
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
                 const video = document.createElement('video');
                 video.srcObject = stream;
                 video.setAttribute('playsinline', 'true');
+                video.setAttribute('autoplay', 'true');
+                video.muted = true;
                 video.style.width = '100%';
                 video.style.borderRadius = '8px';
                 readerEl.appendChild(video);
@@ -342,64 +354,46 @@ export class ShelfMoveAll extends Component {
 
                 const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'qr_code'] });
                 const scan = async () => {
-                    if (!document.body.contains(overlay)) {
-                        stream.getTracks().forEach(t => t.stop());
-                        return;
-                    }
+                    if (!document.body.contains(overlay)) { stream.getTracks().forEach(t => t.stop()); return; }
                     try {
                         const barcodes = await detector.detect(video);
                         if (barcodes.length > 0) {
-                            const code = barcodes[0].rawValue;
                             stream.getTracks().forEach(t => t.stop());
                             overlay.remove();
-                            if (target === 'source') {
-                                this.state.sourceBarcode = code;
-                                this.loadSourceShelf();
-                            } else {
-                                this.state.targetBarcode = code;
-                                this.loadTargetShelf();
-                            }
+                            onDetected(barcodes[0].rawValue);
                             return;
                         }
                     } catch (e) {}
                     requestAnimationFrame(scan);
                 };
                 scan();
-            } catch (e) {
-                statusEl.textContent = 'Kamera erişim hatası';
-            }
+            } catch (e) { statusEl.textContent = 'Kamera erişim hatası'; }
         } else {
             try {
                 if (!window.Html5Qrcode) {
+                    statusEl.textContent = 'Tarayıcı yükleniyor...';
                     const s = document.createElement('script');
                     s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
                     document.head.appendChild(s);
-                    await new Promise((r, j) => { s.onload = r; s.onerror = j; });
+                    await new Promise((r, j) => { s.onload = r; s.onerror = () => j(new Error('CDN')); setTimeout(() => j(new Error('Timeout')), 10000); });
                 }
+                let cameraId = null;
+                try {
+                    const cameras = await Html5Qrcode.getCameras();
+                    if (cameras && cameras.length > 0) {
+                        const backCam = cameras.find(c => /back|rear|environment/i.test(c.label));
+                        cameraId = backCam ? backCam.id : cameras[cameras.length - 1].id;
+                    }
+                } catch (e) {}
                 const scanner = new Html5Qrcode('ub-camera-reader');
-                await scanner.start(
-                    { facingMode: 'environment' },
-                    { fps: 10, qrbox: { width: 250, height: 150 } },
-                    (code) => {
-                        scanner.stop().catch(() => {});
-                        overlay.remove();
-                        if (target === 'source') {
-                            this.state.sourceBarcode = code;
-                            this.loadSourceShelf();
-                        } else {
-                            this.state.targetBarcode = code;
-                            this.loadTargetShelf();
-                        }
-                    },
-                    () => {}
-                );
-                overlay.querySelector('.ub-camera-close').onclick = () => {
-                    scanner.stop().catch(() => {});
-                    overlay.remove();
-                };
+                const config = { fps: 10, qrbox: { width: 250, height: 150 } };
+                const successCb = (code) => { scanner.stop().catch(() => {}); overlay.remove(); onDetected(code); };
+                if (cameraId) { await scanner.start(cameraId, config, successCb, () => {}); }
+                else { await scanner.start({ facingMode: 'environment' }, config, successCb, () => {}); }
+                overlay.querySelector('.ub-camera-close').onclick = () => { scanner.stop().catch(() => {}); overlay.remove(); };
             } catch (e) {
-                alert('Barkod tarayıcı yüklenemedi.');
-                overlay.remove();
+                console.error('Html5Qrcode hatası:', e);
+                statusEl.textContent = 'Kamera başlatılamadı. Lütfen kamera izni verin ve tekrar deneyin.';
             }
         }
     }

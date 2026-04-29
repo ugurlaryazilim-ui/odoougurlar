@@ -249,13 +249,24 @@ export class TailorNewOrder extends Component {
         const readerEl = overlay.querySelector('#tailor-camera-reader');
         const statusEl = overlay.querySelector('.tailor-camera-status');
 
-        if ('BarcodeDetector' in window) {
+        const onDetected = (code) => {
+            this.state.searchQuery = code;
+            this.searchInvoice();
+        };
+
+        // iOS Safari'de BarcodeDetector YOK — doğrudan Html5Qrcode kullan
+        // Android Chrome'da BarcodeDetector VAR — onu dene, hata olursa fallback
+        const useBarcodeDetector = ('BarcodeDetector' in window) && !/iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+        if (useBarcodeDetector) {
             navigator.mediaDevices.getUserMedia({
                 video: { facingMode: 'environment' }
             }).then(async (stream) => {
                 const video = document.createElement('video');
                 video.srcObject = stream;
                 video.setAttribute('playsinline', 'true');
+                video.setAttribute('autoplay', 'true');
+                video.muted = true;
                 video.style.width = '100%';
                 video.style.borderRadius = '8px';
                 readerEl.appendChild(video);
@@ -270,11 +281,9 @@ export class TailorNewOrder extends Component {
                     try {
                         const barcodes = await detector.detect(video);
                         if (barcodes.length > 0) {
-                            const code = barcodes[0].rawValue;
                             stream.getTracks().forEach(t => t.stop());
                             overlay.remove();
-                            this.state.searchQuery = code;
-                            this.searchInvoice();
+                            onDetected(barcodes[0].rawValue);
                             return;
                         }
                     } catch (e) {}
@@ -285,35 +294,66 @@ export class TailorNewOrder extends Component {
                 statusEl.textContent = 'Kamera erişim hatası';
             });
         } else {
-            // BarcodeDetector yok — Html5Qrcode fallback
-            (async () => {
-                try {
-                    if (!window.Html5Qrcode) {
-                        const s = document.createElement('script');
-                        s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
-                        document.head.appendChild(s);
-                        await new Promise((r, j) => { s.onload = r; s.onerror = j; });
-                    }
-                    const scanner = new Html5Qrcode('tailor-camera-reader');
-                    await scanner.start(
-                        { facingMode: 'environment' },
-                        { fps: 10, qrbox: { width: 250, height: 150 } },
-                        (code) => {
-                            scanner.stop().catch(() => {});
-                            overlay.remove();
-                            this.state.searchQuery = code;
-                            this.searchInvoice();
-                        },
-                        () => {}
+            // Html5Qrcode — iOS + tüm tarayıcılarda çalışır
+            this._startHtml5QrScanner(readerEl, statusEl, overlay, onDetected);
+        }
+    }
+
+    async _startHtml5QrScanner(readerEl, statusEl, overlay, onDetected) {
+        try {
+            if (!window.Html5Qrcode) {
+                statusEl.textContent = 'Tarayıcı yükleniyor...';
+                const s = document.createElement('script');
+                s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
+                document.head.appendChild(s);
+                await new Promise((resolve, reject) => {
+                    s.onload = resolve;
+                    s.onerror = () => reject(new Error('CDN yüklenemedi'));
+                    setTimeout(() => reject(new Error('Zaman aşımı')), 10000);
+                });
+            }
+
+            // Kamera listesini al
+            let cameraId = null;
+            try {
+                const cameras = await Html5Qrcode.getCameras();
+                if (cameras && cameras.length > 0) {
+                    // Arka kamerayı tercih et
+                    const backCam = cameras.find(c =>
+                        /back|rear|environment/i.test(c.label)
                     );
-                    overlay.querySelector('.tailor-camera-close').onclick = () => {
-                        scanner.stop().catch(() => {});
-                        overlay.remove();
-                    };
-                } catch (e) {
-                    statusEl.textContent = 'Barkod tarayıcı yüklenemedi.';
+                    cameraId = backCam ? backCam.id : cameras[cameras.length - 1].id;
                 }
-            })();
+            } catch (e) {
+                // getCameras başarısız olursa facingMode ile devam et
+            }
+
+            const scanner = new Html5Qrcode('tailor-camera-reader');
+            const config = { fps: 10, qrbox: { width: 250, height: 150 } };
+            const successCb = (code) => {
+                scanner.stop().catch(() => {});
+                overlay.remove();
+                onDetected(code);
+            };
+
+            if (cameraId) {
+                await scanner.start(cameraId, config, successCb, () => {});
+            } else {
+                await scanner.start(
+                    { facingMode: 'environment' },
+                    config,
+                    successCb,
+                    () => {}
+                );
+            }
+
+            overlay.querySelector('.tailor-camera-close').onclick = () => {
+                scanner.stop().catch(() => {});
+                overlay.remove();
+            };
+        } catch (e) {
+            console.error('Html5Qrcode hatası:', e);
+            statusEl.textContent = 'Kamera başlatılamadı. Lütfen kamera izni verin ve tekrar deneyin.';
         }
     }
 }

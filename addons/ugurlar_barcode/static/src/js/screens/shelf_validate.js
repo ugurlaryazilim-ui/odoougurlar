@@ -252,7 +252,20 @@ export class ShelfValidateScreen extends Component {
         const readerEl = overlay.querySelector('#ub-camera-reader');
         const statusEl = overlay.querySelector('.ub-camera-status');
 
-        if ('BarcodeDetector' in window) {
+        const onDetected = (code) => {
+            if (target === 'shelf') {
+                this.state.shelfBarcode = code;
+                this.loadShelf();
+            } else {
+                this.state.productBarcode = code;
+                this.validateProduct();
+            }
+        };
+
+        // iOS Safari'de BarcodeDetector YOK veya düzgün çalışmıyor
+        const useBarcodeDetector = ('BarcodeDetector' in window) && !/iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+        if (useBarcodeDetector) {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: { facingMode: 'environment' }
@@ -260,6 +273,8 @@ export class ShelfValidateScreen extends Component {
                 const video = document.createElement('video');
                 video.srcObject = stream;
                 video.setAttribute('playsinline', 'true');
+                video.setAttribute('autoplay', 'true');
+                video.muted = true;
                 video.style.width = '100%';
                 video.style.borderRadius = '8px';
                 readerEl.appendChild(video);
@@ -274,16 +289,9 @@ export class ShelfValidateScreen extends Component {
                     try {
                         const barcodes = await detector.detect(video);
                         if (barcodes.length > 0) {
-                            const code = barcodes[0].rawValue;
                             stream.getTracks().forEach(t => t.stop());
                             overlay.remove();
-                            if (target === 'shelf') {
-                                this.state.shelfBarcode = code;
-                                this.loadShelf();
-                            } else {
-                                this.state.productBarcode = code;
-                                this.validateProduct();
-                            }
+                            onDetected(barcodes[0].rawValue);
                             return;
                         }
                     } catch (e) {}
@@ -294,37 +302,50 @@ export class ShelfValidateScreen extends Component {
                 statusEl.textContent = 'Kamera erişim hatası';
             }
         } else {
+            // Html5Qrcode — iOS + tüm tarayıcılarda çalışır
             try {
                 if (!window.Html5Qrcode) {
+                    statusEl.textContent = 'Tarayıcı yükleniyor...';
                     const s = document.createElement('script');
                     s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
                     document.head.appendChild(s);
-                    await new Promise((r, j) => { s.onload = r; s.onerror = j; });
+                    await new Promise((resolve, reject) => {
+                        s.onload = resolve;
+                        s.onerror = () => reject(new Error('CDN yüklenemedi'));
+                        setTimeout(() => reject(new Error('Zaman aşımı')), 10000);
+                    });
                 }
+
+                let cameraId = null;
+                try {
+                    const cameras = await Html5Qrcode.getCameras();
+                    if (cameras && cameras.length > 0) {
+                        const backCam = cameras.find(c => /back|rear|environment/i.test(c.label));
+                        cameraId = backCam ? backCam.id : cameras[cameras.length - 1].id;
+                    }
+                } catch (e) {}
+
                 const scanner = new Html5Qrcode('ub-camera-reader');
-                await scanner.start(
-                    { facingMode: 'environment' },
-                    { fps: 10, qrbox: { width: 250, height: 150 } },
-                    (code) => {
-                        scanner.stop().catch(() => {});
-                        overlay.remove();
-                        if (target === 'shelf') {
-                            this.state.shelfBarcode = code;
-                            this.loadShelf();
-                        } else {
-                            this.state.productBarcode = code;
-                            this.validateProduct();
-                        }
-                    },
-                    () => {}
-                );
+                const config = { fps: 10, qrbox: { width: 250, height: 150 } };
+                const successCb = (code) => {
+                    scanner.stop().catch(() => {});
+                    overlay.remove();
+                    onDetected(code);
+                };
+
+                if (cameraId) {
+                    await scanner.start(cameraId, config, successCb, () => {});
+                } else {
+                    await scanner.start({ facingMode: 'environment' }, config, successCb, () => {});
+                }
+
                 overlay.querySelector('.ub-camera-close').onclick = () => {
                     scanner.stop().catch(() => {});
                     overlay.remove();
                 };
             } catch (e) {
-                alert('Barkod tarayıcı yüklenemedi.');
-                overlay.remove();
+                console.error('Html5Qrcode hatası:', e);
+                statusEl.textContent = 'Kamera başlatılamadı. Lütfen kamera izni verin ve tekrar deneyin.';
             }
         }
     }
