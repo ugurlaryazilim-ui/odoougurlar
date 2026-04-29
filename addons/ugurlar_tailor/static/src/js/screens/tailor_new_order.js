@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, onMounted, useRef } from "@odoo/owl";
+import { Component, useState, onMounted, onWillUnmount, useRef } from "@odoo/owl";
 import { useService } from "@web/core/utils/hooks";
 import { rpc } from "@web/core/network/rpc";
 import { printTailorLabel, printMultipleTailorLabels } from "../label_print";
@@ -9,6 +9,7 @@ export class TailorNewOrder extends Component {
     static template = "ugurlar_tailor.TailorNewOrder";
     static props = {
         onNavigate: Function,
+        scanner: Object,
     };
 
     setup() {
@@ -27,13 +28,24 @@ export class TailorNewOrder extends Component {
 
         this.searchInputRef = useRef("searchInput");
 
+        // Scanner subscription (el terminali / keyboard wedge)
+        this._unsub = this.props.scanner.onScan(barcode => {
+            if (this.state.step === 1) {
+                this.state.searchQuery = barcode;
+                this.searchInvoice();
+            }
+        });
+
         onMounted(async () => {
             await this.loadServices();
             await this.loadTailors();
-            // Barkod terminali: input focus
             if (this.searchInputRef.el) {
                 this.searchInputRef.el.focus();
             }
+        });
+
+        onWillUnmount(() => {
+            if (this._unsub) this._unsub();
         });
     }
 
@@ -73,51 +85,6 @@ export class TailorNewOrder extends Component {
         }
         this.state.searching = false;
     }
-
-    async startBarcodeScanner() {
-        // Mobil: kamera ile barkod okuma
-        if ('BarcodeDetector' in window) {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-                const video = document.createElement('video');
-                video.srcObject = stream;
-                video.setAttribute('playsinline', '');
-                await video.play();
-
-                const detector = new BarcodeDetector();
-                const scan = async () => {
-                    try {
-                        const barcodes = await detector.detect(video);
-                        if (barcodes.length > 0) {
-                            stream.getTracks().forEach(t => t.stop());
-                            this.state.searchQuery = barcodes[0].rawValue;
-                            await this.searchInvoice();
-                            return;
-                        }
-                    } catch(e) { /* retry */ }
-                    requestAnimationFrame(scan);
-                };
-                scan();
-                // 10sn sonra durdur
-                setTimeout(() => {
-                    stream.getTracks().forEach(t => t.stop());
-                }, 10000);
-            } catch(e) {
-                // Kamera erisimi yok — fallback
-                this.notification.add("Kamera erisimi saglanamadi. Barkodu elle giriniz.", { type: "warning" });
-                if (this.searchInputRef.el) {
-                    this.searchInputRef.el.focus();
-                    this.searchInputRef.el.select();
-                }
-            }
-        } else {
-            // BarcodeDetector yok — input focus
-            this.notification.add("Barkod okuyucuyu kullanin veya elle giriniz.", { type: "info" });
-            if (this.searchInputRef.el) {
-                this.searchInputRef.el.focus();
-                this.searchInputRef.el.select();
-            }
-        }
     }
 
     async selectInvoice(invoiceNo) {

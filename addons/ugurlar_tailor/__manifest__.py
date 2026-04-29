@@ -34,6 +34,7 @@
             'ugurlar_tailor/static/src/css/tailor.css',
             'ugurlar_tailor/static/src/xml/tailor_templates.xml',
             'ugurlar_tailor/static/src/js/label_print.js',
+            'ugurlar_tailor/static/src/js/tailor_scanner.js',
             'ugurlar_tailor/static/src/js/tailor_action.js',
             'ugurlar_tailor/static/src/js/screens/tailor_main_menu.js',
             'ugurlar_tailor/static/src/js/screens/tailor_new_order.js',

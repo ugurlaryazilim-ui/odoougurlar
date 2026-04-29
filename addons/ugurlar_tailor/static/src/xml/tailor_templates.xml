@@ -5,8 +5,8 @@
     <t t-name="ugurlar_tailor.TailorAction">
         <div class="tailor-app">
             <TailorMainMenu t-if="state.screen === 'main_menu'" onNavigate.bind="switchScreen"/>
-            <TailorNewOrder t-if="state.screen === 'new_order'" onNavigate.bind="switchScreen"/>
-            <TailorOrderList t-if="state.screen === 'order_list'" onNavigate.bind="switchScreen"/>
+            <TailorNewOrder t-if="state.screen === 'new_order'" onNavigate.bind="switchScreen" scanner="scanner"/>
+            <TailorOrderList t-if="state.screen === 'order_list'" onNavigate.bind="switchScreen" scanner="scanner"/>
         </div>
     </t>
 
@@ -44,15 +44,11 @@
             <!-- Step 1: Fatura Arama -->
             <div t-if="state.step === 1" class="tailor-step">
                 <div class="tailor-search-box">
-                    <input type="text" class="tailor-input"
-                           placeholder="Fatura numarasi giriniz..."
+                    <input type="text" class="tailor-input tailor-barcode-input"
+                           placeholder="Fatura numarasi giriniz veya barkod okutunuz..."
                            t-model="state.searchQuery"
                            t-on-keydown="onSearchKeydown"
                            t-ref="searchInput"/>
-                    <button class="tailor-btn" style="background:#f59e0b;color:#fff;font-size:18px;padding:8px 14px;"
-                            t-on-click="startBarcodeScanner" title="Barkod Okut">
-                        <i class="fa fa-barcode"/>
-                    </button>
                     <button class="tailor-btn tailor-btn-primary" t-on-click="searchInvoice"
                             t-att-disabled="state.searching">
                         <t t-if="state.searching">Araniyor...</t>

@@ -9,6 +9,7 @@ export class TailorOrderList extends Component {
     static template = "ugurlar_tailor.TailorOrderList";
     static props = {
         onNavigate: Function,
+        scanner: { type: Object, optional: true },
     };
 
     setup() {
