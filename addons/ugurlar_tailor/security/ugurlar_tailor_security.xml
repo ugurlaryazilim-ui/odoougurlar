@@ -4,13 +4,11 @@
         <!-- Terzi Kullanıcı Grubu -->
         <record id="group_tailor_user" model="res.groups">
             <field name="name">Terzi / Kullanıcı</field>
-            <field name="category_id" ref="base.module_category_services"/>
         </record>
 
         <!-- Terzi Yönetici Grubu -->
         <record id="group_tailor_manager" model="res.groups">
             <field name="name">Terzi / Yönetici</field>
-            <field name="category_id" ref="base.module_category_services"/>
             <field name="implied_ids" eval="[(4, ref('group_tailor_user'))]"/>
         </record>
     </data>
