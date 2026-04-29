@@ -4,129 +4,157 @@
         <template id="report_tailor_label">
             <t t-call="web.html_container">
                 <t t-foreach="docs" t-as="o">
-                    <!-- ══════ NUSHA 1: TERZI ══════ -->
+                    <!-- ══════ NUSHA 1: TERZİ ══════ -->
                     <div class="page tailor-label">
                         <t t-call="ugurlar_tailor.report_tailor_label_body">
-                            <t t-set="copy_title">TERZI NUSHASI</t>
+                            <t t-set="copy_title">TERZİ NÜSHASI</t>
                             <t t-set="copy_color">#e74c3c</t>
-                            <t t-set="copy_note">Bu nusha terzide kalir</t>
+                            <t t-set="copy_note">Bu nüsha terzide kalır</t>
                         </t>
                     </div>
 
-                    <!-- ══════ NUSHA 2: MAGAZA ══════ -->
+                    <!-- ══════ NUSHA 2: MAĞAZA ══════ -->
                     <div class="page tailor-label">
                         <t t-call="ugurlar_tailor.report_tailor_label_body">
-                            <t t-set="copy_title">MAGAZA NUSHASI</t>
+                            <t t-set="copy_title">MAĞAZA NÜSHASI</t>
                             <t t-set="copy_color">#2980b9</t>
-                            <t t-set="copy_note">Urunle birlikte magazaya doner</t>
+                            <t t-set="copy_note">Ürünle birlikte mağazaya döner</t>
                         </t>
                     </div>
 
-                    <!-- ══════ NUSHA 3: MUSTERI ══════ -->
+                    <!-- ══════ NUSHA 3: MÜŞTERİ ══════ -->
                     <div class="page tailor-label">
                         <t t-call="ugurlar_tailor.report_tailor_label_body">
-                            <t t-set="copy_title">MUSTERI NUSHASI</t>
+                            <t t-set="copy_title">MÜŞTERİ NÜSHASI</t>
                             <t t-set="copy_color">#27ae60</t>
-                            <t t-set="copy_note">Bu nusha musteride kalir</t>
+                            <t t-set="copy_note">Bu nüsha müşteride kalır</t>
                         </t>
                     </div>
                 </t>
             </t>
         </template>
 
-        <!-- ══════ ETIKET GOVDESI (ORTAK SABLON) ══════ -->
+        <!-- ══════ ETİKET GÖVDESİ (ORTAK ŞABLON) ══════ -->
         <template id="report_tailor_label_body">
             <style>
+                @page {
+                    size: 80mm auto;
+                    margin: 2mm;
+                }
                 .tailor-label {
-                    font-family: 'Courier New', monospace;
+                    font-family: Arial, Helvetica, sans-serif;
                     font-size: 11px;
                     width: 76mm;
                     padding: 0;
                     margin: 0 auto;
                     color: #000;
-                    line-height: 1.3;
+                    line-height: 1.4;
+                    page-break-after: always;
                 }
                 .label-header {
                     text-align: center;
-                    padding: 4px 0;
+                    padding: 6px 0;
                     margin-bottom: 4px;
                     color: #fff;
                     font-weight: bold;
-                    font-size: 14px;
+                    font-size: 16px;
                     letter-spacing: 1px;
                 }
                 .label-store {
                     text-align: center;
-                    font-size: 13px;
+                    font-size: 14px;
                     font-weight: bold;
                     margin-bottom: 2px;
                 }
+                .label-subtitle {
+                    text-align: center;
+                    font-size: 10px;
+                    margin-bottom: 4px;
+                }
                 .label-divider {
+                    border: none;
                     border-top: 1px dashed #000;
-                    margin: 3px 0;
+                    margin: 4px 0;
                 }
                 .label-row {
-                    display: flex;
-                    justify-content: space-between;
+                    display: table;
+                    width: 100%;
                     padding: 1px 0;
                 }
                 .label-row .lbl {
+                    display: table-cell;
                     font-weight: bold;
-                    min-width: 80px;
+                    width: 75px;
+                    vertical-align: top;
                 }
                 .label-row .val {
-                    text-align: right;
-                    flex: 1;
+                    display: table-cell;
+                    text-align: left;
                 }
                 .label-services {
-                    margin: 2px 0;
+                    margin: 4px 0;
                 }
                 .label-services .svc-item {
-                    display: flex;
-                    justify-content: space-between;
+                    display: table;
+                    width: 100%;
                     padding: 1px 4px;
+                }
+                .label-services .svc-item .svc-name {
+                    display: table-cell;
+                    width: 70%;
+                }
+                .label-services .svc-item .svc-price {
+                    display: table-cell;
+                    text-align: right;
+                    width: 30%;
                 }
                 .label-total {
                     font-size: 14px;
                     font-weight: bold;
                     text-align: right;
-                    padding: 4px 0;
+                    padding: 6px 0;
                     border-top: 2px solid #000;
                     border-bottom: 2px solid #000;
-                    margin: 3px 0;
+                    margin: 4px 0;
                 }
                 .label-barcode {
                     text-align: center;
-                    margin: 4px 0;
+                    margin: 6px 0;
                 }
                 .label-footer {
                     text-align: center;
                     font-size: 9px;
                     color: #666;
-                    margin-top: 2px;
+                    margin-top: 4px;
                     font-style: italic;
                 }
                 .label-date {
                     text-align: center;
                     font-size: 10px;
-                    margin-top: 2px;
+                    margin-top: 4px;
+                }
+                .label-section-title {
+                    font-weight: bold;
+                    text-align: center;
+                    padding: 3px 0;
+                    font-size: 12px;
                 }
             </style>
 
-            <!-- NUSHA BASLIGI -->
+            <!-- NÜSHA BAŞLIĞI -->
             <div class="label-header" t-attf-style="background-color: #{copy_color};">
                 <t t-out="copy_title"/>
             </div>
 
-            <!-- MAGAZA ADI -->
-            <div class="label-store">UGURLAR</div>
-            <div style="text-align:center; font-size:10px;">Terzi Takip Sistemi</div>
+            <!-- MAĞAZA ADI -->
+            <div class="label-store">UĞURLAR</div>
+            <div class="label-subtitle">Terzi Takip Sistemi</div>
 
-            <div class="label-divider"/>
+            <hr class="label-divider"/>
 
-            <!-- SIPARIS NO -->
+            <!-- SİPARİŞ NO -->
             <div class="label-row">
-                <span class="lbl">Siparis No:</span>
+                <span class="lbl">Sipariş No:</span>
                 <span class="val" style="font-size:13px; font-weight:bold;">
                     <t t-out="o.name"/>
                 </span>
@@ -138,11 +166,11 @@
                 <span class="val"><t t-out="o.invoice_no"/></span>
             </div>
 
-            <div class="label-divider"/>
+            <hr class="label-divider"/>
 
-            <!-- MUSTERI -->
+            <!-- MÜŞTERİ -->
             <div class="label-row">
-                <span class="lbl">Musteri:</span>
+                <span class="lbl">Müşteri:</span>
                 <span class="val"><t t-out="o.customer_name"/></span>
             </div>
             <t t-if="o.customer_phone">
@@ -153,42 +181,42 @@
             </t>
             <t t-if="o.sales_person">
                 <div class="label-row">
-                    <span class="lbl">Satis Per.:</span>
+                    <span class="lbl">Satış Per.:</span>
                     <span class="val"><t t-out="o.sales_person"/></span>
                 </div>
             </t>
 
-            <div class="label-divider"/>
+            <hr class="label-divider"/>
 
-            <!-- URUN -->
+            <!-- ÜRÜN -->
             <div class="label-row">
-                <span class="lbl">Urun:</span>
-                <span class="val"><t t-out="o.product_code or o.product_name"/></span>
+                <span class="lbl">Ürün:</span>
+                <span class="val"><t t-out="o.product_code or o.product_name or ''"/></span>
             </div>
             <div class="label-row">
                 <span class="lbl">Barkod:</span>
                 <span class="val"><t t-out="o.product_barcode"/></span>
             </div>
 
-            <div class="label-divider"/>
+            <hr class="label-divider"/>
 
-            <!-- TERZI -->
+            <!-- TERZİ -->
             <div class="label-row">
                 <span class="lbl">Terzi:</span>
-                <span class="val" style="font-weight:bold;">
-                    <t t-out="o.tailor_id.name"/>
+                <span class="val" style="font-weight:bold; font-size:12px;">
+                    <t t-out="o.tailor_id.name if o.tailor_id else '-'"/>
                 </span>
             </div>
 
-            <div class="label-divider"/>
+            <hr class="label-divider"/>
 
-            <!-- HIZMETLER -->
-            <div style="font-weight:bold; text-align:center; padding:2px 0;">YAPILACAK ISLEMLER</div>
+            <!-- HİZMETLER -->
+            <div class="label-section-title">YAPILACAK İŞLEMLER</div>
             <div class="label-services">
                 <t t-foreach="o.line_ids" t-as="line">
                     <div class="svc-item">
-                        <span><t t-out="line.service_name"/></span>
-                        <span><t t-out="'%.2f TL' % line.price"/></span>
+                        <span class="svc-name"><t t-out="line.service_name"/></span>
+                        <span class="svc-price"><t t-out="'%.2f TL' % line.price"/></span>
                     </div>
                 </t>
             </div>
@@ -200,21 +228,21 @@
 
             <!-- BARKOD -->
             <div class="label-barcode">
-                <img t-att-src="'/report/barcode/?type=%s&amp;value=%s&amp;width=%s&amp;height=%s&amp;humanreadable=1' % ('Code128', o.name, 300, 50)" alt="Barkod"/>
+                <img t-att-src="'/report/barcode/?type=%s&amp;value=%s&amp;width=%s&amp;height=%s&amp;humanreadable=1' % ('Code128', o.name, 280, 50)" alt="Barkod"/>
             </div>
 
-            <!-- TARIH -->
+            <!-- TARİH -->
             <div class="label-date">
                 <t t-out="o.create_date.strftime('%d.%m.%Y %H:%M')"/>
             </div>
 
-            <!-- NUSHA NOTU -->
+            <!-- NÜSHA NOTU -->
             <div class="label-footer">
                 <t t-out="copy_note"/>
             </div>
 
             <t t-if="o.notes">
-                <div class="label-divider"/>
+                <hr class="label-divider"/>
                 <div style="font-size:10px;">
                     <strong>Not:</strong> <t t-out="o.notes"/>
                 </div>

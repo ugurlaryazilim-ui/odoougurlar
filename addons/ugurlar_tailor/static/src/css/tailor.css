@@ -314,9 +314,19 @@
     font-weight: 500;
 }
 
+/* ── Item Container (scrollable) ── */
+.tailor-items {
+    max-height: calc(100vh - 260px);
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
 .tailor-order-actions {
     margin-top: 10px;
     text-align: right;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
 }
 
 /* ── Badges ── */
