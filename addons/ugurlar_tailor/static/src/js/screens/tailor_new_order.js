@@ -3,6 +3,7 @@
 import { Component, useState, onMounted, useRef } from "@odoo/owl";
 import { useService } from "@web/core/utils/hooks";
 import { rpc } from "@web/core/network/rpc";
+import { printTailorLabel } from "../label_print";
 
 export class TailorNewOrder extends Component {
     static template = "ugurlar_tailor.TailorNewOrder";
@@ -259,13 +260,9 @@ export class TailorNewOrder extends Component {
         try {
             const data = await rpc("/ugurlar_tailor/label_data", { order_id: orderId });
             if (data.error) return;
-
-            const { TailorOrderList } = await import("./tailor_order_list");
-            const listInstance = new TailorOrderList();
-            // Dogrudan static metod gibi kullan
-            TailorOrderList.prototype._openLabelPrint.call(this, data);
+            printTailorLabel(data);
         } catch (e) {
-            // sessiz
+            console.error("Etiket yazdirma hatasi:", e);
         }
     }
 }
