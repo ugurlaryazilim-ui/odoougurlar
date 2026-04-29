@@ -265,23 +265,15 @@ export class ShelfClearAllScreen extends Component {
                     document.head.appendChild(s);
                     await new Promise((r, j) => { s.onload = r; s.onerror = () => j(new Error('CDN')); setTimeout(() => j(new Error('Timeout')), 10000); });
                 }
-                let cameraId = null;
-                try {
-                    const cameras = await Html5Qrcode.getCameras();
-                    if (cameras && cameras.length > 0) {
-                        const backCam = cameras.find(c => /back|rear|environment/i.test(c.label));
-                        cameraId = backCam ? backCam.id : cameras[cameras.length - 1].id;
-                    }
-                } catch (e) {}
+                statusEl.textContent = 'Kamera başlatılıyor...';
                 const scanner = new Html5Qrcode('ub-camera-reader');
-                const config = { fps: 10, qrbox: { width: 250, height: 150 } };
+                const config = { fps: 10, qrbox: { width: 250, height: 150 }, aspectRatio: 1.0 };
                 const successCb = (code) => { scanner.stop().catch(() => {}); overlay.remove(); onDetected(code); };
-                if (cameraId) { await scanner.start(cameraId, config, successCb, () => {}); }
-                else { await scanner.start({ facingMode: 'environment' }, config, successCb, () => {}); }
+                await scanner.start({ facingMode: 'environment' }, config, successCb, () => {});
                 overlay.querySelector('.ub-camera-close').onclick = () => { scanner.stop().catch(() => {}); overlay.remove(); };
             } catch (e) {
                 console.error('Html5Qrcode hatası:', e);
-                statusEl.textContent = 'Kamera başlatılamadı. Lütfen kamera izni verin ve tekrar deneyin.';
+                statusEl.textContent = 'Kamera başlatılamadı: ' + (e.message || e);
             }
         }
     }

@@ -313,39 +313,23 @@ export class TailorNewOrder extends Component {
                 });
             }
 
-            // Kamera listesini al
-            let cameraId = null;
-            try {
-                const cameras = await Html5Qrcode.getCameras();
-                if (cameras && cameras.length > 0) {
-                    // Arka kamerayı tercih et
-                    const backCam = cameras.find(c =>
-                        /back|rear|environment/i.test(c.label)
-                    );
-                    cameraId = backCam ? backCam.id : cameras[cameras.length - 1].id;
-                }
-            } catch (e) {
-                // getCameras başarısız olursa facingMode ile devam et
-            }
+            statusEl.textContent = 'Kamera başlatılıyor...';
 
             const scanner = new Html5Qrcode('tailor-camera-reader');
-            const config = { fps: 10, qrbox: { width: 250, height: 150 } };
+            const config = { fps: 10, qrbox: { width: 250, height: 150 }, aspectRatio: 1.0 };
             const successCb = (code) => {
                 scanner.stop().catch(() => {});
                 overlay.remove();
                 onDetected(code);
             };
 
-            if (cameraId) {
-                await scanner.start(cameraId, config, successCb, () => {});
-            } else {
-                await scanner.start(
-                    { facingMode: 'environment' },
-                    config,
-                    successCb,
-                    () => {}
-                );
-            }
+            // iOS'ta getCameras() kullanma — doğrudan facingMode ile başlat
+            await scanner.start(
+                { facingMode: 'environment' },
+                config,
+                successCb,
+                () => {}
+            );
 
             overlay.querySelector('.tailor-camera-close').onclick = () => {
                 scanner.stop().catch(() => {});
@@ -353,7 +337,7 @@ export class TailorNewOrder extends Component {
             };
         } catch (e) {
             console.error('Html5Qrcode hatası:', e);
-            statusEl.textContent = 'Kamera başlatılamadı. Lütfen kamera izni verin ve tekrar deneyin.';
+            statusEl.textContent = 'Kamera başlatılamadı: ' + (e.message || e);
         }
     }
 }
