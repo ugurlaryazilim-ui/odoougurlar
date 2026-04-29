@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <templates xml:space="preserve">
 
-    <!-- ═══════════════ Root Action ═══════════════ -->
+    <!-- Root Action -->
     <t t-name="ugurlar_tailor.TailorAction">
         <div class="tailor-app">
             <TailorMainMenu t-if="state.screen === 'main_menu'" onNavigate.bind="switchScreen"/>
@@ -10,68 +10,68 @@
         </div>
     </t>
 
-    <!-- ═══════════════ Main Menu ═══════════════ -->
+    <!-- Main Menu -->
     <t t-name="ugurlar_tailor.TailorMainMenu">
         <div class="tailor-screen tailor-main-menu">
             <div class="tailor-header">
-                <h1>✂️ Terzi Takip</h1>
-                <p class="tailor-subtitle">Mağaza Terzi Yönetim Sistemi</p>
+                <h1>Terzi Takip</h1>
+                <p class="tailor-subtitle">Magaza Terzi Yonetim Sistemi</p>
             </div>
             <div class="tailor-menu-grid">
                 <div class="tailor-menu-card tailor-card-primary" t-on-click="onNewOrder">
-                    <div class="tailor-card-icon">📋</div>
-                    <div class="tailor-card-title">Yeni Sipariş</div>
-                    <div class="tailor-card-desc">Fatura arayın ve terzi siparişi oluşturun</div>
+                    <div class="tailor-card-icon">+</div>
+                    <div class="tailor-card-title">Yeni Siparis</div>
+                    <div class="tailor-card-desc">Fatura arayin ve terzi siparisi olusturun</div>
                 </div>
                 <div class="tailor-menu-card tailor-card-secondary" t-on-click="onOrderList">
-                    <div class="tailor-card-icon">📦</div>
-                    <div class="tailor-card-title">Sipariş Listesi</div>
-                    <div class="tailor-card-desc">Tüm siparişleri görüntüleyin ve yönetin</div>
+                    <div class="tailor-card-icon">&#128230;</div>
+                    <div class="tailor-card-title">Siparis Listesi</div>
+                    <div class="tailor-card-desc">Tum siparisleri goruntuleyin ve yonetin</div>
                 </div>
             </div>
         </div>
     </t>
 
-    <!-- ═══════════════ New Order ═══════════════ -->
+    <!-- New Order -->
     <t t-name="ugurlar_tailor.TailorNewOrder">
         <div class="tailor-screen tailor-new-order">
             <div class="tailor-toolbar">
-                <button class="tailor-btn tailor-btn-back" t-on-click="goBack">← Geri</button>
+                <button class="tailor-btn tailor-btn-back" t-on-click="goBack">Geri</button>
                 <h2 t-if="state.step === 1">Fatura Ara</h2>
-                <h2 t-if="state.step === 2">Ürün ve Hizmet Seç</h2>
+                <h2 t-if="state.step === 2">Urun ve Hizmet Sec</h2>
             </div>
 
             <!-- Step 1: Fatura Arama -->
             <div t-if="state.step === 1" class="tailor-step">
                 <div class="tailor-search-box">
                     <input type="text" class="tailor-input"
-                           placeholder="Fatura numarası giriniz..."
+                           placeholder="Fatura numarasi giriniz..."
                            t-model="state.searchQuery"
                            t-on-keydown="onSearchKeydown"/>
                     <button class="tailor-btn tailor-btn-primary" t-on-click="searchInvoice"
                             t-att-disabled="state.searching">
-                        <t t-if="state.searching">Aranıyor...</t>
-                        <t t-else="">🔍 Ara</t>
+                        <t t-if="state.searching">Araniyor...</t>
+                        <t t-else="">Ara</t>
                     </button>
                 </div>
-                <div t-if="state.invoices.length > 1" class="tailor-invoice-list">
+                <div t-if="state.invoices.length &gt; 1" class="tailor-invoice-list">
                     <t t-foreach="state.invoices" t-as="inv" t-key="inv.invoice_no">
-                        <div class="tailor-invoice-card" t-on-click="() => this.selectInvoice(inv.invoice_no)">
+                        <div class="tailor-invoice-card" t-on-click="() =&gt; this.selectInvoice(inv.invoice_no)">
                             <strong t-esc="inv.invoice_no"/>
                             <span class="tailor-invoice-meta">
-                                <t t-esc="inv.customer_name"/> — <t t-esc="inv.sales_person || '-'"/>
+                                <t t-esc="inv.customer_name"/> - <t t-esc="inv.sales_person || '-'"/>
                             </span>
                         </div>
                     </t>
                 </div>
             </div>
 
-            <!-- Step 2: Ürün + Hizmet Seçimi -->
+            <!-- Step 2: Urun + Hizmet Secimi -->
             <div t-if="state.step === 2" class="tailor-step">
                 <div class="tailor-invoice-info">
                     <strong>Fatura:</strong> <t t-esc="state.selectedInvoice.invoice_no"/> |
-                    <strong>Müşteri:</strong> <t t-esc="state.selectedInvoice.customer_name"/> |
-                    <strong>Satış Pers.:</strong> <t t-esc="state.selectedInvoice.sales_person || '-'"/>
+                    <strong>Musteri:</strong> <t t-esc="state.selectedInvoice.customer_name"/> |
+                    <strong>Satis Pers.:</strong> <t t-esc="state.selectedInvoice.sales_person || '-'"/>
                 </div>
 
                 <div class="tailor-items">
@@ -82,25 +82,25 @@
                                 <span class="tailor-item-barcode">Barkod: <t t-esc="item.barcode"/></span>
                             </div>
 
-                            <!-- Terzi Seçimi -->
+                            <!-- Terzi Secimi -->
                             <div class="tailor-item-row">
                                 <label>Terzi:</label>
-                                <select class="tailor-select" t-on-change="(ev) => this.onTailorChange(item.barcode, ev)">
-                                    <option value="">-- Terzi Seçin --</option>
+                                <select class="tailor-select" t-on-change="(ev) =&gt; this.onTailorChange(item.barcode, ev)">
+                                    <option value="">-- Terzi Secin --</option>
                                     <t t-foreach="state.tailors" t-as="tailor" t-key="tailor.id">
                                         <option t-att-value="tailor.id" t-esc="tailor.name"/>
                                     </t>
                                 </select>
                             </div>
 
-                            <!-- Hizmet Seçimi -->
+                            <!-- Hizmet Secimi -->
                             <div class="tailor-item-services">
                                 <label>Hizmetler:</label>
                                 <div class="tailor-service-grid">
                                     <t t-foreach="state.services" t-as="svc" t-key="svc.id">
                                         <label class="tailor-service-check">
                                             <input type="checkbox"
-                                                   t-on-change="() => this.onServiceToggle(item.barcode, svc.id)"
+                                                   t-on-change="() =&gt; this.onServiceToggle(item.barcode, svc.id)"
                                                    t-att-checked="(state.itemSelections[item.barcode]?.service_ids || []).includes(svc.id)"/>
                                             <span>
                                                 <t t-esc="svc.name"/>
@@ -115,7 +115,7 @@
                             <div class="tailor-item-row">
                                 <input type="text" class="tailor-input tailor-input-sm"
                                        placeholder="Not ekleyin..."
-                                       t-on-change="(ev) => this.onNotesChange(item.barcode, ev)"/>
+                                       t-on-change="(ev) =&gt; this.onNotesChange(item.barcode, ev)"/>
                             </div>
 
                             <!-- Toplam -->
@@ -130,42 +130,42 @@
                     <button class="tailor-btn tailor-btn-success tailor-btn-lg"
                             t-on-click="submitOrders"
                             t-att-disabled="state.submitting">
-                        <t t-if="state.submitting">Oluşturuluyor...</t>
-                        <t t-else="">✅ Siparişleri Oluştur</t>
+                        <t t-if="state.submitting">Olusturuluyor...</t>
+                        <t t-else="">Siparisleri Olustur</t>
                     </button>
                 </div>
             </div>
         </div>
     </t>
 
-    <!-- ═══════════════ Order List ═══════════════ -->
+    <!-- Order List -->
     <t t-name="ugurlar_tailor.TailorOrderList">
         <div class="tailor-screen tailor-order-list">
             <div class="tailor-toolbar">
-                <button class="tailor-btn tailor-btn-back" t-on-click="goBack">← Geri</button>
-                <h2>Sipariş Listesi</h2>
+                <button class="tailor-btn tailor-btn-back" t-on-click="goBack">Geri</button>
+                <h2>Siparis Listesi</h2>
             </div>
 
             <!-- Filtreler -->
             <div class="tailor-filters">
-                <input type="text" class="tailor-input" placeholder="Ara (fatura, müşteri, sipariş no)..."
+                <input type="text" class="tailor-input" placeholder="Ara (fatura, musteri, siparis no)..."
                        t-model="state.search" t-on-keydown="onSearchKeydown"/>
                 <select class="tailor-select" t-on-change="onFilterChange">
-                    <option value="">Tümü</option>
+                    <option value="">Tumu</option>
                     <option value="pending">Bekliyor</option>
                     <option value="in_progress">Terzide</option>
-                    <option value="completed">Hazır</option>
+                    <option value="completed">Hazir</option>
                     <option value="delivered">Teslim</option>
                 </select>
             </div>
 
             <!-- Loading -->
-            <div t-if="state.loading" class="tailor-loading">Yükleniyor...</div>
+            <div t-if="state.loading" class="tailor-loading">Yukleniyor...</div>
 
             <!-- Liste -->
             <div t-if="!state.loading" class="tailor-orders">
                 <div t-if="state.orders.length === 0" class="tailor-empty">
-                    Sipariş bulunamadı.
+                    Siparis bulunamadi.
                 </div>
                 <t t-foreach="state.orders" t-as="order" t-key="order.id">
                     <div class="tailor-order-card">
@@ -175,10 +175,10 @@
                                   t-esc="getStatusLabel(order.state)"/>
                         </div>
                         <div class="tailor-order-body">
-                            <div>📄 <t t-esc="order.invoice_no"/> — <t t-esc="order.product_name"/></div>
-                            <div>👤 <t t-esc="order.customer_name"/></div>
-                            <div t-if="order.tailor_id">✂️ <t t-esc="order.tailor_id[1]"/></div>
-                            <div>💰 <t t-esc="order.total_price?.toFixed(2)"/> TL</div>
+                            <div><t t-esc="order.invoice_no"/> - <t t-esc="order.product_name"/></div>
+                            <div><t t-esc="order.customer_name"/></div>
+                            <div t-if="order.tailor_id"><t t-esc="order.tailor_id[1]"/></div>
+                            <div><t t-esc="order.total_price?.toFixed(2)"/> TL</div>
                             <div t-if="order.services and order.services.length" class="tailor-order-services">
                                 <t t-foreach="order.services" t-as="s" t-key="s.id">
                                     <span class="tailor-service-tag" t-esc="s.service_name"/>
@@ -187,8 +187,8 @@
                         </div>
                         <div class="tailor-order-actions" t-if="getNextStatus(order.state)">
                             <button class="tailor-btn tailor-btn-sm tailor-btn-primary"
-                                    t-on-click="() => this.updateStatus(order.id, this.getNextStatus(order.state))">
-                                → <t t-esc="getStatusLabel(getNextStatus(order.state))"/>
+                                    t-on-click="() =&gt; this.updateStatus(order.id, this.getNextStatus(order.state))">
+                                <t t-esc="getStatusLabel(getNextStatus(order.state))"/>
                             </button>
                         </div>
                     </div>
@@ -196,12 +196,12 @@
             </div>
 
             <!-- Pagination -->
-            <div class="tailor-pagination" t-if="state.total > state.limit">
+            <div class="tailor-pagination" t-if="state.total &gt; state.limit">
                 <button class="tailor-btn tailor-btn-sm" t-on-click="prevPage"
-                        t-att-disabled="state.page <= 1">◀ Önceki</button>
+                        t-att-disabled="state.page &lt;= 1">Onceki</button>
                 <span><t t-esc="state.page"/> / <t t-esc="totalPages"/></span>
                 <button class="tailor-btn tailor-btn-sm" t-on-click="nextPage"
-                        t-att-disabled="state.page >= totalPages">Sonraki ▶</button>
+                        t-att-disabled="state.page &gt;= totalPages">Sonraki</button>
             </div>
         </div>
     </t>
