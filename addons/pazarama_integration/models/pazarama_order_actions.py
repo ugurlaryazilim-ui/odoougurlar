@@ -3,6 +3,7 @@ import json
 import logging
 
 from odoo import api, fields, models
+from .pazarama_order_sync import PAZARAMA_VALID_ORDER_STATUSES
 
 _logger = logging.getLogger(__name__)
 
@@ -28,8 +29,8 @@ class PazaramaOrderActions(models.Model):
                     fail += 1
                     continue
                 
-                # Sadece Odoo'da faturalandırma aşamasına girenleri içeri al (Örn: orderStatus == 3 'Sipariş Alındı' ise)
-                if order.order_status in [3, 12]:
+                # Geçerli statülerdeki siparişler için Sale Order oluştur
+                if order.order_status in PAZARAMA_VALID_ORDER_STATUSES:
                     # Create odoo sale order from pazarama_order_sync method 
                     shipment_addr = package_data.get('shipmentAddress') or {}
                     billing_addr = package_data.get('billingAddress') or {}

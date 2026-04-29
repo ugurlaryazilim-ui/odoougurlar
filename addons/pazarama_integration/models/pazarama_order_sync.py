@@ -7,6 +7,10 @@ from odoo import api, fields, models
 
 _logger = logging.getLogger(__name__)
 
+# Pazarama'nın kabul ettiği sipariş statüleri (Odoo'ya Sale Order olarak çekilecekler)
+# 3 = Siparişiniz Alındı, 12 = Siparişiniz Hazırlanıyor
+PAZARAMA_VALID_ORDER_STATUSES = (3, 12)
+
 class PazaramaOrderSync(models.Model):
     _inherit = 'pazarama.order'
 
@@ -14,9 +18,14 @@ class PazaramaOrderSync(models.Model):
     def sync_orders_from_pazarama(self):
         """Tüm aktif mağazalardan siparişleri senkronize et."""
         stores = self.env['pazarama.store'].search([('active', '=', True), ('auto_sync', '=', True)])
+        _logger.info("Pazarama otomatik senkronizasyon başladı — %d aktif mağaza", len(stores))
         for store in stores:
             try:
-                self.sync_orders_for_store(store)
+                res = self.sync_orders_for_store(store)
+                _logger.info(
+                    "Pazarama [%s] senkron tamamlandı — Yeni: %d, Güncellenen: %d, Hata: %d",
+                    store.name, res.get('created', 0), res.get('updated', 0), res.get('errors', 0)
+                )
             except Exception as e:
                 _logger.exception("Pazarama %s senkronizasyon hatası: %s", store.name, e)
 
@@ -29,9 +38,14 @@ class PazaramaOrderSync(models.Model):
         updated_count = 0
         error_count = 0
         
-        # Son 1, 3 veya 5 günlük siparişleri çek (store.order_day_range)
-        start_date = datetime.now() - timedelta(days=store.order_day_range or 1)
-        end_date = datetime.now()
+        # Son X günlük siparişleri çek (store.order_day_range)
+        # fields.Datetime.now() = UTC. Pazarama Türkiye saatinde çalışır.
+        # Güvenlik marjı olarak endDate'e +3 saat ekliyoruz (UTC→TR farkı).
+        now_utc = fields.Datetime.now()
+        start_date = now_utc - timedelta(days=store.order_day_range or 1)
+        end_date = now_utc + timedelta(hours=3)  # Türkiye saati güvenlik marjı
+        
+        _logger.info("Pazarama [%s] sipariş çekme: %s → %s", store.name, start_date, end_date)
         
         page = 1
         while True:
@@ -158,14 +172,17 @@ class PazaramaOrderSync(models.Model):
         
         pazarama_order = self.create(vals)
         
-        # Sadece Odoo'da faturalandırma aşamasına girenleri içeri al (Örn: orderStatus == 3 'Sipariş Alındı' ise)
-        if order_status == 3:
+        # Siparişi Alındı (3) veya Hazırlanıyor (12) statüsündeki siparişler için Sale Order oluştur
+        if order_status in PAZARAMA_VALID_ORDER_STATUSES:
             sale_order = self._create_odoo_sale_order(pazarama_order, store, shipment_addr, billing_addr, customer_email, phone_number)
             pazarama_order.write({'sale_order_id': sale_order.id})
             
             # Otomatik onay
             if store.auto_confirm and sale_order.state in ['draft', 'sent']:
                 sale_order.action_confirm()
+        else:
+            _logger.info("Pazarama sipariş %s statüsü %s — Sale Order oluşturulmadı (beklenen: %s)",
+                         order_id, order_status, PAZARAMA_VALID_ORDER_STATUSES)
                 
         return 'created'
 

@@ -7,6 +7,8 @@ from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 
+_CRON_XMLID = 'pazarama_integration.ir_cron_pazarama_sync_orders'
+
 class PazaramaStore(models.Model):
     _name = 'pazarama.store'
     _description = 'Pazarama Mağaza Ayarları'
@@ -82,6 +84,28 @@ class PazaramaStore(models.Model):
         counts = {store.id: count for store, count in data}
         for store in self:
             store.settlement_count = counts.get(store.id, 0)
+
+    def write(self, vals):
+        res = super().write(vals)
+        if 'sync_interval' in vals or 'auto_sync' in vals:
+            self._sync_cron_settings()
+        return res
+
+    def _sync_cron_settings(self):
+        """Store'daki sync_interval ve auto_sync değerlerini cron'a yansıt."""
+        cron = self.env.ref(_CRON_XMLID, raise_if_not_found=False)
+        if not cron:
+            return
+        # En küçük interval'i al (birden fazla store olabilir)
+        stores = self.env['pazarama.store'].search([('active', '=', True)])
+        any_auto = any(s.auto_sync for s in stores)
+        min_interval = min((s.sync_interval for s in stores if s.auto_sync and s.sync_interval > 0), default=5)
+        cron.sudo().write({
+            'active': any_auto,
+            'interval_number': max(min_interval, 1),
+            'interval_type': 'minutes',
+        })
+        _logger.info("Pazarama cron güncellendi: active=%s, interval=%d dk", any_auto, min_interval)
 
     def get_api(self):
         """PazaramaApi client objesini oluştur ve döndür."""
