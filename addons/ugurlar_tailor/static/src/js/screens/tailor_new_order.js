@@ -3,7 +3,7 @@
 import { Component, useState, onMounted, useRef } from "@odoo/owl";
 import { useService } from "@web/core/utils/hooks";
 import { rpc } from "@web/core/network/rpc";
-import { printTailorLabel } from "../label_print";
+import { printTailorLabel, printMultipleTailorLabels } from "../label_print";
 
 export class TailorNewOrder extends Component {
     static template = "ugurlar_tailor.TailorNewOrder";
@@ -227,11 +227,22 @@ export class TailorNewOrder extends Component {
                     result.orders.length + " siparis basariyla olusturuldu!",
                     { type: "success" }
                 );
-                // Her siparis icin etiket yazdir
+                // Tum siparislerin etiket verisini topla, tek seferde yazdir
+                const labelDataArray = [];
                 for (const order of result.orders) {
-                    await this._printOrderLabel(order.id);
+                    try {
+                        const data = await rpc("/ugurlar_tailor/label_data", { order_id: order.id });
+                        if (data && !data.error) {
+                            labelDataArray.push(data);
+                        }
+                    } catch (e) {
+                        console.error("Etiket verisi alinamadi:", e);
+                    }
                 }
-                setTimeout(() => this.props.onNavigate("main_menu"), 2000);
+                if (labelDataArray.length > 0) {
+                    printMultipleTailorLabels(labelDataArray);
+                }
+                setTimeout(() => this.props.onNavigate("main_menu"), 3000);
             } else {
                 this.notification.add("Hata: " + (result.error || ""), { type: "danger" });
             }
@@ -253,16 +264,6 @@ export class TailorNewOrder extends Component {
     onSearchKeydown(ev) {
         if (ev.key === "Enter") {
             this.searchInvoice();
-        }
-    }
-
-    async _printOrderLabel(orderId) {
-        try {
-            const data = await rpc("/ugurlar_tailor/label_data", { order_id: orderId });
-            if (data.error) return;
-            printTailorLabel(data);
-        } catch (e) {
-            console.error("Etiket yazdirma hatasi:", e);
         }
     }
 }

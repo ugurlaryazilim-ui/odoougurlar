@@ -2,9 +2,11 @@
 
 /**
  * Terzi etiket yazdirma — iframe + window.print() yontemi.
- * Barcode modulundeki yaklaşımla ayni.
+ * Barcode modulundeki yaklasimla ayni.
+ * Tek veya coklu siparis destekler.
  */
-export function printTailorLabel(data) {
+
+function _buildLabelHtml(data) {
     const copies = [
         { title: 'TERZİ NÜSHASI', bg: '#e74c3c', note: 'Bu nüsha terzide kalır' },
         { title: 'MAĞAZA NÜSHASI', bg: '#2980b9', note: 'Ürünle birlikte mağazaya döner' },
@@ -18,7 +20,7 @@ export function printTailorLabel(data) {
         </div>`
     ).join('');
 
-    const labelsHtml = copies.map(c => `
+    return copies.map(c => `
         <div class="label">
             <div class="label-hdr" style="background:${c.bg};">${c.title}</div>
             <div class="label-store">UĞURLAR</div>
@@ -28,7 +30,7 @@ export function printTailorLabel(data) {
             <div class="label-r"><span class="ll">Fatura No:</span><span class="vv">${data.invoice_no}</span></div>
             <hr class="label-div"/>
             <div class="label-r"><span class="ll">Müşteri:</span><span class="vv">${data.customer_name}</span></div>
-            ${data.customer_phone ? `<div class="label-r"><span class="ll">Telefon:</span><span class="vv">${data.customer_phone}</span></div>` : ''}
+            ${data.customer_phone ? `<div class="label-r"><span class="ll">Müşteri No:</span><span class="vv">${data.customer_phone}</span></div>` : ''}
             ${data.sales_person ? `<div class="label-r"><span class="ll">Satış Per.:</span><span class="vv">${data.sales_person}</span></div>` : ''}
             <hr class="label-div"/>
             <div class="label-r"><span class="ll">Ürün:</span><span class="vv">${data.product_code || data.product_name}</span></div>
@@ -44,10 +46,12 @@ export function printTailorLabel(data) {
             ${data.notes ? `<hr class="label-div"/><div style="font-size:10px;"><b>Not:</b> ${data.notes}</div>` : ''}
         </div>
     `).join('');
+}
 
+function _printHtml(labelsHtml, title) {
     const html = `<!DOCTYPE html><html><head>
         <meta charset="utf-8">
-        <title>Terzi Etiket — ${data.name}</title>
+        <title>${title}</title>
         <style>
             @page { size: 80mm auto; margin: 2mm; }
             * { margin:0; padding:0; box-sizing:border-box; }
@@ -131,7 +135,6 @@ export function printTailorLabel(data) {
         ${labelsHtml}
     </body></html>`;
 
-    // Barcode modulundeki gibi iframe ile yazdir
     let iframe = document.getElementById('tailor-print-iframe');
     if (!iframe) {
         iframe = document.createElement('iframe');
@@ -156,4 +159,22 @@ export function printTailorLabel(data) {
         iframe.contentWindow.focus();
         iframe.contentWindow.print();
     }, 500);
+}
+
+/**
+ * Tek siparis etiketi yazdir (3 nusha).
+ */
+export function printTailorLabel(data) {
+    const labelsHtml = _buildLabelHtml(data);
+    _printHtml(labelsHtml, `Terzi Etiket — ${data.name}`);
+}
+
+/**
+ * Birden fazla siparis etiketi yazdir (her biri 3 nusha).
+ * Hepsi tek bir print job icerisinde.
+ */
+export function printMultipleTailorLabels(dataArray) {
+    const allLabels = dataArray.map(d => _buildLabelHtml(d)).join('');
+    const names = dataArray.map(d => d.name).join(', ');
+    _printHtml(allLabels, `Terzi Etiketler — ${names}`);
 }
