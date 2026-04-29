@@ -3,6 +3,7 @@ import json
 import logging
 
 from odoo import api, fields, models
+from .flo_order_sync import FLO_VALID_ORDER_STATUSES
 
 _logger = logging.getLogger(__name__)
 
@@ -28,8 +29,8 @@ class FloOrderActions(models.Model):
                     fail += 1
                     continue
                 
-                # FLO string status kullanıyor — string karşılaştırma
-                if order.order_status in ['Created', 'Picking']:
+                # Geçerli statülerdeki siparişler için Sale Order oluştur
+                if order.order_status in FLO_VALID_ORDER_STATUSES:
                     shipment_addr = package_data.get('shipmentAddress') or {}
                     billing_addr = package_data.get('invoiceAddress') or package_data.get('billingAddress') or {}
                     customer_email = package_data.get('customerEmail') or ''

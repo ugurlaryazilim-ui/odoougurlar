@@ -7,6 +7,9 @@ from odoo import api, fields, models
 
 _logger = logging.getLogger(__name__)
 
+# Flo'nun kabul ettiği sipariş statüleri (string)
+FLO_VALID_ORDER_STATUSES = ('Created', 'Picking')
+
 class FloOrderSync(models.Model):
     _inherit = 'flo.order'
 
@@ -14,9 +17,14 @@ class FloOrderSync(models.Model):
     def sync_orders_from_flo(self):
         """Tüm aktif mağazalardan siparişleri senkronize et."""
         stores = self.env['flo.store'].search([('active', '=', True), ('auto_sync', '=', True)])
+        _logger.info("Flo otomatik senkronizasyon başladı — %d aktif mağaza", len(stores))
         for store in stores:
             try:
-                self.sync_orders_for_store(store)
+                res = self.sync_orders_for_store(store)
+                _logger.info(
+                    "Flo [%s] senkron tamamlandı — Yeni: %d, Güncellenen: %d, Hata: %d",
+                    store.name, res.get('created', 0), res.get('updated', 0), res.get('errors', 0)
+                )
             except Exception as e:
                 _logger.exception("Flo %s senkronizasyon hatası: %s", store.name, e)
 
@@ -29,8 +37,12 @@ class FloOrderSync(models.Model):
         updated_count = 0
         error_count = 0
         
-        start_date = datetime.now() - timedelta(days=store.order_day_range or 1)
-        end_date = datetime.now()
+        # fields.Datetime.now() = UTC. Türkiye UTC+3 farkı için güvenlik marjı.
+        now_utc = fields.Datetime.now()
+        start_date = now_utc - timedelta(days=store.order_day_range or 1)
+        end_date = now_utc + timedelta(hours=3)
+        
+        _logger.info("Flo [%s] sipariş çekme: %s → %s", store.name, start_date, end_date)
         
         page = 1
         total_pages = 1
@@ -143,13 +155,16 @@ class FloOrderSync(models.Model):
             
         flo_order = self.create(vals)
         
-        # Odoo'ya aktarilacak durumlar (Created, Picking, Invoiced, vs.) - Flo "Created", "Picking" gönderiyor.
-        if order_status in ['Created', 'Picking']:
+        # Geçerli statülerdeki siparişler için Sale Order oluştur
+        if order_status in FLO_VALID_ORDER_STATUSES:
             sale_order = self._create_odoo_sale_order(flo_order, store, shipment_addr, billing_addr, customer_email, phone_number, order_json)
             flo_order.write({'sale_order_id': sale_order.id})
             
             if store.auto_confirm and sale_order.state in ['draft', 'sent']:
                 sale_order.action_confirm()
+        else:
+            _logger.info("Flo sipariş %s statüsü '%s' — Sale Order oluşturulmadı (beklenen: %s)",
+                         order_number, order_status, FLO_VALID_ORDER_STATUSES)
                 
         return 'created'
 

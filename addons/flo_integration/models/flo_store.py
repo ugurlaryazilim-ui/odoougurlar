@@ -7,6 +7,8 @@ from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 
+_CRON_XMLID = 'flo_integration.ir_cron_flo_sync_orders'
+
 class FloStore(models.Model):
     _name = 'flo.store'
     _description = 'Flo Mağaza Ayarları'
@@ -81,6 +83,27 @@ class FloStore(models.Model):
         for store in self:
             store.settlement_count = counts.get(store.id, 0)
 
+    def write(self, vals):
+        res = super().write(vals)
+        if 'sync_interval' in vals or 'auto_sync' in vals:
+            self._sync_cron_settings()
+        return res
+
+    def _sync_cron_settings(self):
+        """Store'daki sync_interval ve auto_sync değerlerini cron'a yansıt."""
+        cron = self.env.ref(_CRON_XMLID, raise_if_not_found=False)
+        if not cron:
+            return
+        stores = self.env['flo.store'].search([('active', '=', True)])
+        any_auto = any(s.auto_sync for s in stores)
+        min_interval = min((s.sync_interval for s in stores if s.auto_sync and s.sync_interval > 0), default=5)
+        cron.sudo().write({
+            'active': any_auto,
+            'interval_number': max(min_interval, 1),
+            'interval_type': 'minutes',
+        })
+        _logger.info("Flo cron güncellendi: active=%s, interval=%d dk", any_auto, min_interval)
+
     def get_api(self):
         """FloApi client objesini oluştur ve döndür."""
         self.ensure_one()
@@ -94,8 +117,9 @@ class FloStore(models.Model):
         self.ensure_one()
         try:
             api_client = self.get_api()
-            start_date = datetime.now() - timedelta(days=1)
-            end_date = datetime.now()
+            now_utc = fields.Datetime.now()
+            start_date = now_utc - timedelta(days=1)
+            end_date = now_utc + timedelta(hours=3)
             
             result = api_client.get_orders(start_date=start_date, end_date=end_date)
             if result.get('success'):
@@ -135,8 +159,9 @@ class FloStore(models.Model):
         self.ensure_one()
         
         api = self.get_api()
-        start_date = datetime.now() - timedelta(days=self.financial_day_range or 15)
-        end_date = datetime.now()
+        now_utc = fields.Datetime.now()
+        start_date = now_utc - timedelta(days=self.financial_day_range or 15)
+        end_date = now_utc + timedelta(hours=3)
 
         res = api.get_payment_agreements(start_date=start_date, end_date=end_date)
         if not res.get('success'):

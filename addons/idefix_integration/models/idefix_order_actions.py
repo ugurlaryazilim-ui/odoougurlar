@@ -3,6 +3,7 @@ import json
 import logging
 
 from odoo import api, fields, models
+from .idefix_order_sync import IDEFIX_VALID_ORDER_STATUSES
 
 _logger = logging.getLogger(__name__)
 
@@ -28,8 +29,8 @@ class IdefixOrderActions(models.Model):
                     fail += 1
                     continue
                 
-                # Idefix string status kullanıyor — string karşılaştırma
-                if order.order_status in ['created', 'shipment_ready']:
+                # Geçerli statülerdeki siparişler için Sale Order oluştur
+                if order.order_status in IDEFIX_VALID_ORDER_STATUSES:
                     shipment_addr = package_data.get('shippingAddress') or {}
                     billing_addr = package_data.get('invoiceAddress') or {}
                     customer_email = package_data.get('customerContactMail') or ''

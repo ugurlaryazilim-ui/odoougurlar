@@ -7,6 +7,9 @@ from odoo import api, fields, models
 
 _logger = logging.getLogger(__name__)
 
+# Idefix'in kabul ettiği sipariş statüleri (string)
+IDEFIX_VALID_ORDER_STATUSES = ('created', 'shipment_ready')
+
 class IdefixOrderSync(models.Model):
     _inherit = 'idefix.order'
 
@@ -14,9 +17,14 @@ class IdefixOrderSync(models.Model):
     def sync_orders_from_idefix(self):
         """Tüm aktif mağazalardan siparişleri senkronize et."""
         stores = self.env['idefix.store'].search([('active', '=', True), ('auto_sync', '=', True)])
+        _logger.info("Idefix otomatik senkronizasyon başladı — %d aktif mağaza", len(stores))
         for store in stores:
             try:
-                self.sync_orders_for_store(store)
+                res = self.sync_orders_for_store(store)
+                _logger.info(
+                    "Idefix [%s] senkron tamamlandı — Yeni: %d, Güncellenen: %d, Hata: %d",
+                    store.name, res.get('created', 0), res.get('updated', 0), res.get('errors', 0)
+                )
             except Exception as e:
                 _logger.exception("Idefix %s senkronizasyon hatası: %s", store.name, e)
 
@@ -30,8 +38,12 @@ class IdefixOrderSync(models.Model):
         error_count = 0
         
         # Son X günlük siparişleri çek (store.order_day_range)
-        start_date = datetime.now() - timedelta(days=store.order_day_range or 1)
-        end_date = datetime.now()
+        # fields.Datetime.now() = UTC. Türkiye UTC+3 farkı için güvenlik marjı.
+        now_utc = fields.Datetime.now()
+        start_date = now_utc - timedelta(days=store.order_day_range or 1)
+        end_date = now_utc + timedelta(hours=3)
+        
+        _logger.info("Idefix [%s] sipariş çekme: %s → %s", store.name, start_date, end_date)
         
         page = 1
         while True:
@@ -144,14 +156,17 @@ class IdefixOrderSync(models.Model):
         
         idefix_order = self.create(vals)
         
-        # Odoo'da sipariş oluştur (Örn: created veya shipment_ready statüsünde olanları içeri al)
-        if order_status in ['created', 'shipment_ready']:
+        # Geçerli statülerdeki siparişler için Sale Order oluştur
+        if order_status in IDEFIX_VALID_ORDER_STATUSES:
             sale_order = self._create_odoo_sale_order(idefix_order, store, shipment_addr, billing_addr, customer_email, phone_number)
             idefix_order.write({'sale_order_id': sale_order.id})
             
             # Otomatik onay
             if store.auto_confirm and sale_order.state in ['draft', 'sent']:
                 sale_order.action_confirm()
+        else:
+            _logger.info("Idefix sipariş %s statüsü '%s' — Sale Order oluşturulmadı (beklenen: %s)",
+                         order_id, order_status, IDEFIX_VALID_ORDER_STATUSES)
                 
         return 'created'
 
