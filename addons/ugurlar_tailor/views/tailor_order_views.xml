@@ -90,7 +90,6 @@
                 <field name="invoice_no"/>
                 <field name="customer_name"/>
                 <field name="product_barcode"/>
-                <field name="sales_person"/>
                 <field name="tailor_id"/>
                 <separator/>
                 <filter string="Bekliyor" name="pending" domain="[('state', '=', 'pending')]"/>
@@ -98,12 +97,9 @@
                 <filter string="Hazır" name="completed" domain="[('state', '=', 'completed')]"/>
                 <filter string="Teslim" name="delivered" domain="[('state', '=', 'delivered')]"/>
                 <separator/>
-                <filter string="Bugün" name="today" domain="[('create_date', '&gt;=', (context_today()).strftime('%%Y-%%m-%%d'))]"/>
-                <separator/>
                 <group expand="0" string="Grupla">
                     <filter string="Durum" name="group_state" context="{'group_by': 'state'}"/>
                     <filter string="Terzi" name="group_tailor" context="{'group_by': 'tailor_id'}"/>
-                    <filter string="Satış Personeli" name="group_sales" context="{'group_by': 'sales_person'}"/>
                     <filter string="Tarih" name="group_date" context="{'group_by': 'create_date:day'}"/>
                 </group>
             </search>
