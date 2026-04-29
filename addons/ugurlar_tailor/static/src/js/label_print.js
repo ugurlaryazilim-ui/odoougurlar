@@ -12,13 +12,11 @@ function _buildOrderLabel(data, copyType) {
     const config = {
         terzi: {
             title: 'TERZİ NÜSHASI',
-            bg: '#e74c3c',
             line1: '1. Nüsha terzide kalacak',
             line2: 'Lütfen terzi işlemi bittikten sonra bir nüsha sizde bir nüsha ürün ile birlikte mağazaya gönderiniz.',
         },
         magaza: {
             title: 'MAĞAZA NÜSHASI',
-            bg: '#2980b9',
             line1: '2. Nüsha ürünle birlikte mağazaya geri gidecek',
             line2: 'Lütfen terzi işlemi bittikten sonra bir nüsha sizde bir nüsha ürün ile birlikte mağazaya gönderiniz.',
         },
@@ -32,7 +30,7 @@ function _buildOrderLabel(data, copyType) {
 
     return `
         <div class="label">
-            <div class="label-hdr" style="background:${c.bg};">${c.title}</div>
+            <div class="label-hdr">${c.title}</div>
             <div class="label-store">UĞURLAR</div>
             <div class="label-sub">Terzi Takip Sistemi</div>
             <hr class="label-div"/>
@@ -78,7 +76,7 @@ function _buildCustomerSummaryLabel(dataArray) {
 
     return `
         <div class="label">
-            <div class="label-hdr" style="background:#27ae60;">MÜŞTERİ NÜSHASI</div>
+            <div class="label-hdr">MÜŞTERİ NÜSHASI</div>
             <div class="label-store">UĞURLAR</div>
             <div class="label-sub">Terzi Takip Sistemi</div>
             <hr class="label-div"/>
@@ -125,12 +123,11 @@ function _printHtml(labelsHtml, title) {
                 text-align: center;
                 padding: 8px 0;
                 margin-bottom: 4px;
-                color: #fff;
+                color: #000;
                 font-weight: 900;
                 font-size: 18px;
                 letter-spacing: 1px;
-                -webkit-print-color-adjust: exact !important;
-                print-color-adjust: exact !important;
+                border-bottom: 3px solid #000;
             }
             .label-store {
                 text-align: center;
