@@ -232,4 +232,11 @@ export class TailorNewOrder extends Component {
             this.searchInvoice();
         }
     }
+
+    focusScanInput() {
+        if (this.searchInputRef.el) {
+            this.searchInputRef.el.focus();
+            this.searchInputRef.el.select();
+        }
+    }
 }
