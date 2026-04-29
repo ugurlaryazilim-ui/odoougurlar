@@ -1,15 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
-    <!-- ═══════════════ Settings View ═══════════════ -->
     <record id="view_tailor_settings" model="ir.ui.view">
         <field name="name">res.config.settings.view.form.inherit.ugurlar.tailor</field>
         <field name="model">res.config.settings</field>
         <field name="inherit_id" ref="base.res_config_settings_view_form"/>
         <field name="arch" type="xml">
             <xpath expr="//form" position="inside">
-                <app data-string="Terzi Takip" string="Terzi Takip" data-key="ugurlar_tailor">
-                    <block title="Nebim MSSQL Bağlantısı" name="tailor_mssql_settings">
-                        <setting string="SQL Server Bağlantısı" help="Terzi fatura verilerinin çekileceği Nebim SQL Server ayarları">
+                <app data-string="Terzi Takip" string="Terzi Takip" name="ugurlar_tailor" groups="base.group_system">
+                    <block title="Nebim MSSQL Baglantisi" name="tailor_mssql_settings">
+                        <setting string="SQL Server Baglantisi" help="Terzi fatura verilerinin cekilecegi Nebim SQL Server ayarlari">
                             <div class="content-group">
                                 <div class="row mt16">
                                     <label for="tailor_mssql_server" class="col-3 col-lg-3 o_light_label"/>
