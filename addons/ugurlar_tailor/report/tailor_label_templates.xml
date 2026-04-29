@@ -2,165 +2,163 @@
 <odoo>
     <data>
         <template id="report_tailor_label">
-            <t t-call="web.html_container">
-                <t t-foreach="docs" t-as="o">
-                    <!-- ══════ NUSHA 1: TERZİ ══════ -->
-                    <div class="page tailor-label">
-                        <t t-call="ugurlar_tailor.report_tailor_label_body">
-                            <t t-set="copy_title">TERZİ NÜSHASI</t>
-                            <t t-set="copy_color">#e74c3c</t>
-                            <t t-set="copy_note">Bu nüsha terzide kalır</t>
-                        </t>
-                    </div>
+            <html>
+                <head>
+                    <meta charset="UTF-8"/>
+                    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+                    <style>
+                        @page {
+                            size: 80mm auto;
+                            margin: 2mm;
+                        }
+                        body {
+                            font-family: Arial, Helvetica, sans-serif;
+                            font-size: 11px;
+                            color: #000;
+                            line-height: 1.4;
+                            margin: 0;
+                            padding: 0;
+                        }
+                        .tailor-label {
+                            width: 76mm;
+                            padding: 0;
+                            margin: 0 auto;
+                            page-break-after: always;
+                        }
+                        .label-header {
+                            text-align: center;
+                            padding: 6px 0;
+                            margin-bottom: 4px;
+                            color: #fff;
+                            font-weight: bold;
+                            font-size: 16px;
+                            letter-spacing: 1px;
+                        }
+                        .label-store {
+                            text-align: center;
+                            font-size: 14px;
+                            font-weight: bold;
+                            margin-bottom: 2px;
+                        }
+                        .label-subtitle {
+                            text-align: center;
+                            font-size: 10px;
+                            margin-bottom: 4px;
+                        }
+                        .label-divider {
+                            border: none;
+                            border-top: 1px dashed #000;
+                            margin: 4px 0;
+                        }
+                        .label-row {
+                            width: 100%;
+                            padding: 1px 0;
+                            overflow: hidden;
+                        }
+                        .label-row .lbl {
+                            font-weight: bold;
+                            float: left;
+                            width: 80px;
+                        }
+                        .label-row .val {
+                            margin-left: 85px;
+                        }
+                        .svc-item {
+                            overflow: hidden;
+                            padding: 1px 4px;
+                        }
+                        .svc-item .svc-name {
+                            float: left;
+                        }
+                        .svc-item .svc-price {
+                            float: right;
+                        }
+                        .label-total {
+                            font-size: 14px;
+                            font-weight: bold;
+                            text-align: right;
+                            padding: 6px 0;
+                            border-top: 2px solid #000;
+                            border-bottom: 2px solid #000;
+                            margin: 4px 0;
+                            clear: both;
+                        }
+                        .label-barcode {
+                            text-align: center;
+                            margin: 6px 0;
+                        }
+                        .label-footer {
+                            text-align: center;
+                            font-size: 9px;
+                            color: #666;
+                            margin-top: 4px;
+                            font-style: italic;
+                        }
+                        .label-date {
+                            text-align: center;
+                            font-size: 10px;
+                            margin-top: 4px;
+                        }
+                        .label-section-title {
+                            font-weight: bold;
+                            text-align: center;
+                            padding: 3px 0;
+                            font-size: 12px;
+                            clear: both;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <t t-foreach="docs" t-as="o">
+                        <!-- NUSHA 1: TERZI -->
+                        <div class="tailor-label">
+                            <t t-call="ugurlar_tailor.report_tailor_label_copy">
+                                <t t-set="copy_title">TERZI NUSHASI</t>
+                                <t t-set="copy_bg">#e74c3c</t>
+                                <t t-set="copy_note">Bu nusha terzide kalir</t>
+                            </t>
+                        </div>
 
-                    <!-- ══════ NUSHA 2: MAĞAZA ══════ -->
-                    <div class="page tailor-label">
-                        <t t-call="ugurlar_tailor.report_tailor_label_body">
-                            <t t-set="copy_title">MAĞAZA NÜSHASI</t>
-                            <t t-set="copy_color">#2980b9</t>
-                            <t t-set="copy_note">Ürünle birlikte mağazaya döner</t>
-                        </t>
-                    </div>
+                        <!-- NUSHA 2: MAGAZA -->
+                        <div class="tailor-label">
+                            <t t-call="ugurlar_tailor.report_tailor_label_copy">
+                                <t t-set="copy_title">MAGAZA NUSHASI</t>
+                                <t t-set="copy_bg">#2980b9</t>
+                                <t t-set="copy_note">Urunle birlikte magazaya doner</t>
+                            </t>
+                        </div>
 
-                    <!-- ══════ NUSHA 3: MÜŞTERİ ══════ -->
-                    <div class="page tailor-label">
-                        <t t-call="ugurlar_tailor.report_tailor_label_body">
-                            <t t-set="copy_title">MÜŞTERİ NÜSHASI</t>
-                            <t t-set="copy_color">#27ae60</t>
-                            <t t-set="copy_note">Bu nüsha müşteride kalır</t>
-                        </t>
-                    </div>
-                </t>
-            </t>
+                        <!-- NUSHA 3: MUSTERI -->
+                        <div class="tailor-label">
+                            <t t-call="ugurlar_tailor.report_tailor_label_copy">
+                                <t t-set="copy_title">MUSTERI NUSHASI</t>
+                                <t t-set="copy_bg">#27ae60</t>
+                                <t t-set="copy_note">Bu nusha musteride kalir</t>
+                            </t>
+                        </div>
+                    </t>
+                </body>
+            </html>
         </template>
 
-        <!-- ══════ ETİKET GÖVDESİ (ORTAK ŞABLON) ══════ -->
-        <template id="report_tailor_label_body">
-            <style>
-                @page {
-                    size: 80mm auto;
-                    margin: 2mm;
-                }
-                .tailor-label {
-                    font-family: Arial, Helvetica, sans-serif;
-                    font-size: 11px;
-                    width: 76mm;
-                    padding: 0;
-                    margin: 0 auto;
-                    color: #000;
-                    line-height: 1.4;
-                    page-break-after: always;
-                }
-                .label-header {
-                    text-align: center;
-                    padding: 6px 0;
-                    margin-bottom: 4px;
-                    color: #fff;
-                    font-weight: bold;
-                    font-size: 16px;
-                    letter-spacing: 1px;
-                }
-                .label-store {
-                    text-align: center;
-                    font-size: 14px;
-                    font-weight: bold;
-                    margin-bottom: 2px;
-                }
-                .label-subtitle {
-                    text-align: center;
-                    font-size: 10px;
-                    margin-bottom: 4px;
-                }
-                .label-divider {
-                    border: none;
-                    border-top: 1px dashed #000;
-                    margin: 4px 0;
-                }
-                .label-row {
-                    display: table;
-                    width: 100%;
-                    padding: 1px 0;
-                }
-                .label-row .lbl {
-                    display: table-cell;
-                    font-weight: bold;
-                    width: 75px;
-                    vertical-align: top;
-                }
-                .label-row .val {
-                    display: table-cell;
-                    text-align: left;
-                }
-                .label-services {
-                    margin: 4px 0;
-                }
-                .label-services .svc-item {
-                    display: table;
-                    width: 100%;
-                    padding: 1px 4px;
-                }
-                .label-services .svc-item .svc-name {
-                    display: table-cell;
-                    width: 70%;
-                }
-                .label-services .svc-item .svc-price {
-                    display: table-cell;
-                    text-align: right;
-                    width: 30%;
-                }
-                .label-total {
-                    font-size: 14px;
-                    font-weight: bold;
-                    text-align: right;
-                    padding: 6px 0;
-                    border-top: 2px solid #000;
-                    border-bottom: 2px solid #000;
-                    margin: 4px 0;
-                }
-                .label-barcode {
-                    text-align: center;
-                    margin: 6px 0;
-                }
-                .label-footer {
-                    text-align: center;
-                    font-size: 9px;
-                    color: #666;
-                    margin-top: 4px;
-                    font-style: italic;
-                }
-                .label-date {
-                    text-align: center;
-                    font-size: 10px;
-                    margin-top: 4px;
-                }
-                .label-section-title {
-                    font-weight: bold;
-                    text-align: center;
-                    padding: 3px 0;
-                    font-size: 12px;
-                }
-            </style>
-
-            <!-- NÜSHA BAŞLIĞI -->
-            <div class="label-header" t-attf-style="background-color: #{copy_color};">
+        <!-- ETIKET GOVDESI -->
+        <template id="report_tailor_label_copy">
+            <div class="label-header" t-attf-style="background-color: #{copy_bg};">
                 <t t-out="copy_title"/>
             </div>
 
-            <!-- MAĞAZA ADI -->
-            <div class="label-store">UĞURLAR</div>
+            <div class="label-store">UGURLAR</div>
             <div class="label-subtitle">Terzi Takip Sistemi</div>
 
             <hr class="label-divider"/>
 
-            <!-- SİPARİŞ NO -->
             <div class="label-row">
-                <span class="lbl">Sipariş No:</span>
+                <span class="lbl">Siparis No:</span>
                 <span class="val" style="font-size:13px; font-weight:bold;">
                     <t t-out="o.name"/>
                 </span>
             </div>
 
-            <!-- FATURA NO -->
             <div class="label-row">
                 <span class="lbl">Fatura No:</span>
                 <span class="val"><t t-out="o.invoice_no"/></span>
@@ -168,9 +166,8 @@
 
             <hr class="label-divider"/>
 
-            <!-- MÜŞTERİ -->
             <div class="label-row">
-                <span class="lbl">Müşteri:</span>
+                <span class="lbl">Musteri:</span>
                 <span class="val"><t t-out="o.customer_name"/></span>
             </div>
             <t t-if="o.customer_phone">
@@ -181,16 +178,15 @@
             </t>
             <t t-if="o.sales_person">
                 <div class="label-row">
-                    <span class="lbl">Satış Per.:</span>
+                    <span class="lbl">Satis Per.:</span>
                     <span class="val"><t t-out="o.sales_person"/></span>
                 </div>
             </t>
 
             <hr class="label-divider"/>
 
-            <!-- ÜRÜN -->
             <div class="label-row">
-                <span class="lbl">Ürün:</span>
+                <span class="lbl">Urun:</span>
                 <span class="val"><t t-out="o.product_code or o.product_name or ''"/></span>
             </div>
             <div class="label-row">
@@ -200,7 +196,6 @@
 
             <hr class="label-divider"/>
 
-            <!-- TERZİ -->
             <div class="label-row">
                 <span class="lbl">Terzi:</span>
                 <span class="val" style="font-weight:bold; font-size:12px;">
@@ -210,33 +205,26 @@
 
             <hr class="label-divider"/>
 
-            <!-- HİZMETLER -->
-            <div class="label-section-title">YAPILACAK İŞLEMLER</div>
-            <div class="label-services">
-                <t t-foreach="o.line_ids" t-as="line">
-                    <div class="svc-item">
-                        <span class="svc-name"><t t-out="line.service_name"/></span>
-                        <span class="svc-price"><t t-out="'%.2f TL' % line.price"/></span>
-                    </div>
-                </t>
-            </div>
+            <div class="label-section-title">YAPILACAK ISLEMLER</div>
+            <t t-foreach="o.line_ids" t-as="line">
+                <div class="svc-item">
+                    <span class="svc-name"><t t-out="line.service_name"/></span>
+                    <span class="svc-price"><t t-out="'%.2f TL' % line.price"/></span>
+                </div>
+            </t>
 
-            <!-- TOPLAM -->
             <div class="label-total">
                 TOPLAM: <t t-out="'%.2f TL' % o.total_price"/>
             </div>
 
-            <!-- BARKOD -->
             <div class="label-barcode">
                 <img t-att-src="'/report/barcode/?type=%s&amp;value=%s&amp;width=%s&amp;height=%s&amp;humanreadable=1' % ('Code128', o.name, 280, 50)" alt="Barkod"/>
             </div>
 
-            <!-- TARİH -->
             <div class="label-date">
                 <t t-out="o.create_date.strftime('%d.%m.%Y %H:%M')"/>
             </div>
 
-            <!-- NÜSHA NOTU -->
             <div class="label-footer">
                 <t t-out="copy_note"/>
             </div>
@@ -244,7 +232,7 @@
             <t t-if="o.notes">
                 <hr class="label-divider"/>
                 <div style="font-size:10px;">
-                    <strong>Not:</strong> <t t-out="o.notes"/>
+                    <b>Not:</b> <t t-out="o.notes"/>
                 </div>
             </t>
         </template>
