@@ -26,8 +26,8 @@
         'views/tailor_views.xml',
         'views/tailor_menu.xml',
         'views/tailor_settings_views.xml',
-        'report/tailor_receipt_report.xml',
-        'report/tailor_receipt_templates.xml',
+        'report/tailor_label_report.xml',
+        'report/tailor_label_templates.xml',
     ],
     'assets': {
         'web.assets_backend': [

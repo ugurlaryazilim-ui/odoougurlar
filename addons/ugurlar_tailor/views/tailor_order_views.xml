@@ -29,6 +29,7 @@
                     <button name="action_mark_completed" string="Hazır" type="object" class="btn-primary" invisible="state != 'in_progress'"/>
                     <button name="action_mark_delivered" string="Teslim Edildi" type="object" class="btn-primary" invisible="state != 'completed'"/>
                     <button name="action_reset_to_pending" string="Sıfırla" type="object" class="btn-secondary" invisible="state == 'pending'"/>
+                    <button name="action_print_label" string="Etiket Yazdir" type="object" class="btn-warning" icon="fa-print"/>
                     <field name="state" widget="statusbar" statusbar_visible="pending,in_progress,completed,delivered"/>
                 </header>
                 <sheet>

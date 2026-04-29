@@ -185,8 +185,13 @@
                                 </t>
                             </div>
                         </div>
-                        <div class="tailor-order-actions" t-if="getNextStatus(order.state)">
-                            <button class="tailor-btn tailor-btn-sm tailor-btn-primary"
+                        <div class="tailor-order-actions">
+                            <button class="tailor-btn tailor-btn-sm" style="background:#f39c12;color:#fff;"
+                                    t-on-click="() =&gt; this.printLabel(order.id)">
+                                Etiket Yazdir
+                            </button>
+                            <button t-if="getNextStatus(order.state)"
+                                    class="tailor-btn tailor-btn-sm tailor-btn-primary"
                                     t-on-click="() =&gt; this.updateStatus(order.id, this.getNextStatus(order.state))">
                                 <t t-esc="getStatusLabel(getNextStatus(order.state))"/>
                             </button>

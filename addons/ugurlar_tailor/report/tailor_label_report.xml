@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <data>
+        <!-- ═══════════════ 80mm Termal Etiket Kagit Formati ═══════════════ -->
+        <record id="paperformat_tailor_label" model="report.paperformat">
+            <field name="name">Terzi Etiket (80mm Termal)</field>
+            <field name="default" eval="False"/>
+            <field name="format">custom</field>
+            <field name="page_width">80</field>
+            <field name="page_height">200</field>
+            <field name="orientation">Portrait</field>
+            <field name="margin_top">2</field>
+            <field name="margin_bottom">2</field>
+            <field name="margin_left">2</field>
+            <field name="margin_right">2</field>
+            <field name="header_line" eval="False"/>
+            <field name="header_spacing">0</field>
+            <field name="dpi">90</field>
+        </record>
+
+        <!-- ═══════════════ Rapor Aksiyonu ═══════════════ -->
+        <record id="action_report_tailor_label" model="ir.actions.report">
+            <field name="name">Terzi Etiket (3 Nusha)</field>
+            <field name="model">ugurlar.tailor.order</field>
+            <field name="report_type">qweb-pdf</field>
+            <field name="report_name">ugurlar_tailor.report_tailor_label</field>
+            <field name="report_file">ugurlar_tailor.report_tailor_label</field>
+            <field name="print_report_name">'Etiket_%s' % (object.name)</field>
+            <field name="binding_model_id" ref="model_ugurlar_tailor_order"/>
+            <field name="paperformat_id" ref="paperformat_tailor_label"/>
+        </record>
+    </data>
+</odoo>

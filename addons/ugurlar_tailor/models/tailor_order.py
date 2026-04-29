@@ -91,3 +91,7 @@ class UgurlarTailorOrder(models.Model):
             'completed_at': False,
             'delivered_at': False,
         })
+
+    def action_print_label(self):
+        """Etiket yazdır — 3 nüsha PDF döndürür."""
+        return self.env.ref('ugurlar_tailor.action_report_tailor_label').report_action(self)

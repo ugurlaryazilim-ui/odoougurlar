@@ -174,6 +174,10 @@ export class TailorNewOrder extends Component {
                     result.orders.length + " siparis basariyla olusturuldu!",
                     { type: "success" }
                 );
+                // Etiket PDF otomatik ac
+                if (result.label_url) {
+                    window.open(result.label_url, "_blank");
+                }
                 setTimeout(() => this.props.onNavigate("main_menu"), 2000);
             } else {
                 this.notification.add("Hata: " + (result.error || ""), { type: "danger" });

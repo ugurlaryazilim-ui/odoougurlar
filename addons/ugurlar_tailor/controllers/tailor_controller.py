@@ -100,7 +100,11 @@ class TailorController(http.Controller):
                 'total_price': order.total_price,
             })
 
-        return {'success': True, 'orders': created}
+        # Etiket PDF URL'i olustur
+        order_ids = [o['id'] for o in created]
+        label_url = '/report/pdf/ugurlar_tailor.report_tailor_label/%s' % ','.join(str(i) for i in order_ids)
+
+        return {'success': True, 'orders': created, 'label_url': label_url}
 
     # ── Sipariş Listesi ──
     @http.route('/ugurlar_tailor/orders', type='json', auth='user')

@@ -121,4 +121,9 @@ export class TailorOrderList extends Component {
     goBack() {
         this.props.onNavigate("main_menu");
     }
+
+    printLabel(orderId) {
+        const url = `/report/pdf/ugurlar_tailor.report_tailor_label/${orderId}`;
+        window.open(url, "_blank");
+    }
 }
