@@ -165,3 +165,32 @@ class TailorController(http.Controller):
             getattr(order, method)()
             return {'success': True}
         return {'success': False, 'error': 'Geçersiz durum!'}
+
+    # ── Etiket Verisi ──
+    @http.route('/ugurlar_tailor/label_data', type='json', auth='user')
+    def label_data(self, order_id=0):
+        """Etiket yazdırma için sipariş verisini döndür."""
+        order = request.env['ugurlar.tailor.order'].browse(int(order_id))
+        if not order.exists():
+            return {'error': 'Sipariş bulunamadı!'}
+
+        lines = request.env['ugurlar.tailor.order.line'].search_read(
+            [('order_id', '=', order.id)],
+            ['service_name', 'price'],
+        )
+
+        return {
+            'name': order.name,
+            'invoice_no': order.invoice_no or '',
+            'customer_name': order.customer_name or '',
+            'customer_phone': order.customer_phone or '',
+            'sales_person': order.sales_person or '',
+            'product_code': order.product_code or '',
+            'product_name': order.product_name or '',
+            'product_barcode': order.product_barcode or '',
+            'tailor_name': order.tailor_id.name if order.tailor_id else '-',
+            'total_price': order.total_price,
+            'notes': order.notes or '',
+            'date': order.create_date.strftime('%d.%m.%Y %H:%M') if order.create_date else '',
+            'services': [{'name': l['service_name'], 'price': l['price']} for l in lines],
+        }

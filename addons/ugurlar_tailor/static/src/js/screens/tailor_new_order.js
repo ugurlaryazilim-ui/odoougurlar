@@ -226,9 +226,9 @@ export class TailorNewOrder extends Component {
                     result.orders.length + " siparis basariyla olusturuldu!",
                     { type: "success" }
                 );
-                // Etiket PDF otomatik ac
-                if (result.label_url) {
-                    window.open(result.label_url, "_blank");
+                // Her siparis icin etiket yazdir
+                for (const order of result.orders) {
+                    await this._printOrderLabel(order.id);
                 }
                 setTimeout(() => this.props.onNavigate("main_menu"), 2000);
             } else {
@@ -252,6 +252,20 @@ export class TailorNewOrder extends Component {
     onSearchKeydown(ev) {
         if (ev.key === "Enter") {
             this.searchInvoice();
+        }
+    }
+
+    async _printOrderLabel(orderId) {
+        try {
+            const data = await rpc("/ugurlar_tailor/label_data", { order_id: orderId });
+            if (data.error) return;
+
+            const { TailorOrderList } = await import("./tailor_order_list");
+            const listInstance = new TailorOrderList();
+            // Dogrudan static metod gibi kullan
+            TailorOrderList.prototype._openLabelPrint.call(this, data);
+        } catch (e) {
+            // sessiz
         }
     }
 }
