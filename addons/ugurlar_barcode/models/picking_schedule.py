@@ -1,4 +1,5 @@
 """Toplama Zamanlaması — Saatli batch oluşturma sistemi."""
+import json
 import logging
 import pytz
 from datetime import datetime, timedelta, time as dt_time
@@ -36,6 +37,14 @@ class PickingSchedule(models.Model):
 
     last_batch_date = fields.Date(string='Son Batch Tarihi', readonly=True)
     last_batch_time = fields.Char(string='Son Batch Saati', readonly=True)
+    # Her saat dilimi için hangi tarihlerde çalıştığını tutan JSON
+    # Örnek: {"09:30": "2026-04-29", "12:30": "2026-04-29"}
+    completed_times_json = fields.Text(
+        string='Tamamlanan Saatler (JSON)',
+        default='{}',
+        readonly=True,
+        help='Bugün hangi saat dilimleri için batch oluşturulduğunu takip eden JSON alanı',
+    )
     batch_tolerance_minutes = fields.Integer(
         string='Batch Tolerans (dk)',
         default=120,
@@ -46,7 +55,11 @@ class PickingSchedule(models.Model):
     def action_create_batch_now(self):
         """Manuel buton: Şimdi toplama listesi oluştur."""
         self.ensure_one()
+
+        # Önce teşhis bilgisi topla
+        diag = self._diagnose_picking_status()
         batch = self._create_batch_for_current_window()
+
         if batch:
             return {
                 'type': 'ir.actions.act_window',
@@ -55,7 +68,80 @@ class PickingSchedule(models.Model):
                 'view_mode': 'form',
                 'target': 'current',
             }
-        raise UserError(_('Bu zaman diliminde bekleyen sipariş bulunamadı.'))
+
+        # Detaylı hata mesajı oluştur
+        msg = _('Bu zaman diliminde bekleyen sipariş bulunamadı.\n\n')
+        msg += _('🔍 TEŞHİS RAPORU:\n')
+        msg += _('• Depo: %s\n') % (self.warehouse_id.name or '—')
+        msg += _('• Outgoing Picking Type: %s\n') % (diag.get('picking_type_name', 'BULUNAMADI ❌'))
+        msg += _('• Toplam Outgoing Picking: %d\n') % diag.get('total_outgoing', 0)
+        msg += _('• Uygun (confirmed/waiting/assigned + batch yok): %d\n') % diag.get('eligible', 0)
+        msg += _('• Zaten batch\'e atanmış: %d\n') % diag.get('already_batched', 0)
+        msg += _('• Done/İptal durumunda: %d\n') % diag.get('done_or_cancel', 0)
+        msg += _('• Draft durumunda: %d\n') % diag.get('draft', 0)
+
+        if diag.get('eligible', 0) > 0:
+            msg += _('\n⚠️ %d uygun picking bulundu ama stok kontrolünden geçemedi:\n') % diag['eligible']
+            msg += _('• Ana depoda stokta: %d\n') % diag.get('stock_available', 0)
+            msg += _('• Yedek depoda stokta: %d\n') % diag.get('stock_fallback', 0)
+            msg += _('• Stoksuz (unavailable): %d\n') % diag.get('stock_unavailable', 0)
+
+        raise UserError(msg)
+
+    def _diagnose_picking_status(self):
+        """Teşhis: Neden batch oluşturulamıyor?"""
+        self.ensure_one()
+        result = {}
+
+        picking_type = self.env['stock.picking.type'].search([
+            ('warehouse_id', '=', self.warehouse_id.id),
+            ('code', '=', 'outgoing'),
+        ], limit=1)
+
+        result['picking_type_name'] = picking_type.name if picking_type else 'BULUNAMADI'
+
+        if not picking_type:
+            return result
+
+        Picking = self.env['stock.picking'].sudo()
+
+        # Tüm outgoing picking'ler
+        all_outgoing = Picking.search([('picking_type_id', '=', picking_type.id)])
+        result['total_outgoing'] = len(all_outgoing)
+
+        # State dağılımı
+        result['eligible'] = len(all_outgoing.filtered(
+            lambda p: p.state in ('confirmed', 'waiting', 'assigned') and not p.batch_id))
+        result['already_batched'] = len(all_outgoing.filtered(
+            lambda p: p.state in ('confirmed', 'waiting', 'assigned') and p.batch_id))
+        result['done_or_cancel'] = len(all_outgoing.filtered(
+            lambda p: p.state in ('done', 'cancel')))
+        result['draft'] = len(all_outgoing.filtered(
+            lambda p: p.state == 'draft'))
+
+        # Uygun picking'lerin stok durumu
+        eligible_pickings = all_outgoing.filtered(
+            lambda p: p.state in ('confirmed', 'waiting', 'assigned') and not p.batch_id)
+
+        stock_available = 0
+        stock_fallback = 0
+        stock_unavailable = 0
+
+        for picking in eligible_pickings:
+            status = picking._check_availability_status(
+                self.warehouse_id, self.fallback_warehouse_id)
+            if status == 'available':
+                stock_available += 1
+            elif status in ('other_warehouse', 'partial'):
+                stock_fallback += 1
+            else:
+                stock_unavailable += 1
+
+        result['stock_available'] = stock_available
+        result['stock_fallback'] = stock_fallback
+        result['stock_unavailable'] = stock_unavailable
+
+        return result
 
     # ═══════════════════════════════════════════════════════
     # CRON
@@ -65,12 +151,41 @@ class PickingSchedule(models.Model):
     def _cron_run(self):
         """Cron tarafından çağrılır — aktif zamanlamaları kontrol et."""
         schedules = self.search([('active', '=', True)])
+        _logger.info("Toplama zamanlayıcı cron başladı — %d aktif plan", len(schedules))
         for schedule in schedules:
             try:
                 schedule._check_and_create_batch()
             except Exception as e:
                 _logger.exception("Toplama zamanlayıcı hatası [%s]: %s",
                                   schedule.name, e)
+
+    def _get_completed_times(self, today):
+        """Bugün tamamlanan saat dilimlerini JSON'dan oku."""
+        self.ensure_one()
+        try:
+            data = json.loads(self.completed_times_json or '{}')
+        except (json.JSONDecodeError, TypeError):
+            data = {}
+        today_str = str(today)
+        return data.get(today_str, {})
+
+    def _mark_time_completed(self, today, time_key):
+        """Bir saat dilimini tamamlandı olarak işaretle."""
+        self.ensure_one()
+        try:
+            data = json.loads(self.completed_times_json or '{}')
+        except (json.JSONDecodeError, TypeError):
+            data = {}
+        today_str = str(today)
+        if today_str not in data:
+            # Eski günleri temizle, sadece bugünü tut
+            data = {today_str: {}}
+        data[today_str][time_key] = True
+        self.sudo().write({
+            'completed_times_json': json.dumps(data),
+            'last_batch_date': today,
+            'last_batch_time': time_key,
+        })
 
     @api.private
     def _check_and_create_batch(self):
@@ -83,6 +198,9 @@ class PickingSchedule(models.Model):
         current_time = now.time()
         today = now.date()
 
+        # Bugün tamamlanan saatler
+        completed = self._get_completed_times(today)
+
         # Saatleri sıralı al
         sorted_times = self.schedule_line_ids.sorted(
             key=lambda l: l.hour * 60 + l.minute)
@@ -94,31 +212,35 @@ class PickingSchedule(models.Model):
             # Şu an bu saatten sonra mıyız?
             if current_time >= schedule_time:
                 # Bu saat için bugün batch oluşmuş mu?
-                if (self.last_batch_date == today and
-                        self.last_batch_time == time_key):
+                if completed.get(time_key):
                     continue
 
-                # Önceki kontrol zamanı (bir önceki zaman diliminin başı)
-                # gelmiş mi? (120 dk / 2 saat toleransla, cron sarkmalarına karşı)
+                # Tolerans kontrolü: çok geç mi?
                 time_diff = (
                     current_time.hour * 60 + current_time.minute -
                     schedule_time.hour * 60 - schedule_time.minute
                 )
                 if time_diff > self.batch_tolerance_minutes:
-                    # 120 dk'dan fazla geçmiş, muhtemelen daha önce çalıştı
-                    # Son batch kontrolü yapılmıyor, devam et
+                    _logger.debug(
+                        "Toplama [%s] %s: %d dk geçmiş (tolerans: %d dk), atlanıyor",
+                        self.name, time_key, time_diff, self.batch_tolerance_minutes)
                     continue
+
+                _logger.info(
+                    "Toplama [%s] %s saati geldi — batch oluşturuluyor...",
+                    self.name, time_key)
 
                 # Batch oluştur
                 batch = self._create_batch_for_window(line, today, now)
                 if batch:
-                    self.sudo().write({
-                        'last_batch_date': today,
-                        'last_batch_time': time_key,
-                    })
+                    self._mark_time_completed(today, time_key)
                     _logger.info(
                         "Toplama batch oluşturuldu: %s — %s [%s]",
                         batch.name, time_key, self.name)
+                else:
+                    _logger.info(
+                        "Toplama [%s] %s: Uygun picking bulunamadı, batch oluşturulmadı",
+                        self.name, time_key)
 
     # ═══════════════════════════════════════════════════════
     # BATCH OLUŞTURMA
@@ -240,13 +362,29 @@ class PickingSchedule(models.Model):
         ]
         pickings = Picking.search(domain)
 
+        _logger.info(
+            "Toplama [%s] pencere %s — picking_type: %s (id:%d), "
+            "bulunan picking: %d",
+            self.name, window_label, picking_type.complete_name,
+            picking_type.id, len(pickings))
+
         if not pickings:
-            _logger.info("Zaman dilimi %s: Bekleyen siparis yok", window_label)
+            # Detaylı teşhis logu
+            all_pickings = Picking.search([
+                ('picking_type_id', '=', picking_type.id)])
+            state_summary = {}
+            for p in all_pickings:
+                key = f"{p.state}{'(batch)' if p.batch_id else ''}"
+                state_summary[key] = state_summary.get(key, 0) + 1
+            _logger.info(
+                "Toplama [%s] TEŞHİS — Tüm outgoing picking dağılımı: %s",
+                self.name, state_summary)
             return None
 
         # Stok kontrolu ve gruplama
         primary_pickings = self.env['stock.picking']     # INTERNET DEPO'da var
         fallback_pickings = self.env['stock.picking']    # HEYKEL DEPO'da var
+        unavailable_pickings = self.env['stock.picking']
 
         for picking in pickings:
             status = picking._check_availability_status(
@@ -260,7 +398,14 @@ class PickingSchedule(models.Model):
                 primary_pickings |= picking
             elif status in ('other_warehouse', 'partial'):
                 fallback_pickings |= picking
-            # 'unavailable' olanlar hicbir batch'e EKLENMEZ
+            else:
+                unavailable_pickings |= picking
+
+        if unavailable_pickings:
+            _logger.warning(
+                "Toplama [%s] %s — %d picking stoksuz (unavailable): %s",
+                self.name, window_label, len(unavailable_pickings),
+                unavailable_pickings.mapped('name'))
 
         created_batches = []
 
@@ -315,7 +460,9 @@ class PickingSchedule(models.Model):
             created_batches.append(batch)
 
         if not created_batches:
-            _logger.info("Zaman dilimi %s: Uygun siparis yok", window_label)
+            _logger.info(
+                "Toplama [%s] %s — %d picking bulundu ama hepsi stoksuz",
+                self.name, window_label, len(pickings))
             return None
 
         # Ilk batch'i dondur (UI yonlendirmesi icin)
