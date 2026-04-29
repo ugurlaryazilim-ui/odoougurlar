@@ -5,7 +5,7 @@
         <field name="name">ugurlar.tailor.order.list</field>
         <field name="model">ugurlar.tailor.order</field>
         <field name="arch" type="xml">
-            <list string="Terzi Siparişleri" decoration-info="state == 'pending'" decoration-warning="state == 'in_progress'" decoration-success="state == 'completed'" decoration-muted="state == 'delivered'">
+            <list decoration-info="state == 'pending'" decoration-warning="state == 'in_progress'" decoration-success="state == 'completed'" decoration-muted="state == 'delivered'">
                 <field name="name"/>
                 <field name="invoice_no"/>
                 <field name="product_name"/>
@@ -23,7 +23,7 @@
         <field name="name">ugurlar.tailor.order.form</field>
         <field name="model">ugurlar.tailor.order</field>
         <field name="arch" type="xml">
-            <form string="Terzi Siparişi">
+            <form>
                 <header>
                     <button name="action_send_to_tailor" string="Terziye Gönder" type="object" class="btn-primary" invisible="state != 'pending'"/>
                     <button name="action_mark_completed" string="Hazır" type="object" class="btn-primary" invisible="state != 'in_progress'"/>
@@ -36,23 +36,23 @@
                         <h1><field name="name" readonly="1"/></h1>
                     </div>
                     <group>
-                        <group string="Fatura Bilgileri">
+                        <group>
                             <field name="invoice_no"/>
                             <field name="product_barcode"/>
                             <field name="product_code"/>
                             <field name="product_name"/>
                         </group>
-                        <group string="Müşteri Bilgileri">
+                        <group>
                             <field name="customer_name"/>
                             <field name="customer_phone"/>
                             <field name="sales_person"/>
                         </group>
                     </group>
                     <group>
-                        <group string="Terzi">
+                        <group>
                             <field name="tailor_id"/>
                         </group>
-                        <group string="Tarihler">
+                        <group>
                             <field name="completed_at"/>
                             <field name="delivered_at"/>
                         </group>
@@ -62,7 +62,6 @@
                             <field name="line_ids">
                                 <list editable="bottom">
                                     <field name="service_id"/>
-                                    <field name="service_name" column_invisible="True"/>
                                     <field name="price"/>
                                 </list>
                             </field>
@@ -85,38 +84,23 @@
         <field name="name">ugurlar.tailor.order.search</field>
         <field name="model">ugurlar.tailor.order</field>
         <field name="arch" type="xml">
-            <search string="Sipariş Ara">
+            <search>
                 <field name="name"/>
                 <field name="invoice_no"/>
                 <field name="customer_name"/>
-                <field name="product_barcode"/>
                 <field name="tailor_id"/>
-                <separator/>
                 <filter string="Bekliyor" name="pending" domain="[('state', '=', 'pending')]"/>
                 <filter string="Terzide" name="in_progress" domain="[('state', '=', 'in_progress')]"/>
-                <filter string="Hazır" name="completed" domain="[('state', '=', 'completed')]"/>
+                <filter string="Hazir" name="completed" domain="[('state', '=', 'completed')]"/>
                 <filter string="Teslim" name="delivered" domain="[('state', '=', 'delivered')]"/>
-                <separator/>
-                <group expand="0" string="Grupla">
-                    <filter string="Durum" name="group_state" context="{'group_by': 'state'}"/>
-                    <filter string="Terzi" name="group_tailor" context="{'group_by': 'tailor_id'}"/>
-                    <filter string="Tarih" name="group_date" context="{'group_by': 'create_date:day'}"/>
-                </group>
             </search>
         </field>
     </record>
 
     <!-- ═══════════════ Order Action ═══════════════ -->
     <record id="action_tailor_order" model="ir.actions.act_window">
-        <field name="name">Siparişler</field>
+        <field name="name">Siparisler</field>
         <field name="res_model">ugurlar.tailor.order</field>
         <field name="view_mode">list,form</field>
-        <field name="context">{'search_default_pending': 1, 'search_default_in_progress': 1, 'search_default_completed': 1}</field>
-        <field name="help" type="html">
-            <p class="o_view_nocontent_smiling_face">
-                Henüz terzi siparişi yok
-            </p>
-            <p>Mobil arayüzden veya buradan yeni sipariş oluşturabilirsiniz.</p>
-        </field>
     </record>
 </odoo>
