@@ -369,3 +369,57 @@
     .tailor-filters .tailor-select { width: 100%; }
     .tailor-search-box { flex-direction: column; }
 }
+
+/* ─── KAMERA BARKOD TARAYICI OVERLAY ─────────────────── */
+.tailor-camera-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.95);
+    z-index: 99999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.tailor-camera-controls {
+    width: 100%;
+    max-width: 500px;
+    padding: 1rem;
+    position: relative;
+}
+
+.tailor-camera-close {
+    position: absolute;
+    top: -40px;
+    right: 10px;
+    background: rgba(255, 255, 255, 0.2);
+    border: none;
+    color: #fff;
+    font-size: 2rem;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    transition: background 0.2s;
+}
+
+.tailor-camera-close:hover {
+    background: rgba(255, 255, 255, 0.4);
+}
+
+.tailor-camera-status {
+    text-align: center;
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 500;
+    margin-top: 1rem;
+    padding: 0.5rem;
+}

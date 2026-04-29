@@ -233,10 +233,87 @@ export class TailorNewOrder extends Component {
         }
     }
 
-    focusScanInput() {
-        if (this.searchInputRef.el) {
-            this.searchInputRef.el.focus();
-            this.searchInputRef.el.select();
+    scanCamera() {
+        const overlay = document.createElement('div');
+        overlay.className = 'tailor-camera-overlay';
+        overlay.innerHTML = `
+            <div class="tailor-camera-controls">
+                <button class="tailor-camera-close">&times;</button>
+                <div id="tailor-camera-reader" style="width:100%"></div>
+                <div class="tailor-camera-status">Fatura barkodunu kameraya gösterin...</div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        overlay.querySelector('.tailor-camera-close').onclick = () => { overlay.remove(); };
+
+        const readerEl = overlay.querySelector('#tailor-camera-reader');
+        const statusEl = overlay.querySelector('.tailor-camera-status');
+
+        if ('BarcodeDetector' in window) {
+            navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment' }
+            }).then(async (stream) => {
+                const video = document.createElement('video');
+                video.srcObject = stream;
+                video.setAttribute('playsinline', 'true');
+                video.style.width = '100%';
+                video.style.borderRadius = '8px';
+                readerEl.appendChild(video);
+                await video.play();
+
+                const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'qr_code'] });
+                const scan = async () => {
+                    if (!document.body.contains(overlay)) {
+                        stream.getTracks().forEach(t => t.stop());
+                        return;
+                    }
+                    try {
+                        const barcodes = await detector.detect(video);
+                        if (barcodes.length > 0) {
+                            const code = barcodes[0].rawValue;
+                            stream.getTracks().forEach(t => t.stop());
+                            overlay.remove();
+                            this.state.searchQuery = code;
+                            this.searchInvoice();
+                            return;
+                        }
+                    } catch (e) {}
+                    requestAnimationFrame(scan);
+                };
+                scan();
+            }).catch(() => {
+                statusEl.textContent = 'Kamera erişim hatası';
+            });
+        } else {
+            // BarcodeDetector yok — Html5Qrcode fallback
+            (async () => {
+                try {
+                    if (!window.Html5Qrcode) {
+                        const s = document.createElement('script');
+                        s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
+                        document.head.appendChild(s);
+                        await new Promise((r, j) => { s.onload = r; s.onerror = j; });
+                    }
+                    const scanner = new Html5Qrcode('tailor-camera-reader');
+                    await scanner.start(
+                        { facingMode: 'environment' },
+                        { fps: 10, qrbox: { width: 250, height: 150 } },
+                        (code) => {
+                            scanner.stop().catch(() => {});
+                            overlay.remove();
+                            this.state.searchQuery = code;
+                            this.searchInvoice();
+                        },
+                        () => {}
+                    );
+                    overlay.querySelector('.tailor-camera-close').onclick = () => {
+                        scanner.stop().catch(() => {});
+                        overlay.remove();
+                    };
+                } catch (e) {
+                    statusEl.textContent = 'Barkod tarayıcı yüklenemedi.';
+                }
+            })();
         }
     }
 }

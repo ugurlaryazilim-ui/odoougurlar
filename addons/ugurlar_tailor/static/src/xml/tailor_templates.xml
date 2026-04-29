@@ -50,7 +50,7 @@
                            t-on-keydown="onSearchKeydown"
                            t-ref="searchInput"/>
                     <button class="tailor-btn" style="background:#f59e0b;color:#fff;font-size:18px;padding:8px 14px;"
-                            t-on-click="focusScanInput" title="Barkod Okut">
+                            t-on-click="scanCamera" title="Kamera ile Barkod Okut">
                         <i class="fa fa-barcode"/>
                     </button>
                     <button class="tailor-btn tailor-btn-primary" t-on-click="searchInvoice"
