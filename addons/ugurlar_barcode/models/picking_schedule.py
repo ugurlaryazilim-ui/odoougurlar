@@ -365,7 +365,7 @@ class PickingSchedule(models.Model):
         _logger.info(
             "Toplama [%s] pencere %s — picking_type: %s (id:%d), "
             "bulunan picking: %d",
-            self.name, window_label, picking_type.complete_name,
+            self.name, window_label, picking_type.display_name,
             picking_type.id, len(pickings))
 
         if not pickings:
