@@ -106,7 +106,15 @@ function _printHtml(labelsHtml, title) {
         <style>
             @page { size: 80mm auto; margin: 2mm; }
             * { margin:0; padding:0; box-sizing:border-box; }
-            body { font-family: Arial, sans-serif; font-size: 11px; color: #000; }
+            body {
+                font-family: Arial, Helvetica, sans-serif;
+                font-size: 13px;
+                color: #000;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+                text-rendering: geometricPrecision;
+                -webkit-font-smoothing: none;
+            }
             .label {
                 width: 76mm;
                 padding: 0;
@@ -115,77 +123,85 @@ function _printHtml(labelsHtml, title) {
             }
             .label-hdr {
                 text-align: center;
-                padding: 6px 0;
+                padding: 8px 0;
                 margin-bottom: 4px;
                 color: #fff;
-                font-weight: bold;
-                font-size: 16px;
+                font-weight: 900;
+                font-size: 18px;
                 letter-spacing: 1px;
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
             }
             .label-store {
                 text-align: center;
-                font-size: 14px;
-                font-weight: bold;
+                font-size: 16px;
+                font-weight: 900;
                 margin-bottom: 2px;
             }
             .label-sub {
                 text-align: center;
-                font-size: 10px;
+                font-size: 12px;
+                font-weight: 600;
                 margin-bottom: 4px;
             }
             .label-div {
                 border: none;
-                border-top: 1px dashed #000;
-                margin: 4px 0;
+                border-top: 2px dashed #000;
+                margin: 5px 0;
             }
             .label-r {
                 overflow: hidden;
-                padding: 1px 0;
-                line-height: 1.4;
+                padding: 2px 0;
+                line-height: 1.5;
+                font-size: 13px;
             }
             .label-r .ll {
-                font-weight: bold;
+                font-weight: 800;
                 float: left;
-                width: 80px;
+                width: 85px;
             }
             .label-r .vv {
-                margin-left: 85px;
+                margin-left: 90px;
+                font-weight: 600;
             }
             .label-section {
-                font-weight: bold;
+                font-weight: 900;
                 text-align: center;
-                padding: 3px 0;
-                font-size: 12px;
+                padding: 4px 0;
+                font-size: 14px;
                 clear: both;
             }
             .label-dt {
                 text-align: center;
-                font-size: 10px;
-                margin-top: 4px;
+                font-size: 12px;
+                font-weight: 600;
+                margin-top: 6px;
             }
             .label-note-main {
                 text-align: center;
-                font-size: 13px;
-                font-weight: bold;
-                margin-top: 8px;
+                font-size: 14px;
+                font-weight: 900;
+                margin-top: 10px;
                 padding: 4px 0;
             }
             .label-note-sub {
                 text-align: center;
-                font-size: 9px;
-                color: #333;
+                font-size: 11px;
+                font-weight: 600;
+                color: #000;
                 padding: 2px 8px;
-                line-height: 1.3;
+                line-height: 1.4;
             }
             .label-thanks {
                 text-align: center;
-                font-size: 14px;
-                font-weight: bold;
-                margin-top: 8px;
-                padding: 4px 0;
-                letter-spacing: 1px;
+                font-size: 16px;
+                font-weight: 900;
+                margin-top: 10px;
+                padding: 6px 0;
+                letter-spacing: 2px;
+            }
+            @media print {
+                body { -webkit-print-color-adjust: exact !important; }
             }
         </style>
     </head><body>
