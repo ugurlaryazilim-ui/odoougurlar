@@ -85,7 +85,6 @@ export class TailorNewOrder extends Component {
         }
         this.state.searching = false;
     }
-    }
 
     async selectInvoice(invoiceNo) {
         try {
