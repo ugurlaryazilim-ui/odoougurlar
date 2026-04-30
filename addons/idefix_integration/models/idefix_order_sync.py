@@ -1,6 +1,7 @@
 
 import json
 import logging
+import pytz
 from datetime import datetime, timedelta
 
 from odoo import api, fields, models
@@ -96,7 +97,10 @@ class IdefixOrderSync(models.Model):
         order_date = False
         if order_date_str:
             try:
-                order_date = datetime.strptime(order_date_str[:19].replace('T',' '), '%Y-%m-%d %H:%M:%S')
+                # Idefix API Türkiye saati döner — UTC'ye çevir (Odoo UTC saklar)
+                naive_dt = datetime.strptime(order_date_str[:19].replace('T',' '), '%Y-%m-%d %H:%M:%S')
+                turkey_dt = pytz.timezone('Europe/Istanbul').localize(naive_dt)
+                order_date = turkey_dt.astimezone(pytz.UTC).replace(tzinfo=None)
             except Exception:
                 order_date = fields.Datetime.now()
         else:

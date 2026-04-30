@@ -97,7 +97,8 @@ class FloOrderSync(models.Model):
         order_date = False
         if order_date_ts:
             try:
-                order_date = datetime.fromtimestamp(int(order_date_ts))
+                # UNIX timestamp → UTC (Odoo Datetime alanları UTC saklar)
+                order_date = datetime.utcfromtimestamp(int(order_date_ts))
             except Exception:
                 order_date = fields.Datetime.now()
         else:

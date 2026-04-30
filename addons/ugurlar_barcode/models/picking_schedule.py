@@ -384,7 +384,7 @@ class PickingSchedule(models.Model):
         # Stok kontrolu ve gruplama
         primary_pickings = self.env['stock.picking']     # INTERNET DEPO'da var
         fallback_pickings = self.env['stock.picking']    # HEYKEL DEPO'da var
-        unavailable_pickings = self.env['stock.picking']
+        unavailable_pickings = self.env['stock.picking'] # Hiçbir depoda stok yok
 
         for picking in pickings:
             status = picking._check_availability_status(
@@ -401,37 +401,46 @@ class PickingSchedule(models.Model):
             else:
                 unavailable_pickings |= picking
 
-        if unavailable_pickings:
-            _logger.warning(
-                "Toplama [%s] %s — %d picking stoksuz (unavailable): %s",
-                self.name, window_label, len(unavailable_pickings),
-                unavailable_pickings.mapped('name'))
+        _logger.info(
+            "Toplama [%s] %s — stok dağılımı: ana=%d, yedek=%d, stoksuz=%d",
+            self.name, window_label,
+            len(primary_pickings), len(fallback_pickings), len(unavailable_pickings))
 
         created_batches = []
 
         # ── BATCH 1: ANA DEPO (INTERNET MAGAZA DEPO) ──
-        if primary_pickings:
+        # Stokta olan + stoksuz olanlar birlikte aynı batch'e eklenir
+        # Depocu stok durumunu picking üzerinden görür
+        all_primary = primary_pickings | unavailable_pickings
+        if all_primary:
             batch_name = self.env['ir.sequence'].next_by_code(
                 'ugurlar.picking.batch.route') or 'R00000'
 
             wh_name = self.warehouse_id.name or 'Ana Depo'
+            parts = []
+            if primary_pickings:
+                parts.append(f'{len(primary_pickings)} stokta')
+            if unavailable_pickings:
+                parts.append(f'{len(unavailable_pickings)} stoksuz')
+            detail = ', '.join(parts)
+
             batch = self.env['stock.picking.batch'].sudo().create({
                 'name': batch_name,
                 'picking_type_id': picking_type.id,
                 'schedule_time': window_end_utc,
                 'time_window': window_label,
                 'company_id': self.warehouse_id.company_id.id,
-                'source_info': f'{wh_name} - {len(primary_pickings)} siparis ({window_label})',
+                'source_info': f'{wh_name} - {len(all_primary)} siparis ({detail}) ({window_label})',
             })
 
-            primary_pickings.write({
+            all_primary.write({
                 'batch_id': batch.id,
                 'batch_schedule_time': window_end_utc,
             })
 
             _logger.info(
-                "Batch %s olusturuldu: %d siparis — %s (%s)",
-                batch_name, len(primary_pickings), wh_name, window_label)
+                "Batch %s olusturuldu: %d siparis (%s) — %s (%s)",
+                batch_name, len(all_primary), detail, wh_name, window_label)
             created_batches.append(batch)
 
         # ── BATCH 2: YEDEK DEPO (HEYKEL MAGAZA DEPO) ──
@@ -461,8 +470,8 @@ class PickingSchedule(models.Model):
 
         if not created_batches:
             _logger.info(
-                "Toplama [%s] %s — %d picking bulundu ama hepsi stoksuz",
-                self.name, window_label, len(pickings))
+                "Toplama [%s] %s — hiç picking bulunamadı",
+                self.name, window_label)
             return None
 
         # Ilk batch'i dondur (UI yonlendirmesi icin)
