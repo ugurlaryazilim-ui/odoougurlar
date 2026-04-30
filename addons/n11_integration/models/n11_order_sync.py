@@ -267,6 +267,11 @@ class N11OrderSync(models.Model):
                 'ref': customer_ref,
             })
 
+        # Depo ayarını config'den al — Ayarlar > N11 > Depo Ayarları
+        warehouse_id_str = self.env['ir.config_parameter'].sudo().get_param(
+            'n11_integration.warehouse_id')
+        warehouse_id = int(warehouse_id_str) if warehouse_id_str else False
+
         sale_vals = {
             'partner_id': partner.id,
             'partner_invoice_id': invoice_partner.id,
@@ -277,6 +282,8 @@ class N11OrderSync(models.Model):
             'date_order': p_order.order_date,
             'order_line': [],
         }
+        if warehouse_id:
+            sale_vals['warehouse_id'] = warehouse_id
         
         # Batch ürün arama (N+1 önleme) — önce barcode, sonra nebim, sonra default_code
         Product = self.env['product.product'].sudo()
