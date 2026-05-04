@@ -27,7 +27,7 @@ class PttavmStore(models.Model):
     # ─── Senkronizasyon Ayarları ─────────────────────────
     auto_sync = fields.Boolean(string='Otomatik Sipariş Senkronizasyonu', default=True)
     sync_interval = fields.Integer(string='Senkron Aralığı (dk)', default=1, help='Bu değer cron ile senkronize çalışarak hangi sıklıkta Pttavm API\'ye çıkılacağını gösterir.')
-    order_day_range = fields.Integer(string='Senkronizasyon Gün Aralığı', default=1, help="Geçmişe dönük kaç günlük sipariş çekilecek?")
+    order_day_range = fields.Integer(string='Senkronizasyon Gün Aralığı', default=30, help="Geçmişe dönük kaç günlük sipariş çekilecek? PttAVM API 7 günden kısa aralıklarda sipariş döndürmeyebilir.")
     last_sync = fields.Datetime(string='Son Senkronizasyon', readonly=True)
     
     # ─── Sipariş Ayarları ────────────────────────────────

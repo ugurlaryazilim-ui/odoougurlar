@@ -30,7 +30,7 @@ class PttavmOrderSync(models.Model):
         updated_count = 0
         error_count = 0
         
-        day_range = store.order_day_range or 3
+        day_range = store.order_day_range or 30
         start_date = fields.Datetime.now() - timedelta(days=day_range)
         end_date = fields.Datetime.now() + timedelta(hours=3)
         
