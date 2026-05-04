@@ -89,24 +89,26 @@ class PttavmAPIClient:
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
-    def get_orders(self, start_date=None, end_date=None):
+    def get_orders(self, start_date=None, end_date=None, active_only=False):
         """Siparişleri çek. (Max 40 gün)"""
         params = {
-            'isActiveOrders': 'false'
+            'isActiveOrders': 'true' if active_only else 'false'
         }
         
         if start_date:
             if isinstance(start_date, datetime):
-                params['startDate'] = start_date.strftime('%Y-%m-%d')
+                # PttAVM API ISO 8601 format bekler
+                params['startDate'] = start_date.strftime('%Y-%m-%dT%H:%M:%SZ')
             else:
                 params['startDate'] = start_date
         
         if end_date:
             if isinstance(end_date, datetime):
-                params['endDate'] = end_date.strftime('%Y-%m-%d')
+                params['endDate'] = end_date.strftime('%Y-%m-%dT%H:%M:%SZ')
             else:
                 params['endDate'] = end_date
 
+        _logger.info("PttAVM API isteği: /orders/search params=%s", params)
         return self._request('GET', '/orders/search', params=params)
 
     def send_invoice(self, order_id, line_item_ids, pdf_base64=None, url=None):

@@ -1,6 +1,7 @@
 
 import json
 import logging
+import pytz
 from datetime import datetime, timedelta
 
 from odoo import api, fields, models
@@ -29,22 +30,36 @@ class PttavmOrderSync(models.Model):
         updated_count = 0
         error_count = 0
         
-        start_date = datetime.now() - timedelta(days=store.order_day_range or 1)
-        end_date = datetime.now()
+        day_range = store.order_day_range or 3
+        start_date = fields.Datetime.now() - timedelta(days=day_range)
+        end_date = fields.Datetime.now() + timedelta(hours=3)
+        
+        _logger.info("PttAVM [%s] sipariş çekiliyor: %s → %s (son %d gün)",
+                     store.name, start_date, end_date, day_range)
         
         res = api_client.get_orders(start_date=start_date, end_date=end_date)
         
         if not res.get('success'):
-            _logger.error("Pttavm Sipariş Çekme Hatası: %s", res.get('error'))
+            _logger.error("PttAVM Sipariş Çekme Hatası: %s", res.get('error'))
             return {'created': 0, 'updated': 0, 'errors': 1}
         
-        data_list = res.get('data', [])
-        if isinstance(data_list, dict) and 'data' in data_list:
-            data_list = data_list['data']
-            
+        raw_data = res.get('data', [])
+        _logger.info("PttAVM [%s] API yanıt tipi: %s", store.name, type(raw_data).__name__)
+        
+        data_list = raw_data
+        if isinstance(raw_data, dict):
+            data_list = raw_data.get('data', raw_data.get('siparisler', raw_data.get('orders', [])))
+            if not isinstance(data_list, list):
+                _logger.info("PttAVM [%s] dict yanıt anahtarları: %s", store.name, list(raw_data.keys()))
+                data_list = []
+        
         if not data_list or not isinstance(data_list, list):
+            _logger.info("PttAVM [%s] Sipariş bulunamadı. API yanıt: %s",
+                         store.name, str(raw_data)[:500])
             store.sudo().write({'last_sync': fields.Datetime.now()})
             return {'created': 0, 'updated': 0, 'errors': 0}
+        
+        _logger.info("PttAVM [%s] %d sipariş bulundu", store.name, len(data_list))
             
         for order_json in data_list:
             try:
@@ -83,7 +98,10 @@ class PttavmOrderSync(models.Model):
         order_date = False
         if order_date_str:
             try:
-                order_date = datetime.strptime(order_date_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
+                # PttAVM API Türkiye saati döner — UTC'ye çevir
+                naive_dt = datetime.strptime(order_date_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
+                turkey_dt = pytz.timezone('Europe/Istanbul').localize(naive_dt)
+                order_date = turkey_dt.astimezone(pytz.UTC).replace(tzinfo=None)
             except Exception:
                 order_date = fields.Datetime.now()
         else:
@@ -242,6 +260,11 @@ class PttavmOrderSync(models.Model):
                 'ref': customer_ref,
             })
 
+        # Depo ayarını config'den al — Ayarlar > PttAVM > Depo Ayarları
+        warehouse_id_str = self.env['ir.config_parameter'].sudo().get_param(
+            'pttavm_integration.warehouse_id')
+        warehouse_id = int(warehouse_id_str) if warehouse_id_str else False
+
         sale_vals = {
             'partner_id': partner.id,
             'partner_invoice_id': invoice_partner.id,
@@ -252,6 +275,8 @@ class PttavmOrderSync(models.Model):
             'date_order': p_order.order_date,
             'order_line': [],
         }
+        if warehouse_id:
+            sale_vals['warehouse_id'] = warehouse_id
         
         # Batch ürün arama (N+1 önleme)
         Product = self.env['product.product'].sudo()

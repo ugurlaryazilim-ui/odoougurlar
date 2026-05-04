@@ -99,10 +99,12 @@ class PttavmStore(models.Model):
             api_client = self.get_api()
             
             # orders search method takes startDate and endDate, max 40 days
-            start_date = datetime.now() - timedelta(days=1)
-            end_date = datetime.now()
+            start_date = fields.Datetime.now() - timedelta(days=3)
+            end_date = fields.Datetime.now() + timedelta(hours=3)
             
             result = api_client.get_orders(start_date=start_date, end_date=end_date)
+            _logger.info("PttAVM test bağlantı yanıtı: success=%s, data_type=%s",
+                         result.get('success'), type(result.get('data')).__name__)
             if result.get('success'):
                 return {
                     'type': 'ir.actions.client',
