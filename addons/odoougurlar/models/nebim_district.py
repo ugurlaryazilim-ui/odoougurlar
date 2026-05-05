@@ -9,6 +9,23 @@ from odoo import models, fields, api
 
 _logger = logging.getLogger(__name__)
 
+# Türkçe → ASCII normalize mapping (İ/I, ı/i, ş/s, ç/c farkını çözer)
+_TR_NORMALIZE_MAP = str.maketrans({
+    'İ': 'I', 'ı': 'i',
+    'Ğ': 'G', 'ğ': 'g',
+    'Ü': 'U', 'ü': 'u',
+    'Ş': 'S', 'ş': 's',
+    'Ö': 'O', 'ö': 'o',
+    'Ç': 'C', 'ç': 'c',
+})
+
+
+def _normalize_turkish(text):
+    """Türkçe karakterleri ASCII karşılığına çevir."""
+    if not text:
+        return ''
+    return text.strip().translate(_TR_NORMALIZE_MAP)
+
 
 class NebimDistrictMapping(models.Model):
     _name = 'odoougurlar.nebim.district'
@@ -25,6 +42,10 @@ class NebimDistrictMapping(models.Model):
     state_name = fields.Char('Bölge Adı')            # Marmara, Akdeniz...
     city_name = fields.Char('İl Adı')                # Bursa, İstanbul...
     district_name = fields.Char('İlçe Adı')          # Nilüfer, Şişli...
+
+    # Normalize edilmiş isimler (SQL-level Türkçe-safe arama için)
+    normalized_city_name = fields.Char('İl Adı (Normalize)', index=True)
+    normalized_district_name = fields.Char('İlçe Adı (Normalize)', index=True)
 
     # Odoo eşleştirmesi (opsiyonel, hızlı lookup için)
     odoo_state_id = fields.Many2one('res.country.state', 'Odoo İl', ondelete='set null')
@@ -69,6 +90,9 @@ class NebimDistrictMapping(models.Model):
                 'state_name': state_nm,
                 'city_name': city_nm,
                 'district_name': district_nm,
+                # Normalize edilmiş alan (Türkçe İ/I sorununu SQL-level çözer)
+                'normalized_city_name': _normalize_turkish(city_nm).lower(),
+                'normalized_district_name': _normalize_turkish(district_nm).lower(),
             }
             
             if existing:
@@ -79,37 +103,26 @@ class NebimDistrictMapping(models.Model):
                 created += 1
         
         self.env.cr.commit()
-        _logger.info("İlçe sync tamamlandı: %d yeni, %d güncellendi", created, updated)
+        # Cache'i temizle — yeni veri geldi
+        self._district_cache.clear()
+        _logger.info("İlçe sync tamamlandı: %d yeni, %d güncellendi (toplam: %d)",
+                     created, updated, created + updated)
         return {'created': created, 'updated': updated}
 
     # In-memory cache for district lookups (worker-scoped)
     _district_cache = {}
 
-    @staticmethod
-    def _normalize_turkish(text):
-        """Türkçe karakterleri normalize et — ILIKE uyumsuzluğunu çöz."""
-        if not text:
-            return ''
-        # Türkçe → ASCII-benzeri (arama kolaylığı için)
-        tr_map = {
-            'İ': 'I', 'ı': 'i',
-            'Ğ': 'G', 'ğ': 'g',
-            'Ü': 'U', 'ü': 'u',
-            'Ş': 'S', 'ş': 's',
-            'Ö': 'O', 'ö': 'o',
-            'Ç': 'C', 'ç': 'c',
-        }
-        result = text.strip()
-        for tr_char, ascii_char in tr_map.items():
-            result = result.replace(tr_char, ascii_char)
-        return result
-
     @api.model
     def find_nebim_codes(self, odoo_state_name, odoo_city_name):
         """
         Odoo'daki il ve ilçe adlarını kullanarak Nebim kodlarını bulur.
-        Türkçe karakter uyumsuzluğunu handle eder (İ/I, ı/i, ş/s, vb.)
-        Sonuçlar cache'lenir — aynı il/ilçe tekrar sorgulanmaz.
+        
+        3 aşamalı arama:
+        1. SQL ILIKE (hızlı, ama İ/I problemi olabilir)
+        2. Normalize field ile SQL arama (İ→I dönüşümlü, hızlı)
+        3. Sadece il bazlı eşleşme (en azından bölge/il kodu dönsün)
+        
+        Sonuçlar cache'lenir.
         """
         empty = {'state_code': '', 'city_code': '', 'district_code': ''}
 
@@ -121,7 +134,7 @@ class NebimDistrictMapping(models.Model):
         if cache_key in self._district_cache:
             return self._district_cache[cache_key]
 
-        # Tablo boşluk kontrolü
+         # Tablo boşluk kontrolü
         total = self.search_count([])
         if total == 0:
             _logger.error(
@@ -132,13 +145,19 @@ class NebimDistrictMapping(models.Model):
             self._district_cache[cache_key] = empty
             return empty
 
+        # Normalize alanları boşsa otomatik doldur (ilk kez veya güncelleme sonrası)
+        empty_norm = self.search_count([('normalized_city_name', '=', False)])
+        if empty_norm > 0:
+            _logger.info("Normalize alanları dolduruluyor (%d kayıt)...", empty_norm)
+            records = self.search([('normalized_city_name', '=', False)])
+            for rec in records:
+                rec.write({
+                    'normalized_city_name': _normalize_turkish(rec.city_name).lower() if rec.city_name else '',
+                    'normalized_district_name': _normalize_turkish(rec.district_name).lower() if rec.district_name else '',
+                })
+            _logger.info("Normalize alanları dolduruldu.")
+
         result = dict(empty)
-
-        # Arama stratejisi: 3 aşamalı
-        # 1. Normal ILIKE (tam Türkçe karakter eşleşmesi)
-        # 2. Tüm kayıtlarda Python-level Türkçe normalize karşılaştırma
-        # 3. Sadece il ile eşleştirme (ilçe kodu en az il kodu dönsün)
-
         match = self._search_district_match(odoo_state_name, odoo_city_name)
 
         if match:
@@ -160,6 +179,7 @@ class NebimDistrictMapping(models.Model):
 
     def _search_district_match(self, state_name, city_name):
         """İlçe eşleştirmesini 3 aşamalı arama ile yapar."""
+        
         # ─── Aşama 1: ILIKE ile doğrudan arama ───
         if city_name:
             domain = [('district_name', 'ilike', city_name.strip())]
@@ -169,38 +189,36 @@ class NebimDistrictMapping(models.Model):
             if match:
                 return match
 
-        # ─── Aşama 2: Türkçe normalize arama (İ/I farkı çözümü) ───
-        norm_city = self._normalize_turkish(city_name) if city_name else ''
-        norm_state = self._normalize_turkish(state_name) if state_name else ''
+        # ─── Aşama 2: Normalize field ile SQL arama (İ→I dönüşümlü) ───
+        norm_city = _normalize_turkish(city_name).lower() if city_name else ''
+        norm_state = _normalize_turkish(state_name).lower() if state_name else ''
 
         if norm_city:
-            # Nebim verilerini çek ve Python'da normalize karşılaştır
-            candidates = self.search([])  # tüm kayıtlar (cache'li olduğu için hızlı)
-            for rec in candidates:
-                rec_district = self._normalize_turkish(rec.district_name)
-                rec_city = self._normalize_turkish(rec.city_name)
-                if norm_city.lower() in rec_district.lower():
-                    if not norm_state or norm_state.lower() in rec_city.lower():
-                        _logger.info("Türkçe normalize eşleşme bulundu: %s/%s → %s/%s",
-                                     city_name, state_name, rec.district_name, rec.city_name)
-                        return rec
-
-        # ─── Aşama 3: Sadece il ile eşleştir (en az il kodu dönsün) ───
-        if state_name:
-            match = self.search([('city_name', 'ilike', state_name.strip())], limit=1)
+            domain = [('normalized_district_name', 'ilike', norm_city)]
+            if norm_state:
+                domain.append(('normalized_city_name', 'ilike', norm_state))
+            match = self.search(domain, limit=1)
             if match:
-                _logger.info("İlçe bulunamadı, il bazlı eşleşme: %s → city_code=%s",
-                             state_name, match.city_code)
+                _logger.info("Türkçe normalize SQL eşleşme: %s/%s → %s/%s (dist_code=%s)",
+                             city_name, state_name, match.district_name, match.city_name,
+                             match.district_code)
                 return match
 
-            # Türkçe normalize il araması
+        # ─── Aşama 3: Sadece il ile eşleştir (en azından bölge+il kodu dönsün) ───
+        if state_name:
+            # Önce normal ILIKE
+            match = self.search([('city_name', 'ilike', state_name.strip())], limit=1)
+            if match:
+                _logger.info("İlçe bulunamadı, il bazlı eşleşme: %s → city_code=%s, state_code=%s",
+                             state_name, match.city_code, match.state_code)
+                return match
+
+            # Normalize field ile
             if norm_state:
-                candidates = self.search([])
-                for rec in candidates:
-                    if norm_state.lower() in self._normalize_turkish(rec.city_name).lower():
-                        _logger.info("Türkçe normalize il eşleşme: %s → %s",
-                                     state_name, rec.city_name)
-                        return rec
+                match = self.search([('normalized_city_name', 'ilike', norm_state)], limit=1)
+                if match:
+                    _logger.info("Türkçe normalize il eşleşme: %s → %s (city_code=%s)",
+                                 state_name, match.city_name, match.city_code)
+                    return match
 
         return False
-
