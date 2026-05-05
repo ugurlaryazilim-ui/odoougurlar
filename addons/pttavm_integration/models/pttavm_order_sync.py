@@ -8,6 +8,8 @@ from odoo import api, fields, models
 
 _logger = logging.getLogger(__name__)
 
+IST = pytz.timezone('Europe/Istanbul')
+
 class PttavmOrderSync(models.Model):
     _inherit = 'pttavm.order'
 
@@ -31,10 +33,12 @@ class PttavmOrderSync(models.Model):
         error_count = 0
         
         day_range = store.order_day_range or 30
-        start_date = fields.Datetime.now() - timedelta(days=day_range)
-        end_date = fields.Datetime.now() + timedelta(hours=3)
+        # PttAVM API Türkiye saatinde çalışır — sorgu tarihlerini Türkiye saatine çevir
+        now_turkey = datetime.now(pytz.UTC).astimezone(IST).replace(tzinfo=None)
+        start_date = now_turkey - timedelta(days=day_range)
+        end_date = now_turkey + timedelta(minutes=5)  # küçük güvenlik marjı
         
-        _logger.info("PttAVM [%s] sipariş çekiliyor: %s → %s (son %d gün)",
+        _logger.info("PttAVM [%s] sipariş çekiliyor (TR saati): %s → %s (son %d gün)",
                      store.name, start_date, end_date, day_range)
         
         res = api_client.get_orders(start_date=start_date, end_date=end_date)
@@ -98,11 +102,11 @@ class PttavmOrderSync(models.Model):
         order_date = False
         if order_date_str:
             try:
-                # PttAVM API Türkiye saati döner — UTC'ye çevir
-                naive_dt = datetime.strptime(order_date_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
-                turkey_dt = pytz.timezone('Europe/Istanbul').localize(naive_dt)
-                order_date = turkey_dt.astimezone(pytz.UTC).replace(tzinfo=None)
+                # PttAVM API'den gelen tarihi olduğu gibi sakla
+                # Panel ve Odoo'da aynı saat görünsün
+                order_date = datetime.strptime(order_date_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
             except Exception:
+                _logger.warning("PttAVM tarih parse hatası: %s", order_date_str)
                 order_date = fields.Datetime.now()
         else:
             order_date = fields.Datetime.now()

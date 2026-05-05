@@ -8,6 +8,8 @@ from odoo import api, fields, models
 
 _logger = logging.getLogger(__name__)
 
+IST = pytz.timezone('Europe/Istanbul')
+
 # Idefix'in kabul ettiği sipariş statüleri (string)
 IDEFIX_VALID_ORDER_STATUSES = ('created', 'shipment_ready')
 
@@ -39,12 +41,12 @@ class IdefixOrderSync(models.Model):
         error_count = 0
         
         # Son X günlük siparişleri çek (store.order_day_range)
-        # fields.Datetime.now() = UTC. Türkiye UTC+3 farkı için güvenlik marjı.
-        now_utc = fields.Datetime.now()
-        start_date = now_utc - timedelta(days=store.order_day_range or 1)
-        end_date = now_utc + timedelta(hours=3)
+        # Idefix API Türkiye saatinde çalışır — sorgu tarihlerini Türkiye saatine çevir
+        now_turkey = datetime.now(pytz.UTC).astimezone(IST).replace(tzinfo=None)
+        start_date = now_turkey - timedelta(days=store.order_day_range or 1)
+        end_date = now_turkey + timedelta(minutes=5)  # küçük güvenlik marjı
         
-        _logger.info("Idefix [%s] sipariş çekme: %s → %s", store.name, start_date, end_date)
+        _logger.info("Idefix [%s] sipariş çekme (TR saati): %s → %s", store.name, start_date, end_date)
         
         page = 1
         while True:
@@ -97,11 +99,11 @@ class IdefixOrderSync(models.Model):
         order_date = False
         if order_date_str:
             try:
-                # Idefix API Türkiye saati döner — UTC'ye çevir (Odoo UTC saklar)
-                naive_dt = datetime.strptime(order_date_str[:19].replace('T',' '), '%Y-%m-%d %H:%M:%S')
-                turkey_dt = pytz.timezone('Europe/Istanbul').localize(naive_dt)
-                order_date = turkey_dt.astimezone(pytz.UTC).replace(tzinfo=None)
+                # Idefix API'den gelen tarihi olduğu gibi sakla
+                # Panel ve Odoo'da aynı saat görünsün
+                order_date = datetime.strptime(order_date_str[:19].replace('T',' '), '%Y-%m-%d %H:%M:%S')
             except Exception:
+                _logger.warning("Idefix tarih parse hatası: %s", order_date_str)
                 order_date = fields.Datetime.now()
         else:
             order_date = fields.Datetime.now()

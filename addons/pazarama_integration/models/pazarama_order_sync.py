@@ -8,6 +8,8 @@ from odoo import api, fields, models
 
 _logger = logging.getLogger(__name__)
 
+IST = pytz.timezone('Europe/Istanbul')
+
 # Pazarama'nın kabul ettiği sipariş statüleri (Odoo'ya Sale Order olarak çekilecekler)
 # 3 = Siparişiniz Alındı, 12 = Siparişiniz Hazırlanıyor
 PAZARAMA_VALID_ORDER_STATUSES = (3, 12)
@@ -40,13 +42,12 @@ class PazaramaOrderSync(models.Model):
         error_count = 0
         
         # Son X günlük siparişleri çek (store.order_day_range)
-        # fields.Datetime.now() = UTC. Pazarama Türkiye saatinde çalışır.
-        # Güvenlik marjı olarak endDate'e +3 saat ekliyoruz (UTC→TR farkı).
-        now_utc = fields.Datetime.now()
-        start_date = now_utc - timedelta(days=store.order_day_range or 1)
-        end_date = now_utc + timedelta(hours=3)  # Türkiye saati güvenlik marjı
+        # Pazarama API Türkiye saatinde çalışır — sorgu tarihlerini Türkiye saatine çevir
+        now_turkey = datetime.now(pytz.UTC).astimezone(IST).replace(tzinfo=None)
+        start_date = now_turkey - timedelta(days=store.order_day_range or 1)
+        end_date = now_turkey + timedelta(minutes=5)  # küçük güvenlik marjı
         
-        _logger.info("Pazarama [%s] sipariş çekme: %s → %s", store.name, start_date, end_date)
+        _logger.info("Pazarama [%s] sipariş çekme (TR saati): %s → %s", store.name, start_date, end_date)
         
         page = 1
         while True:
@@ -104,10 +105,11 @@ class PazaramaOrderSync(models.Model):
         order_date = False
         if order_date_str:
             try:
-                naive_dt = datetime.strptime(order_date_str, '%Y-%m-%d %H:%M')
-                turkey_dt = pytz.timezone('Europe/Istanbul').localize(naive_dt)
-                order_date = turkey_dt.astimezone(pytz.UTC).replace(tzinfo=None)
+                # Pazarama API'den gelen tarihi olduğu gibi sakla
+                # Panel ve Odoo'da aynı saat görünsün
+                order_date = datetime.strptime(order_date_str, '%Y-%m-%d %H:%M')
             except Exception:
+                _logger.warning("Pazarama tarih parse hatası: %s", order_date_str)
                 order_date = fields.Datetime.now()
         else:
             order_date = fields.Datetime.now()

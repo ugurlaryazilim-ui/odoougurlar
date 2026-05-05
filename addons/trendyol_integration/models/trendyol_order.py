@@ -1,6 +1,7 @@
 
 import json
 import logging
+import pytz
 
 from datetime import datetime, timedelta, timezone
 
@@ -9,6 +10,8 @@ from odoo.exceptions import UserError
 from .trendyol_api import TrendyolAPI
 
 _logger = logging.getLogger(__name__)
+
+IST = pytz.timezone('Europe/Istanbul')
 
 TRENDYOL_STATUS = [
     ('awaiting', 'Beklemede (Awaiting)'),
@@ -228,9 +231,14 @@ class TrendyolOrder(models.Model):
         package_id = str(data.get('id') or data.get('shipmentPackageId', ''))
         status = (data.get('status') or data.get('shipmentPackageStatus', '')).lower()
 
-        # Tarih dönüşümü (timestamp ms → datetime)
+        # Tarih dönüşümü (timestamp ms → Türkiye saati)
         order_date_ts = data.get('orderDate', 0)
-        order_date = datetime.fromtimestamp(order_date_ts / 1000, tz=timezone.utc).replace(tzinfo=None) if order_date_ts else fields.Datetime.now()
+        if order_date_ts:
+            utc_dt = datetime.fromtimestamp(order_date_ts / 1000, tz=timezone.utc)
+            turkey_dt = utc_dt.astimezone(IST)
+            order_date = turkey_dt.replace(tzinfo=None)
+        else:
+            order_date = fields.Datetime.now()
 
         # Müşteri bilgileri
         customer_name = f"{data.get('customerFirstName', '')} {data.get('customerLastName', '')}".strip()
@@ -316,7 +324,9 @@ class TrendyolOrder(models.Model):
         # ETGB tarihi (timestamp ms)
         etgb_date_ts = data.get('etgbDate', 0)
         if etgb_date_ts:
-            vals['etgb_date'] = datetime.fromtimestamp(etgb_date_ts / 1000, tz=timezone.utc).replace(tzinfo=None)
+            utc_dt = datetime.fromtimestamp(etgb_date_ts / 1000, tz=timezone.utc)
+            turkey_dt = utc_dt.astimezone(IST)
+            vals['etgb_date'] = turkey_dt.replace(tzinfo=None)
 
         # Komisyon bilgisi
         if store.process_commission:

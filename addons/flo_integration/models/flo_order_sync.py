@@ -1,11 +1,14 @@
 
 import json
 import logging
+import pytz
 from datetime import datetime, timedelta
 
 from odoo import api, fields, models
 
 _logger = logging.getLogger(__name__)
+
+IST = pytz.timezone('Europe/Istanbul')
 
 # Flo'nun kabul ettiği sipariş statüleri (string)
 FLO_VALID_ORDER_STATUSES = ('Created', 'Picking')
@@ -37,12 +40,12 @@ class FloOrderSync(models.Model):
         updated_count = 0
         error_count = 0
         
-        # fields.Datetime.now() = UTC. Türkiye UTC+3 farkı için güvenlik marjı.
-        now_utc = fields.Datetime.now()
-        start_date = now_utc - timedelta(days=store.order_day_range or 1)
-        end_date = now_utc + timedelta(hours=3)
+        # Flo API Türkiye saatinde çalışır — sorgu tarihlerini Türkiye saatine çevir
+        now_turkey = datetime.now(pytz.UTC).astimezone(IST).replace(tzinfo=None)
+        start_date = now_turkey - timedelta(days=store.order_day_range or 1)
+        end_date = now_turkey + timedelta(minutes=5)  # küçük güvenlik marjı
         
-        _logger.info("Flo [%s] sipariş çekme: %s → %s", store.name, start_date, end_date)
+        _logger.info("Flo [%s] sipariş çekme (TR saati): %s → %s", store.name, start_date, end_date)
         
         page = 1
         total_pages = 1
@@ -97,9 +100,12 @@ class FloOrderSync(models.Model):
         order_date = False
         if order_date_ts:
             try:
-                # UNIX timestamp → UTC (Odoo Datetime alanları UTC saklar)
-                order_date = datetime.utcfromtimestamp(int(order_date_ts))
+                # UNIX timestamp → Türkiye saatine çevir, olduğu gibi sakla
+                utc_dt = datetime.utcfromtimestamp(int(order_date_ts))
+                turkey_dt = pytz.UTC.localize(utc_dt).astimezone(IST)
+                order_date = turkey_dt.replace(tzinfo=None)
             except Exception:
+                _logger.warning("Flo tarih parse hatası: %s", order_date_ts)
                 order_date = fields.Datetime.now()
         else:
             order_date = fields.Datetime.now()
