@@ -5,6 +5,13 @@ from odoo import models, fields, api
 
 _logger = logging.getLogger(__name__)
 
+# Türkçe normalize
+_TR_MAP = str.maketrans({
+    'İ': 'I', 'ı': 'i', 'Ğ': 'G', 'ğ': 'g',
+    'Ü': 'U', 'ü': 'u', 'Ş': 'S', 'ş': 's',
+    'Ö': 'O', 'ö': 'o', 'Ç': 'C', 'ç': 'c',
+})
+
 
 class NebimDashboardWarehouse(models.TransientModel):
     """Nebim Dashboard — Depo, stok, raf, fatura ve bağlantı aksiyonları."""
@@ -258,6 +265,52 @@ class NebimDashboardWarehouse(models.TransientModel):
                 'tag': 'display_notification',
                 'params': {
                     'title': 'Raf Import Hatası',
+                    'message': str(e),
+                    'type': 'danger',
+                    'sticky': True,
+                }
+            }
+
+    # -----------------------------------------------------------------
+    #  İlçe/Bölge Senkronizasyonu
+    # -----------------------------------------------------------------
+    def action_sync_districts(self):
+        """Nebim'den İl/İlçe/Bölge verilerini çekip Odoo tablosuna kaydeder."""
+        try:
+            district_model = self.env['odoougurlar.nebim.district'].sudo()
+            result = district_model.sync_from_nebim()
+            
+            if result.get('error'):
+                return {
+                    'type': 'ir.actions.client',
+                    'tag': 'display_notification',
+                    'params': {
+                        'title': 'İlçe Senkronizasyonu Hatası',
+                        'message': result['error'],
+                        'type': 'danger',
+                        'sticky': True,
+                    }
+                }
+            
+            created = result.get('created', 0)
+            updated = result.get('updated', 0)
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'İlçe Senkronizasyonu Tamamlandı',
+                    'message': f'✅ {created} yeni, ✏️ {updated} güncellendi (toplam: {created + updated} ilçe)',
+                    'type': 'success',
+                    'sticky': True,
+                }
+            }
+        except Exception as e:
+            _logger.error("İlçe senkronizasyonu hatası: %s", e)
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'İlçe Senkronizasyonu Hatası',
                     'message': str(e),
                     'type': 'danger',
                     'sticky': True,
