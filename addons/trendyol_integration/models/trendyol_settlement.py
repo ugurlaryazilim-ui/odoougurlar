@@ -421,15 +421,9 @@ class TrendyolSettlement(models.Model):
             return False
 
         tx_ts = data.get('transactionDate', 0)
-        tx_date = None
-        if tx_ts:
-            utc_dt = datetime.fromtimestamp(tx_ts / 1000, tz=timezone.utc)
-            tx_date = utc_dt.astimezone(IST).replace(tzinfo=None)
+        tx_date = datetime.fromtimestamp(tx_ts / 1000, tz=timezone.utc).replace(tzinfo=None) if tx_ts else None
         pay_ts = data.get('paymentDate', 0)
-        pay_date = None
-        if pay_ts:
-            utc_dt = datetime.fromtimestamp(pay_ts / 1000, tz=timezone.utc)
-            pay_date = utc_dt.astimezone(IST).replace(tzinfo=None)
+        pay_date = datetime.fromtimestamp(pay_ts / 1000, tz=timezone.utc).replace(tzinfo=None) if pay_ts else None
 
         raw_type = data.get('transactionType', '')
         description = data.get('description', '')

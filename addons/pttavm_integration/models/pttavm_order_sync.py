@@ -102,9 +102,10 @@ class PttavmOrderSync(models.Model):
         order_date = False
         if order_date_str:
             try:
-                # PttAVM API'den gelen tarihi olduğu gibi sakla
-                # Panel ve Odoo'da aynı saat görünsün
-                order_date = datetime.strptime(order_date_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
+                # PttAVM API Türkiye saati döner — Odoo UTC saklar
+                naive_dt = datetime.strptime(order_date_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
+                turkey_dt = IST.localize(naive_dt)
+                order_date = turkey_dt.astimezone(pytz.UTC).replace(tzinfo=None)
             except Exception:
                 _logger.warning("PttAVM tarih parse hatası: %s", order_date_str)
                 order_date = fields.Datetime.now()

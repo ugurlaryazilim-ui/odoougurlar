@@ -100,10 +100,8 @@ class FloOrderSync(models.Model):
         order_date = False
         if order_date_ts:
             try:
-                # UNIX timestamp → Türkiye saatine çevir, olduğu gibi sakla
-                utc_dt = datetime.utcfromtimestamp(int(order_date_ts))
-                turkey_dt = pytz.UTC.localize(utc_dt).astimezone(IST)
-                order_date = turkey_dt.replace(tzinfo=None)
+                # UNIX timestamp UTC'dir — Odoo UTC saklar, kullanıcı tz'sine göre gösterir
+                order_date = datetime.utcfromtimestamp(int(order_date_ts))
             except Exception:
                 _logger.warning("Flo tarih parse hatası: %s", order_date_ts)
                 order_date = fields.Datetime.now()

@@ -231,14 +231,9 @@ class TrendyolOrder(models.Model):
         package_id = str(data.get('id') or data.get('shipmentPackageId', ''))
         status = (data.get('status') or data.get('shipmentPackageStatus', '')).lower()
 
-        # Tarih dönüşümü (timestamp ms → Türkiye saati)
+        # Tarih dönüşümü (timestamp ms → UTC datetime)
         order_date_ts = data.get('orderDate', 0)
-        if order_date_ts:
-            utc_dt = datetime.fromtimestamp(order_date_ts / 1000, tz=timezone.utc)
-            turkey_dt = utc_dt.astimezone(IST)
-            order_date = turkey_dt.replace(tzinfo=None)
-        else:
-            order_date = fields.Datetime.now()
+        order_date = datetime.fromtimestamp(order_date_ts / 1000, tz=timezone.utc).replace(tzinfo=None) if order_date_ts else fields.Datetime.now()
 
         # Müşteri bilgileri
         customer_name = f"{data.get('customerFirstName', '')} {data.get('customerLastName', '')}".strip()
@@ -324,9 +319,7 @@ class TrendyolOrder(models.Model):
         # ETGB tarihi (timestamp ms)
         etgb_date_ts = data.get('etgbDate', 0)
         if etgb_date_ts:
-            utc_dt = datetime.fromtimestamp(etgb_date_ts / 1000, tz=timezone.utc)
-            turkey_dt = utc_dt.astimezone(IST)
-            vals['etgb_date'] = turkey_dt.replace(tzinfo=None)
+            vals['etgb_date'] = datetime.fromtimestamp(etgb_date_ts / 1000, tz=timezone.utc).replace(tzinfo=None)
 
         # Komisyon bilgisi
         if store.process_commission:

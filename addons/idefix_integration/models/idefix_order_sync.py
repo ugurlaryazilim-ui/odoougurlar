@@ -99,9 +99,11 @@ class IdefixOrderSync(models.Model):
         order_date = False
         if order_date_str:
             try:
-                # Idefix API'den gelen tarihi olduğu gibi sakla
-                # Panel ve Odoo'da aynı saat görünsün
-                order_date = datetime.strptime(order_date_str[:19].replace('T',' '), '%Y-%m-%d %H:%M:%S')
+                # Idefix API Türkiye saati döner (+03:00) — Odoo UTC saklar
+                # Türkiye → UTC çeviriyoruz, Odoo kullanıcı tz'sine göre geri çevirir
+                naive_dt = datetime.strptime(order_date_str[:19].replace('T',' '), '%Y-%m-%d %H:%M:%S')
+                turkey_dt = IST.localize(naive_dt)
+                order_date = turkey_dt.astimezone(pytz.UTC).replace(tzinfo=None)
             except Exception:
                 _logger.warning("Idefix tarih parse hatası: %s", order_date_str)
                 order_date = fields.Datetime.now()
