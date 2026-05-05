@@ -94,7 +94,7 @@ class IdefixOrderSync(models.Model):
         if existing_idefix:
             update_vals = {'order_status': order_status}
             # Kargo bilgisi sonradan gelebilir — güncelle
-            cargo_tracking = order_json.get('cargoTrackingNumber') or ''
+            cargo_tracking = order_json.get('cargoTrackingNumber') or order_json.get('shipmentCode') or ''
             cargo_provider = order_json.get('cargoCompany') or ''
             if cargo_tracking and not existing_idefix.cargo_tracking_number:
                 update_vals['cargo_tracking_number'] = cargo_tracking
@@ -149,7 +149,7 @@ class IdefixOrderSync(models.Model):
             'line_ids': [],
         }
 
-        cargo_tracking = order_json.get('cargoTrackingNumber') or ''
+        cargo_tracking = order_json.get('cargoTrackingNumber') or order_json.get('shipmentCode') or ''
         cargo_provider = order_json.get('cargoCompany') or ''
 
         items = order_json.get('items', [])

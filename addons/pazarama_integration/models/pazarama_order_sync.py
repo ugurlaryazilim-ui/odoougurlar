@@ -98,14 +98,23 @@ class PazaramaOrderSync(models.Model):
             # Statü ve kargo bilgilerini güncelle
             update_vals = {'order_status': order_status}
             # Kargo bilgisi sonradan gelebilir — güncelle
-            items = order_json.get('items', [])
-            for item in items:
-                cargo = item.get('cargo', {})
-                if cargo.get('trackingNumber') and not existing_pazarama.cargo_tracking_number:
-                    update_vals['cargo_tracking_number'] = str(cargo['trackingNumber'])
-                if cargo.get('companyName') and not existing_pazarama.cargo_provider:
-                    update_vals['cargo_provider'] = str(cargo['companyName'])
-                break
+            if not existing_pazarama.cargo_tracking_number:
+                # Öncelik: items[].cargo.trackingNumber -> shipmentCode
+                items = order_json.get('items', [])
+                for item in items:
+                    cargo = item.get('cargo', {})
+                    if cargo.get('trackingNumber'):
+                        update_vals['cargo_tracking_number'] = str(cargo['trackingNumber'])
+                        break
+                if 'cargo_tracking_number' not in update_vals and order_json.get('shipmentCode'):
+                    update_vals['cargo_tracking_number'] = str(order_json['shipmentCode'])
+            if not existing_pazarama.cargo_provider:
+                items = order_json.get('items', [])
+                for item in items:
+                    cargo = item.get('cargo', {})
+                    if cargo.get('companyName'):
+                        update_vals['cargo_provider'] = str(cargo['companyName'])
+                        break
             existing_pazarama.write(update_vals)
             return 'updated'
 
@@ -181,6 +190,10 @@ class PazaramaOrderSync(models.Model):
                 'cargo_company': cargo.get('companyName'),
             }
             vals['line_ids'].append((0, 0, line_vals))
+
+        # Fallback: shipmentCode (PZ ile başlayan kod)
+        if not cargo_tracking and order_json.get('shipmentCode'):
+            cargo_tracking = str(order_json['shipmentCode'])
             
         vals['cargo_tracking_number'] = cargo_tracking
         vals['cargo_provider'] = cargo_provider
