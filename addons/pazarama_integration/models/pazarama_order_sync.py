@@ -215,6 +215,25 @@ class PazaramaOrderSync(models.Model):
         return 'created'
 
     @api.private
+    def _find_turkey_state(self, city_name):
+        """İl adından Odoo res.country.state kaydını bul."""
+        if not city_name:
+            return False
+        country_tr = self.env.ref('base.tr')
+        # Tam eşleşme
+        state = self.env['res.country.state'].search([
+            ('country_id', '=', country_tr.id),
+            ('name', '=ilike', city_name.strip()),
+        ], limit=1)
+        if not state:
+            # Kısmi eşleşme (İzmir -> İzmir İli gibi)
+            state = self.env['res.country.state'].search([
+                ('country_id', '=', country_tr.id),
+                ('name', 'ilike', city_name.strip()),
+            ], limit=1)
+        return state or False
+
+    @api.private
     def _create_odoo_sale_order(self, p_order, store, ship_addr, bill_addr, customer_email, phone):
         """Odoo Sale Order & Res Partner yaratır."""
         
@@ -223,9 +242,15 @@ class PazaramaOrderSync(models.Model):
         country_tr = self.env.ref('base.tr').id
         
         # Adres text
-        # "Merkez Mah Cami sk. NO: 5/ Merkez / Kütahya"
         display_text = ship_addr.get('displayAddressText', ship_addr.get('addressDetail', ''))
         
+        # İl ve İlçe bilgisini çek
+        ship_city_name = ship_addr.get('cityName', '') or p_order.shipping_city or ''
+        ship_district_name = ship_addr.get('districtName', '') or p_order.shipping_district or ''
+        
+        # İl'i Odoo state tablosundan bul
+        ship_state = self._find_turkey_state(ship_city_name)
+
         # Ön Ek (Prefix) Uygulaması
         customer_ref = ''
         if store.customer_prefix and p_order.customer_id:
@@ -244,16 +269,18 @@ class PazaramaOrderSync(models.Model):
             partner = partner_env.search([('name', '=ilike', p_order.customer_name)], limit=1)
         
         if not partner:
-            partner = partner_env.create({
+            partner_vals = {
                 'name': p_order.customer_name,
                 'email': final_email,
                 'phone': phone,
                 'street': display_text,
-                'city': p_order.shipping_city,
+                'city': ship_district_name,  # İlçe
+                'state_id': ship_state.id if ship_state else False,  # İl
                 'country_id': country_tr,
                 'ref': customer_ref,
-                'company_type': 'person' if bill_addr.get('invoiceType') == 1 else 'company'
-            })
+                'company_type': 'person' if bill_addr.get('invoiceType') == 1 else 'company',
+            }
+            partner = partner_env.create(partner_vals)
             
             # Eğer kurumsalsa fatura adresi bilgilerine göre vergi bilgilerini güncelle
             if bill_addr.get('invoiceType') == 2:
@@ -262,17 +289,33 @@ class PazaramaOrderSync(models.Model):
                     'vat': bill_addr.get('taxNumber') or bill_addr.get('identityNumber'),
                     'is_subject_to_einvoice': bill_addr.get('isEInvoiceObliged', False)
                 })
+        else:
+            # Mevcut partner'ın il/ilçe boşsa güncelle
+            update_vals = {}
+            if not partner.city and ship_district_name:
+                update_vals['city'] = ship_district_name
+            if not partner.state_id and ship_state:
+                update_vals['state_id'] = ship_state.id
+            if not partner.street and display_text:
+                update_vals['street'] = display_text
+            if update_vals:
+                partner.write(update_vals)
         
         # Fatura adresi farklıysa onu oluştur
         invoice_partner = partner
         if bill_addr and bill_addr.get('invoiceType') == 2:
             bill_display = bill_addr.get('displayAddressText', bill_addr.get('addressDetail', ''))
+            bill_city_name = bill_addr.get('cityName', '')
+            bill_district_name = bill_addr.get('districtName', '')
+            bill_state = self._find_turkey_state(bill_city_name)
             invoice_partner = partner_env.create({
                 'name': bill_addr.get('companyName') or p_order.customer_name,
                 'type': 'invoice',
                 'parent_id': partner.id,
                 'street': bill_display,
-                'city': bill_addr.get('cityName', ''),
+                'city': bill_district_name,  # İlçe
+                'state_id': bill_state.id if bill_state else False,  # İl
+                'country_id': country_tr,
                 'vat': bill_addr.get('taxNumber') or bill_addr.get('identityNumber'),
                 'is_subject_to_einvoice': bill_addr.get('isEInvoiceObliged', False),
                 'ref': customer_ref,
