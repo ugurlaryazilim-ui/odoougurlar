@@ -290,14 +290,16 @@ class PazaramaOrderSync(models.Model):
                     'is_subject_to_einvoice': bill_addr.get('isEInvoiceObliged', False)
                 })
         else:
-            # Mevcut partner'ın il/ilçe boşsa güncelle
+            # Mevcut partner'ın il/ilçe bilgilerini güncelle
             update_vals = {}
-            if not partner.city and ship_district_name:
+            if ship_district_name:
                 update_vals['city'] = ship_district_name
-            if not partner.state_id and ship_state:
+            if ship_state:
                 update_vals['state_id'] = ship_state.id
             if not partner.street and display_text:
                 update_vals['street'] = display_text
+            if not partner.country_id:
+                update_vals['country_id'] = country_tr
             if update_vals:
                 partner.write(update_vals)
         
