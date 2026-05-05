@@ -397,13 +397,14 @@ class PackingApiController(BarcodeApiBase):
                 data['cargo_provider'] = mp_info['cargo_provider']
                 data['order_number'] = mp_info['order_number']
                 data['customer_name'] = mp_info['customer_name']
-                # Trendyol-specific shipping fields
+                data['marketplace_name'] = mp_info['marketplace_name']
+                # Shipping fields — her marketplace modülünden çek
                 for field, num_field, name in _MARKETPLACE_REGISTRY:
-                    if name == 'Trendyol' and hasattr(sale, field) and getattr(sale, field):
-                        torder = getattr(sale, field)
-                        data['shipping_address'] = getattr(torder, 'shipping_address', '') or ''
-                        data['shipping_city'] = getattr(torder, 'shipping_city', '') or ''
-                        data['shipping_district'] = getattr(torder, 'shipping_district', '') or ''
+                    if hasattr(sale, field) and getattr(sale, field):
+                        morder = getattr(sale, field)
+                        data['shipping_address'] = getattr(morder, 'shipping_address', '') or ''
+                        data['shipping_city'] = getattr(morder, 'shipping_city', '') or ''
+                        data['shipping_district'] = getattr(morder, 'shipping_district', '') or ''
                         break
 
         # Ürün listesi

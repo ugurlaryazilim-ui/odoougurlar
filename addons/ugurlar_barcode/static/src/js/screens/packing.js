@@ -2,6 +2,7 @@
 
 import { Component, useState, xml, onMounted } from "@odoo/owl";
 import { BarcodeService, AudioFeedback } from "../barcode_service";
+import { generateBarcodeSVG } from "./label_designer";
 
 export class PackingScreen extends Component {
     static template = xml`
@@ -527,6 +528,7 @@ export class PackingScreen extends Component {
     // ─── ETİKET BAS ─────────────────────────────
     async printLabel(pickingId) {
         try {
+            // 1. Sipariş verisi çek
             const data = await BarcodeService.call('/ugurlar_barcode/api/packing_label_data', {
                 picking_id: pickingId,
             });
@@ -534,13 +536,134 @@ export class PackingScreen extends Component {
                 this.state.error = data.error;
                 return;
             }
-            this._openLabelPrint(data);
+
+            // 2. Kayıtlı "Kargo" şablonunu çek
+            let template = null;
+            try {
+                const res = await BarcodeService.labelTemplateList();
+                const cargoTemplates = (res.templates || []).filter(t => t.name.startsWith('Kargo'));
+                if (cargoTemplates.length > 0) {
+                    template = cargoTemplates[0]; // İlk Kargo şablonunu kullan
+                }
+            } catch (e) {
+                console.warn('Kargo şablonu yüklenemedi, varsayılan kullanılacak');
+            }
+
+            if (template && template.elements && template.elements.length > 0) {
+                this._renderCargoTemplate(template, data);
+            } else {
+                this._openDefaultLabelPrint(data);
+            }
         } catch (e) {
             this.state.error = 'Etiket verisi alınamadı';
         }
     }
 
-    _openLabelPrint(data) {
+    _getFieldValue(type, data) {
+        const map = {
+            order_number:      data.order_number || data.origin || '',
+            picking_name:      data.picking_name || '',
+            origin:            data.origin || '',
+            marketplace:       data.marketplace_name || '',
+            customer_name:     data.customer_name || data.partner_name || '',
+            partner_phone:     data.partner_phone || '',
+            shipping_address:  data.shipping_address || data.partner_address || '',
+            shipping_city:     data.shipping_city || '',
+            shipping_district: data.shipping_district || '',
+            cargo_tracking:    data.cargo_tracking || '',
+            cargo_provider:    data.cargo_provider || '',
+            total_qty:         (data.total_qty || 0) + ' adet',
+            total_items:       (data.total_items || 0) + ' çeşit',
+            date_today:        new Date().toLocaleDateString('tr-TR'),
+        };
+        return map[type] !== undefined ? map[type] : '';
+    }
+
+    _renderCargoTemplate(template, data) {
+        const MM_TO_PX = 3.78;
+        const wPx = Math.round(template.width_mm * MM_TO_PX);
+        const hPx = Math.round(template.height_mm * MM_TO_PX);
+
+        let elementsHtml = '';
+        for (const el of template.elements) {
+            const x = Math.round(el.x * MM_TO_PX);
+            const y = Math.round(el.y * MM_TO_PX);
+            const w = Math.round(el.width * MM_TO_PX);
+            const h = Math.round(el.height * MM_TO_PX);
+            const fs = el.fontSize || 9;
+            const fw = el.fontWeight || 'normal';
+            const ta = el.textAlign || 'left';
+            const color = el.color || '#000000';
+            const bgColor = el.bgColor || 'transparent';
+            const rotation = el.rotation || 0;
+
+            let content = '';
+
+            if (el.type === 'line') {
+                elementsHtml += `<div style="position:absolute; left:${x}px; top:${y}px; width:${w}px; height:${Math.max(h, 1)}px; background:${color};"></div>`;
+                continue;
+            }
+
+            if (el.type === 'box') {
+                const bw = el.borderWidth || 1;
+                elementsHtml += `<div style="position:absolute; left:${x}px; top:${y}px; width:${w}px; height:${h}px; border:${bw}px solid ${color}; background:${bgColor};"></div>`;
+                continue;
+            }
+
+            if (el.type === 'cargo_barcode') {
+                const barcodeValue = data.cargo_tracking || '';
+                if (barcodeValue) {
+                    const svg = generateBarcodeSVG(barcodeValue, el.width, el.height);
+                    elementsHtml += `<div style="position:absolute; left:${x}px; top:${y}px; width:${w}px; height:${h}px; transform:rotate(${rotation}deg);">${svg}</div>`;
+                }
+                continue;
+            }
+
+            if (el.type === 'cargo_qr_code') {
+                const qrValue = el.content || data.cargo_tracking || '';
+                if (qrValue) {
+                    elementsHtml += `<div style="position:absolute; left:${x}px; top:${y}px; width:${w}px; height:${h}px; transform:rotate(${rotation}deg);"><img src="/report/barcode/?type=QR&value=${encodeURIComponent(qrValue)}" style="width:100%;height:100%;object-fit:contain;" /></div>`;
+                }
+                continue;
+            }
+
+            if (el.type === 'item_list') {
+                const items = data.items || [];
+                let tableHtml = '<table style="width:100%;border-collapse:collapse;font-size:inherit;"><thead><tr style="border-bottom:1px solid #333;"><th style="text-align:left;padding:0 1px;">#</th><th style="text-align:left;padding:0 1px;">Ürün</th><th style="text-align:right;padding:0 1px;">Adet</th><th style="text-align:left;padding:0 1px;">Barkod</th></tr></thead><tbody>';
+                items.forEach((item, idx) => {
+                    tableHtml += `<tr><td>${idx+1}</td><td>${item.product_name}</td><td style="text-align:right;">${item.qty}</td><td>${item.barcode}</td></tr>`;
+                });
+                tableHtml += '</tbody></table>';
+                elementsHtml += `<div style="position:absolute; left:${x}px; top:${y}px; width:${w}px; height:${h}px; font-size:${fs}pt; font-weight:${fw}; overflow:hidden; color:${color}; background:${bgColor}; transform:rotate(${rotation}deg);">${tableHtml}</div>`;
+                continue;
+            }
+
+            if (el.type === 'custom_text' || el.type === 'sender_name') {
+                content = el.content || '';
+            } else {
+                content = this._getFieldValue(el.type, data);
+            }
+
+            elementsHtml += `<div style="position:absolute; left:${x}px; top:${y}px; width:${w}px; height:${h}px; font-size:${fs}pt; font-weight:${fw}; text-align:${ta}; color:${color}; background:${bgColor}; transform:rotate(${rotation}deg); overflow:hidden; line-height:1.3; display:flex; align-items:center; ${ta === 'center' ? 'justify-content:center;' : ta === 'right' ? 'justify-content:flex-end;' : ''}">${content}</div>`;
+        }
+
+        const html = `<!DOCTYPE html><html><head>
+            <meta charset="utf-8">
+            <title>Kargo Etiketi — ${data.picking_name}</title>
+            <style>
+                @page { size: ${template.width_mm}mm ${template.height_mm}mm; margin: 0; }
+                * { margin:0; padding:0; box-sizing:border-box; }
+                body { font-family: Arial, sans-serif; }
+                .label { position:relative; width:${wPx}px; height:${hPx}px; overflow:hidden; }
+            </style>
+        </head><body>
+            <div class="label">${elementsHtml}</div>
+        </body></html>`;
+
+        this._printViaIframe(html);
+    }
+
+    _openDefaultLabelPrint(data) {
         const cargoBarcode = data.cargo_tracking || '';
         const barcodeHtml = cargoBarcode
             ? `<div style="text-align:center; margin:8px 0;">
@@ -577,45 +700,22 @@ export class PackingScreen extends Component {
                     <h2>${data.cargo_provider || 'KARGO'}</h2>
                     <span>${data.picking_name}</span>
                 </div>
-
                 <div class="info-grid">
-                    <div>
-                        <div class="info-label">Sipariş No</div>
-                        <div class="info-value">${data.order_number || data.origin}</div>
-                    </div>
-                    <div>
-                        <div class="info-label">Müşteri</div>
-                        <div class="info-value">${data.customer_name || data.partner_name}</div>
-                    </div>
-                    <div>
-                        <div class="info-label">Tel</div>
-                        <div class="info-value">${data.partner_phone || '-'}</div>
-                    </div>
-                    <div>
-                        <div class="info-label">Adet</div>
-                        <div class="info-value">${data.total_qty} ürün</div>
-                    </div>
+                    <div><div class="info-label">Sipariş No</div><div class="info-value">${data.order_number || data.origin}</div></div>
+                    <div><div class="info-label">Müşteri</div><div class="info-value">${data.customer_name || data.partner_name}</div></div>
+                    <div><div class="info-label">Tel</div><div class="info-value">${data.partner_phone || '-'}</div></div>
+                    <div><div class="info-label">Adet</div><div class="info-value">${data.total_qty} ürün</div></div>
                 </div>
-
-                <div>
-                    <div class="info-label">Adres</div>
-                    <div class="info-value" style="font-size:10px;">${data.shipping_address || data.partner_address}</div>
-                    <div class="info-value">${[data.shipping_district, data.shipping_city].filter(x=>x).join(' / ')}</div>
-                </div>
-
-                <div class="cargo-section">
-                    <div class="info-label">Kargo Takip No</div>
-                    <div class="tracking">${cargoBarcode}</div>
-                    ${barcodeHtml}
-                </div>
-
-                <table>
-                    <thead><tr><th>Ürün</th><th>Adet</th><th>Barkod</th></tr></thead>
-                    <tbody>${itemsHtml}</tbody>
-                </table>
+                <div><div class="info-label">Adres</div><div class="info-value" style="font-size:10px;">${data.shipping_address || data.partner_address}</div><div class="info-value">${[data.shipping_district, data.shipping_city].filter(x=>x).join(' / ')}</div></div>
+                <div class="cargo-section"><div class="info-label">Kargo Takip No</div><div class="tracking">${cargoBarcode}</div>${barcodeHtml}</div>
+                <table><thead><tr><th>Ürün</th><th>Adet</th><th>Barkod</th></tr></thead><tbody>${itemsHtml}</tbody></table>
             </div>
         </body></html>`;
 
+        this._printViaIframe(html);
+    }
+
+    _printViaIframe(html) {
         // Tabletlerde Popup Blocker'ı aşmak ve direk yazdırmak için görünür ama ufacık iframe kuralım
         let iframe = document.getElementById('ub-print-iframe');
         if (!iframe) {
