@@ -92,7 +92,15 @@ class IdefixOrderSync(models.Model):
         order_status = order_json.get('status', '')
         
         if existing_idefix:
-            existing_idefix.write({'order_status': order_status})
+            update_vals = {'order_status': order_status}
+            # Kargo bilgisi sonradan gelebilir — güncelle
+            cargo_tracking = order_json.get('cargoTrackingNumber') or ''
+            cargo_provider = order_json.get('cargoCompany') or ''
+            if cargo_tracking and not existing_idefix.cargo_tracking_number:
+                update_vals['cargo_tracking_number'] = cargo_tracking
+            if cargo_provider and not existing_idefix.cargo_provider:
+                update_vals['cargo_provider'] = cargo_provider
+            existing_idefix.write(update_vals)
             return 'updated'
 
         order_date_str = order_json.get('orderDate') or order_json.get('createdAt')

@@ -93,7 +93,14 @@ class FloOrderSync(models.Model):
         order_status = order_json.get('shipmentPackageStatus', '')
         
         if existing_flo:
-            existing_flo.write({'order_status': order_status})
+            update_vals = {'order_status': order_status}
+            cargo_tracking = order_json.get('cargoTrackingNumber', '')
+            if cargo_tracking and not existing_flo.cargo_tracking_number:
+                update_vals['cargo_tracking_number'] = cargo_tracking
+            cargo_provider = order_json.get('cargoProviderName', '')
+            if cargo_provider and not existing_flo.cargo_provider:
+                update_vals['cargo_provider'] = cargo_provider
+            existing_flo.write(update_vals)
             return 'updated'
 
         order_date_ts = order_json.get('orderDate')

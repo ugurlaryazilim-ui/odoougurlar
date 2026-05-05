@@ -95,9 +95,18 @@ class PazaramaOrderSync(models.Model):
         order_status = order_json.get('orderStatus', 0)
         
         if existing_pazarama:
-            # Guncelleme islemleri eklenebilir, iptal takibi vs.
-            # Şimdilik sadece statü güncelleyelim.
-            existing_pazarama.write({'order_status': order_status})
+            # Statü ve kargo bilgilerini güncelle
+            update_vals = {'order_status': order_status}
+            # Kargo bilgisi sonradan gelebilir — güncelle
+            items = order_json.get('items', [])
+            for item in items:
+                cargo = item.get('cargo', {})
+                if cargo.get('trackingNumber') and not existing_pazarama.cargo_tracking_number:
+                    update_vals['cargo_tracking_number'] = str(cargo['trackingNumber'])
+                if cargo.get('companyName') and not existing_pazarama.cargo_provider:
+                    update_vals['cargo_provider'] = str(cargo['companyName'])
+                break
+            existing_pazarama.write(update_vals)
             return 'updated'
 
         # Tarih formatı: "2023-01-25 15:22" -> Türkiye saatinden UTC'ye çevir

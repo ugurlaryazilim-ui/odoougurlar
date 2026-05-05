@@ -32,15 +32,22 @@ def _extract_marketplace_info(sale_order):
     for field, num_field, name in _MARKETPLACE_REGISTRY:
         if hasattr(sale_order, field) and getattr(sale_order, field):
             order = getattr(sale_order, field)
+            # Kargo takip no: birden fazla field dene
+            cargo_tracking = (
+                getattr(order, 'cargo_tracking_number', '') or
+                getattr(order, 'cargo_tracking', '') or
+                getattr(order, 'cargo_code', '') or
+                ''
+            )
             return {
                 'marketplace_name': name,
-                'cargo_tracking': getattr(order, 'cargo_tracking_number', '') or '',
-                'cargo_provider': getattr(order, 'cargo_provider', '') or '',
+                'cargo_tracking': cargo_tracking,
+                'cargo_provider': getattr(order, 'cargo_provider', '') or getattr(order, 'cargo_company', '') or '',
                 'customer_name': getattr(order, 'customer_name', '') or '',
                 'order_number': getattr(order, num_field, '') or '',
             }
     return {
-        'marketplace_name': 'Trendyol',  # Fallback
+        'marketplace_name': '',
         'cargo_tracking': '', 'cargo_provider': '',
         'customer_name': '', 'order_number': '',
     }
@@ -406,6 +413,10 @@ class PackingApiController(BarcodeApiBase):
                         data['shipping_city'] = getattr(morder, 'shipping_city', '') or ''
                         data['shipping_district'] = getattr(morder, 'shipping_district', '') or ''
                         break
+
+        # Fallback: Odoo picking kargo ref'i
+        if not data['cargo_tracking'] and picking.carrier_tracking_ref:
+            data['cargo_tracking'] = picking.carrier_tracking_ref
 
         # Ürün listesi
         items = []

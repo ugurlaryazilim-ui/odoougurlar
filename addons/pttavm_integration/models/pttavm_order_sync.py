@@ -95,7 +95,11 @@ class PttavmOrderSync(models.Model):
         first_product_status = products[0].get('siparisDurumu') if products else ''
         
         if existing_pttavm:
-            existing_pttavm.write({'order_status': first_product_status})
+            update_vals = {'order_status': first_product_status}
+            cargo_tracking = order_json.get('kargoBarkod', '')
+            if cargo_tracking and not existing_pttavm.cargo_tracking_number:
+                update_vals['cargo_tracking_number'] = cargo_tracking
+            existing_pttavm.write(update_vals)
             return 'updated'
 
         order_date_str = order_json.get('islemTarihi')
