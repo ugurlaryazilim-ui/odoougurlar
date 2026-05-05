@@ -85,10 +85,30 @@ class NebimDistrictMapping(models.Model):
     # In-memory cache for district lookups (worker-scoped)
     _district_cache = {}
 
+    @staticmethod
+    def _normalize_turkish(text):
+        """Türkçe karakterleri normalize et — ILIKE uyumsuzluğunu çöz."""
+        if not text:
+            return ''
+        # Türkçe → ASCII-benzeri (arama kolaylığı için)
+        tr_map = {
+            'İ': 'I', 'ı': 'i',
+            'Ğ': 'G', 'ğ': 'g',
+            'Ü': 'U', 'ü': 'u',
+            'Ş': 'S', 'ş': 's',
+            'Ö': 'O', 'ö': 'o',
+            'Ç': 'C', 'ç': 'c',
+        }
+        result = text.strip()
+        for tr_char, ascii_char in tr_map.items():
+            result = result.replace(tr_char, ascii_char)
+        return result
+
     @api.model
     def find_nebim_codes(self, odoo_state_name, odoo_city_name):
         """
         Odoo'daki il ve ilçe adlarını kullanarak Nebim kodlarını bulur.
+        Türkçe karakter uyumsuzluğunu handle eder (İ/I, ı/i, ş/s, vb.)
         Sonuçlar cache'lenir — aynı il/ilçe tekrar sorgulanmaz.
         """
         empty = {'state_code': '', 'city_code': '', 'district_code': ''}
@@ -101,31 +121,86 @@ class NebimDistrictMapping(models.Model):
         if cache_key in self._district_cache:
             return self._district_cache[cache_key]
 
+        # Tablo boşluk kontrolü
+        total = self.search_count([])
+        if total == 0:
+            _logger.error(
+                "⚠ Nebim İlçe tablosu BOŞ! "
+                "Ayarlar > Nebim > 'İlçe Senkronizasyonu' çalıştırın. "
+                "İl/İlçe kodları gönderilemeyecek."
+            )
+            self._district_cache[cache_key] = empty
+            return empty
+
         result = dict(empty)
 
-        # Önce ilçe adıyla ara (en spesifik)
-        if odoo_city_name:
-            domain = [('district_name', 'ilike', odoo_city_name.strip())]
-            if odoo_state_name:
-                domain.append(('city_name', 'ilike', odoo_state_name.strip()))
+        # Arama stratejisi: 3 aşamalı
+        # 1. Normal ILIKE (tam Türkçe karakter eşleşmesi)
+        # 2. Tüm kayıtlarda Python-level Türkçe normalize karşılaştırma
+        # 3. Sadece il ile eşleştirme (ilçe kodu en az il kodu dönsün)
 
-            match = self.search(domain, limit=1)
-            if match:
-                result['state_code'] = match.state_code or ''
-                result['city_code'] = match.city_code or ''
-                result['district_code'] = match.district_code or ''
-                self._district_cache[cache_key] = result
-                return result
+        match = self._search_district_match(odoo_state_name, odoo_city_name)
 
-        # İlçe bulunamadıysa sadece il adıyla ara
-        if odoo_state_name:
-            match = self.search([('city_name', 'ilike', odoo_state_name.strip())], limit=1)
-            if match:
-                result['state_code'] = match.state_code or ''
-                result['city_code'] = match.city_code or ''
-                result['district_code'] = match.district_code or ''
-                self._district_cache[cache_key] = result
-                return result
+        if match:
+            result['state_code'] = match.state_code or ''
+            result['city_code'] = match.city_code or ''
+            result['district_code'] = match.district_code or ''
+            _logger.info("Nebim İl/İlçe eşleşti: %s/%s → state=%s, city=%s, district=%s",
+                         odoo_state_name, odoo_city_name,
+                         result['state_code'], result['city_code'], result['district_code'])
+        else:
+            _logger.warning(
+                "Nebim İl/İlçe eşleşMEDİ: il='%s', ilçe='%s' — "
+                "Nebim tablosunda %d kayıt var ama eşleşen bulunamadı.",
+                odoo_state_name, odoo_city_name, total
+            )
 
         self._district_cache[cache_key] = result
         return result
+
+    def _search_district_match(self, state_name, city_name):
+        """İlçe eşleştirmesini 3 aşamalı arama ile yapar."""
+        # ─── Aşama 1: ILIKE ile doğrudan arama ───
+        if city_name:
+            domain = [('district_name', 'ilike', city_name.strip())]
+            if state_name:
+                domain.append(('city_name', 'ilike', state_name.strip()))
+            match = self.search(domain, limit=1)
+            if match:
+                return match
+
+        # ─── Aşama 2: Türkçe normalize arama (İ/I farkı çözümü) ───
+        norm_city = self._normalize_turkish(city_name) if city_name else ''
+        norm_state = self._normalize_turkish(state_name) if state_name else ''
+
+        if norm_city:
+            # Nebim verilerini çek ve Python'da normalize karşılaştır
+            candidates = self.search([])  # tüm kayıtlar (cache'li olduğu için hızlı)
+            for rec in candidates:
+                rec_district = self._normalize_turkish(rec.district_name)
+                rec_city = self._normalize_turkish(rec.city_name)
+                if norm_city.lower() in rec_district.lower():
+                    if not norm_state or norm_state.lower() in rec_city.lower():
+                        _logger.info("Türkçe normalize eşleşme bulundu: %s/%s → %s/%s",
+                                     city_name, state_name, rec.district_name, rec.city_name)
+                        return rec
+
+        # ─── Aşama 3: Sadece il ile eşleştir (en az il kodu dönsün) ───
+        if state_name:
+            match = self.search([('city_name', 'ilike', state_name.strip())], limit=1)
+            if match:
+                _logger.info("İlçe bulunamadı, il bazlı eşleşme: %s → city_code=%s",
+                             state_name, match.city_code)
+                return match
+
+            # Türkçe normalize il araması
+            if norm_state:
+                candidates = self.search([])
+                for rec in candidates:
+                    if norm_state.lower() in self._normalize_turkish(rec.city_name).lower():
+                        _logger.info("Türkçe normalize il eşleşme: %s → %s",
+                                     state_name, rec.city_name)
+                        return rec
+
+        return False
+

@@ -21,8 +21,10 @@ class CustomerProcessor(models.AbstractModel):
             district_model = self.env['odoougurlar.nebim.district'].sudo()
             odoo_state = partner.state_id.name if partner.state_id else ''
             odoo_city = partner.city or ''
+            _logger.info("Nebim Cari İl/İlçe girdi: state_id.name='%s', city='%s', partner=%s",
+                         odoo_state, odoo_city, partner.name)
             nebim_codes = district_model.find_nebim_codes(odoo_state, odoo_city)
-            _logger.info("İl/İlçe eşleştirmesi: %s/%s → %s", odoo_state, odoo_city, nebim_codes)
+            _logger.info("Nebim Cari İl/İlçe sonuç: %s → %s", partner.name, nebim_codes)
         except Exception as e:
             _logger.warning("İl/İlçe eşleştirme hatası (devam ediliyor): %s", e)
         
