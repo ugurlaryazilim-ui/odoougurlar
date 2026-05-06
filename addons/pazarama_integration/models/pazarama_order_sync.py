@@ -1,6 +1,7 @@
 
 import json
 import logging
+import re
 import pytz
 from datetime import datetime, timedelta
 
@@ -192,14 +193,42 @@ class PazaramaOrderSync(models.Model):
             )
 
             price_info = item.get('salePrice') or {}
-            
+            discount_info = item.get('discountAmount') or {}
+
+            # ─── Pazarama Fiyat Hesaplama ───
+            # 1. Brüt KDV dahil fiyat (salePrice)
+            gross_price_incl = price_info.get('value', 0.0)
+            quantity = item.get('quantity', 1) or 1
+            vat_rate = product.get('vatRate', 0)  # ör: 10, 20, 1
+
+            # 2. İndirim: önce discountAmount, yoksa discountDescription'dan parse
+            item_discount = discount_info.get('value', 0.0) if isinstance(discount_info, dict) else float(discount_info or 0)
+            if not item_discount:
+                desc = item.get('discountDescription') or ''
+                # "Pazarama İndirimi - 54 TL" veya "54,99 TL" formatını parse et
+                match = re.search(r'(\d+[.,]?\d*)\s*TL', desc)
+                if match:
+                    item_discount = float(match.group(1).replace(',', '.'))
+
+            # 3. Net KDV dahil fiyat = brüt - indirim (toplam, kalem başına değil)
+            #    İndirim kalem başına dağıtılır
+            discount_per_unit = item_discount / quantity if quantity else 0
+            net_price_incl = gross_price_incl - discount_per_unit
+
+            # 4. KDV hariç fiyat (Odoo'ya yazılacak)
+            #    Odoo üstüne KDV ekler → toplam = net_price_incl olur
+            if vat_rate > 0:
+                price_excl_tax = net_price_incl / (1 + vat_rate / 100.0)
+            else:
+                price_excl_tax = net_price_incl
+
             line_vals = {
                 'item_id': item.get('orderItemId'),
                 'product_id': product.get('productId'),
                 'product_name': product.get('name'),
                 'product_code': product.get('code') or product.get('stockCode'),
-                'quantity': item.get('quantity', 1),
-                'sale_price': price_info.get('value', 0.0),
+                'quantity': quantity,
+                'sale_price': round(price_excl_tax, 2),
                 'status': item.get('orderItemStatus', 0),
                 'cargo_tracking': line_cargo_tracking,
                 'cargo_company': cargo.get('companyName'),
