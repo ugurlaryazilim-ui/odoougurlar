@@ -583,6 +583,12 @@ export class PackingScreen extends Component {
         const wMm = template.width_mm;
         const hMm = template.height_mm;
 
+        // ─── YÖNTEM: Yüzdesel konumlandırma ───
+        // Tarayıcılar @page size'ı sıklıkla görmezden gelir ve yazıcı sürücüsünün
+        // varsayılan kağıt boyutunu kullanır. Bu yüzden tüm elemanları hem mm
+        // hem de yüzde cinsinden konumlandırıyoruz. Böylece yazıcı hangi boyutu
+        // kullanırsa kullansın, içerik doğru oranlarda basılır.
+
         let elementsHtml = '';
         for (const el of template.elements) {
             const x = el.x;
@@ -596,17 +602,28 @@ export class PackingScreen extends Component {
             const bgColor = el.bgColor || 'transparent';
             const rotation = el.rotation || 0;
 
+            // Yüzdesel pozisyonlar (fallback olarak)
+            const xPct = (x / wMm * 100).toFixed(3);
+            const yPct = (y / hMm * 100).toFixed(3);
+            const wPct = (w / wMm * 100).toFixed(3);
+            const hPct = (h / hMm * 100).toFixed(3);
+            // Font boyutunu vw birimine çevir (1vw = kağıt genişliğinin %1'i)
+            // pt -> mm: 1pt ≈ 0.353mm, sonra mm -> vw
+            const fsMmApprox = fs * 0.353;
+            const fsVw = (fsMmApprox / wMm * 100).toFixed(3);
+
             let content = '';
 
             if (el.type === 'line') {
                 const lineH = Math.max(h, 0.3);
-                elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${lineH}mm; background:${color}; transform:rotate(${rotation}deg);"></div>`;
+                const lineHPct = (lineH / hMm * 100).toFixed(3);
+                elementsHtml += `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:${lineHPct}%; background:${color}; transform:rotate(${rotation}deg);"></div>`;
                 continue;
             }
 
             if (el.type === 'box') {
                 const bw = el.borderWidth || 1;
-                elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; border:${bw}px solid ${color}; background:${bgColor}; transform:rotate(${rotation}deg);"></div>`;
+                elementsHtml += `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:${hPct}%; border:${bw}px solid ${color}; background:${bgColor}; transform:rotate(${rotation}deg);"></div>`;
                 continue;
             }
 
@@ -616,7 +633,7 @@ export class PackingScreen extends Component {
                     const encoded = encodeURIComponent(barcodeValue);
                     const imgW = Math.round(w * 12);
                     const imgH = Math.round(h * 12);
-                    elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; transform:rotate(${rotation}deg); text-align:center;">
+                    elementsHtml += `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:${hPct}%; transform:rotate(${rotation}deg); text-align:center;">
                         <img src="/report/barcode/Code128/${encoded}?width=${imgW}&height=${imgH}&humanreadable=1"
                             style="width:100%; height:100%; object-fit:contain; image-rendering:-webkit-crisp-edges; image-rendering:pixelated;"
                             onerror="this.style.display='none'" />
@@ -628,7 +645,7 @@ export class PackingScreen extends Component {
             if (el.type === 'cargo_qr_code') {
                 const qrValue = el.content || data.cargo_tracking || '';
                 if (qrValue) {
-                    elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; transform:rotate(${rotation}deg);"><img src="/report/barcode/?type=QR&value=${encodeURIComponent(qrValue)}&width=${Math.round(w * 12)}&height=${Math.round(h * 12)}" style="width:100%;height:100%;object-fit:contain;" /></div>`;
+                    elementsHtml += `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:${hPct}%; transform:rotate(${rotation}deg);"><img src="/report/barcode/?type=QR&value=${encodeURIComponent(qrValue)}&width=${Math.round(w * 12)}&height=${Math.round(h * 12)}" style="width:100%;height:100%;object-fit:contain;" /></div>`;
                 }
                 continue;
             }
@@ -640,7 +657,7 @@ export class PackingScreen extends Component {
                     tableHtml += `<tr><td style="padding:0 0.5mm;">${idx+1}</td><td style="padding:0 0.5mm;">${item.product_name}</td><td style="text-align:right;padding:0 0.5mm;">${item.qty}</td><td style="padding:0 0.5mm;">${item.barcode}</td></tr>`;
                 });
                 tableHtml += '</tbody></table>';
-                elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; font-size:${fs}pt; font-weight:${fw}; overflow:hidden; color:${color}; background:${bgColor}; transform:rotate(${rotation}deg);">${tableHtml}</div>`;
+                elementsHtml += `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:${hPct}%; font-size:${fsVw}vw; font-weight:${fw}; overflow:hidden; color:${color}; background:${bgColor}; transform:rotate(${rotation}deg);">${tableHtml}</div>`;
                 continue;
             }
 
@@ -650,44 +667,99 @@ export class PackingScreen extends Component {
                 content = this._getFieldValue(el.type, data);
             }
 
-            elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; font-size:${fs}pt; font-weight:${fw}; text-align:${ta}; color:${color}; background:${bgColor}; transform:rotate(${rotation}deg); overflow:hidden; line-height:1.3; display:flex; align-items:center; ${ta === 'center' ? 'justify-content:center;' : ta === 'right' ? 'justify-content:flex-end;' : ''}">${content}</div>`;
+            elementsHtml += `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:${hPct}%; font-size:${fsVw}vw; font-weight:${fw}; text-align:${ta}; color:${color}; background:${bgColor}; transform:rotate(${rotation}deg); overflow:hidden; line-height:1.3; display:flex; align-items:center; ${ta === 'center' ? 'justify-content:center;' : ta === 'right' ? 'justify-content:flex-end;' : ''}">${content}</div>`;
         }
 
-        // Sade, temiz HTML — ekstra DOM yok, sadece label
+        // ─── HTML: Hem mm hem % ile uyumlu, tek sayfa zorlama ───
+        // Çoklu @page tanımı + body'de max/overflow kısıtlamaları
+        // Tarayıcı @page size'ı kabul ederse mm ile basılır,
+        // kabul etmezse % ile yazıcının gerçek kağıt boyutuna uyumlanır.
         const html = `<!DOCTYPE html><html><head>
             <meta charset="utf-8">
             <title>Kargo Etiketi ${wMm}x${hMm}mm</title>
             <style>
-                @page { size: ${wMm}mm ${hMm}mm; margin: 0; }
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                html, body { margin: 0; padding: 0; }
+                @page {
+                    size: ${wMm}mm ${hMm}mm !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                }
+                *, *::before, *::after {
+                    margin: 0; padding: 0; box-sizing: border-box;
+                }
+                html {
+                    margin: 0 !important; padding: 0 !important;
+                    width: 100%; height: 100%;
+                    overflow: hidden !important;
+                }
                 body {
-                    width: ${wMm}mm;
-                    height: ${hMm}mm;
+                    margin: 0 !important; padding: 0 !important;
+                    width: 100%; height: 100%;
+                    max-width: ${wMm}mm; max-height: ${hMm}mm;
+                    overflow: hidden !important;
                     font-family: Arial, Helvetica, sans-serif;
                     -webkit-print-color-adjust: exact !important;
                     print-color-adjust: exact !important;
                 }
                 .label {
                     position: relative;
-                    width: ${wMm}mm;
-                    height: ${hMm}mm;
-                    overflow: visible;
+                    width: 100%; height: 100%;
+                    max-width: ${wMm}mm; max-height: ${hMm}mm;
+                    overflow: hidden !important;
+                    page-break-after: avoid !important;
+                    page-break-inside: avoid !important;
+                    break-after: avoid !important;
+                    break-inside: avoid !important;
                 }
                 img {
                     image-rendering: pixelated;
                     image-rendering: -moz-crisp-edges;
                 }
+                /* İkinci sayfa çıkmasını kesinlikle engelle */
+                body::after { display: none !important; }
                 @media print {
-                    @page { size: ${wMm}mm ${hMm}mm; margin: 0; }
-                    body { width: ${wMm}mm; height: ${hMm}mm; }
+                    @page {
+                        size: ${wMm}mm ${hMm}mm !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                    }
+                    html, body {
+                        width: 100% !important; height: 100% !important;
+                        max-width: ${wMm}mm !important; max-height: ${hMm}mm !important;
+                        margin: 0 !important; padding: 0 !important;
+                        overflow: hidden !important;
+                    }
+                    .label {
+                        width: 100% !important; height: 100% !important;
+                        max-width: ${wMm}mm !important; max-height: ${hMm}mm !important;
+                        overflow: hidden !important;
+                        page-break-after: avoid !important;
+                    }
                 }
+                /* Yazdır diyaloğu açılmadan önce ekranda gösterilecek bilgi */
+                @media screen {
+                    body { display: flex; justify-content: center; align-items: flex-start; padding: 20px; background: #f0f0f0; height: auto; max-height: none; overflow: visible; }
+                    .label { box-shadow: 0 2px 10px rgba(0,0,0,0.15); background: white; flex-shrink: 0; }
+                    .print-info { display: block; }
+                }
+                @media print {
+                    .print-info { display: none !important; }
+                }
+                .print-info {
+                    position: fixed; top: 0; left: 0; right: 0;
+                    background: #1a1a2e; color: white;
+                    padding: 12px 20px; font-size: 13px; z-index: 9999;
+                    text-align: center; font-family: Arial, sans-serif;
+                }
+                .print-info b { color: #ffd700; }
             </style>
         </head><body>
+            <div class="print-info">
+                ⚠️ Yazdırma ayarlarında: <b>Kağıt boyutu = ${wMm} × ${hMm} mm</b> | <b>Kenar boşlukları = Yok</b> | <b>Ölçek = %100</b>
+            </div>
             <div class="label">${elementsHtml}</div>
         </body></html>`;
 
-        this._printViaWindow(html);
+        this._printViaWindow(html, wMm, hMm);
     }
 
     _openDefaultLabelPrint(data) {
@@ -743,29 +815,42 @@ export class PackingScreen extends Component {
         this._printViaWindow(html);
     }
 
-    _printViaWindow(html) {
-        // Yeni pencere aç — @page size desteği iframe'den daha güvenilir
-        const win = window.open('', '_blank', `width=800,height=600`);
+    _printViaWindow(html, wMm, hMm) {
+        // ─── Blob URL yöntemi ───
+        // document.write() yerine Blob URL kullanmak tarayıcının
+        // @page size CSS kuralını daha güvenilir şekilde okumasını sağlar.
+        const blob = new Blob([html], { type: 'text/html; charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+
+        const win = window.open(url, '_blank', 'width=800,height=700');
         if (!win) {
-            // Popup engellenmiş — iframe fallback
+            // Popup engellendiyse iframe fallback
             this._printViaIframe(html);
+            URL.revokeObjectURL(url);
             return;
         }
-        win.document.write(html);
-        win.document.close();
 
-        // Görsellerin (barkod, QR) yüklenmesini bekle, sonra yazdır
+        // Görsellerin yüklenmesini bekle sonra yazdır
         const tryPrint = () => {
-            const imgs = win.document.querySelectorAll('img');
-            const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
-            if (allLoaded || imgs.length === 0) {
+            try {
+                const imgs = win.document.querySelectorAll('img');
+                const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
+                if (allLoaded || imgs.length === 0) {
+                    win.focus();
+                    win.print();
+                    // Blob URL'yi biraz sonra temizle
+                    setTimeout(() => URL.revokeObjectURL(url), 5000);
+                } else {
+                    setTimeout(tryPrint, 200);
+                }
+            } catch (e) {
+                // Cross-origin hata olabilir, yine de yazdırmayı dene
                 win.focus();
                 win.print();
-            } else {
-                setTimeout(tryPrint, 200);
+                setTimeout(() => URL.revokeObjectURL(url), 5000);
             }
         };
-        setTimeout(tryPrint, 600);
+        setTimeout(tryPrint, 800);
     }
 
     _printViaIframe(html) {
@@ -773,35 +858,43 @@ export class PackingScreen extends Component {
         const old = document.getElementById('ub-print-iframe');
         if (old) old.parentNode.removeChild(old);
 
+        const blob = new Blob([html], { type: 'text/html; charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+
         const iframe = document.createElement('iframe');
         iframe.id = 'ub-print-iframe';
         iframe.style.position = 'fixed';
         iframe.style.right = '0';
         iframe.style.bottom = '0';
-        iframe.style.width = '300mm';
-        iframe.style.height = '300mm';
+        iframe.style.width = '1px';
+        iframe.style.height = '1px';
         iframe.style.opacity = '0.01';
         iframe.style.border = '0';
         iframe.style.pointerEvents = 'none';
         iframe.style.zIndex = '-9999';
+        iframe.src = url;
         document.body.appendChild(iframe);
 
-        const doc = iframe.contentWindow.document;
-        doc.open();
-        doc.write(html);
-        doc.close();
-
-        const tryPrint = () => {
-            const imgs = doc.querySelectorAll('img');
-            const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
-            if (allLoaded || imgs.length === 0) {
-                iframe.contentWindow.focus();
-                iframe.contentWindow.print();
-            } else {
-                setTimeout(tryPrint, 200);
-            }
+        iframe.onload = () => {
+            const tryPrint = () => {
+                try {
+                    const imgs = iframe.contentDocument.querySelectorAll('img');
+                    const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
+                    if (allLoaded || imgs.length === 0) {
+                        iframe.contentWindow.focus();
+                        iframe.contentWindow.print();
+                        setTimeout(() => URL.revokeObjectURL(url), 5000);
+                    } else {
+                        setTimeout(tryPrint, 200);
+                    }
+                } catch (e) {
+                    iframe.contentWindow.focus();
+                    iframe.contentWindow.print();
+                    setTimeout(() => URL.revokeObjectURL(url), 5000);
+                }
+            };
+            setTimeout(tryPrint, 400);
         };
-        setTimeout(tryPrint, 600);
     }
 
     willUnmount() {

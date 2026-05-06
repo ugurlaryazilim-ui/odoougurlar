@@ -573,11 +573,33 @@ export class LabelScreen extends Component {
             html = this._buildDefaultHtml(allLabels);
         }
 
-        const printWindow = window.open('', '_blank');
-        printWindow.document.write(html);
-        printWindow.document.close();
-        printWindow.focus();
-        setTimeout(() => printWindow.print(), 300);
+        // Blob URL ile yazdırma — tarayıcı @page size'ı daha güvenilir okur
+        const blob = new Blob([html], { type: 'text/html; charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const printWindow = window.open(url, '_blank', 'width=800,height=700');
+        if (!printWindow) {
+            alert('Popup engellendi — lütfen popup\'a izin verin');
+            URL.revokeObjectURL(url);
+            return;
+        }
+        const tryPrint = () => {
+            try {
+                const imgs = printWindow.document.querySelectorAll('img');
+                const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
+                if (allLoaded || imgs.length === 0) {
+                    printWindow.focus();
+                    printWindow.print();
+                    setTimeout(() => URL.revokeObjectURL(url), 5000);
+                } else {
+                    setTimeout(tryPrint, 200);
+                }
+            } catch (e) {
+                printWindow.focus();
+                printWindow.print();
+                setTimeout(() => URL.revokeObjectURL(url), 5000);
+            }
+        };
+        setTimeout(tryPrint, 800);
     }
 
     _generateBarcodeImg(code, widthMm, heightMm) {
@@ -628,25 +650,33 @@ export class LabelScreen extends Component {
 
         const labelHtml = labels.map(l => {
             const contents = elems.map(el => {
+                // Yüzdesel konumlandırma — yazıcı @page size'ı görmezden gelse bile çalışır
+                const xPct = (el.x / w * 100).toFixed(3);
+                const yPct = (el.y / h * 100).toFixed(3);
+                const wPct = (el.width / w * 100).toFixed(3);
+                const hPct = (el.height / h * 100).toFixed(3);
+                const fsMm = (el.fontSize || 9) * 0.353;
+                const fsVw = (fsMm / w * 100).toFixed(3);
+
                 if (el.type === 'barcode_visual') {
                     const img = this._generateBarcodeImg(l.barcode || '', el.width, el.height);
-                    return `<div style="position:absolute; left:${el.x}mm; top:${el.y}mm; width:${el.width}mm; height:${el.height}mm; overflow:visible;">${img}</div>`;
+                    return `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:${hPct}%; overflow:visible;">${img}</div>`;
                 }
                 if (el.type === 'line') {
-                    return `<div style="position:absolute; left:${el.x}mm; top:${el.y}mm; width:${el.width}mm; height:0; border-top:${Math.max(0.3, el.height)}mm solid #000;"></div>`;
+                    return `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:0; border-top:${Math.max(0.3, el.height)}mm solid #000;"></div>`;
                 }
                 const val = this._getFieldValue(el, l);
                 if (!val) return '';
-                return `<div style="position:absolute; left:${el.x}mm; top:${el.y}mm; width:${el.width}mm; height:${el.height}mm; font-size:${el.fontSize}pt; font-weight:${el.fontWeight}; text-align:${el.textAlign || 'left'}; overflow:hidden; line-height:1.2; white-space:pre-wrap; word-break:break-word;">${val}</div>`;
+                return `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:${hPct}%; font-size:${fsVw}vw; font-weight:${el.fontWeight}; text-align:${el.textAlign || 'left'}; overflow:hidden; line-height:1.2; white-space:pre-wrap; word-break:break-word;">${val}</div>`;
             }).join('');
             return `<div class="label">${contents}</div>`;
         }).join('');
 
         return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etiketler</title><style>
-            @page { size: auto; margin: 0 !important; }
+            @page { size: ${w}mm ${h}mm !important; margin: 0 !important; }
             * { margin: 0; padding: 0; box-sizing: border-box; }
             html, body {
-                margin: 0; padding: 0;
+                margin: 0 !important; padding: 0 !important;
                 font-family: Arial, Helvetica, sans-serif;
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
@@ -658,7 +688,10 @@ export class LabelScreen extends Component {
             }
             .label:last-child { page-break-after: auto; }
             img { image-rendering: pixelated; image-rendering: -moz-crisp-edges; -ms-interpolation-mode: nearest-neighbor; }
-            @media print { @page { size: auto; margin: 0 !important; } html, body { margin:0!important; padding:0!important; } }
+            @media print {
+                @page { size: ${w}mm ${h}mm !important; margin: 0 !important; }
+                html, body { margin:0!important; padding:0!important; }
+            }
         </style></head><body>${labelHtml}</body></html>`;
     }
 
