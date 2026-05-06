@@ -275,9 +275,8 @@ class InvoiceProcessor(models.AbstractModel):
         
         # Sipariş Bazlı mı?
         # NOT: OrderLineID ile sipariş bazlı faturada Nebim kendi siparişindeki
-        # fiyatı kullanır ve PriceVI'yı görmezden gelir. Kullanıcı Odoo'da
-        # ürün/beden/fiyat değişikliği yapabildiği için HER ZAMAN serbest fatura
-        # (barcode + PriceVI) modunda gönderiyoruz.
+        # fiyatı kullanır. Serbest fatura modunda 'Price' (KDV hariç) gönderiyoruz.
+        # PriceVI Nebim tarafından görmezden geliniyor — sadece Price çalışıyor.
         is_order_base = False
         lines = []
         for line in invoice.invoice_line_ids:
@@ -285,13 +284,22 @@ class InvoiceProcessor(models.AbstractModel):
                 continue
 
             line_data = {
-                'Qty1': line.quantity,
-                'PriceVI': float(line.price_unit),
+                'Qty1': float(line.quantity),
+                'Price': float(line.price_unit),
             }
             if line.product_id.barcode:
                 line_data['UsedBarcode'] = line.product_id.barcode
             if line.product_id.default_code:
                 line_data['ItemCode'] = line.product_id.default_code
+
+            _logger.info(
+                "Nebim Fatura Satır: %s | Barcode=%s | ItemCode=%s | Qty=%s | Price(KDV hariç)=%s",
+                line.product_id.display_name,
+                line_data.get('UsedBarcode', 'YOK'),
+                line_data.get('ItemCode', 'YOK'),
+                line.quantity,
+                line.price_unit,
+            )
 
             lines.append(line_data)
 
