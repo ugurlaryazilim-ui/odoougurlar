@@ -580,16 +580,15 @@ export class PackingScreen extends Component {
     }
 
     _renderCargoTemplate(template, data) {
-        const MM_TO_PX = 3.78;
-        const wPx = Math.round(template.width_mm * MM_TO_PX);
-        const hPx = Math.round(template.height_mm * MM_TO_PX);
+        const wMm = template.width_mm;
+        const hMm = template.height_mm;
 
         let elementsHtml = '';
         for (const el of template.elements) {
-            const x = Math.round(el.x * MM_TO_PX);
-            const y = Math.round(el.y * MM_TO_PX);
-            const w = Math.round(el.width * MM_TO_PX);
-            const h = Math.round(el.height * MM_TO_PX);
+            const x = el.x;
+            const y = el.y;
+            const w = el.width;
+            const h = el.height;
             const fs = el.fontSize || 9;
             const fw = el.fontWeight || 'normal';
             const ta = el.textAlign || 'left';
@@ -600,13 +599,14 @@ export class PackingScreen extends Component {
             let content = '';
 
             if (el.type === 'line') {
-                elementsHtml += `<div style="position:absolute; left:${x}px; top:${y}px; width:${w}px; height:${Math.max(h, 1)}px; background:${color};"></div>`;
+                const lineH = Math.max(h, 0.3);
+                elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${lineH}mm; background:${color};"></div>`;
                 continue;
             }
 
             if (el.type === 'box') {
                 const bw = el.borderWidth || 1;
-                elementsHtml += `<div style="position:absolute; left:${x}px; top:${y}px; width:${w}px; height:${h}px; border:${bw}px solid ${color}; background:${bgColor};"></div>`;
+                elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; border:${bw}px solid ${color}; background:${bgColor};"></div>`;
                 continue;
             }
 
@@ -614,9 +614,9 @@ export class PackingScreen extends Component {
                 const barcodeValue = data.cargo_tracking || '';
                 if (barcodeValue) {
                     const encoded = encodeURIComponent(barcodeValue);
-                    const imgW = Math.round(el.width * 12);
-                    const imgH = Math.round(el.height * 12);
-                    elementsHtml += `<div style="position:absolute; left:${x}px; top:${y}px; width:${w}px; height:${h}px; transform:rotate(${rotation}deg); text-align:center;">
+                    const imgW = Math.round(w * 12);
+                    const imgH = Math.round(h * 12);
+                    elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; transform:rotate(${rotation}deg); text-align:center;">
                         <img src="/report/barcode/Code128/${encoded}?width=${imgW}&height=${imgH}&humanreadable=1"
                             style="width:100%; height:100%; object-fit:contain; image-rendering:-webkit-crisp-edges; image-rendering:pixelated;"
                             onerror="this.style.display='none'" />
@@ -628,19 +628,19 @@ export class PackingScreen extends Component {
             if (el.type === 'cargo_qr_code') {
                 const qrValue = el.content || data.cargo_tracking || '';
                 if (qrValue) {
-                    elementsHtml += `<div style="position:absolute; left:${x}px; top:${y}px; width:${w}px; height:${h}px; transform:rotate(${rotation}deg);"><img src="/report/barcode/?type=QR&value=${encodeURIComponent(qrValue)}" style="width:100%;height:100%;object-fit:contain;" /></div>`;
+                    elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; transform:rotate(${rotation}deg);"><img src="/report/barcode/?type=QR&value=${encodeURIComponent(qrValue)}&width=${Math.round(w * 12)}&height=${Math.round(h * 12)}" style="width:100%;height:100%;object-fit:contain;" /></div>`;
                 }
                 continue;
             }
 
             if (el.type === 'item_list') {
                 const items = data.items || [];
-                let tableHtml = '<table style="width:100%;border-collapse:collapse;font-size:inherit;"><thead><tr style="border-bottom:1px solid #333;"><th style="text-align:left;padding:0 1px;">#</th><th style="text-align:left;padding:0 1px;">Ürün</th><th style="text-align:right;padding:0 1px;">Adet</th><th style="text-align:left;padding:0 1px;">Barkod</th></tr></thead><tbody>';
+                let tableHtml = '<table style="width:100%;border-collapse:collapse;font-size:inherit;"><thead><tr style="border-bottom:0.3mm solid #333;"><th style="text-align:left;padding:0 0.5mm;">#</th><th style="text-align:left;padding:0 0.5mm;">Ürün</th><th style="text-align:right;padding:0 0.5mm;">Adet</th><th style="text-align:left;padding:0 0.5mm;">Barkod</th></tr></thead><tbody>';
                 items.forEach((item, idx) => {
-                    tableHtml += `<tr><td>${idx+1}</td><td>${item.product_name}</td><td style="text-align:right;">${item.qty}</td><td>${item.barcode}</td></tr>`;
+                    tableHtml += `<tr><td style="padding:0 0.5mm;">${idx+1}</td><td style="padding:0 0.5mm;">${item.product_name}</td><td style="text-align:right;padding:0 0.5mm;">${item.qty}</td><td style="padding:0 0.5mm;">${item.barcode}</td></tr>`;
                 });
                 tableHtml += '</tbody></table>';
-                elementsHtml += `<div style="position:absolute; left:${x}px; top:${y}px; width:${w}px; height:${h}px; font-size:${fs}pt; font-weight:${fw}; overflow:hidden; color:${color}; background:${bgColor}; transform:rotate(${rotation}deg);">${tableHtml}</div>`;
+                elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; font-size:${fs}pt; font-weight:${fw}; overflow:hidden; color:${color}; background:${bgColor}; transform:rotate(${rotation}deg);">${tableHtml}</div>`;
                 continue;
             }
 
@@ -650,17 +650,20 @@ export class PackingScreen extends Component {
                 content = this._getFieldValue(el.type, data);
             }
 
-            elementsHtml += `<div style="position:absolute; left:${x}px; top:${y}px; width:${w}px; height:${h}px; font-size:${fs}pt; font-weight:${fw}; text-align:${ta}; color:${color}; background:${bgColor}; transform:rotate(${rotation}deg); overflow:hidden; line-height:1.3; display:flex; align-items:center; ${ta === 'center' ? 'justify-content:center;' : ta === 'right' ? 'justify-content:flex-end;' : ''}">${content}</div>`;
+            elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; font-size:${fs}pt; font-weight:${fw}; text-align:${ta}; color:${color}; background:${bgColor}; transform:rotate(${rotation}deg); overflow:hidden; line-height:1.3; display:flex; align-items:center; ${ta === 'center' ? 'justify-content:center;' : ta === 'right' ? 'justify-content:flex-end;' : ''}">${content}</div>`;
         }
 
         const html = `<!DOCTYPE html><html><head>
             <meta charset="utf-8">
             <title>Kargo Etiketi — ${data.picking_name}</title>
             <style>
-                @page { size: ${template.width_mm}mm ${template.height_mm}mm; margin: 0; }
+                @page { size: ${wMm}mm ${hMm}mm; margin: 0 !important; }
                 * { margin:0; padding:0; box-sizing:border-box; }
-                body { font-family: Arial, sans-serif; }
-                .label { position:relative; width:${wPx}px; height:${hPx}px; overflow:hidden; }
+                html, body { margin:0; padding:0; }
+                body { font-family: Arial, sans-serif; -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+                .label { position:relative; width:${wMm}mm; height:${hMm}mm; overflow:hidden; }
+                img { image-rendering:pixelated; image-rendering:-moz-crisp-edges; -ms-interpolation-mode:nearest-neighbor; }
+                @media print { @page { size: ${wMm}mm ${hMm}mm; margin: 0 !important; } html, body { margin:0!important; padding:0!important; } }
             </style>
         </head><body>
             <div class="label">${elementsHtml}</div>
@@ -672,8 +675,9 @@ export class PackingScreen extends Component {
     _openDefaultLabelPrint(data) {
         const cargoBarcode = data.cargo_tracking || '';
         const barcodeHtml = cargoBarcode
-            ? `<div style="text-align:center; margin:8px 0;">
-                 <svg id="cargo-bc"></svg>
+            ? `<div style="text-align:center; margin:2mm 0;">
+                 <img src="/report/barcode/Code128/${encodeURIComponent(cargoBarcode)}?width=840&height=200&humanreadable=1"
+                     style="width:70mm; height:18mm; display:inline-block; object-fit:contain; image-rendering:-webkit-crisp-edges; image-rendering:pixelated;" />
                </div>`
             : '';
 
