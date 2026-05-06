@@ -951,6 +951,13 @@ class PackingApiController(BarcodeApiBase):
                     invoice_proc = picking.env['odoougurlar.invoice.processor'].sudo()
                     connector = picking.env['odoougurlar.nebim.connector'].sudo()
                     payload = invoice_proc._build_invoice_payload(check_invoice)
+                    
+                    # İstek payload'ını kaydet (debug için)
+                    import json
+                    check_invoice.write({
+                        'nebim_request': json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+                    })
+                    
                     result = connector.post_data('Post', payload)
                     
                     if isinstance(result, dict) and 'ExceptionMessage' in result:

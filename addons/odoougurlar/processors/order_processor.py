@@ -115,7 +115,8 @@ class OrderProcessor(models.AbstractModel):
 
 
         try:
-            #_logger.info(f"Nebim'e Sipariş Gidiyor: {payload}")
+            import json
+            sale_order.write({'nebim_order_request': json.dumps(payload, ensure_ascii=False, indent=2, default=str)})
             result = connector.post_data('Post', payload)
             
             # Nebim HTTP 200 dönse bile kendi içinde hata metni yollayabilir
@@ -137,7 +138,7 @@ class OrderProcessor(models.AbstractModel):
             _logger.info("Nebim Sipariş Yanıtı - %d satır LineID alındı", len(response_lines))
 
             # Dönen ID'leri satırlara yaz
-            order_lines = sale_order.order_line.filtered(lambda l: l.product_id)
+            order_lines = sale_order.order_line.filtered(lambda l: l.product_id and l.product_uom_qty > 0)
             for idx, ol in enumerate(order_lines):
                 if idx < len(response_lines):
                     line_data = response_lines[idx]

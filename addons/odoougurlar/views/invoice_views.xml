@@ -24,6 +24,9 @@
                         <field name="nebim_error" invisible="not nebim_error"/>
                         <field name="nebim_response" invisible="not nebim_response"/>
                     </group>
+                    <group invisible="not nebim_sent">
+                        <field name="nebim_request" string="Nebim İstek (JSON)" colspan="2"/>
+                    </group>
                 </group>
             </xpath>
         </field>

@@ -29,6 +29,11 @@ class AccountMove(models.Model):
         readonly=True,
         help='Gönderim sırasında oluşan hata mesajı',
     )
+    nebim_request = fields.Text(
+        string='Nebim İstek',
+        readonly=True,
+        help='Nebim API\'sine gönderilen JSON payload',
+    )
     nebim_invoice_number = fields.Char(
         string='Nebim Fatura No',
         readonly=True,

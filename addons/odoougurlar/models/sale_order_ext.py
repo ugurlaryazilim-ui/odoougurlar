@@ -12,6 +12,7 @@ class SaleOrder(models.Model):
     nebim_address_id = fields.Char(string='Nebim Adres ID', readonly=True)
     nebim_order_sent = fields.Boolean(string='Nebim Sipariş Aktarıldı', default=False)
     nebim_order_response = fields.Text(string='Nebim Sipariş Cevabı', readonly=True)
+    nebim_order_request = fields.Text(string='Nebim Sipariş İstek', readonly=True)
     nebim_export_file_number = fields.Char(string='Nebim ExportFileNumber', readonly=True)
 
     def action_reset_nebim(self):
