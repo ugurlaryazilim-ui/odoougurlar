@@ -657,19 +657,51 @@ export class PackingScreen extends Component {
             <meta charset="utf-8">
             <title>Kargo Etiketi — ${data.picking_name}</title>
             <style>
-                @page { size: ${wMm}mm ${hMm}mm; margin: 0 !important; }
+                @page {
+                    size: ${wMm}mm ${hMm}mm !important;
+                    margin: 0 !important;
+                }
                 * { margin:0; padding:0; box-sizing:border-box; }
-                html, body { margin:0; padding:0; }
-                body { font-family: Arial, sans-serif; -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
-                .label { position:relative; width:${wMm}mm; height:${hMm}mm; overflow:hidden; }
-                img { image-rendering:pixelated; image-rendering:-moz-crisp-edges; -ms-interpolation-mode:nearest-neighbor; }
-                @media print { @page { size: ${wMm}mm ${hMm}mm; margin: 0 !important; } html, body { margin:0!important; padding:0!important; } }
+                html, body {
+                    margin:0 !important; padding:0 !important;
+                    width: ${wMm}mm !important;
+                    height: ${hMm}mm !important;
+                }
+                body {
+                    font-family: Arial, Helvetica, sans-serif;
+                    -webkit-print-color-adjust: exact !important;
+                    print-color-adjust: exact !important;
+                }
+                .label {
+                    position: relative;
+                    width: ${wMm}mm;
+                    height: ${hMm}mm;
+                    overflow: visible;
+                    page-break-after: always;
+                    page-break-inside: avoid;
+                }
+                img {
+                    image-rendering: pixelated;
+                    image-rendering: -moz-crisp-edges;
+                    -ms-interpolation-mode: nearest-neighbor;
+                }
+                @media print {
+                    @page {
+                        size: ${wMm}mm ${hMm}mm !important;
+                        margin: 0 !important;
+                    }
+                    html, body {
+                        margin: 0 !important; padding: 0 !important;
+                        width: ${wMm}mm !important;
+                        height: ${hMm}mm !important;
+                    }
+                }
             </style>
         </head><body>
             <div class="label">${elementsHtml}</div>
         </body></html>`;
 
-        this._printViaIframe(html);
+        this._printViaWindow(html);
     }
 
     _openDefaultLabelPrint(data) {
@@ -722,11 +754,36 @@ export class PackingScreen extends Component {
             </div>
         </body></html>`;
 
-        this._printViaIframe(html);
+        this._printViaWindow(html);
+    }
+
+    _printViaWindow(html) {
+        // Yeni pencere aç — @page size desteği iframe'den daha güvenilir
+        const win = window.open('', '_blank', `width=800,height=600`);
+        if (!win) {
+            // Popup engellenmiş — iframe fallback
+            this._printViaIframe(html);
+            return;
+        }
+        win.document.write(html);
+        win.document.close();
+
+        // Görsellerin (barkod, QR) yüklenmesini bekle, sonra yazdır
+        const tryPrint = () => {
+            const imgs = win.document.querySelectorAll('img');
+            const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
+            if (allLoaded || imgs.length === 0) {
+                win.focus();
+                win.print();
+            } else {
+                setTimeout(tryPrint, 200);
+            }
+        };
+        setTimeout(tryPrint, 600);
     }
 
     _printViaIframe(html) {
-        // Eski iframe varsa kaldır — her yazdırma temiz iframe ile başlasın
+        // Popup engellendiğinde fallback — iframe ile yazdır
         const old = document.getElementById('ub-print-iframe');
         if (old) old.parentNode.removeChild(old);
 
@@ -735,7 +792,6 @@ export class PackingScreen extends Component {
         iframe.style.position = 'fixed';
         iframe.style.right = '0';
         iframe.style.bottom = '0';
-        // Yeterli boyut: tarayıcı, iframe içeriğini @page size ile yazdırabilsin
         iframe.style.width = '300mm';
         iframe.style.height = '300mm';
         iframe.style.opacity = '0.01';
@@ -749,7 +805,6 @@ export class PackingScreen extends Component {
         doc.write(html);
         doc.close();
 
-        // Tüm görsellerin (barkod, QR) yüklenmesini bekle, sonra yazdır
         const tryPrint = () => {
             const imgs = doc.querySelectorAll('img');
             const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
@@ -757,11 +812,9 @@ export class PackingScreen extends Component {
                 iframe.contentWindow.focus();
                 iframe.contentWindow.print();
             } else {
-                // Henüz yüklenmemiş görseller var — biraz daha bekle
                 setTimeout(tryPrint, 200);
             }
         };
-        // İlk deneme: DOM oturması + görseller için yeterli süre
         setTimeout(tryPrint, 600);
     }
 
