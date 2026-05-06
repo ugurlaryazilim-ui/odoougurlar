@@ -525,13 +525,29 @@ export class PackingScreen extends Component {
         this.state.loading = false;
     }
 
-    // ─── ETİKET BAS (PDF — sunucu tarafında wkhtmltopdf ile) ─────
+    // ─── ETİKET BAS ─────────────────────────────
     async printLabel(pickingId) {
-        // PDF etiketini yeni sekmede aç — wkhtmltopdf tam ölçülerde üretir
-        // Tarayıcı yazdırma diyaloğu yerine PDF viewer'dan yazdırma yapılır
-        // böylece yazıcı sürücüsünün varsayılan kağıt boyutu sorunu ortadan kalkar
-        const url = `/ugurlar_barcode/api/cargo_label_pdf?picking_id=${pickingId}`;
-        window.open(url, '_blank');
+        try {
+            const data = await BarcodeService.call('/ugurlar_barcode/api/packing_label_data', {
+                picking_id: pickingId,
+            });
+            if (data.error) { this.state.error = data.error; return; }
+
+            let template = null;
+            try {
+                const res = await BarcodeService.labelTemplateList();
+                const ct = (res.templates || []).filter(t => t.name.startsWith('Kargo'));
+                if (ct.length > 0) template = ct[0];
+            } catch (e) { /* varsayılan kullanılacak */ }
+
+            if (template && template.elements && template.elements.length > 0) {
+                this._renderCargoTemplate(template, data);
+            } else {
+                this._openDefaultLabelPrint(data);
+            }
+        } catch (e) {
+            this.state.error = 'Etiket verisi alınamadı';
+        }
     }
 
     _getFieldValue(type, data) {
@@ -558,183 +574,85 @@ export class PackingScreen extends Component {
         const wMm = template.width_mm;
         const hMm = template.height_mm;
 
-        // ─── YÖNTEM: Yüzdesel konumlandırma ───
-        // Tarayıcılar @page size'ı sıklıkla görmezden gelir ve yazıcı sürücüsünün
-        // varsayılan kağıt boyutunu kullanır. Bu yüzden tüm elemanları hem mm
-        // hem de yüzde cinsinden konumlandırıyoruz. Böylece yazıcı hangi boyutu
-        // kullanırsa kullansın, içerik doğru oranlarda basılır.
-
         let elementsHtml = '';
         for (const el of template.elements) {
-            const x = el.x;
-            const y = el.y;
-            const w = el.width;
-            const h = el.height;
-            const fs = el.fontSize || 9;
-            const fw = el.fontWeight || 'normal';
-            const ta = el.textAlign || 'left';
-            const color = el.color || '#000000';
-            const bgColor = el.bgColor || 'transparent';
-            const rotation = el.rotation || 0;
-
-            // Yüzdesel pozisyonlar (fallback olarak)
-            const xPct = (x / wMm * 100).toFixed(3);
-            const yPct = (y / hMm * 100).toFixed(3);
-            const wPct = (w / wMm * 100).toFixed(3);
-            const hPct = (h / hMm * 100).toFixed(3);
-            // Font boyutunu vw birimine çevir (1vw = kağıt genişliğinin %1'i)
-            // pt -> mm: 1pt ≈ 0.353mm, sonra mm -> vw
-            const fsMmApprox = fs * 0.353;
-            const fsVw = (fsMmApprox / wMm * 100).toFixed(3);
-
+            const x = el.x, y = el.y, w = el.width, h = el.height;
+            const fs = el.fontSize || 9, fw = el.fontWeight || 'normal';
+            const ta = el.textAlign || 'left', color = el.color || '#000000';
+            const bgColor = el.bgColor || 'transparent', rotation = el.rotation || 0;
             let content = '';
 
             if (el.type === 'line') {
                 const lineH = Math.max(h, 0.3);
-                const lineHPct = (lineH / hMm * 100).toFixed(3);
-                elementsHtml += `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:${lineHPct}%; background:${color}; transform:rotate(${rotation}deg);"></div>`;
+                elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${lineH}mm; background:${color}; transform:rotate(${rotation}deg);"></div>`;
                 continue;
             }
-
             if (el.type === 'box') {
                 const bw = el.borderWidth || 1;
-                elementsHtml += `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:${hPct}%; border:${bw}px solid ${color}; background:${bgColor}; transform:rotate(${rotation}deg);"></div>`;
+                elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; border:${bw}px solid ${color}; background:${bgColor}; transform:rotate(${rotation}deg);"></div>`;
                 continue;
             }
-
             if (el.type === 'cargo_barcode') {
-                const barcodeValue = data.cargo_tracking || '';
-                if (barcodeValue) {
-                    const encoded = encodeURIComponent(barcodeValue);
-                    const imgW = Math.round(w * 12);
-                    const imgH = Math.round(h * 12);
-                    elementsHtml += `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:${hPct}%; transform:rotate(${rotation}deg); text-align:center;">
-                        <img src="/report/barcode/Code128/${encoded}?width=${imgW}&height=${imgH}&humanreadable=1"
-                            style="width:100%; height:100%; object-fit:contain; image-rendering:-webkit-crisp-edges; image-rendering:pixelated;"
-                            onerror="this.style.display='none'" />
-                    </div>`;
+                const bv = data.cargo_tracking || '';
+                if (bv) {
+                    const enc = encodeURIComponent(bv), iW = Math.round(w*12), iH = Math.round(h*12);
+                    elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; transform:rotate(${rotation}deg); text-align:center;"><img src="/report/barcode/Code128/${enc}?width=${iW}&height=${iH}&humanreadable=1" style="width:100%;height:100%;object-fit:contain;image-rendering:pixelated;" onerror="this.style.display='none'" /></div>`;
                 }
                 continue;
             }
-
             if (el.type === 'cargo_qr_code') {
-                const qrValue = el.content || data.cargo_tracking || '';
-                if (qrValue) {
-                    elementsHtml += `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:${hPct}%; transform:rotate(${rotation}deg);"><img src="/report/barcode/?type=QR&value=${encodeURIComponent(qrValue)}&width=${Math.round(w * 12)}&height=${Math.round(h * 12)}" style="width:100%;height:100%;object-fit:contain;" /></div>`;
+                const qv = el.content || data.cargo_tracking || '';
+                if (qv) {
+                    elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; transform:rotate(${rotation}deg);"><img src="/report/barcode/?type=QR&value=${encodeURIComponent(qv)}&width=${Math.round(w*12)}&height=${Math.round(h*12)}" style="width:100%;height:100%;object-fit:contain;" /></div>`;
                 }
                 continue;
             }
-
             if (el.type === 'item_list') {
                 const items = data.items || [];
-                let tableHtml = '<table style="width:100%;border-collapse:collapse;font-size:inherit;"><thead><tr style="border-bottom:0.3mm solid #333;"><th style="text-align:left;padding:0 0.5mm;">#</th><th style="text-align:left;padding:0 0.5mm;">Ürün</th><th style="text-align:right;padding:0 0.5mm;">Adet</th><th style="text-align:left;padding:0 0.5mm;">Barkod</th></tr></thead><tbody>';
-                items.forEach((item, idx) => {
-                    tableHtml += `<tr><td style="padding:0 0.5mm;">${idx+1}</td><td style="padding:0 0.5mm;">${item.product_name}</td><td style="text-align:right;padding:0 0.5mm;">${item.qty}</td><td style="padding:0 0.5mm;">${item.barcode}</td></tr>`;
-                });
-                tableHtml += '</tbody></table>';
-                elementsHtml += `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:${hPct}%; font-size:${fsVw}vw; font-weight:${fw}; overflow:hidden; color:${color}; background:${bgColor}; transform:rotate(${rotation}deg);">${tableHtml}</div>`;
+                let tbl = '<table style="width:100%;border-collapse:collapse;font-size:inherit;"><thead><tr style="border-bottom:0.3mm solid #333;"><th style="text-align:left;padding:0 0.5mm;">#</th><th style="text-align:left;padding:0 0.5mm;">Ürün</th><th style="text-align:right;padding:0 0.5mm;">Adet</th><th style="text-align:left;padding:0 0.5mm;">Barkod</th></tr></thead><tbody>';
+                items.forEach((item, idx) => { tbl += `<tr><td style="padding:0 0.5mm;">${idx+1}</td><td style="padding:0 0.5mm;">${item.product_name}</td><td style="text-align:right;padding:0 0.5mm;">${item.qty}</td><td style="padding:0 0.5mm;">${item.barcode}</td></tr>`; });
+                tbl += '</tbody></table>';
+                elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; font-size:${fs}pt; font-weight:${fw}; overflow:hidden; color:${color}; background:${bgColor}; transform:rotate(${rotation}deg);">${tbl}</div>`;
                 continue;
             }
-
             if (el.type === 'custom_text' || el.type === 'sender_name') {
                 content = el.content || '';
             } else {
                 content = this._getFieldValue(el.type, data);
             }
-
-            elementsHtml += `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:${hPct}%; font-size:${fsVw}vw; font-weight:${fw}; text-align:${ta}; color:${color}; background:${bgColor}; transform:rotate(${rotation}deg); overflow:hidden; line-height:1.3; display:flex; align-items:center; ${ta === 'center' ? 'justify-content:center;' : ta === 'right' ? 'justify-content:flex-end;' : ''}">${content}</div>`;
+            elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; font-size:${fs}pt; font-weight:${fw}; text-align:${ta}; color:${color}; background:${bgColor}; transform:rotate(${rotation}deg); overflow:hidden; line-height:1.3; display:flex; align-items:center; ${ta === 'center' ? 'justify-content:center;' : ta === 'right' ? 'justify-content:flex-end;' : ''}">${content}</div>`;
         }
 
-        // ─── HTML: Hem mm hem % ile uyumlu, tek sayfa zorlama ───
-        // Çoklu @page tanımı + body'de max/overflow kısıtlamaları
-        // Tarayıcı @page size'ı kabul ederse mm ile basılır,
-        // kabul etmezse % ile yazıcının gerçek kağıt boyutuna uyumlanır.
         const html = `<!DOCTYPE html><html><head>
             <meta charset="utf-8">
             <title>Kargo Etiketi ${wMm}x${hMm}mm</title>
             <style>
-                @page {
-                    size: ${wMm}mm ${hMm}mm !important;
-                    margin: 0 !important;
-                    padding: 0 !important;
-                }
-                *, *::before, *::after {
-                    margin: 0; padding: 0; box-sizing: border-box;
-                }
-                html {
-                    margin: 0 !important; padding: 0 !important;
-                    width: 100%; height: 100%;
-                    overflow: hidden !important;
-                }
+                @page { size: ${wMm}mm ${hMm}mm; margin: 0; }
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                html, body { margin: 0; padding: 0; }
                 body {
-                    margin: 0 !important; padding: 0 !important;
-                    width: 100%; height: 100%;
-                    max-width: ${wMm}mm; max-height: ${hMm}mm;
-                    overflow: hidden !important;
+                    width: ${wMm}mm; height: ${hMm}mm;
                     font-family: Arial, Helvetica, sans-serif;
                     -webkit-print-color-adjust: exact !important;
                     print-color-adjust: exact !important;
                 }
                 .label {
                     position: relative;
-                    width: 100%; height: 100%;
-                    max-width: ${wMm}mm; max-height: ${hMm}mm;
-                    overflow: hidden !important;
-                    page-break-after: avoid !important;
-                    page-break-inside: avoid !important;
-                    break-after: avoid !important;
-                    break-inside: avoid !important;
+                    width: ${wMm}mm; height: ${hMm}mm;
+                    overflow: hidden;
                 }
-                img {
-                    image-rendering: pixelated;
-                    image-rendering: -moz-crisp-edges;
-                }
-                /* İkinci sayfa çıkmasını kesinlikle engelle */
-                body::after { display: none !important; }
+                img { image-rendering: pixelated; image-rendering: -moz-crisp-edges; }
                 @media print {
-                    @page {
-                        size: ${wMm}mm ${hMm}mm !important;
-                        margin: 0 !important;
-                        padding: 0 !important;
-                    }
-                    html, body {
-                        width: 100% !important; height: 100% !important;
-                        max-width: ${wMm}mm !important; max-height: ${hMm}mm !important;
-                        margin: 0 !important; padding: 0 !important;
-                        overflow: hidden !important;
-                    }
-                    .label {
-                        width: 100% !important; height: 100% !important;
-                        max-width: ${wMm}mm !important; max-height: ${hMm}mm !important;
-                        overflow: hidden !important;
-                        page-break-after: avoid !important;
-                    }
+                    @page { size: ${wMm}mm ${hMm}mm; margin: 0; }
+                    html, body { width: ${wMm}mm; height: ${hMm}mm; overflow: hidden; }
+                    .label { overflow: hidden; page-break-after: avoid; }
                 }
-                /* Yazdır diyaloğu açılmadan önce ekranda gösterilecek bilgi */
-                @media screen {
-                    body { display: flex; justify-content: center; align-items: flex-start; padding: 20px; background: #f0f0f0; height: auto; max-height: none; overflow: visible; }
-                    .label { box-shadow: 0 2px 10px rgba(0,0,0,0.15); background: white; flex-shrink: 0; }
-                    .print-info { display: block; }
-                }
-                @media print {
-                    .print-info { display: none !important; }
-                }
-                .print-info {
-                    position: fixed; top: 0; left: 0; right: 0;
-                    background: #1a1a2e; color: white;
-                    padding: 12px 20px; font-size: 13px; z-index: 9999;
-                    text-align: center; font-family: Arial, sans-serif;
-                }
-                .print-info b { color: #ffd700; }
             </style>
         </head><body>
-            <div class="print-info">
-                ⚠️ Yazdırma ayarlarında: <b>Kağıt boyutu = ${wMm} × ${hMm} mm</b> | <b>Kenar boşlukları = Yok</b> | <b>Ölçek = %100</b>
-            </div>
             <div class="label">${elementsHtml}</div>
         </body></html>`;
 
-        this._printViaWindow(html, wMm, hMm);
+        this._printViaWindow(html);
     }
 
     _openDefaultLabelPrint(data) {
@@ -790,86 +708,53 @@ export class PackingScreen extends Component {
         this._printViaWindow(html);
     }
 
-    _printViaWindow(html, wMm, hMm) {
-        // ─── Blob URL yöntemi ───
-        // document.write() yerine Blob URL kullanmak tarayıcının
-        // @page size CSS kuralını daha güvenilir şekilde okumasını sağlar.
-        const blob = new Blob([html], { type: 'text/html; charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-
-        const win = window.open(url, '_blank', 'width=800,height=700');
+    _printViaWindow(html) {
+        const win = window.open('', '_blank', 'width=800,height=600');
         if (!win) {
-            // Popup engellendiyse iframe fallback
             this._printViaIframe(html);
-            URL.revokeObjectURL(url);
             return;
         }
+        win.document.write(html);
+        win.document.close();
 
-        // Görsellerin yüklenmesini bekle sonra yazdır
         const tryPrint = () => {
-            try {
-                const imgs = win.document.querySelectorAll('img');
-                const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
-                if (allLoaded || imgs.length === 0) {
-                    win.focus();
-                    win.print();
-                    // Blob URL'yi biraz sonra temizle
-                    setTimeout(() => URL.revokeObjectURL(url), 5000);
-                } else {
-                    setTimeout(tryPrint, 200);
-                }
-            } catch (e) {
-                // Cross-origin hata olabilir, yine de yazdırmayı dene
+            const imgs = win.document.querySelectorAll('img');
+            const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
+            if (allLoaded || imgs.length === 0) {
                 win.focus();
                 win.print();
-                setTimeout(() => URL.revokeObjectURL(url), 5000);
+            } else {
+                setTimeout(tryPrint, 200);
             }
         };
-        setTimeout(tryPrint, 800);
+        setTimeout(tryPrint, 600);
     }
 
     _printViaIframe(html) {
-        // Popup engellendiğinde fallback — iframe ile yazdır
         const old = document.getElementById('ub-print-iframe');
         if (old) old.parentNode.removeChild(old);
 
-        const blob = new Blob([html], { type: 'text/html; charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-
         const iframe = document.createElement('iframe');
         iframe.id = 'ub-print-iframe';
-        iframe.style.position = 'fixed';
-        iframe.style.right = '0';
-        iframe.style.bottom = '0';
-        iframe.style.width = '1px';
-        iframe.style.height = '1px';
-        iframe.style.opacity = '0.01';
-        iframe.style.border = '0';
-        iframe.style.pointerEvents = 'none';
-        iframe.style.zIndex = '-9999';
-        iframe.src = url;
+        iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;z-index:-9999;';
         document.body.appendChild(iframe);
 
-        iframe.onload = () => {
-            const tryPrint = () => {
-                try {
-                    const imgs = iframe.contentDocument.querySelectorAll('img');
-                    const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
-                    if (allLoaded || imgs.length === 0) {
-                        iframe.contentWindow.focus();
-                        iframe.contentWindow.print();
-                        setTimeout(() => URL.revokeObjectURL(url), 5000);
-                    } else {
-                        setTimeout(tryPrint, 200);
-                    }
-                } catch (e) {
-                    iframe.contentWindow.focus();
-                    iframe.contentWindow.print();
-                    setTimeout(() => URL.revokeObjectURL(url), 5000);
-                }
-            };
-            setTimeout(tryPrint, 400);
+        const doc = iframe.contentWindow.document;
+        doc.open();
+        doc.write(html);
+        doc.close();
+
+        const tryPrint = () => {
+            const imgs = doc.querySelectorAll('img');
+            const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
+            if (allLoaded || imgs.length === 0) {
+                iframe.contentWindow.focus();
+                iframe.contentWindow.print();
+            } else {
+                setTimeout(tryPrint, 200);
+            }
         };
+        setTimeout(tryPrint, 600);
     }
 
     willUnmount() {
