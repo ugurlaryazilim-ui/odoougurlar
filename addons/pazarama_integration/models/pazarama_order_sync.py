@@ -99,12 +99,15 @@ class PazaramaOrderSync(models.Model):
             update_vals = {'order_status': order_status}
             # Kargo bilgisi sonradan gelebilir — güncelle
             if not existing_pazarama.cargo_tracking_number:
-                # Öncelik: items[].cargo.trackingNumber -> shipmentCode
+                # Öncelik: items[].cargo.trackingNumber -> items[].shipmentCode -> order.shipmentCode
                 items = order_json.get('items', [])
                 for item in items:
                     cargo = item.get('cargo', {})
                     if cargo.get('trackingNumber'):
                         update_vals['cargo_tracking_number'] = str(cargo['trackingNumber'])
+                        break
+                    if item.get('shipmentCode'):
+                        update_vals['cargo_tracking_number'] = str(item['shipmentCode'])
                         break
                 if 'cargo_tracking_number' not in update_vals and order_json.get('shipmentCode'):
                     update_vals['cargo_tracking_number'] = str(order_json['shipmentCode'])
@@ -171,10 +174,22 @@ class PazaramaOrderSync(models.Model):
             product = item.get('product', {})
             cargo = item.get('cargo', {})
             
-            if not cargo_tracking and cargo.get('trackingNumber'):
-                cargo_tracking = str(cargo.get('trackingNumber'))
+            # Kargo takip: önce cargo.trackingNumber, sonra item.shipmentCode (PZ kodu)
+            if not cargo_tracking:
+                cargo_tracking = (
+                    str(cargo['trackingNumber']) if cargo.get('trackingNumber') else ''
+                ) or (
+                    str(item['shipmentCode']) if item.get('shipmentCode') else ''
+                )
             if not cargo_provider and cargo.get('companyName'):
                 cargo_provider = str(cargo.get('companyName'))
+
+            # Satır kargo takip: item.shipmentCode veya cargo.trackingNumber
+            line_cargo_tracking = (
+                str(cargo['trackingNumber']) if cargo.get('trackingNumber') else ''
+            ) or (
+                str(item['shipmentCode']) if item.get('shipmentCode') else ''
+            )
 
             price_info = item.get('salePrice') or {}
             
@@ -186,12 +201,12 @@ class PazaramaOrderSync(models.Model):
                 'quantity': item.get('quantity', 1),
                 'sale_price': price_info.get('value', 0.0),
                 'status': item.get('orderItemStatus', 0),
-                'cargo_tracking': cargo.get('trackingNumber'),
+                'cargo_tracking': line_cargo_tracking,
                 'cargo_company': cargo.get('companyName'),
             }
             vals['line_ids'].append((0, 0, line_vals))
 
-        # Fallback: shipmentCode (PZ ile başlayan kod)
+        # Son fallback: üst seviye shipmentCode (bazı eski API yanıtlarında olabilir)
         if not cargo_tracking and order_json.get('shipmentCode'):
             cargo_tracking = str(order_json['shipmentCode'])
             

@@ -111,9 +111,13 @@ class PazaramaOrderActions(models.Model):
                             # (Cargo tracking comes grouped under items, picking first one broadly)
                             items = pkg.get('items', [])
                             if items:
-                                first_cargo = items[0].get('cargo', {})
+                                first_item = items[0]
+                                first_cargo = first_item.get('cargo', {})
+                                # Kargo takip: cargo.trackingNumber → item.shipmentCode
                                 if first_cargo.get('trackingNumber'):
                                     vals['cargo_tracking_number'] = str(first_cargo['trackingNumber'])
+                                elif first_item.get('shipmentCode'):
+                                    vals['cargo_tracking_number'] = str(first_item['shipmentCode'])
                                 if first_cargo.get('companyName'):
                                     vals['cargo_provider'] = first_cargo['companyName']
 
