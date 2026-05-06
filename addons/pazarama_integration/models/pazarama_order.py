@@ -56,6 +56,9 @@ class PazaramaOrderLine(models.Model):
     
     quantity = fields.Integer(string='Miktar')
     sale_price = fields.Float(string='Satış Fiyatı')
+    discount_amount = fields.Float(string='İndirim Tutarı (KDV Dahil)')
+    discount_pct = fields.Float(string='İndirim %')
+    discount_description = fields.Char(string='İndirim Açıklaması')
     
     status = fields.Integer(string='Sipariş Statüsü')
     

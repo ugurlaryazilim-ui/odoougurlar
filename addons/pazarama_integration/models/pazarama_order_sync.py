@@ -201,26 +201,28 @@ class PazaramaOrderSync(models.Model):
             quantity = item.get('quantity', 1) or 1
             vat_rate = product.get('vatRate', 0)  # ör: 10, 20, 1
 
-            # 2. İndirim: önce discountAmount, yoksa discountDescription'dan parse
+            # 2. İndirim tutarı: önce discountAmount, yoksa discountDescription'dan parse
             item_discount = discount_info.get('value', 0.0) if isinstance(discount_info, dict) else float(discount_info or 0)
-            if not item_discount:
-                desc = item.get('discountDescription') or ''
+            discount_desc = item.get('discountDescription') or ''
+            if not item_discount and discount_desc:
                 # "Pazarama İndirimi - 54 TL" veya "54,99 TL" formatını parse et
-                match = re.search(r'(\d+[.,]?\d*)\s*TL', desc)
+                match = re.search(r'(\d+[.,]?\d*)\s*TL', discount_desc)
                 if match:
                     item_discount = float(match.group(1).replace(',', '.'))
 
-            # 3. Net KDV dahil fiyat = brüt - indirim (toplam, kalem başına değil)
-            #    İndirim kalem başına dağıtılır
-            discount_per_unit = item_discount / quantity if quantity else 0
-            net_price_incl = gross_price_incl - discount_per_unit
-
-            # 4. KDV hariç fiyat (Odoo'ya yazılacak)
-            #    Odoo üstüne KDV ekler → toplam = net_price_incl olur
+            # 3. Brüt KDV hariç fiyat (indirim öncesi — Odoo'ya price_unit olarak yazılacak)
             if vat_rate > 0:
-                price_excl_tax = net_price_incl / (1 + vat_rate / 100.0)
+                gross_price_excl = gross_price_incl / (1 + vat_rate / 100.0)
             else:
-                price_excl_tax = net_price_incl
+                gross_price_excl = gross_price_incl
+
+            # 4. İndirim yüzdesi (Odoo'nun discount sütununda gösterilecek)
+            #    İndirim kalem başına: item_discount / quantity
+            discount_per_unit_incl = item_discount / quantity if quantity else 0
+            if gross_price_incl > 0 and discount_per_unit_incl > 0:
+                discount_pct = (discount_per_unit_incl / gross_price_incl) * 100.0
+            else:
+                discount_pct = 0.0
 
             line_vals = {
                 'item_id': item.get('orderItemId'),
@@ -228,7 +230,10 @@ class PazaramaOrderSync(models.Model):
                 'product_name': product.get('name'),
                 'product_code': product.get('code') or product.get('stockCode'),
                 'quantity': quantity,
-                'sale_price': round(price_excl_tax, 2),
+                'sale_price': round(gross_price_excl, 2),
+                'discount_amount': round(item_discount, 2),
+                'discount_pct': round(discount_pct, 2),
+                'discount_description': discount_desc.strip() if discount_desc else '',
                 'status': item.get('orderItemStatus', 0),
                 'cargo_tracking': line_cargo_tracking,
                 'cargo_company': cargo.get('companyName'),
@@ -420,11 +425,13 @@ class PazaramaOrderSync(models.Model):
                 _logger.warning("Pazarama Urun Bulunamadi: %s", line.product_code)
                 continue
                 
-            sale_vals['order_line'].append((0, 0, {
+            sale_line_vals = {
                 'product_id': product.id,
                 'product_uom_qty': line.quantity,
                 'price_unit': line.sale_price,
+                'discount': line.discount_pct or 0.0,
                 'pazarama_item_id': line.item_id,
-            }))
+            }
+            sale_vals['order_line'].append((0, 0, sale_line_vals))
             
         return self.env['sale.order'].create(sale_vals)
