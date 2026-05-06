@@ -273,35 +273,25 @@ class InvoiceProcessor(models.AbstractModel):
         # Tarih formatı: YYYYMMDD
         invoice_date_str = invoice.invoice_date.strftime('%Y%m%d') if invoice.invoice_date else ''
         
-        # Sipariş Bazlı mı? (OrderLineID var mı kontrol et)
+        # Sipariş Bazlı mı?
+        # NOT: OrderLineID ile sipariş bazlı faturada Nebim kendi siparişindeki
+        # fiyatı kullanır ve PriceVI'yı görmezden gelir. Kullanıcı Odoo'da
+        # ürün/beden/fiyat değişikliği yapabildiği için HER ZAMAN serbest fatura
+        # (barcode + PriceVI) modunda gönderiyoruz.
         is_order_base = False
         lines = []
         for line in invoice.invoice_line_ids:
             if not line.product_id:
                 continue
 
-            sale_line = line.sale_line_ids[0] if line.sale_line_ids else False
-            if sale_line and sale_line.nebim_order_line_id:
-                # Sipariş Bazlı Fatura (OrderLineID kullanılır)
-                # PriceVI: Odoo'daki fatura satırı fiyatını gönder
-                # (kullanıcı bedeni/fiyatı manuel değiştirmiş olabilir)
-                is_order_base = True
-                line_data = {
-                    'OrderLineID': sale_line.nebim_order_line_id,
-                    'Qty1': line.quantity,
-                    'PriceVI': float(line.price_unit),
-                }
-                if line.product_id.barcode:
-                    line_data['UsedBarcode'] = line.product_id.barcode
-            else:
-                # Serbest Fatura (Fiyat ve ItemCode gönderilir)
-                line_data = {
-                    'ItemCode': line.product_id.default_code or '',
-                    'Qty1': line.quantity,
-                    'PriceVI': float(line.price_unit),
-                }
-                if line.product_id.barcode:
-                    line_data['UsedBarcode'] = line.product_id.barcode
+            line_data = {
+                'Qty1': line.quantity,
+                'PriceVI': float(line.price_unit),
+            }
+            if line.product_id.barcode:
+                line_data['UsedBarcode'] = line.product_id.barcode
+            if line.product_id.default_code:
+                line_data['ItemCode'] = line.product_id.default_code
 
             lines.append(line_data)
 
