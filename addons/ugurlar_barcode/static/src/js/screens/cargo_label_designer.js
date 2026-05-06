@@ -31,6 +31,9 @@ const CARGO_FIELD_TYPES = [
     { type: 'line',              label: 'Çizgi',              icon: 'fa-minus',        color: '#aaa',    group: 'other' },
     { type: 'cargo_qr_code',     label: 'QR Karekod',        icon: 'fa-qrcode',       color: '#8e44ad', group: 'cargo' },
     { type: 'box',               label: 'Kutu / Çerçeve',    icon: 'fa-square-o',     color: '#7f8c8d', group: 'other' },
+    // Nebim
+    { type: 'nebim_invoice_no',   label: 'Nebim Fatura No',   icon: 'fa-file-text-o',  color: '#e74c3c', group: 'nebim' },
+    { type: 'nebim_invoice_date', label: 'Nebim Fatura Tarihi', icon: 'fa-calendar-o', color: '#c0392b', group: 'nebim' },
 ];
 
 const CARGO_GROUPS = [
@@ -38,6 +41,7 @@ const CARGO_GROUPS = [
     { id: 'customer', label: 'Müşteri' },
     { id: 'cargo',    label: 'Kargo' },
     { id: 'items',    label: 'Ürünler' },
+    { id: 'nebim',    label: 'Nebim' },
     { id: 'other',    label: 'Diğer' },
 ];
 

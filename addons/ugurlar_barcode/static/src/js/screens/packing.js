@@ -566,6 +566,8 @@ export class PackingScreen extends Component {
             total_qty:         (data.total_qty || 0) + ' adet',
             total_items:       (data.total_items || 0) + ' çeşit',
             date_today:        new Date().toLocaleDateString('tr-TR'),
+            nebim_invoice_no:  data.nebim_invoice_no || '',
+            nebim_invoice_date: data.nebim_invoice_date || '',
         };
         return map[type] !== undefined ? map[type] : '';
     }

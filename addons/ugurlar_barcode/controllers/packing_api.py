@@ -407,6 +407,8 @@ class PackingApiController(BarcodeApiBase):
             'shipping_address': '',
             'shipping_city': '',
             'shipping_district': '',
+            'nebim_invoice_no': '',
+            'nebim_invoice_date': '',
         }
 
         if picking.partner_id:
@@ -468,6 +470,19 @@ class PackingApiController(BarcodeApiBase):
             data['shipping_district'] = picking.partner_id.city or ''
         if not data['customer_name']:
             data['customer_name'] = data['partner_name']
+
+        # Nebim fatura bilgileri
+        if picking.origin:
+            sale = request.env['sale.order'].sudo().search([('name', '=', picking.origin)], limit=1)
+            if sale and sale.invoice_ids:
+                for inv in sale.invoice_ids.filtered(lambda i: i.state == 'posted'):
+                    nebim_no = getattr(inv, 'nebim_invoice_number', '') or ''
+                    nebim_date = getattr(inv, 'nebim_sent_date', None)
+                    if nebim_no:
+                        data['nebim_invoice_no'] = nebim_no
+                        if nebim_date:
+                            data['nebim_invoice_date'] = nebim_date.strftime('%d.%m.%Y %H:%M')
+                        break
 
         # Ürün listesi
         items = []
@@ -575,6 +590,8 @@ class PackingApiController(BarcodeApiBase):
             'date_today': date.today().strftime('%d.%m.%Y'),
             'custom_text': content or '',
             'sender_name': content or '',
+            'nebim_invoice_no': data.get('nebim_invoice_no', ''),
+            'nebim_invoice_date': data.get('nebim_invoice_date', ''),
         }
         return field_map.get(el_type, '')
 
