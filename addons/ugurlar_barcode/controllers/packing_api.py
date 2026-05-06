@@ -932,9 +932,12 @@ class PackingApiController(BarcodeApiBase):
         # ═══ Aşama C: Fatura Oluşturma ve Aktarımı ═══
         if invoice_enabled:
             try:
-                # Fatura oluştur
-                invoices_to_post = sale_order.invoice_ids.filtered(lambda i: i.state == 'draft')
-                if not sale_order.invoice_ids and sale_order.invoice_status in ['to invoice', 'invoiced']:
+                # Fatura oluştur — iptal edilmiş faturaları yok say
+                active_invoices = sale_order.invoice_ids.filtered(
+                    lambda i: i.state in ('draft', 'posted')
+                )
+                invoices_to_post = active_invoices.filtered(lambda i: i.state == 'draft')
+                if not active_invoices and sale_order.invoice_status in ['to invoice', 'invoiced']:
                     invoices_to_post = sale_order._create_invoices()
                     
                 for invoice in invoices_to_post:

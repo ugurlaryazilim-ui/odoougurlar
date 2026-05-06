@@ -36,18 +36,28 @@ class SaleOrder(models.Model):
             if line.nebim_order_line_id:
                 line.write({'nebim_order_line_id': False})
         
-        # İlgili faturaların Nebim bayraklarını sıfırla
+        # Eski faturaları iptal et — yeni fatura güncel ürünlerle oluşsun
+        cancelled_count = 0
+        deleted_count = 0
         for inv in self.invoice_ids:
-            if inv.nebim_sent:
-                inv.write({
-                    'nebim_sent': False,
-                    'nebim_sent_date': False,
-                    'nebim_response': '',
-                    'nebim_error': False,
-                    'nebim_invoice_number': '',
-                })
+            try:
+                if inv.state == 'draft':
+                    # Draft faturayı sil
+                    inv.unlink()
+                    deleted_count += 1
+                elif inv.state == 'posted':
+                    # Posted faturayı iptal et (credit note olmadan)
+                    inv.button_draft()
+                    inv.button_cancel()
+                    cancelled_count += 1
+            except Exception as e:
+                _logger.warning("Fatura iptal/silme hatası (%s): %s", inv.name, e)
         
-        _logger.info("Nebim sıfırlandı: %s — Sipariş ve fatura bayrakları temizlendi", self.name)
+        _logger.info(
+            "Nebim sıfırlandı: %s — Sipariş bayrakları temizlendi, "
+            "%d fatura iptal edildi, %d taslak silindi",
+            self.name, cancelled_count, deleted_count
+        )
         
         return {'type': 'ir.actions.client', 'tag': 'display_notification',
                 'params': {
