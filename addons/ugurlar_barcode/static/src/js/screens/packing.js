@@ -583,6 +583,13 @@ export class PackingScreen extends Component {
         const wMm = template.width_mm;
         const hMm = template.height_mm;
 
+        // DEBUG — konsola boyut bilgisi yaz
+        console.log('=== KARGO ETİKET BOYUT DEBUG ===');
+        console.log('Template adı:', template.name);
+        console.log('Template ID:', template.id);
+        console.log('width_mm:', wMm, 'height_mm:', hMm);
+        console.log('Template raw:', JSON.stringify({id: template.id, name: template.name, width_mm: template.width_mm, height_mm: template.height_mm}));
+
         let elementsHtml = '';
         for (const el of template.elements) {
             const x = el.x;
@@ -655,7 +662,7 @@ export class PackingScreen extends Component {
 
         const html = `<!DOCTYPE html><html><head>
             <meta charset="utf-8">
-            <title>Kargo Etiketi — ${data.picking_name}</title>
+            <title>Kargo Etiketi ${wMm}x${hMm}mm — ${data.picking_name}</title>
             <style>
                 @page {
                     size: ${wMm}mm ${hMm}mm !important;
