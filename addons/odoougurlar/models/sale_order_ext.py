@@ -54,18 +54,53 @@ class SaleOrder(models.Model):
                 _logger.warning("Fatura iptal/silme hatası (%s): %s", inv.name, e)
         
         _logger.info(
-            "Nebim sıfırlandı: %s — Sipariş bayrakları temizlendi, "
-            "%d fatura iptal edildi, %d taslak silindi",
+            "Nebim sıfırlandı: %s — %d fatura iptal, %d taslak silindi",
             self.name, cancelled_count, deleted_count
         )
+        
+        # ── 3. Güncel siparişi hemen Nebim'e gönder ──
+        order_msg = ''
+        try:
+            # Pazaryeri tespiti
+            marketplace_name = None
+            _mp_fields = [
+                ('trendyol_order_id', 'Trendyol'),
+                ('hb_order_id', 'Hepsiburada'),
+                ('amazon_order_id', 'Amazon'),
+                ('pazarama_order_id', 'Pazarama'),
+                ('n11_order_id', 'N11'),
+                ('flo_order_id', 'Flo'),
+                ('idefix_order_id', 'Idefix'),
+                ('pttavm_order_id', 'PttAvm'),
+            ]
+            for field, name in _mp_fields:
+                if hasattr(self, field) and getattr(self, field):
+                    marketplace_name = name
+                    break
+            
+            if not marketplace_name:
+                raise Exception("Pazaryeri bilgisi bulunamadı")
+            
+            mapping = self.env['odoougurlar.marketplace.mapping'].sudo().find_mapping(
+                marketplace_name, self.partner_id.country_id.id
+            )
+            
+            order_proc = self.env['odoougurlar.order.processor'].sudo()
+            order_proc.sync_order(self, mapping)
+            order_msg = '✅ Güncel sipariş Nebim\'e gönderildi.'
+            _logger.info("Nebim sipariş tekrar gönderildi: %s", self.name)
+            
+        except Exception as e:
+            order_msg = f'⚠️ Sipariş gönderilemedi: {str(e)}'
+            _logger.error("Nebim sipariş tekrar gönderim hatası (%s): %s", self.name, e)
         
         return {'type': 'ir.actions.client', 'tag': 'display_notification',
                 'params': {
                     'title': 'Nebim Sıfırlandı',
-                    'message': f'{self.name} için Nebim sipariş ve fatura bayrakları sıfırlandı. '
-                               'Tekrar "Paketle ve Faturala" yapabilirsiniz.',
-                    'type': 'success',
-                    'sticky': False,
+                    'message': f'{self.name} sıfırlandı. {order_msg} '
+                               'Artık "Paketle ve Faturala" yapabilirsiniz.',
+                    'type': 'success' if '✅' in order_msg else 'warning',
+                    'sticky': True,
                 }}
 
     def action_confirm(self):
