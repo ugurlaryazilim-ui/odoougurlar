@@ -525,38 +525,13 @@ export class PackingScreen extends Component {
         this.state.loading = false;
     }
 
-    // ─── ETİKET BAS ─────────────────────────────
+    // ─── ETİKET BAS (PDF — sunucu tarafında wkhtmltopdf ile) ─────
     async printLabel(pickingId) {
-        try {
-            // 1. Sipariş verisi çek
-            const data = await BarcodeService.call('/ugurlar_barcode/api/packing_label_data', {
-                picking_id: pickingId,
-            });
-            if (data.error) {
-                this.state.error = data.error;
-                return;
-            }
-
-            // 2. Kayıtlı "Kargo" şablonunu çek
-            let template = null;
-            try {
-                const res = await BarcodeService.labelTemplateList();
-                const cargoTemplates = (res.templates || []).filter(t => t.name.startsWith('Kargo'));
-                if (cargoTemplates.length > 0) {
-                    template = cargoTemplates[0]; // İlk Kargo şablonunu kullan
-                }
-            } catch (e) {
-                console.warn('Kargo şablonu yüklenemedi, varsayılan kullanılacak');
-            }
-
-            if (template && template.elements && template.elements.length > 0) {
-                this._renderCargoTemplate(template, data);
-            } else {
-                this._openDefaultLabelPrint(data);
-            }
-        } catch (e) {
-            this.state.error = 'Etiket verisi alınamadı';
-        }
+        // PDF etiketini yeni sekmede aç — wkhtmltopdf tam ölçülerde üretir
+        // Tarayıcı yazdırma diyaloğu yerine PDF viewer'dan yazdırma yapılır
+        // böylece yazıcı sürücüsünün varsayılan kağıt boyutu sorunu ortadan kalkar
+        const url = `/ugurlar_barcode/api/cargo_label_pdf?picking_id=${pickingId}`;
+        window.open(url, '_blank');
     }
 
     _getFieldValue(type, data) {
