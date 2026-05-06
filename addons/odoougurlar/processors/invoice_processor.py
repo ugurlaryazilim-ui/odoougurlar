@@ -283,10 +283,13 @@ class InvoiceProcessor(models.AbstractModel):
             sale_line = line.sale_line_ids[0] if line.sale_line_ids else False
             if sale_line and sale_line.nebim_order_line_id:
                 # Sipariş Bazlı Fatura (OrderLineID kullanılır)
+                # PriceVI: Odoo'daki fatura satırı fiyatını gönder
+                # (kullanıcı bedeni/fiyatı manuel değiştirmiş olabilir)
                 is_order_base = True
                 line_data = {
                     'OrderLineID': sale_line.nebim_order_line_id,
                     'Qty1': line.quantity,
+                    'PriceVI': float(line.price_unit),
                 }
                 if line.product_id.barcode:
                     line_data['UsedBarcode'] = line.product_id.barcode
@@ -295,7 +298,7 @@ class InvoiceProcessor(models.AbstractModel):
                 line_data = {
                     'ItemCode': line.product_id.default_code or '',
                     'Qty1': line.quantity,
-                    'PriceVI': line.price_unit,
+                    'PriceVI': float(line.price_unit),
                 }
                 if line.product_id.barcode:
                     line_data['UsedBarcode'] = line.product_id.barcode
