@@ -614,8 +614,8 @@ export class PackingScreen extends Component {
                 const barcodeValue = data.cargo_tracking || '';
                 if (barcodeValue) {
                     const encoded = encodeURIComponent(barcodeValue);
-                    const imgW = Math.round(el.width * 4);
-                    const imgH = Math.round(el.height * 3);
+                    const imgW = Math.round(el.width * 12);
+                    const imgH = Math.round(el.height * 12);
                     elementsHtml += `<div style="position:absolute; left:${x}px; top:${y}px; width:${w}px; height:${h}px; transform:rotate(${rotation}deg); text-align:center;">
                         <img src="/report/barcode/Code128/${encoded}?width=${imgW}&height=${imgH}&humanreadable=1"
                             style="width:100%; height:100%; object-fit:contain; image-rendering:-webkit-crisp-edges; image-rendering:pixelated;"

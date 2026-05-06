@@ -7,8 +7,9 @@ import { BarcodeService } from "../barcode_service";
 function generateBarcodeSVG(code, widthMm, heightMm) {
     if (!code) return '';
     // Odoo'nun built-in barkod üretici endpoint'ini kullan — Code128 formatında gerçek, taranabilir barkod üretir
+    // 300 DPI: 1mm ≈ 11.8px → widthMm * 12 ve heightMm * 12 ile yüksek çözünürlük
     const encoded = encodeURIComponent(code);
-    return `<img src="/report/barcode/Code128/${encoded}?width=${Math.round(widthMm * 4)}&height=${Math.round(heightMm * 3)}&humanreadable=1"
+    return `<img src="/report/barcode/Code128/${encoded}?width=${Math.round(widthMm * 12)}&height=${Math.round(heightMm * 12)}&humanreadable=1"
         style="width:${widthMm}mm; height:${heightMm}mm; display:block; object-fit:contain; image-rendering:-webkit-crisp-edges; image-rendering:pixelated;"
         onerror="this.style.display='none'" />`;
 }

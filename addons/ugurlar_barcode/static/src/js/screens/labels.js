@@ -582,9 +582,10 @@ export class LabelScreen extends Component {
 
     _generateBarcodeImg(code, widthMm, heightMm) {
         if (!code) return '';
-        // Termal yazıcılarda 300dpi kalitesinde ve okunaklı olabilmesi için
-        // yüksek çözünürlüklü Odoo Code128 format render'ı kullanıyoruz
-        return `<img src="/report/barcode/Code128/${encodeURIComponent(code)}?width=800&amp;height=200" style="width:${widthMm}mm; height:${heightMm}mm; display:block; object-fit:fill; image-rendering:-moz-crisp-edges; image-rendering:-webkit-crisp-edges; image-rendering:pixelated;"/>`;
+        // 300 DPI: 1mm ≈ 11.8px → widthMm * 12 ve heightMm * 12 ile yüksek çözünürlük
+        const imgW = Math.round(widthMm * 12);
+        const imgH = Math.round(heightMm * 12);
+        return `<img src="/report/barcode/Code128/${encodeURIComponent(code)}?width=${imgW}&amp;height=${imgH}&amp;humanreadable=1" style="width:${widthMm}mm; height:${heightMm}mm; display:block; object-fit:fill; image-rendering:-moz-crisp-edges; image-rendering:-webkit-crisp-edges; image-rendering:pixelated;"/>`;
     }
 
     _getFieldValue(el, label) {
