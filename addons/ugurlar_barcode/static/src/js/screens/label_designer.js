@@ -3,30 +3,14 @@
 import { Component, useState, xml, useRef, onMounted, onWillUnmount } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 
-// ─── BARKOD SVG ÜRETICI (EAN-13 / Code128 uyumlu çizgi görseli) ────
+// ─── BARKOD HTML ÜRETICI (Odoo /report/barcode/ endpoint ile gerçek barkod) ────
 function generateBarcodeSVG(code, widthMm, heightMm) {
-    // Basit çizgi barkod görselleştirme — her karakter için pattern üret
-    const bars = [];
-    let x = 0;
-    const barW = 0.3;
-    for (let i = 0; i < code.length; i++) {
-        const c = code.charCodeAt(i);
-        // Her karakter için 4 çizgi + boşluk paterni
-        bars.push(x); x += barW;
-        x += barW * 0.5;
-        if (c % 2 === 0) { bars.push(x); x += barW * 1.5; }
-        else { bars.push(x); x += barW; }
-        x += barW * 0.5;
-    }
-    const totalW = x || 1;
-    const scale = widthMm / totalW;
-    const svgBars = bars.map(bx =>
-        `<rect x="${(bx * scale).toFixed(2)}mm" y="0" width="${(barW * scale).toFixed(2)}mm" height="${heightMm * 0.75}mm" fill="black"/>`
-    ).join('');
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${widthMm}mm" height="${heightMm}mm" viewBox="0 0 ${widthMm} ${heightMm}">
-        ${svgBars}
-        <text x="${widthMm/2}" y="${heightMm * 0.95}" text-anchor="middle" font-size="${heightMm * 0.18}pt" font-family="monospace">${code}</text>
-    </svg>`;
+    if (!code) return '';
+    // Odoo'nun built-in barkod üretici endpoint'ini kullan — Code128 formatında gerçek, taranabilir barkod üretir
+    const encoded = encodeURIComponent(code);
+    return `<img src="/report/barcode/Code128/${encoded}?width=${Math.round(widthMm * 4)}&height=${Math.round(heightMm * 3)}&humanreadable=1"
+        style="width:${widthMm}mm; height:${heightMm}mm; display:block; object-fit:contain; image-rendering:-webkit-crisp-edges; image-rendering:pixelated;"
+        onerror="this.style.display='none'" />`;
 }
 
 // ─── ALAN TİPLERİ ──────────────────────────────
