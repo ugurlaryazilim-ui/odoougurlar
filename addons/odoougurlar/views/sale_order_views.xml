@@ -12,6 +12,12 @@
                             <field name="nebim_customer_sent"/>
                             <field name="nebim_customer_code" invisible="not nebim_customer_sent"/>
                             <field name="nebim_order_sent"/>
+                            <button name="action_reset_nebim"
+                                    string="🔄 Nebim Sıfırla"
+                                    type="object"
+                                    class="btn-warning"
+                                    invisible="not nebim_order_sent"
+                                    confirm="Nebim sipariş ve fatura bayrakları sıfırlanacak. Nebim'deki eski siparişi sildiğinizden emin olun. Devam edilsin mi?"/>
                         </group>
                         <group>
                             <field name="nebim_order_response"/>

@@ -10,9 +10,53 @@ class SaleOrder(models.Model):
     nebim_customer_sent = fields.Boolean(string='Nebim Cari Açıldı', default=False, readonly=True)
     nebim_customer_code = fields.Char(string='Nebim Cari Kodu', readonly=True)
     nebim_address_id = fields.Char(string='Nebim Adres ID', readonly=True)
-    nebim_order_sent = fields.Boolean(string='Nebim Sipariş Aktarıldı', default=False, readonly=True)
+    nebim_order_sent = fields.Boolean(string='Nebim Sipariş Aktarıldı', default=False)
     nebim_order_response = fields.Text(string='Nebim Sipariş Cevabı', readonly=True)
     nebim_export_file_number = fields.Char(string='Nebim ExportFileNumber', readonly=True)
+
+    def action_reset_nebim(self):
+        """Nebim senkronizasyon bayraklarını sıfırla.
+        
+        Kullanıcı siparişteki ürünleri/fiyatları değiştirdiğinde ve
+        Nebim'deki eski siparişi sildiğinde bu butona basarak
+        Nebim sync'i sıfırlar. Bir sonraki 'Paketle ve Faturala'da
+        güncel ürünlerle sipariş + fatura tekrar gönderilir.
+        """
+        self.ensure_one()
+        
+        # Sipariş bayraklarını sıfırla
+        self.write({
+            'nebim_order_sent': False,
+            'nebim_order_response': '',
+            'nebim_export_file_number': '',
+        })
+        
+        # OrderLineID'leri temizle (eski Nebim siparişine referans)
+        for line in self.order_line:
+            if line.nebim_order_line_id:
+                line.write({'nebim_order_line_id': False})
+        
+        # İlgili faturaların Nebim bayraklarını sıfırla
+        for inv in self.invoice_ids:
+            if inv.nebim_sent:
+                inv.write({
+                    'nebim_sent': False,
+                    'nebim_sent_date': False,
+                    'nebim_response': '',
+                    'nebim_error': False,
+                    'nebim_invoice_number': '',
+                })
+        
+        _logger.info("Nebim sıfırlandı: %s — Sipariş ve fatura bayrakları temizlendi", self.name)
+        
+        return {'type': 'ir.actions.client', 'tag': 'display_notification',
+                'params': {
+                    'title': 'Nebim Sıfırlandı',
+                    'message': f'{self.name} için Nebim sipariş ve fatura bayrakları sıfırlandı. '
+                               'Tekrar "Paketle ve Faturala" yapabilirsiniz.',
+                    'type': 'success',
+                    'sticky': False,
+                }}
 
     def action_confirm(self):
         """Sipariş onaylandığında, toggle açıksa Cari ve Sipariş Nebim'e gönderilir."""
@@ -97,4 +141,5 @@ class SaleOrderLine(models.Model):
     _inherit = 'sale.order.line'
 
     nebim_order_line_id = fields.Char(string='Nebim OrderLineID', readonly=True)
+
 
