@@ -282,6 +282,8 @@ class InvoiceProcessor(models.AbstractModel):
         for line in invoice.invoice_line_ids:
             if not line.product_id:
                 continue
+            if not line.quantity or line.quantity <= 0:
+                continue
 
             line_data = {
                 'Qty1': float(line.quantity),

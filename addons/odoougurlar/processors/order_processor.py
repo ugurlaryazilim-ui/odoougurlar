@@ -45,6 +45,8 @@ class OrderProcessor(models.AbstractModel):
         for line in sale_order.order_line:
             if not line.product_id:
                 continue
+            if not line.product_uom_qty or line.product_uom_qty <= 0:
+                continue
                 
             line_data = {
                 'Qty1': line.product_uom_qty,
