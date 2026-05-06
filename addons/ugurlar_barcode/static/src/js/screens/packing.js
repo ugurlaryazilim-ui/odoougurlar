@@ -600,13 +600,13 @@ export class PackingScreen extends Component {
 
             if (el.type === 'line') {
                 const lineH = Math.max(h, 0.3);
-                elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${lineH}mm; background:${color}; transform:rotate(${rotation}deg); transform-origin:top left;"></div>`;
+                elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${lineH}mm; background:${color}; transform:rotate(${rotation}deg);"></div>`;
                 continue;
             }
 
             if (el.type === 'box') {
                 const bw = el.borderWidth || 1;
-                elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; border:${bw}px solid ${color}; background:${bgColor}; transform:rotate(${rotation}deg); transform-origin:top left;"></div>`;
+                elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; border:${bw}px solid ${color}; background:${bgColor}; transform:rotate(${rotation}deg);"></div>`;
                 continue;
             }
 
