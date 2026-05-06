@@ -600,13 +600,13 @@ export class PackingScreen extends Component {
 
             if (el.type === 'line') {
                 const lineH = Math.max(h, 0.3);
-                elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${lineH}mm; background:${color};"></div>`;
+                elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${lineH}mm; background:${color}; transform:rotate(${rotation}deg); transform-origin:top left;"></div>`;
                 continue;
             }
 
             if (el.type === 'box') {
                 const bw = el.borderWidth || 1;
-                elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; border:${bw}px solid ${color}; background:${bgColor};"></div>`;
+                elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; border:${bw}px solid ${color}; background:${bgColor}; transform:rotate(${rotation}deg); transform-origin:top left;"></div>`;
                 continue;
             }
 
@@ -726,32 +726,43 @@ export class PackingScreen extends Component {
     }
 
     _printViaIframe(html) {
-        // Tabletlerde Popup Blocker'ı aşmak ve direk yazdırmak için görünür ama ufacık iframe kuralım
-        let iframe = document.getElementById('ub-print-iframe');
-        if (!iframe) {
-            iframe = document.createElement('iframe');
-            iframe.id = 'ub-print-iframe';
-            iframe.style.position = 'fixed';
-            iframe.style.right = '0';
-            iframe.style.bottom = '0';
-            iframe.style.width = '1px';
-            iframe.style.height = '1px';
-            iframe.style.opacity = '0.01';
-            iframe.style.border = '0';
-            iframe.style.pointerEvents = 'none';
-            document.body.appendChild(iframe);
-        }
+        // Eski iframe varsa kaldır — her yazdırma temiz iframe ile başlasın
+        const old = document.getElementById('ub-print-iframe');
+        if (old) old.parentNode.removeChild(old);
+
+        const iframe = document.createElement('iframe');
+        iframe.id = 'ub-print-iframe';
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        // Yeterli boyut: tarayıcı, iframe içeriğini @page size ile yazdırabilsin
+        iframe.style.width = '300mm';
+        iframe.style.height = '300mm';
+        iframe.style.opacity = '0.01';
+        iframe.style.border = '0';
+        iframe.style.pointerEvents = 'none';
+        iframe.style.zIndex = '-9999';
+        document.body.appendChild(iframe);
 
         const doc = iframe.contentWindow.document;
         doc.open();
         doc.write(html);
         doc.close();
 
-        // document.write'tan sonra DOM'un oturmasını bekleyip direk iframe üzerinden yazdır
-        setTimeout(() => {
-            iframe.contentWindow.focus();
-            iframe.contentWindow.print();
-        }, 500);
+        // Tüm görsellerin (barkod, QR) yüklenmesini bekle, sonra yazdır
+        const tryPrint = () => {
+            const imgs = doc.querySelectorAll('img');
+            const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
+            if (allLoaded || imgs.length === 0) {
+                iframe.contentWindow.focus();
+                iframe.contentWindow.print();
+            } else {
+                // Henüz yüklenmemiş görseller var — biraz daha bekle
+                setTimeout(tryPrint, 200);
+            }
+        };
+        // İlk deneme: DOM oturması + görseller için yeterli süre
+        setTimeout(tryPrint, 600);
     }
 
     willUnmount() {
