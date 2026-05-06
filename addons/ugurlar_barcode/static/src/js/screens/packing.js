@@ -665,14 +665,14 @@ export class PackingScreen extends Component {
             <title>Kargo Etiketi ${wMm}x${hMm}mm — ${data.picking_name}</title>
             <style>
                 @page {
-                    size: ${wMm}mm ${hMm}mm !important;
-                    margin: 0 !important;
+                    size: ${wMm}mm ${hMm}mm;
+                    margin: 0;
                 }
                 * { margin:0; padding:0; box-sizing:border-box; }
                 html, body {
-                    margin:0 !important; padding:0 !important;
-                    width: ${wMm}mm !important;
-                    height: ${hMm}mm !important;
+                    margin: 0; padding: 0;
+                    width: ${wMm}mm;
+                    height: ${hMm}mm;
                 }
                 body {
                     font-family: Arial, Helvetica, sans-serif;
@@ -692,10 +692,26 @@ export class PackingScreen extends Component {
                     image-rendering: -moz-crisp-edges;
                     -ms-interpolation-mode: nearest-neighbor;
                 }
+                /* Yazdırma talimatı — ekranda göster, yazıcıya gönderme */
+                .print-instructions {
+                    position: fixed; top: 0; left: 0; right: 0;
+                    background: #1a1a2e; color: #fff;
+                    padding: 12px 20px; font-size: 13px; z-index: 99999;
+                    font-family: Arial, sans-serif; line-height: 1.6;
+                    border-bottom: 3px solid #e94560;
+                }
+                .print-instructions b { color: #e94560; }
+                .print-instructions .dismiss-btn {
+                    display: inline-block; margin-left: 15px;
+                    padding: 4px 16px; background: #e94560; color: #fff;
+                    border: none; border-radius: 4px; cursor: pointer;
+                    font-size: 13px; font-weight: bold;
+                }
                 @media print {
+                    .print-instructions { display: none !important; }
                     @page {
-                        size: ${wMm}mm ${hMm}mm !important;
-                        margin: 0 !important;
+                        size: ${wMm}mm ${hMm}mm;
+                        margin: 0;
                     }
                     html, body {
                         margin: 0 !important; padding: 0 !important;
@@ -705,6 +721,14 @@ export class PackingScreen extends Component {
                 }
             </style>
         </head><body>
+            <div class="print-instructions" id="printInstructions">
+                ⚠️ <b>Yazdırma Ayarları (${wMm}×${hMm}mm):</b>
+                "Daha fazla ayar" aç →
+                <b>Kağıt boyutu:</b> ${wMm}×${hMm}mm (veya Özel) |
+                <b>Kenar boşlukları:</b> Yok |
+                <b>Ölçek:</b> Özel → <b>100</b>
+                <button class="dismiss-btn" onclick="this.parentElement.style.display='none'">✓ Anladım</button>
+            </div>
             <div class="label">${elementsHtml}</div>
         </body></html>`;
 
