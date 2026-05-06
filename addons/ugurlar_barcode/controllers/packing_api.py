@@ -37,12 +37,30 @@ def _extract_marketplace_info(sale_order):
                 getattr(order, 'cargo_tracking_number', '') or
                 getattr(order, 'cargo_tracking', '') or
                 getattr(order, 'cargo_code', '') or
+                getattr(order, 'shipment_code', '') or  # Pazarama PZ kodu
                 ''
             )
+            # Kargo firması
+            cargo_provider = (
+                getattr(order, 'cargo_provider', '') or
+                getattr(order, 'cargo_company', '') or
+                ''
+            )
+            # Kargo satır seviyesinde de olabilir (Pazarama line_ids)
+            if not cargo_tracking or not cargo_provider:
+                line_ids = getattr(order, 'line_ids', None)
+                if line_ids:
+                    for line in line_ids:
+                        if not cargo_tracking:
+                            cargo_tracking = getattr(line, 'cargo_tracking', '') or ''
+                        if not cargo_provider:
+                            cargo_provider = getattr(line, 'cargo_company', '') or ''
+                        if cargo_tracking and cargo_provider:
+                            break
             return {
                 'marketplace_name': name,
                 'cargo_tracking': cargo_tracking,
-                'cargo_provider': getattr(order, 'cargo_provider', '') or getattr(order, 'cargo_company', '') or '',
+                'cargo_provider': cargo_provider,
                 'customer_name': getattr(order, 'customer_name', '') or '',
                 'order_number': getattr(order, num_field, '') or '',
             }
@@ -372,8 +390,16 @@ class PackingApiController(BarcodeApiBase):
             'picking_name': picking.name,
             'origin': picking.origin or '',
             'partner_name': picking.partner_id.name or '',
-            'partner_phone': picking.partner_id.phone or '',
+            'partner_phone': picking.partner_id.phone or picking.partner_id.mobile or '',
             'partner_address': '',
+            'cargo_tracking': '',
+            'cargo_provider': '',
+            'order_number': '',
+            'customer_name': '',
+            'marketplace_name': '',
+            'shipping_address': '',
+            'shipping_city': '',
+            'shipping_district': '',
         }
 
         if picking.partner_id:
@@ -384,15 +410,6 @@ class PackingApiController(BarcodeApiBase):
                 picking.partner_id.state_id.name if picking.partner_id.state_id else '',
             ]
             data['partner_address'] = ', '.join(p for p in addr_parts if p)
-
-        # Trendyol sipariş bilgileri
-        data['cargo_tracking'] = ''
-        data['cargo_provider'] = ''
-        data['order_number'] = ''
-        data['customer_name'] = ''
-        data['shipping_address'] = ''
-        data['shipping_city'] = ''
-        data['shipping_district'] = ''
 
         if picking.origin:
             sale = request.env['sale.order'].sudo().search([
@@ -405,11 +422,28 @@ class PackingApiController(BarcodeApiBase):
                 data['order_number'] = mp_info['order_number']
                 data['customer_name'] = mp_info['customer_name']
                 data['marketplace_name'] = mp_info['marketplace_name']
+
                 # Shipping fields — her marketplace modülünden çek
                 for field, num_field, name in _MARKETPLACE_REGISTRY:
                     if hasattr(sale, field) and getattr(sale, field):
                         morder = getattr(sale, field)
-                        data['shipping_address'] = getattr(morder, 'shipping_address', '') or ''
+                        # shipping_address — bazı modellerde 'shipping_address', bazılarında 'shipment_address' (JSON)
+                        addr = getattr(morder, 'shipping_address', '') or ''
+                        if not addr:
+                            # Pazarama: shipment_address JSON field'ından parse et
+                            import json as _json
+                            raw_addr = getattr(morder, 'shipment_address', '') or ''
+                            if raw_addr:
+                                try:
+                                    addr_data = _json.loads(raw_addr)
+                                    addr_parts = [
+                                        addr_data.get('neighborhoodName', ''),
+                                        addr_data.get('addressDetail', ''),
+                                    ]
+                                    addr = ' '.join(p for p in addr_parts if p)
+                                except (ValueError, TypeError):
+                                    addr = raw_addr[:200]
+                        data['shipping_address'] = addr or data['partner_address']
                         data['shipping_city'] = getattr(morder, 'shipping_city', '') or ''
                         data['shipping_district'] = getattr(morder, 'shipping_district', '') or ''
                         break
@@ -418,12 +452,23 @@ class PackingApiController(BarcodeApiBase):
         if not data['cargo_tracking'] and picking.carrier_tracking_ref:
             data['cargo_tracking'] = picking.carrier_tracking_ref
 
+        # Fallback: Partner bilgileri (eğer marketplace verisi yoksa)
+        if not data['shipping_address']:
+            data['shipping_address'] = data['partner_address']
+        if not data['shipping_city'] and picking.partner_id:
+            data['shipping_city'] = picking.partner_id.state_id.name if picking.partner_id.state_id else ''
+        if not data['shipping_district'] and picking.partner_id:
+            data['shipping_district'] = picking.partner_id.city or ''
+        if not data['customer_name']:
+            data['customer_name'] = data['partner_name']
+
         # Ürün listesi
         items = []
         for move in picking.move_ids:
             items.append({
                 'product_name': move.product_id.display_name,
                 'barcode': move.product_id.barcode or '',
+                'default_code': move.product_id.default_code or '',
                 'qty': move.product_uom_qty,
             })
         data['items'] = items
