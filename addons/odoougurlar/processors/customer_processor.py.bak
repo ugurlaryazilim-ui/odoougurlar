@@ -115,26 +115,6 @@ class CustomerProcessor(models.AbstractModel):
                 'Address': (partner.street or 'Adres bilgisi yok')[:200],
             }]
         
-        # İletişim bilgileri (Telefon + Email)
-        # Nebim referansı: CommunicationTypeCode 7=Telefon, 3=Email
-        comm_list = []
-        cust_phone = (partner.phone or partner.mobile or '').strip()
-        cust_email = (partner.email or '').strip()
-        if cust_phone:
-            comm_list.append({
-                'CommunicationTypeCode': 7,
-                'CommAddress': cust_phone,
-                'CanSendAdvert': False,
-            })
-        if cust_email:
-            comm_list.append({
-                'CommunicationTypeCode': 3,
-                'CommAddress': cust_email,
-                'CanSendAdvert': False,
-            })
-        if comm_list:
-            payload['Communications'] = comm_list
-        
         _logger.info("Nebim Cari PostalAddresses: Country=%s, State=%s, City=%s, District=%s",
                      country_code, state_code, city_code, district_code)
         
