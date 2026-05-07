@@ -132,8 +132,27 @@ class CustomerProcessor(models.AbstractModel):
         customer_code = mapping.nebim_customer_code if mapping else ''
         address_id = ''
         try:
+            # İstek payload'unu sale_order'a kaydet (debug için)
+            if sale_order:
+                import json as _json
+                try:
+                    sale_order.sudo().write({
+                        'nebim_customer_request': _json.dumps(payload, ensure_ascii=False, default=str),
+                    })
+                except Exception:
+                    pass
+
             result = connector.post_data('Post', payload)
             _logger.info("Cari bilgisi işlendi (Nebim): %s - Sonuc: OK", partner.name)
+            
+            # Yanıt JSON'unu sale_order'a kaydet (debug için)
+            if sale_order:
+                try:
+                    sale_order.sudo().write({
+                        'nebim_customer_response': _json.dumps(result, ensure_ascii=False, default=str) if result else '',
+                    })
+                except Exception:
+                    pass
             
             # Nebim'den hata dönerse (200 OK gelse bile HTTP içinde json hatası olabilir)
             if isinstance(result, dict) and 'ExceptionMessage' in result:

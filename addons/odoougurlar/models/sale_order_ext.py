@@ -10,6 +10,8 @@ class SaleOrder(models.Model):
     nebim_customer_sent = fields.Boolean(string='Nebim Cari Açıldı', default=False, readonly=True)
     nebim_customer_code = fields.Char(string='Nebim Cari Kodu', readonly=True)
     nebim_address_id = fields.Char(string='Nebim Adres ID', readonly=True)
+    nebim_customer_request = fields.Text(string='Nebim Cari İstek', readonly=True)
+    nebim_customer_response = fields.Text(string='Nebim Cari Cevabı', readonly=True)
     nebim_order_sent = fields.Boolean(string='Nebim Sipariş Aktarıldı', default=False)
     nebim_order_response = fields.Text(string='Nebim Sipariş Cevabı', readonly=True)
     nebim_order_request = fields.Text(string='Nebim Sipariş İstek', readonly=True)

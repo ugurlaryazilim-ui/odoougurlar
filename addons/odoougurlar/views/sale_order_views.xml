@@ -24,6 +24,14 @@
                             <field name="nebim_order_request" widget="CopyClipboardChar"/>
                         </group>
                     </group>
+                    <group string="Nebim Cari JSON">
+                        <group>
+                            <field name="nebim_customer_request" widget="CopyClipboardChar"/>
+                        </group>
+                        <group>
+                            <field name="nebim_customer_response" widget="CopyClipboardChar"/>
+                        </group>
+                    </group>
                 </page>
             </xpath>
         </field>
