@@ -98,6 +98,7 @@ class CustomerProcessor(models.AbstractModel):
                 'FirstName': partner.name.split(' ', 1)[0][:50] if partner.name else '',
                 'LastName': partner.name.split(' ', 1)[-1][:50] if ' ' in partner.name else '',
                 'IdentityNum': partner.vat or '11111111111',
+                'TaxNumber': '1111111111',
                 'OfficeCode': 'M',
                 'CurrencyCode': 'TRY',
             }
@@ -158,11 +159,23 @@ class CustomerProcessor(models.AbstractModel):
                 'Address': (partner.street or 'Adres bilgisi yok')[:200],
             }]
 
-        # Telefon ve email PostalAddress içinde gönder
+        # İletişim bilgileri — Nebim referans formatı:
+        # CommunicationTypeCode: 7 = Telefon/GSM, 3 = Email
+        comm_list = []
         if customer_phone:
-            payload['PostalAddresses'][0]['PhoneNumber'] = customer_phone
+            comm_list.append({
+                'CommunicationTypeCode': 7,
+                'CommAddress': customer_phone,
+                'CanSendAdvert': False,
+            })
         if customer_email:
-            payload['PostalAddresses'][0]['EMail'] = customer_email
+            comm_list.append({
+                'CommunicationTypeCode': 3,
+                'CommAddress': customer_email,
+                'CanSendAdvert': False,
+            })
+        if comm_list:
+            payload['Communications'] = comm_list
         
         _logger.info("Nebim Cari PostalAddresses: Country=%s, State=%s, City=%s, District=%s",
                      country_code, state_code, city_code, district_code)
