@@ -106,6 +106,49 @@ class CustomerProcessor(models.AbstractModel):
                 payload['TaxNumber'] = '1111111111'
                 payload['CustomerTypeCode'] = 3
 
+        # ─── Müşteri iletişim bilgileri ───
+        customer_email = (partner.email or '').strip()
+        customer_phone = (partner.phone or partner.mobile or '').strip()
+
+        # Pazaryeri modüllerinden email/telefon çekmek (Odoo partner boşsa)
+        if sale_order and (not customer_email or not customer_phone):
+            for field, _num_field, _name in [
+                ('trendyol_order_id', '', 'Trendyol'),
+                ('hb_order_id', '', 'Hepsiburada'),
+                ('pazarama_order_id', '', 'Pazarama'),
+                ('n11_order_id', '', 'N11'),
+                ('idefix_order_id', '', 'Idefix'),
+                ('pttavm_order_id', '', 'PttAvm'),
+            ]:
+                if hasattr(sale_order, field) and getattr(sale_order, field):
+                    mp_order = getattr(sale_order, field)
+                    if not customer_email:
+                        customer_email = (getattr(mp_order, 'customer_email', '') or '').strip()
+                    if not customer_phone:
+                        # Bazı modüllerde phone, bazılarında shipping_phone
+                        customer_phone = (
+                            getattr(mp_order, 'customer_phone', '') or
+                            getattr(mp_order, 'phone', '') or ''
+                        ).strip()
+                        if not customer_phone:
+                            # Adres JSON içinden telefon çekmeyi dene
+                            import json as _json
+                            for addr_field in ('shipment_address', 'shipping_address', 'billing_address'):
+                                raw = getattr(mp_order, addr_field, '') or ''
+                                if raw:
+                                    try:
+                                        addr_data = _json.loads(raw)
+                                        customer_phone = (addr_data.get('phone', '') or '').strip()
+                                        if customer_phone:
+                                            break
+                                    except (ValueError, TypeError):
+                                        pass
+                    if customer_email and customer_phone:
+                        break
+
+        _logger.info("Nebim Cari İletişim: email='%s', phone='%s', partner='%s'",
+                     customer_email, customer_phone, partner.name)
+
         payload['PostalAddresses'] = [{
                 'AddressTypeCode': "1",
                 'CountryCode': country_code,
@@ -114,6 +157,25 @@ class CustomerProcessor(models.AbstractModel):
                 'DistrictCode': district_code,
                 'Address': (partner.street or 'Adres bilgisi yok')[:200],
             }]
+
+        # Telefon numarasını PostalAddress'e ekle
+        if customer_phone:
+            payload['PostalAddresses'][0]['PhoneNumber'] = customer_phone
+
+        # E-posta ve telefon iletişim listesi
+        comm_list = []
+        if customer_email:
+            comm_list.append({
+                'CommunicationTypeCode': 'Email',
+                'CommAddress': customer_email,
+            })
+        if customer_phone:
+            comm_list.append({
+                'CommunicationTypeCode': 'GSM',
+                'CommAddress': customer_phone,
+            })
+        if comm_list:
+            payload['Communications'] = comm_list
         
         _logger.info("Nebim Cari PostalAddresses: Country=%s, State=%s, City=%s, District=%s",
                      country_code, state_code, city_code, district_code)
