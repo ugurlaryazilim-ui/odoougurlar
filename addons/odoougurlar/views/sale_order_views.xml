@@ -21,10 +21,9 @@
                         </group>
                         <group>
                             <field name="nebim_order_response" widget="CopyClipboardChar"/>
+                            <field name="nebim_order_request" widget="CopyClipboardChar"/>
                         </group>
                     </group>
-                    <separator string="Nebim Sipariş İstek (JSON)"/>
-                    <field name="nebim_order_request" nolabel="1" widget="CopyClipboardChar"/>
                 </page>
             </xpath>
         </field>
