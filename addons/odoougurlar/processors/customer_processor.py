@@ -120,16 +120,16 @@ class CustomerProcessor(models.AbstractModel):
         comm_list = []
         cust_phone = (partner.phone or partner.mobile or '').strip()
         cust_email = (partner.email or '').strip()
-        if cust_phone:
-            comm_list.append({
-                'CommunicationTypeCode': 7,
-                'CommAddress': cust_phone,
-                'CanSendAdvert': False,
-            })
         if cust_email:
             comm_list.append({
                 'CommunicationTypeCode': 3,
                 'CommAddress': cust_email,
+                'CanSendAdvert': False,
+            })
+        if cust_phone:
+            comm_list.append({
+                'CommunicationTypeCode': 7,
+                'CommAddress': cust_phone,
                 'CanSendAdvert': False,
             })
         if comm_list:
