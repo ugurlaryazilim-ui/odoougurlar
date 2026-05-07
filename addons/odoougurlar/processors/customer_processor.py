@@ -158,24 +158,11 @@ class CustomerProcessor(models.AbstractModel):
                 'Address': (partner.street or 'Adres bilgisi yok')[:200],
             }]
 
-        # Telefon numarasını PostalAddress'e ekle
+        # Telefon ve email PostalAddress içinde gönder
         if customer_phone:
             payload['PostalAddresses'][0]['PhoneNumber'] = customer_phone
-
-        # E-posta ve telefon iletişim listesi
-        comm_list = []
         if customer_email:
-            comm_list.append({
-                'CommunicationTypeCode': 'Email',
-                'CommAddress': customer_email,
-            })
-        if customer_phone:
-            comm_list.append({
-                'CommunicationTypeCode': 'GSM',
-                'CommAddress': customer_phone,
-            })
-        if comm_list:
-            payload['Communications'] = comm_list
+            payload['PostalAddresses'][0]['EMail'] = customer_email
         
         _logger.info("Nebim Cari PostalAddresses: Country=%s, State=%s, City=%s, District=%s",
                      country_code, state_code, city_code, district_code)
