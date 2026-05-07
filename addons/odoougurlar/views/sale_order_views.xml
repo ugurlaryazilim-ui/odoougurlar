@@ -20,11 +20,11 @@
                                     confirm="Nebim sipariş ve fatura bayrakları sıfırlanacak. Nebim'deki eski siparişi sildiğinizden emin olun. Devam edilsin mi?"/>
                         </group>
                         <group>
-                            <field name="nebim_order_response"/>
+                            <field name="nebim_order_response" widget="CopyClipboardText"/>
                         </group>
                     </group>
                     <separator string="Nebim Sipariş İstek (JSON)"/>
-                    <field name="nebim_order_request" nolabel="1"/>
+                    <field name="nebim_order_request" nolabel="1" widget="CopyClipboardText"/>
                 </page>
             </xpath>
         </field>
