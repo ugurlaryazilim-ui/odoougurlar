@@ -273,11 +273,14 @@ class InvoiceProcessor(models.AbstractModel):
         # Tarih formatı: YYYYMMDD
         invoice_date_str = invoice.invoice_date.strftime('%Y%m%d') if invoice.invoice_date else ''
         
-        # Sipariş Bazlı mı?
-        # NOT: OrderLineID ile sipariş bazlı faturada Nebim kendi siparişindeki
-        # fiyatı kullanır. Serbest fatura modunda 'Price' (KDV hariç) gönderiyoruz.
-        # PriceVI Nebim tarafından görmezden geliniyor — sadece Price çalışıyor.
-        is_order_base = False
+        # ── Satır verileri ──
+        # Strateji: OrderLineID varsa → sipariş bazlı fatura (Nebim siparişindeki fiyatı kullanır)
+        #           OrderLineID yoksa → serbest fatura (Price alanıyla gönderilir)
+        #
+        # "Nebim Sıfırla" butonu ile güncel fiyatlarla sipariş Nebim'e gönderilir.
+        # Bu siparişteki OrderLineID'ler sale.order.line'a kaydedilir.
+        # Fatura bu OrderLineID'lere bağlandığında Nebim siparişteki (doğru) fiyatı kullanır.
+        has_order_line_ids = False
         lines = []
         for line in invoice.invoice_line_ids:
             if not line.product_id:
@@ -285,25 +288,40 @@ class InvoiceProcessor(models.AbstractModel):
             if not line.quantity or line.quantity <= 0:
                 continue
 
+            # Fatura satırını sipariş satırıyla eşleştir
+            sale_line = line.sale_line_ids[0] if line.sale_line_ids else False
+            order_line_id = sale_line.nebim_order_line_id if sale_line and sale_line.nebim_order_line_id else ''
+
             line_data = {
                 'Qty1': float(line.quantity),
-                'Price': float(line.price_unit),
             }
-            if line.product_id.barcode:
-                line_data['UsedBarcode'] = line.product_id.barcode
-            if line.product_id.default_code:
-                line_data['ItemCode'] = line.product_id.default_code
 
-            _logger.info(
-                "Nebim Fatura Satır: %s | Barcode=%s | ItemCode=%s | Qty=%s | Price(KDV hariç)=%s",
-                line.product_id.display_name,
-                line_data.get('UsedBarcode', 'YOK'),
-                line_data.get('ItemCode', 'YOK'),
-                line.quantity,
-                line.price_unit,
-            )
+            if order_line_id:
+                # Sipariş bazlı: OrderLineID ile Nebim siparişindeki fiyat kullanılır
+                line_data['OrderLineID'] = order_line_id
+                has_order_line_ids = True
+                _logger.info(
+                    "Nebim Fatura Satır (SİPARİŞ BAZLI): %s | OrderLineID=%s | Qty=%s",
+                    line.product_id.display_name, order_line_id, line.quantity,
+                )
+            else:
+                # Serbest fatura: Price alanı ile fiyat gönderilir
+                line_data['Price'] = float(line.price_unit)
+                if line.product_id.barcode:
+                    line_data['UsedBarcode'] = line.product_id.barcode
+                if line.product_id.default_code:
+                    line_data['ItemCode'] = line.product_id.default_code
+                _logger.info(
+                    "Nebim Fatura Satır (SERBEST): %s | Barcode=%s | Price(KDV hariç)=%s",
+                    line.product_id.display_name,
+                    line_data.get('UsedBarcode', 'YOK'),
+                    line.price_unit,
+                )
 
             lines.append(line_data)
+
+        is_order_base = has_order_line_ids
+        _logger.info("Nebim Fatura Modu: %s", "SİPARİŞ BAZLI" if is_order_base else "SERBEST")
 
         # Mapping'den değerleri al
         m_store = (mapping.store_code if mapping and mapping.store_code else '002')
