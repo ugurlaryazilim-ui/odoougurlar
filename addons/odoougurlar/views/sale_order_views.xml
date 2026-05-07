@@ -23,9 +23,8 @@
                             <field name="nebim_order_response"/>
                         </group>
                     </group>
-                    <group invisible="not nebim_order_sent">
-                        <field name="nebim_order_request" string="Nebim Sipariş İstek (JSON)"/>
-                    </group>
+                    <separator string="Nebim Sipariş İstek (JSON)"/>
+                    <field name="nebim_order_request" nolabel="1"/>
                 </page>
             </xpath>
         </field>

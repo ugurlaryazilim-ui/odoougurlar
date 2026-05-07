@@ -66,9 +66,11 @@ class AccountMove(models.Model):
             return {'type': 'ir.actions.client', 'tag': 'display_notification',
                     'params': {'title': 'Bilgi', 'message': 'Bu fatura zaten Nebim\'e gönderilmiş.', 'type': 'info'}}
         try:
+            import json
             invoice_proc = self.env['odoougurlar.invoice.processor'].sudo()
             connector = self.env['odoougurlar.nebim.connector'].sudo()
             payload = invoice_proc._build_invoice_payload(self)
+            self.write({'nebim_request': json.dumps(payload, ensure_ascii=False, indent=2, default=str)})
             result = connector.post_data('Post', payload)
             
             if isinstance(result, dict) and 'ExceptionMessage' in result:
