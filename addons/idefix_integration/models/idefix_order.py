@@ -55,7 +55,9 @@ class IdefixOrderLine(models.Model):
     product_code = fields.Char(string='Ürün/Stok Kodu')
     
     quantity = fields.Integer(string='Miktar')
-    sale_price = fields.Float(string='Satış Fiyatı')
+    sale_price = fields.Float(string='Satış Fiyatı (KDV Hariç)')
+    sale_price_tax_included = fields.Float(string='Satış Fiyatı (KDV Dahil)')
+    vat_rate = fields.Integer(string='KDV Oranı (%)', default=10)
     
     status = fields.Char(string='Sipariş Statüsü')
     

@@ -154,17 +154,28 @@ class IdefixOrderSync(models.Model):
 
         items = order_json.get('items', [])
         for item in items:
+            vat_rate = item.get('vatRate', 10)  # KDV oranı (örn. 10 = %10)
+            kdv_dahil_fiyat = item.get('discountedTotalPrice', 0.0)
+            # KDV hariç fiyat hesapla — Odoo price_unit KDV hariç bekler
+            kdv_haric_fiyat = round(kdv_dahil_fiyat / (1 + vat_rate / 100.0), 2) if vat_rate else kdv_dahil_fiyat
+
             line_vals = {
                 'item_id': str(item.get('id', '')),
-                'product_id': str(item.get('erpId', '')), # We might map ERP ID
+                'product_id': str(item.get('erpId', '')),
                 'product_name': item.get('productName'),
                 'product_code': item.get('barcode') or item.get('merchantSku'),
-                'quantity': 1, # Idefix gives items as flat list usually, but defaulting 1
-                'sale_price': item.get('discountedTotalPrice', 0.0),
+                'quantity': 1,
+                'sale_price': kdv_haric_fiyat,  # KDV hariç fiyat (Odoo'ya bu gidecek)
+                'sale_price_tax_included': kdv_dahil_fiyat,  # Orijinal KDV dahil fiyat (referans)
+                'vat_rate': vat_rate,
                 'status': item.get('itemStatus', ''),
                 'cargo_tracking': cargo_tracking,
                 'cargo_company': cargo_provider,
             }
+            _logger.info(
+                "Idefix Satır: %s | KDV Dahil=%.2f | KDV%%=%d | KDV Hariç=%.2f",
+                item.get('productName', ''), kdv_dahil_fiyat, vat_rate, kdv_haric_fiyat,
+            )
             vals['line_ids'].append((0, 0, line_vals))
             
         vals['cargo_tracking_number'] = cargo_tracking
