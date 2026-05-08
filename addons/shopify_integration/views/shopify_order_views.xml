@@ -108,7 +108,7 @@
                 <filter name="paid" string="Ödenmiş"
                         domain="[('financial_status', '=', 'paid')]"/>
                 <filter name="unfulfilled" string="Karşılanmamış"
-                        domain="[('fulfillment_status', 'in', ['', 'unfulfilled', False])]"/>
+                        domain="[('fulfillment_status', 'in', ('', 'unfulfilled'))]"/>
                 <filter name="fulfilled" string="Karşılanmış"
                         domain="[('fulfillment_status', '=', 'fulfilled')]"/>
                 <separator/>
