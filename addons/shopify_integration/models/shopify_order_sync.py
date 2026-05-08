@@ -254,8 +254,8 @@ class ShopifyOrderSync(models.Model):
         """Shopify siparişinden Odoo sale.order oluşturur."""
         partner = self._find_or_create_partner(order_json, store)
 
-        # Depo / Warehouse — idefix ile aynı pattern
-        warehouse = self.env['stock.warehouse'].search(
+        # Depo / Warehouse — store ayarlarından al
+        warehouse = store.warehouse_id or self.env['stock.warehouse'].search(
             [('code', '=', '002')], limit=1
         ) or self.env['stock.warehouse'].search([], limit=1)
 

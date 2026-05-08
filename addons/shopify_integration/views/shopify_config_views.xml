@@ -48,6 +48,7 @@
                         <group string="Sipariş Ayarları">
                             <field name="auto_confirm"/>
                             <field name="customer_prefix"/>
+                            <field name="warehouse_id"/>
                         </group>
                         <group string="Kargo Ayarları">
                             <field name="default_cargo_company"/>

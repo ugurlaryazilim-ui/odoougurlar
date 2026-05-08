@@ -10,6 +10,7 @@
     'data': [
         'security/ir.model.access.csv',
         'data/cron_data.xml',
+        'views/settings_views.xml',
         'views/shopify_config_views.xml',
         'views/shopify_order_views.xml',
         'views/sale_order_views.xml',

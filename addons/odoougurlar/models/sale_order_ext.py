@@ -75,6 +75,7 @@ class SaleOrder(models.Model):
                 ('flo_order_id', 'Flo'),
                 ('idefix_order_id', 'Idefix'),
                 ('pttavm_order_id', 'PttAvm'),
+                ('shopify_order_id', 'Shopify'),
             ]
             for field, name in _mp_fields:
                 if hasattr(self, field) and getattr(self, field):
@@ -136,6 +137,7 @@ class SaleOrder(models.Model):
             ('flo_order_id', 'Flo'),
             ('idefix_order_id', 'Idefix'),
             ('pttavm_order_id', 'PttAvm'),
+            ('shopify_order_id', 'Shopify'),
         ]
         for field, name in _mp_fields:
             if hasattr(order, field) and getattr(order, field):

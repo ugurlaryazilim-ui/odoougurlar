@@ -54,6 +54,11 @@ class ShopifyStore(models.Model):
         string='Müşteri Kodu Ön Ek', default='SHO-',
         help='Shopify müşterilerinin kodlarına eklenen ek')
 
+    # ─── Depo Ayarları ───────────────────────────────────
+    warehouse_id = fields.Many2one(
+        'stock.warehouse', string='Sipariş Deposu',
+        help='Shopify siparişlerinin düşeceği depo')
+
     # ─── Kargo Ayarları ──────────────────────────────────
     default_cargo_company = fields.Char(
         string='Varsayılan Kargo Firması', default='DHL')
