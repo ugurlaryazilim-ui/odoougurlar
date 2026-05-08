@@ -238,10 +238,12 @@ class ShopifyOrderSync(models.Model):
         # Odoo Sale Order oluştur
         try:
             sale_order = self._create_odoo_sale_order(shopify_order, order_json, store)
-            shopify_order.write({'sale_order_id': sale_order.id})
-            sale_order.write({'shopify_order_id': shopify_order.id})
-            _logger.info("Shopify → Odoo sipariş oluşturuldu: %s → %s",
-                         shopify_order.order_number, sale_order.name)
+            if sale_order:
+                _logger.info("Shopify → Odoo sipariş oluşturuldu: %s → %s",
+                             shopify_order.order_number, sale_order.name)
+            else:
+                _logger.error("Shopify %s: sale.order oluşturulamadı (ürün eşleşmedi)",
+                              shopify_order.order_number)
         except Exception as e:
             _logger.error("Odoo sale.order oluşturulamadı (Shopify %s): %s",
                           shopify_order.order_number, e, exc_info=True)
@@ -350,7 +352,12 @@ class ShopifyOrderSync(models.Model):
 
         sale_order = self.env['sale.order'].sudo().create(so_vals)
 
-        # Otomatik onayla
+        # ÖNCELİKLE shopify_order_id yaz — Nebim auto-sync buna bakıyor
+        sale_order.write({'shopify_order_id': shopify_order.id})
+        shopify_order.write({'sale_order_id': sale_order.id})
+
+        # Otomatik onayla — action_confirm() içindeki Nebim auto-sync
+        # shopify_order_id'yi görecek ve cari + sipariş oluşturacak
         if store.auto_confirm:
             try:
                 sale_order.action_confirm()
