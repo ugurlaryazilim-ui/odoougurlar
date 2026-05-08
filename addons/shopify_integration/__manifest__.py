@@ -1,0 +1,22 @@
+{
+    'name': 'Shopify Entegrasyonu',
+    'version': '19.0.1.0.0',
+    'summary': 'Shopify Sipariş Entegrasyonu',
+    'description': 'Shopify REST Admin API üzerinden siparişlerin çekilmesi, '
+                   'Odoo\'da oluşturulması ve Nebim entegrasyonuna hazır hale getirilmesi.',
+    'author': 'Uğurlar',
+    'category': 'Sales',
+    'depends': ['sale_management', 'sale_stock', 'stock', 'delivery', 'contacts'],
+    'data': [
+        'security/ir.model.access.csv',
+        'data/cron_data.xml',
+        'views/shopify_config_views.xml',
+        'views/shopify_order_views.xml',
+        'views/sale_order_views.xml',
+        'views/menu_views.xml',
+    ],
+    'installable': True,
+    'application': True,
+    'auto_install': False,
+    'license': 'LGPL-3',
+}

@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- ═══ Shopify Order — Form ═══ -->
+    <record id="shopify_order_form_view" model="ir.ui.view">
+        <field name="name">shopify.order.form</field>
+        <field name="model">shopify.order</field>
+        <field name="arch" type="xml">
+            <form string="Shopify Sipariş" create="0">
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="order_number" readonly="1"/></h1>
+                    </div>
+                    <group>
+                        <group string="Sipariş Bilgileri">
+                            <field name="store_id"/>
+                            <field name="order_id"/>
+                            <field name="order_date"/>
+                            <field name="order_status"/>
+                            <field name="financial_status"/>
+                            <field name="fulfillment_status"/>
+                            <field name="discount_codes"/>
+                        </group>
+                        <group string="Müşteri">
+                            <field name="customer_name"/>
+                            <field name="customer_email"/>
+                            <field name="customer_phone"/>
+                            <field name="shipping_city"/>
+                        </group>
+                    </group>
+                    <group>
+                        <group string="Tutarlar">
+                            <field name="subtotal_price"/>
+                            <field name="total_discount"/>
+                            <field name="shipping_price"/>
+                            <field name="total_tax"/>
+                            <field name="total_price"/>
+                            <field name="currency"/>
+                            <field name="taxes_included"/>
+                        </group>
+                        <group string="Kargo &amp; Odoo">
+                            <field name="cargo_tracking_number"/>
+                            <field name="cargo_provider"/>
+                            <field name="sale_order_id"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Sipariş Satırları">
+                            <field name="line_ids">
+                                <list>
+                                    <field name="sku"/>
+                                    <field name="product_name"/>
+                                    <field name="variant_title"/>
+                                    <field name="quantity"/>
+                                    <field name="price" string="Fiyat (KDV Dahil)"/>
+                                    <field name="price_tax_excluded" string="Fiyat (KDV Hariç)"/>
+                                    <field name="total_discount"/>
+                                    <field name="tax_rate"/>
+                                    <field name="fulfillment_status"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Raw Data">
+                            <field name="raw_data" readonly="1"/>
+                            <field name="shipping_address" readonly="1"/>
+                            <field name="billing_address" readonly="1"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- ═══ Shopify Order — List ═══ -->
+    <record id="shopify_order_list_view" model="ir.ui.view">
+        <field name="name">shopify.order.list</field>
+        <field name="model">shopify.order</field>
+        <field name="arch" type="xml">
+            <list string="Shopify Siparişleri" create="0"
+                  decoration-success="financial_status == 'paid'"
+                  decoration-danger="order_status == 'cancelled'"
+                  decoration-muted="fulfillment_status == 'fulfilled'">
+                <field name="order_number"/>
+                <field name="order_date"/>
+                <field name="customer_name"/>
+                <field name="customer_email" optional="hide"/>
+                <field name="shipping_city"/>
+                <field name="total_price"/>
+                <field name="total_discount" optional="show"/>
+                <field name="financial_status"/>
+                <field name="fulfillment_status"/>
+                <field name="cargo_tracking_number" optional="show"/>
+                <field name="sale_order_id"/>
+                <field name="store_id" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- ═══ Shopify Order — Search ═══ -->
+    <record id="shopify_order_search_view" model="ir.ui.view">
+        <field name="name">shopify.order.search</field>
+        <field name="model">shopify.order</field>
+        <field name="arch" type="xml">
+            <search string="Shopify Sipariş Ara">
+                <field name="order_number"/>
+                <field name="customer_name"/>
+                <field name="customer_email"/>
+                <field name="cargo_tracking_number"/>
+                <filter name="paid" string="Ödenmiş"
+                        domain="[('financial_status', '=', 'paid')]"/>
+                <filter name="unfulfilled" string="Karşılanmamış"
+                        domain="[('fulfillment_status', 'in', ['', 'unfulfilled', False])]"/>
+                <filter name="fulfilled" string="Karşılanmış"
+                        domain="[('fulfillment_status', '=', 'fulfilled')]"/>
+                <separator/>
+                <group expand="0" string="Grupla">
+                    <filter name="by_store" string="Mağaza" context="{'group_by': 'store_id'}"/>
+                    <filter name="by_status" string="Ödeme Durumu" context="{'group_by': 'financial_status'}"/>
+                    <filter name="by_date" string="Sipariş Tarihi" context="{'group_by': 'order_date:day'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- ═══ Action ═══ -->
+    <record id="action_shopify_order" model="ir.actions.act_window">
+        <field name="name">Shopify Siparişleri</field>
+        <field name="res_model">shopify.order</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="shopify_order_search_view"/>
+    </record>
+</odoo>

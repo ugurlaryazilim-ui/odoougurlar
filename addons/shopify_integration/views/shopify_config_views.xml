@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- ═══ Shopify Store — Form ═══ -->
+    <record id="shopify_store_form_view" model="ir.ui.view">
+        <field name="name">shopify.store.form</field>
+        <field name="model">shopify.store</field>
+        <field name="arch" type="xml">
+            <form string="Shopify Mağaza Ayarları">
+                <header>
+                    <button name="action_test_connection"
+                            string="🔌 Bağlantı Testi"
+                            type="object"
+                            class="btn-primary"/>
+                    <button name="action_sync_now"
+                            string="🔄 Siparişleri Şimdi Çek"
+                            type="object"
+                            class="btn-success"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button class="oe_stat_button" type="object"
+                                name="action_view_orders" icon="fa-shopping-cart">
+                            <field name="order_count" widget="statinfo" string="Sipariş"/>
+                        </button>
+                    </div>
+                    <widget name="web_ribbon" title="Arşiv" bg_color="text-bg-danger"
+                            invisible="active"/>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" placeholder="Mağaza Adı"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group string="API Ayarları">
+                            <field name="shop_url" placeholder="monalureglobal.myshopify.com"/>
+                            <field name="access_token" password="True"/>
+                            <field name="api_version"/>
+                        </group>
+                        <group string="Senkronizasyon">
+                            <field name="auto_sync"/>
+                            <field name="sync_interval" invisible="not auto_sync"/>
+                            <field name="order_day_range"/>
+                            <field name="sync_only_paid"/>
+                            <field name="last_sync"/>
+                        </group>
+                    </group>
+                    <group>
+                        <group string="Sipariş Ayarları">
+                            <field name="auto_confirm"/>
+                            <field name="customer_prefix"/>
+                        </group>
+                        <group string="Kargo Ayarları">
+                            <field name="default_cargo_company"/>
+                        </group>
+                    </group>
+                    <group>
+                        <group>
+                            <field name="active"/>
+                            <field name="sequence"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- ═══ Shopify Store — List ═══ -->
+    <record id="shopify_store_list_view" model="ir.ui.view">
+        <field name="name">shopify.store.list</field>
+        <field name="model">shopify.store</field>
+        <field name="arch" type="xml">
+            <list string="Shopify Mağazalar">
+                <field name="sequence" widget="handle"/>
+                <field name="name"/>
+                <field name="shop_url"/>
+                <field name="auto_sync"/>
+                <field name="last_sync"/>
+                <field name="order_count"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- ═══ Action ═══ -->
+    <record id="action_shopify_store" model="ir.actions.act_window">
+        <field name="name">Shopify Mağazalar</field>
+        <field name="res_model">shopify.store</field>
+        <field name="view_mode">list,form</field>
+    </record>
+</odoo>
