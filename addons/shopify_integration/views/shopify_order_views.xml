@@ -37,7 +37,7 @@
                             <field name="currency"/>
                             <field name="taxes_included"/>
                         </group>
-                        <group string="Kargo &amp; Odoo">
+                        <group string="Kargo ve Odoo">
                             <field name="cargo_tracking_number"/>
                             <field name="cargo_provider"/>
                             <field name="sale_order_id"/>
@@ -51,8 +51,8 @@
                                     <field name="product_name"/>
                                     <field name="variant_title"/>
                                     <field name="quantity"/>
-                                    <field name="price" string="Fiyat (KDV Dahil)"/>
-                                    <field name="price_tax_excluded" string="Fiyat (KDV Hariç)"/>
+                                    <field name="price"/>
+                                    <field name="price_tax_excluded"/>
                                     <field name="total_discount"/>
                                     <field name="tax_rate"/>
                                     <field name="fulfillment_status"/>
@@ -75,10 +75,7 @@
         <field name="name">shopify.order.list</field>
         <field name="model">shopify.order</field>
         <field name="arch" type="xml">
-            <list string="Shopify Siparişleri" create="0"
-                  decoration-success="financial_status == 'paid'"
-                  decoration-danger="order_status == 'cancelled'"
-                  decoration-muted="fulfillment_status == 'fulfilled'">
+            <list string="Shopify Siparişleri" create="0">
                 <field name="order_number"/>
                 <field name="order_date"/>
                 <field name="customer_name"/>
@@ -100,23 +97,11 @@
         <field name="name">shopify.order.search</field>
         <field name="model">shopify.order</field>
         <field name="arch" type="xml">
-            <search string="Shopify Sipariş Ara">
+            <search>
                 <field name="order_number"/>
                 <field name="customer_name"/>
                 <field name="customer_email"/>
                 <field name="cargo_tracking_number"/>
-                <filter name="paid" string="Ödenmiş"
-                        domain="[('financial_status', '=', 'paid')]"/>
-                <filter name="unfulfilled" string="Karşılanmamış"
-                        domain="[('fulfillment_status', 'in', ('', 'unfulfilled'))]"/>
-                <filter name="fulfilled" string="Karşılanmış"
-                        domain="[('fulfillment_status', '=', 'fulfilled')]"/>
-                <separator/>
-                <group expand="0" string="Grupla">
-                    <filter name="by_store" string="Mağaza" context="{'group_by': 'store_id'}"/>
-                    <filter name="by_status" string="Ödeme Durumu" context="{'group_by': 'financial_status'}"/>
-                    <filter name="by_date" string="Sipariş Tarihi" context="{'group_by': 'order_date:day'}"/>
-                </group>
             </search>
         </field>
     </record>
@@ -126,6 +111,5 @@
         <field name="name">Shopify Siparişleri</field>
         <field name="res_model">shopify.order</field>
         <field name="view_mode">list,form</field>
-        <field name="search_view_id" ref="shopify_order_search_view"/>
     </record>
 </odoo>
