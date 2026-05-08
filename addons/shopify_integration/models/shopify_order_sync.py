@@ -291,13 +291,40 @@ class ShopifyOrderSync(models.Model):
                     if p:
                         product_map[sku] = p
 
-            # 3. default_code fallback
+            # 3. default_code exact match
             still_missing = [s for s in skus if s not in product_map]
             if still_missing:
                 products = Product.search([('default_code', 'in', still_missing)])
                 for p in products:
                     if p.default_code:
                         product_map[p.default_code] = p
+
+            # 4. Shopify SKU → Odoo İç Referans dönüşümü
+            # Shopify: 24K91231000436 (birleşik)
+            # Odoo:    24K91231-0004-36 (tireli)
+            # Tireler çıkarıldığında eşleşir
+            final_missing = [s for s in skus if s not in product_map]
+            if final_missing:
+                # İlk 8 karakter ürün kodu — bunla başlayan tüm varyantları çek
+                prefix_set = set()
+                for sku in final_missing:
+                    if len(sku) >= 6:
+                        prefix_set.add(sku[:6])  # İlk 6 karakter yeterli
+                for prefix in prefix_set:
+                    candidates = Product.search([
+                        ('default_code', '=like', f'{prefix}%')
+                    ])
+                    for p in candidates:
+                        if p.default_code:
+                            # Tireyi kaldır ve karşılaştır
+                            clean_code = p.default_code.replace('-', '').replace(' ', '')
+                            for sku in final_missing:
+                                clean_sku = sku.replace('-', '').replace(' ', '')
+                                if clean_code == clean_sku and sku not in product_map:
+                                    product_map[sku] = p
+                                    _logger.info(
+                                        "Shopify SKU eşleşti (tireli dönüşüm): %s → %s",
+                                        sku, p.default_code)
 
         # Sipariş satırları
         for line in shopify_order.line_ids:
