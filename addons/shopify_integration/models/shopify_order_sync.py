@@ -65,14 +65,13 @@ class ShopifyOrderSync(models.Model):
             except Exception as e:
                 error_count += 1
                 _logger.error("Shopify sipariş işleme hatası (order=%s): %s",
-                              order_json.get('name', '?'), e)
+                              order_json.get('name', '?'), e, exc_info=True)
 
         store.sudo().write({'last_sync': fields.Datetime.now()})
         return {'created': created_count, 'updated': updated_count, 'errors': error_count}
 
     # ─── Process Single Order ────────────────────────────
 
-    @api.private
     def _process_order_json(self, order_json, store):
         """Gelen tekil JSON'u işler, ShopifyOrder ve SaleOrder yaratır."""
         order_id = str(order_json.get('id', ''))
@@ -127,6 +126,22 @@ class ShopifyOrderSync(models.Model):
             order_json.get('phone', '') or ''
         )
 
+        # ─── note_attributes'tan İl/İlçe bilgisi ────────
+        note_attrs = order_json.get('note_attributes', []) or []
+        note_il = ''
+        note_ilce = ''
+        for attr in note_attrs:
+            attr_name = (attr.get('name', '') or '').strip()
+            attr_value = (attr.get('value', '') or '').strip()
+            if attr_name == 'İl':
+                note_il = attr_value
+            elif attr_name == 'İlçe':
+                note_ilce = attr_value
+
+        # Şehir bilgisi: önce note_attributes, sonra shipping_address
+        shipping_city = note_il or shipping_addr.get('city', '') or ''
+        shipping_district = note_ilce or ''
+
         # Kargo bilgisi
         fulfillments = order_json.get('fulfillments', [])
         tracking_number = ''
@@ -154,7 +169,8 @@ class ShopifyOrderSync(models.Model):
             'customer_phone': customer_phone,
             'shipping_address': json.dumps(shipping_addr, ensure_ascii=False) if shipping_addr else '',
             'billing_address': json.dumps(billing_addr, ensure_ascii=False) if billing_addr else '',
-            'shipping_city': shipping_addr.get('city', ''),
+            'shipping_city': shipping_city,
+            'shipping_district': shipping_district,
             'cargo_tracking_number': tracking_number,
             'cargo_provider': tracking_company,
             'total_price': float(order_json.get('total_price', 0)),
@@ -228,18 +244,17 @@ class ShopifyOrderSync(models.Model):
                          shopify_order.order_number, sale_order.name)
         except Exception as e:
             _logger.error("Odoo sale.order oluşturulamadı (Shopify %s): %s",
-                          shopify_order.order_number, e)
+                          shopify_order.order_number, e, exc_info=True)
 
         return 'created'
 
     # ─── Create Odoo Sale Order ──────────────────────────
 
-    @api.private
     def _create_odoo_sale_order(self, shopify_order, order_json, store):
         """Shopify siparişinden Odoo sale.order oluşturur."""
         partner = self._find_or_create_partner(order_json, store)
 
-        # Depo / Warehouse
+        # Depo / Warehouse — idefix ile aynı pattern
         warehouse = self.env['stock.warehouse'].search(
             [('code', '=', '002')], limit=1
         ) or self.env['stock.warehouse'].search([], limit=1)
@@ -254,9 +269,40 @@ class ShopifyOrderSync(models.Model):
             'order_line': [],
         }
 
+        # ─── Batch ürün arama (N+1 önleme) — idefix pattern ───
+        Product = self.env['product.product'].sudo()
+        skus = [line.sku for line in shopify_order.line_ids if line.sku]
+        product_map = {}
+
+        if skus:
+            # 1. Barcode ile ara
+            products = Product.search([('barcode', 'in', skus)])
+            for p in products:
+                if p.barcode:
+                    product_map[p.barcode] = p
+
+            # 2. nebim_barcode fallback
+            missing = [s for s in skus if s not in product_map]
+            if missing and 'nebim_barcode' in Product._fields:
+                for sku in missing:
+                    p = Product.search([('nebim_barcode', '=', sku)], limit=1)
+                    if not p:
+                        p = Product.search([('nebim_barcode', 'ilike', sku)], limit=1)
+                    if p:
+                        product_map[sku] = p
+
+            # 3. default_code fallback
+            still_missing = [s for s in skus if s not in product_map]
+            if still_missing:
+                products = Product.search([('default_code', 'in', still_missing)])
+                for p in products:
+                    if p.default_code:
+                        product_map[p.default_code] = p
+
         # Sipariş satırları
         for line in shopify_order.line_ids:
-            product = self._find_product_by_sku(line.sku)
+            product = product_map.get(line.sku)
+
             if not product:
                 _logger.warning("Shopify ürün bulunamadı: SKU=%s, Ürün=%s",
                                 line.sku, line.product_name)
@@ -268,11 +314,12 @@ class ShopifyOrderSync(models.Model):
                 'product_id': product.id,
                 'product_uom_qty': line.quantity,
                 'price_unit': line.price_tax_excluded,
-                'name': f"[{line.sku}] {line.product_name}",
             }))
 
         if not so_vals['order_line']:
-            raise UserError("Eşleşen ürün bulunamadı — sipariş satırları boş.")
+            _logger.error("Shopify %s: Eşleşen ürün bulunamadı! SKUs=%s",
+                          shopify_order.order_number, skus)
+            return False
 
         sale_order = self.env['sale.order'].sudo().create(so_vals)
 
@@ -288,7 +335,6 @@ class ShopifyOrderSync(models.Model):
 
     # ─── Partner (Müşteri) ───────────────────────────────
 
-    @api.private
     def _find_or_create_partner(self, order_json, store):
         """Müşteriyi bul veya oluştur."""
         customer = order_json.get('customer', {}) or {}
@@ -304,6 +350,20 @@ class ShopifyOrderSync(models.Model):
         last_name = shipping.get('last_name', '') or customer.get('last_name', '')
         full_name = f"{first_name} {last_name}".strip() or 'Shopify Müşteri'
 
+        # ─── note_attributes'tan İl/İlçe ────────────────
+        note_attrs = order_json.get('note_attributes', []) or []
+        note_il = ''
+        note_ilce = ''
+        for attr in note_attrs:
+            attr_name = (attr.get('name', '') or '').strip()
+            attr_value = (attr.get('value', '') or '').strip()
+            if attr_name == 'İl':
+                note_il = attr_value
+            elif attr_name == 'İlçe':
+                note_ilce = attr_value
+
+        city = note_il or shipping.get('city', '') or ''
+
         # Önce email ile ara
         partner = False
         if email:
@@ -317,20 +377,18 @@ class ShopifyOrderSync(models.Model):
             return partner
 
         # Ülke
+        country_tr = self.env.ref('base.tr', raise_if_not_found=False)
         country_code = shipping.get('country_code', 'TR')
-        country = self.env['res.country'].search(
-            [('code', '=', country_code)], limit=1)
+        country = False
+        if country_code == 'TR' and country_tr:
+            country = country_tr
+        else:
+            country = self.env['res.country'].search(
+                [('code', '=', country_code)], limit=1)
 
         # İl / State
         state = False
-        province = shipping.get('province', '') or ''
-        city = shipping.get('city', '') or ''
-        if province and country:
-            state = self.env['res.country.state'].search([
-                ('country_id', '=', country.id),
-                ('name', 'ilike', province),
-            ], limit=1)
-        elif city and country:
+        if city and country:
             state = self.env['res.country.state'].search([
                 ('country_id', '=', country.id),
                 ('name', 'ilike', city),
@@ -339,6 +397,8 @@ class ShopifyOrderSync(models.Model):
         address1 = shipping.get('address1', '') or ''
         address2 = shipping.get('address2', '') or ''
         street = f"{address1} {address2}".strip() if address1 else ''
+        if note_ilce:
+            street = f"{street} {note_ilce}".strip()
 
         partner_vals = {
             'name': full_name,
@@ -354,32 +414,32 @@ class ShopifyOrderSync(models.Model):
         }
 
         partner = self.env['res.partner'].sudo().create(partner_vals)
-        _logger.info("Shopify müşteri oluşturuldu: %s (email=%s)", partner.name, email)
+        _logger.info("Shopify müşteri oluşturuldu: %s (email=%s, il=%s, ilce=%s)",
+                     partner.name, email, city, note_ilce)
         return partner
 
     # ─── Product Matching ────────────────────────────────
 
-    @api.private
     def _find_product_by_sku(self, sku):
         """SKU/barkod ile ürün bul."""
         if not sku:
             return False
 
+        Product = self.env['product.product'].sudo()
+
         # 1. Barcode ile ara
-        product = self.env['product.product'].search(
-            [('barcode', '=', sku)], limit=1)
+        product = Product.search([('barcode', '=', sku)], limit=1)
         if product:
             return product
 
-        # 2. Default code ile ara
-        product = self.env['product.product'].search(
-            [('default_code', '=', sku)], limit=1)
-        if product:
-            return product
+        # 2. nebim_barcode fallback
+        if 'nebim_barcode' in Product._fields:
+            product = Product.search([('nebim_barcode', '=', sku)], limit=1)
+            if product:
+                return product
 
-        # 3. Barkodun sonuna/başına karakter eklenmiş olabilir — kısmi arama
-        product = self.env['product.product'].search(
-            [('barcode', 'ilike', sku)], limit=1)
+        # 3. Default code ile ara
+        product = Product.search([('default_code', '=', sku)], limit=1)
         if product:
             return product
 
