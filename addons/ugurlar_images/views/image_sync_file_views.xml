@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- İşlenmiş Dosyalar - Tree -->
+    <record id="view_image_sync_file_tree" model="ir.ui.view">
+        <field name="name">ugurlar.image.sync.file.tree</field>
+        <field name="model">ugurlar.image.sync.file</field>
+        <field name="arch" type="xml">
+            <list string="İşlenmiş Görseller" decoration-danger="state=='error'"
+                  decoration-success="state=='done'" default_order="sync_date desc">
+                <field name="filename"/>
+                <field name="barcode"/>
+                <field name="product_id"/>
+                <field name="image_type" widget="badge"
+                       decoration-info="image_type=='main'"
+                       decoration-warning="image_type=='extra'"/>
+                <field name="image_order"/>
+                <field name="state" widget="badge"
+                       decoration-danger="state=='error'"
+                       decoration-success="state=='done'"/>
+                <field name="file_size"/>
+                <field name="color_propagated" widget="boolean"/>
+                <field name="sibling_count"/>
+                <field name="sync_date"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- İşlenmiş Dosyalar - Form -->
+    <record id="view_image_sync_file_form" model="ir.ui.view">
+        <field name="name">ugurlar.image.sync.file.form</field>
+        <field name="model">ugurlar.image.sync.file</field>
+        <field name="arch" type="xml">
+            <form string="İşlenmiş Görsel Detayı">
+                <header>
+                    <field name="state" widget="statusbar"
+                           statusbar_visible="done,error"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group string="Dosya Bilgileri">
+                            <field name="filename"/>
+                            <field name="barcode"/>
+                            <field name="file_size"/>
+                            <field name="file_mtime"/>
+                            <field name="sync_date"/>
+                        </group>
+                        <group string="Ürün Bilgileri">
+                            <field name="product_id"/>
+                            <field name="product_tmpl_id"/>
+                            <field name="image_type"/>
+                            <field name="image_order"/>
+                            <field name="color_propagated"/>
+                            <field name="sibling_count"/>
+                        </group>
+                    </group>
+                    <group string="Hata Mesajı" invisible="state != 'error'">
+                        <field name="error_message" nolabel="1"
+                               style="font-family: monospace; white-space: pre-wrap;"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- İşlenmiş Dosyalar - Search -->
+    <record id="view_image_sync_file_search" model="ir.ui.view">
+        <field name="name">ugurlar.image.sync.file.search</field>
+        <field name="model">ugurlar.image.sync.file</field>
+        <field name="arch" type="xml">
+            <search string="İşlenmiş Görseller Ara">
+                <field name="filename"/>
+                <field name="barcode"/>
+                <field name="product_id"/>
+                <filter name="done" string="Başarılı" domain="[('state','=','done')]"/>
+                <filter name="error" string="Hatalı" domain="[('state','=','error')]"/>
+                <separator/>
+                <filter name="main" string="Ana Resim" domain="[('image_type','=','main')]"/>
+                <filter name="extra" string="Ek Resim" domain="[('image_type','=','extra')]"/>
+                <separator/>
+                <filter name="propagated" string="Renk Yayılmış" domain="[('color_propagated','=',True)]"/>
+                <group expand="0" string="Grupla">
+                    <filter name="group_barcode" string="Barkod" context="{'group_by': 'barcode'}"/>
+                    <filter name="group_state" string="Durum" context="{'group_by': 'state'}"/>
+                    <filter name="group_date" string="Tarih" context="{'group_by': 'sync_date:day'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="action_image_sync_file" model="ir.actions.act_window">
+        <field name="name">İşlenmiş Görseller</field>
+        <field name="res_model">ugurlar.image.sync.file</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_image_sync_file_search"/>
+        <field name="context">{'search_default_done': 1}</field>
+    </record>
+
+</odoo>

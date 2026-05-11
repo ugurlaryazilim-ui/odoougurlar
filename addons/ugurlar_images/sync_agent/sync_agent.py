@@ -394,11 +394,71 @@ class OdooImageSync:
                     {'image_variant_1920': img_b64},
                 )
 
+    def _get_file_meta(self, fpath):
+        """Dosyanın boyut ve değişiklik tarihini döner."""
+        try:
+            stat = os.stat(fpath)
+            return int(stat.st_size), str(int(stat.st_mtime))
+        except OSError:
+            return 0, ''
+
+    def _fetch_processed_files(self):
+        """Odoo'dan başarıyla işlenmiş dosya listesini çeker.
+        
+        Returns: dict of filename → (file_size, file_mtime)
+        """
+        try:
+            records = self._execute(
+                'ugurlar.image.sync.file', 'search_read',
+                [('state', '=', 'done')],
+                fields=['filename', 'file_size', 'file_mtime'],
+            )
+            return {
+                r['filename']: (r['file_size'], r['file_mtime'])
+                for r in records
+            }
+        except Exception as e:
+            _logger.warning("Odoo'dan işlenmiş dosya listesi çekilemedi: %s", e)
+            return {}
+
+    def _record_success(self, filename, barcode, file_size, file_mtime,
+                        product_id, tmpl_id, image_type, order,
+                        color_propagated=False, sibling_count=0):
+        """Başarılı dosyayı Odoo'ya kaydet."""
+        try:
+            self._execute(
+                'ugurlar.image.sync.file', 'mark_processed',
+                filename, barcode, file_size, file_mtime,
+                product_id=product_id,
+                tmpl_id=tmpl_id,
+                image_type=image_type,
+                image_order=order,
+                color_propagated=color_propagated,
+                sibling_count=sibling_count,
+            )
+        except Exception as e:
+            _logger.warning("Dosya kaydı yazılamadı (%s): %s", filename, e)
+
+    def _record_error(self, filename, barcode, file_size, file_mtime, error_msg):
+        """Hatalı dosyayı Odoo'ya kaydet."""
+        try:
+            self._execute(
+                'ugurlar.image.sync.file', 'mark_error',
+                filename, barcode, file_size, file_mtime, error_msg,
+            )
+        except Exception as e:
+            _logger.warning("Hata kaydı yazılamadı (%s): %s", filename, e)
+
     def process_folder(self):
-        """Klasördeki tüm görselleri tarar ve işler."""
+        """Klasördeki tüm görselleri tarar ve işler.
+        
+        Dosyalar yerinde bırakılır (taşınmaz). İşlenmiş dosyalar 
+        Odoo'daki ugurlar.image.sync.file tablosunda takip edilir.
+        Sadece yeni veya değişmiş dosyalar işlenir.
+        Hatalı dosyalar Hatalilar klasörüne taşınır.
+        """
         watch = self.config['watch_folder']
-        done = self.config['done_folder']
-        error = self.config['error_folder']
+        error_dir = self.config['error_folder']
         separator = self.config['separator']
         main_index = self.config['main_image_index']
         color_propagation = self.config.get('color_propagation', False)
@@ -411,10 +471,10 @@ class OdooImageSync:
                 _logger.warning("📁 Klasöre erişilemiyor: %s — %s (ağ sürücüsü bağlı mı?)", watch, e)
                 return 0
 
-        # Klasörleri oluştur
-        os.makedirs(done, exist_ok=True)
-        os.makedirs(error, exist_ok=True)
+        # Hatalılar klasörünü oluştur
+        os.makedirs(error_dir, exist_ok=True)
 
+        # ── Klasördeki görselleri tara ──
         files = []
         for f in os.listdir(watch):
             fpath = os.path.join(watch, f)
@@ -427,9 +487,35 @@ class OdooImageSync:
         if not files:
             return 0
 
-        # Dosyaları barkod bazlı grupla
-        barcode_groups = {}
+        # ── Odoo'dan işlenmiş dosya listesini çek ──
+        processed = self._fetch_processed_files()
+
+        # ── Yeni/değişmiş dosyaları filtrele ──
+        new_files = []
+        skipped = 0
         for fpath in files:
+            fname = os.path.basename(fpath)
+            file_size, file_mtime = self._get_file_meta(fpath)
+
+            if fname in processed:
+                old_size, old_mtime = processed[fname]
+                if old_size == file_size and old_mtime == file_mtime:
+                    skipped += 1
+                    continue
+                # Dosya değişmiş — tekrar işlenecek
+                _logger.info("🔄 Dosya değişmiş, tekrar işlenecek: %s", fname)
+
+            new_files.append(fpath)
+
+        if not new_files:
+            return 0
+
+        if skipped > 0:
+            _logger.debug("⏭️ %d dosya zaten işlenmiş, atlandı", skipped)
+
+        # ── Dosyaları barkod bazlı grupla ──
+        barcode_groups = {}
+        for fpath in new_files:
             fname = os.path.basename(fpath)
             name, ext = os.path.splitext(fname)
             parts = name.rsplit(separator, 1)
@@ -447,7 +533,7 @@ class OdooImageSync:
             if barcode:
                 barcode_groups.setdefault(barcode, []).append((order, fpath))
 
-        _logger.info("── %d görsel bulundu (%d barkod) ──", len(files), len(barcode_groups))
+        _logger.info("── %d yeni görsel bulundu (%d barkod) ──", len(new_files), len(barcode_groups))
 
         success = 0
         for barcode, items in barcode_groups.items():
@@ -456,10 +542,14 @@ class OdooImageSync:
             # Ürünü bul
             product = self.find_product(barcode)
             if not product:
-                _logger.warning("Ürün bulunamadı (barkod: %s) — %d dosya atlanıyor", barcode, len(items))
+                _logger.warning("Ürün bulunamadı (barkod: %s) — %d dosya hatalılar'a taşınıyor", barcode, len(items))
                 for _, fpath in items:
+                    fname = os.path.basename(fpath)
+                    file_size, file_mtime = self._get_file_meta(fpath)
+                    error_msg = f"Ürün bulunamadı (barkod: {barcode})"
+                    self._record_error(fname, barcode, file_size, file_mtime, error_msg)
                     try:
-                        shutil.move(fpath, os.path.join(error, os.path.basename(fpath)))
+                        shutil.move(fpath, os.path.join(error_dir, fname))
                     except Exception:
                         pass
                 continue
@@ -467,7 +557,7 @@ class OdooImageSync:
             tmpl_id = product['product_tmpl_id'][0]
 
             # ── Hedef varyantları belirle ──
-            target_variants = [product]  # en azından kendisi
+            target_variants = [product]
 
             if color_propagation:
                 siblings = self.find_color_siblings(product)
@@ -482,27 +572,29 @@ class OdooImageSync:
                                  deleted, tv.get('barcode') or tv['name'])
 
             # ── DOSYALARI İŞLE ──
-            # Önce tüm dosyaları oku ve sıkıştır (1 kez oku, N varyanta yaz)
-            image_data = []  # [(order, fname, fpath, img_b64), ...]
+            image_data = []  # [(order, fname, fpath, img_b64, file_size, file_mtime), ...]
             for order, fpath in items:
                 fname = os.path.basename(fpath)
+                file_size, file_mtime = self._get_file_meta(fpath)
                 try:
                     img_b64 = compress_image(fpath)
-                    image_data.append((order, fname, fpath, img_b64))
+                    image_data.append((order, fname, fpath, img_b64, file_size, file_mtime))
                 except Exception as e:
                     _logger.error("Sıkıştırma hatası (%s): %s", fname, str(e))
+                    self._record_error(fname, barcode, file_size, file_mtime, str(e))
                     try:
-                        shutil.move(fpath, os.path.join(error, fname))
+                        shutil.move(fpath, os.path.join(error_dir, fname))
                     except Exception:
                         pass
 
             # Her hedef varyanta yükle
+            sibling_count = len(target_variants) - 1
             for tv in target_variants:
                 tv_barcode = tv.get('barcode') or tv['name']
                 tv_id = tv['id']
                 is_self = (tv_id == product['id'])
 
-                for order, fname, fpath, img_b64 in image_data:
+                for order, fname, fpath, img_b64, file_size, file_mtime in image_data:
                     try:
                         self._upload_to_variant(tv_id, tv_barcode, img_b64, order, separator, tmpl_id=tmpl_id)
 
@@ -516,15 +608,22 @@ class OdooImageSync:
                     except Exception as e:
                         _logger.error("Yükleme hatası (%s → %s): %s", fname, tv_barcode, str(e))
 
-            # Dosyaları taşı
-            for order, fname, fpath, img_b64 in image_data:
-                try:
-                    shutil.move(fpath, os.path.join(done, fname))
-                    success += 1
-                except Exception:
-                    pass
+            # ── Başarılı dosyaları Odoo'ya kaydet (dosyalar YERİNDE kalır) ──
+            for order, fname, fpath, img_b64, file_size, file_mtime in image_data:
+                is_main = (str(order) == main_index)
+                image_type = 'main' if is_main else 'extra'
+                self._record_success(
+                    fname, barcode, file_size, file_mtime,
+                    product_id=product['id'],
+                    tmpl_id=tmpl_id,
+                    image_type=image_type,
+                    order=order,
+                    color_propagated=color_propagation and sibling_count > 0,
+                    sibling_count=sibling_count,
+                )
+                success += 1
 
-        _logger.info("── Tamamlandı: %d/%d başarılı ──", success, len(files))
+        _logger.info("── Tamamlandı: %d/%d başarılı ──", success, len(new_files))
         self._product_cache.clear()
         self._sibling_cache.clear()
         return success
@@ -533,8 +632,9 @@ class OdooImageSync:
 def main():
     """Ana döngü: klasörü belli aralıklarla tarar."""
     print("=" * 50)
-    print("  Uğurlar Odoo Image Sync Agent v2.0")
+    print("  Uğurlar Odoo Image Sync Agent v3.0")
     print("  🎨 Renk bazlı yayma destekli")
+    print("  📋 Dosya takibi: Odoo DB")
     print("  Çıkmak için Ctrl+C")
     print("=" * 50)
 
@@ -554,3 +654,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

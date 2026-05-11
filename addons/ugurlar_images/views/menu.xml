@@ -31,6 +31,12 @@
               action="action_image_sync_log"
               sequence="10"/>
 
+    <menuitem id="menu_image_sync_file"
+              name="İşlenmiş Görseller"
+              parent="menu_ugurlar_images_logs"
+              action="action_image_sync_file"
+              sequence="20"/>
+
     <!-- Alt Menü: Ayarlar -->
     <menuitem id="menu_ugurlar_images_config"
               name="Yapılandırma"
