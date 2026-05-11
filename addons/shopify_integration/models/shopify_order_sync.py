@@ -95,6 +95,20 @@ class ShopifyOrderSync(models.Model):
                 update_vals['cargo_tracking_number'] = ful.get('tracking_number', '')
                 update_vals['cargo_provider'] = ful.get('tracking_company', '')
             existing.write(update_vals)
+
+            # ─── RETRY: sale_order yoksa yeniden oluşturmayı dene ───
+            if not existing.sale_order_id and not order_json.get('cancelled_at'):
+                _logger.info("Shopify %s: sale_order yok, yeniden oluşturuluyor...",
+                             existing.order_number)
+                try:
+                    sale_order = self._create_odoo_sale_order(existing, order_json, store)
+                    if sale_order:
+                        _logger.info("Shopify → Odoo sipariş (retry) oluşturuldu: %s → %s",
+                                     existing.order_number, sale_order.name)
+                except Exception as e:
+                    _logger.error("Shopify sale.order retry hatası (%s): %s",
+                                  existing.order_number, e, exc_info=True)
+
             return 'updated'
 
         # Sipariş tarihi dönüşümü (Shopify ISO 8601 → UTC)
@@ -396,7 +410,9 @@ class ShopifyOrderSync(models.Model):
             elif attr_name == 'İlçe':
                 note_ilce = attr_value
 
-        city = note_il or shipping.get('city', '') or ''
+        # İl ve İlçe
+        il_adi = note_il or shipping.get('province', '') or shipping.get('city', '') or ''
+        ilce_adi = note_ilce or ''
 
         # Önce email ile ara
         partner = False
@@ -408,6 +424,21 @@ class ShopifyOrderSync(models.Model):
             partner = self.env['res.partner'].search([('phone', '=', phone)], limit=1)
 
         if partner:
+            # Mevcut partner'ı güncelle — eksik il/ilçe bilgisi varsa
+            update_vals = {}
+            if il_adi and not partner.state_id:
+                country_tr = self.env.ref('base.tr', raise_if_not_found=False)
+                if country_tr:
+                    state = self.env['res.country.state'].search([
+                        ('country_id', '=', country_tr.id),
+                        ('name', 'ilike', il_adi),
+                    ], limit=1)
+                    if state:
+                        update_vals['state_id'] = state.id
+            if il_adi and not partner.city:
+                update_vals['city'] = il_adi
+            if update_vals:
+                partner.sudo().write(update_vals)
             return partner
 
         # Ülke
@@ -422,24 +453,25 @@ class ShopifyOrderSync(models.Model):
 
         # İl / State
         state = False
-        if city and country:
+        if il_adi and country:
             state = self.env['res.country.state'].search([
                 ('country_id', '=', country.id),
-                ('name', 'ilike', city),
+                ('name', 'ilike', il_adi),
             ], limit=1)
 
+        # Adres — İlçe adreste yer alır
         address1 = shipping.get('address1', '') or ''
         address2 = shipping.get('address2', '') or ''
         street = f"{address1} {address2}".strip() if address1 else ''
-        if note_ilce:
-            street = f"{street} {note_ilce}".strip()
+        if ilce_adi and ilce_adi.lower() not in street.lower():
+            street = f"{ilce_adi} {street}".strip()
 
         partner_vals = {
             'name': full_name,
             'email': email,
             'phone': phone,
             'street': street,
-            'city': city,
+            'city': il_adi,  # Nebim city = İl adı (idefix ile aynı pattern)
             'state_id': state.id if state else False,
             'country_id': country.id if country else False,
             'zip': shipping.get('zip', '') or '',
@@ -449,7 +481,7 @@ class ShopifyOrderSync(models.Model):
 
         partner = self.env['res.partner'].sudo().create(partner_vals)
         _logger.info("Shopify müşteri oluşturuldu: %s (email=%s, il=%s, ilce=%s)",
-                     partner.name, email, city, note_ilce)
+                     partner.name, email, il_adi, ilce_adi)
         return partner
 
     # ─── Product Matching ────────────────────────────────

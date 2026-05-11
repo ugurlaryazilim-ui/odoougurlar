@@ -152,6 +152,19 @@ class SaleOrder(models.Model):
                 marketplace_name, order.partner_id.country_id.id
             )
 
+            if not mapping:
+                _logger.error(
+                    "Auto-sync: '%s' için marketplace mapping bulunamadı! "
+                    "Ayarlar > Nebim > Pazaryeri Eşleştirmeleri'nde '%s' kuralı tanımlayın.",
+                    marketplace_name, marketplace_name)
+                try:
+                    order.write({
+                        'nebim_customer_response': f'[Auto-Sync] HATA: "{marketplace_name}" için marketplace mapping bulunamadı!'
+                    })
+                except Exception:
+                    pass
+                return
+
             # Cari (savepoint korumalı)
             if customer_enabled and not order.nebim_customer_sent:
                 try:
@@ -168,6 +181,10 @@ class SaleOrder(models.Model):
                         _logger.info("Auto-sync Cari başarılı: %s → %s", order.name, cust_code)
                 except Exception as e:
                     _logger.error("Auto-sync Cari hatası (%s): %s", order.name, e)
+                    try:
+                        order.write({'nebim_customer_response': f'[Auto-Sync] CARİ HATA: {str(e)}'})
+                    except Exception:
+                        pass
 
             # Sipariş (savepoint korumalı)
             if order_enabled and not order.nebim_order_sent:
