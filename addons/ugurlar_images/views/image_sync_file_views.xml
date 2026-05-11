@@ -72,6 +72,7 @@
                 <field name="filename"/>
                 <field name="barcode"/>
                 <field name="product_id"/>
+                <separator/>
                 <filter name="done" string="Başarılı" domain="[('state','=','done')]"/>
                 <filter name="error" string="Hatalı" domain="[('state','=','error')]"/>
                 <separator/>
@@ -79,11 +80,10 @@
                 <filter name="extra" string="Ek Resim" domain="[('image_type','=','extra')]"/>
                 <separator/>
                 <filter name="propagated" string="Renk Yayılmış" domain="[('color_propagated','=',True)]"/>
-                <group expand="0" string="Grupla">
-                    <filter name="group_barcode" string="Barkod" context="{'group_by': 'barcode'}"/>
-                    <filter name="group_state" string="Durum" context="{'group_by': 'state'}"/>
-                    <filter name="group_date" string="Tarih" context="{'group_by': 'sync_date:day'}"/>
-                </group>
+                <separator/>
+                <filter name="group_barcode" string="Barkod" context="{'group_by': 'barcode'}"/>
+                <filter name="group_state" string="Durum" context="{'group_by': 'state'}"/>
+                <filter name="group_date" string="Tarih" context="{'group_by': 'sync_date:day'}"/>
             </search>
         </field>
     </record>
