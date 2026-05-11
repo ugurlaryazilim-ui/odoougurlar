@@ -76,9 +76,9 @@ class ResConfigSettings(models.TransientModel):
     image_watch_folder = fields.Char(
         string='Görsel Klasör Yolu',
         config_parameter='ugurlar_images.image_watch_folder',
-        default=r'C:\OdooResimler',
-        help='Sync Agent\'ın izleyeceği Windows klasör yolu.\n'
-             r'Örnek: C:\OdooResimler veya Y:\Pazaryerleri\entegre ürün görselleri',
+        default=r'\\nbsrv02\Online_Data\Pazaryerleri\entegre ürün görselleri',
+        help='Sync Agent\'ın izleyeceği klasör yolu.\n'
+             r'Ağ paylaşımı için UNC yol kullanın: \\sunucu\paylasim\klasor',
     )
 
     def action_generate_api_key(self):
