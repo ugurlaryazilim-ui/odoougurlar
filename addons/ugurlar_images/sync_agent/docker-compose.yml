@@ -5,7 +5,8 @@ services:
     restart: unless-stopped
     volumes:
       # Windows klasörünü container'a bağla
-      - C:\OdooResimler:/data/images
+      # Bu yolu değiştirmek için: docker-compose.yml düzenle → docker compose up -d --build
+      - "Y:\\Pazaryerleri\\entegre ürün görselleri:/data/images"
       # Config dosyasını bağla
       - ./config.json:/app/config.json
     environment:

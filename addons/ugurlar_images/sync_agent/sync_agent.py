@@ -190,6 +190,9 @@ class OdooImageSync:
 
     def _sync_odoo_settings(self):
         """Odoo Ayarlar'dan dinamik config değerlerini çeker (klasör yolu vb.)."""
+        # Docker modunda mıyız? /data/images varsa Docker volume mount aktif
+        is_docker = os.path.isdir('/data/images')
+
         _PARAM_MAP = {
             'ugurlar_images.image_watch_folder': 'watch_folder',
             'ugurlar_images.image_separator': '_separator_key',
@@ -208,13 +211,17 @@ class OdooImageSync:
                 )
                 if val:
                     if config_key == 'watch_folder':
-                        old = self.config.get('watch_folder', '')
-                        self.config['watch_folder'] = val
-                        if old != val:
-                            # done/error klasörlerini de güncelle
-                            self.config['done_folder'] = os.path.join(val, 'Gonderilenler')
-                            self.config['error_folder'] = os.path.join(val, 'Hatalilar')
-                            _logger.info("📁 Klasör yolu güncellendi: %s → %s", old, val)
+                        # Docker modunda klasör yolunu override ETME
+                        # Docker volume mount zaten doğru yolu bağlıyor
+                        if is_docker:
+                            _logger.info("📁 Docker modu — Odoo yolu: %s (volume mount kullanılıyor)", val)
+                        else:
+                            old = self.config.get('watch_folder', '')
+                            self.config['watch_folder'] = val
+                            if old != val:
+                                self.config['done_folder'] = os.path.join(val, 'Gonderilenler')
+                                self.config['error_folder'] = os.path.join(val, 'Hatalilar')
+                                _logger.info("📁 Klasör yolu güncellendi: %s → %s", old, val)
                     elif config_key == '_separator_key':
                         self.config['separator'] = _SEP_MAP.get(val, self.config['separator'])
                     elif config_key == '_main_index_key':
