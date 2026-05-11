@@ -151,7 +151,7 @@ export class BatchPickingScreen extends Component {
                         </div>
                         <t t-foreach="state.items" t-as="item" t-key="item.move_id">
                             <div t-attf-class="bp-route-table-row {{item.move_id === state.currentItem.move_id ? 'bp-row-active' : ''}} {{item.collected_qty >= item.demand_qty ? 'bp-row-done' : ''}}">
-                                <span class="bp-cell-barcode" t-esc="(item.barcode || '').substring(0, 10) + (item.barcode.length > 10 ? '..' : '')"/>
+                                <span class="bp-cell-barcode bp-barcode-copy" t-att-data-barcode="item.barcode || ''" t-on-click="(ev) => this.copyBarcode(ev)" t-esc="item.barcode || ''"/>
                                 <span t-esc="(item.location_parts || {}).zone || '-'"/>
                                 <span>
                                     <t t-esc="(item.location_parts || {}).section || ''"/>
@@ -519,6 +519,39 @@ export class BatchPickingScreen extends Component {
 
     onImageError(ev) {
         ev.target.src = '/web/static/img/placeholder.png';
+    }
+
+    copyBarcode(ev) {
+        const barcode = ev.currentTarget.dataset.barcode;
+        if (!barcode) return;
+        navigator.clipboard.writeText(barcode).then(() => {
+            const el = ev.currentTarget;
+            el.classList.add('bp-copied');
+            const orig = el.textContent;
+            el.textContent = '✓ Kopyalandı';
+            setTimeout(() => {
+                el.textContent = orig;
+                el.classList.remove('bp-copied');
+            }, 1200);
+        }).catch(() => {
+            // Fallback for older browsers
+            const ta = document.createElement('textarea');
+            ta.value = barcode;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            const el = ev.currentTarget;
+            el.classList.add('bp-copied');
+            const orig = el.textContent;
+            el.textContent = '✓ Kopyalandı';
+            setTimeout(() => {
+                el.textContent = orig;
+                el.classList.remove('bp-copied');
+            }, 1200);
+        });
     }
 
     willUnmount() {
