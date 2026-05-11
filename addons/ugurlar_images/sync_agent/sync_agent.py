@@ -174,6 +174,9 @@ class OdooImageSync:
         else:
             _logger.info("🎨 Renk yayma KAPALI")
 
+        # ── Odoo'dan dinamik ayarları çek ──
+        self._sync_odoo_settings()
+
     def _execute(self, model, method, *args, **kwargs):
         """Odoo XML-RPC execute_kw wrapper."""
         return self.models.execute_kw(
@@ -184,6 +187,46 @@ class OdooImageSync:
             list(args),
             kwargs
         )
+
+    def _sync_odoo_settings(self):
+        """Odoo Ayarlar'dan dinamik config değerlerini çeker (klasör yolu vb.)."""
+        _PARAM_MAP = {
+            'ugurlar_images.image_watch_folder': 'watch_folder',
+            'ugurlar_images.image_separator': '_separator_key',
+            'ugurlar_images.main_image_index': '_main_index_key',
+            'ugurlar_images.image_match_field': 'match_field',
+            'ugurlar_images.image_overwrite': '_overwrite_str',
+        }
+        _SEP_MAP = {'underscore': '_', 'dash': '-', 'dot': '.'}
+        _IDX_MAP = {'idx0': '0', 'idx1': '1'}
+
+        try:
+            for param_key, config_key in _PARAM_MAP.items():
+                val = self._execute(
+                    'ir.config_parameter', 'get_param',
+                    param_key,
+                )
+                if val:
+                    if config_key == 'watch_folder':
+                        old = self.config.get('watch_folder', '')
+                        self.config['watch_folder'] = val
+                        if old != val:
+                            # done/error klasörlerini de güncelle
+                            self.config['done_folder'] = os.path.join(val, 'Gonderilenler')
+                            self.config['error_folder'] = os.path.join(val, 'Hatalilar')
+                            _logger.info("📁 Klasör yolu güncellendi: %s → %s", old, val)
+                    elif config_key == '_separator_key':
+                        self.config['separator'] = _SEP_MAP.get(val, self.config['separator'])
+                    elif config_key == '_main_index_key':
+                        self.config['main_image_index'] = _IDX_MAP.get(val, self.config['main_image_index'])
+                    elif config_key == 'match_field':
+                        self.config['match_field'] = val
+                    elif config_key == '_overwrite_str':
+                        self.config['overwrite_existing'] = val.lower() in ('true', '1', 'yes')
+
+            _logger.info("📁 Aktif klasör: %s", self.config['watch_folder'])
+        except Exception as e:
+            _logger.warning("Odoo'dan ayarlar çekilemedi (lokal config kullanılıyor): %s", e)
 
     def find_product(self, barcode):
         """Barkod ile ürün varyantını bul. Cache kullanır."""

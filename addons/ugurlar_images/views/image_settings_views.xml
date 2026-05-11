@@ -43,8 +43,14 @@
                                  help="Windows Sync Agent bağlantısını aktifleştirin.">
                             <field name="sync_agent_enabled"/>
                             <div class="content-group mt-2" invisible="not sync_agent_enabled">
-                                <label for="sync_agent_api_key"/>
-                                <field name="sync_agent_api_key"/>
+                                <div class="row mt8">
+                                    <label for="image_watch_folder" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="image_watch_folder" class="col-6" placeholder="Y:\Pazaryerleri\entegre ürün görselleri"/>
+                                </div>
+                                <div class="row mt8">
+                                    <label for="sync_agent_api_key" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="sync_agent_api_key" class="col-6"/>
+                                </div>
                                 <div class="mt8">
                                     <button name="action_generate_api_key"
                                             type="object"
