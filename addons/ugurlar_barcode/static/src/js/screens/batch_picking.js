@@ -522,36 +522,41 @@ export class BatchPickingScreen extends Component {
     }
 
     copyBarcode(ev) {
-        const barcode = ev.currentTarget.dataset.barcode;
+        const el = ev.currentTarget;
+        if (!el) return;
+        const barcode = el.dataset.barcode;
         if (!barcode) return;
-        navigator.clipboard.writeText(barcode).then(() => {
-            const el = ev.currentTarget;
+        const origText = el.textContent;
+
+        const showCopied = () => {
             el.classList.add('bp-copied');
-            const orig = el.textContent;
             el.textContent = '✓ Kopyalandı';
             setTimeout(() => {
-                el.textContent = orig;
+                el.textContent = origText;
                 el.classList.remove('bp-copied');
             }, 1200);
-        }).catch(() => {
-            // Fallback for older browsers
-            const ta = document.createElement('textarea');
-            ta.value = barcode;
-            ta.style.position = 'fixed';
-            ta.style.opacity = '0';
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand('copy');
-            document.body.removeChild(ta);
-            const el = ev.currentTarget;
-            el.classList.add('bp-copied');
-            const orig = el.textContent;
-            el.textContent = '✓ Kopyalandı';
-            setTimeout(() => {
-                el.textContent = orig;
-                el.classList.remove('bp-copied');
-            }, 1200);
-        });
+        };
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(barcode).then(showCopied).catch(() => {
+                this._fallbackCopy(barcode);
+                showCopied();
+            });
+        } else {
+            this._fallbackCopy(barcode);
+            showCopied();
+        }
+    }
+
+    _fallbackCopy(text) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
     }
 
     willUnmount() {
