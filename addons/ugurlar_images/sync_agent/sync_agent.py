@@ -403,8 +403,15 @@ class OdooImageSync:
         main_index = self.config['main_image_index']
         color_propagation = self.config.get('color_propagation', False)
 
+        # Ağ sürücüsü erişim kontrolü
+        if not os.path.exists(watch):
+            try:
+                os.makedirs(watch, exist_ok=True)
+            except OSError as e:
+                _logger.warning("📁 Klasöre erişilemiyor: %s — %s (ağ sürücüsü bağlı mı?)", watch, e)
+                return 0
+
         # Klasörleri oluştur
-        os.makedirs(watch, exist_ok=True)
         os.makedirs(done, exist_ok=True)
         os.makedirs(error, exist_ok=True)
 
