@@ -139,7 +139,11 @@ class OdooImageSync:
         self._product_cache = {}
         # Renk kardeşleri cache — variant_id → [sibling_ids]
         self._sibling_cache = {}
+        # Lokal dosya takip cache — filename → {size, mtime, state, ...}
+        self._local_cache = {}
         self._connect()
+        # Lokal cache'i diskten yükle (Odoo bağlantısından sonra)
+        self._local_cache = self._load_cache()
 
     def _connect(self):
         """Odoo'ya XML-RPC ile bağlan."""
@@ -394,6 +398,46 @@ class OdooImageSync:
                     {'image_variant_1920': img_b64},
                 )
 
+    # ═══════════════════════════════════════════════════════════════
+    # LOKal CACHE — hızlı dosya takibi (processed_cache.json)
+    # ═══════════════════════════════════════════════════════════════
+
+    def _cache_path(self):
+        """Lokal cache dosyasının yolunu döner (agent'ın yanında)."""
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'processed_cache.json')
+
+    def _load_cache(self):
+        """Lokal cache'i diskten yükle. Yoksa boş dict döner."""
+        path = self._cache_path()
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                _logger.info("📦 Lokal cache yüklendi: %d dosya kaydı", len(data))
+                return data
+            except (json.JSONDecodeError, IOError) as e:
+                _logger.warning("Lokal cache okunamadı, sıfırdan başlanıyor: %s", e)
+        return {}
+
+    def _save_cache(self):
+        """Lokal cache'i diske atomik olarak yaz (bozulma riski yok)."""
+        path = self._cache_path()
+        tmp_path = path + '.tmp'
+        try:
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(self._local_cache, f, ensure_ascii=False)
+            # Atomik rename — yarıda kalırsa eski dosya korunur
+            if os.path.exists(path):
+                os.replace(tmp_path, path)
+            else:
+                os.rename(tmp_path, path)
+        except IOError as e:
+            _logger.warning("Lokal cache yazılamadı: %s", e)
+
+    # ═══════════════════════════════════════════════════════════════
+    # DOSYA META & KONTROL
+    # ═══════════════════════════════════════════════════════════════
+
     def _get_file_meta(self, fpath):
         """Dosyanın boyut ve değişiklik tarihini döner."""
         try:
@@ -402,29 +446,43 @@ class OdooImageSync:
         except OSError:
             return 0, ''
 
-    def _fetch_processed_files(self):
-        """Odoo'dan başarıyla işlenmiş dosya listesini çeker.
+    def _is_file_processed(self, fname, file_size, file_mtime):
+        """Lokal cache'ten dosyanın işlenip işlenmediğini kontrol eder.
         
-        Returns: dict of filename → (file_size, file_mtime)
+        Network çağrısı YAPMAZ — sadece bellekteki dict'e bakar.
+        Dosya boyutu veya tarihi değişmişse → tekrar işlenecek.
         """
-        try:
-            records = self._execute(
-                'ugurlar.image.sync.file', 'search_read',
-                [('state', '=', 'done')],
-                fields=['filename', 'file_size', 'file_mtime'],
-            )
-            return {
-                r['filename']: (r['file_size'], r['file_mtime'])
-                for r in records
-            }
-        except Exception as e:
-            _logger.warning("Odoo'dan işlenmiş dosya listesi çekilemedi: %s", e)
-            return {}
+        if fname not in self._local_cache:
+            return False
+
+        entry = self._local_cache[fname]
+        if entry.get('size') != file_size or entry.get('mtime') != file_mtime:
+            # Dosya değişmiş
+            return False
+
+        return entry.get('state') == 'done'
+
+    # ═══════════════════════════════════════════════════════════════
+    # KAYIT — Lokal cache (hızlı) + Odoo DB (raporlama)
+    # ═══════════════════════════════════════════════════════════════
 
     def _record_success(self, filename, barcode, file_size, file_mtime,
                         product_id, tmpl_id, image_type, order,
                         color_propagated=False, sibling_count=0):
-        """Başarılı dosyayı Odoo'ya kaydet."""
+        """Başarılı dosyayı hem lokal cache'e hem Odoo'ya kaydet."""
+        # ── 1. Lokal cache (anında, network yok) ──
+        self._local_cache[filename] = {
+            'size': file_size,
+            'mtime': file_mtime,
+            'barcode': barcode,
+            'state': 'done',
+            'product_id': product_id,
+            'tmpl_id': tmpl_id,
+            'image_type': image_type,
+            'order': order,
+        }
+
+        # ── 2. Odoo DB (best-effort, hata olursa lokal cache yeter) ──
         try:
             self._execute(
                 'ugurlar.image.sync.file', 'mark_processed',
@@ -437,23 +495,40 @@ class OdooImageSync:
                 sibling_count=sibling_count,
             )
         except Exception as e:
-            _logger.warning("Dosya kaydı yazılamadı (%s): %s", filename, e)
+            _logger.debug("Odoo kayıt yazılamadı (%s) — lokal cache yeterli: %s", filename, e)
 
     def _record_error(self, filename, barcode, file_size, file_mtime, error_msg):
-        """Hatalı dosyayı Odoo'ya kaydet."""
+        """Hatalı dosyayı hem lokal cache'e hem Odoo'ya kaydet."""
+        # ── 1. Lokal cache ──
+        self._local_cache[filename] = {
+            'size': file_size,
+            'mtime': file_mtime,
+            'barcode': barcode,
+            'state': 'error',
+            'error': error_msg,
+        }
+
+        # ── 2. Odoo DB (best-effort) ──
         try:
             self._execute(
                 'ugurlar.image.sync.file', 'mark_error',
                 filename, barcode, file_size, file_mtime, error_msg,
             )
         except Exception as e:
-            _logger.warning("Hata kaydı yazılamadı (%s): %s", filename, e)
+            _logger.debug("Odoo hata kaydı yazılamadı (%s): %s", filename, e)
+
+    # ═══════════════════════════════════════════════════════════════
+    # ANA İŞLEM DÖNGÜSÜ
+    # ═══════════════════════════════════════════════════════════════
 
     def process_folder(self):
         """Klasördeki tüm görselleri tarar ve işler.
         
-        Dosyalar yerinde bırakılır (taşınmaz). İşlenmiş dosyalar 
-        Odoo'daki ugurlar.image.sync.file tablosunda takip edilir.
+        HİBRİT MOD:
+          - Lokal cache (processed_cache.json) → hızlı kontrol, network yok
+          - Odoo DB (ugurlar.image.sync.file) → raporlama, merkezi takip
+        
+        Dosyalar yerinde bırakılır (taşınmaz).
         Sadece yeni veya değişmiş dosyalar işlenir.
         Hatalı dosyalar Hatalilar klasörüne taşınır.
         """
@@ -487,22 +562,19 @@ class OdooImageSync:
         if not files:
             return 0
 
-        # ── Odoo'dan işlenmiş dosya listesini çek ──
-        processed = self._fetch_processed_files()
-
-        # ── Yeni/değişmiş dosyaları filtrele ──
+        # ── Yeni/değişmiş dosyaları filtrele (LOKAL CACHE — 0ms) ──
         new_files = []
         skipped = 0
         for fpath in files:
             fname = os.path.basename(fpath)
             file_size, file_mtime = self._get_file_meta(fpath)
 
-            if fname in processed:
-                old_size, old_mtime = processed[fname]
-                if old_size == file_size and old_mtime == file_mtime:
-                    skipped += 1
-                    continue
-                # Dosya değişmiş — tekrar işlenecek
+            if self._is_file_processed(fname, file_size, file_mtime):
+                skipped += 1
+                continue
+
+            # Cache'de var ama değişmiş?
+            if fname in self._local_cache:
                 _logger.info("🔄 Dosya değişmiş, tekrar işlenecek: %s", fname)
 
             new_files.append(fpath)
@@ -572,7 +644,7 @@ class OdooImageSync:
                                  deleted, tv.get('barcode') or tv['name'])
 
             # ── DOSYALARI İŞLE ──
-            image_data = []  # [(order, fname, fpath, img_b64, file_size, file_mtime), ...]
+            image_data = []
             for order, fpath in items:
                 fname = os.path.basename(fpath)
                 file_size, file_mtime = self._get_file_meta(fpath)
@@ -608,7 +680,7 @@ class OdooImageSync:
                     except Exception as e:
                         _logger.error("Yükleme hatası (%s → %s): %s", fname, tv_barcode, str(e))
 
-            # ── Başarılı dosyaları Odoo'ya kaydet (dosyalar YERİNDE kalır) ──
+            # ── Başarılı dosyaları kaydet (lokal + Odoo) ──
             for order, fname, fpath, img_b64, file_size, file_mtime in image_data:
                 is_main = (str(order) == main_index)
                 image_type = 'main' if is_main else 'extra'
@@ -623,6 +695,10 @@ class OdooImageSync:
                 )
                 success += 1
 
+        # ── Lokal cache'i diske yaz ──
+        if success > 0:
+            self._save_cache()
+
         _logger.info("── Tamamlandı: %d/%d başarılı ──", success, len(new_files))
         self._product_cache.clear()
         self._sibling_cache.clear()
@@ -632,9 +708,9 @@ class OdooImageSync:
 def main():
     """Ana döngü: klasörü belli aralıklarla tarar."""
     print("=" * 50)
-    print("  Uğurlar Odoo Image Sync Agent v3.0")
+    print("  Uğurlar Odoo Image Sync Agent v3.1")
     print("  🎨 Renk bazlı yayma destekli")
-    print("  📋 Dosya takibi: Odoo DB")
+    print("  📋 Hibrit takip: Lokal cache + Odoo DB")
     print("  Çıkmak için Ctrl+C")
     print("=" * 50)
 
@@ -649,9 +725,10 @@ def main():
             agent.process_folder()
             time.sleep(interval)
     except KeyboardInterrupt:
-        _logger.info("Agent durduruldu.")
+        # Çıkışta cache'i son kez kaydet
+        agent._save_cache()
+        _logger.info("Agent durduruldu. Cache kaydedildi.")
 
 
 if __name__ == '__main__':
     main()
-
