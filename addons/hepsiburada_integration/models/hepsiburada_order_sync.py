@@ -416,8 +416,9 @@ class HepsiburadaOrderSync(models.AbstractModel):
                 state_id = state.id
 
         if not partner:
+            partner_name = hb_order.customer_name or 'Bilinmeyen Müşteri'
             partner = ResPartner.create({
-                'name': hb_order.customer_name,
+                'name': partner_name,
                 'ref': ref_val,
                 'phone': hb_order.customer_phone,
                 'email': '' if store.skip_customer_email else hb_order.customer_email,
@@ -430,6 +431,12 @@ class HepsiburadaOrderSync(models.AbstractModel):
             })
         else:
             update_vals = {}
+            # İsim güncelle — eski "Adsız" kayıtlarını düzelt
+            if hb_order.customer_name and (not partner.name or partner.name == 'Adsız'):
+                update_vals['name'] = hb_order.customer_name
+            # Ref güncelle
+            if ref_val and not partner.ref:
+                update_vals['ref'] = ref_val
             if hb_order.shipping_address:
                 update_vals['street'] = hb_order.shipping_address
             if state_id:
@@ -438,6 +445,10 @@ class HepsiburadaOrderSync(models.AbstractModel):
                 update_vals['city'] = city_name
             if not partner.vat and hb_order.tax_number:
                 update_vals['vat'] = hb_order.tax_number
+            if hb_order.customer_phone and not partner.phone:
+                update_vals['phone'] = hb_order.customer_phone
+            if hb_order.customer_email and not partner.email and not store.skip_customer_email:
+                update_vals['email'] = hb_order.customer_email
             if update_vals:
                 partner.write(update_vals)
                 
