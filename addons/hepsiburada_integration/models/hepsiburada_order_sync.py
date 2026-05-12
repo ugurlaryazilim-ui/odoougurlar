@@ -265,67 +265,124 @@ class HepsiburadaOrderSync(models.AbstractModel):
         # Sipariş ana bilgilerini ilk paketten al
         first_pkg = packages[0]
         
-        customer_name = first_pkg.get('customerName') or first_pkg.get('recipientName') or ''
-        status = first_pkg.get('status')
-        cargo_company = first_pkg.get('cargoCompany') or ''
-        cargo_provider = cargo_company
+        # ── Müşteri bilgileri ──
+        # API: customer.name veya items[0].customerName
+        customer_obj = first_pkg.get('customer', {})
+        customer_name = customer_obj.get('name', '')
+        if not customer_name:
+            # items içinden de bakılabilir
+            items = first_pkg.get('items', [])
+            if items:
+                customer_name = items[0].get('customerName', '')
         
-        # Fatura detayları
-        tax_office = first_pkg.get('taxOffice') or ''
-        tax_number = first_pkg.get('taxNumber') or first_pkg.get('identityNo') or ''
+        # ── Fatura bilgileri ──
+        # API: invoice.taxOffice, invoice.taxNumber, invoice.turkishIdentityNumber
+        invoice_obj = first_pkg.get('invoice', {})
+        tax_office = invoice_obj.get('taxOffice', '')
+        tax_number = invoice_obj.get('taxNumber', '')
+        tc_number = invoice_obj.get('turkishIdentityNumber', '')
+        # Vergi/TC No: kurumsal ise taxNumber, bireysel ise TC
+        tax_id_value = tax_number or tc_number
         
-        shipping_city = first_pkg.get('shippingCity') or ''
-        shipping_district = first_pkg.get('shippingTown') or ''
-        shipping_neighborhood = first_pkg.get('shippingDistrict') or ''
-        customer_email = first_pkg.get('email') or ''
-        customer_phone = first_pkg.get('phoneNumber') or ''
-
-        # Adres texti oluşturma
-        street_parts = []
-        if shipping_neighborhood:
-            street_parts.append(shipping_neighborhood)
-        if first_pkg.get('shippingAddressDetail'):
-            street_parts.append(first_pkg.get('shippingAddressDetail'))
-        full_address = " ".join(street_parts)
+        # ── Email ve telefon ──
+        # API: invoice.address.email, deliveryAddress.phoneNumber
+        invoice_addr = invoice_obj.get('address', {})
+        customer_email = invoice_addr.get('email', '')
+        delivery_addr = first_pkg.get('deliveryAddress', {})
+        customer_phone = delivery_addr.get('phoneNumber', '') or delivery_addr.get('alternatePhoneNumber', '')
+        if not customer_phone:
+            customer_phone = invoice_addr.get('phoneNumber', '') or invoice_addr.get('alternatePhoneNumber', '')
+        
+        # ── Teslimat adresi ──
+        # API: deliveryAddress.address, deliveryAddress.city, deliveryAddress.town, deliveryAddress.district
+        shipping_address = delivery_addr.get('address', '')
+        shipping_city = delivery_addr.get('city', '')
+        shipping_district = delivery_addr.get('town', '')  # town = ilçe
+        shipping_neighborhood = delivery_addr.get('district', '')
+        
+        # Adres metni birleştir
+        if not shipping_address and shipping_neighborhood:
+            shipping_address = shipping_neighborhood
+        
+        # ── Sipariş durumu ve kargo ──
+        # Bu bilgiler items seviyesinde geliyor
+        all_items = []
+        for pkg in packages:
+            all_items.extend(pkg.get('items', []))
+        
+        first_item = all_items[0] if all_items else {}
+        status = first_item.get('status', '')
+        cargo_company = first_item.get('cargoCompany', '')
+        cargo_provider = ''
+        cargo_model = first_item.get('cargoCompanyModel', {})
+        if cargo_model:
+            cargo_provider = cargo_model.get('name', '') or cargo_model.get('shortName', '')
+        if not cargo_provider:
+            cargo_provider = cargo_company
+        package_number = first_item.get('packageNumber', '')
+        cargo_tracking = first_item.get('barcode', '')  # kargo barkodu
+        
+        # ── Sipariş tarihi ──
+        order_date_str = first_pkg.get('orderDate', '')
+        order_date = False
+        if order_date_str:
+            try:
+                order_date = order_date_str.replace('T', ' ')[:19]
+            except Exception:
+                pass
+        
+        # ── Toplam tutar ──
+        total_price = sum(
+            item.get('totalPrice', {}).get('amount', 0.0)
+            for item in all_items
+        )
+        currency = 'TRY'
+        if all_items:
+            currency = all_items[0].get('totalPrice', {}).get('currency', 'TRY')
             
         hb_order = HbOrder.create({
             'hb_order_number': order_no,
             'merchant_id': store.merchant_id,
-            'order_date': first_pkg.get('orderDate', '').replace('T', ' ')[:19] if first_pkg.get('orderDate') else False,
+            'order_date': order_date,
             'status': status,
             'cargo_company': cargo_company,
             'cargo_provider': cargo_provider,
+            'cargo_tracking_number': cargo_tracking,
+            'package_number': package_number,
             'customer_name': customer_name,
             'customer_email': customer_email,
             'customer_phone': customer_phone,
             'tax_office': tax_office,
-            'tax_number': tax_number,
-            'shipping_address': full_address,
+            'tax_number': tax_id_value,
+            'shipping_address': shipping_address,
             'shipping_city': shipping_city,
             'shipping_district': shipping_district,
-            'total_price': sum(pkg.get('totalPrice', {}).get('amount', 0.0) for pkg in packages),
-            'currency': first_pkg.get('totalPrice', {}).get('currency', 'TRY'),
+            'total_price': total_price,
+            'currency': currency,
             'raw_payload': json.dumps(packages, ensure_ascii=False)
         })
 
-        # Satırları oluştur (Package içindeki items dizisi)
-        for pkg in packages:
-            pkg_items = pkg.get('items', [])
-            for item in pkg_items:
-                env['hepsiburada.order.line'].create({
-                    'order_id': hb_order.id,
-                    'line_item_id': item.get('lineItemId') or item.get('id'),
-                    'sku': item.get('hbSku') or item.get('sku'),
-                    'merchant_sku': item.get('merchantSku'),
-                    'product_name': item.get('productName', ''),
-                    'quantity': item.get('quantity', 1),
-                    'price': item.get('price', {}).get('amount', item.get('unitPrice', {}).get('amount', 0.0)),
-                    'merchant_unit_price': item.get('merchantUnitPrice', 0.0),
-                    'vat': item.get('vat', 0.0),
-                    'vat_rate': item.get('vatRate', 0.0),
-                    'commission_amount': item.get('commission', {}).get('amount', 0.0),
-                    'status': status
-                })
+        # ── Satırları oluştur ──
+        for item in all_items:
+            item_total = item.get('totalPrice', {}).get('amount', 0.0)
+            item_unit = item.get('unitPrice', {}).get('amount', item_total)
+            commission = item.get('commission', {})
+            
+            env['hepsiburada.order.line'].create({
+                'order_id': hb_order.id,
+                'line_item_id': item.get('id', ''),
+                'sku': item.get('sku', ''),
+                'merchant_sku': item.get('merchantSKU') or item.get('productBarcode', ''),
+                'product_name': item.get('name', ''),
+                'quantity': item.get('quantity', 1),
+                'price': item_total,
+                'merchant_unit_price': item_unit,
+                'vat': item.get('vat', 0.0),
+                'vat_rate': item.get('vatRate', 0.0),
+                'commission_amount': commission.get('amount', 0.0) if isinstance(commission, dict) else 0.0,
+                'commission_rate': item.get('commissionRate', 0.0),
+                'status': item.get('status', ''),
+            })
 
         partner = self._find_or_create_partner(hb_order, store)
         sale_order = self._create_sale_order(hb_order, partner, store)
@@ -437,27 +494,36 @@ class HepsiburadaOrderSync(models.AbstractModel):
                                line.merchant_sku, line.sku, line.product_name)
                 continue
 
+            # HB unitPrice KDV DAHİL tutardır
             unit_price = line.merchant_unit_price if line.merchant_unit_price > 0 else line.price
 
-            # Tax arama — cache ile
-            vat_rate = line.vat_rate
-            if vat_rate not in tax_cache:
-                tax_id = self.env['account.tax'].search([
-                    ('type_tax_use', '=', 'sale'),
-                    ('amount', '=', vat_rate)
-                ], limit=1)
-                tax_cache[vat_rate] = tax_id
-            tax_id = tax_cache[vat_rate]
-            
-            tax_lines = [(6, 0, [tax_id.id])] if tax_id else []
-
-            order_lines.append((0, 0, {
+            ol_vals = {
                 'product_id': product.id,
                 'product_uom_qty': line.quantity,
-                'price_unit': unit_price,
-                'tax_id': tax_lines,
-                'name': f"[HB] {line.product_name}"
-            }))
+                'price_unit': unit_price,  # KDV dahil fiyat
+                'name': f"[HB] {line.product_name}",
+            }
+
+            # KDV dahil vergi bul — yuvarlama farkı olmasın
+            vat_rate = line.vat_rate
+            if vat_rate > 0:
+                if vat_rate not in tax_cache:
+                    tax = self.env['account.tax'].sudo().search([
+                        ('type_tax_use', '=', 'sale'),
+                        ('amount', '=', vat_rate),
+                        ('price_include', '=', True),
+                        ('company_id', '=', self.env.company.id),
+                    ], limit=1)
+                    tax_cache[vat_rate] = tax
+                include_tax = tax_cache[vat_rate]
+                if include_tax:
+                    ol_vals['tax_id'] = [(6, 0, [include_tax.id])]
+                else:
+                    # KDV dahil vergi bulunamadı — manuel dönüşüm
+                    ol_vals['price_unit'] = unit_price / (1 + vat_rate / 100)
+                    _logger.warning("HB: %%%d KDV dahil vergi bulunamadı, manuel dönüşüm", int(vat_rate))
+
+            order_lines.append((0, 0, ol_vals))
 
         warehouse_id_str = self.env['ir.config_parameter'].sudo().get_param('hepsiburada_integration.warehouse_id')
         warehouse_id = int(warehouse_id_str) if warehouse_id_str else False
