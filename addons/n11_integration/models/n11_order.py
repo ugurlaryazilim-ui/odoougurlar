@@ -56,7 +56,8 @@ class N11OrderLine(models.Model):
     product_code = fields.Char(string='Ürün/Stok Kodu')
     
     quantity = fields.Integer(string='Miktar')
-    sale_price = fields.Float(string='Satış Fiyatı')
+    sale_price = fields.Float(string='Satış Fiyatı (KDV Dahil)')
+    vat_rate = fields.Float(string='KDV Oranı (%)')
     
     status = fields.Char(string='Sipariş Statüsü')
     

@@ -136,19 +136,13 @@ class N11OrderSync(models.Model):
             vat_rate = float(item.get('vatRate', 0))
             
             # N11 sellerInvoiceAmount KDV DAHİL tutardır.
-            # Odoo price_unit alanı KDV HARİÇ bekler (üstüne vergi ekler).
-            # Bu yüzden KDV'yi çıkararak KDV hariç birim fiyatı hesaplıyoruz.
+            # Fiyatı KDV dahil olarak saklıyoruz, Odoo tarafında
+            # price_include=True vergi kullanarak tam tutar eşleşmesi sağlıyoruz.
             seller_invoice_amount = float(item.get('sellerInvoiceAmount', 0.0))
             if seller_invoice_amount > 0 and qty > 0:
-                price_with_vat = seller_invoice_amount / qty
+                unit_price_incl = seller_invoice_amount / qty
             else:
-                price_with_vat = float(item.get('price', 0.0))
-
-            # KDV dahil → KDV hariç dönüşüm
-            if vat_rate > 0:
-                net_sale_price = price_with_vat / (1 + vat_rate / 100)
-            else:
-                net_sale_price = price_with_vat
+                unit_price_incl = float(item.get('price', 0.0))
                 
             line_vals = {
                 'item_id': str(item.get('orderLineId', '')),
@@ -156,7 +150,8 @@ class N11OrderSync(models.Model):
                 'product_name': item.get('productName', ''),
                 'product_code': item.get('barcode') or item.get('stockCode'),
                 'quantity': qty,
-                'sale_price': net_sale_price,
+                'sale_price': unit_price_incl,
+                'vat_rate': vat_rate,
                 'status': item.get('orderItemLineItemStatusName', ''),
             }
             vals['line_ids'].append((0, 0, line_vals))
@@ -320,18 +315,44 @@ class N11OrderSync(models.Model):
                     if p.default_code:
                         product_map[p.default_code] = p
 
+        # KDV dahil vergi cache'i — aynı oranı tekrar aramamak için
+        _tax_cache = {}
+
         for line in p_order.line_ids:
             product = product_map.get(line.product_code)
             
             if not product:
                 _logger.warning("N11 Urun Bulunamadi: %s", line.product_code)
                 continue
-                
-            sale_vals['order_line'].append((0, 0, {
+            
+            ol_vals = {
                 'product_id': product.id,
                 'product_uom_qty': line.quantity,
-                'price_unit': line.sale_price,
+                'price_unit': line.sale_price,  # KDV DAHİL fiyat
                 'n11_item_id': line.item_id,
-            }))
+            }
+
+            # KDV dahil vergi bul ve ata — yuvarlama farkı olmasın
+            vat_rate = line.vat_rate or 0
+            if vat_rate > 0:
+                if vat_rate not in _tax_cache:
+                    tax = self.env['account.tax'].sudo().search([
+                        ('type_tax_use', '=', 'sale'),
+                        ('amount', '=', vat_rate),
+                        ('price_include', '=', True),
+                        ('company_id', '=', self.env.company.id),
+                    ], limit=1)
+                    _tax_cache[vat_rate] = tax
+                include_tax = _tax_cache[vat_rate]
+                if include_tax:
+                    ol_vals['tax_id'] = [(6, 0, [include_tax.id])]
+                else:
+                    # KDV dahil vergi bulunamadı, manuel dönüşüm yap
+                    ol_vals['price_unit'] = line.sale_price / (1 + vat_rate / 100)
+                    _logger.warning(
+                        "N11: %%%d KDV dahil vergi bulunamadı, manuel dönüşüm yapıldı",
+                        int(vat_rate))
+
+            sale_vals['order_line'].append((0, 0, ol_vals))
             
         return self.env['sale.order'].create(sale_vals)
