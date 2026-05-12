@@ -140,9 +140,13 @@ class OdooImageSync:
         self._product_cache = {}
         # Renk kardeşleri cache — variant_id → [sibling_ids]
         self._sibling_cache = {}
-        self._connect()
-        # SQLite cache başlat — her dosya anında diske yazılır
+        # SQLite cache başlat — her dosya anında diske yazılır (Odoo gerekmez)
         self._init_db()
+        # Odoo bağlantısı — başarısız olursa agent bekler
+        try:
+            self._connect()
+        except Exception as e:
+            _logger.warning("Odoo bağlantısı başarısız, tekrar denenecek: %s", e)
 
     def _connect(self):
         """Odoo'ya XML-RPC ile bağlan."""
@@ -553,13 +557,21 @@ class OdooImageSync:
         """Klasördeki tüm görselleri tarar ve işler.
         
         HİBRİT MOD:
-          - Lokal cache (processed_cache.json) → hızlı kontrol, network yok
+          - SQLite cache (processed_cache.db) → hızlı kontrol, network yok
           - Odoo DB (ugurlar.image.sync.file) → raporlama, merkezi takip
         
         Dosyalar yerinde bırakılır (taşınmaz).
         Sadece yeni veya değişmiş dosyalar işlenir.
         Hatalı dosyalar Hatalilar klasörüne taşınır.
         """
+        # Odoo bağlantısı yoksa yeniden bağlanmayı dene
+        if not self.uid:
+            try:
+                self._connect()
+            except Exception:
+                _logger.debug("Odoo henüz hazır değil, sonraki döngüde denenecek")
+                return 0
+
         watch = self.config['watch_folder']
         error_dir = self.config['error_folder']
         separator = self.config['separator']
@@ -736,10 +748,10 @@ class OdooImageSync:
 def main():
     """Ana döngü: klasörü belli aralıklarla tarar."""
     print("=" * 50)
-    print("  Uğurlar Odoo Image Sync Agent v3.2")
-    print("  🎨 Renk bazlı yayma destekli")
-    print("  💾 SQLite cache — crash-safe, kaldığı yerden devam")
-    print("  Çıkmak için Ctrl+C")
+    print("  Ugurlar Odoo Image Sync Agent v3.2")
+    print("  Renk bazli yayma destekli")
+    print("  SQLite cache - crash-safe, kaldigi yerden devam")
+    print("  Cikmak icin Ctrl+C")
     print("=" * 50)
 
     config = load_config()
