@@ -233,7 +233,7 @@ class PackingApiController(BarcodeApiBase):
                             'picking_id': picking.id,
                             'picking_name': picking.name,
                         }
-            return {'error': f'Bu ürün rotada yok: {product.display_name}'}
+            return {'error': f'Ürün toplama listesinde bulunamadı — barkod eşleşmedi: [{product.barcode or "?"}] {product.display_name}'}
 
         # Barkod eşleşti → qty artır
         new_qty = target_move.quantity + 1

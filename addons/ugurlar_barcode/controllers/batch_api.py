@@ -363,7 +363,7 @@ class BatchApiController(BarcodeApiBase):
                             'message': f'{product.display_name} zaten toplandı ✓',
                             'product_name': product.display_name,
                         }
-            return {'error': f'Bu ürün rotada yok: {product.display_name}'}
+            return {'error': f'Ürün toplama listesinde bulunamadı — barkod eşleşmedi: [{product.barcode or "?"}] {product.display_name}'}
 
         # Toplama miktarını artır
         new_qty = (target_move.wave_collected_qty or 0) + 1
