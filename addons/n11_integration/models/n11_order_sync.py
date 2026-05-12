@@ -133,14 +133,22 @@ class N11OrderSync(models.Model):
 
         for item in products:
             qty = int(item.get('quantity', 1))
+            vat_rate = float(item.get('vatRate', 0))
             
-            # n11 faturaya yansıyacak tutar: sellerInvoiceAmount
-            # Eğer Odoo bunu baz alıp fatura kesecekse net birim tutar bulunmalıdır.
+            # N11 sellerInvoiceAmount KDV DAHİL tutardır.
+            # Odoo price_unit alanı KDV HARİÇ bekler (üstüne vergi ekler).
+            # Bu yüzden KDV'yi çıkararak KDV hariç birim fiyatı hesaplıyoruz.
             seller_invoice_amount = float(item.get('sellerInvoiceAmount', 0.0))
             if seller_invoice_amount > 0 and qty > 0:
-                net_sale_price = seller_invoice_amount / qty
+                price_with_vat = seller_invoice_amount / qty
             else:
-                net_sale_price = float(item.get('price', 0.0))
+                price_with_vat = float(item.get('price', 0.0))
+
+            # KDV dahil → KDV hariç dönüşüm
+            if vat_rate > 0:
+                net_sale_price = price_with_vat / (1 + vat_rate / 100)
+            else:
+                net_sale_price = price_with_vat
                 
             line_vals = {
                 'item_id': str(item.get('orderLineId', '')),
