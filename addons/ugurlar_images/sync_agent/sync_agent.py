@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import shutil
+import sqlite3
 import sys
 import time
 import xmlrpc.client
@@ -139,11 +140,9 @@ class OdooImageSync:
         self._product_cache = {}
         # Renk kardeşleri cache — variant_id → [sibling_ids]
         self._sibling_cache = {}
-        # Lokal dosya takip cache — filename → {size, mtime, state, ...}
-        self._local_cache = {}
         self._connect()
-        # Lokal cache'i diskten yükle (Odoo bağlantısından sonra)
-        self._local_cache = self._load_cache()
+        # SQLite cache başlat — her dosya anında diske yazılır
+        self._init_db()
 
     def _connect(self):
         """Odoo'ya XML-RPC ile bağlan."""
@@ -399,40 +398,68 @@ class OdooImageSync:
                 )
 
     # ═══════════════════════════════════════════════════════════════
-    # LOKal CACHE — hızlı dosya takibi (processed_cache.json)
+    # SQLite CACHE — her dosya anında diske yazılır, crash-safe
     # ═══════════════════════════════════════════════════════════════
 
-    def _cache_path(self):
-        """Lokal cache dosyasının yolunu döner (agent'ın yanında)."""
-        return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'processed_cache.json')
+    def _db_path(self):
+        """SQLite veritabanı yolunu döner (agent'ın yanında)."""
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'processed_cache.db')
 
-    def _load_cache(self):
-        """Lokal cache'i diskten yükle. Yoksa boş dict döner."""
-        path = self._cache_path()
-        if os.path.exists(path):
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                _logger.info("📦 Lokal cache yüklendi: %d dosya kaydı", len(data))
-                return data
-            except (json.JSONDecodeError, IOError) as e:
-                _logger.warning("Lokal cache okunamadı, sıfırdan başlanıyor: %s", e)
-        return {}
+    def _init_db(self):
+        """SQLite veritabanını başlat ve tabloyu oluştur."""
+        db_path = self._db_path()
+        self._db = sqlite3.connect(db_path)
+        self._db.execute('PRAGMA journal_mode=WAL')   # Yazma sırasında okuma yapılabilsin
+        self._db.execute('PRAGMA synchronous=NORMAL') # Performans vs güvenlik dengesi
+        self._db.execute('''
+            CREATE TABLE IF NOT EXISTS processed_files (
+                filename TEXT PRIMARY KEY,
+                file_size INTEGER,
+                file_mtime TEXT,
+                barcode TEXT,
+                state TEXT DEFAULT 'done',
+                product_id INTEGER,
+                tmpl_id INTEGER,
+                image_type TEXT,
+                image_order INTEGER,
+                error_msg TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        self._db.commit()
 
-    def _save_cache(self):
-        """Lokal cache'i diske atomik olarak yaz (bozulma riski yok)."""
-        path = self._cache_path()
-        tmp_path = path + '.tmp'
+        # Eski JSON cache varsa migrate et
+        self._migrate_json_cache()
+
+        count = self._db.execute('SELECT COUNT(*) FROM processed_files').fetchone()[0]
+        _logger.info("📦 SQLite cache hazır: %d dosya kaydı (%s)", count, db_path)
+
+    def _migrate_json_cache(self):
+        """Eski processed_cache.json varsa SQLite'a aktar ve sil."""
+        json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'processed_cache.json')
+        if not os.path.exists(json_path):
+            return
         try:
-            with open(tmp_path, 'w', encoding='utf-8') as f:
-                json.dump(self._local_cache, f, ensure_ascii=False)
-            # Atomik rename — yarıda kalırsa eski dosya korunur
-            if os.path.exists(path):
-                os.replace(tmp_path, path)
-            else:
-                os.rename(tmp_path, path)
-        except IOError as e:
-            _logger.warning("Lokal cache yazılamadı: %s", e)
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if not data:
+                return
+            migrated = 0
+            for fname, entry in data.items():
+                try:
+                    self._db.execute(
+                        'INSERT OR IGNORE INTO processed_files (filename, file_size, file_mtime, barcode, state) VALUES (?, ?, ?, ?, ?)',
+                        (fname, entry.get('size', 0), entry.get('mtime', ''), entry.get('barcode', ''), entry.get('state', 'done'))
+                    )
+                    migrated += 1
+                except Exception:
+                    pass
+            self._db.commit()
+            # Eski dosyayı yedekle
+            os.rename(json_path, json_path + '.migrated')
+            _logger.info("📦 JSON cache → SQLite migrate edildi: %d kayıt", migrated)
+        except Exception as e:
+            _logger.warning("JSON cache migration hatası: %s", e)
 
     # ═══════════════════════════════════════════════════════════════
     # DOSYA META & KONTROL
@@ -447,20 +474,24 @@ class OdooImageSync:
             return 0, ''
 
     def _is_file_processed(self, fname, file_size, file_mtime):
-        """Lokal cache'ten dosyanın işlenip işlenmediğini kontrol eder.
+        """SQLite'tan dosyanın işlenip işlenmediğini kontrol eder.
         
-        Network çağrısı YAPMAZ — sadece bellekteki dict'e bakar.
+        Network çağrısı YAPMAZ — sadece lokal SQLite'a bakar.
         Dosya boyutu veya tarihi değişmişse → tekrar işlenecek.
         """
-        if fname not in self._local_cache:
+        row = self._db.execute(
+            'SELECT file_size, file_mtime, state FROM processed_files WHERE filename = ?',
+            (fname,)
+        ).fetchone()
+
+        if not row:
             return False
 
-        entry = self._local_cache[fname]
-        if entry.get('size') != file_size or entry.get('mtime') != file_mtime:
-            # Dosya değişmiş
+        db_size, db_mtime, db_state = row
+        if db_size != file_size or db_mtime != file_mtime:
             return False
 
-        return entry.get('state') == 'done'
+        return db_state == 'done'
 
     # ═══════════════════════════════════════════════════════════════
     # KAYIT — Lokal cache (hızlı) + Odoo DB (raporlama)
@@ -469,20 +500,17 @@ class OdooImageSync:
     def _record_success(self, filename, barcode, file_size, file_mtime,
                         product_id, tmpl_id, image_type, order,
                         color_propagated=False, sibling_count=0):
-        """Başarılı dosyayı hem lokal cache'e hem Odoo'ya kaydet."""
-        # ── 1. Lokal cache (anında, network yok) ──
-        self._local_cache[filename] = {
-            'size': file_size,
-            'mtime': file_mtime,
-            'barcode': barcode,
-            'state': 'done',
-            'product_id': product_id,
-            'tmpl_id': tmpl_id,
-            'image_type': image_type,
-            'order': order,
-        }
+        """Başarılı dosyayı SQLite'a ANINDA kaydet + Odoo'ya best-effort."""
+        # ── 1. SQLite (anında diske, crash-safe) ──
+        self._db.execute(
+            '''INSERT OR REPLACE INTO processed_files
+               (filename, file_size, file_mtime, barcode, state, product_id, tmpl_id, image_type, image_order)
+               VALUES (?, ?, ?, ?, 'done', ?, ?, ?, ?)''',
+            (filename, file_size, file_mtime, barcode, product_id, tmpl_id, image_type, order)
+        )
+        self._db.commit()  # Her dosya anında diske!
 
-        # ── 2. Odoo DB (best-effort, hata olursa lokal cache yeter) ──
+        # ── 2. Odoo DB (best-effort, hata olursa SQLite yeter) ──
         try:
             self._execute(
                 'ugurlar.image.sync.file', 'mark_processed',
@@ -495,18 +523,18 @@ class OdooImageSync:
                 sibling_count=sibling_count,
             )
         except Exception as e:
-            _logger.debug("Odoo kayıt yazılamadı (%s) — lokal cache yeterli: %s", filename, e)
+            _logger.debug("Odoo kayıt yazılamadı (%s) — SQLite yeterli: %s", filename, e)
 
     def _record_error(self, filename, barcode, file_size, file_mtime, error_msg):
-        """Hatalı dosyayı hem lokal cache'e hem Odoo'ya kaydet."""
-        # ── 1. Lokal cache ──
-        self._local_cache[filename] = {
-            'size': file_size,
-            'mtime': file_mtime,
-            'barcode': barcode,
-            'state': 'error',
-            'error': error_msg,
-        }
+        """Hatalı dosyayı SQLite'a ANINDA kaydet + Odoo'ya best-effort."""
+        # ── 1. SQLite ──
+        self._db.execute(
+            '''INSERT OR REPLACE INTO processed_files
+               (filename, file_size, file_mtime, barcode, state, error_msg)
+               VALUES (?, ?, ?, ?, 'error', ?)''',
+            (filename, file_size, file_mtime, barcode, error_msg)
+        )
+        self._db.commit()
 
         # ── 2. Odoo DB (best-effort) ──
         try:
@@ -574,7 +602,10 @@ class OdooImageSync:
                 continue
 
             # Cache'de var ama değişmiş?
-            if fname in self._local_cache:
+            existing = self._db.execute(
+                'SELECT 1 FROM processed_files WHERE filename = ?', (fname,)
+            ).fetchone()
+            if existing:
                 _logger.info("🔄 Dosya değişmiş, tekrar işlenecek: %s", fname)
 
             new_files.append(fpath)
@@ -695,10 +726,7 @@ class OdooImageSync:
                 )
                 success += 1
 
-        # ── Lokal cache'i diske yaz ──
-        if success > 0:
-            self._save_cache()
-
+        # SQLite zaten her dosyada commit ediyor, ekstra save gerekmez
         _logger.info("── Tamamlandı: %d/%d başarılı ──", success, len(new_files))
         self._product_cache.clear()
         self._sibling_cache.clear()
@@ -708,9 +736,9 @@ class OdooImageSync:
 def main():
     """Ana döngü: klasörü belli aralıklarla tarar."""
     print("=" * 50)
-    print("  Uğurlar Odoo Image Sync Agent v3.1")
+    print("  Uğurlar Odoo Image Sync Agent v3.2")
     print("  🎨 Renk bazlı yayma destekli")
-    print("  📋 Hibrit takip: Lokal cache + Odoo DB")
+    print("  💾 SQLite cache — crash-safe, kaldığı yerden devam")
     print("  Çıkmak için Ctrl+C")
     print("=" * 50)
 
@@ -722,12 +750,25 @@ def main():
 
     try:
         while True:
-            agent.process_folder()
+            try:
+                agent.process_folder()
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                _logger.error("⚠️ Tarama hatası (kaldığı yerden devam edecek): %s", e)
+                _logger.info("🔄 30 saniye bekleyip tekrar denenecek...")
+                time.sleep(30)
+                # Odoo bağlantısını yenile
+                try:
+                    agent._connect()
+                    _logger.info("✅ Odoo bağlantısı yenilendi")
+                except Exception:
+                    _logger.warning("Odoo bağlantısı henüz yenilenemiyor, beklenecek...")
+                continue
             time.sleep(interval)
     except KeyboardInterrupt:
-        # Çıkışta cache'i son kez kaydet
-        agent._save_cache()
-        _logger.info("Agent durduruldu. Cache kaydedildi.")
+        agent._db.close()
+        _logger.info("Agent durduruldu. SQLite kapatıldı.")
 
 
 if __name__ == '__main__':
