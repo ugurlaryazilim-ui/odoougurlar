@@ -118,7 +118,7 @@ class CustomerProcessor(models.AbstractModel):
         # İletişim bilgileri (Telefon + Email)
         # Nebim referansı: CommunicationTypeCode 7=Telefon, 3=Email
         comm_list = []
-        cust_phone = (partner.phone or partner.mobile or '').strip()
+        cust_phone = (partner.phone or getattr(partner, 'mobile', '') or '').strip()
         cust_email = (partner.email or '').strip()
         if cust_email:
             comm_list.append({

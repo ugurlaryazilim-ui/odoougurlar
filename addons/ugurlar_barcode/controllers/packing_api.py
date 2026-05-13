@@ -427,7 +427,7 @@ class PackingApiController(BarcodeApiBase):
             'picking_name': picking.name,
             'origin': picking.origin or '',
             'partner_name': picking.partner_id.name or '',
-            'partner_phone': picking.partner_id.phone or picking.partner_id.mobile or '',
+            'partner_phone': picking.partner_id.phone or getattr(picking.partner_id, 'mobile', '') or '',
             'partner_address': '',
             'cargo_tracking': '',
             'cargo_provider': '',
