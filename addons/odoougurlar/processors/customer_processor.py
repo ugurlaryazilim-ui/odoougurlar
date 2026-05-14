@@ -139,7 +139,8 @@ class CustomerProcessor(models.AbstractModel):
                      country_code, state_code, city_code, district_code)
         
         # Muhasebe hesap kodları (Nebim Müşteri Kartı -> GLAccounts sekmesi için)
-        if not is_export and mapping and getattr(mapping, 'nebim_customer_code', False):
+        # İhracat ve yurtiçi müşteriler dahil — tüm cari tiplere gönderilir
+        if mapping and getattr(mapping, 'nebim_customer_code', False):
             gl_acc = {
                 "CompanyCode": 1,
                 "GLAccCode": mapping.nebim_customer_code,
