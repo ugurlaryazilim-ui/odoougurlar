@@ -357,6 +357,9 @@ class TrendyolOrder(models.Model):
         api_lines = package_data.get('lines', [])
         product_map = self._batch_find_products(api_lines)
 
+        # KDV dahil vergi cache'i — aynı oranı tekrar aramamak için
+        _tax_cache = {}
+
         order_lines = []
         for line in api_lines:
             bc = line.get('barcode', '').strip()
@@ -366,6 +369,7 @@ class TrendyolOrder(models.Model):
                 # Batch'te bulunamadı, tek tek dene (nebim_barcode fallback)
                 product = self._find_product_by_barcode(bc, sku)
 
+            # Trendyol price/lineUnitPrice KDV DAHİL tutardır (indirim sonrası)
             price = (line.get('price')
                      or line.get('amount')
                      or line.get('lineUnitPrice')
@@ -376,10 +380,31 @@ class TrendyolOrder(models.Model):
             ol_vals = {
                 'name': line.get('productName', 'Bilinmeyen Ürün'),
                 'product_uom_qty': qty,
-                'price_unit': unit_price,
+                'price_unit': unit_price,  # KDV DAHİL fiyat
             }
             if product:
                 ol_vals['product_id'] = product.id
+
+            # KDV dahil vergi bul ve ata — Odoo'nun tekrar KDV eklemesini engelle
+            vat_rate = line.get('vatRate', 0) or 0
+            if vat_rate > 0:
+                if vat_rate not in _tax_cache:
+                    tax = self.env['account.tax'].sudo().search([
+                        ('type_tax_use', '=', 'sale'),
+                        ('amount', '=', vat_rate),
+                        ('price_include', '=', True),
+                        ('company_id', '=', self.env.company.id),
+                    ], limit=1)
+                    _tax_cache[vat_rate] = tax
+                include_tax = _tax_cache[vat_rate]
+                if include_tax:
+                    ol_vals['tax_id'] = [(6, 0, [include_tax.id])]
+                else:
+                    # KDV dahil vergi bulunamadı — manuel dönüşüm (KDV hariç yaz)
+                    ol_vals['price_unit'] = unit_price / (1 + vat_rate / 100)
+                    _logger.warning(
+                        "Trendyol: %%%d KDV dahil vergi bulunamadı, manuel dönüşüm yapıldı",
+                        int(vat_rate))
 
             order_lines.append((0, 0, ol_vals))
 
