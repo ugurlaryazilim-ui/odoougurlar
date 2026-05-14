@@ -140,11 +140,15 @@ class CustomerProcessor(models.AbstractModel):
         
         # Muhasebe hesap kodları (Nebim Müşteri Kartı -> GLAccounts sekmesi için)
         if not is_export and mapping and getattr(mapping, 'nebim_customer_code', False):
-            payload['GLAccounts'] = [{
+            gl_acc = {
                 "CompanyCode": 1,
                 "GLAccCode": mapping.nebim_customer_code,
                 "OrderAdvanceGLAccCode": getattr(mapping, 'sales_advance_code', ''),
-            }]
+            }
+            # E-Fatura Satış Hesabı — mapping'deki Banka Kodu (BankCode) alanından
+            if getattr(mapping, 'bank_code', ''):
+                gl_acc["EInvoiceSalesGLAccCode"] = mapping.bank_code
+            payload['GLAccounts'] = [gl_acc]
         
 
         

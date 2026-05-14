@@ -67,6 +67,27 @@ class InvoiceProcessor(models.AbstractModel):
         return stats
 
     @api.private
+    def _build_payment_entry(self, mapping, cc_type_code, amount, document_date=None, amount_key='Amount'):
+        """Ödeme bloğu oluştur — tüm fatura tipleri için ortak.
+        
+        BankCode, mapping'deki bank_code alanından alınır.
+        """
+        entry = {
+            'PaymentType': '2',
+            'Code': '',
+            'CreditCardTypeCode': cc_type_code,
+            'InstallmentCount': 1,
+            'CurrencyCode': 'TRY',
+            amount_key: float(amount),
+        }
+        if document_date:
+            entry['DocumentDate'] = document_date
+        # Banka Kodu — mapping'den al
+        if mapping and getattr(mapping, 'bank_code', ''):
+            entry['BankCode'] = mapping.bank_code
+        return entry
+
+    @api.private
     def _build_invoice_payload(self, invoice):
         """
         Odoo faturasını Nebim JSON formatına dönüştürür.
@@ -237,15 +258,10 @@ class InvoiceProcessor(models.AbstractModel):
                 'ExportTypeCode': m_export_type,
                 'PaymentMeansCode': m_payment_means,
             },
-            'Payments': [{
-                'CreditCardTypeCode': m_cc_type,
-                'Code': '',
-                'InstallmentCount': 1,
-                'DocumentDate': document_date_str,
-                'PaymentType': '2',
-                'Amount': float(invoice.amount_total),
-                'CurrencyCode': 'TRY',
-            }],
+            'Payments': [self._build_payment_entry(
+                mapping, m_cc_type, float(invoice.amount_total),
+                document_date=document_date_str, amount_key='Amount'
+            )],
             'SalesViaInternetInfo': {
                 'PaymentTypeDescription': 'KREDIKARTI/BANKAKARTI',
                 'SendDate': now_str,
@@ -351,14 +367,12 @@ class InvoiceProcessor(models.AbstractModel):
             'IsSalesViaInternet': True,
             'IsCompleted': True,
             'Lines': lines,
-            'Payments': [{
-                'PaymentType': '2',
-                'Code': '',
-                'CreditCardTypeCode': mapping.credit_card_type_code if mapping and mapping.credit_card_type_code else 'TRD',
-                'InstallmentCount': 1,
-                'CurrencyCode': 'TRY',
-                'AmountVI': invoice.amount_total,
-            }],
+            'Payments': [self._build_payment_entry(
+                mapping,
+                mapping.credit_card_type_code if mapping and mapping.credit_card_type_code else 'TRD',
+                invoice.amount_total,
+                amount_key='AmountVI'
+            )],
             'SalesViaInternetInfo': {
                 'SalesURL': m_sales_url,
                 'PaymentTypeCode': 1,

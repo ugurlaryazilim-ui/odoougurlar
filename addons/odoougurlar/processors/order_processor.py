@@ -99,14 +99,18 @@ class OrderProcessor(models.AbstractModel):
         if not is_export:
             payload['POSTerminalID'] = '1'
             payload['StoreWareHouseCode'] = m_warehouse
-            payload['Payments'] = [{
+            payment_entry = {
                 'PaymentType': '2',
                 'Code': '',
                 'CreditCardTypeCode': mapping.credit_card_type_code if mapping and mapping.credit_card_type_code else 'TRD',
                 'InstallmentCount': 1,
                 'CurrencyCode': 'TRY',
                 'AmountVI': sale_order.amount_total,
-            }]
+            }
+            # Banka Kodu — mapping'den al
+            if mapping and getattr(mapping, 'bank_code', ''):
+                payment_entry['BankCode'] = mapping.bank_code
+            payload['Payments'] = [payment_entry]
         
         if is_export and mapping:
             if mapping.tax_exemption_code:
