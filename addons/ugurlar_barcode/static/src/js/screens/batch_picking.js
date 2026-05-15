@@ -32,6 +32,9 @@ export class BatchPickingScreen extends Component {
                                     <span><i class="fa fa-clock-o"></i> <t t-esc="b.time_window"/></span>
                                     <span><i class="fa fa-shopping-cart"></i> <t t-esc="b.total_orders"/> sipariş</span>
                                     <span><i class="fa fa-cube"></i> <t t-esc="b.total_items"/> ürün</span>
+                                    <t t-if="b.warehouse_name">
+                                        <span class="bp-warehouse-badge"><i class="fa fa-home"></i> <t t-esc="b.warehouse_name"/></span>
+                                    </t>
                                 </div>
                                 <div class="bp-batch-action">
                                     <button class="btn btn-success bp-btn-collect">
@@ -93,9 +96,15 @@ export class BatchPickingScreen extends Component {
                         </span>
                     </div>
 
-                    <!-- Barkod bilgisi -->
+                    <!-- Barkod + Marka + Renk bilgisi -->
                     <div class="bp-barcode-info">
                         <span>Barkod: <strong t-esc="state.currentItem.barcode"/></span>
+                        <t t-if="state.currentItem.brand || state.currentItem.color">
+                            <span class="bp-brand-color-info">
+                                <t t-if="state.currentItem.brand"><span class="bp-info-tag bp-tag-brand" t-esc="state.currentItem.brand"/></t>
+                                <t t-if="state.currentItem.color"><span class="bp-info-tag bp-tag-color" t-esc="state.currentItem.color"/></t>
+                            </span>
+                        </t>
                     </div>
 
                     <!-- MOR BANT: Ürün Kodu + Varyant -->
@@ -144,6 +153,9 @@ export class BatchPickingScreen extends Component {
                     <div class="bp-route-table">
                         <div class="bp-route-table-header">
                             <span>Barkod</span>
+                            <span>Marka</span>
+                            <span>Renk</span>
+                            <span>Beden</span>
                             <span>Sokak</span>
                             <span>Kat-Göz</span>
                             <span>Adet</span>
@@ -152,6 +164,9 @@ export class BatchPickingScreen extends Component {
                         <t t-foreach="state.items" t-as="item" t-key="item.move_id">
                             <div t-attf-class="bp-route-table-row {{item.move_id === state.currentItem.move_id ? 'bp-row-active' : ''}} {{item.collected_qty >= item.demand_qty ? 'bp-row-done' : ''}}">
                                 <span class="bp-cell-barcode bp-barcode-copy" t-att-data-barcode="item.barcode || ''" t-on-click="(ev) => this.copyBarcode(ev)" t-esc="item.barcode || ''"/>
+                                <span class="bp-cell-brand" t-esc="item.brand || '-'"/>
+                                <span class="bp-cell-color" t-esc="item.color || '-'"/>
+                                <span class="bp-cell-size" t-esc="item.size || '-'"/>
                                 <span t-esc="(item.location_parts || {}).zone || '-'"/>
                                 <span>
                                     <t t-esc="(item.location_parts || {}).section || ''"/>
