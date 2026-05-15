@@ -171,6 +171,12 @@
     font-size: 18px;
     border-radius: 8px;
 }
+.bp-btn-product {
+    padding: 8px 12px;
+    font-size: 16px;
+    border-radius: 8px;
+    margin-left: 2px;
+}
 
 /* ─── TARAMA SONUCU ─── */
 .bp-scan-feedback {

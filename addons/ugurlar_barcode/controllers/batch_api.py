@@ -108,13 +108,16 @@ class BatchApiController(BarcodeApiBase):
 
         result = []
         for b in batches:
-            # Depo bilgisi — batch'e bağlı picking'lerin deposu
+            # Depo bilgisi — source_info alanından depo adını çıkar
+            # Format: "HEYKEL MAĞAZA DEPO - 6 siparis (09:31-12:30)"
             warehouse_name = ''
-            if b.picking_type_id and b.picking_type_id.warehouse_id:
-                warehouse_name = b.picking_type_id.warehouse_id.name or ''
-            elif b.picking_ids:
-                wh = b.picking_ids[0].picking_type_id.warehouse_id
-                warehouse_name = wh.name if wh else ''
+            si = b.source_info or ''
+            if si:
+                warehouse_name = si.split(' - ')[0].strip()
+            if not warehouse_name:
+                # Fallback: picking_type üzerinden
+                if b.picking_type_id and b.picking_type_id.warehouse_id:
+                    warehouse_name = b.picking_type_id.warehouse_id.name or ''
 
             result.append({
                 'id': b.id,
@@ -268,19 +271,26 @@ class BatchApiController(BarcodeApiBase):
                         if vals:
                             variant_info = ', '.join(
                                 v.name for v in vals)
-                            # Attribute tipine göre Marka/Renk/Beden ayrıştır
+                            # Attribute tipine göre Renk/Beden ayrıştır
                             for v in vals:
                                 attr_name = (v.attribute_id.name or '').strip().lower()
                                 if attr_name in ('renk', 'color', 'colour'):
                                     color_name = v.name
                                 elif attr_name in ('beden', 'size', 'numara'):
                                     size_name = v.name
+                                elif attr_name in ('marka', 'brand'):
+                                    brand_name = v.name
 
-                    # Marka — product template üzerindeki attribute veya marka alanı
-                    if hasattr(product, 'product_brand_id') and product.product_brand_id:
-                        brand_name = product.product_brand_id.name or ''
-                    elif hasattr(product.product_tmpl_id, 'product_brand_id') and product.product_tmpl_id.product_brand_id:
-                        brand_name = product.product_tmpl_id.product_brand_id.name or ''
+                    # Marka bulunamadıysa, product template üzerindeki nitelik satırlarından dene
+                    if not brand_name:
+                        tmpl = product.product_tmpl_id
+                        if tmpl:
+                            for attr_line in tmpl.attribute_line_ids:
+                                attr_name = (attr_line.attribute_id.name or '').strip().lower()
+                                if attr_name in ('marka', 'brand'):
+                                    if attr_line.value_ids:
+                                        brand_name = attr_line.value_ids[0].name
+                                    break
 
                     route_items.append({
                         'move_id': move.id,

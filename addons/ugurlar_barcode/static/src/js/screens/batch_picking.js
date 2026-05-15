@@ -133,6 +133,9 @@ export class BatchPickingScreen extends Component {
                         <button class="btn btn-warning bp-btn-go" t-on-click="onScan">
                             <i class="fa fa-arrow-right"></i>
                         </button>
+                        <button class="btn btn-info bp-btn-product" t-on-click="goToProduct" title="Ürüne Git">
+                            <i class="fa fa-external-link"></i>
+                        </button>
                     </div>
 
                     <!-- Tarama sonucu mesajı -->
@@ -525,6 +528,14 @@ export class BatchPickingScreen extends Component {
             this.state.error = 'Tamamlama hatası';
         }
         this.state.loading = false;
+    }
+
+
+    // ═══ ÜRÜNE GİT ═══
+    goToProduct() {
+        if (!this.state.currentItem || !this.state.currentItem.product_id) return;
+        const url = `/odoo/inventory/products/${this.state.currentItem.product_id}`;
+        window.open(url, '_blank');
     }
 
     // ═══ YARDIMCI ═══
