@@ -49,37 +49,16 @@ class CustomerProcessor(models.AbstractModel):
         cari_model_type = 2 if is_export else 3
 
         if partner.is_company:
-            # ─── Vergi Numarası / TC Kimlik No Ayrımı ───
-            # Tüzel kişi (Ltd., A.Ş.) → 10 haneli VKN → Nebim TaxNumber
-            # Şahıs firması → 11 haneli TCKN → Nebim IdentityNum (TaxNumber 10 hane bekler!)
-            vat_raw = partner.vat or ''
-            vat_clean = ''.join(filter(str.isdigit, vat_raw))  # Sadece rakamlar
-
             payload = {
                 'ModelType': cari_model_type,
                 'CurrAccDescription': partner.name[:50],
                 'FirstName': partner.name[:50],
                 'LastName': '',
                 'IsIndividualAcc': False,
+                'TaxNumber': partner.vat or '',
                 'OfficeCode': 'M',
                 'CurrencyCode': 'TRY',
             }
-
-            if len(vat_clean) == 11:
-                # Şahıs firması — 11 haneli TCKN
-                # Nebim TaxNumber alanı 10 hane bekler, 11 hane "Geçersiz Değer" verir
-                payload['IdentityNum'] = vat_clean
-                payload['TaxNumber'] = vat_clean[:10]
-                _logger.info("KURUMSAL (ŞAHIS FİRMASI): %s | TCKN → IdentityNum (11 hane)", partner.name)
-            elif len(vat_clean) == 10:
-                # Tüzel kişi — 10 haneli VKN
-                payload['TaxNumber'] = vat_clean
-                _logger.info("KURUMSAL (TÜZEL KİŞİ): %s | VKN → TaxNumber (10 hane)", partner.name)
-            else:
-                # Bilinmeyen format — olduğu gibi gönder
-                payload['TaxNumber'] = vat_raw
-                _logger.warning("KURUMSAL: %s | Vergi no uzunluğu beklenmeyen: %d hane", partner.name, len(vat_clean))
-
             # Yurt içi kurumsal müşteriler için e-fatura bayrağı açıkça gönderilir
             # Yurt dışı (ihracat) için GÖNDERİLMEZ — Nebim tetiklememeli!
             if not is_export:
@@ -108,8 +87,8 @@ class CustomerProcessor(models.AbstractModel):
                     _logger.warning("Eksik Vergi Dairesi Eşleştirmesi: '%s' için kayıt bulunamadı.", tax_office_name)
             
             # KVKK uyumlu loglama — VKN maskeleniyor
-            masked_vat = f"{vat_clean[:3]}***{vat_clean[-2:]}" if len(vat_clean) > 5 else '***'
-            _logger.info("KURUMSAL MÜŞTERİ: %s | VKN/TCKN: %s | Hane: %d", partner.name, masked_vat, len(vat_clean))
+            masked_vat = f"{(partner.vat or '')[:3]}***{(partner.vat or '')[-2:]}" if partner.vat and len(partner.vat) > 5 else '***'
+            _logger.info("KURUMSAL MÜŞTERİ: %s | VKN: %s | IsSubjectToEInvoice: True", partner.name, masked_vat)
         else:
             payload = {
                 'ModelType': cari_model_type,
