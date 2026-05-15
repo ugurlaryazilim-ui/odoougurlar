@@ -1,7 +1,15 @@
+import json as _json
 import logging
 from odoo import models, api
 
 _logger = logging.getLogger(__name__)
+
+
+class NebimCustomerError(Exception):
+    """Nebim cari hatası — request JSON'u taşır, savepoint rollback sonrası kaydedilir."""
+    def __init__(self, message, request_json=''):
+        super().__init__(message)
+        self.request_json = request_json
 
 # Türkçe → ASCII normalize mapping
 _TR_MAP = str.maketrans({
@@ -50,35 +58,49 @@ class CustomerProcessor(models.AbstractModel):
 
         if partner.is_company:
             # ─── Vergi Numarası / TC Kimlik No Ayrımı ───
-            # Tüzel kişi (Ltd., A.Ş.) → 10 haneli VKN → Nebim TaxNumber
-            # Şahıs firması → 11 haneli TCKN → Nebim IdentityNum (TaxNumber 10 hane bekler!)
+            # Tüzel kişi (Ltd., A.Ş.) → 10 haneli VKN → Nebim TaxNumber + IsIndividualAcc=False
+            # Şahıs firması → 11 haneli TCKN → Nebim IdentityNum + IsIndividualAcc=True
             vat_raw = partner.vat or ''
             vat_clean = ''.join(filter(str.isdigit, vat_raw))  # Sadece rakamlar
+            is_sahis = len(vat_clean) == 11  # 11 hane = TC Kimlik No = Şahıs firması
 
-            payload = {
-                'ModelType': cari_model_type,
-                'CurrAccDescription': partner.name[:50],
-                'FirstName': partner.name[:50],
-                'LastName': '',
-                'IsIndividualAcc': False,
-                'OfficeCode': 'M',
-                'CurrencyCode': 'TRY',
-            }
+            if is_sahis:
+                # ─── ŞAHIS FİRMASI (11 hane TCKN) ───
+                # Nebim'de "Gerçek Kişilik (Şahıs)" olarak kaydedilmeli
+                # TaxNumber alanı 10 hane bekler, 11 hane "Geçersiz Değer" verir
+                # TC Kimlik No BOŞ OLMALI hatası IsIndividualAcc=False iken IdentityNum gönderilince oluşur
+                name_parts = (partner.name or '').strip().split()
+                first_name = name_parts[0] if name_parts else ''
+                last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
 
-            if len(vat_clean) == 11:
-                # Şahıs firması — 11 haneli TCKN
-                # Nebim TaxNumber alanı 10 hane bekler, 11 hane "Geçersiz Değer" verir
-                payload['IdentityNum'] = vat_clean
-                payload['TaxNumber'] = vat_clean[:10]
-                _logger.info("KURUMSAL (ŞAHIS FİRMASI): %s | TCKN → IdentityNum (11 hane)", partner.name)
-            elif len(vat_clean) == 10:
-                # Tüzel kişi — 10 haneli VKN
-                payload['TaxNumber'] = vat_clean
-                _logger.info("KURUMSAL (TÜZEL KİŞİ): %s | VKN → TaxNumber (10 hane)", partner.name)
+                payload = {
+                    'ModelType': cari_model_type,
+                    'CurrAccDescription': partner.name[:50],
+                    'FirstName': first_name[:50],
+                    'LastName': last_name[:50],
+                    'IsIndividualAcc': True,   # Şahıs firması = Gerçek Kişilik
+                    'IdentityNum': vat_clean,  # 11 haneli TCKN
+                    # TaxNumber GÖNDERİLMEZ — Nebim "Geçersiz Değer" verir
+                    'OfficeCode': 'M',
+                    'CurrencyCode': 'TRY',
+                }
+                _logger.info("KURUMSAL (ŞAHIS FİRMASI): %s | TCKN → IdentityNum (11 hane), IsIndividualAcc=True", partner.name)
             else:
-                # Bilinmeyen format — olduğu gibi gönder
-                payload['TaxNumber'] = vat_raw
-                _logger.warning("KURUMSAL: %s | Vergi no uzunluğu beklenmeyen: %d hane", partner.name, len(vat_clean))
+                # ─── TÜZEL KİŞİ (10 hane VKN veya diğer) ───
+                payload = {
+                    'ModelType': cari_model_type,
+                    'CurrAccDescription': partner.name[:50],
+                    'FirstName': partner.name[:50],
+                    'LastName': '',
+                    'IsIndividualAcc': False,
+                    'TaxNumber': vat_clean if len(vat_clean) == 10 else vat_raw,
+                    'OfficeCode': 'M',
+                    'CurrencyCode': 'TRY',
+                }
+                if len(vat_clean) == 10:
+                    _logger.info("KURUMSAL (TÜZEL KİŞİ): %s | VKN → TaxNumber (10 hane)", partner.name)
+                else:
+                    _logger.warning("KURUMSAL: %s | Vergi no uzunluğu beklenmeyen: %d hane", partner.name, len(vat_clean))
 
             # Yurt içi kurumsal müşteriler için e-fatura bayrağı açıkça gönderilir
             # Yurt dışı (ihracat) için GÖNDERİLMEZ — Nebim tetiklememeli!
@@ -109,7 +131,7 @@ class CustomerProcessor(models.AbstractModel):
             
             # KVKK uyumlu loglama — VKN maskeleniyor
             masked_vat = f"{vat_clean[:3]}***{vat_clean[-2:]}" if len(vat_clean) > 5 else '***'
-            _logger.info("KURUMSAL MÜŞTERİ: %s | VKN/TCKN: %s | Hane: %d", partner.name, masked_vat, len(vat_clean))
+            _logger.info("KURUMSAL MÜŞTERİ: %s | VKN/TCKN: %s | Hane: %d | Şahıs: %s", partner.name, masked_vat, len(vat_clean), is_sahis)
         else:
             payload = {
                 'ModelType': cari_model_type,
@@ -177,13 +199,19 @@ class CustomerProcessor(models.AbstractModel):
         # Gerçek üretimde (Production) Nebim'in "sp_RetailCustomer" veya "ModelType 2" zorunluluğuna göre şekillenir.
         customer_code = mapping.nebim_customer_code if mapping else ''
         address_id = ''
+        # Request JSON'u oluştur (hata durumunda da kaydedilecek)
+        request_json = ''
+        try:
+            request_json = _json.dumps(payload, ensure_ascii=False, default=str)
+        except Exception:
+            pass
+
         try:
             # İstek payload'unu sale_order'a kaydet (debug için)
             if sale_order:
-                import json as _json
                 try:
                     sale_order.sudo().write({
-                        'nebim_customer_request': _json.dumps(payload, ensure_ascii=False, default=str),
+                        'nebim_customer_request': request_json,
                     })
                 except Exception:
                     pass
@@ -204,7 +232,7 @@ class CustomerProcessor(models.AbstractModel):
             if isinstance(result, dict) and 'ExceptionMessage' in result:
                 error_msg = result['ExceptionMessage']
                 _logger.error("Nebim Cari Hatası: %s", error_msg)
-                raise Exception(f"Nebim Cari Hatası: {error_msg}")
+                raise NebimCustomerError(f"Nebim Cari Hatası: {error_msg}", request_json=request_json)
                 
             # Eğer Nebim kendi yarattığı bir kodu döndürüyorsa JSON içinden al (isteğe bağlı)
             if isinstance(result, list) and len(result) > 0 and isinstance(result[0], dict):
@@ -218,9 +246,11 @@ class CustomerProcessor(models.AbstractModel):
                 
             _logger.info("Oluşan Nebim Müşteri Kodu: %s, Adres ID: %s", customer_code, address_id)
             return customer_code, address_id
+        except NebimCustomerError:
+            raise  # Zaten request_json taşıyor
         except Exception as e:
             _logger.error("Cari Nebim'e gönderilemedi. Hata: %s", e)
-            raise Exception(f"Cari oluşturma başarısız: {str(e)}")
+            raise NebimCustomerError(f"Cari oluşturma başarısız: {str(e)}", request_json=request_json)
 
     def _resolve_nebim_address_codes(self, partner):
         """

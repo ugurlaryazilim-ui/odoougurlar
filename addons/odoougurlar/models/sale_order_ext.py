@@ -182,7 +182,12 @@ class SaleOrder(models.Model):
                 except Exception as e:
                     _logger.error("Auto-sync Cari hatası (%s): %s", order.name, e)
                     try:
-                        order.write({'nebim_customer_response': f'[Auto-Sync] CARİ HATA: {str(e)}'})
+                        # NebimCustomerError taşıyorsa request JSON'u da kaydet
+                        request_json = getattr(e, 'request_json', '')
+                        write_vals = {'nebim_customer_response': f'[Auto-Sync] CARİ HATA: {str(e)}'}
+                        if request_json:
+                            write_vals['nebim_customer_request'] = request_json
+                        order.write(write_vals)
                     except Exception:
                         pass
 
