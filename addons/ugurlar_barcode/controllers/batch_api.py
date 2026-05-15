@@ -271,7 +271,7 @@ class BatchApiController(BarcodeApiBase):
                         if vals:
                             variant_info = ', '.join(
                                 v.name for v in vals)
-                            # Attribute tipine göre Renk/Beden ayrıştır
+                            # Attribute tipine göre Renk/Beden/Marka ayrıştır
                             for v in vals:
                                 attr_name = (v.attribute_id.name or '').strip().lower()
                                 if attr_name in ('renk', 'color', 'colour'):
@@ -281,16 +281,34 @@ class BatchApiController(BarcodeApiBase):
                                 elif attr_name in ('marka', 'brand'):
                                     brand_name = v.name
 
-                    # Marka bulunamadıysa, product template üzerindeki nitelik satırlarından dene
-                    if not brand_name:
-                        tmpl = product.product_tmpl_id
-                        if tmpl:
-                            for attr_line in tmpl.attribute_line_ids:
-                                attr_name = (attr_line.attribute_id.name or '').strip().lower()
-                                if attr_name in ('marka', 'brand'):
-                                    if attr_line.value_ids:
-                                        brand_name = attr_line.value_ids[0].name
-                                    break
+                    # Fallback: template attribute_line_ids'den Marka/Renk/Beden ara
+                    # (Bazı ürünlerde varyant olarak değil, sadece nitelik olarak tanımlı)
+                    tmpl = product.product_tmpl_id
+                    if tmpl and (not brand_name or not color_name or not size_name):
+                        for attr_line in tmpl.attribute_line_ids:
+                            attr_name = (attr_line.attribute_id.name or '').strip().lower()
+                            if not brand_name and attr_name in ('marka', 'brand'):
+                                if attr_line.value_ids:
+                                    brand_name = attr_line.value_ids[0].name
+                            elif not color_name and attr_name in ('renk', 'color', 'colour'):
+                                if attr_line.value_ids:
+                                    # Tek değer varsa direkt al, birden fazlaysa varyanta bak
+                                    if len(attr_line.value_ids) == 1:
+                                        color_name = attr_line.value_ids[0].name
+                            elif not size_name and attr_name in ('beden', 'size', 'numara'):
+                                if attr_line.value_ids:
+                                    if len(attr_line.value_ids) == 1:
+                                        size_name = attr_line.value_ids[0].name
+
+                    # Fallback: default_code'dan renk kodu / beden çıkar
+                    # Format: {ürün_kodu}-{renk_kodu}-{beden}  (ör: 15322263-0028-S)
+                    dc = product.default_code or ''
+                    dc_parts = dc.split('-')
+                    if len(dc_parts) >= 3:
+                        if not color_name:
+                            color_name = dc_parts[-2]   # Son ikinci parça → renk kodu
+                        if not size_name:
+                            size_name = dc_parts[-1]     # Son parça → beden
 
                     route_items.append({
                         'move_id': move.id,
