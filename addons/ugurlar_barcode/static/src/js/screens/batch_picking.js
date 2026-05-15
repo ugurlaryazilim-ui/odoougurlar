@@ -533,8 +533,11 @@ export class BatchPickingScreen extends Component {
 
     // ═══ ÜRÜNE GİT ═══
     goToProduct() {
-        if (!this.state.currentItem || !this.state.currentItem.product_id) return;
-        const url = `/odoo/inventory/products/${this.state.currentItem.product_id}`;
+        if (!this.state.currentItem) return;
+        // /odoo/inventory/products/ sayfası product.template ID bekler (varyant değil!)
+        const tmplId = this.state.currentItem.product_tmpl_id;
+        if (!tmplId) return;
+        const url = `/odoo/inventory/products/${tmplId}`;
         window.open(url, '_blank');
     }
 

@@ -297,6 +297,7 @@ class BatchApiController(BarcodeApiBase):
                         'picking_id': picking.id,
                         'picking_name': picking.name,
                         'product_id': product.id,
+                        'product_tmpl_id': product.product_tmpl_id.id,
                         'product_name': product.name or product.display_name,
                         'display_name': product.display_name,
                         'default_code': product.default_code or '',
