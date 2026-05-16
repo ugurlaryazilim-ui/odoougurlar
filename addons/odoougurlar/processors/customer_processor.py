@@ -173,31 +173,14 @@ class CustomerProcessor(models.AbstractModel):
                 payload['TaxNumber'] = '1111111111'
                 payload['CustomerTypeCode'] = 3
 
-        # PostalAddresses — Nebim e-fatura XML'ini bu adres alanlarından oluşturur.
-        # FirstName, LastName, IdentityNum burada boş olursa Sematron
-        # "[TCKN] Adı ve Soyadı boş olmamalıdır" hatası verir.
-        postal_address = {
+        payload['PostalAddresses'] = [{
             'AddressTypeCode': "1",
             'CountryCode': country_code,
             'StateCode': state_code,
             'CityCode': city_code,
             'DistrictCode': district_code,
             'Address': (partner.street or 'Adres bilgisi yok')[:200],
-        }
-        
-        # Şahıs firması veya bireysel müşteri → PostalAddress'e kimlik bilgisi ekle
-        # E-fatura XML'inde alıcı bilgisi buradan çekilir
-        if payload.get('IsIndividualAcc', False):
-            name_parts = (partner.name or '').strip().split()
-            postal_address['FirstName'] = name_parts[0][:50] if name_parts else ''
-            postal_address['LastName'] = ' '.join(name_parts[1:])[:50] if len(name_parts) > 1 else ''
-            postal_address['IdentityNum'] = payload.get('IdentityNum', '')
-        elif payload.get('TaxNumber'):
-            # Tüzel kişi — VKN ve firma adı
-            postal_address['CompanyName'] = (partner.name or '')[:100]
-            postal_address['TaxNumber'] = payload.get('TaxNumber', '')
-        
-        payload['PostalAddresses'] = [postal_address]
+        }]
         
         # İletişim bilgileri (Telefon + Email)
         # Nebim referansı: CommunicationTypeCode 7=Telefon, 3=Email
