@@ -80,7 +80,7 @@ class OrderProcessor(models.AbstractModel):
             'CustomerCode': customer_code,
             'OfficeCode': "M",
             'StoreCode': m_store,
-            'WarehouseCode': (m_warehouse if is_export else ''),
+            'WarehouseCode': m_warehouse,
             'ExportFileNumber': export_file_number,
             'ShipmentMethodCode': m_shipment,
             'DocumentNumber': sale_order.client_order_ref or sale_order.name,
@@ -112,6 +112,7 @@ class OrderProcessor(models.AbstractModel):
                 'InstallmentCount': 1,
                 'CurrencyCode': 'TRY',
                 'AmountVI': sale_order.amount_total,
+                'Amount': sale_order.amount_total,
             }
             # Banka Kodu — mapping'den al
             if mapping and getattr(mapping, 'bank_code', ''):

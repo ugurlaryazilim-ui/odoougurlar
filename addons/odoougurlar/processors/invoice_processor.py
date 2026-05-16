@@ -44,14 +44,38 @@ class InvoiceProcessor(models.AbstractModel):
                     payload = self._build_invoice_payload(invoice)
                     result = connector.post_data('Post', payload)
 
+                    # Nebim bazen IsPostingJournal'ı creation'da kabul etmez.
+                    # HeaderID ile ikinci bir güncelleme yaparak journal posting'i tetikle.
+                    header_id = ''
+                    if isinstance(result, dict):
+                        header_id = result.get('HeaderID') or result.get('ApplicationID') or ''
+                    if header_id and isinstance(result, dict):
+                        try:
+                            update_payload = {
+                                'ModelType': payload.get('ModelType', 8),
+                                'HeaderID': header_id,
+                                'IsPostingJournal': True,
+                                'IsCompleted': True,
+                            }
+                            connector.post_data('Post', update_payload)
+                            _logger.info("Fatura IsPostingJournal güncellendi: %s → HeaderID: %s", invoice.name, header_id)
+                        except Exception as ej:
+                            _logger.warning("IsPostingJournal güncellemesi başarısız: %s - %s", invoice.name, str(ej))
+
+                    # Nebim fatura numarasını çıkar
+                    nebim_invoice_number = ''
+                    if isinstance(result, dict):
+                        nebim_invoice_number = result.get('InvoiceNumber', '')
+
                     invoice.write({
                         'nebim_sent': True,
                         'nebim_sent_date': fields.Datetime.now(),
                         'nebim_response': str(result),
                         'nebim_error': False,
+                        'nebim_invoice_number': nebim_invoice_number or '',
                     })
                     stats['updated'] += 1
-                    _logger.info("Fatura Nebim'e gönderildi: %s", invoice.name)
+                    _logger.info("Fatura Nebim'e gönderildi: %s → %s", invoice.name, nebim_invoice_number)
 
             except Exception as e:
                 stats['failed'] += 1
