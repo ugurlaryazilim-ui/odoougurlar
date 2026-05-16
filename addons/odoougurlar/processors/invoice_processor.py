@@ -234,6 +234,7 @@ class InvoiceProcessor(models.AbstractModel):
         # ── Ana payload — İnternet deposu (002) kurallarını aşmak için tam internet payload'u ──
         payload = {
             'IsCompleted': True,
+            'IsPostingJournal': True,
             'IsOrderBase': True,
             'IsShipmentBase': False,
             'SendInvoiceByEMail': True,
@@ -394,6 +395,7 @@ class InvoiceProcessor(models.AbstractModel):
             'IsOrderBase': is_order_base,
             'IsSalesViaInternet': True,
             'IsCompleted': True,
+            'IsPostingJournal': True,
             'SendInvoiceByEMail': True,
             'EMailAddress': email_address,
             'Lines': lines,
