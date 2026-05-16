@@ -66,6 +66,13 @@ class OrderProcessor(models.AbstractModel):
         # Nebim Toptan (Model 14) ve Perakende (Model 13), her ikisi de Adres id eksik olunca ağlar
         addr_id = sale_order.nebim_address_id or (mapping.nebim_address_id if mapping else '') or 'adc3d09b-897b-4b74-a29f-b42600863ec3'
 
+        # ShipmentMethodCode: 1=İhracat, 2=Yurtiçi Kargo
+        # Mapping default'u '1' olabilir ama yurtiçi siparişlerde '2' olmalı
+        if is_export:
+            m_shipment = (mapping.shipment_method_code if mapping and getattr(mapping, 'shipment_method_code', None) else '1')
+        else:
+            m_shipment = '2'  # Yurtiçi her zaman kargo
+
         payload = {
             'ModelType': model_type,
             'IsCompleted': True,
@@ -73,9 +80,9 @@ class OrderProcessor(models.AbstractModel):
             'CustomerCode': customer_code,
             'OfficeCode': "M",
             'StoreCode': m_store,
-            'WarehouseCode': m_warehouse,
+            'WarehouseCode': (m_warehouse if is_export else ''),
             'ExportFileNumber': export_file_number,
-            'ShipmentMethodCode': (mapping.shipment_method_code if mapping and getattr(mapping, 'shipment_method_code', None) else ('1' if is_export else '2')),
+            'ShipmentMethodCode': m_shipment,
             'DocumentNumber': sale_order.client_order_ref or sale_order.name,
             'Description': sale_order.client_order_ref or sale_order.name,
             'InternalDescription': sale_order.name,
