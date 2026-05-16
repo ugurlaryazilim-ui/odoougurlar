@@ -314,7 +314,7 @@ class TrendyolOrder(models.Model):
             'tax_number': inv_addr.get('taxNumber', '') if commercial else '',
             'tax_office': inv_addr.get('taxOffice', '') if commercial else '',
             'company_name': inv_addr.get('company', '') if commercial else '',
-            'is_e_invoice_available': inv_addr.get('isEInvoiceAvailable', False) if commercial else False,
+            'is_e_invoice_available': inv_addr.get('isEInvoiceAvailable', False),
             'raw_data': json.dumps(data, ensure_ascii=False),
             'line_ids': line_vals,
             'micro': data.get('micro', False),
@@ -529,6 +529,10 @@ class TrendyolOrder(models.Model):
             vals['company_type'] = 'company'
             vals['name'] = inv_addr.get('company', '') or customer_name
             vals['vat'] = inv_addr.get('taxNumber', '')
+        elif inv_addr.get('isEInvoiceAvailable') and inv_addr.get('taxNumber'):
+            # Bireysel sipariş ama GİB'de e-fatura mükellefi
+            # VAT yazılmazsa Nebim'de bireysel olur → e-arşiv → Doğan ERROR_CODE:10013
+            vals['vat'] = inv_addr.get('taxNumber', '')
         if c_country:
             vals['country_id'] = c_country.id
         if c_state_id:
@@ -547,6 +551,11 @@ class TrendyolOrder(models.Model):
         new_street = inv_full_text[:128] if inv_full_text else ship_full_text[:128]
         if new_street and partner.street != new_street:
             upd_vals['street'] = new_street
+
+        # Mevcut partner'da VAT yoksa ve GİB'de e-fatura mükellefi ise ekle
+        if not partner.vat and inv_addr.get('taxNumber'):
+            if commercial or inv_addr.get('isEInvoiceAvailable'):
+                upd_vals['vat'] = inv_addr.get('taxNumber', '')
 
         if upd_vals:
             partner.write(upd_vals)
