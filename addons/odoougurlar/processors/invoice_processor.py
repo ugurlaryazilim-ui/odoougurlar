@@ -381,10 +381,12 @@ class InvoiceProcessor(models.AbstractModel):
         m_payment_agent = (mapping.payment_agent if mapping and mapping.payment_agent else payment_agent)
 
         # Hamurlabs InvoiceR_SiparisBazli.txt şablonuna göre payload
+        desc = sale_order.client_order_ref or sale_order.name if sale_order else invoice.name
         payload = {
             'ModelType': model_type,
             'CustomerCode': customer_code,
-            'Description': sale_order.client_order_ref or sale_order.name if sale_order else invoice.name,
+            'Description': desc,
+            'InternalDescription': desc,
             'InvoiceDate': invoice_date_str,
             'OfficeCode': 'M',
             'StoreCode': m_store,
