@@ -104,31 +104,19 @@ class CustomerProcessor(models.AbstractModel):
 
             # Yurt içi kurumsal müşteriler için e-fatura bayrağı:
             # GİB'de e-fatura mükellefi olan müşteriye e-arşiv GÖNDERİLEMEZ
-            # (Doğan ERROR_CODE:10013: "e-fatura mükellefi olduğu için e-arşiv düzenlenemez")
-            # Bu yasal zorunluluk — Hamurlabs'ta çalışan müşteri GİB'de kayıtlı değildi.
-            #   - Tüzel kişi (10h VKN): her zaman True
-            #   - Şahıs (11h TCKN, GİB mükellefi): True → e-fatura
-            #   - Şahıs (11h TCKN, GİB'de değil): gönderilmez → e-arşiv
-            #   - İhracat: gönderilmez
+            # (Doğan ERROR_CODE:10013)
+            #
+            # Trendyol isEInvoiceAvailable bayrağı GÜVENİLMEZ — GİB kaydını
+            # yansıtmıyor. Bu yüzden TÜM kurumsal müşteriler (tüzel + şahıs)
+            # için IsSubjectToEInvoice=True gönderiyoruz.
+            #
+            # - GİB'de kayıtlı → e-fatura çalışır ✅
+            # - GİB'de kayıtlı değil → Nebim/Sematron yine e-arşive düşürür
+            #   (InvoiceTypeCode otomatik 2 olur)
+            # - İhracat → gönderilmez
             if not is_export:
-                if not is_sahis:
-                    # Tüzel kişi → her zaman e-fatura
-                    payload['IsSubjectToEInvoice'] = True
-                else:
-                    # Şahıs firması → GİB'de e-fatura mükellefi mi?
-                    e_invoice_available = False
-                    if sale_order:
-                        if hasattr(sale_order, 'trendyol_order_id') and sale_order.trendyol_order_id:
-                            e_invoice_available = sale_order.trendyol_order_id.is_e_invoice_available or False
-                        elif hasattr(sale_order, 'hb_order_id') and sale_order.hb_order_id:
-                            e_invoice_available = getattr(sale_order.hb_order_id, 'is_e_invoice_available', False) or False
-                        elif hasattr(sale_order, 'n11_order_id') and sale_order.n11_order_id:
-                            e_invoice_available = getattr(sale_order.n11_order_id, 'is_e_invoice_available', False) or False
-                    if e_invoice_available:
-                        payload['IsSubjectToEInvoice'] = True
-                        _logger.info("ŞAHIS E-FATURA MÜKELLEFİ: %s → GİB kayıtlı, e-fatura gönderilecek", partner.name)
-                    else:
-                        _logger.info("ŞAHIS E-ARŞİV: %s → GİB'de kayıtsız, e-arşiv gönderilecek", partner.name)
+                payload['IsSubjectToEInvoice'] = True
+                _logger.info("KURUMSAL MÜŞTERİ E-FATURA: %s | Şahıs=%s → IsSubjectToEInvoice=True", partner.name, is_sahis)
             
             # Pazaryeri Vergi Dairesi Adı -> Nebim Vergi Dairesi Kodu eşleştirmesi
             # SADECE tüzel kişi (10h VKN) için — şahıs firması (11h TCKN) için Hamurlabs boş gönderiyor
