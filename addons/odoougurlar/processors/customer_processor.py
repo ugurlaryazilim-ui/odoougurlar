@@ -103,26 +103,13 @@ class CustomerProcessor(models.AbstractModel):
                     _logger.warning("KURUMSAL: %s | Vergi no uzunluğu beklenmeyen: %d hane", partner.name, len(vat_clean))
 
             # Yurt içi kurumsal müşteriler için e-fatura bayrağı:
-            # - Tüzel kişi (10 hane VKN): her zaman e-fatura mükellefi
-            # - Şahıs firması (11 hane TCKN): Trendyol isEInvoiceAvailable=true ise e-fatura
-            #   GİB'de e-fatura mükellefi ise e-arşiv gönderemiyoruz (Doğan ERROR_CODE:10013)
-            #   isEInvoiceAvailable=false veya yok ise → e-arşiv
-            # - Yurt dışı (ihracat) için GÖNDERİLMEZ
-            if not is_export:
-                if not is_sahis:
-                    # Tüzel kişi (10 hane VKN) → her zaman e-fatura
-                    payload['IsSubjectToEInvoice'] = True
-                else:
-                    # Şahıs firması → pazaryerinden gelen bayrakla kontrol et
-                    e_invoice_flag = False
-                    if sale_order:
-                        if hasattr(sale_order, 'trendyol_order_id') and sale_order.trendyol_order_id:
-                            e_invoice_flag = sale_order.trendyol_order_id.is_e_invoice_available or False
-                    if e_invoice_flag:
-                        payload['IsSubjectToEInvoice'] = True
-                        _logger.info("ŞAHIS FİRMASI E-FATURA: %s → isEInvoiceAvailable=True, GİB'de kayıtlı", partner.name)
-                    else:
-                        _logger.info("ŞAHIS FİRMASI E-ARŞİV: %s → IsSubjectToEInvoice gönderilmiyor", partner.name)
+            # Hamurlabs referansı:
+            #   - Tüzel kişi (10 hane VKN): IsSubjectToEInvoice=True
+            #   - Şahıs firması (11 hane TCKN): IsSubjectToEInvoice GÖNDERİLMEZ (=False)
+            #     Hamurlabs tüm şahıs firmalarını e-arşiv olarak gönderiyor.
+            #   - Yurt dışı (ihracat): GÖNDERİLMEZ
+            if not is_export and not is_sahis:
+                payload['IsSubjectToEInvoice'] = True
             
             # Pazaryeri Vergi Dairesi Adı -> Nebim Vergi Dairesi Kodu eşleştirmesi
             # SADECE tüzel kişi (10h VKN) için — şahıs firması (11h TCKN) için Hamurlabs boş gönderiyor
