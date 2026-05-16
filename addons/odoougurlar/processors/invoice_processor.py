@@ -446,6 +446,25 @@ class InvoiceProcessor(models.AbstractModel):
             payload['BillingPostalAddressID'] = address_id
             payload['ShippingPostalAddressID'] = address_id
 
+        # E-fatura XML'inde alıcı bilgisi faturanın PostalAddress bloğundan çekilir.
+        # Bu blok boş olursa Sematron "[TCKN] Adı ve Soyadı boş olmamalıdır" hatası verir.
+        partner = invoice.partner_id
+        vat = (partner.vat or '').strip()
+        is_individual = len(vat) == 11 if vat.isdigit() else False
+        if is_individual and vat:
+            name_parts = (partner.name or '').strip().split()
+            payload['PostalAddress'] = {
+                'FirstName': name_parts[0][:50] if name_parts else '',
+                'LastName': ' '.join(name_parts[1:])[:50] if len(name_parts) > 1 else '',
+                'IdentityNum': vat,
+            }
+            _logger.info("Fatura PostalAddress kimlik bilgisi eklendi: %s", partner.name)
+        elif vat and len(vat) == 10:
+            payload['PostalAddress'] = {
+                'CompanyName': (partner.name or '')[:100],
+                'TaxNumber': vat,
+            }
+
         _logger.info("Perakende fatura payload hazırlandı: %s (MT%s) | Email=%s", 
                      invoice.name, model_type, email_address or 'YOK')
 
