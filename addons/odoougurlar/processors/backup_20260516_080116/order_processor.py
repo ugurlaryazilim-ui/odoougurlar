@@ -75,6 +75,7 @@ class OrderProcessor(models.AbstractModel):
             'StoreCode': m_store,
             'WarehouseCode': m_warehouse,
             'ExportFileNumber': export_file_number,
+            'TaxExemptionCode': (mapping.tax_exemption_code if mapping and mapping.tax_exemption_code else '301'),
             'ShipmentMethodCode': (mapping.shipment_method_code if mapping and getattr(mapping, 'shipment_method_code', None) else ('1' if is_export else '2')),
             'DocumentNumber': sale_order.client_order_ref or sale_order.name,
             'Description': sale_order.client_order_ref or sale_order.name,
@@ -111,8 +112,9 @@ class OrderProcessor(models.AbstractModel):
                 payment_entry['BankCode'] = mapping.bank_code
             payload['Payments'] = [payment_entry]
         
-        if is_export:
-            payload['TaxExemptionCode'] = (mapping.tax_exemption_code if mapping and mapping.tax_exemption_code else '301')
+        if is_export and mapping:
+            if mapping.tax_exemption_code:
+                payload['TaxExemptionCode'] = mapping.tax_exemption_code
         
 
 

@@ -351,34 +351,6 @@ class InvoiceProcessor(models.AbstractModel):
         if sale_order and sale_order.date_order:
             payment_date_str = sale_order.date_order.strftime('%Y-%m-%d %H:%M:%S')
 
-        # ── E-posta adresi (e-arşiv fatura için gerekli) ──
-        email_address = ''
-        payment_agent = ''
-        if sale_order:
-            # Trendyol
-            if hasattr(sale_order, 'trendyol_order_id') and sale_order.trendyol_order_id:
-                email_address = sale_order.trendyol_order_id.customer_email or ''
-                payment_agent = 'TrendyolMp'
-            # Hepsiburada
-            elif hasattr(sale_order, 'hb_order_id') and sale_order.hb_order_id:
-                email_address = getattr(sale_order.hb_order_id, 'customer_email', '') or ''
-                payment_agent = 'HepsiBuradaMp'
-            # N11
-            elif hasattr(sale_order, 'n11_order_id') and sale_order.n11_order_id:
-                email_address = getattr(sale_order.n11_order_id, 'buyer_email', '') or ''
-                payment_agent = 'N11Mp'
-            # Amazon
-            elif hasattr(sale_order, 'amazon_store_id') and sale_order.amazon_store_id:
-                payment_agent = 'AmazonMp'
-            # PttAvm
-            elif hasattr(sale_order, 'pttavm_order_id') and sale_order.pttavm_order_id:
-                payment_agent = 'PttAvmMp'
-        # Fallback: partner email
-        if not email_address and invoice.partner_id.email:
-            email_address = invoice.partner_id.email or ''
-
-        m_payment_agent = (mapping.payment_agent if mapping and mapping.payment_agent else payment_agent)
-
         # Hamurlabs InvoiceR_SiparisBazli.txt şablonuna göre payload
         payload = {
             'ModelType': model_type,
@@ -394,8 +366,6 @@ class InvoiceProcessor(models.AbstractModel):
             'IsOrderBase': is_order_base,
             'IsSalesViaInternet': True,
             'IsCompleted': True,
-            'SendInvoiceByEMail': True,
-            'EMailAddress': email_address,
             'Lines': lines,
             'Payments': [self._build_payment_entry(
                 mapping,
@@ -409,7 +379,6 @@ class InvoiceProcessor(models.AbstractModel):
                 'PaymentTypeDescription': 'KREDIKARTI/BANKAKARTI',
                 'PaymentDate': payment_date_str,
                 'SendDate': now_str,
-                'PaymentAgent': m_payment_agent,
             },
         }
         
@@ -418,7 +387,10 @@ class InvoiceProcessor(models.AbstractModel):
             payload['BillingPostalAddressID'] = address_id
             payload['ShippingPostalAddressID'] = address_id
 
-        _logger.info("Perakende fatura payload hazırlandı: %s (MT%s) | Email=%s", 
-                     invoice.name, model_type, email_address or 'YOK')
+        # Kurumsal müşteri ve E-Fatura kaydı VARSA → E-Fatura bilgileri ekle
+        # E-Fatura bloğu SADECE Nebim'de e-fatura mükellefi olarak kayıtlı müşteriler için gönderilir
+        # Aksi halde Nebim "EInvoice not found!" hatası verir
+        # TODO: Trendyol'dan gelen isEInvoiceAvailable bayrağını trendyol.order modeline ekleyip buradan kontrol et
+        # Şimdilik e-fatura bloğu göndermiyoruz — Nebim zaten e-fatura mükellefi ise otomatik keser
 
         return payload

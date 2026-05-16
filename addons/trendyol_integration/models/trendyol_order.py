@@ -71,6 +71,10 @@ class TrendyolOrder(models.Model):
     tax_number = fields.Char(string='Vergi No', readonly=True)
     tax_office = fields.Char(string='Vergi Dairesi', readonly=True)
     company_name = fields.Char(string='Firma Adı', readonly=True)
+    is_e_invoice_available = fields.Boolean(
+        string='E-Fatura Mükellefi', default=False, readonly=True,
+        help='Trendyol invoiceAddress.isEInvoiceAvailable — e-fatura mükellefi ise True'
+    )
     micro = fields.Boolean(string='Mikro İhracat', default=False, readonly=True,
                            help='Trendyol mikro ihracat siparişi')
     etgb_no = fields.Char(string='ETGB No', readonly=True,
@@ -310,6 +314,7 @@ class TrendyolOrder(models.Model):
             'tax_number': inv_addr.get('taxNumber', '') if commercial else '',
             'tax_office': inv_addr.get('taxOffice', '') if commercial else '',
             'company_name': inv_addr.get('company', '') if commercial else '',
+            'is_e_invoice_available': inv_addr.get('isEInvoiceAvailable', False) if commercial else False,
             'raw_data': json.dumps(data, ensure_ascii=False),
             'line_ids': line_vals,
             'micro': data.get('micro', False),

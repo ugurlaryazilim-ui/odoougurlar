@@ -102,29 +102,10 @@ class CustomerProcessor(models.AbstractModel):
                 else:
                     _logger.warning("KURUMSAL: %s | Vergi no uzunluğu beklenmeyen: %d hane", partner.name, len(vat_clean))
 
-            # Yurt içi kurumsal müşteriler için e-fatura bayrağı:
-            # - Tüzel kişi (10 hane VKN): her zaman e-fatura mükellefi
-            # - Şahıs firması (11 hane TCKN): SADECE pazaryeri isEInvoiceAvailable=True ise
-            #   Aksi halde Nebim'de e-fatura numarası "None" dönüyor
-            # - Yurt dışı (ihracat) için GÖNDERİLMEZ
+            # Yurt içi kurumsal müşteriler için e-fatura bayrağı açıkça gönderilir
+            # Yurt dışı (ihracat) için GÖNDERİLMEZ — Nebim tetiklememeli!
             if not is_export:
-                if not is_sahis:
-                    # Tüzel kişi (10 hane VKN) → her zaman e-fatura
-                    payload['IsSubjectToEInvoice'] = True
-                else:
-                    # Şahıs firması → pazaryerinden gelen bayrakla kontrol et
-                    e_invoice_flag = False
-                    if sale_order:
-                        # Trendyol: is_e_invoice_available alanı
-                        if hasattr(sale_order, 'trendyol_order_id') and sale_order.trendyol_order_id:
-                            e_invoice_flag = sale_order.trendyol_order_id.is_e_invoice_available or False
-                        # Diğer pazaryerleri: commercial=True olsa bile, e-fatura bayrağı
-                        # genellikle yok → varsayılan False (e-arşiv olarak kesilir)
-                    if e_invoice_flag:
-                        payload['IsSubjectToEInvoice'] = True
-                        _logger.info("ŞAHIS FİRMASI E-FATURA: %s → isEInvoiceAvailable=True", partner.name)
-                    else:
-                        _logger.info("ŞAHIS FİRMASI E-ARŞİV: %s → IsSubjectToEInvoice gönderilmiyor", partner.name)
+                payload['IsSubjectToEInvoice'] = True
             
             # Pazaryeri Vergi Dairesi Adı -> Nebim Vergi Dairesi Kodu eşleştirmesi
             # Trendyol, Hepsiburada veya diğer pazaryerlerinden gelen tax_office alanı
