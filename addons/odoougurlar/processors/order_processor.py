@@ -111,7 +111,6 @@ class OrderProcessor(models.AbstractModel):
                 'CreditCardTypeCode': mapping.credit_card_type_code if mapping and mapping.credit_card_type_code else 'TRD',
                 'InstallmentCount': 1,
                 'CurrencyCode': 'TRY',
-                'AmountVI': sale_order.amount_total,
                 'Amount': sale_order.amount_total,
             }
             # Banka Kodu — mapping'den al
