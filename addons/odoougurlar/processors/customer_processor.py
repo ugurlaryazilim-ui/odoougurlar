@@ -104,14 +104,25 @@ class CustomerProcessor(models.AbstractModel):
 
             # Yurt içi kurumsal müşteriler için e-fatura bayrağı:
             # - Tüzel kişi (10 hane VKN): her zaman e-fatura mükellefi
-            # - Şahıs firması (11 hane TCKN): ASLA e-fatura gönderilmez!
-            #   Hamurlabs da IsSubjectToEInvoice=False gönderiyor.
-            #   Nebim otomatik e-arşiv (InvoiceTypeCode=2) keser.
-            #   True gönderilince Nebim e-fatura (InvoiceTypeCode=1) olarak kesmeye
-            #   çalışır ve Sematron'da "[TCKN] Adı ve Soyadı boş olmamalıdır" hatası verir.
+            # - Şahıs firması (11 hane TCKN): Trendyol isEInvoiceAvailable=true ise e-fatura
+            #   GİB'de e-fatura mükellefi ise e-arşiv gönderemiyoruz (Doğan ERROR_CODE:10013)
+            #   isEInvoiceAvailable=false veya yok ise → e-arşiv
             # - Yurt dışı (ihracat) için GÖNDERİLMEZ
-            if not is_export and not is_sahis:
-                payload['IsSubjectToEInvoice'] = True
+            if not is_export:
+                if not is_sahis:
+                    # Tüzel kişi (10 hane VKN) → her zaman e-fatura
+                    payload['IsSubjectToEInvoice'] = True
+                else:
+                    # Şahıs firması → pazaryerinden gelen bayrakla kontrol et
+                    e_invoice_flag = False
+                    if sale_order:
+                        if hasattr(sale_order, 'trendyol_order_id') and sale_order.trendyol_order_id:
+                            e_invoice_flag = sale_order.trendyol_order_id.is_e_invoice_available or False
+                    if e_invoice_flag:
+                        payload['IsSubjectToEInvoice'] = True
+                        _logger.info("ŞAHIS FİRMASI E-FATURA: %s → isEInvoiceAvailable=True, GİB'de kayıtlı", partner.name)
+                    else:
+                        _logger.info("ŞAHIS FİRMASI E-ARŞİV: %s → IsSubjectToEInvoice gönderilmiyor", partner.name)
             
             # Pazaryeri Vergi Dairesi Adı -> Nebim Vergi Dairesi Kodu eşleştirmesi
             # Trendyol, Hepsiburada veya diğer pazaryerlerinden gelen tax_office alanı
