@@ -44,21 +44,26 @@ class InvoiceProcessor(models.AbstractModel):
                     payload = self._build_invoice_payload(invoice)
                     result = connector.post_data('Post', payload)
 
-                    # Nebim bazen IsPostingJournal'ı creation'da kabul etmez.
-                    # HeaderID ile ikinci bir güncelleme yaparak journal posting'i tetikle.
-                    header_id = ''
-                    if isinstance(result, dict):
-                        header_id = result.get('HeaderID') or result.get('ApplicationID') or ''
-                    if header_id and isinstance(result, dict):
+                    # ═══ İkinci POST: IsPostingJournal=True (Yevmiye Fişi) ═══
+                    # Nebim ilk POST'ta IsPostingJournal'ı yok sayar (SQL: False kalır).
+                    # Hamurlabs SQL'inde IsPostingJournal=1, bizde 0.
+                    # 
+                    # Çözüm: İlk POST'un TAM RESPONSE'unu alıp IsPostingJournal=True
+                    # ekleyerek tekrar POST ediyoruz. Nebim sadece HeaderID ile minimal
+                    # payload kabul ETMİYOR — tam obje lazım.
+                    if isinstance(result, dict) and result.get('HeaderID'):
                         try:
-                            update_payload = {
-                                'ModelType': payload.get('ModelType', 8),
-                                'HeaderID': header_id,
-                                'IsPostingJournal': True,
-                                'IsCompleted': True,
-                            }
-                            connector.post_data('Post', update_payload)
-                            _logger.info("Fatura IsPostingJournal güncellendi: %s → HeaderID: %s", invoice.name, header_id)
+                            update_payload = dict(result)  # Tam response'u kopyala
+                            update_payload['IsPostingJournal'] = True
+                            update_payload['IsCompleted'] = True
+                            update_result = connector.post_data('Post', update_payload)
+                            _logger.info(
+                                "Fatura IsPostingJournal güncellendi: %s → HeaderID: %s",
+                                invoice.name, result.get('HeaderID')
+                            )
+                            # Güncelleme başarılıysa result'ı güncelle
+                            if isinstance(update_result, dict) and not update_result.get('ExceptionMessage'):
+                                result = update_result
                         except Exception as ej:
                             _logger.warning("IsPostingJournal güncellemesi başarısız: %s - %s", invoice.name, str(ej))
 

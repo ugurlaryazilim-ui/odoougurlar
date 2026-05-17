@@ -994,26 +994,19 @@ class PackingApiController(BarcodeApiBase):
                         raise Exception(f"Nebim Fatura Hatası: {result['ExceptionMessage']}")
                     
                     # ═══ İkinci POST: IsPostingJournal=True (Yevmiye Fişi) ═══
-                    # Nebim ilk POST'ta IsPostingJournal'ı yok sayar (SQL: False).
-                    # Hamurlabs'ta IsPostingJournal=True, Odoo'da False.
-                    # İkinci POST ile HeaderID üzerinden güncelleme yapılmalı.
-                    header_id = ''
-                    model_type = payload.get('ModelType', 8)
-                    if isinstance(result, dict):
-                        header_id = result.get('HeaderID', '')
-                    elif isinstance(result, list) and len(result) > 0 and isinstance(result[0], dict):
-                        header_id = result[0].get('HeaderID', '')
-                    
-                    if header_id:
+                    # Nebim ilk POST'ta IsPostingJournal'ı yok sayar (SQL: False kalır).
+                    # Hamurlabs SQL'inde IsPostingJournal=1, bizde 0 — journal kayıtları oluşmuyor.
+                    #
+                    # Çözüm: İlk POST'un TAM RESPONSE'unu alıp IsPostingJournal=True
+                    # ekleyerek tekrar POST ediyoruz. Nebim sadece HeaderID ile minimal
+                    # payload kabul ETMİYOR — tam obje lazım.
+                    if isinstance(result, dict) and result.get('HeaderID'):
                         try:
-                            update_payload = {
-                                'ModelType': model_type,
-                                'InvoiceHeaderID': header_id,
-                                'IsPostingJournal': True,
-                                'IsCompleted': True,
-                            }
+                            update_payload = dict(result)  # Tam response'u kopyala
+                            update_payload['IsPostingJournal'] = True
+                            update_payload['IsCompleted'] = True
                             update_result = connector.post_data('Post', update_payload)
-                            _logger.info("Nebim IsPostingJournal güncellendi: HeaderID=%s", header_id)
+                            _logger.info("Nebim IsPostingJournal güncellendi: HeaderID=%s", result.get('HeaderID'))
                             
                             # Güncelleme sonucu varsa result'ı güncelle
                             if isinstance(update_result, dict) and not update_result.get('ExceptionMessage'):
