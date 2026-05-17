@@ -156,7 +156,7 @@ class CustomerProcessor(models.AbstractModel):
                 payload['CustomerTypeCode'] = 3
 
         payload['PostalAddresses'] = [{
-            'AddressTypeCode': "1",
+            'AddressTypeCode': "2",  # Hamurlabs "2" gönderiyor (Teslimat)
             'CountryCode': country_code,
             'StateCode': state_code,
             'CityCode': city_code,
