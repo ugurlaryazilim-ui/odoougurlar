@@ -66,22 +66,25 @@ class CustomerProcessor(models.AbstractModel):
 
             if is_sahis:
                 # ─── ŞAHIS FİRMASI (11 hane TCKN) ───
-                # E-fatura mükellefi olduğunda FirstName/LastName BOŞ olmalı!
-                # (Hamurlabs bilgisi: e-fatura ise FirstName ve LastName boş,
-                #  CurrAccDescription'a isim soyisim yazılmalı)
-                # Aksi halde Nebim e-arşiv formatına zorlar.
+                # Hamurlabs referansı: FirstName/LastName DOLU, IsSubjectToEInvoice YOK
+                # E-fatura/e-arşiv ayrımı CARİ'de değil, FATURA'da yapılır.
+                name_parts = (partner.name or '').strip().split()
+                first_name = name_parts[0] if name_parts else ''
+                last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
+
                 payload = {
                     'ModelType': cari_model_type,
-                    'CurrAccDescription': (partner.name or 'SAHIS')[:50],
-                    'FirstName': '',   # E-fatura için BOŞ olmalı
-                    'LastName': '',    # E-fatura için BOŞ olmalı
+                    'CurrAccDescription': partner.name[:50],
+                    'FirstName': first_name[:50],
+                    'LastName': last_name[:50],
                     'IsIndividualAcc': True,   # Şahıs firması = Gerçek Kişilik
                     'IdentityNum': vat_clean,  # 11 haneli TCKN
                     # TaxNumber GÖNDERİLMEZ — Nebim "Geçersiz Değer" verir
+                    # IsSubjectToEInvoice GÖNDERİLMEZ — Hamurlabs'ta yok, fatura seviyesinde yapılır
                     'OfficeCode': 'M',
                     'CurrencyCode': 'TRY',
                 }
-                _logger.info("KURUMSAL (ŞAHIS FİRMASI): %s | TCKN → IdentityNum (11 hane), FirstName/LastName=BOŞ (e-fatura uyumlu)", partner.name)
+                _logger.info("KURUMSAL (ŞAHIS FİRMASI): %s | TCKN → IdentityNum (11 hane), IsSubjectToEInvoice=GÖNDERİLMEZ", partner.name)
             else:
                 # ─── TÜZEL KİŞİ (10 hane VKN veya diğer) ───
                 payload = {
@@ -99,21 +102,12 @@ class CustomerProcessor(models.AbstractModel):
                 else:
                     _logger.warning("KURUMSAL: %s | Vergi no uzunluğu beklenmeyen: %d hane", partner.name, len(vat_clean))
 
-            # Yurt içi kurumsal müşteriler için e-fatura bayrağı:
-            # GİB'de e-fatura mükellefi olan müşteriye e-arşiv GÖNDERİLEMEZ
-            # (Doğan ERROR_CODE:10013)
-            #
-            # Trendyol isEInvoiceAvailable bayrağı GÜVENİLMEZ — GİB kaydını
-            # yansıtmıyor. Bu yüzden TÜM kurumsal müşteriler (tüzel + şahıs)
-            # için IsSubjectToEInvoice=True gönderiyoruz.
-            #
-            # - GİB'de kayıtlı → e-fatura çalışır ✅
-            # - GİB'de kayıtlı değil → Nebim/Sematron yine e-arşive düşürür
-            #   (InvoiceTypeCode otomatik 2 olur)
-            # - İhracat → gönderilmez
-            if not is_export:
+            # E-fatura bayrağı — SADECE tüzel kişi (10h VKN) için
+            # Şahıs firmalarında (11h TCKN) e-fatura ayrımı FATURA seviyesinde yapılır
+            # Hamurlabs referansı: şahıs carisinde IsSubjectToEInvoice işaretli DEĞİL
+            if not is_export and not is_sahis:
                 payload['IsSubjectToEInvoice'] = True
-                _logger.info("KURUMSAL MÜŞTERİ E-FATURA: %s | Şahıs=%s → IsSubjectToEInvoice=True", partner.name, is_sahis)
+                _logger.info("TÜZEL KİŞİ E-FATURA: %s → IsSubjectToEInvoice=True", partner.name)
             
             # Pazaryeri Vergi Dairesi Adı -> Nebim Vergi Dairesi Kodu eşleştirmesi
             # SADECE tüzel kişi (10h VKN) için — şahıs firması (11h TCKN) için Hamurlabs boş gönderiyor
@@ -142,13 +136,16 @@ class CustomerProcessor(models.AbstractModel):
             masked_vat = f"{vat_clean[:3]}***{vat_clean[-2:]}" if len(vat_clean) > 5 else '***'
             _logger.info("KURUMSAL MÜŞTERİ: %s | VKN/TCKN: %s | Hane: %d | Şahıs: %s", partner.name, masked_vat, len(vat_clean), is_sahis)
         else:
+            name_parts = (partner.name or '').strip().split()
+            first_name = name_parts[0] if name_parts else ''
+            last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
             payload = {
                 'ModelType': cari_model_type,
                 'CurrAccCode': '',
                 'CurrAccDescription': (partner.name or 'BIREYSEL')[:50],
                 'IsIndividualAcc': True,
-                'FirstName': '',   # E-fatura uyumlu — BOŞ
-                'LastName': '',    # E-fatura uyumlu — BOŞ
+                'FirstName': first_name[:50],
+                'LastName': last_name[:50],
                 'IdentityNum': partner.vat or '11111111111',
                 'OfficeCode': 'M',
                 'CurrencyCode': 'TRY',
