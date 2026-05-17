@@ -993,6 +993,34 @@ class PackingApiController(BarcodeApiBase):
                     if isinstance(result, dict) and 'ExceptionMessage' in result:
                         raise Exception(f"Nebim Fatura Hatası: {result['ExceptionMessage']}")
                     
+                    # ═══ İkinci POST: IsPostingJournal=True (Yevmiye Fişi) ═══
+                    # Nebim ilk POST'ta IsPostingJournal'ı yok sayar (SQL: False).
+                    # Hamurlabs'ta IsPostingJournal=True, Odoo'da False.
+                    # İkinci POST ile HeaderID üzerinden güncelleme yapılmalı.
+                    header_id = ''
+                    model_type = payload.get('ModelType', 8)
+                    if isinstance(result, dict):
+                        header_id = result.get('HeaderID', '')
+                    elif isinstance(result, list) and len(result) > 0 and isinstance(result[0], dict):
+                        header_id = result[0].get('HeaderID', '')
+                    
+                    if header_id:
+                        try:
+                            update_payload = {
+                                'ModelType': model_type,
+                                'InvoiceHeaderID': header_id,
+                                'IsPostingJournal': True,
+                                'IsCompleted': True,
+                            }
+                            update_result = connector.post_data('Post', update_payload)
+                            _logger.info("Nebim IsPostingJournal güncellendi: HeaderID=%s", header_id)
+                            
+                            # Güncelleme sonucu varsa result'ı güncelle
+                            if isinstance(update_result, dict) and not update_result.get('ExceptionMessage'):
+                                result = update_result
+                        except Exception as e2:
+                            _logger.warning("IsPostingJournal güncelleme hatası: %s (fatura yine de oluşturuldu)", e2)
+                    
                     # Nebim fatura numarasını ayrıştır
                     nebim_inv_no = ''
                     if isinstance(result, dict):

@@ -66,25 +66,22 @@ class CustomerProcessor(models.AbstractModel):
 
             if is_sahis:
                 # ─── ŞAHIS FİRMASI (11 hane TCKN) ───
-                # Nebim'de "Gerçek Kişilik (Şahıs)" olarak kaydedilmeli
-                # TaxNumber alanı 10 hane bekler, 11 hane "Geçersiz Değer" verir
-                # TC Kimlik No BOŞ OLMALI hatası IsIndividualAcc=False iken IdentityNum gönderilince oluşur
-                name_parts = (partner.name or '').strip().split()
-                first_name = name_parts[0] if name_parts else ''
-                last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
-
+                # E-fatura mükellefi olduğunda FirstName/LastName BOŞ olmalı!
+                # (Hamurlabs bilgisi: e-fatura ise FirstName ve LastName boş,
+                #  CurrAccDescription'a isim soyisim yazılmalı)
+                # Aksi halde Nebim e-arşiv formatına zorlar.
                 payload = {
                     'ModelType': cari_model_type,
-                    'CurrAccDescription': partner.name[:50],
-                    'FirstName': first_name[:50],
-                    'LastName': last_name[:50],
+                    'CurrAccDescription': (partner.name or 'SAHIS')[:50],
+                    'FirstName': '',   # E-fatura için BOŞ olmalı
+                    'LastName': '',    # E-fatura için BOŞ olmalı
                     'IsIndividualAcc': True,   # Şahıs firması = Gerçek Kişilik
                     'IdentityNum': vat_clean,  # 11 haneli TCKN
                     # TaxNumber GÖNDERİLMEZ — Nebim "Geçersiz Değer" verir
                     'OfficeCode': 'M',
                     'CurrencyCode': 'TRY',
                 }
-                _logger.info("KURUMSAL (ŞAHIS FİRMASI): %s | TCKN → IdentityNum (11 hane), IsIndividualAcc=True", partner.name)
+                _logger.info("KURUMSAL (ŞAHIS FİRMASI): %s | TCKN → IdentityNum (11 hane), FirstName/LastName=BOŞ (e-fatura uyumlu)", partner.name)
             else:
                 # ─── TÜZEL KİŞİ (10 hane VKN veya diğer) ───
                 payload = {
@@ -150,8 +147,8 @@ class CustomerProcessor(models.AbstractModel):
                 'CurrAccCode': '',
                 'CurrAccDescription': (partner.name or 'BIREYSEL')[:50],
                 'IsIndividualAcc': True,
-                'FirstName': partner.name.split(' ', 1)[0][:50] if partner.name else '',
-                'LastName': partner.name.split(' ', 1)[-1][:50] if ' ' in partner.name else '',
+                'FirstName': '',   # E-fatura uyumlu — BOŞ
+                'LastName': '',    # E-fatura uyumlu — BOŞ
                 'IdentityNum': partner.vat or '11111111111',
                 'OfficeCode': 'M',
                 'CurrencyCode': 'TRY',
