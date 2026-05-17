@@ -80,7 +80,8 @@ class OrderProcessor(models.AbstractModel):
             'CustomerCode': customer_code,
             'OfficeCode': "M",
             'StoreCode': m_store,
-            'WarehouseCode': (m_warehouse if is_export else ''),  # Hamurlabs: yurtiçi boş gönderiyor
+            'WarehouseCode': m_warehouse,
+            'ExportFileNumber': export_file_number,
             'ShipmentMethodCode': m_shipment,
             'DocumentNumber': sale_order.client_order_ref or sale_order.name,
             'Description': sale_order.client_order_ref or sale_order.name,
@@ -100,19 +101,15 @@ class OrderProcessor(models.AbstractModel):
             },
         }
         
-        # Perakende siparişte POSTerminalID ve Payments gerekli
-        # StoreWareHouseCode GÖNDERİLMEZ (Hamurlabs göndermiyor)
+        # Perakende siparişte POSTerminalID, StoreWareHouseCode ve Payments gerekli
         if not is_export:
             payload['POSTerminalID'] = '1'
-            # DocumentDate: Hamurlabs gönderiyor, sipariş tarihi /Date(epoch)/ formatında
-            import time
-            order_epoch = int(sale_order.date_order.timestamp() * 1000) if sale_order.date_order else int(time.time() * 1000)
+            payload['StoreWareHouseCode'] = m_warehouse
             payment_entry = {
                 'PaymentType': '2',
                 'Code': '',
                 'CreditCardTypeCode': mapping.credit_card_type_code if mapping and mapping.credit_card_type_code else 'TRD',
                 'InstallmentCount': 1,
-                'DocumentDate': f"\\/Date({order_epoch})\\/",  # Hamurlabs formatı
                 'CurrencyCode': 'TRY',
                 'Amount': sale_order.amount_total,
             }
@@ -122,7 +119,6 @@ class OrderProcessor(models.AbstractModel):
             payload['Payments'] = [payment_entry]
         
         if is_export:
-            payload['ExportFileNumber'] = export_file_number  # Sadece ihracat için
             payload['TaxExemptionCode'] = (mapping.tax_exemption_code if mapping and mapping.tax_exemption_code else '301')
         
 
