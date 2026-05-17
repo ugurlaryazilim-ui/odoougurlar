@@ -426,6 +426,7 @@ class InvoiceProcessor(models.AbstractModel):
             'IsOrderBase': is_order_base,
             'IsSalesViaInternet': True,
             'IsCompleted': True,
+            'DocumentTypeCode': 4,  # Hamurlabs SQL: 4 (Perakende Satış)
             'IsPostingJournal': True,
             'SendInvoiceByEMail': True,
             'EMailAddress': email_address,
