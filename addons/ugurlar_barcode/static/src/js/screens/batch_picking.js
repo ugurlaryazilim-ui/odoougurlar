@@ -169,12 +169,13 @@ export class BatchPickingScreen extends Component {
                         </span>
                     </div>
 
-                    <!-- Barkod + Marka + Renk bilgisi -->
+                    <!-- Barkod + Marka + Kategori + Renk bilgisi -->
                     <div class="bp-barcode-info">
                         <span>Barkod: <strong t-esc="state.currentItem.barcode"/></span>
-                        <t t-if="state.currentItem.brand || state.currentItem.color">
+                        <t t-if="state.currentItem.brand || state.currentItem.color || state.currentItem.category">
                             <span class="bp-brand-color-info">
                                 <t t-if="state.currentItem.brand"><span class="bp-info-tag bp-tag-brand" t-esc="state.currentItem.brand"/></t>
+                                <t t-if="state.currentItem.category"><span class="bp-info-tag bp-tag-category" style="background:#e3f2fd; color:#1976d2; margin:0 3px; padding:2px 6px; border-radius:4px; font-size:11px;" t-esc="state.currentItem.category"/></t>
                                 <t t-if="state.currentItem.color"><span class="bp-info-tag bp-tag-color" t-esc="state.currentItem.color"/></t>
                             </span>
                         </t>
@@ -230,6 +231,7 @@ export class BatchPickingScreen extends Component {
                         <div class="bp-route-table-header">
                             <span>Barkod</span>
                             <span>Marka</span>
+                            <span>Kategori</span>
                             <span>Renk</span>
                             <span>Beden</span>
                             <span>Sokak</span>
@@ -238,9 +240,11 @@ export class BatchPickingScreen extends Component {
                             <span>Top.</span>
                         </div>
                         <t t-foreach="state.items" t-as="item" t-key="item.move_id">
-                            <div t-attf-class="bp-route-table-row {{item.move_id === state.currentItem.move_id ? 'bp-row-active' : ''}} {{item.collected_qty >= item.demand_qty ? 'bp-row-done' : ''}}">
-                                <span class="bp-cell-barcode bp-barcode-copy" t-att-data-barcode="item.barcode || ''" t-on-click="(ev) => this.copyBarcode(ev)" t-esc="item.barcode || ''"/>
+                            <div t-attf-class="bp-route-table-row {{item.move_id === state.currentItem?.move_id ? 'bp-row-active' : ''}} {{item.collected_qty >= item.demand_qty ? 'bp-row-done' : ''}}"
+                                 t-on-click="() => this.selectItem(item)">
+                                <span class="bp-cell-barcode bp-barcode-copy" t-att-data-barcode="item.barcode || ''" t-on-click.stop="(ev) => this.copyBarcode(ev)" t-esc="item.barcode || ''"/>
                                 <span class="bp-cell-brand" t-esc="item.brand || '-'"/>
+                                <span class="bp-cell-category" t-esc="item.category || '-'"/>
                                 <span class="bp-cell-color" t-esc="item.color || '-'"/>
                                 <span class="bp-cell-size" t-esc="item.size || '-'"/>
                                 <span t-esc="(item.location_parts || {}).zone || '-'"/>
@@ -251,7 +255,7 @@ export class BatchPickingScreen extends Component {
                                 <span t-esc="item.demand_qty"/>
                                 <span class="d-flex justify-content-between align-items-center">
                                     <t t-esc="item.collected_qty"/>
-                                    <button class="btn btn-sm text-danger p-0 ms-1" t-if="item.collected_qty > 0" t-on-click="() => this.onDecreaseQty(item)">
+                                    <button class="btn btn-sm text-danger p-0 ms-1" t-if="item.collected_qty > 0" t-on-click.stop="() => this.onDecreaseQty(item)">
                                         <i class="fa fa-minus-circle"></i>
                                     </button>
                                 </span>
@@ -472,6 +476,24 @@ export class BatchPickingScreen extends Component {
             const inp = document.querySelector('.bp-scan-input');
             if (inp) inp.focus();
         }, 100);
+    }
+
+    // ═══ MANUEL ÜRÜN SEÇ ═══
+    selectItem(item) {
+        if (!item || item.collected_qty >= item.demand_qty) return;
+        const idx = this.state.items.findIndex(i => i.move_id === item.move_id);
+        if (idx >= 0) {
+            this.state.currentIndex = idx;
+            this.state.currentItem = item;
+            this.state.scanInput = '';
+            this.state.scanMsg = '';
+            
+            // Input'a fokus
+            setTimeout(() => {
+                const inp = document.querySelector('.bp-scan-input');
+                if (inp) inp.focus();
+            }, 100);
+        }
     }
 
     _updateProgress() {

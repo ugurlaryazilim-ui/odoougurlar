@@ -371,6 +371,7 @@ class BatchApiController(BarcodeApiBase):
                         'barcode': product.barcode or '',
                         'variant_info': variant_info,
                         'brand': brand_name,
+                        'category': product.categ_id.name if product.categ_id else '',
                         'color': color_name,
                         'size': size_name,
                         'demand_qty': move.product_uom_qty,
