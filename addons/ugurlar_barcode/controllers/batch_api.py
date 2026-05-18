@@ -476,6 +476,10 @@ class BatchApiController(BarcodeApiBase):
         new_qty = (target_move.wave_collected_qty or 0) + 1
         target_move.sudo().write({'wave_collected_qty': new_qty})
 
+        # Batch durumu taslak ise 'in_progress' (Devam) yap
+        if batch.state == 'draft':
+            batch.sudo().write({'state': 'in_progress'})
+
         # İşlem logu
         try:
             user = request.env.user
