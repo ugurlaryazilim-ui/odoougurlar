@@ -335,7 +335,7 @@ export class BatchPickingScreen extends Component {
             scanOk: false,
             summary: null,
             // ── Filtre alanları ──
-            filterState: 'all',
+            filterState: 'draft',
             searchText: '',
             stateCounts: { draft: 0, in_progress: 0, done: 0 },
             canDelete: false,
