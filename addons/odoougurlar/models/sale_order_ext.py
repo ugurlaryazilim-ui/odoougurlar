@@ -26,6 +26,10 @@ class SaleOrder(models.Model):
         string='Pazaryeri Sipariş No', compute='_compute_marketplace_info',
         readonly=True,
     )
+    picking_batch_names = fields.Char(
+        string='Rota', compute='_compute_picking_batch_names',
+        readonly=True, store=False
+    )
 
     _MP_FIELDS = [
         ('trendyol_order_id', 'Trendyol'),
@@ -49,6 +53,11 @@ class SaleOrder(models.Model):
                     break
             order.marketplace_name = mp_name
             order.marketplace_order_number = order.client_order_ref if mp_name else False
+
+    def _compute_picking_batch_names(self):
+        for order in self:
+            batches = order.picking_ids.mapped('batch_id.name')
+            order.picking_batch_names = ', '.join([b for b in batches if b])
 
 
     def action_reset_nebim(self):

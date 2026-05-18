@@ -45,6 +45,7 @@
         <field name="arch" type="xml">
             <xpath expr="//field[@name='partner_id']" position="after">
                 <field name="nebim_customer_code" optional="show" string="Nebim Cari Kodu"/>
+                <field name="picking_batch_names" optional="show" string="Rota"/>
                 <field name="marketplace_name" optional="show" string="Pazaryeri"/>
                 <field name="marketplace_order_number" optional="show" string="Sipariş No"/>
             </xpath>
@@ -58,6 +59,7 @@
         <field name="arch" type="xml">
             <xpath expr="//field[@name='partner_id']" position="after">
                 <field name="nebim_customer_code" optional="show" string="Nebim Cari Kodu"/>
+                <field name="picking_batch_names" optional="show" string="Rota"/>
                 <field name="marketplace_name" optional="show" string="Pazaryeri"/>
                 <field name="marketplace_order_number" optional="show" string="Sipariş No"/>
             </xpath>
