@@ -98,7 +98,7 @@ export class BatchPickingScreen extends Component {
                                 </span>
                                 <span class="bp-col-action">
                                     <button class="btn btn-sm btn-outline-danger" style="margin-right:4px;"
-                                            t-if="b.state !== 'done'"
+                                            t-if="b.state !== 'done' and state.canDelete"
                                             t-on-click.stop="() => this.deleteBatch(b.id, b.name)">
                                         <i class="fa fa-trash"></i>
                                     </button>
@@ -334,6 +334,7 @@ export class BatchPickingScreen extends Component {
             filterState: 'all',
             searchText: '',
             stateCounts: { draft: 0, in_progress: 0, done: 0 },
+            canDelete: false,
         });
 
         this._searchTimer = null;
@@ -417,6 +418,9 @@ export class BatchPickingScreen extends Component {
             this.state.batches = res.batches || [];
             if (res.state_counts) {
                 this.state.stateCounts = res.state_counts;
+            }
+            if (res.can_delete !== undefined) {
+                this.state.canDelete = res.can_delete;
             }
         } catch (e) {
             this.state.error = 'Yükleme hatası';

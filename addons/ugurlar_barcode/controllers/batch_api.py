@@ -161,6 +161,7 @@ class BatchApiController(BarcodeApiBase):
             'batches': result,
             'total': len(result),
             'state_counts': state_counts,
+            'can_delete': request.env.user.has_group('stock.group_stock_manager') or request.env.user.has_group('base.group_system')
         }
 
     @http.route('/ugurlar_barcode/api/batch_detail', type='json', auth='user')
