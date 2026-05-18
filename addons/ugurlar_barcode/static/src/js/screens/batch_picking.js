@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml, onMounted } from "@odoo/owl";
+import { Component, useState, xml, onMounted, onWillUnmount } from "@odoo/owl";
 import { BarcodeService, AudioFeedback } from "../barcode_service";
 
 export class BatchPickingScreen extends Component {
