@@ -261,6 +261,27 @@ class BatchApiController(BarcodeApiBase):
         except Exception as e:
             return {'error': str(e)}
 
+    @http.route('/ugurlar_barcode/api/batch_delete', type='json', auth='user')
+    def batch_delete(self, batch_id=0, **kw):
+        """Test rotalarını vs. silmek için."""
+        batch = request.env['stock.picking.batch'].sudo().browse(int(batch_id))
+        if not batch.exists():
+            return {'error': 'Rota bulunamadı'}
+        
+        try:
+            # Sadece draft veya in_progress olanları sildirelim
+            if batch.state == 'done':
+                return {'error': 'Tamamlanmış rotalar silinemez'}
+            
+            # İçindeki transferleri iptal etmeyelim, sadece rotadan çıkaralım
+            if batch.picking_ids:
+                batch.picking_ids.write({'batch_id': False})
+                
+            batch.unlink()
+            return {'success': True}
+        except Exception as e:
+            return {'error': str(e)}
+
     # ═══════════════════════════════════════════════════════
     # ROTA TOPLAMA (WAVE PICKING) API'LERİ
     # ═══════════════════════════════════════════════════════

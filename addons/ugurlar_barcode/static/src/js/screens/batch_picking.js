@@ -97,6 +97,11 @@ export class BatchPickingScreen extends Component {
                                           t-esc="b.state === 'draft' ? 'Taslak' : b.state === 'in_progress' ? 'Devam' : 'Tamamlandı'"/>
                                 </span>
                                 <span class="bp-col-action">
+                                    <button class="btn btn-sm btn-outline-danger" style="margin-right:4px;"
+                                            t-if="b.state !== 'done'"
+                                            t-on-click.stop="() => this.deleteBatch(b.id, b.name)">
+                                        <i class="fa fa-trash"></i>
+                                    </button>
                                     <button t-attf-class="btn btn-sm {{b.state === 'done' ? 'btn-outline-success' : 'btn-success'}} bp-btn-collect">
                                         <i t-attf-class="fa {{b.state === 'done' ? 'fa-eye' : 'fa-play'}}"></i>
                                         <t t-esc="b.state === 'done' ? 'Gör' : 'Topla'"/>
@@ -333,6 +338,19 @@ export class BatchPickingScreen extends Component {
 
         this._searchTimer = null;
 
+        this._onPopState = (ev) => {
+            const state = ev.state || {};
+            if (state.ubScreen === 'batch_picking') {
+                const targetView = state.bpView || 'list';
+                if (this.state.view !== targetView) {
+                    this.state.view = targetView;
+                    if (targetView === 'list') {
+                        this.loadBatches();
+                    }
+                }
+            }
+        };
+
         this._unsub = this.props.scanner.onScan(bc => {
             if (this.state.view === 'collect') {
                 this.state.scanInput = bc;
@@ -340,22 +358,26 @@ export class BatchPickingScreen extends Component {
             }
         });
 
-        onMounted(() => this.loadBatches());
+        onMounted(() => {
+            window.addEventListener('popstate', this._onPopState);
+            this.loadBatches();
+        });
+
+        onWillUnmount(() => {
+            if (this._unsub) this._unsub();
+            window.removeEventListener('popstate', this._onPopState);
+        });
     }
 
     goBack() {
-        if (this.state.view === 'collect') {
-            this.state.view = 'list';
-            this.state.error = null;
-        } else if (this.state.view === 'summary') {
-            this.state.view = 'list';
-            this.loadBatches();
+        if (this.state.view === 'collect' || this.state.view === 'summary') {
+            history.back(); // Tarayıcı geri tuşunu simüle et, _onPopState yakalayacak
         } else {
             this.props.navigate('main');
         }
     }
 
-    // ═══ FİLTRE ═══
+    // ═══ FİLTRE & SİLME ═══
     setFilter(filterState) {
         this.state.filterState = filterState;
         this.loadBatches();
@@ -365,6 +387,23 @@ export class BatchPickingScreen extends Component {
         this.state.searchText = text;
         clearTimeout(this._searchTimer);
         this._searchTimer = setTimeout(() => this.loadBatches(), 350);
+    }
+
+    async deleteBatch(batchId, batchName) {
+        if (!confirm(`"${batchName}" rotasını silmek istediğinize emin misiniz?`)) return;
+        
+        this.state.loading = true;
+        try {
+            const res = await BarcodeService.call('/ugurlar_barcode/api/batch_delete', { batch_id: batchId });
+            if (res.error) {
+                alert(res.error);
+            } else {
+                this.loadBatches();
+            }
+        } catch (e) {
+            alert('Silme işlemi başarısız');
+        }
+        this.state.loading = false;
     }
 
     // ═══ LİSTE ═══
@@ -401,6 +440,9 @@ export class BatchPickingScreen extends Component {
             this._updateProgress();
             this._goToNextItem();
             this.state.view = 'collect';
+            
+            // Sub-state ekle (Geri tuşu listeye dönsün diye)
+            history.pushState(Object.assign({}, history.state, { bpView: 'collect' }), '');
         } catch (e) {
             this.state.error = 'Rota yüklenirken hata oluştu';
         }
@@ -615,6 +657,9 @@ export class BatchPickingScreen extends Component {
             } else {
                 this.state.summary = res;
                 this.state.view = 'summary';
+                
+                // Sub-state güncelle (Geri tuşu listeye dönsün diye)
+                history.replaceState(Object.assign({}, history.state, { bpView: 'summary' }), '');
             }
         } catch (e) {
             this.state.error = 'Tamamlama hatası';

@@ -143,6 +143,7 @@
 
 /* Sütun özellikleri */
 .bp-col-name strong { display: block; font-size: 14px; color: #333; }
+.bp-table-head .bp-col-name strong { color: #fff; font-size: 12px; } /* Header override */
 .bp-batch-type { display: block; color: #999; font-size: 11px; margin-top: 1px; }
 .bp-col-wh {}
 .bp-wh-tag {
@@ -158,12 +159,12 @@
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.bp-col-time { color: #555; font-size: 12px; }
-.bp-date-sub { display: block; color: #aaa; font-size: 11px; }
-.bp-col-orders,
-.bp-col-items { color: #666; font-size: 13px; }
-.bp-col-orders i,
-.bp-col-items i { color: #999; margin-right: 2px; font-size: 11px; }
+.bp-table-row .bp-col-time { color: #555; font-size: 12px; }
+.bp-table-row .bp-date-sub { display: block; color: #aaa; font-size: 11px; }
+.bp-table-row .bp-col-orders,
+.bp-table-row .bp-col-items { color: #666; font-size: 13px; }
+.bp-table-row .bp-col-orders i,
+.bp-table-row .bp-col-items i { color: #999; margin-right: 2px; font-size: 11px; }
 
 /* Durum tag'leri */
 .bp-state-tag {
