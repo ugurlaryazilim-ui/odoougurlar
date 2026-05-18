@@ -89,7 +89,7 @@ class BarcodeApp extends Component {
         if (match && VALID_SCREENS.has(match[1])) {
             return match[1];
         }
-        return null;
+        return 'main'; // Eğer hash'te screen yoksa varsayılan olarak ana menüye dön
     }
 
     // ═══ STORAGE OKUMA ═══
@@ -108,8 +108,14 @@ class BarcodeApp extends Component {
 
     // ═══ BAŞLANGIÇ EKRANI ═══
     _readScreen() {
-        // 1. Hash'ten oku
-        const fromHash = this._readScreenFromHash();
+        // 1. Hash'ten oku (eger url'de screen= yoksa null donerdi, simdi main doner. Ama main ise storage'a da bakalim)
+        const hash = window.location.hash || '';
+        const match = hash.match(/(?:^#|[?&])screen=([^&]+)/);
+        let fromHash = null;
+        if (match && VALID_SCREENS.has(match[1])) {
+            fromHash = match[1];
+        }
+        
         if (fromHash) {
             this._saveToStorage(fromHash);
             return fromHash;
@@ -124,12 +130,27 @@ class BarcodeApp extends Component {
     // ═══ HASH YAZMA ═══
     _writeHash(screen, replace = false) {
         const base = window.location.pathname + window.location.search;
-        const newUrl = base + '#screen=' + screen;
+        let currentHash = window.location.hash || '';
+        
+        if (!currentHash) {
+            currentHash = '#screen=' + screen;
+        } else if (currentHash.includes('screen=')) {
+            currentHash = currentHash.replace(/([#&])screen=[^&]*/, '$1screen=' + screen);
+        } else {
+            currentHash += (currentHash === '#' ? '' : '&') + 'screen=' + screen;
+        }
+
+        const newUrl = base + currentHash;
+
+        // Odoo'nun history.state içindeki kendi routing bilgilerini bozmamak için Object.assign kullanıyoruz.
+        // Aksi takdirde geri tuşuna basıldığında Odoo action'dan tamamen çıkar.
+        const currentState = history.state || {};
+        const newState = Object.assign({}, currentState, { ubScreen: screen });
 
         if (replace) {
-            history.replaceState({ ubScreen: screen }, '', newUrl);
+            history.replaceState(newState, '', newUrl);
         } else {
-            history.pushState({ ubScreen: screen }, '', newUrl);
+            history.pushState(newState, '', newUrl);
         }
     }
 
