@@ -100,11 +100,24 @@ class OrderProcessor(models.AbstractModel):
             },
         }
         
-        # Perakende siparişte POSTerminalID gerekli
-        # Payments SİPARİŞTE GÖNDERİLMEZ — Faturada gönderilir.
-        # Siparişte Payments göndermek Nebim'de çift "Peşin Satış" hareketi yaratıyor.
+        # Perakende siparişte POSTerminalID ve Payments gerekli
+        # Hamurlabs'ta da sipariş Payments ile gönderiliyor.
         if not is_export:
             payload['POSTerminalID'] = '1'
+            import time
+            order_epoch = int(sale_order.date_order.timestamp() * 1000) if sale_order.date_order else int(time.time() * 1000)
+            payment_entry = {
+                'PaymentType': '2',
+                'Code': '',
+                'CreditCardTypeCode': mapping.credit_card_type_code if mapping and mapping.credit_card_type_code else 'TRD',
+                'InstallmentCount': 1,
+                'DocumentDate': f"\\/Date({order_epoch})\\/",
+                'CurrencyCode': 'TRY',
+                'Amount': sale_order.amount_total,
+            }
+            if mapping and getattr(mapping, 'bank_code', ''):
+                payment_entry['BankCode'] = mapping.bank_code
+            payload['Payments'] = [payment_entry]
 
         # ── PostalAddress bloğu ──
         # Nebim siparişe adres bilgisini PostalAddress tekil nesnesi olarak da ister.

@@ -53,9 +53,16 @@ class InvoiceProcessor(models.AbstractModel):
                     # payload kabul ETMİYOR — tam obje lazım.
                     if isinstance(result, dict) and result.get('HeaderID'):
                         try:
-                            update_payload = dict(result)  # Tam response'u kopyala
-                            update_payload['IsPostingJournal'] = True
-                            update_payload['IsCompleted'] = True
+                            # Sadece IsPostingJournal=True ve IsCompleted=True güncelle.
+                            # Tam response'u (Payments dahil) tekrar POST ETME —
+                            # aksi halde Nebim Payments'ı ikinci kez işletip
+                            # ekstra "Peşin Satış" hareketi oluşturuyor.
+                            update_payload = {
+                                'HeaderID': result['HeaderID'],
+                                'ModelType': result.get('ModelType'),
+                                'IsPostingJournal': True,
+                                'IsCompleted': True,
+                            }
                             update_result = connector.post_data('Post', update_payload)
                             _logger.info(
                                 "Fatura IsPostingJournal güncellendi: %s → HeaderID: %s",
