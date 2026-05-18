@@ -127,6 +127,15 @@ class OrderProcessor(models.AbstractModel):
         
 
 
+        # ── PostalAddress bloğu ──
+        # Nebim siparişe adres bilgisini PostalAddress tekil nesnesi olarak da ister.
+        # Şahıs firması (11h TCKN): FirstName/LastName/IdentityNum
+        # Tüzel kişi (10h VKN): CompanyName/TaxNumber
+        partner = sale_order.partner_id
+        postal_address = self._build_postal_address(partner, mapping, sale_order)
+        if postal_address:
+            payload['PostalAddress'] = postal_address
+
         try:
             import json
             sale_order.write({'nebim_order_request': json.dumps(payload, ensure_ascii=False, indent=2, default=str)})
@@ -173,3 +182,83 @@ class OrderProcessor(models.AbstractModel):
             _logger.error("Sipariş gönderim hatası: %s", e)
             sale_order.write({'nebim_order_response': str(e)})
             raise Exception(f"Nebim Sipariş Aktarım Hatası: {str(e)}")
+
+    def _build_postal_address(self, partner, mapping, sale_order):
+        """Sipariş için PostalAddress bloğunu partner bilgilerinden oluşturur.
+
+        Şahıs firması (11h TCKN): FirstName / LastName / IdentityNum
+        Tüzel kişi (10h VKN):     CompanyName / TaxNumber / TaxOfficeCode
+        Bireysel (is_company=False): FirstName / LastName / IdentityNum
+        """
+        if not partner:
+            return {}
+
+        country_code = (partner.country_id.code or 'TR').upper()
+
+        # İl/İlçe kodlarını çöz (nebim.district tablosundan)
+        state_code = city_code = district_code = ''
+        if country_code == 'TR':
+            try:
+                district_model = self.env['odoougurlar.nebim.district'].sudo()
+                odoo_state = partner.state_id.name if partner.state_id else ''
+                odoo_city = partner.city or ''
+                if odoo_state or odoo_city:
+                    codes = district_model.find_nebim_codes(odoo_state, odoo_city)
+                    state_code = codes.get('state_code', '')
+                    city_code = codes.get('city_code', '')
+                    district_code = codes.get('district_code', '')
+            except Exception as e:
+                _logger.warning("PostalAddress il/ilçe kodu çözümlenemedi: %s", e)
+
+        postal = {
+            'CountryCode': country_code,
+            'StateCode': state_code,
+            'CityCode': city_code,
+            'DistrictCode': district_code,
+            'Address': (partner.street or '')[:200],
+        }
+
+        if partner.is_company:
+            vat_raw = partner.vat or ''
+            vat_clean = ''.join(filter(str.isdigit, vat_raw))
+            is_sahis = len(vat_clean) == 11
+
+            if is_sahis:
+                # Şahıs firması → TC Kimlik No + Ad/Soyad
+                name_parts = (partner.name or '').strip().split()
+                postal['FirstName'] = name_parts[0][:50] if name_parts else ''
+                postal['LastName'] = ' '.join(name_parts[1:])[:50] if len(name_parts) > 1 else ''
+                postal['IdentityNum'] = vat_clean
+                postal['CompanyName'] = ''
+            else:
+                # Tüzel kişi → VKN + Firma adı
+                postal['CompanyName'] = (partner.name or '')[:50]
+                postal['TaxNumber'] = vat_clean if len(vat_clean) == 10 else vat_raw
+                # Vergi Dairesi kodu
+                tax_office_name = ''
+                if sale_order:
+                    for attr in ('trendyol_order_id', 'n11_order_id', 'hb_order_id'):
+                        obj = getattr(sale_order, attr, None)
+                        if obj:
+                            tax_office_name = getattr(obj, 'tax_office', '') or ''
+                            if tax_office_name:
+                                break
+                if tax_office_name:
+                    tax_mapping = self.env['odoougurlar.tax.mapping'].sudo().search(
+                        [('name', '=ilike', tax_office_name.strip())], limit=1)
+                    postal['TaxOfficeCode'] = tax_mapping.nebim_tax_office_code if tax_mapping else 'null'
+                else:
+                    postal['TaxOfficeCode'] = 'null'
+                postal['FirstName'] = ''
+                postal['LastName'] = ''
+                postal['IdentityNum'] = ''
+        else:
+            # Bireysel müşteri
+            name_parts = (partner.name or '').strip().split()
+            postal['FirstName'] = name_parts[0][:50] if name_parts else ''
+            postal['LastName'] = ' '.join(name_parts[1:])[:50] if len(name_parts) > 1 else ''
+            postal['IdentityNum'] = partner.vat or '11111111111'
+            postal['CompanyName'] = ''
+            postal['TaxOfficeCode'] = 'null'
+
+        return postal
