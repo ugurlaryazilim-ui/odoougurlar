@@ -17,6 +17,44 @@ class SaleOrder(models.Model):
     nebim_order_request = fields.Text(string='Nebim Sipariş İstek', readonly=True)
     nebim_export_file_number = fields.Char(string='Nebim ExportFileNumber', readonly=True)
 
+    # ─── Pazaryeri Bilgileri (Computed) ────────────────────
+    marketplace_name = fields.Char(
+        string='Pazaryeri', compute='_compute_marketplace_info',
+        store=True, readonly=True,
+    )
+    marketplace_order_number = fields.Char(
+        string='Pazaryeri Sipariş No', compute='_compute_marketplace_info',
+        store=True, readonly=True,
+    )
+
+    _MP_FIELDS = [
+        ('trendyol_order_id', 'Trendyol'),
+        ('hb_order_id', 'Hepsiburada'),
+        ('amazon_order_id', 'Amazon'),
+        ('pazarama_order_id', 'Pazarama'),
+        ('n11_order_id', 'N11'),
+        ('flo_order_id', 'Flo'),
+        ('idefix_order_id', 'Idefix'),
+        ('pttavm_order_id', 'PttAvm'),
+        ('shopify_order_id', 'Shopify'),
+    ]
+
+    @api.depends(
+        'trendyol_order_id', 'hb_order_id', 'amazon_order_id',
+        'pazarama_order_id', 'n11_order_id', 'flo_order_id',
+        'idefix_order_id', 'pttavm_order_id', 'shopify_order_id',
+        'client_order_ref',
+    )
+    def _compute_marketplace_info(self):
+        for order in self:
+            mp_name = False
+            for field, name in self._MP_FIELDS:
+                if hasattr(order, field) and getattr(order, field):
+                    mp_name = name
+                    break
+            order.marketplace_name = mp_name
+            order.marketplace_order_number = order.client_order_ref if mp_name else False
+
     def action_reset_nebim(self):
         """Nebim senkronizasyon bayraklarını sıfırla.
         
