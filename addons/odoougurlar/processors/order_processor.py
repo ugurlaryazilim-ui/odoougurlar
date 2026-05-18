@@ -100,41 +100,24 @@ class OrderProcessor(models.AbstractModel):
             },
         }
         
-        # Perakende siparişte POSTerminalID ve Payments gerekli
-        # StoreWareHouseCode GÖNDERİLMEZ (Hamurlabs göndermiyor)
+        # Perakende siparişte POSTerminalID gerekli
+        # Payments SİPARİŞTE GÖNDERİLMEZ — Faturada gönderilir.
+        # Siparişte Payments göndermek Nebim'de çift "Peşin Satış" hareketi yaratıyor.
         if not is_export:
             payload['POSTerminalID'] = '1'
-            # DocumentDate: Hamurlabs gönderiyor, sipariş tarihi /Date(epoch)/ formatında
-            import time
-            order_epoch = int(sale_order.date_order.timestamp() * 1000) if sale_order.date_order else int(time.time() * 1000)
-            payment_entry = {
-                'PaymentType': '2',
-                'Code': '',
-                'CreditCardTypeCode': mapping.credit_card_type_code if mapping and mapping.credit_card_type_code else 'TRD',
-                'InstallmentCount': 1,
-                'DocumentDate': f"\\/Date({order_epoch})\\/",  # Hamurlabs formatı
-                'CurrencyCode': 'TRY',
-                'Amount': sale_order.amount_total,
-            }
-            # Banka Kodu — mapping'den al
-            if mapping and getattr(mapping, 'bank_code', ''):
-                payment_entry['BankCode'] = mapping.bank_code
-            payload['Payments'] = [payment_entry]
-        
-        if is_export:
-            payload['ExportFileNumber'] = export_file_number  # Sadece ihracat için
-            payload['TaxExemptionCode'] = (mapping.tax_exemption_code if mapping and mapping.tax_exemption_code else '301')
-        
-
 
         # ── PostalAddress bloğu ──
         # Nebim siparişe adres bilgisini PostalAddress tekil nesnesi olarak da ister.
-        # Şahıs firması (11h TCKN): FirstName/LastName/IdentityNum
-        # Tüzel kişi (10h VKN): CompanyName/TaxNumber
         partner = sale_order.partner_id
         postal_address = self._build_postal_address(partner, mapping, sale_order)
         if postal_address:
             payload['PostalAddress'] = postal_address
+
+        if is_export:
+            payload['ExportFileNumber'] = export_file_number  # Sadece ihracat için
+            payload['TaxExemptionCode'] = (mapping.tax_exemption_code if mapping and mapping.tax_exemption_code else '301')
+
+
 
         try:
             import json
@@ -230,10 +213,14 @@ class OrderProcessor(models.AbstractModel):
                 postal['LastName'] = ' '.join(name_parts[1:])[:50] if len(name_parts) > 1 else ''
                 postal['IdentityNum'] = vat_clean
                 postal['CompanyName'] = ''
+                postal['TaxOfficeCode'] = 'null'
             else:
                 # Tüzel kişi → VKN + Firma adı
                 postal['CompanyName'] = (partner.name or '')[:50]
                 postal['TaxNumber'] = vat_clean if len(vat_clean) == 10 else vat_raw
+                postal['FirstName'] = ''
+                postal['LastName'] = ''
+                postal['IdentityNum'] = ''
                 # Vergi Dairesi kodu
                 tax_office_name = ''
                 if sale_order:
@@ -249,9 +236,6 @@ class OrderProcessor(models.AbstractModel):
                     postal['TaxOfficeCode'] = tax_mapping.nebim_tax_office_code if tax_mapping else 'null'
                 else:
                     postal['TaxOfficeCode'] = 'null'
-                postal['FirstName'] = ''
-                postal['LastName'] = ''
-                postal['IdentityNum'] = ''
         else:
             # Bireysel müşteri
             name_parts = (partner.name or '').strip().split()
