@@ -91,20 +91,18 @@ class BatchApiController(BarcodeApiBase):
 
     @http.route('/ugurlar_barcode/api/batch_list', type='json', auth='user')
     def batch_list(self, **kw):
-        """Günün batch'lerini listele."""
-        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        tomorrow = today + timedelta(days=1)
+        """Batch'leri listele — opsiyonel filtre desteği."""
+        filter_state = kw.get('filter_state', '')   # draft | in_progress | done | ''
+        search_text = (kw.get('search', '') or '').strip().lower()
 
-        batches = request.env['stock.picking.batch'].sudo().search([
-            ('schedule_time', '>=', today),
-            ('schedule_time', '<', tomorrow),
-        ], order='schedule_time desc')
+        domain = [('time_window', '!=', False)]
 
-        if not batches:
-            # Bugün batch yoksa son 7 gündeki tümünü al
-            batches = request.env['stock.picking.batch'].sudo().search([
-                ('time_window', '!=', False),
-            ], order='schedule_time desc', limit=20)
+        if filter_state and filter_state != 'all':
+            domain.append(('state', '=', filter_state))
+
+        batches = request.env['stock.picking.batch'].sudo().search(
+            domain, order='schedule_time desc', limit=50,
+        )
 
         result = []
         for b in batches:
@@ -119,12 +117,19 @@ class BatchApiController(BarcodeApiBase):
                 if b.picking_type_id and b.picking_type_id.warehouse_id:
                     warehouse_name = b.picking_type_id.warehouse_id.name or ''
 
-            result.append({
+            # Tarih formatlama
+            date_str = ''
+            if b.schedule_time:
+                dt = b.schedule_time
+                date_str = dt.strftime('%d %b %H:%M')
+
+            item = {
                 'id': b.id,
                 'name': b.name,
                 'state': b.state,
                 'time_window': b.time_window or '',
                 'schedule_time': str(b.schedule_time or ''),
+                'date_display': date_str,
                 'total_orders': b.total_orders,
                 'total_items': b.total_items,
                 'available_count': b.available_count,
@@ -132,9 +137,31 @@ class BatchApiController(BarcodeApiBase):
                 'unavailable_count': b.unavailable_count,
                 'user': b.user_id.name or '',
                 'warehouse_name': warehouse_name,
-            })
+                'batch_type': 'Manuel' if 'Manuel' in (b.time_window or '') else 'Otomatik',
+            }
 
-        return {'batches': result, 'total': len(result)}
+            # Client-side search (name veya warehouse)
+            if search_text:
+                hay = (b.name + ' ' + warehouse_name).lower()
+                if search_text not in hay:
+                    continue
+
+            result.append(item)
+
+        # Durum sayaçları (filtre dışı — tüm batch'ler için)
+        all_batches = request.env['stock.picking.batch'].sudo().search(
+            [('time_window', '!=', False)], limit=200,
+        )
+        state_counts = {'draft': 0, 'in_progress': 0, 'done': 0}
+        for ab in all_batches:
+            if ab.state in state_counts:
+                state_counts[ab.state] += 1
+
+        return {
+            'batches': result,
+            'total': len(result),
+            'state_counts': state_counts,
+        }
 
     @http.route('/ugurlar_barcode/api/batch_detail', type='json', auth='user')
     def batch_detail(self, batch_id=0, **kw):

@@ -20,36 +20,104 @@ export class BatchPickingScreen extends Component {
                 <t t-if="state.loading">
                     <div class="ub-loading"><i class="fa fa-spinner fa-spin fa-2x"></i><p>Yükleniyor...</p></div>
                 </t>
-                <div class="bp-batch-list" t-if="!state.loading">
-                    <t t-if="state.batches.length">
+                <div class="bp-list-container" t-if="!state.loading">
+                    <!-- ─── FİLTRE BARI ─── -->
+                    <div class="bp-filter-bar">
+                        <div class="bp-filter-pills">
+                            <button t-attf-class="bp-pill {{state.filterState === 'all' ? 'bp-pill-active' : ''}}"
+                                    t-on-click="() => this.setFilter('all')">
+                                <i class="fa fa-th-list"></i> Tümü
+                                <span class="bp-pill-count" t-esc="state.stateCounts.draft + state.stateCounts.in_progress + state.stateCounts.done"/>
+                            </button>
+                            <button t-attf-class="bp-pill bp-pill-draft {{state.filterState === 'draft' ? 'bp-pill-active' : ''}}"
+                                    t-on-click="() => this.setFilter('draft')">
+                                <i class="fa fa-pencil"></i> Taslak
+                                <span class="bp-pill-count" t-esc="state.stateCounts.draft"/>
+                            </button>
+                            <button t-attf-class="bp-pill bp-pill-progress {{state.filterState === 'in_progress' ? 'bp-pill-active' : ''}}"
+                                    t-on-click="() => this.setFilter('in_progress')">
+                                <i class="fa fa-spinner"></i> Devam
+                                <span class="bp-pill-count" t-esc="state.stateCounts.in_progress"/>
+                            </button>
+                            <button t-attf-class="bp-pill bp-pill-done {{state.filterState === 'done' ? 'bp-pill-active' : ''}}"
+                                    t-on-click="() => this.setFilter('done')">
+                                <i class="fa fa-check"></i> Tamamlandı
+                                <span class="bp-pill-count" t-esc="state.stateCounts.done"/>
+                            </button>
+                        </div>
+                        <div class="bp-filter-search">
+                            <i class="fa fa-search"></i>
+                            <input type="text" class="bp-search-input" placeholder="Rota veya depo ara..."
+                                   t-att-value="state.searchText"
+                                   t-on-input="(ev) => this.onSearch(ev.target.value)"/>
+                            <button class="bp-search-clear" t-if="state.searchText"
+                                    t-on-click="() => this.onSearch('')">
+                                <i class="fa fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- ─── SONUÇ SAYISI ─── -->
+                    <div class="bp-list-info">
+                        <span><t t-esc="state.batches.length"/> rota listeleniyor</span>
+                    </div>
+
+                    <!-- ─── TABLO BAŞLIĞI ─── -->
+                    <div class="bp-table" t-if="state.batches.length">
+                        <div class="bp-table-head">
+                            <span class="bp-col-name">Rota</span>
+                            <span class="bp-col-wh">Depo</span>
+                            <span class="bp-col-time">Zaman</span>
+                            <span class="bp-col-orders">Sipariş</span>
+                            <span class="bp-col-items">Ürün</span>
+                            <span class="bp-col-state">Durum</span>
+                            <span class="bp-col-action"></span>
+                        </div>
                         <t t-foreach="state.batches" t-as="b" t-key="b.id">
-                            <div class="bp-batch-card" t-on-click="() => this.selectBatch(b.id)">
-                                <div class="bp-batch-header">
-                                    <span class="bp-batch-name" t-esc="b.name"/>
-                                    <span t-attf-class="badge bp-state-{{b.state}}" t-esc="b.state === 'draft' ? 'Taslak' : b.state === 'in_progress' ? 'Devam' : b.state"/>
-                                </div>
-                                <div class="bp-batch-meta">
-                                    <span><i class="fa fa-clock-o"></i> <t t-esc="b.time_window"/></span>
-                                    <span><i class="fa fa-shopping-cart"></i> <t t-esc="b.total_orders"/> sipariş</span>
-                                    <span><i class="fa fa-cube"></i> <t t-esc="b.total_items"/> ürün</span>
-                                    <t t-if="b.warehouse_name">
-                                        <span class="bp-warehouse-badge"><i class="fa fa-home"></i> <t t-esc="b.warehouse_name"/></span>
-                                    </t>
-                                </div>
-                                <div class="bp-batch-action">
-                                    <button class="btn btn-success bp-btn-collect">
-                                        <i class="fa fa-play"></i> Topla
+                            <div t-attf-class="bp-table-row bp-table-row-{{b.state}}" t-on-click="() => this.selectBatch(b.id)">
+                                <span class="bp-col-name">
+                                    <strong t-esc="b.name"/>
+                                    <small class="bp-batch-type" t-esc="b.batch_type"/>
+                                </span>
+                                <span class="bp-col-wh">
+                                    <span class="bp-wh-tag" t-if="b.warehouse_name" t-esc="b.warehouse_name"/>
+                                </span>
+                                <span class="bp-col-time">
+                                    <span t-esc="b.time_window"/>
+                                    <small class="bp-date-sub" t-if="b.date_display" t-esc="b.date_display"/>
+                                </span>
+                                <span class="bp-col-orders">
+                                    <i class="fa fa-shopping-cart"></i> <t t-esc="b.total_orders"/>
+                                </span>
+                                <span class="bp-col-items">
+                                    <i class="fa fa-cube"></i> <t t-esc="b.total_items"/>
+                                </span>
+                                <span class="bp-col-state">
+                                    <span t-attf-class="bp-state-tag bp-state-{{b.state}}"
+                                          t-esc="b.state === 'draft' ? 'Taslak' : b.state === 'in_progress' ? 'Devam' : 'Tamamlandı'"/>
+                                </span>
+                                <span class="bp-col-action">
+                                    <button t-attf-class="btn btn-sm {{b.state === 'done' ? 'btn-outline-success' : 'btn-success'}} bp-btn-collect">
+                                        <i t-attf-class="fa {{b.state === 'done' ? 'fa-eye' : 'fa-play'}}"></i>
+                                        <t t-esc="b.state === 'done' ? 'Gör' : 'Topla'"/>
                                     </button>
-                                </div>
+                                </span>
                             </div>
                         </t>
-                    </t>
-                    <div class="ub-no-stock" t-if="!state.batches.length">
-                        <i class="fa fa-inbox"></i>
-                        <p>Bekleyen rota yok</p>
+                    </div>
+
+                    <div class="bp-empty-state" t-if="!state.batches.length">
+                        <i class="fa fa-inbox fa-3x"></i>
+                        <p t-if="state.filterState !== 'all' || state.searchText">Filtreye uygun rota bulunamadı</p>
+                        <p t-else="">Bekleyen rota yok</p>
+                        <button class="btn btn-outline-secondary btn-sm" t-if="state.filterState !== 'all' || state.searchText"
+                                t-on-click="() => { this.state.filterState = 'all'; this.state.searchText = ''; this.loadBatches(); }">
+                            <i class="fa fa-refresh"></i> Filtreleri Temizle
+                        </button>
                     </div>
                 </div>
             </t>
+
 
             <!-- ═══ GÖRÜNÜM 2: RAF YÖNLENDİRMELİ TOPLAMA ═══ -->
             <t t-if="state.view === 'collect'">
@@ -257,7 +325,13 @@ export class BatchPickingScreen extends Component {
             scanMsg: '',
             scanOk: false,
             summary: null,
+            // ── Filtre alanları ──
+            filterState: 'all',
+            searchText: '',
+            stateCounts: { draft: 0, in_progress: 0, done: 0 },
         });
+
+        this._searchTimer = null;
 
         this._unsub = this.props.scanner.onScan(bc => {
             if (this.state.view === 'collect') {
@@ -281,12 +355,30 @@ export class BatchPickingScreen extends Component {
         }
     }
 
+    // ═══ FİLTRE ═══
+    setFilter(filterState) {
+        this.state.filterState = filterState;
+        this.loadBatches();
+    }
+
+    onSearch(text) {
+        this.state.searchText = text;
+        clearTimeout(this._searchTimer);
+        this._searchTimer = setTimeout(() => this.loadBatches(), 350);
+    }
+
     // ═══ LİSTE ═══
     async loadBatches() {
         this.state.loading = true;
         try {
-            const res = await BarcodeService.call('/ugurlar_barcode/api/batch_list', {});
+            const res = await BarcodeService.call('/ugurlar_barcode/api/batch_list', {
+                filter_state: this.state.filterState,
+                search: this.state.searchText,
+            });
             this.state.batches = res.batches || [];
+            if (res.state_counts) {
+                this.state.stateCounts = res.state_counts;
+            }
         } catch (e) {
             this.state.error = 'Yükleme hatası';
         }

@@ -10,57 +10,191 @@
     margin-bottom: 10px;
 }
 
-/* ─── BATCH LİSTESİ ─── */
-.bp-batch-list {
-    padding: 8px;
-}
-
-.bp-batch-card {
+/* ═══ FİLTRE BARI ═══ */
+.bp-filter-bar {
+    padding: 10px 12px;
     background: #fff;
-    border-radius: 12px;
-    padding: 14px;
-    margin-bottom: 10px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-    border-left: 5px solid #2196F3;
-    cursor: pointer;
-    transition: transform 0.15s;
-}
-.bp-batch-card:active {
-    transform: scale(0.98);
-}
-.bp-batch-header {
+    border-bottom: 1px solid #e0e0e0;
     display: flex;
-    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
     align-items: center;
-    margin-bottom: 6px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
 }
-.bp-batch-name {
-    font-size: 18px;
-    font-weight: 700;
-    color: #333;
-}
-.bp-state-draft { background: #ff9800; color: #fff; padding: 2px 10px; border-radius: 12px; font-size: 12px; }
-.bp-state-in_progress { background: #2196F3; color: #fff; padding: 2px 10px; border-radius: 12px; font-size: 12px; }
-.bp-state-done { background: #4CAF50; color: #fff; padding: 2px 10px; border-radius: 12px; font-size: 12px; }
-
-.bp-batch-meta {
+.bp-filter-pills {
     display: flex;
-    gap: 12px;
-    color: #666;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.bp-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 1.5px solid #ddd;
+    background: #fafafa;
+    color: #555;
     font-size: 13px;
-    margin-bottom: 8px;
-}
-.bp-batch-meta i { margin-right: 3px; }
-
-.bp-batch-action {
-    text-align: right;
-}
-.bp-btn-collect {
-    padding: 6px 24px;
     font-weight: 600;
-    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.bp-pill:hover { background: #f0f0f0; border-color: #bbb; }
+.bp-pill-active {
+    background: #5e3551 !important;
+    color: #fff !important;
+    border-color: #5e3551 !important;
+}
+.bp-pill-draft.bp-pill-active { background: #ef6c00 !important; border-color: #ef6c00 !important; }
+.bp-pill-progress.bp-pill-active { background: #1565c0 !important; border-color: #1565c0 !important; }
+.bp-pill-done.bp-pill-active { background: #2e7d32 !important; border-color: #2e7d32 !important; }
+.bp-pill-count {
+    background: rgba(0,0,0,0.12);
+    color: inherit;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 11px;
+    min-width: 20px;
+    text-align: center;
+}
+.bp-pill-active .bp-pill-count { background: rgba(255,255,255,0.25); }
+
+/* ─── ARAMA ─── */
+.bp-filter-search {
+    position: relative;
+    flex: 1;
+    min-width: 180px;
+    max-width: 320px;
+}
+.bp-filter-search > .fa-search {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #999;
+    font-size: 13px;
+}
+.bp-search-input {
+    width: 100%;
+    padding: 7px 32px 7px 32px;
+    border: 1.5px solid #ddd;
+    border-radius: 20px;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+.bp-search-input:focus { border-color: #5e3551; box-shadow: 0 0 0 2px rgba(94,53,81,0.12); }
+.bp-search-clear {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: #999;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+/* ─── LİSTE BİLGİSİ ─── */
+.bp-list-info {
+    padding: 6px 14px;
+    font-size: 12px;
+    color: #888;
+    background: #fafafa;
+    border-bottom: 1px solid #eee;
+}
+
+/* ═══ TABLO GÖRÜNÜMÜ ═══ */
+.bp-table {
+    font-size: 13px;
+}
+.bp-table-head {
+    display: grid;
+    grid-template-columns: 1.5fr 1.5fr 1.5fr 0.7fr 0.7fr 1fr 0.8fr;
+    padding: 8px 12px;
+    background: #5e3551;
+    color: #fff;
+    font-weight: 700;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    position: sticky;
+    top: 52px;
+    z-index: 9;
+}
+.bp-table-row {
+    display: grid;
+    grid-template-columns: 1.5fr 1.5fr 1.5fr 0.7fr 0.7fr 1fr 0.8fr;
+    padding: 10px 12px;
+    border-bottom: 1px solid #f0f0f0;
+    align-items: center;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.bp-table-row:hover { background: #f8f4f7; }
+.bp-table-row:active { background: #f0e8ef; }
+.bp-table-row-done { border-left: 4px solid #4CAF50; }
+.bp-table-row-in_progress { border-left: 4px solid #1565c0; }
+.bp-table-row-draft { border-left: 4px solid #ef6c00; }
+
+/* Sütun özellikleri */
+.bp-col-name strong { display: block; font-size: 14px; color: #333; }
+.bp-batch-type { display: block; color: #999; font-size: 11px; margin-top: 1px; }
+.bp-col-wh {}
+.bp-wh-tag {
+    display: inline-block;
+    background: #e3f2fd;
+    color: #1565c0;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.bp-col-time { color: #555; font-size: 12px; }
+.bp-date-sub { display: block; color: #aaa; font-size: 11px; }
+.bp-col-orders,
+.bp-col-items { color: #666; font-size: 13px; }
+.bp-col-orders i,
+.bp-col-items i { color: #999; margin-right: 2px; font-size: 11px; }
+
+/* Durum tag'leri */
+.bp-state-tag {
+    display: inline-block;
+    padding: 3px 12px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+.bp-state-tag.bp-state-draft { background: #fff3e0; color: #e65100; }
+.bp-state-tag.bp-state-in_progress { background: #e3f2fd; color: #1565c0; }
+.bp-state-tag.bp-state-done { background: #e8f5e9; color: #2e7d32; }
+
+.bp-col-action { text-align: right; }
+.bp-btn-collect {
+    padding: 5px 16px;
+    font-weight: 600;
+    font-size: 12px;
     border-radius: 8px;
 }
+
+/* ─── BOŞ DURUM ─── */
+.bp-empty-state {
+    text-align: center;
+    padding: 50px 20px;
+    color: #aaa;
+}
+.bp-empty-state i { color: #ccc; margin-bottom: 12px; }
+.bp-empty-state p { font-size: 15px; margin-bottom: 12px; }
 
 /* ─── ÜST BAR ─── */
 .bp-top-bar {
