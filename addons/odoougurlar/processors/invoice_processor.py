@@ -49,6 +49,26 @@ class InvoiceProcessor(models.AbstractModel):
                     if isinstance(raw_result, dict) and raw_result.get('ExceptionMessage'):
                         raise Exception(raw_result['ExceptionMessage'])
 
+                    # ── İkinci POST: IsPostingJournal güncellemesi (Hamurlabs yöntemi) ──
+                    # Nebim ilk POST'ta IsPostingJournal=True'yu yok sayar.
+                    # HeaderID ile ikinci POST yaparak journal posting tetiklenir.
+                    # Bu olmazsa DB'de IsPostingJournal=0 kalır, e-fatura/e-arşiv gönderilmez.
+                    header_id = ''
+                    if isinstance(raw_result, dict):
+                        header_id = raw_result.get('HeaderID') or raw_result.get('ApplicationID') or ''
+                    if header_id:
+                        try:
+                            update_payload = {
+                                'ModelType': payload.get('ModelType', 8),
+                                'HeaderID': header_id,
+                                'IsPostingJournal': True,
+                                'IsCompleted': True,
+                            }
+                            connector.post_data('Post', update_payload)
+                            _logger.info("Fatura IsPostingJournal güncellendi: %s → HeaderID: %s", invoice.name, header_id)
+                        except Exception as ej:
+                            _logger.warning("IsPostingJournal güncellemesi başarısız: %s - %s", invoice.name, str(ej))
+
                     # Nebim fatura numarasını çıkar
                     nebim_invoice_number = ''
                     if isinstance(raw_result, dict):
@@ -439,40 +459,31 @@ class InvoiceProcessor(models.AbstractModel):
             'IsCompleted': True,
         }
 
-        # ── Fatura PostalAddress — FirstName/LastName/IdentityNum dolu gönder ──
+        # PostalAddress — Hamurlabs backup yöntemi: sadece kimlik alanları gönder
         inv_partner = invoice.partner_id
-        inv_vat_raw = (inv_partner.vat or '').strip()
-        inv_vat_clean = ''.join(filter(str.isdigit, inv_vat_raw))
-        inv_is_sahis = len(inv_vat_clean) == 11
-
-        try:
-            inv_nebim_codes = self.env['odoougurlar.customer.processor']._resolve_nebim_address_codes(inv_partner)
-        except Exception:
-            inv_nebim_codes = {}
-
-        inv_name_parts = (inv_partner.name or '').strip().split()
-        inv_first_name = inv_name_parts[0] if inv_name_parts else ''
-        inv_last_name = ' '.join(inv_name_parts[1:]) if len(inv_name_parts) > 1 else ''
-
-        payload['PostalAddress'] = {
-            'Address':      (inv_partner.street or '')[:200],
-            'CityCode':     inv_nebim_codes.get('city_code', ''),
-            'CountryCode':  (inv_partner.country_id.code or 'TR').upper(),
-            'DistrictCode': inv_nebim_codes.get('district_code', ''),
-            'StateCode':    inv_nebim_codes.get('state_code', ''),
-            'FirstName':    inv_first_name[:50] if inv_is_sahis else '',
-            'LastName':     inv_last_name[:50] if inv_is_sahis else '',
-            'IdentityNum':  inv_vat_clean if inv_is_sahis else '',
-            'TaxNumber':    '' if inv_is_sahis else inv_vat_clean,
-            'TaxOfficeCode': '',
-        }
+        inv_vat = (inv_partner.vat or '').strip()
+        inv_is_sahis = len(inv_vat) == 11 and inv_vat.isdigit()
+        if inv_is_sahis:
+            inv_name_parts = (inv_partner.name or '').strip().split()
+            payload['PostalAddress'] = {
+                'FirstName': inv_name_parts[0][:50] if inv_name_parts else '',
+                'LastName':  ' '.join(inv_name_parts[1:])[:50] if len(inv_name_parts) > 1 else '',
+                'IdentityNum': inv_vat,
+            }
+            _logger.info("Fatura PostalAddress (şahıs): %s | FirstName=%s",
+                         inv_partner.name, inv_name_parts[0] if inv_name_parts else '')
+        elif inv_vat and len(inv_vat) == 10:
+            payload['PostalAddress'] = {
+                'CompanyName': (inv_partner.name or '')[:100],
+                'TaxNumber': inv_vat,
+            }
 
         # BillingPostalAddressID / ShippingPostalAddressID — PostalAddress yanında da gönder
         if address_id:
             payload['BillingPostalAddressID'] = address_id
             payload['ShippingPostalAddressID'] = address_id
 
-        _logger.info("Perakende fatura payload: %s | PostalAddress FirstName=%s LastName=%s IdentityNum=%s",
-                     invoice.name, inv_first_name, inv_last_name, inv_vat_clean)
+        _logger.info("Perakende fatura payload hazırlandı: %s (MT%s) | Email=%s",
+                     invoice.name, model_type, email_address or 'YOK')
 
         return payload
