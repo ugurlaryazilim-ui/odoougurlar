@@ -73,64 +73,53 @@ class OrderProcessor(models.AbstractModel):
         else:
             m_shipment = '2'  # Yurtiçi her zaman kargo
 
+        # OrderDate: Nebim resmi formatı YYYYMMDD
+        order_date_str = sale_order.date_order.strftime('%Y%m%d') if sale_order.date_order else fields.Date.today().strftime('%Y%m%d')
+        send_date_str = fields.Date.today().strftime('%Y%m%d')
+        payment_date_str = sale_order.date_order.strftime('%Y%m%d') if sale_order.date_order else send_date_str
+
+        # ── Nebim resmi sıralama — birebir aynı ──
         payload = {
-            'ModelType': model_type,
-            'IsCompleted': True,
-            'IsSalesViaInternet': True,
-            'CustomerCode': customer_code,
-            'OfficeCode': "M",
-            'StoreCode': m_store,
-            'WarehouseCode': (m_warehouse if is_export else ''),  # Hamurlabs: yurtiçi boş gönderiyor
-            'ShipmentMethodCode': m_shipment,
-            'DocumentNumber': sale_order.client_order_ref or sale_order.name,
-            'Description': sale_order.client_order_ref or sale_order.name,
-            'InternalDescription': sale_order.name,
-            'OrderDate': sale_order.date_order.strftime('%Y-%m-%d') if sale_order.date_order else fields.Date.today().strftime('%Y-%m-%d'),
-            'DeliveryCompanyCode': ('' if is_export else m_delivery),
-            'BillingPostalAddressID': addr_id,
-            'ShippingPostalAddressID': addr_id,
-            'Lines': lines,
+            'ModelType':            model_type,
+            'CustomerCode':         customer_code,
+            'PosTerminalID':        1,
+            'OrderDate':            order_date_str,
+            'OfficeCode':           'M',
+            'StoreCode':            m_store,
+            'StoreWareHouseCode':   (m_warehouse if is_export else m_store),
+            'IsSalesViaInternet':   True,
+            'ApplyCampaign':        True,
+            'IsCompleted':          True,
+            'ShipmentMethodCode':   int(m_shipment),
+            'DeliveryCompanyCode':  ('' if is_export else m_delivery),
+            'SuppressItemDiscount': False,
             'OrdersViaInternetInfo': {
-                'SalesURL': m_sales_url,
-                'PaymentTypeCode': 1,
-                'PaymentTypeDescription': "KREDIKARTI/BANKAKARTI",
-                'SendDate': fields.Date.today().strftime('%Y-%m-%d'),
-                'PaymentDate': sale_order.date_order.strftime('%Y-%m-%d') if sale_order.date_order else fields.Date.today().strftime('%Y-%m-%d'),
-                'PaymentAgent': m_payment_agent
+                'SalesURL':               m_sales_url,
+                'PaymentTypeCode':        1,
+                'PaymentTypeDescription': 'KREDIKARTI/BANKAKARTI',
+                'PaymentAgent':           m_payment_agent,
+                'PaymentDate':            payment_date_str,
+                'SendDate':               send_date_str,
             },
+            'Lines': lines,
+            'Payments': [{
+                'PaymentType':      2,
+                'CreditCardTypeCode': mapping.credit_card_type_code if mapping and mapping.credit_card_type_code else 'TRD',
+                'InstallmentCount': 1,
+                'CurrencyCode':     'TRY',
+                'Amount':           sale_order.amount_total,
+            }],
         }
-        
-        # ── PostalAddress bloğu ──
-        # Nebim siparişe adres bilgisini PostalAddress tekil nesnesi olarak da ister.
-        # Hamurlabs örneğine göre POSTerminalID'den ONCE gelecek.
+
+        # PostalAddress — Nebim formatında en sonda gelir
         partner = sale_order.partner_id
         postal_address = self._build_postal_address(partner, mapping, sale_order)
         if postal_address:
             payload['PostalAddress'] = postal_address
 
-        # Perakende siparişte POSTerminalID ve Payments gerekli
-        # Hamurlabs'ta da sipariş Payments ile gönderiliyor.
-        if not is_export:
-            payload['POSTerminalID'] = '1'
-            import time
-            order_epoch = int(sale_order.date_order.timestamp() * 1000) if sale_order.date_order else int(time.time() * 1000)
-            payment_entry = {
-                'PaymentType': '2',
-                'Code': '',
-                'CreditCardTypeCode': mapping.credit_card_type_code if mapping and mapping.credit_card_type_code else 'TRD',
-                'InstallmentCount': 1,
-                'DocumentDate': f"\\/Date({order_epoch})\\/",
-                'CurrencyCode': 'TRY',
-                'Amount': sale_order.amount_total,
-            }
-            if mapping and getattr(mapping, 'bank_code', ''):
-                payment_entry['BankCode'] = mapping.bank_code
-            payload['Payments'] = [payment_entry]
-
         if is_export:
-            payload['ExportFileNumber'] = export_file_number  # Sadece ihracat için
+            payload['ExportFileNumber'] = export_file_number
             payload['TaxExemptionCode'] = (mapping.tax_exemption_code if mapping and mapping.tax_exemption_code else '301')
-
 
 
         try:
