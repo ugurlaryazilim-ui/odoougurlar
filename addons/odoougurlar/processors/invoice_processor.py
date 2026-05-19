@@ -412,6 +412,7 @@ class InvoiceProcessor(models.AbstractModel):
             'ModelType': model_type,
             'CustomerCode': customer_code,
             'Description': desc,
+            'InternalDescription': desc,
             'InvoiceDate': invoice_date_str,
             'OfficeCode': 'M',
             'StoreCode': m_store,
@@ -421,6 +422,10 @@ class InvoiceProcessor(models.AbstractModel):
             'DeliveryCompanyCode': m_delivery,
             'IsOrderBase': is_order_base,
             'IsSalesViaInternet': True,
+            'DocumentTypeCode': 4,
+            'IsPostingJournal': True,
+            'SendInvoiceByEMail': True,
+            'EMailAddress': email_address,
             'Lines': lines,
             'SalesViaInternetInfo': {
                 'SalesURL': m_sales_url,
@@ -433,8 +438,10 @@ class InvoiceProcessor(models.AbstractModel):
             'IsCompleted': True,
         }
 
-        # BillingPostalAddressID / ShippingPostalAddressID GÖNDERİLMEZ (deneme)
-        # Önceki çalışan formatta bu alanlar yoktu.
+        # Adres ID varsa ekle
+        if address_id:
+            payload['BillingPostalAddressID'] = address_id
+            payload['ShippingPostalAddressID'] = address_id
 
         # PostalAddress bloğu FATURADA GÖNDERİLMEZ!
         # Hamurlabs fatura isteğinde PostalAddress YOK ve e-arşiv çalışıyor.
