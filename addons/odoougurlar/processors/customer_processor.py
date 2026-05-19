@@ -77,10 +77,9 @@ class CustomerProcessor(models.AbstractModel):
                     'CurrAccDescription': partner.name[:50],
                     'FirstName': first_name[:50],
                     'LastName': last_name[:50],
-                    'IsIndividualAcc': False,  # Şahıs firması = False (bireysel 111... = True)
+                    'IsIndividualAcc': True,
+                    'IsSubjectToEInvoice': True,
                     'IdentityNum': vat_clean,  # 11 haneli TCKN
-                    'TaxNumber': '',           # IsIndividualAcc=False iken boş string gönder (null kabul etmiyor)
-                    # IsSubjectToEInvoice GÖNDERİLMEZ — Hamurlabs'ta yok, fatura seviyesinde yapılır
                     'OfficeCode': 'M',
                     'CurrencyCode': 'TRY',
                 }
