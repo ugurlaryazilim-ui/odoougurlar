@@ -79,7 +79,7 @@ class CustomerProcessor(models.AbstractModel):
                     'LastName': last_name[:50],
                     'IsIndividualAcc': False,  # Şahıs firması = False (bireysel 111... = True)
                     'IdentityNum': vat_clean,  # 11 haneli TCKN
-                    # TaxNumber GÖNDERİLMEZ — Nebim "Geçersiz Değer" verir
+                    'TaxNumber': None,         # IsIndividualAcc=False iken Nebim TaxNumber ister → null gönder
                     # IsSubjectToEInvoice GÖNDERİLMEZ — Hamurlabs'ta yok, fatura seviyesinde yapılır
                     'OfficeCode': 'M',
                     'CurrencyCode': 'TRY',
