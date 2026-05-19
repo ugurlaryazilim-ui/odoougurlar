@@ -72,11 +72,6 @@ class CustomerProcessor(models.AbstractModel):
                 first_name = name_parts[0] if name_parts else ''
                 last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
 
-                # GİB e-fatura alias formatı: TCKN@hs.gib.gov.tr
-                # Bu alias olmadan Nebim e-faturaya route edemez (EInvoiceAliasCode boş kalır).
-                # TC e-fatura mükellef değilse GİB reddeder, Nebim e-arşive döner.
-                e_invoice_alias = f"{vat_clean}@hs.gib.gov.tr"
-
                 payload = {
                     'ModelType': cari_model_type,
                     'CurrAccDescription': partner.name[:50],
@@ -84,13 +79,12 @@ class CustomerProcessor(models.AbstractModel):
                     'LastName': last_name[:50],
                     'IsIndividualAcc': True,
                     'IsSubjectToEInvoice': True,
-                    'EInvoiceAliasCode': e_invoice_alias,
                     'IdentityNum': vat_clean,  # 11 haneli TCKN
                     'OfficeCode': 'M',
                     'CurrencyCode': 'TRY',
                 }
-                _logger.info("KURUMSAL (ŞAHIS FİRMASI): %s | FirstName=%s LastName=%s | Alias=%s",
-                             partner.name, first_name, last_name, e_invoice_alias)
+                _logger.info("KURUMSAL (ŞAHIS FİRMASI): %s | FirstName=%s LastName=%s",
+                             partner.name, first_name, last_name)
             else:
                 # ─── TÜZEL KİŞİ (10 hane VKN veya diğer) ───
                 payload = {

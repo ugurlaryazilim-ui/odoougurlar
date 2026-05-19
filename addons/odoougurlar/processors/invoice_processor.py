@@ -470,11 +470,8 @@ class InvoiceProcessor(models.AbstractModel):
                 'LastName':  ' '.join(inv_name_parts[1:])[:50] if len(inv_name_parts) > 1 else '',
                 'IdentityNum': inv_vat,
             }
-            # GİB e-fatura alias — Nebim bu olmadan e-faturaya route edemez
-            e_invoice_alias = f"{inv_vat}@hs.gib.gov.tr"
-            payload['EInvoiceAliasCode'] = e_invoice_alias
-            _logger.info("Fatura PostalAddress (şahıs): %s | FirstName=%s | Alias=%s",
-                         inv_partner.name, inv_name_parts[0] if inv_name_parts else '', e_invoice_alias)
+            _logger.info("Fatura PostalAddress (şahıs): %s | FirstName=%s",
+                         inv_partner.name, inv_name_parts[0] if inv_name_parts else '')
         elif inv_vat and len(inv_vat) == 10:
             payload['PostalAddress'] = {
                 'CompanyName': (inv_partner.name or '')[:100],
