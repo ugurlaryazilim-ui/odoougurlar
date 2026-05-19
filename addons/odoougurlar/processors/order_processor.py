@@ -79,6 +79,7 @@ class OrderProcessor(models.AbstractModel):
         payment_date_str = sale_order.date_order.strftime('%Y%m%d') if sale_order.date_order else send_date_str
 
         # ── Nebim resmi sıralama — birebir aynı ──
+        doc_ref = sale_order.client_order_ref or sale_order.name
         payload = {
             'ModelType':            model_type,
             'CustomerCode':         customer_code,
@@ -87,12 +88,16 @@ class OrderProcessor(models.AbstractModel):
             'OfficeCode':           'M',
             'StoreCode':            m_store,
             'StoreWareHouseCode':   (m_warehouse if is_export else m_store),
+            'WarehouseCode':        (m_warehouse if is_export else ''),
             'IsSalesViaInternet':   True,
             'ApplyCampaign':        True,
             'IsCompleted':          True,
             'ShipmentMethodCode':   int(m_shipment),
             'DeliveryCompanyCode':  ('' if is_export else m_delivery),
             'SuppressItemDiscount': False,
+            'DocumentNumber':       doc_ref,
+            'Description':          doc_ref,
+            'InternalDescription':  sale_order.name,
             'OrdersViaInternetInfo': {
                 'SalesURL':               m_sales_url,
                 'PaymentTypeCode':        1,
@@ -103,11 +108,11 @@ class OrderProcessor(models.AbstractModel):
             },
             'Lines': lines,
             'Payments': [{
-                'PaymentType':      2,
+                'PaymentType':        2,
                 'CreditCardTypeCode': mapping.credit_card_type_code if mapping and mapping.credit_card_type_code else 'TRD',
-                'InstallmentCount': 1,
-                'CurrencyCode':     'TRY',
-                'Amount':           sale_order.amount_total,
+                'InstallmentCount':   1,
+                'CurrencyCode':       'TRY',
+                'Amount':             sale_order.amount_total,
             }],
         }
 
