@@ -412,6 +412,7 @@ class InvoiceProcessor(models.AbstractModel):
         m_payment_agent = (mapping.payment_agent if mapping and mapping.payment_agent else payment_agent)
 
         # Hamurlabs InvoiceR_SiparisBazli.txt şablonuna göre payload
+        # IsCompleted sol (çalışan) formata göre EN SONDA gelir
         desc = sale_order.client_order_ref or sale_order.name if sale_order else invoice.name
         payload = {
             'ModelType': model_type,
@@ -427,14 +428,12 @@ class InvoiceProcessor(models.AbstractModel):
             'DeliveryCompanyCode': m_delivery,
             'IsOrderBase': is_order_base,
             'IsSalesViaInternet': True,
-            'IsCompleted': True,
-            'DocumentTypeCode': 4,  # Deneme: 4 (önceki 5)
+            'DocumentTypeCode': 4,
             'IsPostingJournal': True,
             'SendInvoiceByEMail': True,
             'EMailAddress': email_address,
             'Lines': lines,
-            # Payments FATURAADA GÖNDERİLMEZ — Sipariş bazlı faturada Nebim
-            # siparişteki ödemeyi zaten biliyor; tekrar göndermek çift hareket yaratır.
+            # Payments FATURADA GÖNDERİLMEZ — çift hareket yaratır
             'SalesViaInternetInfo': {
                 'SalesURL': m_sales_url,
                 'PaymentTypeCode': 1,
@@ -443,24 +442,16 @@ class InvoiceProcessor(models.AbstractModel):
                 'SendDate': now_date_str,
                 'PaymentAgent': m_payment_agent,
             },
+            'IsCompleted': True,  # Sol (çalışan) formata göre en sonda
         }
-        
-        # Adres ID varsa ekle
-        if address_id:
-            payload['BillingPostalAddressID'] = address_id
-            payload['ShippingPostalAddressID'] = address_id
+
+        # BillingPostalAddressID / ShippingPostalAddressID GÖNDERİLMEZ (deneme)
+        # Önceki çalışan formatta bu alanlar yoktu.
 
         # PostalAddress bloğu FATURADA GÖNDERİLMEZ!
-        # 
         # Hamurlabs fatura isteğinde PostalAddress YOK ve e-arşiv çalışıyor.
-        # Biz PostalAddress gönderince IdentityNum ile Sematron GİB kontrolü yapıyor
-        # → GİB'de kayıtlı müşteri için Doğan 10013 hatası veriyor.
-        #
-        # Nebim zaten cari kaydından (cdCurrAcc) kimlik bilgisini biliyor.
-        # OrderLineID → sipariş → cari zaten bağlı.
-        # Fazladan PostalAddress göndermek gereksiz ve hatalı.
 
-        _logger.info("Perakende fatura payload hazırlandı: %s (MT%s) | Email=%s", 
+        _logger.info("Perakende fatura payload hazırlandı: %s (MT%s) | Email=%s",
                      invoice.name, model_type, email_address or 'YOK')
 
         return payload
