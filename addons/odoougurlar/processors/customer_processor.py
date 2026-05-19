@@ -78,7 +78,6 @@ class CustomerProcessor(models.AbstractModel):
                     'FirstName': first_name[:50],   # GİB zorunlu: TCKN varsa Ad boş olamaz
                     'LastName': last_name[:50],     # GİB zorunlu: TCKN varsa Soyad boş olamaz
                     'IsIndividualAcc': True,
-                    'IsSubjectToEInvoice': True,
                     'IdentityNum': vat_clean,  # 11 haneli TCKN
                     'OfficeCode': 'M',
                     'CurrencyCode': 'TRY',
