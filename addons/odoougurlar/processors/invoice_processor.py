@@ -422,7 +422,8 @@ class InvoiceProcessor(models.AbstractModel):
             'DeliveryCompanyCode': m_delivery,
             'IsOrderBase': is_order_base,
             'IsSalesViaInternet': True,
-            'DocumentTypeCode': 4,
+            # DocumentTypeCode gönderilmiyor — Nebim müşterinin IsSubjectToEInvoice durumuna göre
+            # otomatik e-fatura veya e-arşiv seçer. 4 (e-arşiv) zorlayınca 10013 hatası oluyor.
             'IsPostingJournal': True,
             'SendInvoiceByEMail': True,
             'EMailAddress': email_address,

@@ -77,9 +77,9 @@ class CustomerProcessor(models.AbstractModel):
                     'CurrAccDescription': partner.name[:50],
                     'FirstName': first_name[:50],
                     'LastName': last_name[:50],
-                    'IsIndividualAcc': False,
+                    'IsIndividualAcc': True,
+                    'IsSubjectToEInvoice': True,
                     'IdentityNum': vat_clean,  # 11 haneli TCKN
-                    'TaxNumber': '',           # IsIndividualAcc=False iken zorunlu — boş string
                     'OfficeCode': 'M',
                     'CurrencyCode': 'TRY',
                 }
