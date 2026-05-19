@@ -39,55 +39,48 @@ class InvoiceProcessor(models.AbstractModel):
 
         for invoice in invoices:
             stats['processed'] += 1
+            raw_result = None
             try:
                 with self.env.cr.savepoint():
                     payload = self._build_invoice_payload(invoice)
-                    result = connector.post_data('Post', payload)
+                    raw_result = connector.post_data('Post', payload)
 
-                    # ═══ İkinci POST: IsPostingJournal=True (Yevmiye Fişi) ═══
-                    # Nebim ilk POST'ta IsPostingJournal'ı yok sayar (SQL: False kalır).
-                    # Hamurlabs SQL'inde IsPostingJournal=1, bizde 0.
-                    # 
-                    # Çözüm: İlk POST'un TAM RESPONSE'unu alıp IsPostingJournal=True
-                    # ekleyerek tekrar POST ediyoruz. Nebim sadece HeaderID ile minimal
-                    # payload kabul ETMİYOR — tam obje lazım.
-                    if isinstance(result, dict) and result.get('HeaderID'):
-                        try:
-                            # İkinci POST kaldırıldı — ilk POST'ta IsPostingJournal=True zaten var.
-                            # Tam response'u tekrar POST etmek Nebim'de ekstra
-                            # "Peşin Satış" hareketi yaratıyordu.
-                            _logger.info(
-                                "Fatura ilk POST'ta IsPostingJournal=True ile gönderildi: %s → HeaderID: %s",
-                                invoice.name, result.get('HeaderID')
-                            )
-                        except Exception as ej:
-                            _logger.warning("IsPostingJournal log hatası: %s - %s", invoice.name, str(ej))
+                    # ExceptionMessage kontrolu
+                    if isinstance(raw_result, dict) and raw_result.get('ExceptionMessage'):
+                        raise Exception(raw_result['ExceptionMessage'])
 
                     # Nebim fatura numarasını çıkar
                     nebim_invoice_number = ''
-                    if isinstance(result, dict):
-                        nebim_invoice_number = result.get('InvoiceNumber', '')
+                    if isinstance(raw_result, dict):
+                        nebim_invoice_number = (
+                            raw_result.get('InvoiceNumber')
+                            or raw_result.get('HeaderID')
+                            or ''
+                        )
 
                     invoice.write({
                         'nebim_sent': True,
                         'nebim_sent_date': fields.Datetime.now(),
-                        'nebim_response': str(result),
+                        'nebim_response': str(raw_result),
                         'nebim_error': False,
-                        'nebim_invoice_number': nebim_invoice_number or '',
+                        'nebim_invoice_number': str(nebim_invoice_number),
                     })
                     stats['updated'] += 1
                     _logger.info("Fatura Nebim'e gönderildi: %s → %s", invoice.name, nebim_invoice_number)
 
             except Exception as e:
                 stats['failed'] += 1
+                _logger.error("Fatura gönderim hatası [%s]: %s", invoice.name, str(e))
+                # Hata kaydını savepoint DIŞINDA yaz — savepoint rollback yapsa bile
+                # bu write çalışır ve kullanıcı hatayı Nebim Yanıt alanında görebilir.
                 try:
-                    invoice.write({'nebim_error': str(e)})
-                except Exception:
-                    _logger.warning("Fatura hata kaydı yazılamadı: %s", invoice.name)
-                _logger.error(
-                    "Fatura gönderim hatası [%s]: %s",
-                    invoice.name, str(e)
-                )
+                    invoice.write({
+                        'nebim_error': str(e),
+                        'nebim_response': str(raw_result) if raw_result is not None else 'Yanıt alınamadı',
+                    })
+                    self.env.cr.commit()
+                except Exception as write_err:
+                    _logger.warning("Fatura hata kaydı yazılamadı: %s — %s", invoice.name, write_err)
 
         return stats
 
@@ -411,14 +404,12 @@ class InvoiceProcessor(models.AbstractModel):
 
         m_payment_agent = (mapping.payment_agent if mapping and mapping.payment_agent else payment_agent)
 
-        # Hamurlabs InvoiceR_SiparisBazli.txt şablonuna göre payload
-        # IsCompleted sol (çalışan) formata göre EN SONDA gelir
+        # Minimal payload — sadece fatura için gereken alanlar
         desc = sale_order.client_order_ref or sale_order.name if sale_order else invoice.name
         payload = {
             'ModelType': model_type,
             'CustomerCode': customer_code,
             'Description': desc,
-            'InternalDescription': desc,
             'InvoiceDate': invoice_date_str,
             'OfficeCode': 'M',
             'StoreCode': m_store,
@@ -428,12 +419,7 @@ class InvoiceProcessor(models.AbstractModel):
             'DeliveryCompanyCode': m_delivery,
             'IsOrderBase': is_order_base,
             'IsSalesViaInternet': True,
-            'DocumentTypeCode': 4,
-            'IsPostingJournal': True,
-            'SendInvoiceByEMail': True,
-            'EMailAddress': email_address,
             'Lines': lines,
-            # Payments FATURADA GÖNDERİLMEZ — çift hareket yaratır
             'SalesViaInternetInfo': {
                 'SalesURL': m_sales_url,
                 'PaymentTypeCode': 1,
@@ -442,7 +428,7 @@ class InvoiceProcessor(models.AbstractModel):
                 'SendDate': now_date_str,
                 'PaymentAgent': m_payment_agent,
             },
-            'IsCompleted': True,  # Sol (çalışan) formata göre en sonda
+            'IsCompleted': True,
         }
 
         # BillingPostalAddressID / ShippingPostalAddressID GÖNDERİLMEZ (deneme)
