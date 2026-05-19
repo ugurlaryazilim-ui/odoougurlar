@@ -77,7 +77,7 @@ class CustomerProcessor(models.AbstractModel):
                     'CurrAccDescription': partner.name[:50],
                     'FirstName': first_name[:50],
                     'LastName': last_name[:50],
-                    'IsIndividualAcc': True,   # Şahıs firması = Gerçek Kişilik
+                    'IsIndividualAcc': False,  # Şahıs firması = False (bireysel 111... = True)
                     'IdentityNum': vat_clean,  # 11 haneli TCKN
                     # TaxNumber GÖNDERİLMEZ — Nebim "Geçersiz Değer" verir
                     # IsSubjectToEInvoice GÖNDERİLMEZ — Hamurlabs'ta yok, fatura seviyesinde yapılır
