@@ -75,15 +75,15 @@ class CustomerProcessor(models.AbstractModel):
                 payload = {
                     'ModelType': cari_model_type,
                     'CurrAccDescription': partner.name[:50],
-                    'FirstName': '',   # Şahıs firması: boş — tam ad CurrAccDescription'da
-                    'LastName': '',    # Şahıs firması: boş
+                    'FirstName': first_name[:50],   # GİB zorunlu: TCKN varsa Ad boş olamaz
+                    'LastName': last_name[:50],     # GİB zorunlu: TCKN varsa Soyad boş olamaz
                     'IsIndividualAcc': True,
                     'IsSubjectToEInvoice': True,
                     'IdentityNum': vat_clean,  # 11 haneli TCKN
                     'OfficeCode': 'M',
                     'CurrencyCode': 'TRY',
                 }
-                _logger.info("KURUMSAL (ŞAHIS FİRMASI): %s | TCKN → IdentityNum (11 hane)", partner.name)
+                _logger.info("KURUMSAL (ŞAHIS FİRMASI): %s | FirstName=%s LastName=%s", partner.name, first_name, last_name)
             else:
                 # ─── TÜZEL KİŞİ (10 hane VKN veya diğer) ───
                 payload = {
