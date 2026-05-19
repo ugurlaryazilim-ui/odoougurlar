@@ -75,8 +75,8 @@ class CustomerProcessor(models.AbstractModel):
                 payload = {
                     'ModelType': cari_model_type,
                     'CurrAccDescription': partner.name[:50],
-                    'FirstName': first_name[:50],
-                    'LastName': last_name[:50],
+                    'FirstName': '',   # Şahıs firması: boş — tam ad CurrAccDescription'da
+                    'LastName': '',    # Şahıs firması: boş
                     'IsIndividualAcc': True,
                     'IsSubjectToEInvoice': True,
                     'IdentityNum': vat_clean,  # 11 haneli TCKN
