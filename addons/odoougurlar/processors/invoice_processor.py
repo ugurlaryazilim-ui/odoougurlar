@@ -438,9 +438,7 @@ class InvoiceProcessor(models.AbstractModel):
             'IsCompleted': True,
         }
 
-        # ── Fatura PostalAddress — BillingPostalAddressID yerine doğrudan PostalAddress gönder ──
-        # Nebim fatura API'si PostalAddress'i GİB e-fatura XML'ine aktarır.
-        # BillingPostalAddressID gönderilince PostalAddress boş kalıyor → GİB şematron hatası.
+        # ── Fatura PostalAddress — FirstName/LastName/IdentityNum dolu gönder ──
         inv_partner = invoice.partner_id
         inv_vat_raw = (inv_partner.vat or '').strip()
         inv_vat_clean = ''.join(filter(str.isdigit, inv_vat_raw))
@@ -468,8 +466,12 @@ class InvoiceProcessor(models.AbstractModel):
             'TaxOfficeCode': '',
         }
 
+        # BillingPostalAddressID / ShippingPostalAddressID — PostalAddress yanında da gönder
+        if address_id:
+            payload['BillingPostalAddressID'] = address_id
+            payload['ShippingPostalAddressID'] = address_id
+
         _logger.info("Perakende fatura payload: %s | PostalAddress FirstName=%s LastName=%s IdentityNum=%s",
                      invoice.name, inv_first_name, inv_last_name, inv_vat_clean)
 
         return payload
-
