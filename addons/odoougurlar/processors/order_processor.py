@@ -100,6 +100,14 @@ class OrderProcessor(models.AbstractModel):
             },
         }
         
+        # ── PostalAddress bloğu ──
+        # Nebim siparişe adres bilgisini PostalAddress tekil nesnesi olarak da ister.
+        # Hamurlabs örneğine göre POSTerminalID'den ONCE gelecek.
+        partner = sale_order.partner_id
+        postal_address = self._build_postal_address(partner, mapping, sale_order)
+        if postal_address:
+            payload['PostalAddress'] = postal_address
+
         # Perakende siparişte POSTerminalID ve Payments gerekli
         # Hamurlabs'ta da sipariş Payments ile gönderiliyor.
         if not is_export:
@@ -118,13 +126,6 @@ class OrderProcessor(models.AbstractModel):
             if mapping and getattr(mapping, 'bank_code', ''):
                 payment_entry['BankCode'] = mapping.bank_code
             payload['Payments'] = [payment_entry]
-
-        # ── PostalAddress bloğu ──
-        # Nebim siparişe adres bilgisini PostalAddress tekil nesnesi olarak da ister.
-        partner = sale_order.partner_id
-        postal_address = self._build_postal_address(partner, mapping, sale_order)
-        if postal_address:
-            payload['PostalAddress'] = postal_address
 
         if is_export:
             payload['ExportFileNumber'] = export_file_number  # Sadece ihracat için
@@ -182,9 +183,13 @@ class OrderProcessor(models.AbstractModel):
     def _build_postal_address(self, partner, mapping, sale_order):
         """Sipariş için PostalAddress bloğunu partner bilgilerinden oluşturur.
 
-        Şahıs firması (11h TCKN): FirstName / LastName / IdentityNum
-        Tüzel kişi (10h VKN):     CompanyName / TaxNumber / TaxOfficeCode
-        Bireysel (is_company=False): FirstName / LastName / IdentityNum
+        ALAN SIRASI Nebim spesifikasyonuna göre sabitlendi:
+        Address, CityCode, CompanyName, CountryCode, DistrictCode,
+        FirstName, IdentityNum, LastName, StateCode, TaxNumber, TaxOfficeCode
+
+        Tüzel kişi (10h VKN) : CompanyName+TaxNumber+TaxOfficeCode dolu, diğerleri boş
+        Şahis firması (11h TCKN): FirstName+LastName+IdentityNum dolu, diğerleri boş
+        Bireysel             : FirstName+LastName+IdentityNum dolu, diğerleri boş
         """
         if not partner:
             return {}
@@ -206,13 +211,9 @@ class OrderProcessor(models.AbstractModel):
             except Exception as e:
                 _logger.warning("PostalAddress il/ilçe kodu çözümlenemedi: %s", e)
 
-        postal = {
-            'CountryCode': country_code,
-            'StateCode': state_code,
-            'CityCode': city_code,
-            'DistrictCode': district_code,
-            'Address': (partner.street or '')[:200],
-        }
+        # Varsayılan boş değerler
+        first_name = last_name = identity_num = company_name = tax_number = ''
+        tax_office_code = 'null'
 
         if partner.is_company:
             vat_raw = partner.vat or ''
@@ -220,20 +221,16 @@ class OrderProcessor(models.AbstractModel):
             is_sahis = len(vat_clean) == 11
 
             if is_sahis:
-                # Şahıs firması → TC Kimlik No + Ad/Soyad
+                # Şahis firması → TC Kimlik No + Ad/Soyad
                 name_parts = (partner.name or '').strip().split()
-                postal['FirstName'] = name_parts[0][:50] if name_parts else ''
-                postal['LastName'] = ' '.join(name_parts[1:])[:50] if len(name_parts) > 1 else ''
-                postal['IdentityNum'] = vat_clean
-                postal['CompanyName'] = ''
-                postal['TaxOfficeCode'] = 'null'
+                first_name = name_parts[0][:50] if name_parts else ''
+                last_name = ' '.join(name_parts[1:])[:50] if len(name_parts) > 1 else ''
+                identity_num = vat_clean
+                # company_name, tax_number boş kalır
             else:
                 # Tüzel kişi → VKN + Firma adı
-                postal['CompanyName'] = (partner.name or '')[:50]
-                postal['TaxNumber'] = vat_clean if len(vat_clean) == 10 else vat_raw
-                postal['FirstName'] = ''
-                postal['LastName'] = ''
-                postal['IdentityNum'] = ''
+                company_name = (partner.name or '')[:50]
+                tax_number = vat_clean if len(vat_clean) == 10 else vat_raw
                 # Vergi Dairesi kodu
                 tax_office_name = ''
                 if sale_order:
@@ -246,16 +243,27 @@ class OrderProcessor(models.AbstractModel):
                 if tax_office_name:
                     tax_mapping = self.env['odoougurlar.tax.mapping'].sudo().search(
                         [('name', '=ilike', tax_office_name.strip())], limit=1)
-                    postal['TaxOfficeCode'] = tax_mapping.nebim_tax_office_code if tax_mapping else 'null'
-                else:
-                    postal['TaxOfficeCode'] = 'null'
+                    tax_office_code = tax_mapping.nebim_tax_office_code if tax_mapping else 'null'
+                # first_name, last_name, identity_num boş kalır
         else:
             # Bireysel müşteri
             name_parts = (partner.name or '').strip().split()
-            postal['FirstName'] = name_parts[0][:50] if name_parts else ''
-            postal['LastName'] = ' '.join(name_parts[1:])[:50] if len(name_parts) > 1 else ''
-            postal['IdentityNum'] = partner.vat or '11111111111'
-            postal['CompanyName'] = ''
-            postal['TaxOfficeCode'] = 'null'
+            first_name = name_parts[0][:50] if name_parts else ''
+            last_name = ' '.join(name_parts[1:])[:50] if len(name_parts) > 1 else ''
+            identity_num = partner.vat or '11111111111'
+            # company_name, tax_number boş kalır
 
-        return postal
+        # Nebim spesifikasyonunun kesin alan sırası
+        return {
+            'Address':      (partner.street or '')[:200],
+            'CityCode':     city_code,
+            'CompanyName':  company_name,
+            'CountryCode':  country_code,
+            'DistrictCode': district_code,
+            'FirstName':    first_name,
+            'IdentityNum':  identity_num,
+            'LastName':     last_name,
+            'StateCode':    state_code,
+            'TaxNumber':    tax_number,
+            'TaxOfficeCode': tax_office_code,
+        }
