@@ -433,7 +433,7 @@ class InvoiceProcessor(models.AbstractModel):
             'IsOrderBase': is_order_base,
             'IsSalesViaInternet': True,
             'IsCompleted': True,
-            'DocumentTypeCode': 5,  # Deneme: 5
+            'DocumentTypeCode': 4,  # Deneme: 4 (önceki 5)
             'IsPostingJournal': True,
             'SendInvoiceByEMail': True,
             'EMailAddress': email_address,
