@@ -367,14 +367,16 @@ class InvoiceProcessor(models.AbstractModel):
         m_delivery = (mapping.delivery_company_code if mapping and mapping.delivery_company_code else 'YRT')
         m_sales_url = (mapping.sales_url if mapping and mapping.sales_url else 'www.trendyol.com')
 
-        # SalesViaInternetInfo tarihler — /Date(epoch_ms)/ formatı
+        # SalesViaInternetInfo tarihler — /Date(epoch_ms)/ formatı (WCF/MS JSON)
+        # NOT: \\/Date()\/ YANLIŞ — JSON'da \ gerekmez, sadece /Date()/ yeterli
         import time
         now_epoch_ms = int(time.time() * 1000)
         payment_epoch_ms = now_epoch_ms
         if sale_order and sale_order.date_order:
             payment_epoch_ms = int(sale_order.date_order.timestamp() * 1000)
-        now_date_str = f"\\/Date({now_epoch_ms})\\/"
-        payment_date_str = f"\\/Date({payment_epoch_ms})\\/"
+        now_date_str = f"/Date({now_epoch_ms})/"
+        payment_date_str = f"/Date({payment_epoch_ms})/"
+
 
         # ── E-posta adresi (e-arşiv fatura için gerekli) ──
         email_address = ''
