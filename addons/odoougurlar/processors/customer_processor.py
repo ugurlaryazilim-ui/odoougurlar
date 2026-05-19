@@ -75,10 +75,11 @@ class CustomerProcessor(models.AbstractModel):
                 payload = {
                     'ModelType': cari_model_type,
                     'CurrAccDescription': partner.name[:50],
-                    'FirstName': first_name[:50],   # GİB zorunlu: TCKN varsa Ad boş olamaz
-                    'LastName': last_name[:50],     # GİB zorunlu: TCKN varsa Soyad boş olamaz
-                    'IsIndividualAcc': True,
+                    'FirstName': first_name[:50],
+                    'LastName': last_name[:50],
+                    'IsIndividualAcc': False,
                     'IdentityNum': vat_clean,  # 11 haneli TCKN
+                    'TaxNumber': '',           # IsIndividualAcc=False iken zorunlu — boş string
                     'OfficeCode': 'M',
                     'CurrencyCode': 'TRY',
                 }
