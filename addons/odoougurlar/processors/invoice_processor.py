@@ -334,13 +334,13 @@ class InvoiceProcessor(models.AbstractModel):
             sale_line = line.sale_line_ids[0] if line.sale_line_ids else False
             order_line_id = sale_line.nebim_order_line_id if sale_line and sale_line.nebim_order_line_id else ''
 
-            line_data = {
-                'Qty1': float(line.quantity),
-            }
-
+            # OrderLineID varsa önce gelir, sonra Qty1 (integer)
             if order_line_id:
-                # Sipariş bazlı: OrderLineID ile Nebim siparişindeki fiyat kullanılır
-                line_data['OrderLineID'] = order_line_id
+                # Sipariş bazlı: OrderLineID önce, Qty1 integer olarak
+                line_data = {
+                    'OrderLineID': order_line_id,
+                    'Qty1': int(line.quantity),
+                }
                 has_order_line_ids = True
                 _logger.info(
                     "Nebim Fatura Satır (SİPARİŞ BAZLI): %s | OrderLineID=%s | Qty=%s",
@@ -348,7 +348,10 @@ class InvoiceProcessor(models.AbstractModel):
                 )
             else:
                 # Serbest fatura: Price alanı ile fiyat gönderilir
-                line_data['Price'] = float(line.price_unit)
+                line_data = {
+                    'Qty1': int(line.quantity),
+                    'Price': float(line.price_unit),
+                }
                 if line.product_id.barcode:
                     line_data['UsedBarcode'] = line.product_id.barcode
                 if line.product_id.default_code:
@@ -371,11 +374,14 @@ class InvoiceProcessor(models.AbstractModel):
         m_delivery = (mapping.delivery_company_code if mapping and mapping.delivery_company_code else 'YRT')
         m_sales_url = (mapping.sales_url if mapping and mapping.sales_url else 'www.trendyol.com')
 
-        # SalesViaInternetInfo tarihler
-        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        payment_date_str = ''
+        # SalesViaInternetInfo tarihler — /Date(epoch_ms)/ formatı
+        import time
+        now_epoch_ms = int(time.time() * 1000)
+        payment_epoch_ms = now_epoch_ms
         if sale_order and sale_order.date_order:
-            payment_date_str = sale_order.date_order.strftime('%Y-%m-%d %H:%M:%S')
+            payment_epoch_ms = int(sale_order.date_order.timestamp() * 1000)
+        now_date_str = f"\\/Date({now_epoch_ms})\\/"
+        payment_date_str = f"\\/Date({payment_epoch_ms})\\/"
 
         # ── E-posta adresi (e-arşiv fatura için gerekli) ──
         email_address = ''
@@ -427,18 +433,14 @@ class InvoiceProcessor(models.AbstractModel):
             'SendInvoiceByEMail': True,
             'EMailAddress': email_address,
             'Lines': lines,
-            'Payments': [self._build_payment_entry(
-                mapping,
-                mapping.credit_card_type_code if mapping and mapping.credit_card_type_code else 'TRD',
-                invoice.amount_total,
-                amount_key='AmountVI'
-            )],
+            # Payments FATURAADA GÖNDERİLMEZ — Sipariş bazlı faturada Nebim
+            # siparişteki ödemeyi zaten biliyor; tekrar göndermek çift hareket yaratır.
             'SalesViaInternetInfo': {
                 'SalesURL': m_sales_url,
                 'PaymentTypeCode': 1,
                 'PaymentTypeDescription': 'KREDIKARTI/BANKAKARTI',
                 'PaymentDate': payment_date_str,
-                'SendDate': now_str,
+                'SendDate': now_date_str,
                 'PaymentAgent': m_payment_agent,
             },
         }
