@@ -438,16 +438,38 @@ class InvoiceProcessor(models.AbstractModel):
             'IsCompleted': True,
         }
 
-        # Adres ID varsa ekle
-        if address_id:
-            payload['BillingPostalAddressID'] = address_id
-            payload['ShippingPostalAddressID'] = address_id
+        # ── Fatura PostalAddress — BillingPostalAddressID yerine doğrudan PostalAddress gönder ──
+        # Nebim fatura API'si PostalAddress'i GİB e-fatura XML'ine aktarır.
+        # BillingPostalAddressID gönderilince PostalAddress boş kalıyor → GİB şematron hatası.
+        inv_partner = invoice.partner_id
+        inv_vat_raw = (inv_partner.vat or '').strip()
+        inv_vat_clean = ''.join(filter(str.isdigit, inv_vat_raw))
+        inv_is_sahis = len(inv_vat_clean) == 11
 
-        # PostalAddress FATURADA GÖNDERİLMEZ
-        # GİB şematron hatası almamak için fatura payload'unda PostalAddress bloğu yok.
+        try:
+            inv_nebim_codes = self.env['odoougurlar.customer.processor']._resolve_nebim_address_codes(inv_partner)
+        except Exception:
+            inv_nebim_codes = {}
 
-        _logger.info("Perakende fatura payload hazırlandı: %s (MT%s) | Email=%s",
-                     invoice.name, model_type, email_address or 'YOK')
+        inv_name_parts = (inv_partner.name or '').strip().split()
+        inv_first_name = inv_name_parts[0] if inv_name_parts else ''
+        inv_last_name = ' '.join(inv_name_parts[1:]) if len(inv_name_parts) > 1 else ''
+
+        payload['PostalAddress'] = {
+            'Address':      (inv_partner.street or '')[:200],
+            'CityCode':     inv_nebim_codes.get('city_code', ''),
+            'CountryCode':  (inv_partner.country_id.code or 'TR').upper(),
+            'DistrictCode': inv_nebim_codes.get('district_code', ''),
+            'StateCode':    inv_nebim_codes.get('state_code', ''),
+            'FirstName':    inv_first_name[:50] if inv_is_sahis else '',
+            'LastName':     inv_last_name[:50] if inv_is_sahis else '',
+            'IdentityNum':  inv_vat_clean if inv_is_sahis else '',
+            'TaxNumber':    '' if inv_is_sahis else inv_vat_clean,
+            'TaxOfficeCode': '',
+        }
+
+        _logger.info("Perakende fatura payload: %s | PostalAddress FirstName=%s LastName=%s IdentityNum=%s",
+                     invoice.name, inv_first_name, inv_last_name, inv_vat_clean)
 
         return payload
 
