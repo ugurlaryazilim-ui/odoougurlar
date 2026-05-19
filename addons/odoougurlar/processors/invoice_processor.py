@@ -443,8 +443,41 @@ class InvoiceProcessor(models.AbstractModel):
             payload['BillingPostalAddressID'] = address_id
             payload['ShippingPostalAddressID'] = address_id
 
-        # PostalAddress bloğu FATURADA GÖNDERİLMEZ!
-        # Hamurlabs fatura isteğinde PostalAddress YOK ve e-arşiv çalışıyor.
+        # ── Fatura PostalAddress — FirstName/LastName BOŞ gönderilir ──
+        partner = invoice.partner_id
+        vat_raw2 = (partner.vat or '').strip()
+        vat_clean2 = ''.join(filter(str.isdigit, vat_raw2))
+        is_sahis2 = len(vat_clean2) == 11
+
+        inv_nebim_codes = self._resolve_nebim_address_codes(partner) if hasattr(self, '_resolve_nebim_address_codes') else {}
+        inv_city_code     = inv_nebim_codes.get('city_code', '')
+        inv_state_code    = inv_nebim_codes.get('state_code', '')
+        inv_district_code = inv_nebim_codes.get('district_code', '')
+
+        payload['PostalAddress'] = {
+            'Address':      (partner.street or '')[:200],
+            'AddressID':    0,
+            'BuildingName': '',
+            'BuildingNum':  '',
+            'CityCode':     inv_city_code,
+            'CompanyName':  '' if is_sahis2 else (partner.name or '')[:50],
+            'CountryCode':  (partner.country_id.code or 'TR').upper(),
+            'DistrictCode': inv_district_code,
+            'DoorNum':      0,
+            'FirstName':    '',
+            'FloorNum':     0,
+            'IdentityNum':  vat_clean2 if is_sahis2 else '',
+            'LastName':     '',
+            'QuarterCode':  0,
+            'QuarterName':  '',
+            'SiteName':     '',
+            'StateCode':    inv_state_code,
+            'StreetCode':   0,
+            'StreetName':   '',
+            'TaxNumber':    '' if is_sahis2 else vat_clean2,
+            'TaxOfficeCode': '',
+            'ZipCode':      '',
+        }
 
         _logger.info("Perakende fatura payload hazırlandı: %s (MT%s) | Email=%s",
                      invoice.name, model_type, email_address or 'YOK')

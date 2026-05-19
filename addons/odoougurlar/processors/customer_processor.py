@@ -83,7 +83,7 @@ class CustomerProcessor(models.AbstractModel):
                     'OfficeCode': 'M',
                     'CurrencyCode': 'TRY',
                 }
-                _logger.info("KURUMSAL (ŞAHIS FİRMASI): %s | TCKN → IdentityNum (11 hane), IsSubjectToEInvoice=GÖNDERİLMEZ", partner.name)
+                _logger.info("KURUMSAL (ŞAHIS FİRMASI): %s | TCKN → IdentityNum (11 hane)", partner.name)
             else:
                 # ─── TÜZEL KİŞİ (10 hane VKN veya diğer) ───
                 payload = {
