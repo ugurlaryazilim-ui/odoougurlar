@@ -181,15 +181,12 @@ class OrderProcessor(models.AbstractModel):
             raise Exception(f"Nebim Sipariş Aktarım Hatası: {str(e)}")
 
     def _build_postal_address(self, partner, mapping, sale_order):
-        """Sipariş için PostalAddress bloğunu partner bilgilerinden oluşturur.
+        """Sipariş için PostalAddress bloğunu Nebim resmi formatında oluşturur.
 
-        ALAN SIRASI Nebim spesifikasyonuna göre sabitlendi:
-        Address, CityCode, CompanyName, CountryCode, DistrictCode,
-        FirstName, IdentityNum, LastName, StateCode, TaxNumber, TaxOfficeCode
-
-        Tüzel kişi (10h VKN) : CompanyName+TaxNumber+TaxOfficeCode dolu, diğerleri boş
-        Şahis firması (11h TCKN): FirstName+LastName+IdentityNum dolu, diğerleri boş
-        Bireysel             : FirstName+LastName+IdentityNum dolu, diğerleri boş
+        Nebim resmi dökümantasyonundan alınan birebir alan sırası ve yapısı.
+        Tüzel kişi (10h VKN) : CompanyName + TaxNumber + TaxOfficeCode dolu
+        Şahıs firması (11h TCKN): FirstName + LastName + IdentityNum dolu
+        Bireysel (11111...) : FirstName + LastName + IdentityNum dolu
         """
         if not partner:
             return {}
@@ -212,8 +209,7 @@ class OrderProcessor(models.AbstractModel):
                 _logger.warning("PostalAddress il/ilçe kodu çözümlenemedi: %s", e)
 
         # Varsayılan boş değerler
-        first_name = last_name = identity_num = company_name = tax_number = ''
-        tax_office_code = 'null'
+        first_name = last_name = identity_num = company_name = tax_number = tax_office_code = ''
 
         if partner.is_company:
             vat_raw = partner.vat or ''
@@ -221,12 +217,11 @@ class OrderProcessor(models.AbstractModel):
             is_sahis = len(vat_clean) == 11
 
             if is_sahis:
-                # Şahis firması → TC Kimlik No + Ad/Soyad
+                # Şahıs firması → TC Kimlik No + Ad/Soyad
                 name_parts = (partner.name or '').strip().split()
                 first_name = name_parts[0][:50] if name_parts else ''
                 last_name = ' '.join(name_parts[1:])[:50] if len(name_parts) > 1 else ''
                 identity_num = vat_clean
-                # company_name, tax_number boş kalır
             else:
                 # Tüzel kişi → VKN + Firma adı
                 company_name = (partner.name or '')[:50]
@@ -243,27 +238,37 @@ class OrderProcessor(models.AbstractModel):
                 if tax_office_name:
                     tax_mapping = self.env['odoougurlar.tax.mapping'].sudo().search(
                         [('name', '=ilike', tax_office_name.strip())], limit=1)
-                    tax_office_code = tax_mapping.nebim_tax_office_code if tax_mapping else 'null'
-                # first_name, last_name, identity_num boş kalır
+                    tax_office_code = tax_mapping.nebim_tax_office_code if tax_mapping else ''
         else:
             # Bireysel müşteri
             name_parts = (partner.name or '').strip().split()
             first_name = name_parts[0][:50] if name_parts else ''
             last_name = ' '.join(name_parts[1:])[:50] if len(name_parts) > 1 else ''
             identity_num = partner.vat or '11111111111'
-            # company_name, tax_number boş kalır
 
-        # Nebim spesifikasyonunun kesin alan sırası
+        # Nebim resmi dökümantasyonundan birebir alan sırası
         return {
             'Address':      (partner.street or '')[:200],
+            'AddressID':    0,
+            'BuildingName': '',
+            'BuildingNum':  '',
             'CityCode':     city_code,
             'CompanyName':  company_name,
             'CountryCode':  country_code,
             'DistrictCode': district_code,
+            'DoorNum':      0,
             'FirstName':    first_name,
+            'FloorNum':     0,
             'IdentityNum':  identity_num,
             'LastName':     last_name,
+            'QuarterCode':  0,
+            'QuarterName':  '',
+            'SiteName':     '',
             'StateCode':    state_code,
+            'StreetCode':   0,
+            'StreetName':   '',
             'TaxNumber':    tax_number,
             'TaxOfficeCode': tax_office_code,
+            'ZipCode':      '',
         }
+

@@ -53,26 +53,15 @@ class InvoiceProcessor(models.AbstractModel):
                     # payload kabul ETMİYOR — tam obje lazım.
                     if isinstance(result, dict) and result.get('HeaderID'):
                         try:
-                            # Sadece IsPostingJournal=True ve IsCompleted=True güncelle.
-                            # Tam response'u (Payments dahil) tekrar POST ETME —
-                            # aksi halde Nebim Payments'ı ikinci kez işletip
-                            # ekstra "Peşin Satış" hareketi oluşturuyor.
-                            update_payload = {
-                                'HeaderID': result['HeaderID'],
-                                'ModelType': result.get('ModelType'),
-                                'IsPostingJournal': True,
-                                'IsCompleted': True,
-                            }
-                            update_result = connector.post_data('Post', update_payload)
+                            # İkinci POST kaldırıldı — ilk POST'ta IsPostingJournal=True zaten var.
+                            # Tam response'u tekrar POST etmek Nebim'de ekstra
+                            # "Peşin Satış" hareketi yaratıyordu.
                             _logger.info(
-                                "Fatura IsPostingJournal güncellendi: %s → HeaderID: %s",
+                                "Fatura ilk POST'ta IsPostingJournal=True ile gönderildi: %s → HeaderID: %s",
                                 invoice.name, result.get('HeaderID')
                             )
-                            # Güncelleme başarılıysa result'ı güncelle
-                            if isinstance(update_result, dict) and not update_result.get('ExceptionMessage'):
-                                result = update_result
                         except Exception as ej:
-                            _logger.warning("IsPostingJournal güncellemesi başarısız: %s - %s", invoice.name, str(ej))
+                            _logger.warning("IsPostingJournal log hatası: %s - %s", invoice.name, str(ej))
 
                     # Nebim fatura numarasını çıkar
                     nebim_invoice_number = ''
