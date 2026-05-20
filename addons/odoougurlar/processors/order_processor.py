@@ -53,9 +53,9 @@ class OrderProcessor(models.AbstractModel):
 
             line_data = {
                 'Qty1': line.product_uom_qty,
-                'PriceVI': price_vi,
+                'SalesPersonCode': mapping.sales_person_code if mapping else 'TRD',
                 'UsedBarcode': line.product_id.barcode or '',
-                'SalesPersonCode': mapping.sales_person_code if mapping else 'TRD'
+                'PriceVI': price_vi
             }
             lines.append(line_data)
 
@@ -118,7 +118,7 @@ class OrderProcessor(models.AbstractModel):
             'IsSalesViaInternet':   True,
             'ShipmentMethodCode':   m_shipment,
             'StoreCode':            m_store,
-            'WarehouseCode':        (m_warehouse if is_export else ''),
+            'WarehouseCode':        m_warehouse,
             'InternalDescription':  doc_ref,
             'Description':          doc_ref,
             'DeliveryCompanyCode':  ('' if is_export else m_delivery),
