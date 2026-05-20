@@ -48,8 +48,8 @@ class OrderProcessor(models.AbstractModel):
             if not line.product_uom_qty or line.product_uom_qty <= 0:
                 continue
                 
-            # PriceVI: KDV dahil fiyat (Hamurlabs bu şekilde gönderiyor)
-            price_vi = float(line.price_unit * (1 + line.tax_id[0].amount / 100)) if line.tax_id else float(line.price_unit)
+            # PriceVI: KDV dahil birim fiyat — Odoo price_total zaten KDV dahil hesaplar
+            price_vi = float(line.price_total / line.product_uom_qty) if line.product_uom_qty else float(line.price_unit)
 
             line_data = {
                 'Qty1': line.product_uom_qty,
