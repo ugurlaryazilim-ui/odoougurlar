@@ -410,6 +410,7 @@ class InvoiceProcessor(models.AbstractModel):
             'CustomerCode':        customer_code,
         }
 
+
         # PostalAddress — Hamurlabs TAM format (GİB schematron zorunlu)
         inv_partner = invoice.partner_id
         inv_vat     = (inv_partner.vat or '').strip()
@@ -430,37 +431,51 @@ class InvoiceProcessor(models.AbstractModel):
             inv_city  = nebim_codes.get('city_code', '')
             inv_dist  = nebim_codes.get('district_code', '')
 
+        # TaxOfficeCode — customer_processor ile aynı mantık: sipariş → tax_office → mapping → Nebim kodu
+        inv_tax_office_code = ''
+        if sale_order:
+            tax_office_name = ''
+            if hasattr(sale_order, 'trendyol_order_id') and sale_order.trendyol_order_id:
+                tax_office_name = getattr(sale_order.trendyol_order_id, 'tax_office', '') or ''
+            elif hasattr(sale_order, 'n11_order_id') and sale_order.n11_order_id:
+                tax_office_name = getattr(sale_order.n11_order_id, 'tax_office', '') or ''
+            elif hasattr(sale_order, 'hb_order_id') and sale_order.hb_order_id:
+                tax_office_name = getattr(sale_order.hb_order_id, 'tax_office', '') or ''
+            if tax_office_name:
+                tax_map = self.env['odoougurlar.tax.mapping'].sudo().search(
+                    [('name', '=ilike', tax_office_name.strip())], limit=1
+                )
+                inv_tax_office_code = tax_map.nebim_tax_office_code if tax_map else ''
+                _logger.info("Fatura TaxOfficeCode: '%s' → '%s'", tax_office_name, inv_tax_office_code)
+
         if inv_is_sahis:
             parts = (inv_partner.name or '').strip().split()
             payload['PostalAddress'] = {
-                'FirstName':    parts[0][:50] if parts else '',
-                'DistrictCode': inv_dist,
-                'LastName':     ' '.join(parts[1:])[:50] if len(parts) > 1 else '',
-                'StateCode':    inv_state,
-                'TaxOfficeCode': '',
-                'TaxNumber':    '',
-                'CityCode':     inv_city,
-                'CountryCode':  inv_country_code,
-                'CompanyName':  '',
-                'IdentityNum':  inv_vat,
-                'Address':      (inv_partner.street or '')[:200],
+                'FirstName':     parts[0][:50] if parts else '',
+                'DistrictCode':  inv_dist,
+                'LastName':      ' '.join(parts[1:])[:50] if len(parts) > 1 else '',
+                'StateCode':     inv_state,
+                'TaxOfficeCode': inv_tax_office_code,
+                'TaxNumber':     '',
+                'CityCode':      inv_city,
+                'CountryCode':   inv_country_code,
+                'CompanyName':   '',
+                'IdentityNum':   inv_vat,
+                'Address':       (inv_partner.street or '')[:200],
             }
         elif inv_vat and len(inv_vat) == 10:
             payload['PostalAddress'] = {
-                'CompanyName':  (inv_partner.name or '')[:100],
-                'TaxNumber':    inv_vat,
-                'DistrictCode': inv_dist,
-                'StateCode':    inv_state,
-                'CityCode':     inv_city,
-                'CountryCode':  inv_country_code,
-                'Address':      (inv_partner.street or '')[:200],
+                'CompanyName':   (inv_partner.name or '')[:100],
+                'TaxNumber':     inv_vat,
+                'DistrictCode':  inv_dist,
+                'StateCode':     inv_state,
+                'TaxOfficeCode': inv_tax_office_code,
+                'CityCode':      inv_city,
+                'CountryCode':   inv_country_code,
+                'Address':       (inv_partner.street or '')[:200],
             }
 
-        # BillingPostalAddressID / ShippingPostalAddressID — Hamurlabs bunları SİPARİŞE koyuyor
-        # faturaya KOYMUYOR. Biz de kaldırıyoruz.
-        # (AdresID'ler sale_order_ext.py üzerinden order payload'una eklenmeli)
-
-        _logger.info("Perakende fatura payload hazırlandı: %s (MT%s) | Email=%s",
-                     invoice.name, model_type, email_address or 'YOK')
+        _logger.info("Perakende fatura payload hazırlandı: %s (MT%s) | Email=%s | TaxOffice=%s",
+                     invoice.name, model_type, email_address or 'YOK', inv_tax_office_code or '-')
 
         return payload
