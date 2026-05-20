@@ -88,50 +88,45 @@ class OrderProcessor(models.AbstractModel):
             payment_epoch_sec = int(time.time())
         payment_doc_date = f"\\/Date({payment_epoch_sec})\\/"
 
-        # ── Nebim payload ──
+        # ── Nebim payload ── Hamurlabs alan sırası birebir
         doc_ref = sale_order.client_order_ref or sale_order.name
+        
         payload = {
-            'ModelType':            model_type,
-            'CustomerCode':         customer_code,
-            'POSTerminalID':        '1',
-            'OrderDate':            order_date_str,
-            'OfficeCode':           'M',
-            'StoreCode':            m_store,
-            'WarehouseCode':        (m_warehouse if is_export else ''),
-            'IsSalesViaInternet':   True,
             'IsCompleted':          True,
-            'ShipmentMethodCode':   m_shipment,
-            'DeliveryCompanyCode':  ('' if is_export else m_delivery),
-            'DocumentNumber':       doc_ref,
-            'Description':          doc_ref,
-            'InternalDescription':  sale_order.name,
-            'BillingPostalAddressID': addr_id,
-            'ShippingPostalAddressID': addr_id,
             'OrdersViaInternetInfo': {
+                'PaymentTypeDescription': 'KREDIKARTI/BANKAKARTI',
+                'SendDate':               send_date_str,
+                'PaymentDate':            payment_date_str,
                 'SalesURL':               m_sales_url,
                 'PaymentTypeCode':        1,
-                'PaymentTypeDescription': 'KREDIKARTI/BANKAKARTI',
                 'PaymentAgent':           m_payment_agent,
-                'PaymentDate':            payment_date_str,
-                'SendDate':               send_date_str,
             },
+            'POSTerminalID':        '1',
+            'BillingPostalAddressID': addr_id,
             'Lines': lines,
+            'OfficeCode':           'M',
+            'DocumentNumber':       doc_ref,
             'Payments': [{
-                'PaymentType':        '2',
                 'CreditCardTypeCode': mapping.credit_card_type_code if mapping and mapping.credit_card_type_code else 'TRD',
                 'Code':               '',
                 'InstallmentCount':   1,
-                'CurrencyCode':       'TRY',
-                'Amount':             sale_order.amount_total,
                 'DocumentDate':       payment_doc_date,
+                'PaymentType':        '2',
+                'Amount':             sale_order.amount_total,
+                'CurrencyCode':       'TRY',
             }],
+            'IsSalesViaInternet':   True,
+            'ShipmentMethodCode':   m_shipment,
+            'StoreCode':            m_store,
+            'WarehouseCode':        (m_warehouse if is_export else ''),
+            'InternalDescription':  doc_ref,
+            'Description':          doc_ref,
+            'DeliveryCompanyCode':  ('' if is_export else m_delivery),
+            'ModelType':            model_type,
+            'OrderDate':            order_date_str,
+            'CustomerCode':         customer_code,
+            'ShippingPostalAddressID': addr_id,
         }
-
-        # PostalAddress — Nebim formatında en sonda gelir
-        partner = sale_order.partner_id
-        postal_address = self._build_postal_address(partner, mapping, sale_order)
-        if postal_address:
-            payload['PostalAddress'] = postal_address
 
         if is_export:
             payload['ExportFileNumber'] = export_file_number

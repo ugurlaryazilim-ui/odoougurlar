@@ -381,36 +381,6 @@ class InvoiceProcessor(models.AbstractModel):
         # Sipariş ref
         desc = sale_order.client_order_ref or sale_order.name if sale_order else invoice.name
 
-        # ── PAYLOAD — Hamurlabs alan sırası birebir ──
-        payload = {
-            'IsCompleted':       True,
-            'SendInvoiceByEMail': True,
-            'POSTerminalID':     '1',
-            'Lines':             lines,
-            'OfficeCode':        'M',
-            'SalesViaInternetInfo': {
-                'PaymentTypeDescription': 'KREDIKARTI/BANKAKARTI',
-                'SendDate':    now_str,
-                'PaymentDate': pay_str,
-                'SalesURL':    m_url,
-                'PaymentTypeCode': 1,
-                'PaymentAgent':    m_agent,
-            },
-            'EMailAddress':       email_address,
-            'IsOrderBase':        is_order_base,
-            'IsSalesViaInternet': True,
-            'ShipmentMethodCode': '2',
-            'StoreCode':          m_store,
-            'WarehouseCode':      m_wh,
-            'InternalDescription': desc,
-            'Description':         desc,
-            'InvoiceDate':         invoice_date_str,
-            'DeliveryCompanyCode': m_delivery,
-            'ModelType':           model_type,
-            'CustomerCode':        customer_code,
-        }
-
-
         # PostalAddress — Hamurlabs TAM format (GİB schematron zorunlu)
         inv_partner = invoice.partner_id
         inv_vat     = (inv_partner.vat or '').strip()
@@ -448,9 +418,10 @@ class InvoiceProcessor(models.AbstractModel):
                 inv_tax_office_code = tax_map.nebim_tax_office_code if tax_map else ''
                 _logger.info("Fatura TaxOfficeCode: '%s' → '%s'", tax_office_name, inv_tax_office_code)
 
+        postal_address = {}
         if inv_is_sahis:
             parts = (inv_partner.name or '').strip().split()
-            payload['PostalAddress'] = {
+            postal_address = {
                 'FirstName':     parts[0][:50] if parts else '',
                 'DistrictCode':  inv_dist,
                 'LastName':      ' '.join(parts[1:])[:50] if len(parts) > 1 else '',
@@ -464,7 +435,7 @@ class InvoiceProcessor(models.AbstractModel):
                 'Address':       (inv_partner.street or '')[:200],
             }
         elif inv_vat and len(inv_vat) == 10:
-            payload['PostalAddress'] = {
+            postal_address = {
                 'CompanyName':   (inv_partner.name or '')[:100],
                 'TaxNumber':     inv_vat,
                 'DistrictCode':  inv_dist,
@@ -474,6 +445,36 @@ class InvoiceProcessor(models.AbstractModel):
                 'CountryCode':   inv_country_code,
                 'Address':       (inv_partner.street or '')[:200],
             }
+
+        # ── PAYLOAD — Hamurlabs alan sırası birebir ──
+        payload = {
+            'IsCompleted':       True,
+            'SendInvoiceByEMail': True,
+            'POSTerminalID':     '1',
+            'Lines':             lines,
+            'OfficeCode':        'M',
+            'SalesViaInternetInfo': {
+                'PaymentTypeDescription': 'KREDIKARTI/BANKAKARTI',
+                'SendDate':    now_str,
+                'PaymentDate': pay_str,
+                'SalesURL':    m_url,
+                'PaymentTypeCode': 1,
+                'PaymentAgent':    m_agent,
+            },
+            'EMailAddress':       email_address,
+            'PostalAddress':      postal_address,
+            'IsOrderBase':        is_order_base,
+            'IsSalesViaInternet': True,
+            'ShipmentMethodCode': '2',
+            'StoreCode':          m_store,
+            'WarehouseCode':      m_wh,
+            'InternalDescription': desc,
+            'Description':         desc,
+            'InvoiceDate':         invoice_date_str,
+            'DeliveryCompanyCode': m_delivery,
+            'ModelType':           model_type,
+            'CustomerCode':        customer_code,
+        }
 
         _logger.info("Perakende fatura payload hazırlandı: %s (MT%s) | Email=%s | TaxOffice=%s",
                      invoice.name, model_type, email_address or 'YOK', inv_tax_office_code or '-')
