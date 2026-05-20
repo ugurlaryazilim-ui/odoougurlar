@@ -87,8 +87,8 @@ class CustomerProcessor(models.AbstractModel):
                 payload = {
                     'ModelType': invoice_model_type,  # Hamurlabs şahıs firmaları için fatura MT ile gönderiyor (8)
                     'CurrAccDescription': partner.name[:50],
-                    'FirstName': first_name[:50],
-                    'LastName': last_name[:50],
+                    'FirstName': '',
+                    'LastName': '',
                     'IsIndividualAcc': True,
                     'IsSubjectToEInvoice': True,
                     'IdentityNum': vat_clean,  # 11 haneli TCKN
