@@ -122,27 +122,26 @@ class CustomerProcessor(models.AbstractModel):
                 _logger.info("TÜZEL KİŞİ E-FATURA: %s → IsSubjectToEInvoice=True", partner.name)
             
             # Pazaryeri Vergi Dairesi Adı -> Nebim Vergi Dairesi Kodu eşleştirmesi
-            # SADECE tüzel kişi (10h VKN) için — şahıs firması (11h TCKN) için Hamurlabs boş gönderiyor
-            if not is_sahis:
-                tax_office_name = ''
-                if sale_order:
-                    # Trendyol
-                    if hasattr(sale_order, 'trendyol_order_id') and sale_order.trendyol_order_id:
-                        tax_office_name = sale_order.trendyol_order_id.tax_office or ''
-                    # N11
-                    elif hasattr(sale_order, 'n11_order_id') and sale_order.n11_order_id:
-                        tax_office_name = sale_order.n11_order_id.tax_office or ''
-                    # Hepsiburada (gelecek genişleme)
-                    elif hasattr(sale_order, 'hb_order_id') and sale_order.hb_order_id:
-                        tax_office_name = getattr(sale_order.hb_order_id, 'tax_office', '') or ''
-                    
-                if tax_office_name:
-                    tax_mapping = self.env['odoougurlar.tax.mapping'].sudo().search([('name', '=ilike', tax_office_name.strip())], limit=1)
-                    if tax_mapping:
-                        payload['TaxOfficeCode'] = tax_mapping.nebim_tax_office_code
-                        _logger.info("Vergi Dairesi Eşleştirildi: '%s' → Kod: %s", tax_office_name, tax_mapping.nebim_tax_office_code)
-                    else:
-                        _logger.warning("Eksik Vergi Dairesi Eşleştirmesi: '%s' için kayıt bulunamadı.", tax_office_name)
+            # Hem tüzel kişi hem de şahıs firması için vergi dairesini gönderiyoruz
+            tax_office_name = ''
+            if sale_order:
+                # Trendyol
+                if hasattr(sale_order, 'trendyol_order_id') and sale_order.trendyol_order_id:
+                    tax_office_name = sale_order.trendyol_order_id.tax_office or ''
+                # N11
+                elif hasattr(sale_order, 'n11_order_id') and sale_order.n11_order_id:
+                    tax_office_name = sale_order.n11_order_id.tax_office or ''
+                # Hepsiburada (gelecek genişleme)
+                elif hasattr(sale_order, 'hb_order_id') and sale_order.hb_order_id:
+                    tax_office_name = getattr(sale_order.hb_order_id, 'tax_office', '') or ''
+                
+            if tax_office_name:
+                tax_mapping = self.env['odoougurlar.tax.mapping'].sudo().search([('name', '=ilike', tax_office_name.strip())], limit=1)
+                if tax_mapping:
+                    payload['TaxOfficeCode'] = tax_mapping.nebim_tax_office_code
+                    _logger.info("Vergi Dairesi Eşleştirildi: '%s' → Kod: %s", tax_office_name, tax_mapping.nebim_tax_office_code)
+                else:
+                    _logger.warning("Eksik Vergi Dairesi Eşleştirmesi: '%s' için kayıt bulunamadı.", tax_office_name)
             
             # KVKK uyumlu loglama — VKN maskeleniyor
             masked_vat = f"{vat_clean[:3]}***{vat_clean[-2:]}" if len(vat_clean) > 5 else '***'
