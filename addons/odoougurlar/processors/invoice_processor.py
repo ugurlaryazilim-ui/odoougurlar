@@ -330,8 +330,8 @@ class InvoiceProcessor(models.AbstractModel):
             sale_line = line.sale_line_ids[0] if line.sale_line_ids else False
             order_line_id = sale_line.nebim_order_line_id if sale_line and sale_line.nebim_order_line_id else ''
 
-            # KDV dahil birim fiyat (PriceVI) — Hamurlabs sipariş bazlı faturada da gönderdi
-            price_vi = float(line.price_subtotal + line.price_tax) / max(int(line.quantity), 1) if line.quantity else float(line.price_unit)
+            # KDV dahil birim fiyat (PriceVI) — price_total Odoo'nun KDV dahil alanı
+            price_vi = float(line.price_total / line.quantity) if line.quantity else float(line.price_unit)
 
             if order_line_id:
                 # Sipariş bazlı: Hamurlabs gibi OrderLineID + Qty1 + UsedBarcode + SalesPersonCode
