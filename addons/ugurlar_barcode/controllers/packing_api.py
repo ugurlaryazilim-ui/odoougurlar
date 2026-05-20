@@ -190,25 +190,6 @@ class PackingApiController(BarcodeApiBase):
             if target_move:
                 break
 
-        # ── Exact match bulunamadı → aynı şablon (product_tmpl_id) ile dene ──
-        # Mağazadan gelen farklı varyantlar için (aynı ürün, farklı internal ref)
-        template_matched = False
-        if not target_move and product.product_tmpl_id:
-            scanned_tmpl_id = product.product_tmpl_id.id
-            for picking in batch.picking_ids:
-                for move in picking.move_ids:
-                    if (move.product_id.product_tmpl_id.id == scanned_tmpl_id and
-                            move.quantity < move.product_uom_qty):
-                        target_move = move
-                        target_picking = picking
-                        template_matched = True
-                        _logger.info(
-                            "Şablon eşleşmesi: taranan=%s → rotadaki=%s (aynı ürün şablonu)",
-                            product.display_name, move.product_id.display_name)
-                        break
-                if target_move:
-                    break
-
         if not target_move:
             # Belki tamamlanmış — bilgi ver
             for picking in batch.picking_ids:
@@ -222,18 +203,7 @@ class PackingApiController(BarcodeApiBase):
                             'picking_id': picking.id,
                             'picking_name': picking.name,
                         }
-                    # Şablon bazında da kontrol et
-                    if (product.product_tmpl_id and
-                            move.product_id.product_tmpl_id.id == product.product_tmpl_id.id):
-                        return {
-                            'warning': True,
-                            'message': f'{product.display_name} zaten tamamlandı',
-                            'product_name': product.display_name,
-                            'picking_completed': all(m.quantity >= m.product_uom_qty for m in picking.move_ids),
-                            'picking_id': picking.id,
-                            'picking_name': picking.name,
-                        }
-            return {'error': f'Ürün toplama listesinde bulunamadı — barkod eşleşmedi: [{product.barcode or "?"}] {product.display_name}'}
+            return {'error': f'Ürün toplama listesinde bulunamadı — barkod eşleşmedi (Yanlış beden/varyant okutmuş olabilirsiniz): [{product.barcode or "?"}] {product.display_name}'}
 
         # Barkod eşleşti → qty artır
         new_qty = target_move.quantity + 1
