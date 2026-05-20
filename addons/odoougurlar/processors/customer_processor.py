@@ -90,7 +90,6 @@ class CustomerProcessor(models.AbstractModel):
                     'FirstName': first_name[:50],
                     'LastName': last_name[:50],
                     'IsIndividualAcc': True,
-                    'IsSubjectToEInvoice': True,
                     'IdentityNum': vat_clean,  # 11 haneli TCKN
                     'OfficeCode': 'M',
                     'CurrencyCode': 'TRY',
