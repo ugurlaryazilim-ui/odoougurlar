@@ -49,25 +49,8 @@ class InvoiceProcessor(models.AbstractModel):
                     if isinstance(raw_result, dict) and raw_result.get('ExceptionMessage'):
                         raise Exception(raw_result['ExceptionMessage'])
 
-                    # ── İkinci POST: IsPostingJournal güncellemesi (Hamurlabs yöntemi) ──
-                    # Nebim ilk POST'ta IsPostingJournal=True'yu yok sayar.
-                    # HeaderID ile ikinci POST yaparak journal posting tetiklenir.
-                    # Bu olmazsa DB'de IsPostingJournal=0 kalır, e-fatura/e-arşiv gönderilmez.
-                    header_id = ''
-                    if isinstance(raw_result, dict):
-                        header_id = raw_result.get('HeaderID') or raw_result.get('ApplicationID') or ''
-                    if header_id:
-                        try:
-                            update_payload = {
-                                'ModelType': payload.get('ModelType', 8),
-                                'HeaderID': header_id,
-                                'IsPostingJournal': True,
-                                'IsCompleted': True,
-                            }
-                            connector.post_data('Post', update_payload)
-                            _logger.info("Fatura IsPostingJournal güncellendi: %s → HeaderID: %s", invoice.name, header_id)
-                        except Exception as ej:
-                            _logger.warning("IsPostingJournal güncellemesi başarısız: %s - %s", invoice.name, str(ej))
+                    # NOT: Hamurlabs IsPostingJournal göndermez ve ikinci POST yapmaz.
+                    # Nebim bu işlemi kendi internal trigger ile yapar.
 
                     # Nebim fatura numarasını çıkar
                     nebim_invoice_number = ''
@@ -347,13 +330,17 @@ class InvoiceProcessor(models.AbstractModel):
             sale_line = line.sale_line_ids[0] if line.sale_line_ids else False
             order_line_id = sale_line.nebim_order_line_id if sale_line and sale_line.nebim_order_line_id else ''
 
-            # OrderLineID varsa önce gelir, sonra Qty1 (integer)
+            # KDV dahil birim fiyat (PriceVI) — Hamurlabs sipariş bazlı faturada da gönderdi
+            price_vi = float(line.price_subtotal + line.price_tax) / max(int(line.quantity), 1) if line.quantity else float(line.price_unit)
+
             if order_line_id:
-                # Sipariş bazlı: OrderLineID önce, Qty1 integer olarak
+                # Sipariş bazlı: Hamurlabs gibi OrderLineID + Qty1 + UsedBarcode + SalesPersonCode
                 line_data = {
                     'OrderLineID': order_line_id,
                     'Qty1': int(line.quantity),
                 }
+                if line.product_id.barcode:
+                    line_data['UsedBarcode'] = line.product_id.barcode
                 has_order_line_ids = True
                 _logger.info(
                     "Nebim Fatura Satır (SİPARİŞ BAZLI): %s | OrderLineID=%s | Qty=%s",
@@ -364,6 +351,7 @@ class InvoiceProcessor(models.AbstractModel):
                 line_data = {
                     'Qty1': int(line.quantity),
                     'Price': float(line.price_unit),
+                    'PriceVI': price_vi,
                 }
                 if line.product_id.barcode:
                     line_data['UsedBarcode'] = line.product_id.barcode
@@ -387,15 +375,13 @@ class InvoiceProcessor(models.AbstractModel):
         m_delivery = (mapping.delivery_company_code if mapping and mapping.delivery_company_code else 'YRT')
         m_sales_url = (mapping.sales_url if mapping and mapping.sales_url else 'www.trendyol.com')
 
-        # SalesViaInternetInfo tarihler — /Date(epoch_ms)/ formatı (WCF/MS JSON)
-        # NOT: \\/Date()\/ YANLIŞ — JSON'da \ gerekmez, sadece /Date()/ yeterli
-        import time
-        now_epoch_ms = int(time.time() * 1000)
-        payment_epoch_ms = now_epoch_ms
+        # SalesViaInternetInfo tarihler — Hamurlabs "YYYY-MM-DD HH:MM:SS" string formatı kullanıyor
+        from datetime import datetime as _dt
+        now_dt = _dt.now()
+        now_date_str = now_dt.strftime('%Y-%m-%d %H:%M:%S')
+        payment_date_str = now_date_str
         if sale_order and sale_order.date_order:
-            payment_epoch_ms = int(sale_order.date_order.timestamp() * 1000)
-        now_date_str = f"/Date({now_epoch_ms})/"
-        payment_date_str = f"/Date({payment_epoch_ms})/"
+            payment_date_str = sale_order.date_order.strftime('%Y-%m-%d %H:%M:%S')
 
 
         # ── E-posta adresi (e-arşiv fatura için gerekli) ──
@@ -437,14 +423,13 @@ class InvoiceProcessor(models.AbstractModel):
             'OfficeCode': 'M',
             'StoreCode': m_store,
             'WarehouseCode': m_warehouse,
-            'POSTerminalID': 1,
+            'POSTerminalID': '1',  # Hamurlabs string olarak gönderiyor
             'ShipmentMethodCode': '2',
             'DeliveryCompanyCode': m_delivery,
             'IsOrderBase': is_order_base,
             'IsSalesViaInternet': True,
-            # DocumentTypeCode gönderilmiyor — Nebim müşterinin IsSubjectToEInvoice durumuna göre
-            # otomatik e-fatura veya e-arşiv seçer. 4 (e-arşiv) zorlayınca 10013 hatası oluyor.
-            'IsPostingJournal': True,
+            # DocumentTypeCode ve IsPostingJournal gönderilmiyor (Hamurlabs da göndermedi)
+            # Nebim IsSubjectToEInvoice durumuna göre kendi belirliyor.
             'SendInvoiceByEMail': True,
             'EMailAddress': email_address,
             'Lines': lines,
@@ -459,29 +444,58 @@ class InvoiceProcessor(models.AbstractModel):
             'IsCompleted': True,
         }
 
-        # PostalAddress — Hamurlabs backup yöntemi: sadece kimlik alanları gönder
+        # PostalAddress — Hamurlabs TAM format: tüm alanlar gönderilmeli (GİB schematron gereksinimi)
         inv_partner = invoice.partner_id
         inv_vat = (inv_partner.vat or '').strip()
         inv_is_sahis = len(inv_vat) == 11 and inv_vat.isdigit()
+
+        # Adres kodlarını çöz (il/ilçe/bölge)
+        nebim_codes = self.env['odoougurlar.customer.processor'].sudo()._resolve_nebim_address_codes(inv_partner)
+        inv_country_code = (
+            self.env['odoougurlar.nebim.country'].sudo().find_nebim_country(inv_partner.country_id.id)
+            if inv_partner.country_id else 'TR'
+        ) or 'TR'
+        inv_country_code = inv_country_code.upper()
+        if inv_country_code != 'TR':
+            inv_state_code = inv_country_code
+            inv_city_code = inv_country_code
+            inv_district_code = inv_country_code
+        else:
+            inv_state_code = nebim_codes.get('state_code', '')
+            inv_city_code = nebim_codes.get('city_code', '')
+            inv_district_code = nebim_codes.get('district_code', '')
+
         if inv_is_sahis:
             inv_name_parts = (inv_partner.name or '').strip().split()
             payload['PostalAddress'] = {
-                'FirstName': inv_name_parts[0][:50] if inv_name_parts else '',
-                'LastName':  ' '.join(inv_name_parts[1:])[:50] if len(inv_name_parts) > 1 else '',
-                'IdentityNum': inv_vat,
+                'FirstName':    inv_name_parts[0][:50] if inv_name_parts else '',
+                'LastName':     ' '.join(inv_name_parts[1:])[:50] if len(inv_name_parts) > 1 else '',
+                'IdentityNum':  inv_vat,
+                'CountryCode':  inv_country_code,
+                'StateCode':    inv_state_code,
+                'CityCode':     inv_city_code,
+                'DistrictCode': inv_district_code,
+                'TaxNumber':    '',
+                'TaxOfficeCode': '',
+                'CompanyName':  '',
+                'Address':      (inv_partner.street or '')[:200],
             }
-            _logger.info("Fatura PostalAddress (şahıs): %s | FirstName=%s",
-                         inv_partner.name, inv_name_parts[0] if inv_name_parts else '')
+            _logger.info("Fatura PostalAddress (şahıs/TAM): %s | State=%s City=%s",
+                         inv_partner.name, inv_state_code, inv_city_code)
         elif inv_vat and len(inv_vat) == 10:
             payload['PostalAddress'] = {
-                'CompanyName': (inv_partner.name or '')[:100],
-                'TaxNumber': inv_vat,
+                'CompanyName':  (inv_partner.name or '')[:100],
+                'TaxNumber':    inv_vat,
+                'CountryCode':  inv_country_code,
+                'StateCode':    inv_state_code,
+                'CityCode':     inv_city_code,
+                'DistrictCode': inv_district_code,
+                'Address':      (inv_partner.street or '')[:200],
             }
 
-        # BillingPostalAddressID / ShippingPostalAddressID — PostalAddress yanında da gönder
-        if address_id:
-            payload['BillingPostalAddressID'] = address_id
-            payload['ShippingPostalAddressID'] = address_id
+        # BillingPostalAddressID / ShippingPostalAddressID — Hamurlabs bunları SİPARİŞE koyuyor
+        # faturaya KOYMUYOR. Biz de kaldırıyoruz.
+        # (AdresID'ler sale_order_ext.py üzerinden order payload'una eklenmeli)
 
         _logger.info("Perakende fatura payload hazırlandı: %s (MT%s) | Email=%s",
                      invoice.name, model_type, email_address or 'YOK')

@@ -48,9 +48,12 @@ class OrderProcessor(models.AbstractModel):
             if not line.product_uom_qty or line.product_uom_qty <= 0:
                 continue
                 
+            # PriceVI: KDV dahil fiyat (Hamurlabs bu şekilde gönderiyor)
+            price_vi = float(line.price_unit * (1 + line.tax_id[0].amount / 100)) if line.tax_id else float(line.price_unit)
+
             line_data = {
                 'Qty1': line.product_uom_qty,
-                'Price': line.price_unit,
+                'PriceVI': price_vi,
                 'UsedBarcode': line.product_id.barcode or '',
                 'SalesPersonCode': mapping.sales_person_code if mapping else 'TRD'
             }
@@ -63,40 +66,47 @@ class OrderProcessor(models.AbstractModel):
         m_payment_agent = (mapping.payment_agent if mapping and mapping.payment_agent else 'TrendyolMp')
         m_sales_url = (mapping.sales_url if mapping and mapping.sales_url else 'www.trendyol.com')
         
-        # Nebim Toptan (Model 14) ve Perakende (Model 13), her ikisi de Adres id eksik olunca ağlar
+        # Adres ID — siparişe ekleniyor (Hamurlabs yöntemi)
         addr_id = sale_order.nebim_address_id or (mapping.nebim_address_id if mapping else '') or 'adc3d09b-897b-4b74-a29f-b42600863ec3'
 
         # ShipmentMethodCode: 1=İhracat, 2=Yurtiçi Kargo
-        # Mapping default'u '1' olabilir ama yurtiçi siparişlerde '2' olmalı
         if is_export:
             m_shipment = (mapping.shipment_method_code if mapping and getattr(mapping, 'shipment_method_code', None) else '1')
         else:
             m_shipment = '2'  # Yurtiçi her zaman kargo
 
-        # OrderDate: Nebim resmi formatı YYYYMMDD
-        order_date_str = sale_order.date_order.strftime('%Y%m%d') if sale_order.date_order else fields.Date.today().strftime('%Y%m%d')
-        send_date_str = fields.Date.today().strftime('%Y%m%d')
-        payment_date_str = sale_order.date_order.strftime('%Y%m%d') if sale_order.date_order else send_date_str
+        # Tarihler — Hamurlabs "YYYY-MM-DD" string formatı kullanıyor
+        order_date_str = sale_order.date_order.strftime('%Y-%m-%d') if sale_order.date_order else fields.Date.today().strftime('%Y-%m-%d')
+        send_date_str = fields.Date.today().strftime('%Y-%m-%d')
+        payment_date_str = sale_order.date_order.strftime('%Y-%m-%d') if sale_order.date_order else send_date_str
 
-        # ── Nebim resmi sıralama — birebir aynı ──
+        # Payment.DocumentDate: Hamurlabs epoch SANIYE cinsinden gönderiyor
+        import time
+        if sale_order.date_order:
+            payment_epoch_sec = int(sale_order.date_order.timestamp())
+        else:
+            payment_epoch_sec = int(time.time())
+        payment_doc_date = f"\\/Date({payment_epoch_sec})\\/"
+
+        # ── Nebim payload ──
         doc_ref = sale_order.client_order_ref or sale_order.name
         payload = {
             'ModelType':            model_type,
             'CustomerCode':         customer_code,
-            'PosTerminalID':        1,
+            'POSTerminalID':        '1',
             'OrderDate':            order_date_str,
             'OfficeCode':           'M',
             'StoreCode':            m_store,
             'WarehouseCode':        (m_warehouse if is_export else ''),
             'IsSalesViaInternet':   True,
-            'ApplyCampaign':        True,
             'IsCompleted':          True,
-            'ShipmentMethodCode':   int(m_shipment),
+            'ShipmentMethodCode':   m_shipment,
             'DeliveryCompanyCode':  ('' if is_export else m_delivery),
-            'SuppressItemDiscount': False,
             'DocumentNumber':       doc_ref,
             'Description':          doc_ref,
             'InternalDescription':  sale_order.name,
+            'BillingPostalAddressID': addr_id,
+            'ShippingPostalAddressID': addr_id,
             'OrdersViaInternetInfo': {
                 'SalesURL':               m_sales_url,
                 'PaymentTypeCode':        1,
@@ -107,11 +117,13 @@ class OrderProcessor(models.AbstractModel):
             },
             'Lines': lines,
             'Payments': [{
-                'PaymentType':        2,
+                'PaymentType':        '2',
                 'CreditCardTypeCode': mapping.credit_card_type_code if mapping and mapping.credit_card_type_code else 'TRD',
+                'Code':               '',
                 'InstallmentCount':   1,
                 'CurrencyCode':       'TRY',
                 'Amount':             sale_order.amount_total,
+                'DocumentDate':       payment_doc_date,
             }],
         }
 
