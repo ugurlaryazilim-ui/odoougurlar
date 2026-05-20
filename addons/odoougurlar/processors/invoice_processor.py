@@ -436,13 +436,16 @@ class InvoiceProcessor(models.AbstractModel):
             }
         elif inv_vat and len(inv_vat) == 10:
             postal_address = {
-                'CompanyName':   (inv_partner.name or '')[:100],
-                'TaxNumber':     inv_vat,
+                'FirstName':     '',
                 'DistrictCode':  inv_dist,
+                'LastName':      '',
                 'StateCode':     inv_state,
                 'TaxOfficeCode': inv_tax_office_code,
+                'TaxNumber':     inv_vat,
                 'CityCode':      inv_city,
                 'CountryCode':   inv_country_code,
+                'CompanyName':   (inv_partner.name or '')[:100],
+                'IdentityNum':   '',
                 'Address':       (inv_partner.street or '')[:200],
             }
 
