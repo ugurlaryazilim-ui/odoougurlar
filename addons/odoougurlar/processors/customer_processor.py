@@ -270,18 +270,19 @@ class CustomerProcessor(models.AbstractModel):
         
         odoo_state = partner.state_id.name if partner.state_id else ''
         odoo_city = partner.city or ''
-        
-        _logger.info("Nebim İl/İlçe çözümleme başladı: state='%s', city='%s', partner='%s'",
-                     odoo_state, odoo_city, partner.name)
-        
-        if not odoo_state and not odoo_city:
-            _logger.warning("Partner '%s' il/ilçe bilgisi boş!", partner.name)
+        country_code = (partner.country_id.code or '').upper()  # 'TR', 'AZ', 'GR' vb.
+
+        _logger.info("Nebim İl/İlçe çözümleme başladı: state='%s', city='%s', country='%s', partner='%s'",
+                     odoo_state, odoo_city, country_code, partner.name)
+
+        if not odoo_state and not odoo_city and not country_code:
+            _logger.warning("Partner '%s' adres bilgisi boş!", partner.name)
             return empty
-        
+
         # ─── Yöntem 1: Odoo tablosundan bul ───
         district_model = self.env['odoougurlar.nebim.district'].sudo()
         table_count = district_model.search_count([])
-        
+
         if table_count > 0:
             result = district_model.find_nebim_codes(odoo_state, odoo_city)
             if result.get('city_code'):
@@ -289,32 +290,33 @@ class CustomerProcessor(models.AbstractModel):
             _logger.info("Odoo tablosunda eşleşme bulunamadı, Nebim SP ile denenecek...")
         else:
             _logger.info("Nebim İlçe tablosu boş, SP'den doğrudan çekilecek...")
-        
+
         # ─── Yöntem 2: Nebim SP'yi doğrudan çağır ───
         try:
             connector = self.env['odoougurlar.nebim.connector']
             sp_data = connector.run_proc('sp_GetDistrict_Hamurlabs')
-            
+
             if not isinstance(sp_data, list):
                 _logger.error("SP beklenmeyen yanıt döndü: %s", type(sp_data))
                 return empty
-            
+
             _logger.info("SP'den %d ilçe kaydı alındı, eşleştirme yapılıyor...", len(sp_data))
-            
-            # Eşleştirme: Normalize karşılaştırma ile
-            norm_city = _norm(odoo_city)    # İlçe: "CIGLI"
-            norm_state = _norm(odoo_state)  # İl: "IZMIR"
-            
+
+            norm_city = _norm(odoo_city)
+            norm_state = _norm(odoo_state)
+
             best_match = None
             city_only_match = None
-            
+            country_match = None  # Ülke bazlı fallback (TR olmayan ülkeler için)
+
             for row in sp_data:
                 city_desc = row.get('CityDescription', '') or row.get('CityName', '') or ''
                 district_desc = row.get('DistrictDescription', '') or row.get('DistrictName', '') or ''
-                
+                row_country = (row.get('CountryCode', '') or '').upper()
+
                 norm_row_city = _norm(city_desc)
                 norm_row_district = _norm(district_desc)
-                
+
                 # Tam eşleşme: İlçe + İl
                 if norm_city and norm_city == norm_row_district:
                     if norm_state and norm_state == norm_row_city:
@@ -323,36 +325,40 @@ class CustomerProcessor(models.AbstractModel):
                     elif not norm_state:
                         best_match = row
                         break
-                
-                # İl eşleşmesi (fallback - en az bölge/il kodu dönsün)
+
+                # İl eşleşmesi (fallback)
                 if norm_state and norm_state == norm_row_city and not city_only_match:
                     city_only_match = row
-            
-            match = best_match or city_only_match
+
+                # Ülke kodu eşleşmesi (TR olmayan ülkeler için son çare)
+                if country_code and country_code != 'TR' and row_country == country_code and not country_match:
+                    country_match = row
+
+            match = best_match or city_only_match or (country_match if country_code != 'TR' else None)
             if match:
                 result = {
                     'state_code': match.get('StateCode', '') or match.get('stateCode', '') or '',
                     'city_code': match.get('CityCode', '') or match.get('cityCode', '') or '',
-                    'district_code': match.get('DistrictCode', '') or match.get('districtCode', '') or '',
+                    'district_code': match.get('DistrictCode', '') or match.get('districtCode', '') or '' if (best_match or city_only_match) else '',
                 }
                 _logger.info(
-                    "✅ Nebim İl/İlçe eşleşti (SP): %s/%s → state=%s, city=%s, district=%s",
-                    odoo_state, odoo_city,
+                    "✅ Nebim İl/İlçe eşleşti: %s/%s (country=%s) → state=%s, city=%s, district=%s",
+                    odoo_state, odoo_city, country_code,
                     result['state_code'], result['city_code'], result['district_code']
                 )
-                
-                # Tablo boşsa veya eksikse sonucu kaydet (gelecek sorgular için cache)
+
+                # Tablo boşsa veya eksikse sonucu kaydet
                 if table_count == 0 or not best_match:
                     self._save_sp_to_table(sp_data, district_model)
-                
+
                 return result
             else:
                 _logger.warning(
-                    "❌ Nebim İl/İlçe eşleşMEDİ: il='%s' (norm='%s'), ilçe='%s' (norm='%s') — %d kayıt kontrol edildi",
-                    odoo_state, norm_state, odoo_city, norm_city, len(sp_data)
+                    "❌ Nebim İl/İlçe eşleşMEDİ: il='%s' (norm='%s'), ilçe='%s' (norm='%s'), country='%s' — %d kayıt kontrol edildi",
+                    odoo_state, norm_state, odoo_city, norm_city, country_code, len(sp_data)
                 )
                 return empty
-                
+
         except Exception as e:
             _logger.error("Nebim SP çağrısı başarısız: %s", e)
             return empty
