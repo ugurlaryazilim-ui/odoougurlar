@@ -87,7 +87,6 @@ class OrderProcessor(models.AbstractModel):
             'OrderDate':            order_date_str,
             'OfficeCode':           'M',
             'StoreCode':            m_store,
-            'StoreWareHouseCode':   (m_warehouse if is_export else m_store),
             'WarehouseCode':        (m_warehouse if is_export else ''),
             'IsSalesViaInternet':   True,
             'ApplyCampaign':        True,
