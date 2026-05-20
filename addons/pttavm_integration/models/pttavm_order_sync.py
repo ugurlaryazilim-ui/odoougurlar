@@ -200,13 +200,12 @@ class PttavmOrderSync(models.Model):
         
         pttavm_order = self.create(vals)
         
-        # kargo_yapilmasi_bekleniyor durumlari ise Odoo'ya aktar
-        if first_product_status in ['kargo_yapilmasi_bekleniyor', 'havale_onayi_bekleniyor', 'onay_surecinde']:
-            sale_order = self._create_odoo_sale_order(pttavm_order, store, shipment_addr, billing_addr, customer_email, phone_number, order_json)
-            pttavm_order.write({'sale_order_id': sale_order.id})
-            
-            if store.auto_confirm and sale_order.state in ['draft', 'sent']:
-                sale_order.action_confirm()
+        # Kullanıcı talebi: Pttavm sipariş durumu ne olursa olsun Odoo satış siparişine aktar
+        sale_order = self._create_odoo_sale_order(pttavm_order, store, shipment_addr, billing_addr, customer_email, phone_number, order_json)
+        pttavm_order.write({'sale_order_id': sale_order.id})
+        
+        if store.auto_confirm and sale_order.state in ['draft', 'sent']:
+            sale_order.action_confirm()
                 
         return 'created'
 

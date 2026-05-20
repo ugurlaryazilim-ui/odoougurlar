@@ -29,26 +29,22 @@ class PttavmOrderActions(models.Model):
                     fail += 1
                     continue
                 
-                # Sadece Odoo'da faturalandırma aşamasına girenleri içeri al
-                if order.order_status in ['kargo_yapilmasi_bekleniyor', 'havale_onayi_bekleniyor', 'onay_surecinde']:
-                    # Create odoo sale order from pttavm_order_sync method 
-                    shipment_addr = package_data.get('shipmentAddress') or {}
-                    billing_addr = package_data.get('billingAddress') or {}
-                    customer_email = package_data.get('customerEmail') or shipment_addr.get('customerEmail') or ''
-                    phone_number = shipment_addr.get('phoneNumber') or ''
+                # Kullanıcı talebi: Pttavm sipariş durumu ne olursa olsun Odoo satış siparişine aktar
+                shipment_addr = package_data.get('shipmentAddress') or {}
+                billing_addr = package_data.get('billingAddress') or {}
+                customer_email = package_data.get('customerEmail') or shipment_addr.get('customerEmail') or ''
+                phone_number = shipment_addr.get('phoneNumber') or ''
 
-                    sale_order = self._create_odoo_sale_order(order, store, shipment_addr, billing_addr, customer_email, phone_number)
-                    order.write({
-                        'sale_order_id': sale_order.id,
-                        'store_id': store.id,
-                    })
-                    
-                    if store.auto_confirm and sale_order.state in ['draft', 'sent']:
-                        sale_order.action_confirm()
+                sale_order = self._create_odoo_sale_order(order, store, shipment_addr, billing_addr, customer_email, phone_number)
+                order.write({
+                    'sale_order_id': sale_order.id,
+                    'store_id': store.id,
+                })
+                
+                if store.auto_confirm and sale_order.state in ['draft', 'sent']:
+                    sale_order.action_confirm()
 
-                    success += 1
-                else:
-                    fail += 1
+                success += 1
             except Exception as e:
                 fail += 1
                 _logger.exception("Pttavm Tekrar deneme hatası %s: %s", order.order_number, e)
