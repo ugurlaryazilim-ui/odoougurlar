@@ -85,7 +85,8 @@ class CustomerProcessor(models.AbstractModel):
                 last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
 
                 payload = {
-                    'ModelType': invoice_model_type,  # Hamurlabs şahıs firmaları için fatura MT ile gönderiyor (8)
+                    'ModelType': cari_model_type,  # Cari API için 3 (perakende müşteri)
+                    'CurrAccCode': '',
                     'CurrAccDescription': partner.name[:50],
                     'FirstName': '',
                     'LastName': '',
