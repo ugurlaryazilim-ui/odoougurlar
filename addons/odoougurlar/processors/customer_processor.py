@@ -102,8 +102,6 @@ class CustomerProcessor(models.AbstractModel):
                 payload = {
                     'ModelType': cari_model_type,
                     'CurrAccDescription': partner.name[:50],
-                    'FirstName': partner.name[:50],
-                    'LastName': '',
                     'IsIndividualAcc': False,
                     'TaxNumber': vat_clean if len(vat_clean) == 10 else vat_raw,
                     'OfficeCode': 'M',
