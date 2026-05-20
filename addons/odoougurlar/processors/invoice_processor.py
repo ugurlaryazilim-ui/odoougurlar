@@ -306,18 +306,8 @@ class InvoiceProcessor(models.AbstractModel):
 
     @api.private
     def _build_retail_invoice(self, invoice, sale_order, mapping, customer_code, model_type, address_id):
-        """ModelType 8 — Perakende Fatura (e-Arşiv)."""
-        
-        # Tarih formatı: YYYYMMDD
+        # ── Satır verileri ── Hamurlabs birebir format
         invoice_date_str = invoice.invoice_date.strftime('%Y%m%d') if invoice.invoice_date else ''
-        
-        # ── Satır verileri ──
-        # Strateji: OrderLineID varsa → sipariş bazlı fatura (Nebim siparişindeki fiyatı kullanır)
-        #           OrderLineID yoksa → serbest fatura (Price alanıyla gönderilir)
-        #
-        # "Nebim Sıfırla" butonu ile güncel fiyatlarla sipariş Nebim'e gönderilir.
-        # Bu siparişteki OrderLineID'ler sale.order.line'a kaydedilir.
-        # Fatura bu OrderLineID'lere bağlandığında Nebim siparişteki (doğru) fiyatı kullanır.
         has_order_line_ids = False
         lines = []
         for line in invoice.invoice_line_ids:
@@ -326,130 +316,105 @@ class InvoiceProcessor(models.AbstractModel):
             if not line.quantity or line.quantity <= 0:
                 continue
 
-            # Fatura satırını sipariş satırıyla eşleştir
             sale_line = line.sale_line_ids[0] if line.sale_line_ids else False
             order_line_id = sale_line.nebim_order_line_id if sale_line and sale_line.nebim_order_line_id else ''
 
-            # KDV dahil birim fiyat (PriceVI) — price_total Odoo'nun KDV dahil alanı
-            price_vi = float(line.price_total / line.quantity) if line.quantity else float(line.price_unit)
+            # KDV dahil birim fiyat — price_total Odoo standardı (price_tax değil!)
+            qty = float(line.quantity)
+            price_vi = round(float(line.price_total) / qty, 2) if qty else round(float(line.price_unit), 2)
 
             if order_line_id:
-                # Sipariş bazlı: Hamurlabs gibi OrderLineID + Qty1 + UsedBarcode + SalesPersonCode
+                # ── Sipariş bazlı — Hamurlabs birebir ──
                 line_data = {
-                    'OrderLineID': order_line_id,
-                    'Qty1': int(line.quantity),
+                    'Qty1':           qty,
+                    'UsedBarcode':    line.product_id.barcode or '',
+                    'SalesPersonCode': mapping.sales_person_code if mapping and mapping.sales_person_code else 'TRD',
+                    'OrderLineID':    order_line_id,
+                    'PriceVI':        price_vi,
                 }
-                if line.product_id.barcode:
-                    line_data['UsedBarcode'] = line.product_id.barcode
                 has_order_line_ids = True
-                _logger.info(
-                    "Nebim Fatura Satır (SİPARİŞ BAZLI): %s | OrderLineID=%s | Qty=%s",
-                    line.product_id.display_name, order_line_id, line.quantity,
-                )
             else:
-                # Serbest fatura: Price alanı ile fiyat gönderilir
+                # ── Serbest fatura ──
                 line_data = {
-                    'Qty1': int(line.quantity),
-                    'Price': float(line.price_unit),
+                    'Qty1':    qty,
                     'PriceVI': price_vi,
                 }
                 if line.product_id.barcode:
                     line_data['UsedBarcode'] = line.product_id.barcode
                 if line.product_id.default_code:
                     line_data['ItemCode'] = line.product_id.default_code
-                _logger.info(
-                    "Nebim Fatura Satır (SERBEST): %s | Barcode=%s | Price(KDV hariç)=%s",
-                    line.product_id.display_name,
-                    line_data.get('UsedBarcode', 'YOK'),
-                    line.price_unit,
-                )
 
             lines.append(line_data)
+            _logger.info("Fatura satır: %s | OrderLineID=%s | PriceVI=%s",
+                         line.product_id.display_name, order_line_id or '-', price_vi)
 
         is_order_base = has_order_line_ids
-        _logger.info("Nebim Fatura Modu: %s", "SİPARİŞ BAZLI" if is_order_base else "SERBEST")
 
-        # Mapping'den değerleri al
-        m_store = (mapping.store_code if mapping and mapping.store_code else '002')
-        m_warehouse = (mapping.warehouse_code if mapping and mapping.warehouse_code else '002')
-        m_delivery = (mapping.delivery_company_code if mapping and mapping.delivery_company_code else 'YRT')
-        m_sales_url = (mapping.sales_url if mapping and mapping.sales_url else 'www.trendyol.com')
+        # Mapping değerleri
+        m_store    = mapping.store_code if mapping and mapping.store_code else '002'
+        m_wh       = mapping.warehouse_code if mapping and mapping.warehouse_code else '002'
+        m_delivery = mapping.delivery_company_code if mapping and mapping.delivery_company_code else 'YRT'
+        m_url      = mapping.sales_url if mapping and mapping.sales_url else 'www.trendyol.com'
 
-        # SalesViaInternetInfo tarihler — Hamurlabs "YYYY-MM-DD HH:MM:SS" string formatı kullanıyor
+        # SalesViaInternetInfo tarihleri — Hamurlabs "YYYY-MM-DD HH:MM:SS" string
         from datetime import datetime as _dt
-        now_dt = _dt.now()
-        now_date_str = now_dt.strftime('%Y-%m-%d %H:%M:%S')
-        payment_date_str = now_date_str
-        if sale_order and sale_order.date_order:
-            payment_date_str = sale_order.date_order.strftime('%Y-%m-%d %H:%M:%S')
+        now_str     = _dt.now().strftime('%Y-%m-%d %H:%M:%S')
+        pay_str     = sale_order.date_order.strftime('%Y-%m-%d %H:%M:%S') if sale_order and sale_order.date_order else now_str
 
-
-        # ── E-posta adresi (e-arşiv fatura için gerekli) ──
+        # E-posta
         email_address = ''
         payment_agent = ''
         if sale_order:
-            # Trendyol
             if hasattr(sale_order, 'trendyol_order_id') and sale_order.trendyol_order_id:
                 email_address = sale_order.trendyol_order_id.customer_email or ''
                 payment_agent = 'TrendyolMp'
-            # Hepsiburada
             elif hasattr(sale_order, 'hb_order_id') and sale_order.hb_order_id:
                 email_address = getattr(sale_order.hb_order_id, 'customer_email', '') or ''
                 payment_agent = 'HepsiBuradaMp'
-            # N11
             elif hasattr(sale_order, 'n11_order_id') and sale_order.n11_order_id:
                 email_address = getattr(sale_order.n11_order_id, 'buyer_email', '') or ''
                 payment_agent = 'N11Mp'
-            # Amazon
-            elif hasattr(sale_order, 'amazon_store_id') and sale_order.amazon_store_id:
-                payment_agent = 'AmazonMp'
-            # PttAvm
-            elif hasattr(sale_order, 'pttavm_order_id') and sale_order.pttavm_order_id:
-                payment_agent = 'PttAvmMp'
-        # Fallback: partner email
         if not email_address and invoice.partner_id.email:
             email_address = invoice.partner_id.email or ''
+        m_agent = mapping.payment_agent if mapping and mapping.payment_agent else payment_agent
 
-        m_payment_agent = (mapping.payment_agent if mapping and mapping.payment_agent else payment_agent)
-
-        # Minimal payload — sadece fatura için gereken alanlar
+        # Sipariş ref
         desc = sale_order.client_order_ref or sale_order.name if sale_order else invoice.name
+
+        # ── PAYLOAD — Hamurlabs alan sırası birebir ──
         payload = {
-            'ModelType': model_type,
-            'CustomerCode': customer_code,
-            'Description': desc,
-            'InternalDescription': desc,
-            'InvoiceDate': invoice_date_str,
-            'OfficeCode': 'M',
-            'StoreCode': m_store,
-            'WarehouseCode': m_warehouse,
-            'POSTerminalID': '1',  # Hamurlabs string olarak gönderiyor
-            'ShipmentMethodCode': '2',
-            'DeliveryCompanyCode': m_delivery,
-            'IsOrderBase': is_order_base,
-            'IsSalesViaInternet': True,
-            # DocumentTypeCode ve IsPostingJournal gönderilmiyor (Hamurlabs da göndermedi)
-            # Nebim IsSubjectToEInvoice durumuna göre kendi belirliyor.
+            'IsCompleted':       True,
             'SendInvoiceByEMail': True,
-            'EMailAddress': email_address,
-            'Lines': lines,
+            'POSTerminalID':     '1',
+            'Lines':             lines,
+            'OfficeCode':        'M',
             'SalesViaInternetInfo': {
-                'SalesURL': m_sales_url,
-                'PaymentTypeCode': 1,
                 'PaymentTypeDescription': 'KREDIKARTI/BANKAKARTI',
-                'PaymentDate': payment_date_str,
-                'SendDate': now_date_str,
-                'PaymentAgent': m_payment_agent,
+                'SendDate':    now_str,
+                'PaymentDate': pay_str,
+                'SalesURL':    m_url,
+                'PaymentTypeCode': 1,
+                'PaymentAgent':    m_agent,
             },
-            'IsCompleted': True,
+            'EMailAddress':       email_address,
+            'IsOrderBase':        is_order_base,
+            'IsSalesViaInternet': True,
+            'ShipmentMethodCode': '2',
+            'StoreCode':          m_store,
+            'WarehouseCode':      m_wh,
+            'InternalDescription': desc,
+            'Description':         desc,
+            'InvoiceDate':         invoice_date_str,
+            'DeliveryCompanyCode': m_delivery,
+            'ModelType':           model_type,
+            'CustomerCode':        customer_code,
         }
 
-        # PostalAddress — Hamurlabs TAM format: tüm alanlar gönderilmeli (GİB schematron gereksinimi)
+        # PostalAddress — Hamurlabs TAM format (GİB schematron zorunlu)
         inv_partner = invoice.partner_id
-        inv_vat = (inv_partner.vat or '').strip()
+        inv_vat     = (inv_partner.vat or '').strip()
         inv_is_sahis = len(inv_vat) == 11 and inv_vat.isdigit()
 
-        # Adres kodlarını çöz (il/ilçe/bölge)
         nebim_codes = self.env['odoougurlar.customer.processor'].sudo()._resolve_nebim_address_codes(inv_partner)
         inv_country_code = (
             self.env['odoougurlar.nebim.country'].sudo().find_nebim_country(inv_partner.country_id.id)
@@ -457,39 +422,37 @@ class InvoiceProcessor(models.AbstractModel):
         ) or 'TR'
         inv_country_code = inv_country_code.upper()
         if inv_country_code != 'TR':
-            inv_state_code = inv_country_code
-            inv_city_code = inv_country_code
-            inv_district_code = inv_country_code
+            inv_state = inv_country_code
+            inv_city  = inv_country_code
+            inv_dist  = inv_country_code
         else:
-            inv_state_code = nebim_codes.get('state_code', '')
-            inv_city_code = nebim_codes.get('city_code', '')
-            inv_district_code = nebim_codes.get('district_code', '')
+            inv_state = nebim_codes.get('state_code', '')
+            inv_city  = nebim_codes.get('city_code', '')
+            inv_dist  = nebim_codes.get('district_code', '')
 
         if inv_is_sahis:
-            inv_name_parts = (inv_partner.name or '').strip().split()
+            parts = (inv_partner.name or '').strip().split()
             payload['PostalAddress'] = {
-                'FirstName':    inv_name_parts[0][:50] if inv_name_parts else '',
-                'LastName':     ' '.join(inv_name_parts[1:])[:50] if len(inv_name_parts) > 1 else '',
-                'IdentityNum':  inv_vat,
-                'CountryCode':  inv_country_code,
-                'StateCode':    inv_state_code,
-                'CityCode':     inv_city_code,
-                'DistrictCode': inv_district_code,
-                'TaxNumber':    '',
+                'FirstName':    parts[0][:50] if parts else '',
+                'DistrictCode': inv_dist,
+                'LastName':     ' '.join(parts[1:])[:50] if len(parts) > 1 else '',
+                'StateCode':    inv_state,
                 'TaxOfficeCode': '',
+                'TaxNumber':    '',
+                'CityCode':     inv_city,
+                'CountryCode':  inv_country_code,
                 'CompanyName':  '',
+                'IdentityNum':  inv_vat,
                 'Address':      (inv_partner.street or '')[:200],
             }
-            _logger.info("Fatura PostalAddress (şahıs/TAM): %s | State=%s City=%s",
-                         inv_partner.name, inv_state_code, inv_city_code)
         elif inv_vat and len(inv_vat) == 10:
             payload['PostalAddress'] = {
                 'CompanyName':  (inv_partner.name or '')[:100],
                 'TaxNumber':    inv_vat,
+                'DistrictCode': inv_dist,
+                'StateCode':    inv_state,
+                'CityCode':     inv_city,
                 'CountryCode':  inv_country_code,
-                'StateCode':    inv_state_code,
-                'CityCode':     inv_city_code,
-                'DistrictCode': inv_district_code,
                 'Address':      (inv_partner.street or '')[:200],
             }
 
