@@ -38,11 +38,23 @@ class CustomerProcessor(models.AbstractModel):
         # ─── İl/İlçe/Bölge Kodu Çözümleme ───
         nebim_codes = self._resolve_nebim_address_codes(partner)
         
-        country_code = (partner.country_id.code or 'TR').upper()
+        # ─── Ülke Kodu: sp_GetCountry_Hamurlabs tablosundan Nebim'e özgü kodu al ───
+        # find_nebim_country → odoougurlar.nebim.country tablosuna bakar (SP'den senkronize edilmiş)
+        # Eşleşme yoksa ISO kodu fallback olarak kullanılır (AZ, GR, TR...)
+        country_code = (
+            self.env['odoougurlar.nebim.country'].sudo().find_nebim_country(partner.country_id.id)
+            if partner.country_id else 'TR'
+        ) or 'TR'
+        country_code = country_code.upper()
+
         if country_code != 'TR':
+            # Mikro ihracat / yurtdışı: Bölge + İl + İlçe = ülke kodu (AZ, GR, BH...)
+            # Nebim yabancı adreslerde detaylı il/ilçe kodu gerektirmez
             state_code = country_code
             city_code = country_code
             district_code = country_code
+            _logger.info("Yurtdışı müşteri (%s): StateCode=CityCode=DistrictCode='%s'",
+                         partner.name, country_code)
         else:
             state_code = nebim_codes.get('state_code', '')
             city_code = nebim_codes.get('city_code', '')
