@@ -52,7 +52,7 @@ class TrendyolStore(models.Model):
     # ─── Tek Sipariş Çekme ───────────────────────────────
     fetch_order_number = fields.Char(
         string='Sipariş No',
-        store=False,
+        copy=False,
         help='Trendyol sipariş numarasını yazıp "Sipariş Çek" butonuna basarak tek siparişi çekebilirsiniz',
     )
 
