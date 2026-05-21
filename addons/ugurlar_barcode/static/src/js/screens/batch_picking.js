@@ -827,14 +827,18 @@ export class BatchPickingScreen extends Component {
         const imgSrc = ev.target.src;
         if (!imgSrc || imgSrc.includes('placeholder')) return;
 
-        // Küçük boyut (image_128/image_256) yerine orijinal boyutu (image_1920) yükle
-        const fullSrc = imgSrc.replace(/image_\d+/, 'image_1920');
+        // Büyük boyut adayları (en büyükten küçüğe dene)
+        const sizes = ['image_1920', 'image_512', 'image_256'];
+        const candidates = sizes
+            .map(s => imgSrc.replace(/image_\d+/, s))
+            .filter(url => url !== imgSrc);
+        candidates.push(imgSrc); // son çare: orijinal küçük resim
 
         const overlay = document.createElement('div');
         overlay.className = 'bp-lightbox-overlay';
         overlay.innerHTML = `
             <button class="bp-lightbox-close">✕</button>
-            <img src="${fullSrc}" alt="Ürün Görseli"/>
+            <img alt="Ürün Görseli"/>
         `;
 
         const close = () => {
@@ -843,7 +847,21 @@ export class BatchPickingScreen extends Component {
 
         overlay.querySelector('.bp-lightbox-close').onclick = (e) => { e.stopPropagation(); close(); };
         overlay.onclick = close;
-        overlay.querySelector('img').onclick = (e) => e.stopPropagation();
+
+        const lbImg = overlay.querySelector('img');
+        lbImg.onclick = (e) => e.stopPropagation();
+
+        // Sırayla dene: yüklenemeyen boyutu atla, sonrakini dene
+        let tryIdx = 0;
+        const tryNext = () => {
+            if (tryIdx >= candidates.length) {
+                close(); // hiçbiri yüklenemezse kapat
+                return;
+            }
+            lbImg.src = candidates[tryIdx++];
+        };
+        lbImg.onerror = tryNext;
+        tryNext();
 
         document.body.appendChild(overlay);
     }
