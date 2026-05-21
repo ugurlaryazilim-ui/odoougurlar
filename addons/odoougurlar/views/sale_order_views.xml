@@ -85,11 +85,22 @@
         <field name="model">sale.order</field>
         <field name="inherit_id" ref="sale.sale_order_view_search_inherit_sale"/>
         <field name="arch" type="xml">
+            <!-- Ana arama alanını genişlet — ne yazarsan yaz her yerde arasın -->
+            <xpath expr="//field[@name='name']" position="attributes">
+                <attribute name="string">Ara...</attribute>
+                <attribute name="filter_domain">['|', '|', '|', '|',
+                    ('name', 'ilike', self),
+                    ('client_order_ref', 'ilike', self),
+                    ('nebim_customer_code', 'ilike', self),
+                    ('partner_id', 'child_of', self),
+                    ('order_line.product_id.barcode', 'ilike', self)]</attribute>
+            </xpath>
+            <!-- Özel arama alanları da ekle (dropdown'dan seçmek isteyenler için) -->
             <xpath expr="//field[@name='partner_id']" position="after">
                 <field name="nebim_customer_code" string="Nebim Cari Kodu"/>
                 <field name="client_order_ref" string="Sipariş No"/>
                 <field name="order_line" string="Ürün Barkodu"
-                       filter_domain="['|', ('order_line.product_id.barcode', 'ilike', self), ('order_line.product_id.default_code', 'ilike', self)]"/>
+                       filter_domain="[('order_line.product_id.barcode', 'ilike', self)]"/>
             </xpath>
         </field>
     </record>
