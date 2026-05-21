@@ -43,6 +43,14 @@ class StockLocationQty(models.Model):
                 loc.total_quant_qty = sum(loc.quant_ids.mapped('quantity'))
 
     # ═══ RAF DETAY DOSYASI EXCEL EXPORT ═══
+    def action_export_shelf_detail_all(self):
+        """Tüm dahili konumları Excel olarak indir (controller endpoint'ine yönlendir)."""
+        return {
+            'type': 'ir.actions.act_url',
+            'url': '/odoougurlar/shelf_detail_export',
+            'target': 'self',
+        }
+
     def action_export_shelf_detail(self):
         """Seçili konumları veya tümünü Excel olarak dışa aktar (HamurLabs formatı)."""
         try:

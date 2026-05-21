@@ -407,18 +407,20 @@
                   sequence="1"/>
 
         <!-- ============================================================ -->
-        <!-- Raf Detay Dosyası - Server Action (Çark Menüsü)              -->
+        <!-- Raf Detay Dosyası - List View Header Butonu                  -->
         <!-- ============================================================ -->
-        <record id="action_export_shelf_detail" model="ir.actions.server">
-            <field name="name">📦 Raf Detay Dosyası</field>
-            <field name="model_id" ref="stock.model_stock_location"/>
-            <field name="binding_model_id" ref="stock.model_stock_location"/>
-            <field name="binding_view_types">list,form</field>
-            <field name="binding_type">action</field>
-            <field name="state">code</field>
-            <field name="code">
-if records:
-    action = records.action_export_shelf_detail()
+        <record id="view_location_tree_shelf_export" model="ir.ui.view">
+            <field name="name">stock.location.tree.shelf.export</field>
+            <field name="model">stock.location</field>
+            <field name="inherit_id" ref="stock.view_location_tree2"/>
+            <field name="arch" type="xml">
+                <xpath expr="//list" position="inside">
+                    <header>
+                        <button name="action_export_shelf_detail_all" type="object"
+                                string="📦 Raf Detay Dosyası"
+                                class="btn-secondary"/>
+                    </header>
+                </xpath>
             </field>
         </record>
 
