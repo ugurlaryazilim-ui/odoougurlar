@@ -49,6 +49,13 @@ class TrendyolStore(models.Model):
         help='Odoo siparişinin referans formatı',
     )
 
+    # ─── Tek Sipariş Çekme ───────────────────────────────
+    fetch_order_number = fields.Char(
+        string='Sipariş No',
+        store=False,
+        help='Trendyol sipariş numarasını yazıp "Sipariş Çek" butonuna basarak tek siparişi çekebilirsiniz',
+    )
+
     # ─── Müşteri Ayarları ────────────────────────────────
     customer_prefix = fields.Char(
         string='Müşteri Kodu Ön Ek',
@@ -267,4 +274,66 @@ class TrendyolStore(models.Model):
             'domain': [('store_id', '=', self.id)],
             'context': {'default_store_id': self.id},
         }
+
+    def action_fetch_single_order(self):
+        """Sipariş numarası ile tek sipariş çek."""
+        self.ensure_one()
+        order_number = self.fetch_order_number
+        if not order_number:
+            raise UserError(_('Lütfen bir sipariş numarası girin!'))
+
+        order_number = order_number.strip()
+        _logger.info("Tek sipariş çekiliyor: %s (mağaza: %s)", order_number, self.name)
+
+        try:
+            api = self.get_api()
+            result = api.get_orders(order_number=order_number)
+
+            if not result.get('success'):
+                raise UserError(_('❌ Trendyol API hatası:\n\n%s') % result.get('error', 'Bilinmeyen hata'))
+
+            data = result.get('data', {})
+            content = data.get('content', [])
+
+            if not content:
+                raise UserError(_('❌ Sipariş bulunamadı: %s\n\nBu numarada sipariş Trendyol\'da mevcut değil.') % order_number)
+
+            TrendyolOrder = self.env['trendyol.order']
+            created = 0
+            updated = 0
+
+            for package in content:
+                try:
+                    with self.env.cr.savepoint():
+                        res = TrendyolOrder._process_package(package, self)
+                        if res == 'created':
+                            created += 1
+                        elif res == 'updated':
+                            updated += 1
+                except Exception as e:
+                    raise UserError(_('❌ Sipariş işleme hatası:\n\n%s') % str(e))
+
+            # Sipariş çekildikten sonra input temizle
+            self.fetch_order_number = False
+
+            msg = f'✅ Sipariş başarıyla çekildi! ({order_number})'
+            if created:
+                msg += f' | Yeni oluşturuldu'
+            elif updated:
+                msg += f' | Güncellendi'
+
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Trendyol Sipariş Çek',
+                    'message': msg,
+                    'type': 'success',
+                    'sticky': False,
+                },
+            }
+        except UserError:
+            raise
+        except Exception as e:
+            raise UserError(_('❌ Sipariş çekme hatası:\n\n%s') % str(e))
 
