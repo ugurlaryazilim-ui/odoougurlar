@@ -48,13 +48,16 @@ class N11APIClient:
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
-    def get_shipment_packages(self, start_date=None, end_date=None, status=None, page=0, size=100):
+    def get_shipment_packages(self, start_date=None, end_date=None, status=None, page=0, size=100, order_number=None):
         """Siparişleri çek."""
         params = {
             'page': page,
             'size': size
         }
         
+        if order_number:
+            params['orderNumber'] = order_number
+
         if start_date:
             if isinstance(start_date, datetime):
                 params['startDate'] = int(start_date.timestamp() * 1000)

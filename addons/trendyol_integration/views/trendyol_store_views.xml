@@ -49,12 +49,11 @@
                                     <field name="sync_interval" invisible="not auto_sync"/>
                                     <field name="last_sync"/>
                                     <separator string="Tek Sipariş Çek"/>
-                                    <label for="fetch_order_number"/>
-                                    <div class="d-flex gap-2">
+                                    <div class="o_row">
                                         <field name="fetch_order_number" placeholder="Sipariş numarası girin..."
-                                               class="flex-grow-1"/>
+                                               nolabel="1"/>
                                         <button name="action_fetch_single_order" type="object"
-                                                string="📥 Sipariş Çek" class="btn-primary"/>
+                                                string="📥 Çek" class="btn-primary btn-sm"/>
                                     </div>
                                 </group>
                             </group>

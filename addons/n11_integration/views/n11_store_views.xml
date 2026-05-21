@@ -37,6 +37,13 @@
                                     <field name="order_day_range"/>
                                     <field name="last_sync" readonly="1"/>
                                     <field name="active"/>
+                                    <separator string="Tek Sipariş Çek"/>
+                                    <div class="o_row">
+                                        <field name="fetch_order_number" placeholder="Sipariş numarası girin..."
+                                               nolabel="1"/>
+                                        <button name="action_fetch_single_order" type="object"
+                                                string="📥 Çek" class="btn-primary btn-sm"/>
+                                    </div>
                                 </group>
                             </group>
                         </page>

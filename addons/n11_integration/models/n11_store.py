@@ -24,6 +24,13 @@ class N11Store(models.Model):
     sync_interval = fields.Integer(string='Senkron Aralığı (dk)', default=1, help='Bu değer cron ile senkronize çalışarak hangi sıklıkta N11 API\'ye çıkılacağını gösterir.')
     order_day_range = fields.Integer(string='Senkronizasyon Gün Aralığı', default=1, help="Geçmişe dönük kaç günlük sipariş çekilecek?")
     last_sync = fields.Datetime(string='Son Senkronizasyon', readonly=True)
+
+    # ─── Tek Sipariş Çekme ───────────────────────────────
+    fetch_order_number = fields.Char(
+        string='Sipariş No',
+        copy=False,
+        help='N11 sipariş numarasını yazıp "Sipariş Çek" butonuna basarak tek siparişi çekebilirsiniz',
+    )
     
     # ─── Sipariş Ayarları ────────────────────────────────
     auto_confirm = fields.Boolean(string='Siparişi Otomatik Onayla', default=True, help="Odoo'ya düşen siparişler otomatik onaylanır ve Nebim sürecini tetikler.")
@@ -160,3 +167,69 @@ class N11Store(models.Model):
         """N11 için finansal mutabakat servisi henüz desteklenmiyor."""
         self.ensure_one()
         raise UserError(_("N11 için finansal mutabakat servisi bu sürümde desteklenmemektedir. Lütfen paneli kullanınız."))
+
+    def action_fetch_single_order(self):
+        """Sipariş numarası ile tek sipariş çek."""
+        self.ensure_one()
+        order_number = self.fetch_order_number
+        if not order_number:
+            raise UserError(_('Lütfen bir sipariş numarası girin!'))
+
+        order_number = order_number.strip()
+        _logger.info("N11 tek sipariş çekiliyor: %s (mağaza: %s)", order_number, self.name)
+
+        try:
+            api = self.get_api()
+            result = api.get_shipment_packages(order_number=order_number)
+
+            if not result.get('success'):
+                raise UserError(_('❌ N11 API hatası:\n\n%s') % result.get('error', 'Bilinmeyen hata'))
+
+            data = result.get('data', {})
+            content = data if isinstance(data, list) else data.get('content', data.get('shipmentPackages', []))
+
+            if not content:
+                raise UserError(_('❌ Sipariş bulunamadı: %s\n\nBu numarada sipariş N11\'de mevcut değil.') % order_number)
+
+            N11Order = self.env['n11.order']
+            created = 0
+            updated = 0
+
+            if isinstance(content, list):
+                packages = content
+            else:
+                packages = [content]
+
+            for package in packages:
+                try:
+                    with self.env.cr.savepoint():
+                        res = N11Order._process_order_json(package, self)
+                        if res == 'created':
+                            created += 1
+                        elif res == 'updated':
+                            updated += 1
+                except Exception as e:
+                    raise UserError(_('❌ Sipariş işleme hatası:\n\n%s') % str(e))
+
+            self.fetch_order_number = False
+
+            msg = f'✅ Sipariş başarıyla çekildi! ({order_number})'
+            if created:
+                msg += ' | Yeni oluşturuldu'
+            elif updated:
+                msg += ' | Güncellendi'
+
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'N11 Sipariş Çek',
+                    'message': msg,
+                    'type': 'success',
+                    'sticky': False,
+                },
+            }
+        except UserError:
+            raise
+        except Exception as e:
+            raise UserError(_('❌ Sipariş çekme hatası:\n\n%s') % str(e))
