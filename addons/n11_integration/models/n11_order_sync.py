@@ -356,3 +356,16 @@ class N11OrderSync(models.Model):
             sale_vals['order_line'].append((0, 0, ol_vals))
             
         return self.env['sale.order'].create(sale_vals)
+
+    # ─── CRON ────────────────────────────────────────────
+
+    @api.model
+    def cron_sync_n11_orders(self):
+        """Cron ile otomatik senkronizasyon — tüm aktif mağazalar.
+
+        Trendyol modülündeki gibi güvenli wrapper: hata olsa bile cron çökmez.
+        """
+        try:
+            self.sync_orders_from_n11()
+        except Exception as e:
+            _logger.exception("N11 cron senkronizasyon hatası: %s", e)
