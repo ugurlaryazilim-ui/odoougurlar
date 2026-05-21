@@ -169,6 +169,31 @@ class TrendyolStore(models.Model):
         for store in self:
             store.settlement_count = counts.get(store.id, 0)
 
+    def write(self, vals):
+        res = super().write(vals)
+        if 'sync_interval' in vals or 'auto_sync' in vals:
+            self._update_cron_interval()
+        return res
+
+    def _update_cron_interval(self):
+        """Mağaza sync_interval alanına göre cron aralığını dinamik güncelle."""
+        cron = self.env.ref('trendyol_integration.cron_trendyol_sync_orders', raise_if_not_found=False)
+        if not cron:
+            return
+        # Tüm aktif mağazaların en küçük sync_interval'ini al
+        stores = self.search([('active', '=', True), ('auto_sync', '=', True)])
+        if stores:
+            min_interval = min(s.sync_interval for s in stores) or 1
+            cron.sudo().write({
+                'interval_number': max(min_interval, 1),  # Minimum 1 dk
+                'interval_type': 'minutes',
+                'active': True,
+            })
+            _logger.info("Trendyol cron aralığı %d dakikaya güncellendi", min_interval)
+        else:
+            cron.sudo().write({'active': False})
+            _logger.info("Trendyol aktif mağaza yok, cron devre dışı bırakıldı")
+
     def get_api(self):
         """Bu mağaza için TrendyolAPI instance oluştur."""
         self.ensure_one()
