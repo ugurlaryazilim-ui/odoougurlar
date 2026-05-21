@@ -223,7 +223,8 @@ export class BatchPickingScreen extends Component {
                     <!-- ÜRÜN GÖRSELİ -->
                     <div class="bp-product-image">
                         <img t-att-src="state.currentItem.image_url" alt="Ürün" loading="lazy"
-                             t-on-error="onImageError"/>
+                             t-on-error="onImageError"
+                             t-on-click="onImageClick"/>
                     </div>
 
                     <!-- SAĞ PANEL: Rota Listesi Tablosu -->
@@ -711,6 +712,28 @@ export class BatchPickingScreen extends Component {
 
     onImageError(ev) {
         ev.target.src = '/web/static/img/placeholder.png';
+    }
+
+    onImageClick(ev) {
+        const imgSrc = ev.target.src;
+        if (!imgSrc || imgSrc.includes('placeholder')) return;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'bp-lightbox-overlay';
+        overlay.innerHTML = `
+            <button class="bp-lightbox-close">✕</button>
+            <img src="${imgSrc}" alt="Ürün Görseli"/>
+        `;
+
+        const close = () => {
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        };
+
+        overlay.querySelector('.bp-lightbox-close').onclick = (e) => { e.stopPropagation(); close(); };
+        overlay.onclick = close;
+        overlay.querySelector('img').onclick = (e) => e.stopPropagation();
+
+        document.body.appendChild(overlay);
     }
 
     copyBarcode(ev) {

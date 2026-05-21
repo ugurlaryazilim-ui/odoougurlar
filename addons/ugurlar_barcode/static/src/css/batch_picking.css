@@ -348,16 +348,66 @@
     text-align: center;
     padding: 10px;
     background: #fff;
-    min-height: 140px;
+    min-height: 155px;
     display: flex;
     align-items: center;
     justify-content: center;
 }
 .bp-product-image img {
-    max-width: 200px;
-    max-height: 200px;
+    max-width: 220px;
+    max-height: 220px;
     object-fit: contain;
     border-radius: 8px;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+.bp-product-image img:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+}
+
+/* ─── LIGHTBOX OVERLAY ─── */
+.bp-lightbox-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(0,0,0,0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: zoom-out;
+    animation: bp-lightbox-fadein 0.2s ease;
+}
+@keyframes bp-lightbox-fadein {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+.bp-lightbox-overlay img {
+    max-width: 90vw;
+    max-height: 90vh;
+    object-fit: contain;
+    border-radius: 12px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+}
+.bp-lightbox-close {
+    position: absolute;
+    top: 16px;
+    right: 24px;
+    color: #fff;
+    font-size: 32px;
+    cursor: pointer;
+    background: rgba(0,0,0,0.4);
+    border: none;
+    border-radius: 50%;
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+}
+.bp-lightbox-close:hover {
+    background: rgba(255,255,255,0.2);
 }
 
 /* ─── ROTA TABLOSU ─── */
