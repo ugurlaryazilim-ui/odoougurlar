@@ -78,26 +78,25 @@ class CustomerProcessor(models.AbstractModel):
 
             if is_sahis:
                 # ─── ŞAHIS FİRMASI (11 hane TCKN) ───
-                # Hamurlabs referansı: FirstName/LastName DOLU, IsSubjectToEInvoice YOK
-                # E-fatura/e-arşiv ayrımı CARİ'de değil, FATURA'da yapılır.
-                name_parts = (partner.name or '').strip().split()
-                first_name = name_parts[0] if name_parts else ''
-                last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
+                # TEST: TC'nin ilk 10 hanesini TaxNumber olarak gönder
+                # FirstName/LastName/IdentityNum boş, CurrAccDescription dolu
+                tax_number_10 = vat_clean[:10]  # 11 haneden son haneyi sil
 
                 payload = {
                     'ModelType': cari_model_type,  # Cari API için 3 (perakende müşteri)
                     'CurrAccCode': '',
                     'CurrAccDescription': partner.name[:50],
-                    'FirstName': first_name[:50],
-                    'LastName': last_name[:50],
+                    'FirstName': '',
+                    'LastName': '',
                     'IsIndividualAcc': True,
                     'IsSubjectToEInvoice': True,
-                    'IdentityNum': vat_clean,  # 11 haneli TCKN
+                    'IdentityNum': '',
+                    'TaxNumber': tax_number_10,
                     'OfficeCode': 'M',
                     'CurrencyCode': 'TRY',
                 }
-                _logger.info("KURUMSAL (ŞAHIS FİRMASI): %s | FirstName=%s LastName=%s",
-                             partner.name, first_name, last_name)
+                _logger.info("KURUMSAL (ŞAHIS FİRMASI): %s | TaxNumber(10h)=%s | Orijinal TCKN=%s",
+                             partner.name, tax_number_10, vat_clean)
             else:
                 # ─── TÜZEL KİŞİ (10 hane VKN veya diğer) ───
                 payload = {
