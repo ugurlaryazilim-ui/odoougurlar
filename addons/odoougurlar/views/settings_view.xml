@@ -406,23 +406,7 @@
                   action="action_nebim_settings"
                   sequence="1"/>
 
-        <!-- ============================================================ -->
-        <!-- Raf Detay Dosyası - List View Header Butonu                  -->
-        <!-- ============================================================ -->
-        <record id="view_location_tree_shelf_export" model="ir.ui.view">
-            <field name="name">stock.location.tree.shelf.export</field>
-            <field name="model">stock.location</field>
-            <field name="inherit_id" ref="stock.view_location_tree2"/>
-            <field name="arch" type="xml">
-                <xpath expr="//list" position="inside">
-                    <header>
-                        <button name="action_export_shelf_detail_all" type="object"
-                                string="📦 Raf Detay Dosyası"
-                                class="btn-secondary"/>
-                    </header>
-                </xpath>
-            </field>
-        </record>
+        <!-- Raf Detay Dosyası: JS CogMenu ile ekleniyor (static/src/js/shelf_export_cog.js) -->
 
     </data>
 </odoo>

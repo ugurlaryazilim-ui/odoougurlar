@@ -38,4 +38,9 @@
     'installable': True,
     'application': True,
     'auto_install': False,
+    'assets': {
+        'web.assets_backend': [
+            'odoougurlar/static/src/js/shelf_export_cog.js',
+        ],
+    },
 }
