@@ -88,8 +88,8 @@ class CustomerProcessor(models.AbstractModel):
                     'ModelType': cari_model_type,  # Cari API için 3 (perakende müşteri)
                     'CurrAccCode': '',
                     'CurrAccDescription': partner.name[:50],
-                    'FirstName': '',
-                    'LastName': '',
+                    'FirstName': first_name[:50],
+                    'LastName': last_name[:50],
                     'IsIndividualAcc': True,
                     'IsSubjectToEInvoice': True,
                     'IdentityNum': vat_clean,  # 11 haneli TCKN
