@@ -718,11 +718,14 @@ export class BatchPickingScreen extends Component {
         const imgSrc = ev.target.src;
         if (!imgSrc || imgSrc.includes('placeholder')) return;
 
+        // Küçük boyut (image_128/image_256) yerine orijinal boyutu (image_1920) yükle
+        const fullSrc = imgSrc.replace(/image_\d+/, 'image_1920');
+
         const overlay = document.createElement('div');
         overlay.className = 'bp-lightbox-overlay';
         overlay.innerHTML = `
             <button class="bp-lightbox-close">✕</button>
-            <img src="${imgSrc}" alt="Ürün Görseli"/>
+            <img src="${fullSrc}" alt="Ürün Görseli"/>
         `;
 
         const close = () => {
