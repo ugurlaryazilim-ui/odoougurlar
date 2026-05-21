@@ -37,17 +37,25 @@
         </field>
     </record>
 
-    <!-- Sipariş Listesi (Tree) Eklemeleri -->
+    <!-- Sipariş Listesi (Tree) — Tıkla-Kopyala özelliği -->
     <record id="view_order_tree_nebim" model="ir.ui.view">
         <field name="name">sale.order.tree.nebim.ext</field>
         <field name="model">sale.order</field>
         <field name="inherit_id" ref="sale.view_order_tree"/>
         <field name="arch" type="xml">
+            <!-- Numara (name) alanına tıkla-kopyala -->
+            <xpath expr="//field[@name='name']" position="attributes">
+                <attribute name="widget">CopyClipboardChar</attribute>
+            </xpath>
+            <!-- Partner'dan sonra Nebim alanları ekle -->
             <xpath expr="//field[@name='partner_id']" position="after">
-                <field name="nebim_customer_code" optional="show" string="Nebim Cari Kodu"/>
-                <field name="picking_batch_names" optional="show" string="Rota"/>
+                <field name="nebim_customer_code" optional="show" string="Nebim Cari Kodu"
+                       widget="CopyClipboardChar"/>
+                <field name="picking_batch_names" optional="show" string="Rota"
+                       widget="CopyClipboardChar"/>
                 <field name="marketplace_name" optional="show" string="Pazaryeri"/>
-                <field name="marketplace_order_number" optional="show" string="Sipariş No"/>
+                <field name="marketplace_order_number" optional="show" string="Sipariş No"
+                       widget="CopyClipboardChar"/>
             </xpath>
         </field>
     </record>
@@ -58,11 +66,39 @@
         <field name="inherit_id" ref="sale.view_quotation_tree_with_onboarding"/>
         <field name="arch" type="xml">
             <xpath expr="//field[@name='partner_id']" position="after">
-                <field name="nebim_customer_code" optional="show" string="Nebim Cari Kodu"/>
-                <field name="picking_batch_names" optional="show" string="Rota"/>
+                <field name="nebim_customer_code" optional="show" string="Nebim Cari Kodu"
+                       widget="CopyClipboardChar"/>
+                <field name="picking_batch_names" optional="show" string="Rota"
+                       widget="CopyClipboardChar"/>
                 <field name="marketplace_name" optional="show" string="Pazaryeri"/>
-                <field name="marketplace_order_number" optional="show" string="Sipariş No"/>
+                <field name="marketplace_order_number" optional="show" string="Sipariş No"
+                       widget="CopyClipboardChar"/>
             </xpath>
         </field>
     </record>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- ARAMA GENİŞLETME — Nebim, Sipariş No, Barkod      -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <record id="view_sale_order_search_nebim" model="ir.ui.view">
+        <field name="name">sale.order.search.nebim.ext</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.sale_order_view_search_inherit_sale"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='partner_id']" position="after">
+                <field name="nebim_customer_code" string="Nebim Cari Kodu"/>
+                <field name="client_order_ref" string="Sipariş No"/>
+                <field name="order_line" string="Ürün Barkodu"
+                       filter_domain="['|', ('order_line.product_id.barcode', 'ilike', self), ('order_line.product_id.default_code', 'ilike', self)]"/>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- VARSAYILAN FİLTRE KALDIRMA                         -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <record id="sale.action_orders" model="ir.actions.act_window">
+        <field name="context">{}</field>
+    </record>
+
 </odoo>
