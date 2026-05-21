@@ -56,6 +56,9 @@ class AmazonStore(models.Model):
     commission_account_id = fields.Many2one('account.account', string='Komisyon Gider Hesabı')
     sales_journal_id = fields.Many2one('account.journal', string='Satış Yevmiyesi')
     
+    # ─── Senkronizasyon Ayarları ─────────────────────────
+    auto_sync = fields.Boolean(string='Otomatik Senkronizasyon', default=True)
+    sync_interval = fields.Integer(string='Senkron Aralığı (dk)', default=15)
     last_sync = fields.Datetime('Son Senkronizasyon', readonly=True)
 
     def get_api_endpoint(self):
@@ -113,3 +116,26 @@ class AmazonStore(models.Model):
             }
         except Exception as e:
             raise UserError(str(e))
+
+    def write(self, vals):
+        res = super().write(vals)
+        if 'sync_interval' in vals or 'auto_sync' in vals:
+            self._update_cron_interval()
+        return res
+
+    def _update_cron_interval(self):
+        cron = self.env.ref('amazon_integration.ir_cron_amazon_sync_orders', raise_if_not_found=False)
+        if not cron:
+            return
+        stores = self.search([('active', '=', True), ('auto_sync', '=', True)])
+        if stores:
+            min_interval = min(s.sync_interval for s in stores) or 1
+            cron.sudo().write({
+                'interval_number': max(min_interval, 1),
+                'interval_type': 'minutes',
+                'active': True,
+            })
+            _logger.info("Amazon cron aralığı %d dakikaya güncellendi", min_interval)
+        else:
+            cron.sudo().write({'active': False})
+            _logger.info("Amazon aktif mağaza yok, cron devre dışı bırakıldı")

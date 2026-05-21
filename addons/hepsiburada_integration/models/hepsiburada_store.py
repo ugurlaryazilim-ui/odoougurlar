@@ -155,6 +155,30 @@ class HepsiburadaStore(models.Model):
         for store in self:
             store.log_count = counts.get(store.id, 0)
 
+    def write(self, vals):
+        res = super().write(vals)
+        if 'sync_interval' in vals or 'auto_sync' in vals:
+            self._update_cron_interval()
+        return res
+
+    def _update_cron_interval(self):
+        """Mağaza sync_interval alanına göre cron aralığını dinamik güncelle."""
+        cron = self.env.ref('hepsiburada_integration.ir_cron_hepsiburada_order_sync', raise_if_not_found=False)
+        if not cron:
+            return
+        stores = self.search([('active', '=', True), ('auto_sync', '=', True)])
+        if stores:
+            min_interval = min(s.sync_interval for s in stores) or 1
+            cron.sudo().write({
+                'interval_number': max(min_interval, 1),
+                'interval_type': 'minutes',
+                'active': True,
+            })
+            _logger.info("Hepsiburada cron aralığı %d dakikaya güncellendi", min_interval)
+        else:
+            cron.sudo().write({'active': False})
+            _logger.info("Hepsiburada aktif mağaza yok, cron devre dışı bırakıldı")
+
     def _get_api_domain(self):
         """Ortama göre doğru domain'i döndür."""
         self.ensure_one()

@@ -84,6 +84,30 @@ class PttavmStore(models.Model):
         for store in self:
             store.settlement_count = counts.get(store.id, 0)
 
+    def write(self, vals):
+        res = super().write(vals)
+        if 'sync_interval' in vals or 'auto_sync' in vals:
+            self._update_cron_interval()
+        return res
+
+    def _update_cron_interval(self):
+        """Mağaza sync_interval alanına göre cron aralığını dinamik güncelle."""
+        cron = self.env.ref('pttavm_integration.ir_cron_pttavm_sync_orders', raise_if_not_found=False)
+        if not cron:
+            return
+        stores = self.search([('active', '=', True), ('auto_sync', '=', True)])
+        if stores:
+            min_interval = min(s.sync_interval for s in stores) or 1
+            cron.sudo().write({
+                'interval_number': max(min_interval, 1),
+                'interval_type': 'minutes',
+                'active': True,
+            })
+            _logger.info("PTTAVM cron aralığı %d dakikaya güncellendi", min_interval)
+        else:
+            cron.sudo().write({'active': False})
+            _logger.info("PTTAVM aktif mağaza yok, cron devre dışı bırakıldı")
+
     def get_api(self):
         """PttavmApi client objesini oluştur ve döndür."""
         self.ensure_one()

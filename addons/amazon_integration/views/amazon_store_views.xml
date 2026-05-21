@@ -91,6 +91,8 @@
                             
                             <page string="Senkronizasyon Durumu" name="sync_status">
                                 <group>
+                                    <field name="auto_sync"/>
+                                    <field name="sync_interval" invisible="not auto_sync"/>
                                     <field name="last_sync" readonly="1"/>
                                 </group>
                             </page>

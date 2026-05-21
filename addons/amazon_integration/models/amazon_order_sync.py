@@ -72,6 +72,22 @@ class AmazonOrderSync(models.Model):
             _logger.error("AWS Auth Error: %s", e)
             return None
 
+    @api.model
+    def cron_sync_amazon_orders(self):
+        """Cron ile otomatik senkronizasyon."""
+        try:
+            stores = self.env['amazon.store'].search([
+                ('active', '=', True),
+                ('auto_sync', '=', True),
+            ])
+            for store in stores:
+                try:
+                    store.action_sync_orders()
+                except Exception as e:
+                    _logger.exception("Amazon %s senkronizasyon hatası: %s", store.name, e)
+        except Exception as e:
+            _logger.exception("Amazon cron senkronizasyon hatası: %s", e)
+
     def action_sync_orders(self):
         self.ensure_one()
         sync_log = self.env['amazon.sync.log'].create({

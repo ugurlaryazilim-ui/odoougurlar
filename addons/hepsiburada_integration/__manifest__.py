@@ -14,6 +14,7 @@
     'depends': ['base', 'sale', 'stock', 'odoougurlar'],
     'data': [
         'security/ir.model.access.csv',
+        'data/cron_data.xml',
         'views/hepsiburada_store_views.xml',
         'views/hepsiburada_config_views.xml',
         'views/hepsiburada_order_views.xml',
