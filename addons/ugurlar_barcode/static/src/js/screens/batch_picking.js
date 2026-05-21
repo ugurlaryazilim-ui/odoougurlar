@@ -23,36 +23,67 @@ export class BatchPickingScreen extends Component {
                 <div class="bp-list-container" t-if="!state.loading">
                     <!-- ─── FİLTRE BARI ─── -->
                     <div class="bp-filter-bar">
-                        <div class="bp-filter-pills">
-                            <button t-attf-class="bp-pill {{state.filterState === 'all' ? 'bp-pill-active' : ''}}"
-                                    t-on-click="() => this.setFilter('all')">
-                                <i class="fa fa-th-list"></i> Tümü
-                                <span class="bp-pill-count" t-esc="state.stateCounts.draft + state.stateCounts.in_progress + state.stateCounts.done"/>
-                            </button>
-                            <button t-attf-class="bp-pill bp-pill-draft {{state.filterState === 'draft' ? 'bp-pill-active' : ''}}"
-                                    t-on-click="() => this.setFilter('draft')">
-                                <i class="fa fa-pencil"></i> Taslak
-                                <span class="bp-pill-count" t-esc="state.stateCounts.draft"/>
-                            </button>
-                            <button t-attf-class="bp-pill bp-pill-progress {{state.filterState === 'in_progress' ? 'bp-pill-active' : ''}}"
-                                    t-on-click="() => this.setFilter('in_progress')">
-                                <i class="fa fa-spinner"></i> Devam
-                                <span class="bp-pill-count" t-esc="state.stateCounts.in_progress"/>
-                            </button>
-                            <button t-attf-class="bp-pill bp-pill-done {{state.filterState === 'done' ? 'bp-pill-active' : ''}}"
-                                    t-on-click="() => this.setFilter('done')">
-                                <i class="fa fa-check"></i> Tamamlandı
-                                <span class="bp-pill-count" t-esc="state.stateCounts.done"/>
-                            </button>
+                        <!-- Satır 1: Durum pilleri + Arama -->
+                        <div class="bp-filter-row">
+                            <div class="bp-filter-pills">
+                                <button t-attf-class="bp-pill {{state.filterState === 'all' ? 'bp-pill-active' : ''}}"
+                                        t-on-click="() => this.setFilter('all')">
+                                    <i class="fa fa-th-list"></i> Tümü
+                                    <span class="bp-pill-count" t-esc="state.stateCounts.draft + state.stateCounts.in_progress + state.stateCounts.done"/>
+                                </button>
+                                <button t-attf-class="bp-pill bp-pill-draft {{state.filterState === 'draft' ? 'bp-pill-active' : ''}}"
+                                        t-on-click="() => this.setFilter('draft')">
+                                    <i class="fa fa-pencil"></i> Taslak
+                                    <span class="bp-pill-count" t-esc="state.stateCounts.draft"/>
+                                </button>
+                                <button t-attf-class="bp-pill bp-pill-progress {{state.filterState === 'in_progress' ? 'bp-pill-active' : ''}}"
+                                        t-on-click="() => this.setFilter('in_progress')">
+                                    <i class="fa fa-spinner"></i> Devam
+                                    <span class="bp-pill-count" t-esc="state.stateCounts.in_progress"/>
+                                </button>
+                                <button t-attf-class="bp-pill bp-pill-done {{state.filterState === 'done' ? 'bp-pill-active' : ''}}"
+                                        t-on-click="() => this.setFilter('done')">
+                                    <i class="fa fa-check"></i> Tamamlandı
+                                    <span class="bp-pill-count" t-esc="state.stateCounts.done"/>
+                                </button>
+                            </div>
+                            <div class="bp-filter-search">
+                                <i class="fa fa-search"></i>
+                                <input type="text" class="bp-search-input" placeholder="Rota veya depo ara..."
+                                       t-att-value="state.searchText"
+                                       t-on-input="(ev) => this.onSearch(ev.target.value)"/>
+                                <button class="bp-search-clear" t-if="state.searchText"
+                                        t-on-click="() => this.onSearch('')">
+                                    <i class="fa fa-times"></i>
+                                </button>
+                            </div>
                         </div>
-                        <div class="bp-filter-search">
-                            <i class="fa fa-search"></i>
-                            <input type="text" class="bp-search-input" placeholder="Rota veya depo ara..."
-                                   t-att-value="state.searchText"
-                                   t-on-input="(ev) => this.onSearch(ev.target.value)"/>
-                            <button class="bp-search-clear" t-if="state.searchText"
-                                    t-on-click="() => this.onSearch('')">
-                                <i class="fa fa-times"></i>
+                        <!-- Satır 2: Mağaza + Tarih filtreleri -->
+                        <div class="bp-filter-row bp-filter-advanced">
+                            <div class="bp-filter-group">
+                                <label class="bp-filter-label"><i class="fa fa-building"></i> Mağaza</label>
+                                <select class="bp-filter-select" t-on-change="(ev) => this.setWarehouse(ev.target.value)">
+                                    <option value="">Tüm Mağazalar</option>
+                                    <t t-foreach="state.warehouses" t-as="wh" t-key="wh">
+                                        <option t-att-value="wh" t-att-selected="state.filterWarehouse === wh" t-esc="wh"/>
+                                    </t>
+                                </select>
+                            </div>
+                            <div class="bp-filter-group">
+                                <label class="bp-filter-label"><i class="fa fa-calendar"></i> Başlangıç</label>
+                                <input type="date" class="bp-filter-date"
+                                       t-att-value="state.filterDateFrom"
+                                       t-on-change="(ev) => this.setDateFrom(ev.target.value)"/>
+                            </div>
+                            <div class="bp-filter-group">
+                                <label class="bp-filter-label"><i class="fa fa-calendar"></i> Bitiş</label>
+                                <input type="date" class="bp-filter-date"
+                                       t-att-value="state.filterDateTo"
+                                       t-on-change="(ev) => this.setDateTo(ev.target.value)"/>
+                            </div>
+                            <button class="bp-filter-clear-btn" t-if="state.filterWarehouse || state.filterDateFrom || state.filterDateTo"
+                                    t-on-click="clearAdvancedFilters">
+                                <i class="fa fa-times-circle"></i> Temizle
                             </button>
                         </div>
                     </div>
@@ -338,6 +369,10 @@ export class BatchPickingScreen extends Component {
             // ── Filtre alanları ──
             filterState: 'draft',
             searchText: '',
+            filterWarehouse: '',
+            filterDateFrom: '',
+            filterDateTo: '',
+            warehouses: [],
             stateCounts: { draft: 0, in_progress: 0, done: 0 },
             canDelete: false,
         });
@@ -395,6 +430,28 @@ export class BatchPickingScreen extends Component {
         this._searchTimer = setTimeout(() => this.loadBatches(), 350);
     }
 
+    setWarehouse(value) {
+        this.state.filterWarehouse = value;
+        this.loadBatches();
+    }
+
+    setDateFrom(value) {
+        this.state.filterDateFrom = value;
+        this.loadBatches();
+    }
+
+    setDateTo(value) {
+        this.state.filterDateTo = value;
+        this.loadBatches();
+    }
+
+    clearAdvancedFilters() {
+        this.state.filterWarehouse = '';
+        this.state.filterDateFrom = '';
+        this.state.filterDateTo = '';
+        this.loadBatches();
+    }
+
     async deleteBatch(batchId, batchName) {
         if (!confirm(`"${batchName}" rotasını silmek istediğinize emin misiniz?`)) return;
         
@@ -419,10 +476,16 @@ export class BatchPickingScreen extends Component {
             const res = await BarcodeService.call('/ugurlar_barcode/api/batch_list', {
                 filter_state: this.state.filterState,
                 search: this.state.searchText,
+                warehouse: this.state.filterWarehouse,
+                date_from: this.state.filterDateFrom,
+                date_to: this.state.filterDateTo,
             });
             this.state.batches = res.batches || [];
             if (res.state_counts) {
                 this.state.stateCounts = res.state_counts;
+            }
+            if (res.warehouses) {
+                this.state.warehouses = res.warehouses;
             }
             if (res.can_delete !== undefined) {
                 this.state.canDelete = res.can_delete;

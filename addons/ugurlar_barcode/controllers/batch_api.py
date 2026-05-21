@@ -94,8 +94,24 @@ class BatchApiController(BarcodeApiBase):
         """Batch'leri listele — opsiyonel filtre desteği."""
         filter_state = kw.get('filter_state', '')   # draft | in_progress | done | ''
         search_text = (kw.get('search', '') or '').strip().lower()
+        warehouse_filter = (kw.get('warehouse', '') or '').strip()
+        date_from = kw.get('date_from', '') or ''
+        date_to = kw.get('date_to', '') or ''
 
         domain = [('time_window', '!=', False)]
+
+        if date_from:
+            try:
+                dt_from = datetime.strptime(date_from, '%Y-%m-%d')
+                domain.append(('schedule_time', '>=', dt_from))
+            except Exception:
+                pass
+        if date_to:
+            try:
+                dt_to = datetime.strptime(date_to, '%Y-%m-%d') + timedelta(days=1)
+                domain.append(('schedule_time', '<', dt_to))
+            except Exception:
+                pass
 
         if filter_state and filter_state != 'all':
             domain.append(('state', '=', filter_state))
@@ -146,6 +162,11 @@ class BatchApiController(BarcodeApiBase):
                 if search_text not in hay:
                     continue
 
+            # Warehouse filter
+            if warehouse_filter:
+                if warehouse_filter.lower() not in warehouse_name.lower():
+                    continue
+
             result.append(item)
 
         # Durum sayaçları (filtre dışı — tüm batch'ler için)
@@ -157,10 +178,24 @@ class BatchApiController(BarcodeApiBase):
             if ab.state in state_counts:
                 state_counts[ab.state] += 1
 
+        # Unique warehouse names for filter dropdown
+        warehouse_set = set()
+        for ab in all_batches:
+            si = ab.source_info or ''
+            if si:
+                wh = si.split(' - ')[0].strip()
+                if wh:
+                    warehouse_set.add(wh)
+            elif ab.picking_type_id and ab.picking_type_id.warehouse_id:
+                wh = ab.picking_type_id.warehouse_id.name or ''
+                if wh:
+                    warehouse_set.add(wh)
+
         return {
             'batches': result,
             'total': len(result),
             'state_counts': state_counts,
+            'warehouses': sorted(warehouse_set),
             'can_delete': request.env.user.has_group('stock.group_stock_manager') or request.env.user.has_group('base.group_system')
         }
 
