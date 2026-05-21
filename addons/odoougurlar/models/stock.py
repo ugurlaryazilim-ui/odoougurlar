@@ -23,10 +23,19 @@ class StockLocationQty(models.Model):
         string='Adet',
         compute='_compute_total_quant_qty',
         digits=(16, 0),
-        help='Bu konumdaki toplam ürün stok adedi',
+        help='Bu konum ve tüm alt konumlarındaki toplam ürün stok adedi',
     )
 
-    @api.depends('quant_ids', 'quant_ids.quantity')
     def _compute_total_quant_qty(self):
         for loc in self:
-            loc.total_quant_qty = sum(loc.quant_ids.mapped('quantity'))
+            # parent_path ile tüm alt konumları dahil et (ör: "1/5/12/" → LIKE "1/5/12/%")
+            if loc.parent_path:
+                self.env.cr.execute("""
+                    SELECT COALESCE(SUM(sq.quantity), 0)
+                    FROM stock_quant sq
+                    JOIN stock_location sl ON sl.id = sq.location_id
+                    WHERE sl.parent_path LIKE %s
+                """, [loc.parent_path + '%'])
+                loc.total_quant_qty = self.env.cr.fetchone()[0]
+            else:
+                loc.total_quant_qty = sum(loc.quant_ids.mapped('quantity'))
