@@ -206,7 +206,10 @@ class N11OrderSync(models.Model):
             if state:
                 state_id = state.id
                 
-        tc_id = raw_json.get('tcIdentityNumber') or ship_addr.get('tcId') or p_order.customer_id
+        tc_id = raw_json.get('tcIdentityNumber') or ship_addr.get('tcId') or ''
+        # TC boş/kısa geliyorsa 11 haneli varsayılan ata (Nebim 11 hane zorunlu tutuyor)
+        if not tc_id or len(str(tc_id).strip()) < 11:
+            tc_id = '11111111111'
         
         if not partner:
             partner = partner_env.create({
