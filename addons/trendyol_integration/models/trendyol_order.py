@@ -456,7 +456,7 @@ class TrendyolOrder(models.Model):
                 email, commercial, inv_addr, ship_addr,
                 inv_full_text, ship_full_text, store)
         else:
-            self._update_existing_partner(main_partner, customer_name, commercial, inv_addr, inv_full_text, ship_full_text)
+            self._update_existing_partner(main_partner, customer_name, commercial, inv_addr, ship_addr, inv_full_text, ship_full_text)
 
         # 2- Teslimat ve fatura child contact'ları
         result = {
@@ -540,7 +540,7 @@ class TrendyolOrder(models.Model):
 
         return Partner.create(vals)
 
-    def _update_existing_partner(self, partner, customer_name, commercial, inv_addr, inv_full_text, ship_full_text):
+    def _update_existing_partner(self, partner, customer_name, commercial, inv_addr, ship_addr, inv_full_text, ship_full_text):
         """Mevcut müşteriyi güncelle."""
         upd_vals = {}
         if commercial and inv_addr.get('company'):
@@ -551,6 +551,11 @@ class TrendyolOrder(models.Model):
         new_street = inv_full_text[:128] if inv_full_text else ship_full_text[:128]
         if new_street and partner.street != new_street:
             upd_vals['street'] = new_street
+
+        # İlçe (district) bilgisini her zaman güncelle — Nebim adres çözümlemesi için kritik
+        new_city = inv_addr.get('district') or ship_addr.get('district') or inv_addr.get('city') or ship_addr.get('city', '')
+        if new_city and partner.city != new_city:
+            upd_vals['city'] = new_city
 
         # Mevcut partner'da VAT yoksa ve GİB'de e-fatura mükellefi ise ekle
         if not partner.vat and inv_addr.get('taxNumber'):
