@@ -112,4 +112,14 @@
         <field name="context">{}</field>
     </record>
 
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- SATIŞ MENÜSÜ — Siparişler varsayılan olarak açılır -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <record id="sale.menu_sale_order" model="ir.ui.menu">
+        <field name="sequence">1</field>
+    </record>
+    <record id="sale.menu_sale_quotations" model="ir.ui.menu">
+        <field name="sequence">2</field>
+    </record>
+
 </odoo>
