@@ -420,18 +420,19 @@ class InvoiceProcessor(models.AbstractModel):
 
         postal_address = {}
         if inv_is_sahis:
-            parts = (inv_partner.name or '').strip().split()
+            # Şahıs firması fatura: TC'nin ilk 10 hanesini TaxNumber olarak gönder
+            tax_number_10 = inv_vat[:10]  # 11 haneden son haneyi sil
             postal_address = {
-                'FirstName':     parts[0][:50] if parts else '',
+                'FirstName':     '',
                 'DistrictCode':  inv_dist,
-                'LastName':      ' '.join(parts[1:])[:50] if len(parts) > 1 else '',
+                'LastName':      '',
                 'StateCode':     inv_state,
                 'TaxOfficeCode': inv_tax_office_code,
-                'TaxNumber':     '',
+                'TaxNumber':     tax_number_10,
                 'CityCode':      inv_city,
                 'CountryCode':   inv_country_code,
-                'CompanyName':   '',
-                'IdentityNum':   inv_vat,
+                'CompanyName':   (inv_partner.name or '')[:100],
+                'IdentityNum':   '',
                 'Address':       (inv_partner.street or '')[:200],
             }
         elif inv_vat and len(inv_vat) == 10:
