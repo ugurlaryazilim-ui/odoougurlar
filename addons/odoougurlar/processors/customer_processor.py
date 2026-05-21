@@ -280,6 +280,11 @@ class CustomerProcessor(models.AbstractModel):
         odoo_city = partner.city or ''
         country_code = (partner.country_id.code or '').upper()  # 'TR', 'AZ', 'GR' vb.
 
+        # Nebim'de "Mersin" ili "İçel" olarak kayıtlıdır
+        if _norm(odoo_state) == 'MERSIN':
+            odoo_state = 'İçel'
+            _logger.info("Mersin → İçel eşlemesi uygulandı (partner: %s)", partner.name)
+
         _logger.info("Nebim İl/İlçe çözümleme başladı: state='%s', city='%s', country='%s', partner='%s'",
                      odoo_state, odoo_city, country_code, partner.name)
 
