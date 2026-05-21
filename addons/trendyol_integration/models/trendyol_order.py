@@ -519,7 +519,7 @@ class TrendyolOrder(models.Model):
             'ref': customer_ref,
             'phone': inv_addr.get('phone') or ship_addr.get('phone') or '',
             'street': inv_full_text[:128] if inv_full_text else ship_full_text[:128],
-            'city': inv_addr.get('city') or ship_addr.get('city', ''),
+            'city': inv_addr.get('district') or ship_addr.get('district') or inv_addr.get('city') or ship_addr.get('city', ''),
             'comment': f'trendyol_id:{customer_id}',
             'customer_rank': 1,
         }
@@ -582,7 +582,7 @@ class TrendyolOrder(models.Model):
                     'name': f"{ship_addr.get('firstName', '')} {ship_addr.get('lastName', '')}".strip() or main_partner.name,
                     'phone': ship_addr.get('phone') or main_partner.phone,
                     'street': ship_full_text[:128],
-                    'city': ship_addr.get('city', ''),
+                    'city': ship_addr.get('district') or ship_addr.get('city', ''),
                     'country_id': s_country.id if s_country else False,
                     'state_id': s_state_id if s_state_id else False,
                 })
@@ -604,7 +604,7 @@ class TrendyolOrder(models.Model):
                     'type': 'invoice',
                     'name': inv_addr.get('company') or main_partner.name,
                     'street': inv_full_text[:128],
-                    'city': inv_addr.get('city', ''),
+                    'city': inv_addr.get('district') or inv_addr.get('city', ''),
                     'country_id': i_country.id if i_country else False,
                     'state_id': i_state_id if i_state_id else False,
                     'vat': inv_addr.get('taxNumber', ''),
