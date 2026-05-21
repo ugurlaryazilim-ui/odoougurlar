@@ -151,6 +151,7 @@
             <field name="arch" type="xml">
                 <xpath expr="//field[@name='complete_name']" position="after">
                     <field name="barcode" string="Barkod" optional="show"/>
+                    <field name="total_quant_qty" string="Adet" optional="show"/>
                 </xpath>
             </field>
         </record>
