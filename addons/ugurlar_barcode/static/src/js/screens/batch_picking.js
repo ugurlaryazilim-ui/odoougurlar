@@ -377,6 +377,9 @@ export class BatchPickingScreen extends Component {
             canDelete: false,
         });
 
+        // ── Filtreleri localStorage'dan yükle (günlük cache) ──
+        this._loadFiltersFromCache();
+
         this._searchTimer = null;
 
         this._onPopState = (ev) => {
@@ -421,27 +424,32 @@ export class BatchPickingScreen extends Component {
     // ═══ FİLTRE & SİLME ═══
     setFilter(filterState) {
         this.state.filterState = filterState;
+        this._saveFiltersToCache();
         this.loadBatches();
     }
 
     onSearch(text) {
         this.state.searchText = text;
+        this._saveFiltersToCache();
         clearTimeout(this._searchTimer);
         this._searchTimer = setTimeout(() => this.loadBatches(), 350);
     }
 
     setWarehouse(value) {
         this.state.filterWarehouse = value;
+        this._saveFiltersToCache();
         this.loadBatches();
     }
 
     setDateFrom(value) {
         this.state.filterDateFrom = value;
+        this._saveFiltersToCache();
         this.loadBatches();
     }
 
     setDateTo(value) {
         this.state.filterDateTo = value;
+        this._saveFiltersToCache();
         this.loadBatches();
     }
 
@@ -449,7 +457,45 @@ export class BatchPickingScreen extends Component {
         this.state.filterWarehouse = '';
         this.state.filterDateFrom = '';
         this.state.filterDateTo = '';
+        this._saveFiltersToCache();
         this.loadBatches();
+    }
+
+    // ═══ FİLTRE CACHE (localStorage — günlük expiry) ═══
+    _filterCacheKey = 'bp_filters';
+
+    _saveFiltersToCache() {
+        try {
+            const today = new Date().toISOString().slice(0, 10);
+            const data = {
+                filterState: this.state.filterState,
+                searchText: this.state.searchText,
+                filterWarehouse: this.state.filterWarehouse,
+                filterDateFrom: this.state.filterDateFrom,
+                filterDateTo: this.state.filterDateTo,
+                _date: today,
+            };
+            localStorage.setItem(this._filterCacheKey, JSON.stringify(data));
+        } catch (e) { /* quota / private mode */ }
+    }
+
+    _loadFiltersFromCache() {
+        try {
+            const raw = localStorage.getItem(this._filterCacheKey);
+            if (!raw) return;
+            const data = JSON.parse(raw);
+            const today = new Date().toISOString().slice(0, 10);
+            // Günlük expiry: farklı günse temizle
+            if (data._date !== today) {
+                localStorage.removeItem(this._filterCacheKey);
+                return;
+            }
+            if (data.filterState) this.state.filterState = data.filterState;
+            if (data.searchText) this.state.searchText = data.searchText;
+            if (data.filterWarehouse) this.state.filterWarehouse = data.filterWarehouse;
+            if (data.filterDateFrom) this.state.filterDateFrom = data.filterDateFrom;
+            if (data.filterDateTo) this.state.filterDateTo = data.filterDateTo;
+        } catch (e) { /* parse error / private mode */ }
     }
 
     async deleteBatch(batchId, batchName) {
