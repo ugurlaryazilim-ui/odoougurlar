@@ -413,7 +413,8 @@
             <field name="name">📦 Raf Detay Dosyası</field>
             <field name="model_id" ref="stock.model_stock_location"/>
             <field name="binding_model_id" ref="stock.model_stock_location"/>
-            <field name="binding_view_types">list</field>
+            <field name="binding_view_types">list,form</field>
+            <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
 if records:
