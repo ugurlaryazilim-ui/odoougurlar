@@ -26,6 +26,10 @@
                     <group invisible="upload_type != 'excel'" string="Excel Dosyası">
                         <field name="excel_file" filename="excel_filename"/>
                         <field name="excel_filename" invisible="1"/>
+                        <button name="action_parse_excel" type="object"
+                                string="📥 Excel'i Yükle ve Ürünleri Getir"
+                                class="btn-success"
+                                invisible="not excel_file"/>
                         <div class="alert alert-info" role="alert">
                             <strong>Excel Formatı:</strong> İlk satır başlık olmalı.
                             Zorunlu sütunlar: <strong>Barkod</strong> ve <strong>Adet</strong>

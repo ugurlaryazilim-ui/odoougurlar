@@ -37,15 +37,23 @@ class TransferOrderWizard(models.TransientModel):
     # Sonuç bilgileri
     warning_message = fields.Text(string='Uyarılar', readonly=True)
 
-    @api.onchange('excel_file')
-    def _onchange_excel_file(self):
-        """Excel dosyası yüklendiğinde parse et."""
+    def action_parse_excel(self):
+        """Excel dosyasını parse et ve ürün satırlarını oluştur."""
+        self.ensure_one()
         if not self.excel_file:
-            return
+            raise UserError("Önce bir Excel dosyası yükleyin!")
         try:
             self._parse_excel()
         except Exception as e:
             raise UserError(f"Excel okuma hatası: {e}")
+        # Wizard'ı yeniden aç (satırlar DB'de artık)
+        return {
+            'type': 'ir.actions.act_window',
+            'res_model': self._name,
+            'res_id': self.id,
+            'view_mode': 'form',
+            'target': 'new',
+        }
 
     def _parse_excel(self):
         """Excel dosyasını parse edip line'ları doldur."""
@@ -78,8 +86,8 @@ class TransferOrderWizard(models.TransientModel):
                 "İlk satırda 'Barkod' veya 'Barcode' başlığı olmalı."
             )
 
-        # Mevcut satırları temizle
-        self.line_ids = [(5, 0, 0)]
+        # Mevcut satırları temizle (DB'den)
+        self.line_ids.unlink()
         lines = []
         warnings = []
         env = self.env
@@ -111,13 +119,13 @@ class TransferOrderWizard(models.TransientModel):
                 warnings.append(f"Satır {row_idx}: Barkod '{barcode}' bulunamadı — atlandı")
                 continue
 
-            lines.append((0, 0, {
+            self.env['odoougurlar.transfer.wizard.line'].create({
+                'wizard_id': self.id,
                 'product_id': product.id,
                 'barcode': barcode,
                 'quantity': qty,
-            }))
+            })
 
-        self.line_ids = lines
         if warnings:
             self.warning_message = '\n'.join(warnings)
         else:
@@ -145,11 +153,12 @@ class TransferOrderWizard(models.TransientModel):
         if existing:
             existing[0].quantity += self.search_qty or 1.0
         else:
-            self.line_ids = [(0, 0, {
+            self.env['odoougurlar.transfer.wizard.line'].create({
+                'wizard_id': self.id,
                 'product_id': product.id,
                 'barcode': barcode,
                 'quantity': self.search_qty or 1.0,
-            })]
+            })
 
         # Alanları temizle
         self.search_barcode = False
