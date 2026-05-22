@@ -167,7 +167,7 @@ class TransferOrderWizard(models.TransientModel):
         """Transfer siparişi (stock.picking) oluştur."""
         self.ensure_one()
 
-        if not self.line_ids:
+        if not self.line_ids.filtered(lambda l: l.product_id):
             raise UserError("Ürün listesi boş! Önce ürün ekleyin.")
 
         if self.source_warehouse_id == self.dest_warehouse_id:
@@ -190,6 +190,8 @@ class TransferOrderWizard(models.TransientModel):
         warnings = []
         valid_lines = []
         for line in self.line_ids:
+            if not line.product_id:
+                continue
             # Kaynak depodaki stok
             available = self.env['stock.quant']._get_available_quantity(
                 line.product_id, source_loc,
@@ -308,7 +310,7 @@ class TransferOrderWizardLine(models.TransientModel):
         ondelete='cascade',
     )
     product_id = fields.Many2one(
-        'product.product', string='Ürün', required=True,
+        'product.product', string='Ürün',
     )
     barcode = fields.Char(string='Barkod')
     quantity = fields.Float(string='Adet', default=1.0, required=True)
