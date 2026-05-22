@@ -4,6 +4,12 @@ from odoo import models, fields, api
 
 _logger = logging.getLogger(__name__)
 
+# ─── Stok Sync'ten Hariç Tutulan Depolar ──────────────────────────────
+# Bu depolardaki stok Nebim cron ile güncellenmez.
+# Raf import ile yerleştirilen stok korunur.
+# Sipariş karşılanınca Odoo düşer, fatura Nebim'e gider.
+SKIP_STOCK_SYNC_WAREHOUSES = {'002'}  # X Depo (İnternet Mağaza Depo)
+
 # ─── Module-Level Cache ───────────────────────────────────────────────
 _STOCK_CACHE = {
     'loaded': False,
@@ -12,6 +18,7 @@ _STOCK_CACHE = {
     'variant_map': {},     # (nebim_code, variant_code) → product.product id
     'template_map': {},    # nebim_code → [product.product ids]
     'warehouse_map': {},   # warehouse_code → location_id
+    'skip_location_ids': set(),  # stok sync atlanacak location_id'ler
     'default_location_id': None,
 }
 
@@ -87,11 +94,19 @@ class StockProcessor(models.AbstractModel):
 
         # 4. Warehouse → location_id
         _STOCK_CACHE['warehouse_map'] = {}
+        _STOCK_CACHE['skip_location_ids'] = set()
         for wh in self.env['stock.warehouse'].sudo().search([]):
             if wh.nebim_warehouse_code:
                 _STOCK_CACHE['warehouse_map'][wh.nebim_warehouse_code] = wh.lot_stock_id.id
             if wh.code:
                 _STOCK_CACHE['warehouse_map'][wh.code] = wh.lot_stock_id.id
+            # Hariç tutulan depoları kaydet
+            if wh.code in SKIP_STOCK_SYNC_WAREHOUSES:
+                _STOCK_CACHE['skip_location_ids'].add(wh.lot_stock_id.id)
+                _logger.info(
+                    "  Stok sync ATLANACAK depo: %s (kod: %s, loc_id: %d)",
+                    wh.name, wh.code, wh.lot_stock_id.id,
+                )
 
         # Varsayılan depo
         default_wh = self.env['stock.warehouse'].sudo().search([], limit=1)
@@ -192,6 +207,11 @@ class StockProcessor(models.AbstractModel):
                     location_id = _STOCK_CACHE.get('default_location_id')
                 if not location_id:
                     stats['failed'] += 1
+                    continue
+
+                # Hariç tutulan depoları atla (ör: X Depo - raflanmış stok)
+                if location_id in _STOCK_CACHE.get('skip_location_ids', set()):
+                    stats['skipped'] += 1
                     continue
 
                 # Quant kontrol
