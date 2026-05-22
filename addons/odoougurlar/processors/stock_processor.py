@@ -36,21 +36,27 @@ class StockProcessor(models.AbstractModel):
             return
         _logger.info("Stok cache yükleniyor...")
 
-        # 1. Barcode → product_id
+        # 1. Barcode → product_id  (iki adımlı: barcode öncelikli)
         _STOCK_CACHE['barcode_map'] = {}
+
+        # Adım 1: barcode alanı — her zaman öncelikli
         self.env.cr.execute("""
-            SELECT id, barcode, nebim_barcode
-            FROM product_product
-            WHERE active = true
+            SELECT barcode, id FROM product_product
+            WHERE active = true AND barcode IS NOT NULL AND barcode != ''
         """)
-        for pid, barcode, nebim_barcode in self.env.cr.fetchall():
-            if barcode:
-                _STOCK_CACHE['barcode_map'][barcode] = pid
-            if nebim_barcode:
-                for bc in nebim_barcode.split(','):
-                    bc = bc.strip()
-                    if bc:
-                        _STOCK_CACHE['barcode_map'][bc] = pid
+        for barcode, pid in self.env.cr.fetchall():
+            _STOCK_CACHE['barcode_map'][barcode] = pid
+
+        # Adım 2: nebim_barcode — sadece barcode map'te yoksa ekle (üzerine yazmaz)
+        self.env.cr.execute("""
+            SELECT id, nebim_barcode FROM product_product
+            WHERE active = true AND nebim_barcode IS NOT NULL AND nebim_barcode != ''
+        """)
+        for pid, nebim_barcode in self.env.cr.fetchall():
+            for bc in nebim_barcode.split(','):
+                bc = bc.strip()
+                if bc and bc not in _STOCK_CACHE['barcode_map']:
+                    _STOCK_CACHE['barcode_map'][bc] = pid
 
         # 2. default_code (ItemSku) → product_id
         _STOCK_CACHE['sku_map'] = {}
