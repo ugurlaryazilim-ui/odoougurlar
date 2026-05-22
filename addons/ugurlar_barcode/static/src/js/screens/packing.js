@@ -259,7 +259,9 @@ export class PackingScreen extends Component {
     // ─── BATCH LİSTESİ ──────────────────────────
     async loadBatchList() {
         try {
-            const res = await BarcodeService.call('/ugurlar_barcode/api/batch_list', {});
+            const res = await BarcodeService.call('/ugurlar_barcode/api/batch_list', {
+                exclude_transfers: true,
+            });
             this.state.batches = res.batches || [];
         } catch (e) {
             // sessiz

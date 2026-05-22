@@ -97,11 +97,21 @@ class BatchApiController(BarcodeApiBase):
         warehouse_filter = (kw.get('warehouse', '') or '').strip()
         date_from = kw.get('date_from', '') or ''
         date_to = kw.get('date_to', '') or ''
+        exclude_transfers = kw.get('exclude_transfers', False)
 
-        domain = [
-            ('time_window', '!=', False),
-            ('name', 'not like', 'T%'),  # Transfer rotaları (T00001) gizle
-        ]
+        if exclude_transfers:
+            # Paketleme: sadece time_window olan ve T ile başlamayan
+            domain = [
+                ('time_window', '!=', False),
+                ('name', 'not like', 'T%'),
+            ]
+        else:
+            # Rota Toplama: time_window olan VEYA T ile başlayan (transferler)
+            domain = [
+                '|',
+                ('time_window', '!=', False),
+                ('name', 'like', 'T%'),
+            ]
 
         if date_from:
             try:
