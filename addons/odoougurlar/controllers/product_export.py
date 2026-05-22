@@ -66,7 +66,7 @@ class ProductListExportController(http.Controller):
                 pp.default_code,
                 COALESCE(pt.name->>'tr_TR', pt.name->>'en_US',
                          pt.name->>'tr', '') AS product_name,
-                pt.detailed_type,
+                pt.type,
                 pp.barcode,
                 pp.nebim_variant_code,
                 pp.nebim_barcode,
@@ -204,7 +204,7 @@ class ProductListExportController(http.Controller):
         }
 
         for row_idx, row in enumerate(quant_rows, 2):
-            (product_id, default_code, product_name, detailed_type,
+            (product_id, default_code, product_name, ptype,
              barcode, variant_code, nebim_barcode, nebim_code,
              color_code, quantity, in_date, write_date,
              loc_barcode, loc_path, loc_name, categ_name,
@@ -220,7 +220,7 @@ class ProductListExportController(http.Controller):
             row_data = [
                 default_code or nebim_code or '',       # Ürün Kodu
                 product_name or '',                      # Adı
-                type_map.get(detailed_type, detailed_type or ''),  # Ürün Tipi
+                type_map.get(ptype, ptype or ''),  # Ürün Tipi
                 marka,                                   # Marka
                 barcode or '',                           # Barkod
                 beden,                                   # Beden
@@ -239,7 +239,7 @@ class ProductListExportController(http.Controller):
                 nebim_barcode or '',                     # Barkodlar
                 categ_name or '',                        # Kategoriler
                 sezon,                                   # Ürün Sezonu
-                type_map.get(detailed_type, detailed_type or ''),  # Ürün Tipi
+                type_map.get(ptype, ptype or ''),  # Ürün Tipi
                 '',                                      # Ürün Division
                 categ_name or '',                        # Ürün Kategorisi
                 '',                                      # Ürün Alt Departman
