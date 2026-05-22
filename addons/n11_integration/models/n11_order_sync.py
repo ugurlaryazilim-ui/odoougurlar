@@ -114,7 +114,11 @@ class N11OrderSync(models.Model):
             'payment_type': 1,
             'invoice_type': 2 if is_commercial else 1,
             'customer_id': str(order_json.get('customerId', '')),
-            'customer_name': order_json.get('customerfullName', '').strip(),
+            'customer_name': (
+                order_json.get('customerfullName', '').strip()
+                or shipment_addr.get('fullName', '').strip()
+                or billing_addr.get('fullName', '').strip()
+            ),
             'customer_email': customer_email,
             'tax_office': billing_addr.get('taxHouse') or billing_addr.get('taxOffice') or order_json.get('taxOffice') or '',
             'shipment_address': json.dumps(shipment_addr, ensure_ascii=False),
