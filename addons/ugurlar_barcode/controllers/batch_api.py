@@ -123,13 +123,23 @@ class BatchApiController(BarcodeApiBase):
         barcode_batch_ids = None
         if barcode_search:
             product = self._find_product(barcode_search)
+            _logger.info("Barkod arama: '%s' → ürün: %s", barcode_search,
+                         product.display_name if product else 'BULUNAMADI')
             if product:
-                pickings = request.env['stock.picking'].sudo().search([
-                    ('move_ids.product_id', '=', product.id),
-                    ('batch_id', '!=', False),
+                # stock.move üzerinden batch bul (daha güvenilir)
+                moves = request.env['stock.move'].sudo().search([
+                    ('product_id', '=', product.id),
+                    ('picking_id', '!=', False),
+                    ('picking_id.batch_id', '!=', False),
                     ('state', 'not in', ['done', 'cancel']),
-                ], limit=50)
-                barcode_batch_ids = set(pickings.mapped('batch_id.id'))
+                ], limit=100)
+                batch_ids = set()
+                for m in moves:
+                    if m.picking_id and m.picking_id.batch_id:
+                        batch_ids.add(m.picking_id.batch_id.id)
+                barcode_batch_ids = batch_ids
+                _logger.info("Barkod arama: %d move, %d batch bulundu: %s",
+                             len(moves), len(batch_ids), batch_ids)
             else:
                 barcode_batch_ids = set()  # ürün bulunamadı → boş sonuç
 

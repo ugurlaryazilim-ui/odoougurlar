@@ -308,19 +308,28 @@ export class PackingScreen extends Component {
                     exclude_done: true,
                     barcode_search: name,
                 });
-                const batches = res.batches || [];
-                if (batches.length === 0) {
-                    this.state.error = `"${name}" barkodlu ürün açık rotalarda bulunamadı`;
-                } else if (batches.length === 1) {
-                    // Tek rota bulundu → doğrudan aç
-                    await this.loadBatch(batches[0].id);
+                if (res.error) {
+                    this.state.error = res.error;
+                    this.state.batches = [];
                 } else {
-                    // Birden fazla rota → listeyi filtrele
-                    this.state.batches = batches;
-                    this.state.error = null;
+                    const batches = res.batches || [];
+                    if (batches.length === 0) {
+                        this.state.error = '"' + name + '" barkodlu ürün açık rotalarda bulunamadı';
+                        this.state.batches = [];
+                    } else if (batches.length === 1) {
+                        // Tek rota bulundu → doğrudan aç
+                        this.state.loading = false;
+                        await this.loadBatch(batches[0].id);
+                        return;
+                    } else {
+                        // Birden fazla rota → listeyi filtrele
+                        this.state.batches = batches;
+                        this.state.error = null;
+                    }
                 }
             } catch (e) {
-                this.state.error = 'Bağlantı hatası';
+                this.state.error = 'Bağlantı hatası: ' + (e.message || e);
+                this.state.batches = [];
             }
         }
 
