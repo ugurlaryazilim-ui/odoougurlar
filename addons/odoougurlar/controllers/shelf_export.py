@@ -19,14 +19,20 @@ class ShelfExportController(http.Controller):
             from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
         except ImportError:
             _logger.error("openpyxl kütüphanesi bulunamadı!")
-            return request.not_found()
+            return request.make_response(
+                "openpyxl kütüphanesi bulunamadı",
+                headers=[('Content-Type', 'text/plain')],
+            )
 
         try:
             return self._generate_shelf_excel(openpyxl, Font, PatternFill,
                                               Alignment, Border, Side)
         except Exception as e:
             _logger.exception("Raf export hatası: %s", str(e))
-            return request.not_found()
+            return request.make_response(
+                f"Raf export hatası: {e}",
+                headers=[('Content-Type', 'text/plain')],
+            )
 
     def _generate_shelf_excel(self, openpyxl, Font, PatternFill,
                               Alignment, Border, Side):
@@ -34,76 +40,86 @@ class ShelfExportController(http.Controller):
         env = request.env
         cr = env.cr
 
-        # ─── VERİ TOPLAMA (SQL ile hızlı) ───
+        # ─── 1. Warehouse map: lot_stock_id → warehouse_name ───
         cr.execute("""
-            SELECT
-                sl.id,
-                sl.complete_name,
-                sl.name,
-                sl.barcode,
-                sl.usage,
-                sl.posx, sl.posy, sl.posz,
-                sl.scrap_location,
-                sw.name AS warehouse_name,
-                (SELECT COUNT(*) FROM stock_location ch
-                 WHERE ch.location_id = sl.id) AS child_count,
-                COALESCE((
-                    SELECT SUM(sq.quantity)
-                    FROM stock_quant sq
-                    JOIN stock_location sub ON sq.location_id = sub.id
-                    WHERE sub.parent_path LIKE sl.parent_path || '%%'
-                      AND sub.usage = 'internal'
-                      AND sq.quantity > 0
-                ), 0) AS total_qty,
-                COALESCE((
-                    SELECT COUNT(DISTINCT sq.product_id)
-                    FROM stock_quant sq
-                    WHERE sq.location_id = sl.id AND sq.quantity > 0
-                ), 0) AS product_count
-            FROM stock_location sl
-            LEFT JOIN stock_warehouse sw ON sw.lot_stock_id = (
-                SELECT p.id FROM stock_location p
-                WHERE sl.parent_path LIKE p.parent_path || '%%'
-                  AND p.id != sl.id
-                  AND p.usage = 'internal'
-                ORDER BY LENGTH(p.parent_path) ASC
-                LIMIT 1
-            )
-            WHERE sl.usage = 'internal'
-            ORDER BY sl.complete_name
-        """)
-        rows = cr.fetchall()
-
-        # Warehouse cache (ayrıca SQL ile)
-        cr.execute("""
-            SELECT sl.id, sw.name
+            SELECT sw.lot_stock_id, sw.name
             FROM stock_warehouse sw
-            JOIN stock_location sl ON sl.id = sw.lot_stock_id
         """)
-        wh_map = {}
-        for loc_id, wh_name in cr.fetchall():
-            wh_map[loc_id] = wh_name
+        wh_lot_map = dict(cr.fetchall())
 
-        # Her lokasyon için warehouse bul (parent_path üzerinden)
+        # ─── 2. Tüm dahili lokasyonları çek ───
         cr.execute("""
-            SELECT sl.id, sw.name
-            FROM stock_location sl
-            JOIN stock_warehouse sw ON sl.parent_path LIKE
-                (SELECT parent_path FROM stock_location WHERE id = sw.lot_stock_id) || '%%'
-            WHERE sl.usage = 'internal'
+            SELECT id, complete_name, name, barcode, usage,
+                   posx, posy, posz, scrap_location, parent_path,
+                   location_id
+            FROM stock_location
+            WHERE usage = 'internal'
+            ORDER BY complete_name
         """)
-        loc_wh = {}
-        for loc_id, wh_name in cr.fetchall():
-            loc_wh[loc_id] = wh_name
+        locations = cr.fetchall()
+        _logger.info("Raf export: %d lokasyon bulundu", len(locations))
 
-        _logger.info("Raf export: %d lokasyon bulundu", len(rows))
+        # ─── 3. Child count map ───
+        cr.execute("""
+            SELECT location_id, COUNT(*)
+            FROM stock_location
+            WHERE location_id IS NOT NULL
+            GROUP BY location_id
+        """)
+        child_count_map = dict(cr.fetchall())
+
+        # ─── 4. Quant toplam: her lokasyon için (parent_path ile hiyerarşi) ───
+        cr.execute("""
+            SELECT sq.location_id, SUM(sq.quantity)
+            FROM stock_quant sq
+            JOIN stock_location sl ON sq.location_id = sl.id
+            WHERE sl.usage = 'internal' AND sq.quantity > 0
+            GROUP BY sq.location_id
+        """)
+        quant_direct_map = dict(cr.fetchall())
+
+        # ─── 5. Product count: her lokasyondaki unique ürün ───
+        cr.execute("""
+            SELECT sq.location_id, COUNT(DISTINCT sq.product_id)
+            FROM stock_quant sq
+            WHERE sq.quantity > 0
+            GROUP BY sq.location_id
+        """)
+        product_count_map = dict(cr.fetchall())
+
+        # ─── Hiyerarşik toplam hesapla (parent_path) ───
+        loc_data = {}
+        for row in locations:
+            loc_id = row[0]
+            parent_path = row[9] or ''
+            loc_data[loc_id] = {
+                'row': row,
+                'parent_path': parent_path,
+            }
+
+        def calc_total_qty(loc_id):
+            """Bir lokasyon ve tüm alt lokasyonlarının toplam miktarı."""
+            pp = loc_data[loc_id]['parent_path']
+            total = 0.0
+            for other_id, other in loc_data.items():
+                if other['parent_path'].startswith(pp):
+                    total += quant_direct_map.get(other_id, 0)
+            return total
+
+        # ─── Lokasyon → Warehouse eşleme ───
+        def find_warehouse(parent_path):
+            """parent_path üzerinden warehouse bul."""
+            parts = [int(p) for p in parent_path.strip('/').split('/') if p]
+            for lot_id, wh_name in wh_lot_map.items():
+                if lot_id in parts:
+                    return wh_name
+            return ''
 
         # ─── EXCEL OLUŞTUR ───
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Raf Detay Listesi"
 
-        # Stiller
         header_font = Font(name='Calibri', bold=True, color='FFFFFF', size=11)
         header_fill = PatternFill(start_color='2E4057', end_color='2E4057',
                                   fill_type='solid')
@@ -119,7 +135,6 @@ class ShelfExportController(http.Controller):
                                     fill_type='solid')
         data_align = Alignment(vertical='center')
 
-        # Başlıklar
         headers = [
             'Path', 'Name', 'Id', 'Unique Code', 'Global Slot',
             'Total Quantity', 'Type', 'Code', 'Is Pick',
@@ -136,20 +151,20 @@ class ShelfExportController(http.Controller):
             cell.alignment = header_align
             cell.border = thin_border
 
-        # Veri satırları
         usage_map = {
             'supplier': 'Supplier', 'view': 'View', 'internal': 'Normal',
             'customer': 'Customer', 'inventory': 'Inventory',
             'transit': 'Transit', 'production': 'Production',
         }
 
-        for row_idx, row in enumerate(rows, 2):
+        for row_idx, row in enumerate(locations, 2):
             (loc_id, complete_name, name, barcode, usage,
-             posx, posy, posz, scrap, wh_name,
-             child_count, total_qty, product_count) = row
+             posx, posy, posz, scrap, parent_path, parent_id) = row
 
-            warehouse = loc_wh.get(loc_id, wh_name or '')
-            has_children = child_count > 0
+            warehouse = find_warehouse(parent_path or '')
+            has_children = child_count_map.get(loc_id, 0) > 0
+            total_qty = calc_total_qty(loc_id)
+            prod_count = product_count_map.get(loc_id, 0)
 
             slot_parts = []
             if posx: slot_parts.append(str(posx))
@@ -167,8 +182,8 @@ class ShelfExportController(http.Controller):
                 usage_map.get(usage, usage or ''),
                 barcode or '',
                 'Yes' if usage == 'internal' and not has_children else 'No',
-                warehouse or '',
-                product_count,
+                warehouse,
+                prod_count,
                 'No',
                 'Yes' if usage == 'internal' else 'No',
                 'Yes' if not has_children and usage == 'internal' else 'No',
