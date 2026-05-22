@@ -37,8 +37,57 @@ class ShelfImportProcessor(models.AbstractModel):
             'locations_existing': 0,
             'products_placed': 0,
             'products_not_found': 0,
+            'quants_cleared': 0,
             'errors': 0,
         }
+
+        # ─── 0. RAF STOKLARINı SIFIRLA ───────────────────────
+        # İlgili depolardaki tüm quant kayıtlarını sil
+        # Raf lokasyonları korunuyor, sadece ürün miktarları temizleniyor
+        _logger.info("═══ RAF STOKLARI SIFIRLANIYOR ═══")
+        for wh_code in DEPOT_MAP.values():
+            wh = self.env['stock.warehouse'].sudo().search(
+                [('code', '=', wh_code)], limit=1
+            )
+            if not wh:
+                _logger.warning("Sıfırlama: Depo bulunamadı (kod: %s)", wh_code)
+                continue
+
+            parent_path = wh.lot_stock_id.parent_path
+            if not parent_path:
+                continue
+
+            # Kaç quant silinecek?
+            self.env.cr.execute("""
+                SELECT COUNT(*) FROM stock_quant
+                WHERE location_id IN (
+                    SELECT id FROM stock_location
+                    WHERE parent_path LIKE %s AND usage = 'internal'
+                )
+            """, [parent_path + '%'])
+            count = self.env.cr.fetchone()[0]
+
+            if count > 0:
+                self.env.cr.execute("""
+                    DELETE FROM stock_quant
+                    WHERE location_id IN (
+                        SELECT id FROM stock_location
+                        WHERE parent_path LIKE %s AND usage = 'internal'
+                    )
+                """, [parent_path + '%'])
+                stats['quants_cleared'] += count
+                _logger.info(
+                    "  Depo %s (%s): %d quant silindi",
+                    wh.name, wh_code, count,
+                )
+            else:
+                _logger.info("  Depo %s (%s): zaten boş", wh.name, wh_code)
+
+        self.env.cr.commit()
+        _logger.info(
+            "═══ SIFIRLAMA TAMAMLANDI: toplam %d quant silindi ═══",
+            stats['quants_cleared'],
+        )
 
         # ─── 1. RAF DOSYALARINI İŞLE ──────────────────────────
         shelf_files = [

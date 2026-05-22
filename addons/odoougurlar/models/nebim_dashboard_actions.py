@@ -225,6 +225,7 @@ class NebimDashboardWarehouse(models.TransientModel):
 
             note = (
                 f"Raf Import Tamamlandı:\n"
+                f"  Sıfırlanan stok kaydı: {stats.get('quants_cleared', 0)}\n"
                 f"  Oluşturulan lokasyon: {stats.get('locations_created', 0)}\n"
                 f"  Yerleştirilen ürün: {stats.get('products_placed', 0)}\n"
                 f"  Bulunamayan ürün: {stats.get('products_not_found', 0)}\n"
@@ -240,6 +241,7 @@ class NebimDashboardWarehouse(models.TransientModel):
             })
 
             msg = (
+                f"🗑️ {stats.get('quants_cleared', 0)} stok sıfırlandı, "
                 f"✅ {stats.get('locations_created', 0)} lokasyon oluşturuldu, "
                 f"{stats.get('products_placed', 0)} ürün yerleştirildi"
             )
