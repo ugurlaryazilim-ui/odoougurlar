@@ -98,7 +98,10 @@ class BatchApiController(BarcodeApiBase):
         date_from = kw.get('date_from', '') or ''
         date_to = kw.get('date_to', '') or ''
 
-        domain = [('time_window', '!=', False)]
+        domain = [
+            ('time_window', '!=', False),
+            ('name', 'not like', 'T%'),  # Transfer rotaları (T00001) gizle
+        ]
 
         if date_from:
             try:

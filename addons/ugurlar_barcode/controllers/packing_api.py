@@ -235,10 +235,34 @@ class PackingApiController(BarcodeApiBase):
         picking_matched = sum(m.quantity for m in target_picking.move_ids)
         picking_completed = all(m.quantity >= m.product_uom_qty for m in target_picking.move_ids)
 
+        # ─── Aynı siparişe ait diğer picking'leri kontrol et ───
+        # Aynı origin (satış siparişi) altındaki tüm picking'ler tamamlanmadan
+        # etiket yazdırılmamalı
+        sibling_remaining = []
+        all_siblings_complete = True
+        if target_picking.origin:
+            sibling_pickings = batch.picking_ids.filtered(
+                lambda p: p.origin == target_picking.origin and p.id != target_picking.id
+            )
+            for sp in sibling_pickings:
+                for m in sp.move_ids:
+                    if m.quantity < m.product_uom_qty:
+                        all_siblings_complete = False
+                        sibling_remaining.append(
+                            f"{m.product_id.display_name} ({m.product_uom_qty - m.quantity} adet)"
+                        )
+
+        # Picking'in kendi kalan ürünleri
         remaining_items = []
         for m in target_picking.move_ids:
             if m.quantity < m.product_uom_qty:
                 remaining_items.append(f"{m.product_id.display_name} ({m.product_uom_qty - m.quantity} adet)")
+
+        # Kalan ürünlere aynı siparişteki diğer picking'lerinkini de ekle
+        remaining_items.extend(sibling_remaining)
+
+        # Gerçek tamamlanma: bu picking + aynı siparişteki diğer picking'ler
+        order_completed = picking_completed and all_siblings_complete
 
         if picking_completed and target_picking.state != 'done':
             try:
@@ -267,7 +291,7 @@ class PackingApiController(BarcodeApiBase):
             'demand_qty': target_move.product_uom_qty,
             'picking_name': target_picking.name,
             'picking_id': target_picking.id,
-            'picking_completed': picking_completed,
+            'picking_completed': order_completed,  # Sipariş bazlı tamamlanma
             'picking_total': picking_total,
             'picking_matched': picking_matched,
             'remaining_items': remaining_items,
