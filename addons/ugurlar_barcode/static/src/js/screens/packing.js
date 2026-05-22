@@ -786,12 +786,26 @@ export class PackingScreen extends Component {
         win.document.write(html);
         win.document.close();
 
+        // Yazdırma sonrası otomatik kapat + focus
+        const autoCloseAndFocus = () => {
+            try { win.close(); } catch (e) { /* popup zaten kapanmış */ }
+            this._autoFocus();
+        };
+
+        // afterprint event ile otomatik kapatma
+        win.addEventListener('afterprint', () => {
+            setTimeout(autoCloseAndFocus, 300);
+        });
+
         const tryPrint = () => {
             const imgs = win.document.querySelectorAll('img');
             const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
             if (allLoaded || imgs.length === 0) {
                 win.focus();
                 win.print();
+                // Fallback: afterprint desteklenmeyen tarayıcılar için
+                // print() dialog kapandıktan sonra bu satır çalışır
+                setTimeout(autoCloseAndFocus, 500);
             } else {
                 setTimeout(tryPrint, 200);
             }
@@ -813,12 +827,22 @@ export class PackingScreen extends Component {
         doc.write(html);
         doc.close();
 
+        const autoCleanup = () => {
+            try { iframe.parentNode.removeChild(iframe); } catch (e) {}
+            this._autoFocus();
+        };
+
+        iframe.contentWindow.addEventListener('afterprint', () => {
+            setTimeout(autoCleanup, 300);
+        });
+
         const tryPrint = () => {
             const imgs = doc.querySelectorAll('img');
             const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
             if (allLoaded || imgs.length === 0) {
                 iframe.contentWindow.focus();
                 iframe.contentWindow.print();
+                setTimeout(autoCleanup, 500);
             } else {
                 setTimeout(tryPrint, 200);
             }
