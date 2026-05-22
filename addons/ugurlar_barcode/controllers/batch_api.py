@@ -656,6 +656,28 @@ class BatchApiController(BarcodeApiBase):
                 batch.write({'state': 'done'})
             except Exception:
                 pass
+        # ─── 4. Ürün chatter'larına transfer tamamlanma logu ───
+        try:
+            user = request.env.user
+            for picking in batch.picking_ids:
+                source_name = picking.location_id.display_name or ''
+                dest_name = picking.location_dest_id.display_name or ''
+                for move in picking.move_ids:
+                    collected = move.wave_collected_qty or 0
+                    if collected > 0 and move.product_id:
+                        msg = Markup(
+                            '<b>&#128666; Transfer Tamamlandı:</b> <em>%s</em> tarafından '
+                            '<b>%s</b> rotasında (Sipariş: %s)<br/>'
+                            '&#128230; <b>%s</b> adet — '
+                            '<b>%s</b> &#10132; <b>%s</b>'
+                        ) % (
+                            user.name, batch.name, picking.name,
+                            int(collected),
+                            source_name, dest_name,
+                        )
+                        self._log_chatter(move.product_id, msg)
+        except Exception as e:
+            _logger.warning("Chatter log hatası: %s", e)
 
         return {
             'success': True,
