@@ -2,9 +2,9 @@
 <templates xml:space="preserve">
 
     <!--
-        Stok Konumları list view — "Yeni" yanına "Raf Detay Dosyası" butonu.
+        Stok Konumları list view — kontrol paneli butonları.
         Odoo 19 web.ListView template'ini inherit eder.
-        control-panel-create-button slot'undaki Yeni butonundan sonra eklenir.
+        o_list_button_add (Yeni) butonundan sonra eklenir.
     -->
     <t t-name="odoougurlar.StockLocationListView" t-inherit="web.ListView" owl="1">
         <xpath expr="//button[hasclass('o_list_button_add')]" position="after">
@@ -12,6 +12,11 @@
                     class="btn btn-secondary o_shelf_export_btn ms-1"
                     t-on-click="onExportShelfDetail">
                 📦 Raf Detay Dosyası
+            </button>
+            <button type="button"
+                    class="btn btn-secondary o_product_export_btn ms-1"
+                    t-on-click="onExportProductList">
+                📋 Ürün Listesi
             </button>
         </xpath>
     </t>
