@@ -242,7 +242,6 @@ class TransferOrderWizard(models.TransientModel):
         # Move'lar oluştur
         for line, qty in valid_lines:
             self.env['stock.move'].create({
-                'name': f"{seq_name}: {line.product_id.display_name}",
                 'product_id': line.product_id.id,
                 'product_uom_qty': qty,
                 'product_uom': line.product_id.uom_id.id,
