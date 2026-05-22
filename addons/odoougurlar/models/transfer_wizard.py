@@ -254,6 +254,18 @@ class TransferOrderWizard(models.TransientModel):
         picking.action_confirm()
         picking.action_assign()
 
+        # ─── Batch Picking (Rota Toplama) oluştur ───
+        # T00001 adıyla batch oluştur, picking'i bağla
+        batch = self.env['stock.picking.batch'].create({
+            'name': seq_name,
+            'picking_type_id': picking_type.id,
+            'picking_ids': [(4, picking.id)],
+        })
+        _logger.info(
+            "Batch picking oluşturuldu: %s (picking: %s)",
+            batch.name, picking.name,
+        )
+
         _logger.info(
             "Transfer oluşturuldu: %s — %s → %s, %d ürün",
             seq_name, self.source_warehouse_id.name,
