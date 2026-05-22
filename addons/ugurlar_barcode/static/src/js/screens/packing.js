@@ -20,10 +20,10 @@ export class PackingScreen extends Component {
             <t t-if="state.view === 'search'">
                 <div class="ub-search-form">
                     <div class="ub-search-field">
-                        <label class="ub-field-label">Rota / Batch Numarası</label>
+                        <label class="ub-field-label">Rota, Batch veya Barkod</label>
                         <div class="ub-input-group">
                             <input type="text" class="form-control ub-barcode-input"
-                                   placeholder="TOPLAMA-2026-04-06-0930..."
+                                   placeholder="R00215 veya ürün barkodu..."
                                    t-on-keydown="onRouteKey"
                                    t-att-value="state.routeInput"
                                    t-on-input="(ev) => this.state.routeInput = ev.target.value"/>
@@ -43,7 +43,7 @@ export class PackingScreen extends Component {
                 <!-- Bugünkü batch listesi -->
                 <div class="ub-packing-batch-list" t-if="state.batches.length">
                     <div class="ub-section-title-dark" style="margin-top:0.8rem;">
-                        <i class="fa fa-list"></i> Son Rotalar
+                        <i class="fa fa-list"></i> Açık Rotalar
                     </div>
                     <t t-foreach="state.batches" t-as="b" t-key="b.id">
                         <div class="ub-picking-row" t-on-click="() => this.loadBatch(b.id)">
@@ -265,6 +265,7 @@ export class PackingScreen extends Component {
         try {
             const res = await BarcodeService.call('/ugurlar_barcode/api/batch_list', {
                 exclude_transfers: true,
+                exclude_done: true,
             });
             this.state.batches = res.batches || [];
         } catch (e) {
@@ -281,18 +282,48 @@ export class PackingScreen extends Component {
         if (!name) return;
         this.state.loading = true;
         this.state.error = null;
-        try {
-            const res = await BarcodeService.call('/ugurlar_barcode/api/packing_batch_detail', {
-                batch_name: name,
-            });
-            if (res.error) {
-                this.state.error = res.error;
-            } else {
-                this._setBatchDetail(res);
+
+        // Akıllı algılama: R/TOPLAMA ile başlıyorsa rota numarası, değilse barkod
+        const isRouteName = /^[Rr]\d/i.test(name) || name.toUpperCase().startsWith('TOPLAMA');
+
+        if (isRouteName) {
+            // Rota numarası → doğrudan aç
+            try {
+                const res = await BarcodeService.call('/ugurlar_barcode/api/packing_batch_detail', {
+                    batch_name: name,
+                });
+                if (res.error) {
+                    this.state.error = res.error;
+                } else {
+                    this._setBatchDetail(res);
+                }
+            } catch (e) {
+                this.state.error = 'Bağlantı hatası';
             }
-        } catch (e) {
-            this.state.error = 'Bağlantı hatası';
+        } else {
+            // Barkod → o ürünün olduğu açık rotaları filtrele
+            try {
+                const res = await BarcodeService.call('/ugurlar_barcode/api/batch_list', {
+                    exclude_transfers: true,
+                    exclude_done: true,
+                    barcode_search: name,
+                });
+                const batches = res.batches || [];
+                if (batches.length === 0) {
+                    this.state.error = `"${name}" barkodlu ürün açık rotalarda bulunamadı`;
+                } else if (batches.length === 1) {
+                    // Tek rota bulundu → doğrudan aç
+                    await this.loadBatch(batches[0].id);
+                } else {
+                    // Birden fazla rota → listeyi filtrele
+                    this.state.batches = batches;
+                    this.state.error = null;
+                }
+            } catch (e) {
+                this.state.error = 'Bağlantı hatası';
+            }
         }
+
         this.state.loading = false;
     }
 

@@ -98,6 +98,8 @@ class BatchApiController(BarcodeApiBase):
         date_from = kw.get('date_from', '') or ''
         date_to = kw.get('date_to', '') or ''
         exclude_transfers = kw.get('exclude_transfers', False)
+        exclude_done = kw.get('exclude_done', False)
+        barcode_search = (kw.get('barcode_search', '') or '').strip()
 
         if exclude_transfers:
             # Paketleme: sadece time_window olan ve T ile başlamayan
@@ -112,6 +114,24 @@ class BatchApiController(BarcodeApiBase):
                 ('time_window', '!=', False),
                 ('name', 'like', 'T%'),
             ]
+
+        # Tamamlanan/iptal rotaları gizle
+        if exclude_done:
+            domain.append(('state', 'not in', ['done', 'cancel']))
+
+        # Barkod ile ürün arama — ürünün bulunduğu rotaları filtrele
+        barcode_batch_ids = None
+        if barcode_search:
+            product = self._find_product(barcode_search)
+            if product:
+                pickings = request.env['stock.picking'].sudo().search([
+                    ('move_ids.product_id', '=', product.id),
+                    ('batch_id', '!=', False),
+                    ('state', 'not in', ['done', 'cancel']),
+                ], limit=50)
+                barcode_batch_ids = set(pickings.mapped('batch_id.id'))
+            else:
+                barcode_batch_ids = set()  # ürün bulunamadı → boş sonuç
 
         if date_from:
             try:
@@ -135,6 +155,10 @@ class BatchApiController(BarcodeApiBase):
 
         result = []
         for b in batches:
+            # Barkod arama filtresi: sadece bu ürünün olduğu batch'ler
+            if barcode_batch_ids is not None and b.id not in barcode_batch_ids:
+                continue
+
             # Depo bilgisi — source_info alanından depo adını çıkar
             # Format: "HEYKEL MAĞAZA DEPO - 6 siparis (09:31-12:30)"
             warehouse_name = ''
