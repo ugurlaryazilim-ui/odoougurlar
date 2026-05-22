@@ -256,14 +256,19 @@ export class PackingScreen extends Component {
     }
 
     _autoFocus() {
-        // View değiştiğinde doğru input'a focus at
+        // Önce ana pencereye focus ver (popup'tan dönüş için şart)
+        window.focus();
+        // DOM hazır olduktan sonra input'a focus at
         setTimeout(() => {
+            window.focus();
             if (this.state.view === 'search' && this.routeInputRef.el) {
                 this.routeInputRef.el.focus();
+                this.routeInputRef.el.select();
             } else if (this.state.view === 'detail' && this.scanInputRef.el) {
                 this.scanInputRef.el.focus();
+                this.scanInputRef.el.select();
             }
-        }, 50);
+        }, 150);
     }
 
     goBack() {
@@ -787,9 +792,13 @@ export class PackingScreen extends Component {
         win.document.close();
 
         // Yazdırma sonrası otomatik kapat + focus
+        let _closed = false;
         const autoCloseAndFocus = () => {
+            if (_closed) return;
+            _closed = true;
             try { win.close(); } catch (e) { /* popup zaten kapanmış */ }
-            this._autoFocus();
+            // Popup kapandıktan sonra ana pencereye dön ve input'a focus ver
+            setTimeout(() => this._autoFocus(), 400);
         };
 
         // afterprint event ile otomatik kapatma
@@ -827,9 +836,12 @@ export class PackingScreen extends Component {
         doc.write(html);
         doc.close();
 
+        let _cleaned = false;
         const autoCleanup = () => {
+            if (_cleaned) return;
+            _cleaned = true;
             try { iframe.parentNode.removeChild(iframe); } catch (e) {}
-            this._autoFocus();
+            setTimeout(() => this._autoFocus(), 400);
         };
 
         iframe.contentWindow.addEventListener('afterprint', () => {
