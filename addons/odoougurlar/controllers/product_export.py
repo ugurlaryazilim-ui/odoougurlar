@@ -93,19 +93,13 @@ class ProductListExportController(http.Controller):
         quant_rows = cr.fetchall()
         _logger.info("Ürün export: %d ürün-raf kaydı bulundu", len(quant_rows))
 
-        # ─── 2. Ürün attribute'lerini çek ───
-        # Marka, Cinsiyet, Sezon/Yıl, Ürün Grubu vb.
-        target_attrs = ['Marka', 'Cinsiyet', 'Sezon/Yıl', 'Ürün Grubu',
-                        'Renk', 'Beden']
+        # ─── 2. Template attribute'leri (Marka, Cinsiyet, Sezon vb.) ───
         cr.execute("""
             SELECT
                 ptal.product_tmpl_id,
-                pa.name->>'tr_TR' AS attr_name_tr,
-                pa.name->>'en_US' AS attr_name_en,
-                pa.name::text AS attr_name_raw,
+                COALESCE(pa.name->>'tr_TR', pa.name->>'en_US', '') AS attr_name,
                 STRING_AGG(
-                    COALESCE(pav.name->>'tr_TR', pav.name->>'en_US',
-                             pav.name->>'tr', pav.name::text),
+                    COALESCE(pav.name->>'tr_TR', pav.name->>'en_US', ''),
                     ', '
                 ) AS attr_value
             FROM product_template_attribute_line ptal
@@ -113,50 +107,49 @@ class ProductListExportController(http.Controller):
             JOIN product_template_attribute_value ptav
                 ON ptav.attribute_line_id = ptal.id
             JOIN product_attribute_value pav ON ptav.product_attribute_value_id = pav.id
+            WHERE pa.create_variant = 'no_variant'
             GROUP BY ptal.product_tmpl_id, pa.name, pa.id
         """)
-        # template_id → {attr_name: attr_value}
         tmpl_attrs = {}
-        for tmpl_id, name_tr, name_en, name_raw, value in cr.fetchall():
+        for tmpl_id, attr_name, value in cr.fetchall():
             if tmpl_id not in tmpl_attrs:
                 tmpl_attrs[tmpl_id] = {}
-            # Attribute ismini belirle
-            attr_name = name_tr or name_en or ''
-            # JSON formatında gelebilir, temizle
-            if attr_name.startswith('{') or attr_name.startswith('"'):
-                try:
-                    parsed = json.loads(name_raw)
-                    if isinstance(parsed, dict):
-                        attr_name = parsed.get('tr_TR', parsed.get('en_US', ''))
-                    elif isinstance(parsed, str):
-                        attr_name = parsed
-                except Exception:
-                    attr_name = name_raw.strip('"{}')
-            tmpl_attrs[tmpl_id][attr_name] = value
+            tmpl_attrs[tmpl_id][attr_name or ''] = value
 
         def get_attr(tmpl_id, *names):
-            """Template'in attribute değerini bul."""
             attrs = tmpl_attrs.get(tmpl_id, {})
             for n in names:
                 if n in attrs:
                     return attrs[n]
             return ''
 
-        # ─── 3. Beden bilgisi: variant_code'dan veya attribute'den ───
-        def get_size(variant_code, tmpl_id):
-            """Beden bilgisi: nebim_variant_code veya Beden attribute."""
-            if variant_code:
-                parts = variant_code.split('-')
-                if len(parts) >= 2:
-                    return parts[-1]  # Son kısım beden
-                return variant_code
-            return get_attr(tmpl_id, 'Beden')
+        # ─── 3. Varyant-bazlı attribute'ler (Renk, Beden) ───
+        # product_variant_combination: her varyantın kendi Renk ve Beden değeri
+        cr.execute("""
+            SELECT
+                pvc.product_product_id,
+                COALESCE(pa.name->>'tr_TR', pa.name->>'en_US', '') AS attr_name,
+                COALESCE(pav.name->>'tr_TR', pav.name->>'en_US', '') AS attr_value
+            FROM product_variant_combination pvc
+            JOIN product_template_attribute_value ptav
+                ON pvc.product_template_attribute_value_id = ptav.id
+            JOIN product_attribute_value pav
+                ON ptav.product_attribute_value_id = pav.id
+            JOIN product_attribute pa ON pav.attribute_id = pa.id
+        """)
+        variant_attrs = {}  # product_id → {attr_name: attr_value}
+        for prod_id, attr_name, attr_value in cr.fetchall():
+            if prod_id not in variant_attrs:
+                variant_attrs[prod_id] = {}
+            variant_attrs[prod_id][attr_name or ''] = attr_value
 
-        def get_color(color_code, tmpl_id):
-            """Renk bilgisi: nebim_color_code veya Renk attribute."""
-            if color_code:
-                return color_code
-            return get_attr(tmpl_id, 'Renk')
+        def get_variant_attr(product_id, *names):
+            """Varyantın kendi attribute değerini bul (Renk, Beden)."""
+            attrs = variant_attrs.get(product_id, {})
+            for n in names:
+                if n in attrs:
+                    return attrs[n]
+            return ''
 
         # ─── EXCEL OLUŞTUR ───
         wb = openpyxl.Workbook()
@@ -179,8 +172,8 @@ class ProductListExportController(http.Controller):
         data_align = Alignment(vertical='center')
 
         headers = [
-            'Ürün Kodu', 'Adı', 'Ürün Tipi', 'Marka', 'Barkod',
-            'Beden', 'Raf Miktarı', 'Sezon', 'Renk',
+            'Ana Ürün Kodu', 'Ürün Kodu', 'Adı', 'Ürün Tipi', 'Marka',
+            'Barkod', 'Beden', 'Raf Miktarı', 'Sezon', 'Renk',
             'Depoya Son Geliş Tarihi', 'Raf Tekil Kodu', 'Raf Yolu',
             'Ürün ID', 'Son Raflama Zamanı', 'Raf Tipi', 'Raf Statüsü',
             'SKU', 'EAN', 'Barkodlar', 'Kategoriler',
@@ -210,28 +203,36 @@ class ProductListExportController(http.Controller):
              loc_barcode, loc_path, loc_name, categ_name,
              template_id) = row
 
+            # Template seviye attribute'ler
             marka = get_attr(template_id, 'Marka')
             sezon = get_attr(template_id, 'Sezon/Yıl')
             cinsiyet = get_attr(template_id, 'Cinsiyet')
             urun_grubu = get_attr(template_id, 'Ürün Grubu')
-            beden = get_size(variant_code, template_id)
-            renk = get_color(color_code, template_id)
+
+            # Varyant-bazlı Renk ve Beden (barkoda özel)
+            renk = get_variant_attr(product_id, 'Renk')
+            beden = get_variant_attr(product_id, 'Beden')
+            # Fallback: nebim_variant_code'dan
+            if not beden and variant_code:
+                parts = variant_code.split('-')
+                beden = parts[-1] if len(parts) >= 2 else variant_code
 
             row_data = [
-                default_code or nebim_code or '',       # Ürün Kodu
+                nebim_code or '',                        # Ana Ürün Kodu
+                default_code or '',                      # Ürün Kodu (varyant)
                 product_name or '',                      # Adı
-                type_map.get(ptype, ptype or ''),  # Ürün Tipi
+                type_map.get(ptype, ptype or ''),         # Ürün Tipi
                 marka,                                   # Marka
                 barcode or '',                           # Barkod
                 beden,                                   # Beden
                 quantity or 0,                           # Raf Miktarı
                 sezon,                                   # Sezon
                 renk,                                    # Renk
-                in_date.strftime('%Y-%m-%d %H:%M') if in_date else '',  # Son Geliş
+                in_date.strftime('%Y-%m-%d %H:%M') if in_date else '',
                 loc_barcode or '',                       # Raf Tekil Kodu
                 loc_path or '',                          # Raf Yolu
                 product_id,                              # Ürün ID
-                write_date.strftime('%Y-%m-%d %H:%M') if write_date else '',  # Son Raflama
+                write_date.strftime('%Y-%m-%d %H:%M') if write_date else '',
                 'Normal',                                # Raf Tipi
                 'free',                                  # Raf Statüsü
                 default_code or '',                      # SKU
@@ -239,7 +240,7 @@ class ProductListExportController(http.Controller):
                 nebim_barcode or '',                     # Barkodlar
                 categ_name or '',                        # Kategoriler
                 sezon,                                   # Ürün Sezonu
-                type_map.get(ptype, ptype or ''),  # Ürün Tipi
+                type_map.get(ptype, ptype or ''),         # Ürün Tipi
                 '',                                      # Ürün Division
                 categ_name or '',                        # Ürün Kategorisi
                 '',                                      # Ürün Alt Departman
@@ -258,14 +259,14 @@ class ProductListExportController(http.Controller):
 
         # Sütun genişlikleri
         col_widths = {
-            1: 14, 2: 30, 3: 12, 4: 16, 5: 18,
-            6: 10, 7: 12, 8: 12, 9: 14,
-            10: 20, 11: 16, 12: 40,
-            13: 10, 14: 20, 15: 10, 16: 10,
-            17: 14, 18: 18, 19: 24, 20: 30,
-            21: 12, 22: 12, 23: 14,
-            24: 30, 25: 16, 26: 14,
-            27: 12, 28: 16, 29: 16,
+            1: 16, 2: 18, 3: 30, 4: 12, 5: 16,
+            6: 18, 7: 10, 8: 12, 9: 12, 10: 14,
+            11: 20, 12: 16, 13: 40,
+            14: 10, 15: 20, 16: 10, 17: 10,
+            18: 14, 19: 18, 20: 24, 21: 30,
+            22: 12, 23: 12, 24: 14,
+            25: 30, 26: 16, 27: 14,
+            28: 12, 29: 16, 30: 16,
         }
         for col, width in col_widths.items():
             ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = width
