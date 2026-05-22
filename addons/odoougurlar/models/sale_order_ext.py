@@ -28,7 +28,7 @@ class SaleOrder(models.Model):
     )
     picking_batch_names = fields.Char(
         string='Rota', compute='_compute_picking_batch_names',
-        readonly=True, store=True,
+        readonly=True, store=False,
     )
 
     _MP_FIELDS = [
@@ -54,10 +54,22 @@ class SaleOrder(models.Model):
             order.marketplace_name = mp_name
             order.marketplace_order_number = order.client_order_ref if mp_name else False
 
-    @api.depends('picking_ids.batch_id')
     def _compute_picking_batch_names(self):
+        Picking = self.env['stock.picking'].sudo()
         for order in self:
-            batches = order.picking_ids.mapped('batch_id.name')
+            # picking_ids yerine procurement group veya origin üzerinden bul
+            pickings = Picking.browse()
+            if hasattr(order, 'picking_ids'):
+                pickings = order.picking_ids
+            elif order.procurement_group_id:
+                pickings = Picking.search([
+                    ('group_id', '=', order.procurement_group_id.id),
+                ], limit=20)
+            elif order.name:
+                pickings = Picking.search([
+                    ('origin', '=', order.name),
+                ], limit=20)
+            batches = pickings.mapped('batch_id.name')
             order.picking_batch_names = ', '.join([b for b in batches if b])
 
 
