@@ -90,7 +90,7 @@ class ShelfExportController(http.Controller):
         loc_data = {}
         for row in locations:
             loc_id = row[0]
-            parent_path = row[9] or ''
+            parent_path = row[5] or ''
             loc_data[loc_id] = {
                 'row': row,
                 'parent_path': parent_path,
