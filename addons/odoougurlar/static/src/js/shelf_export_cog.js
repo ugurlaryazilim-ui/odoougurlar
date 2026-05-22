@@ -23,8 +23,8 @@ export class StockLocationListController extends ListController {
     }
 }
 
-// Template'i set et
-StockLocationListController.template = "odoougurlar.StockLocationListButtons";
+// web.ListView'u inherit eden template
+StockLocationListController.template = "odoougurlar.StockLocationListView";
 
 // Custom view olarak kaydet
 registry.category("views").add("stock_location_list", {
