@@ -2,8 +2,8 @@
 <templates xml:space="preserve">
 
     <!-- Stok Konumları list view — "Yeni" yanına "Raf Detay Dosyası" butonu -->
-    <t t-name="odoougurlar.StockLocationListButtons" t-inherit="web.ListView.Buttons">
-        <xpath expr="//button[hasclass('o_list_button_add')]" position="after">
+    <t t-name="odoougurlar.StockLocationListButtons" t-inherit="web.ListView.Buttons" owl="1">
+        <xpath expr="//t[@t-set-slot='control-panel-create-button']" position="inside">
             <button type="button"
                     class="btn btn-secondary ms-1"
                     t-on-click="onExportShelfDetail">

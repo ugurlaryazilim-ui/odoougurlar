@@ -14,7 +14,7 @@ export class StockLocationListController extends ListController {
         this.actionService = useService("action");
     }
 
-    async onExportShelfDetail() {
+    onExportShelfDetail() {
         this.actionService.doAction({
             type: "ir.actions.act_url",
             url: "/odoougurlar/shelf_detail_export",
@@ -23,9 +23,11 @@ export class StockLocationListController extends ListController {
     }
 }
 
+// Template'i set et
+StockLocationListController.template = "odoougurlar.StockLocationListButtons";
+
 // Custom view olarak kaydet
 registry.category("views").add("stock_location_list", {
     ...listView,
     Controller: StockLocationListController,
-    buttonTemplate: "odoougurlar.StockLocationListButtons",
 });
