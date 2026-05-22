@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml, onMounted, onWillUnmount } from "@odoo/owl";
+import { Component, useState, xml, onMounted, onWillUnmount, useRef, onPatched } from "@odoo/owl";
 import { BarcodeService, AudioFeedback } from "../barcode_service";
 import { generateBarcodeSVG } from "./label_designer";
 
@@ -24,6 +24,7 @@ export class PackingScreen extends Component {
                         <div class="ub-input-group">
                             <input type="text" class="form-control ub-barcode-input"
                                    placeholder="R00215 veya ürün barkodu..."
+                                   t-ref="routeInput"
                                    t-on-keydown="onRouteKey"
                                    t-att-value="state.routeInput"
                                    t-on-input="(ev) => this.state.routeInput = ev.target.value"/>
@@ -92,6 +93,7 @@ export class PackingScreen extends Component {
                     <div class="ub-input-group">
                         <input type="text" class="form-control ub-barcode-input"
                                placeholder="Ürün barkodunu okutun..."
+                               t-ref="scanInput"
                                t-on-keydown="onScanKey"
                                t-att-value="state.scanInput"
                                t-on-input="(ev) => this.state.scanInput = ev.target.value"/>
@@ -238,11 +240,30 @@ export class PackingScreen extends Component {
             }
         });
 
-        onMounted(() => this.loadBatchList());
+        this.routeInputRef = useRef('routeInput');
+        this.scanInputRef = useRef('scanInput');
+
+        onMounted(() => {
+            this.loadBatchList();
+            this._autoFocus();
+        });
+
+        onPatched(() => this._autoFocus());
 
         onWillUnmount(() => {
             if (this._unsub) this._unsub();
         });
+    }
+
+    _autoFocus() {
+        // View değiştiğinde doğru input'a focus at
+        setTimeout(() => {
+            if (this.state.view === 'search' && this.routeInputRef.el) {
+                this.routeInputRef.el.focus();
+            } else if (this.state.view === 'detail' && this.scanInputRef.el) {
+                this.scanInputRef.el.focus();
+            }
+        }, 50);
     }
 
     goBack() {
