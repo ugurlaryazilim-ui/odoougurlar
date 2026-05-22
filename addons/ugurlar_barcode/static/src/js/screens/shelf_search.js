@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml } from "@odoo/owl";
+import { Component, useState, xml, onWillUnmount } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 
 export class ShelfSearch extends Component {
@@ -144,6 +144,11 @@ export class ShelfSearch extends Component {
             this.state.inputValue = barcode;
             this.doSearch(barcode);
         });
+
+        onWillUnmount(() => {
+            if (this._unsubscribe) this._unsubscribe();
+            if (this._scanTimer) clearTimeout(this._scanTimer);
+        });
     }
 
     onInput(ev) {
@@ -270,8 +275,5 @@ export class ShelfSearch extends Component {
         this.props.navigate('stock_search');
     }
 
-    willUnmount() {
-        if (this._unsubscribe) this._unsubscribe();
-        if (this._scanTimer) clearTimeout(this._scanTimer);
-    }
+
 }

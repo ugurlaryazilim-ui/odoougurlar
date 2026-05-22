@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml } from "@odoo/owl";
+import { Component, useState, xml, onWillUnmount } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 
 export class ShelfTransferScreen extends Component {
@@ -122,7 +122,7 @@ export class ShelfTransferScreen extends Component {
                         <label class="ub-field-label">Adet</label>
                         <input type="number" class="form-control ub-barcode-input"
                                min="1" t-att-value="state.quantity"
-                               t-on-input="(ev) => this.state.quantity = parseInt(ev.target.value) || 1"/>
+                               t-on-input="onQuantityInput"/>
                     </div>
 
                     <div class="ub-search-field">
@@ -230,6 +230,12 @@ export class ShelfTransferScreen extends Component {
             success: null,
             history: [],
         });
+
+        onWillUnmount(() => {});
+    }
+
+    onQuantityInput(ev) {
+        this.state.quantity = Number.parseInt(ev.target.value, 10) || 1;
     }
 
     // ═══ ADIM 1: KAYNAK RAF ═══
@@ -465,5 +471,5 @@ export class ShelfTransferScreen extends Component {
         }
     }
 
-    willUnmount() {}
+
 }

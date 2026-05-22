@@ -907,7 +907,4 @@ export class BatchPickingScreen extends Component {
         document.body.removeChild(ta);
     }
 
-    willUnmount() {
-        if (this._unsub) this._unsub();
-    }
 }

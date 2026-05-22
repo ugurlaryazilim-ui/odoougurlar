@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml, onMounted } from "@odoo/owl";
+import { Component, useState, xml, onMounted, onWillUnmount } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 
 export class PickingScreen extends Component {
@@ -112,6 +112,10 @@ export class PickingScreen extends Component {
             }
         });
         onMounted(() => this.loadList());
+
+        onWillUnmount(() => {
+            if (this._unsub) this._unsub();
+        });
     }
 
     goBack() {
@@ -180,5 +184,5 @@ export class PickingScreen extends Component {
         this.state.loading = false;
     }
 
-    willUnmount() { if (this._unsub) this._unsub(); }
+
 }

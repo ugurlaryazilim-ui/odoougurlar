@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml } from "@odoo/owl";
+import { Component, useState, xml, onWillUnmount } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 
 export class BulkScreen extends Component {
@@ -145,6 +145,10 @@ export class BulkScreen extends Component {
         this._unsubscribe = this.props.scanner.onScan(bc => {
             this.addItemByBarcode(bc);
         });
+
+        onWillUnmount(() => {
+            if (this._unsubscribe) this._unsubscribe();
+        });
     }
 
     onOpChange(ev) { this.state.operation = ev.target.value; }
@@ -204,5 +208,5 @@ export class BulkScreen extends Component {
         this.state.loading = false;
     }
 
-    willUnmount() { if (this._unsubscribe) this._unsubscribe(); }
+
 }

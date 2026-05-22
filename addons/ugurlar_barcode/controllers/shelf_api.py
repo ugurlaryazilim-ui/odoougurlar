@@ -85,7 +85,7 @@ class ShelfApiController(BarcodeApiBase):
     # ─── RAF KONTROL (raf barkodu ile ürünleri listele) ───
     @http.route('/ugurlar_barcode/api/shelf_control', type='json', auth='user')
     def shelf_control(self, barcode='', **kw):
-        """Raf barkodu/adı ile o raftaki ürünleri listele (HamurLabs uyumlu)."""
+        """Raf barkodu/adı ile o raftaki ürünleri listele (performans optimizeli)."""
         if not barcode:
             return {'error': 'Raf barkodu giriniz'}
 
@@ -95,16 +95,40 @@ class ShelfApiController(BarcodeApiBase):
         if not location:
             return {'error': f'Raf bulunamadı: {barcode}'}
 
-        quants = request.env['stock.quant'].sudo().search([
+        # ─── PREFETCH ile toplu veri çekme (N+1 sorgu önleme) ───
+        StockQuant = request.env['stock.quant'].sudo()
+        quants = StockQuant.search_fetch([
             ('location_id', '=', location.id),
             ('quantity', '>', 0),
-        ])
+        ], ['product_id', 'quantity'])
+
+        if not quants:
+            return {
+                'location': {
+                    'id': location.id,
+                    'name': location.name,
+                    'complete_name': location.complete_name,
+                    'barcode': location.barcode or '',
+                    'warehouse': location.warehouse_id.name if location.warehouse_id else '',
+                },
+                'products': [],
+                'total_products': 0,
+                'total_quantity': 0,
+            }
+
+        # Toplu prefetch — tek sorguda tüm ürün ve template verilerini çek
+        all_products = quants.mapped('product_id')
+        all_products.fetch(['name', 'barcode', 'default_code', 'product_tmpl_id'])
+        all_templates = all_products.mapped('product_tmpl_id')
+        all_templates.fetch(['nebim_code', 'attribute_line_ids'])
 
         _marka_cache = {}
         products = []
+        total_qty = 0
         for q in quants:
             p = q.product_id
             tmpl = p.product_tmpl_id
+            total_qty += q.quantity
             products.append({
                 'id': p.id,
                 'name': p.name,
@@ -114,12 +138,15 @@ class ShelfApiController(BarcodeApiBase):
                 'quantity': q.quantity,
             })
 
-        request.env['ugurlar.barcode.operation'].sudo().create({
-            'operation_type': 'shelf_control',
-            'barcode': barcode,
-            'location_id': location.id,
-            'state': 'done',
-        })
+        try:
+            request.env['ugurlar.barcode.operation'].sudo().create({
+                'operation_type': 'shelf_control',
+                'barcode': barcode,
+                'location_id': location.id,
+                'state': 'done',
+            })
+        except Exception:
+            pass
 
         return {
             'location': {
@@ -131,7 +158,7 @@ class ShelfApiController(BarcodeApiBase):
             },
             'products': products,
             'total_products': len(products),
-            'total_quantity': sum(p['quantity'] for p in products),
+            'total_quantity': total_qty,
         }
 
     # ─── RAFLAMA (ürün → raf) ─────────────────────────────

@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml } from "@odoo/owl";
+import { Component, useState, xml, onWillUnmount } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 
 export class MovementsScreen extends Component {
@@ -285,6 +285,10 @@ export class MovementsScreen extends Component {
             this.loadMovements();
         });
         this.loadMovements();
+
+        onWillUnmount(() => {
+            if (this._unsub) this._unsub();
+        });
     }
 
     // ─── COMPUTED ──────────────────────────────────
@@ -449,5 +453,5 @@ export class MovementsScreen extends Component {
         });
     }
 
-    willUnmount() { if (this._unsub) this._unsub(); }
+
 }

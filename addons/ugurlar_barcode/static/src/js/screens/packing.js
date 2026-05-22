@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml, onMounted } from "@odoo/owl";
+import { Component, useState, xml, onMounted, onWillUnmount } from "@odoo/owl";
 import { BarcodeService, AudioFeedback } from "../barcode_service";
 import { generateBarcodeSVG } from "./label_designer";
 
@@ -239,6 +239,10 @@ export class PackingScreen extends Component {
         });
 
         onMounted(() => this.loadBatchList());
+
+        onWillUnmount(() => {
+            if (this._unsub) this._unsub();
+        });
     }
 
     goBack() {
@@ -761,7 +765,5 @@ export class PackingScreen extends Component {
         setTimeout(tryPrint, 600);
     }
 
-    willUnmount() {
-        if (this._unsub) this._unsub();
-    }
+
 }

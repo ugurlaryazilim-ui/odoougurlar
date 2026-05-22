@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml, markup } from "@odoo/owl";
+import { Component, useState, xml, markup, onWillUnmount } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 
 export class LabelScreen extends Component {
@@ -190,6 +190,10 @@ export class LabelScreen extends Component {
             this._addBc(bc);
         });
         this.loadTemplates();
+
+        onWillUnmount(() => {
+            if (this._unsub) this._unsub();
+        });
     }
 
     async loadTemplates() {
@@ -730,6 +734,6 @@ export class LabelScreen extends Component {
         `).join('')}</body></html>`;
     }
 
-    willUnmount() { if (this._unsub) this._unsub(); }
+
 }
 

@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml } from "@odoo/owl";
+import { Component, useState, xml, onWillUnmount } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 
 export class PutawayScreen extends Component {
@@ -89,7 +89,7 @@ export class PutawayScreen extends Component {
                         <label class="ub-field-label">Adet</label>
                         <input type="number" class="form-control ub-qty-input-wide"
                                t-att-value="state.quantity" min="1"
-                               t-on-input="(ev) => this.state.quantity = parseInt(ev.target.value) || 1"/>
+                               t-on-input="onQuantityInput"/>
                     </div>
                     <button t-attf-class="btn ub-search-submit-btn {{state.mode === 'putaway' ? 'ub-action-putaway' : 'ub-action-remove'}}"
                             t-on-click="onExecute">
@@ -203,6 +203,13 @@ export class PutawayScreen extends Component {
             history: [],
         });
         this._unsub = this.props.scanner.onScan(bc => this.onScanDetected(bc));
+        onWillUnmount(() => {
+            if (this._unsub) this._unsub();
+        });
+    }
+
+    onQuantityInput(ev) {
+        this.state.quantity = Number.parseInt(ev.target.value, 10) || 1;
     }
 
     setMode(mode) {
@@ -397,7 +404,4 @@ export class PutawayScreen extends Component {
         });
     }
 
-    willUnmount() {
-        if (this._unsub) this._unsub();
-    }
 }

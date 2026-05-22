@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml } from "@odoo/owl";
+import { Component, useState, xml, onWillUnmount } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 
 export class CountingScreen extends Component {
@@ -344,6 +344,10 @@ export class CountingScreen extends Component {
             historyDetail: null,
         });
         this._unsub = this.props.scanner.onScan(bc => this.onScanDetected(bc));
+
+        onWillUnmount(() => {
+            if (this._unsub) this._unsub();
+        });
     }
 
     get countedCount() {
@@ -595,5 +599,5 @@ export class CountingScreen extends Component {
         });
     }
 
-    willUnmount() { if (this._unsub) this._unsub(); }
+
 }
