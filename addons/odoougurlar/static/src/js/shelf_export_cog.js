@@ -1,35 +1,31 @@
 /** @odoo-module */
+import { ListController } from "@web/views/list/list_controller";
+import { listView } from "@web/views/list/list_view";
 import { registry } from "@web/core/registry";
-import { Component, xml } from "@odoo/owl";
-import { DropdownItem } from "@web/core/dropdown/dropdown_item";
+import { useService } from "@web/core/utils/hooks";
 
 /**
- * Raf Detay Dosyası — CogMenu (çark menüsü) öğesi.
- * stock.location list view'ında kayıt seçmeden her zaman görünür.
+ * Stok Konumları — özel list view controller.
+ * "Yeni" butonunun yanında "📦 Raf Detay Dosyası" butonu gösterir.
  */
-class ShelfDetailExport extends Component {
-    static template = xml`
-        <DropdownItem onSelected.bind="onExport">
-            📦 Raf Detay Dosyası
-        </DropdownItem>
-    `;
-    static components = { DropdownItem };
+export class StockLocationListController extends ListController {
+    setup() {
+        super.setup();
+        this.actionService = useService("action");
+    }
 
-    onExport() {
-        // Controller endpoint'ine yönlendir — doğrudan Excel indir
-        this.env.services.action.doAction({
-            type: 'ir.actions.act_url',
-            url: '/odoougurlar/shelf_detail_export',
-            target: 'self',
+    async onExportShelfDetail() {
+        this.actionService.doAction({
+            type: "ir.actions.act_url",
+            url: "/odoougurlar/shelf_detail_export",
+            target: "self",
         });
     }
 }
 
-// CogMenu registry'sine ekle — sadece stock.location modelinde göster
-registry.category("cogMenu").add("shelf_detail_export", {
-    Component: ShelfDetailExport,
-    groupNumber: 4,
-    isDisplayed: (env) => {
-        return env.config && env.config.resModel === "stock.location";
-    },
+// Custom view olarak kaydet
+registry.category("views").add("stock_location_list", {
+    ...listView,
+    Controller: StockLocationListController,
+    buttonTemplate: "odoougurlar.StockLocationListButtons",
 });

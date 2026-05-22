@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <!-- Stok Konumları list view — "Yeni" yanına "Raf Detay Dosyası" butonu -->
+    <t t-name="odoougurlar.StockLocationListButtons" t-inherit="web.ListView.Buttons">
+        <xpath expr="//button[hasclass('o_list_button_add')]" position="after">
+            <button type="button"
+                    class="btn btn-secondary ms-1"
+                    t-on-click="onExportShelfDetail">
+                📦 Raf Detay Dosyası
+            </button>
+        </xpath>
+    </t>
+
+</templates>

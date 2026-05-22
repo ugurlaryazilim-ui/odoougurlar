@@ -41,6 +41,7 @@
     'assets': {
         'web.assets_backend': [
             'odoougurlar/static/src/js/shelf_export_cog.js',
+            'odoougurlar/static/src/xml/shelf_export_buttons.xml',
         ],
     },
 }

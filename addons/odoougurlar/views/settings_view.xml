@@ -406,7 +406,19 @@
                   action="action_nebim_settings"
                   sequence="1"/>
 
-        <!-- Raf Detay Dosyası: JS CogMenu ile ekleniyor (static/src/js/shelf_export_cog.js) -->
+        <!-- ============================================================ -->
+        <!-- Stok Konumları — "Raf Detay Dosyası" butonu (Yeni yanında)   -->
+        <!-- ============================================================ -->
+        <record id="view_location_tree_shelf_export" model="ir.ui.view">
+            <field name="name">stock.location.tree.shelf.export</field>
+            <field name="model">stock.location</field>
+            <field name="inherit_id" ref="stock.view_location_tree2"/>
+            <field name="arch" type="xml">
+                <xpath expr="//list" position="attributes">
+                    <attribute name="js_class">stock_location_list</attribute>
+                </xpath>
+            </field>
+        </record>
 
     </data>
 </odoo>
