@@ -294,7 +294,10 @@ class ShelfImportProcessor(models.AbstractModel):
                     if raf_miktar <= 0:
                         continue
 
-                    product_id = product_barcode_map.get(barkod) or product_barcode_map.get(ean)
+                    # Önce Barkod ile, bulunamazsa EAN ile ürün ara
+                    product_id = product_barcode_map.get(barkod)
+                    if not product_id and ean:
+                        product_id = product_barcode_map.get(ean)
                     if not product_id:
                         stats['products_not_found'] += 1
                         if len(not_found_samples) < 10:
@@ -314,6 +317,7 @@ class ShelfImportProcessor(models.AbstractModel):
                     existing = quant_cache.get(cache_key)
 
                     if existing:
+                        # Aynı ürün aynı rafta → son Excel miktarı geçerli
                         existing.write({'quantity': raf_miktar})
                     else:
                         new_quant = StockQuant.create({
@@ -343,5 +347,23 @@ class ShelfImportProcessor(models.AbstractModel):
             stats['locations_created'], stats['products_placed'],
             stats['products_not_found'], stats['errors']
         )
+
+        # Depo bazlı gerçek quant toplamlarını logla (doğrulama)
+        for depot_name, wh_code in DEPOT_MAP.items():
+            wh = self.env['stock.warehouse'].sudo().search(
+                [('code', '=', wh_code)], limit=1
+            )
+            if wh and wh.lot_stock_id.parent_path:
+                self.env.cr.execute("""
+                    SELECT COUNT(*), COALESCE(SUM(sq.quantity), 0)
+                    FROM stock_quant sq
+                    JOIN stock_location sl ON sl.id = sq.location_id
+                    WHERE sl.parent_path LIKE %s AND sl.usage = 'internal'
+                """, [wh.lot_stock_id.parent_path + '%'])
+                cnt, total = self.env.cr.fetchone()
+                _logger.info(
+                    "  Doğrulama — %s (%s): %d quant kaydı, toplam adet: %.0f",
+                    depot_name, wh_code, cnt, total,
+                )
 
         return stats
