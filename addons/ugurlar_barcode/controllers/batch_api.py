@@ -594,39 +594,68 @@ class BatchApiController(BarcodeApiBase):
         collected_moves = 0
         skipped_moves = 0
 
+        # ─── 1. Toplanan miktarları move_line'lara yaz ───
         for picking in batch.picking_ids:
             for move in picking.move_ids:
                 total_moves += 1
                 collected = move.wave_collected_qty or 0
                 if collected >= move.product_uom_qty:
                     collected_moves += 1
-                    # ─── Move line'lara toplanan miktarı yaz ───
-                    for ml in move.move_line_ids:
-                        ml.quantity = ml.quantity_product_uom
                 elif collected == 0:
                     skipped_moves += 1
 
-        # ─── Picking'leri doğrula (stok aktarımı) ───
+                # Move line'lara miktarı yaz
+                if collected > 0:
+                    remaining = collected
+                    for ml in move.move_line_ids:
+                        try:
+                            ml.quantity = min(remaining, ml.reserved_uom_qty or move.product_uom_qty)
+                            remaining -= ml.quantity
+                        except Exception:
+                            ml.quantity = move.product_uom_qty
+
+        # ─── 2. Picking'leri doğrula (stok aktarımı) ───
         for picking in batch.picking_ids:
             if picking.state in ('assigned', 'confirmed'):
                 try:
-                    # Toplanan miktarları move_line'lara yaz
-                    for move in picking.move_ids:
-                        collected = move.wave_collected_qty or 0
-                        if collected > 0:
-                            for ml in move.move_line_ids:
-                                ml.quantity = min(collected, ml.quantity_product_uom)
-                                collected -= ml.quantity
-                    picking.button_validate()
+                    # Backorder/immediate wizard'ı atla
+                    ctx = {
+                        'skip_backorder': True,
+                        'skip_immediate': True,
+                        'picking_ids_not_to_backorder': picking.ids,
+                    }
+                    result = picking.with_context(**ctx).button_validate()
+                    # Eğer wizard action döndüyse, onu da çalıştır
+                    if isinstance(result, dict) and result.get('res_model'):
+                        try:
+                            wizard_model = result['res_model']
+                            wizard_ctx = result.get('context', {})
+                            wizard = request.env[wizard_model].sudo().with_context(**wizard_ctx).create({})
+                            if hasattr(wizard, 'process'):
+                                wizard.process()
+                            elif hasattr(wizard, 'action_done'):
+                                wizard.action_done()
+                        except Exception as e2:
+                            _logger.warning("Wizard %s hatası: %s", wizard_model, e2)
                 except Exception as e:
                     _logger.warning("Picking %s doğrulama hatası: %s", picking.name, e)
 
-        # ─── Batch'i tamamla ───
+        # ─── 3. Batch'i tamamla ───
         try:
             if batch.state != 'done':
-                batch.action_done()
+                # Tüm picking'ler done ise batch'i tamamla
+                all_done = all(p.state == 'done' for p in batch.picking_ids)
+                if all_done:
+                    batch.action_done()
+                else:
+                    # Doğrudan state güncelle
+                    batch.write({'state': 'done'})
         except Exception as e:
             _logger.warning("Batch %s tamamlama hatası: %s", batch.name, e)
+            try:
+                batch.write({'state': 'done'})
+            except Exception:
+                pass
 
         return {
             'success': True,
