@@ -577,6 +577,9 @@ export class BatchPickingScreen extends Component {
             this.state.currentItem = items[nextIdx];
         } else {
             this.state.currentItem = null; // Tümü toplandı
+            // ─── OTOMATİK TAMAMLA ───
+            // Tüm ürünler toplandığında otomatik doğrula
+            setTimeout(() => this.onComplete(), 800);
         }
         this.state.scanInput = '';
         this.state.scanMsg = '';

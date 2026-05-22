@@ -585,7 +585,7 @@ class BatchApiController(BarcodeApiBase):
 
     @http.route('/ugurlar_barcode/api/batch_collect_complete', type='json', auth='user')
     def batch_collect_complete(self, batch_id=0, **kw):
-        """Rota toplama tamamla — özet bilgi döndür."""
+        """Rota toplama tamamla — picking'leri doğrula ve stok aktar."""
         batch = request.env['stock.picking.batch'].sudo().browse(int(batch_id))
         if not batch.exists():
             return {'error': 'Rota bulunamadı'}
@@ -600,8 +600,33 @@ class BatchApiController(BarcodeApiBase):
                 collected = move.wave_collected_qty or 0
                 if collected >= move.product_uom_qty:
                     collected_moves += 1
+                    # ─── Move line'lara toplanan miktarı yaz ───
+                    for ml in move.move_line_ids:
+                        ml.quantity = ml.quantity_product_uom
                 elif collected == 0:
                     skipped_moves += 1
+
+        # ─── Picking'leri doğrula (stok aktarımı) ───
+        for picking in batch.picking_ids:
+            if picking.state in ('assigned', 'confirmed'):
+                try:
+                    # Toplanan miktarları move_line'lara yaz
+                    for move in picking.move_ids:
+                        collected = move.wave_collected_qty or 0
+                        if collected > 0:
+                            for ml in move.move_line_ids:
+                                ml.quantity = min(collected, ml.quantity_product_uom)
+                                collected -= ml.quantity
+                    picking.button_validate()
+                except Exception as e:
+                    _logger.warning("Picking %s doğrulama hatası: %s", picking.name, e)
+
+        # ─── Batch'i tamamla ───
+        try:
+            if batch.state != 'done':
+                batch.action_done()
+        except Exception as e:
+            _logger.warning("Batch %s tamamlama hatası: %s", batch.name, e)
 
         return {
             'success': True,
@@ -610,6 +635,6 @@ class BatchApiController(BarcodeApiBase):
             'collected_moves': collected_moves,
             'skipped_moves': skipped_moves,
             'partial_moves': total_moves - collected_moves - skipped_moves,
-            'message': f'{batch.name}: {collected_moves}/{total_moves} ürün toplandı',
+            'message': f'{batch.name}: {collected_moves}/{total_moves} ürün toplandı ve aktarıldı ✅',
         }
 
