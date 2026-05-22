@@ -50,7 +50,7 @@ class ShelfExportController(http.Controller):
         # ─── 2. Tüm dahili lokasyonları çek ───
         cr.execute("""
             SELECT id, complete_name, name, barcode, usage,
-                   scrap_location, parent_path, location_id
+                   parent_path, location_id
             FROM stock_location
             WHERE usage = 'internal'
             ORDER BY complete_name
@@ -158,7 +158,7 @@ class ShelfExportController(http.Controller):
 
         for row_idx, row in enumerate(locations, 2):
             (loc_id, complete_name, name, barcode, usage,
-             scrap, parent_path, parent_id) = row
+             parent_path, parent_id) = row
 
             warehouse = find_warehouse(parent_path or '')
             has_children = child_count_map.get(loc_id, 0) > 0
@@ -184,7 +184,7 @@ class ShelfExportController(http.Controller):
                 'ALL',
                 'ALL',
                 'Yes' if usage == 'internal' else 'No',
-                'Yes' if usage == 'internal' and not scrap else 'No',
+                'Yes' if usage == 'internal' else 'No',
                 0, 0, 0, 0, '',
             ]
 
