@@ -12,8 +12,8 @@ _logger = logging.getLogger(__name__)
 class ShelfExportController(http.Controller):
 
     @http.route('/odoougurlar/shelf_detail_export', type='http', auth='user')
-    def shelf_detail_export(self, **kw):
-        """Tüm dahili stok konumlarını Excel olarak indir."""
+    def shelf_detail_export(self, domain=None, **kw):
+        """Stok konumlarını Excel olarak indir. domain parametresi ile filtreleme."""
         try:
             import openpyxl
             from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -26,7 +26,8 @@ class ShelfExportController(http.Controller):
 
         try:
             return self._generate_shelf_excel(openpyxl, Font, PatternFill,
-                                              Alignment, Border, Side)
+                                              Alignment, Border, Side,
+                                              domain_str=domain)
         except Exception as e:
             _logger.exception("Raf export hatası: %s", str(e))
             return request.make_response(
@@ -35,10 +36,23 @@ class ShelfExportController(http.Controller):
             )
 
     def _generate_shelf_excel(self, openpyxl, Font, PatternFill,
-                              Alignment, Border, Side):
+                              Alignment, Border, Side, domain_str=None):
         """Excel dosyası oluştur ve döndür."""
+        import json
         env = request.env
         cr = env.cr
+
+        # ─── 0. Domain parse: filtreli lokasyon ID'leri ───
+        loc_ids = None
+        if domain_str:
+            try:
+                domain = json.loads(domain_str)
+                if domain:
+                    loc_records = env['stock.location'].sudo().search(domain)
+                    loc_ids = loc_records.ids
+                    _logger.info("Raf export: filtre uygulandı, %d lokasyon", len(loc_ids))
+            except Exception as e:
+                _logger.warning("Domain parse hatası: %s, tümü indirilecek", e)
 
         # ─── 1. Warehouse map: lot_stock_id → warehouse_name ───
         cr.execute("""
@@ -47,14 +61,25 @@ class ShelfExportController(http.Controller):
         """)
         wh_lot_map = dict(cr.fetchall())
 
-        # ─── 2. Tüm dahili lokasyonları çek ───
-        cr.execute("""
-            SELECT id, complete_name, name, barcode, usage,
-                   parent_path, location_id
-            FROM stock_location
-            WHERE usage = 'internal'
-            ORDER BY complete_name
-        """)
+        # ─── 2. Lokasyonları çek (filtreliyse sadece o ID'ler) ───
+        if loc_ids is not None:
+            if not loc_ids:
+                loc_ids = [0]  # boş sonuç için
+            cr.execute("""
+                SELECT id, complete_name, name, barcode, usage,
+                       parent_path, location_id
+                FROM stock_location
+                WHERE id IN %s
+                ORDER BY complete_name
+            """, (tuple(loc_ids),))
+        else:
+            cr.execute("""
+                SELECT id, complete_name, name, barcode, usage,
+                       parent_path, location_id
+                FROM stock_location
+                WHERE usage = 'internal'
+                ORDER BY complete_name
+            """)
         locations = cr.fetchall()
         _logger.info("Raf export: %d lokasyon bulundu", len(locations))
 

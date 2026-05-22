@@ -7,6 +7,7 @@ import { useService } from "@web/core/utils/hooks";
 /**
  * Stok Konumları — özel list view controller.
  * "Yeni" butonunun yanında "📦 Raf Detay Dosyası" butonu gösterir.
+ * Aktif filtreleri (domain) export'a iletir.
  */
 export class StockLocationListController extends ListController {
     setup() {
@@ -15,9 +16,13 @@ export class StockLocationListController extends ListController {
     }
 
     onExportShelfDetail() {
+        // Aktif domain'i al (filtre, arama, grup vs.)
+        const domain = this.model.root.domain || [];
+        const domainStr = JSON.stringify(domain);
+        const url = `/odoougurlar/shelf_detail_export?domain=${encodeURIComponent(domainStr)}`;
         this.actionService.doAction({
             type: "ir.actions.act_url",
-            url: "/odoougurlar/shelf_detail_export",
+            url: url,
             target: "self",
         });
     }
