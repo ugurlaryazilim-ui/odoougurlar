@@ -34,6 +34,7 @@
         'views/tax_mapping_views.xml',
         'views/sale_order_views.xml',
         'views/invoice_views.xml',
+        'views/transfer_wizard_view.xml',
     ],
     'installable': True,
     'application': True,

@@ -15,3 +15,9 @@ access_nebim_country_admin,odoougurlar.nebim.country admin,model_odoougurlar_neb
 access_nebim_country_user,odoougurlar.nebim.country user,model_odoougurlar_nebim_country,base.group_user,1,0,0,0
 access_odoougurlar_tax_mapping_admin,odoougurlar.tax.mapping admin,model_odoougurlar_tax_mapping,base.group_system,1,1,1,1
 access_odoougurlar_tax_mapping_user,odoougurlar.tax.mapping user,model_odoougurlar_tax_mapping,base.group_user,1,0,0,0
+access_transfer_wizard_admin,odoougurlar.transfer.wizard admin,model_odoougurlar_transfer_wizard,base.group_system,1,1,1,1
+access_transfer_wizard_user,odoougurlar.transfer.wizard user,model_odoougurlar_transfer_wizard,base.group_user,1,1,1,1
+access_transfer_wizard_line_admin,odoougurlar.transfer.wizard.line admin,model_odoougurlar_transfer_wizard_line,base.group_system,1,1,1,1
+access_transfer_wizard_line_user,odoougurlar.transfer.wizard.line user,model_odoougurlar_transfer_wizard_line,base.group_user,1,1,1,1
+access_transfer_result_wizard_admin,odoougurlar.transfer.result.wizard admin,model_odoougurlar_transfer_result_wizard,base.group_system,1,1,1,1
+access_transfer_result_wizard_user,odoougurlar.transfer.result.wizard user,model_odoougurlar_transfer_result_wizard,base.group_user,1,1,1,1

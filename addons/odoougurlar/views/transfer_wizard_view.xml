@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+
+        <!-- ============================================================ -->
+        <!-- Transfer Siparişi Oluşturma Wizard View                     -->
+        <!-- ============================================================ -->
+        <record id="view_transfer_wizard_form" model="ir.ui.view">
+            <field name="name">odoougurlar.transfer.wizard.form</field>
+            <field name="model">odoougurlar.transfer.wizard</field>
+            <field name="arch" type="xml">
+                <form string="Transfer Siparişi Oluştur">
+                    <group>
+                        <group string="Depo Bilgileri">
+                            <field name="source_warehouse_id"
+                                   options="{'no_create': True, 'no_open': True}"/>
+                            <field name="dest_warehouse_id"
+                                   options="{'no_create': True, 'no_open': True}"/>
+                        </group>
+                        <group string="Ürün Ekleme">
+                            <field name="upload_type" widget="radio"/>
+                        </group>
+                    </group>
+
+                    <!-- Excel Yükleme -->
+                    <group invisible="upload_type != 'excel'" string="Excel Dosyası">
+                        <field name="excel_file" filename="excel_filename"/>
+                        <field name="excel_filename" invisible="1"/>
+                        <div class="alert alert-info" role="alert">
+                            <strong>Excel Formatı:</strong> İlk satır başlık olmalı.
+                            Zorunlu sütunlar: <strong>Barkod</strong> ve <strong>Adet</strong>
+                        </div>
+                    </group>
+
+                    <!-- Ürün Arama -->
+                    <group invisible="upload_type != 'search'" string="Ürün Ara ve Ekle">
+                        <group>
+                            <field name="search_barcode"
+                                   placeholder="Barkod veya ürün kodu girin..."/>
+                            <field name="search_qty"/>
+                        </group>
+                        <button name="action_add_product" type="object"
+                                string="➕ Ürün Ekle" class="btn-primary"/>
+                    </group>
+
+                    <!-- Uyarılar -->
+                    <group invisible="not warning_message">
+                        <div class="alert alert-warning" role="alert">
+                            <field name="warning_message" nolabel="1"/>
+                        </div>
+                    </group>
+
+                    <!-- Ürün Listesi -->
+                    <group string="Ürün Listesi">
+                        <field name="line_ids" nolabel="1">
+                            <list editable="bottom">
+                                <field name="product_id" readonly="1"/>
+                                <field name="barcode" readonly="1"/>
+                                <field name="quantity"/>
+                            </list>
+                        </field>
+                    </group>
+
+                    <footer>
+                        <button name="action_create_transfer" type="object"
+                                string="🚚 Transfer Oluştur"
+                                class="btn-primary"
+                                confirm="Seçilen ürünlerle transfer oluşturulacak. Devam etmek istiyor musunuz?"/>
+                        <button string="İptal" class="btn-secondary" special="cancel"/>
+                    </footer>
+                </form>
+            </field>
+        </record>
+
+        <!-- Transfer Wizard Action -->
+        <record id="action_transfer_wizard" model="ir.actions.act_window">
+            <field name="name">Transfer Siparişi Oluştur</field>
+            <field name="res_model">odoougurlar.transfer.wizard</field>
+            <field name="view_mode">form</field>
+            <field name="target">new</field>
+        </record>
+
+        <!-- ============================================================ -->
+        <!-- Transfer Sonuç Wizard                                       -->
+        <!-- ============================================================ -->
+        <record id="view_transfer_result_wizard_form" model="ir.ui.view">
+            <field name="name">odoougurlar.transfer.result.wizard.form</field>
+            <field name="model">odoougurlar.transfer.result.wizard</field>
+            <field name="arch" type="xml">
+                <form string="Transfer Sonucu">
+                    <group>
+                        <field name="message" nolabel="1" widget="text"/>
+                        <field name="picking_id" invisible="1"/>
+                    </group>
+                    <footer>
+                        <button name="action_open_picking" type="object"
+                                string="📋 Transfer'e Git" class="btn-primary"/>
+                        <button string="Kapat" class="btn-secondary" special="cancel"/>
+                    </footer>
+                </form>
+            </field>
+        </record>
+
+        <!-- ============================================================ -->
+        <!-- Transfer Sequence: T00001                                   -->
+        <!-- ============================================================ -->
+        <record id="seq_transfer_order" model="ir.sequence">
+            <field name="name">Transfer Siparişi Sırası</field>
+            <field name="code">odoougurlar.transfer.order</field>
+            <field name="prefix">T</field>
+            <field name="padding">5</field>
+            <field name="number_next">1</field>
+            <field name="number_increment">1</field>
+        </record>
+
+    </data>
+</odoo>

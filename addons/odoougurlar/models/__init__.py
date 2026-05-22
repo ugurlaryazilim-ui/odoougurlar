@@ -13,3 +13,4 @@ from . import sale_order_ext
 from . import nebim_district
 from . import nebim_country
 from . import tax_mapping
+from . import transfer_wizard

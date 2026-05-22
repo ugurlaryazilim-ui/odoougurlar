@@ -6,9 +6,10 @@ import { useService } from "@web/core/utils/hooks";
 
 /**
  * Stok Konumları — özel list view controller.
- * "Yeni" butonunun yanında iki buton gösterir:
+ * Butonlar:
  *   📦 Raf Detay Dosyası  — lokasyon bilgilerini indirir
  *   📋 Ürün Listesi       — raflardaki ürün detaylarını indirir
+ *   🚚 Transfer Siparişi  — depolar arası transfer wizard'ı açar
  * Aktif filtreleri (domain) export'a iletir.
  */
 export class StockLocationListController extends ListController {
@@ -39,6 +40,17 @@ export class StockLocationListController extends ListController {
             type: "ir.actions.act_url",
             url: url,
             target: "self",
+        });
+    }
+
+    onCreateTransfer() {
+        this.actionService.doAction({
+            type: "ir.actions.act_window",
+            res_model: "odoougurlar.transfer.wizard",
+            name: "Transfer Siparişi Oluştur",
+            view_mode: "form",
+            views: [[false, "form"]],
+            target: "new",
         });
     }
 }

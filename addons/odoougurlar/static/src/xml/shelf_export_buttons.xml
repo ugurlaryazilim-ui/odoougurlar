@@ -18,6 +18,11 @@
                     t-on-click="onExportProductList">
                 📋 Ürün Listesi
             </button>
+            <button type="button"
+                    class="btn btn-primary o_transfer_order_btn ms-1"
+                    t-on-click="onCreateTransfer">
+                🚚 Transfer Siparişi
+            </button>
         </xpath>
     </t>
 
