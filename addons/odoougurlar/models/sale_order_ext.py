@@ -28,7 +28,7 @@ class SaleOrder(models.Model):
     )
     picking_batch_names = fields.Char(
         string='Rota', compute='_compute_picking_batch_names',
-        readonly=True, store=False
+        readonly=True, store=True,
     )
 
     _MP_FIELDS = [
@@ -54,6 +54,7 @@ class SaleOrder(models.Model):
             order.marketplace_name = mp_name
             order.marketplace_order_number = order.client_order_ref if mp_name else False
 
+    @api.depends('picking_ids.batch_id')
     def _compute_picking_batch_names(self):
         for order in self:
             batches = order.picking_ids.mapped('batch_id.name')

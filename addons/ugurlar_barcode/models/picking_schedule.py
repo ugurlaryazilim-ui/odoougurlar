@@ -362,11 +362,40 @@ class PickingSchedule(models.Model):
         ]
         pickings = Picking.search(domain)
 
+        # ─── OTOMATİK BATCH SORUNU: Odoo'nun auto_batch'i picking'lere
+        # otomatik tekli batch oluşturmuş olabilir. Bu tekli "Manuel" batch'leri
+        # de yakala ve gruplanan batch'e taşı ───
+        solo_batch_pickings = Picking.browse()
+        solo_batches_to_delete = self.env['stock.picking.batch'].browse()
+
+        auto_batched = Picking.search([
+            ('picking_type_id', '=', picking_type.id),
+            ('state', 'in', ['confirmed', 'waiting', 'assigned']),
+            ('batch_id', '!=', False),
+        ])
+        for p in auto_batched:
+            batch = p.batch_id
+            # Tekli siparişli, Manuel (cron dışı) batch ise yakala
+            if (batch.time_window and 'Manuel' in batch.time_window
+                    and len(batch.picking_ids) <= 1
+                    and batch.state in ('draft', 'in_progress')):
+                solo_batch_pickings |= p
+                solo_batches_to_delete |= batch
+
+        # Tekli batch picking'lerini ana listeye ekle
+        if solo_batch_pickings:
+            _logger.info(
+                "Toplama [%s] %s — %d tekli Manuel batch picking konsolide ediliyor",
+                self.name, window_label, len(solo_batch_pickings))
+            # Batch bağlantısını geçici olarak kaldır
+            solo_batch_pickings.write({'batch_id': False})
+            pickings |= solo_batch_pickings
+
         _logger.info(
             "Toplama [%s] pencere %s — picking_type: %s (id:%d), "
-            "bulunan picking: %d",
+            "bulunan picking: %d (tekli batch'ten: %d)",
             self.name, window_label, picking_type.display_name,
-            picking_type.id, len(pickings))
+            picking_type.id, len(pickings), len(solo_batch_pickings))
 
         if not pickings:
             # Detaylı teşhis logu
@@ -473,6 +502,16 @@ class PickingSchedule(models.Model):
                 "Toplama [%s] %s — hiç picking bulunamadı",
                 self.name, window_label)
             return None
+
+        # ─── Boş kalan eski tekli batch'leri temizle ───
+        if solo_batches_to_delete:
+            for old_batch in solo_batches_to_delete:
+                if not old_batch.picking_ids:
+                    try:
+                        _logger.info("Eski tekli batch siliniyor: %s", old_batch.name)
+                        old_batch.unlink()
+                    except Exception as e:
+                        _logger.warning("Batch silinemedi %s: %s", old_batch.name, e)
 
         # Ilk batch'i dondur (UI yonlendirmesi icin)
         return created_batches[0]
