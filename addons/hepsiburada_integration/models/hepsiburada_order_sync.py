@@ -344,11 +344,15 @@ class HepsiburadaOrderSync(models.AbstractModel):
         )
         
         # ── Sipariş Tarihi ──
+        # HB orderDate TR yerel saatinde gelir (UTC+3), Odoo UTC bekler
         order_date = False
         order_date_str = first_pkg.get('orderDate', '')
         if order_date_str:
             try:
-                order_date = order_date_str.replace('T', ' ')[:19]
+                dt_local = datetime.strptime(order_date_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
+                # TR yerel saat (UTC+3) → UTC'ye çevir
+                dt_utc = dt_local - timedelta(hours=3)
+                order_date = dt_utc.strftime('%Y-%m-%d %H:%M:%S')
             except Exception:
                 pass
         
@@ -612,6 +616,8 @@ class HepsiburadaOrderSync(models.AbstractModel):
             'origin': hb_order.hb_order_number,
             'order_line': order_lines,
         }
+        if hb_order.order_date:
+            sale_vals['date_order'] = hb_order.order_date
         if warehouse_id:
             sale_vals['warehouse_id'] = warehouse_id
 
