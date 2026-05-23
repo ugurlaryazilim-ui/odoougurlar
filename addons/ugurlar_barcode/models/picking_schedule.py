@@ -375,9 +375,8 @@ class PickingSchedule(models.Model):
         ])
         for p in auto_batched:
             batch = p.batch_id
-            # Tekli siparişli, Manuel (cron dışı) batch ise yakala
+            # Manuel (cron dışı) batch ise yakala — tüm tekli auto_batch'ler dahil
             if (batch.time_window and 'Manuel' in batch.time_window
-                    and len(batch.picking_ids) <= 1
                     and batch.state in ('draft', 'in_progress')):
                 solo_batch_pickings |= p
                 solo_batches_to_delete |= batch
