@@ -352,13 +352,17 @@ class PickingSchedule(models.Model):
                             self.warehouse_id.name)
             return None
 
-        # Batch'e atanmamis, onaylanmis picking'leri al
-        # NOT: create_date filtresi YOK — tum bekleyen picking'ler dahil
-        # Saat penceresi sadece batch'in NE ZAMAN olusturuldugunu belirler
+        # ─── Zaman penceresi bazlı picking filtreleme ───
+        # Sadece bu penceredeki siparişler dahil edilir:
+        #   08:30 rotası → 16:01 (önceki gün) ~ 08:30 arası
+        #   11:00 rotası → 08:31 ~ 11:00 arası
+        #   16:00 rotası → 11:01 ~ 16:00 arası
         domain = [
             ('picking_type_id', '=', picking_type.id),
             ('state', 'in', ['confirmed', 'waiting', 'assigned']),
             ('batch_id', '=', False),
+            ('create_date', '>=', window_start_utc),
+            ('create_date', '<=', window_end_utc),
         ]
         pickings = Picking.search(domain)
 
@@ -372,6 +376,8 @@ class PickingSchedule(models.Model):
             ('picking_type_id', '=', picking_type.id),
             ('state', 'in', ['confirmed', 'waiting', 'assigned']),
             ('batch_id', '!=', False),
+            ('create_date', '>=', window_start_utc),
+            ('create_date', '<=', window_end_utc),
         ])
         for p in auto_batched:
             batch = p.batch_id
@@ -388,19 +394,19 @@ class PickingSchedule(models.Model):
         # Tekli batch picking'lerini ana listeye ekle
         if solo_batch_pickings:
             _logger.info(
-                "Toplama [%s] %s — %d tekli/auto batch picking konsolide ediliyor "
-                "(auto: %d, manuel: %d)",
-                self.name, window_label, len(solo_batch_pickings),
-                len(solo_batch_pickings.filtered(lambda p: not p.batch_id.time_window)),
-                len(solo_batch_pickings.filtered(lambda p: p.batch_id.time_window and 'Manuel' in p.batch_id.time_window)))
+                "Toplama [%s] %s — %d tekli/auto batch picking konsolide ediliyor",
+                self.name, window_label, len(solo_batch_pickings))
             # Batch bağlantısını geçici olarak kaldır
             solo_batch_pickings.write({'batch_id': False})
             pickings |= solo_batch_pickings
 
         _logger.info(
-            "Toplama [%s] pencere %s — picking_type: %s (id:%d), "
+            "Toplama [%s] pencere %s (UTC: %s ~ %s) — picking_type: %s (id:%d), "
             "bulunan picking: %d (tekli batch'ten: %d)",
-            self.name, window_label, picking_type.display_name,
+            self.name, window_label,
+            window_start_utc.strftime('%Y-%m-%d %H:%M'),
+            window_end_utc.strftime('%Y-%m-%d %H:%M'),
+            picking_type.display_name,
             picking_type.id, len(pickings), len(solo_batch_pickings))
 
         if not pickings:
