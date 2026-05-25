@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml, onWillUnmount } from "@odoo/owl";
+import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 
 export class StockSearch extends Component {
@@ -25,7 +25,8 @@ export class StockSearch extends Component {
                                placeholder="Barkod okutun veya yazın..."
                                t-on-keydown="(ev) => this.onKeyDown(ev, 'barcode')"
                                t-att-value="state.barcodeValue"
-                               t-on-input="(ev) => this.onFieldInput(ev, 'barcode')"/>
+                               t-on-input="(ev) => this.onFieldInput(ev, 'barcode')"
+                               t-ref="barcodeInput"/>
                         <button class="ub-scan-icon-btn" t-on-click="startCameraScan" title="Kamera ile tara">
                             <i class="fa fa-barcode"></i>
                         </button>
@@ -139,6 +140,7 @@ export class StockSearch extends Component {
     };
 
     setup() {
+        this.barcodeInputRef = useRef('barcodeInput');
         this.state = useState({
             barcodeValue: '',
             codeValue: '',
@@ -155,6 +157,10 @@ export class StockSearch extends Component {
             this.state.codeValue = '';
             this.state.nameValue = '';
             this.doSearch(barcode, 'barcode');
+        });
+
+        onMounted(() => {
+            if (this.barcodeInputRef.el) this.barcodeInputRef.el.focus();
         });
 
         onWillUnmount(() => {

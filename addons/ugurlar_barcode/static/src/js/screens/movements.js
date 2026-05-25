@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml, onWillUnmount } from "@odoo/owl";
+import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 
 export class MovementsScreen extends Component {
@@ -24,7 +24,8 @@ export class MovementsScreen extends Component {
                                placeholder="Ürün barkodu veya kodu..."
                                t-att-value="state.productBarcode"
                                t-on-input="(ev) => this.state.productBarcode = ev.target.value"
-                               t-on-keydown="onKeyDown"/>
+                               t-on-keydown="onKeyDown"
+                               t-ref="barcodeInput"/>
                         <button class="ub-scan-icon-btn" t-on-click="cameraScan" title="Kamera ile tara">
                             <i class="fa fa-barcode"></i>
                         </button>
@@ -266,6 +267,7 @@ export class MovementsScreen extends Component {
     static props = { navigate: Function, scanner: Object };
 
     setup() {
+        this.barcodeInputRef = useRef('barcodeInput');
         this.state = useState({
             days: 7,
             moveType: 'all',
@@ -285,6 +287,10 @@ export class MovementsScreen extends Component {
             this.loadMovements();
         });
         this.loadMovements();
+
+        onMounted(() => {
+            if (this.barcodeInputRef.el) this.barcodeInputRef.el.focus();
+        });
 
         onWillUnmount(() => {
             if (this._unsub) this._unsub();

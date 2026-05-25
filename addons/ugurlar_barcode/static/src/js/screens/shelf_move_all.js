@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml } from "@odoo/owl";
+import { Component, useState, xml, onMounted, onWillUnmount, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 import { playSoundTransfer, playSoundError, vibrate, vibrateError } from "../sound_utils";
 
@@ -41,7 +41,8 @@ export class ShelfMoveAll extends Component {
                                    placeholder="Kaynak raf barkodunu okutun..."
                                    t-att-value="state.sourceBarcode"
                                    t-on-input="(ev) => this.state.sourceBarcode = ev.target.value"
-                                   t-on-keydown="(e) => e.key === 'Enter' &amp;&amp; this.loadSourceShelf()"/>
+                                   t-on-keydown="(e) => e.key === 'Enter' &amp;&amp; this.loadSourceShelf()"
+                                   t-ref="sourceInput"/>
                             <button class="ub-scan-icon-btn" t-on-click="() => this.scanCamera('source')" title="Kamera ile tara">
                                 <i class="fa fa-barcode"></i>
                             </button>
@@ -119,7 +120,8 @@ export class ShelfMoveAll extends Component {
                                            placeholder="Hedef raf barkodunu okutun..."
                                            t-att-value="state.targetBarcode"
                                            t-on-input="(ev) => this.state.targetBarcode = ev.target.value"
-                                           t-on-keydown="(e) => e.key === 'Enter' &amp;&amp; this.loadTargetShelf()"/>
+                                           t-on-keydown="(e) => e.key === 'Enter' &amp;&amp; this.loadTargetShelf()"
+                                           t-ref="targetInput"/>
                                     <button class="ub-scan-icon-btn" t-on-click="() => this.scanCamera('target')" title="Kamera ile tara">
                                         <i class="fa fa-barcode"></i>
                                     </button>
@@ -218,6 +220,9 @@ export class ShelfMoveAll extends Component {
     `;
 
     setup() {
+        this.sourceInputRef = useRef('sourceInput');
+        this.targetInputRef = useRef('targetInput');
+
         this.state = useState({
             sourceBarcode: '',
             targetBarcode: '',
@@ -230,6 +235,33 @@ export class ShelfMoveAll extends Component {
             loading: false,
             result: null,
         });
+
+        this._scanHandler = (barcode) => {
+            if (this.state.loading) return;
+            if (!this.state.sourceInfo) {
+                this.state.sourceBarcode = barcode;
+                this.loadSourceShelf();
+            } else if (!this.state.targetInfo) {
+                this.state.targetBarcode = barcode;
+                this.loadTargetShelf();
+            }
+        };
+
+        onMounted(() => {
+            if (this.props.scanner) this.props.scanner.onScan(this._scanHandler);
+            this._focusCurrentInput();
+        });
+
+        onWillUnmount(() => {
+            if (this.props.scanner) this.props.scanner.offScan(this._scanHandler);
+        });
+    }
+
+    _focusCurrentInput() {
+        setTimeout(() => {
+            const ref = !this.state.sourceInfo ? this.sourceInputRef : this.targetInputRef;
+            if (ref && ref.el) { ref.el.focus(); ref.el.select(); }
+        }, 100);
     }
 
     async loadSourceShelf() {

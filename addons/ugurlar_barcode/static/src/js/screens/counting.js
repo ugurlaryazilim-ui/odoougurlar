@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml, onWillUnmount } from "@odoo/owl";
+import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 
 export class CountingScreen extends Component {
@@ -148,7 +148,8 @@ export class CountingScreen extends Component {
                                    placeholder="Sayım yapılacak raf barkodunu okutun..."
                                    t-on-keydown="onShelfKey"
                                    t-att-value="state.shelfBarcode"
-                                   t-on-input="(ev) => this.onShelfInput(ev)"/>
+                                   t-on-input="(ev) => this.onShelfInput(ev)"
+                                   t-ref="shelfInput"/>
                             <button class="ub-scan-icon-btn" t-on-click="() => this.cameraScan('shelf')" title="Kamera ile tara">
                                 <i class="fa fa-barcode"></i>
                             </button>
@@ -202,7 +203,8 @@ export class CountingScreen extends Component {
                                    placeholder="Ürün barkodunu okutun..."
                                    t-on-keydown="onProductKey"
                                    t-att-value="state.productInput"
-                                   t-on-input="(ev) => this.onProductInput(ev)"/>
+                                   t-on-input="(ev) => this.onProductInput(ev)"
+                                   t-ref="productInput"/>
                             <button class="ub-scan-icon-btn" t-on-click="() => this.cameraScan('product')" title="Kamera ile tara">
                                 <i class="fa fa-barcode"></i>
                             </button>
@@ -327,6 +329,9 @@ export class CountingScreen extends Component {
     static props = { navigate: Function, scanner: Object };
 
     setup() {
+        this.shelfInputRef = useRef('shelfInput');
+        this.productInputRef = useRef('productInput');
+
         this.state = useState({
             view: 'menu',  // 'menu', 'count', 'history'
             step: 1,
@@ -345,9 +350,20 @@ export class CountingScreen extends Component {
         });
         this._unsub = this.props.scanner.onScan(bc => this.onScanDetected(bc));
 
+        onMounted(() => {
+            this._focusCurrentInput();
+        });
+
         onWillUnmount(() => {
             if (this._unsub) this._unsub();
         });
+    }
+
+    _focusCurrentInput() {
+        setTimeout(() => {
+            const ref = this.state.step === 2 ? this.productInputRef : this.shelfInputRef;
+            if (ref && ref.el) { ref.el.focus(); ref.el.select(); }
+        }, 100);
     }
 
     get countedCount() {

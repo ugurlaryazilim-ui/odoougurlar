@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml } from "@odoo/owl";
+import { Component, useState, xml, onMounted, onWillUnmount, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 import { playSoundClear, playSoundError, vibrate, vibrateError } from "../sound_utils";
 
@@ -42,7 +42,8 @@ export class ShelfClearAllScreen extends Component {
                                        placeholder="Raf barkodunu okutun..."
                                        t-att-value="state.shelfBarcode"
                                        t-on-input="(ev) => this.state.shelfBarcode = ev.target.value"
-                                       t-on-keydown="(e) => e.key === 'Enter' &amp;&amp; this.loadShelf()"/>
+                                       t-on-keydown="(e) => e.key === 'Enter' &amp;&amp; this.loadShelf()"
+                                   t-ref="shelfInput"/>
                                 <button class="ub-scan-icon-btn" t-on-click="() => this.scanCamera('shelf')" title="Kamera ile tara">
                                     <i class="fa fa-barcode"></i>
                                 </button>
@@ -155,6 +156,8 @@ export class ShelfClearAllScreen extends Component {
     `;
 
     setup() {
+        this.shelfInputRef = useRef('shelfInput');
+
         this.state = useState({
             shelfBarcode: '',
             shelfInfo: null,
@@ -163,6 +166,23 @@ export class ShelfClearAllScreen extends Component {
             error: null,
             loading: false,
             result: null,
+        });
+
+        this._scanHandler = (barcode) => {
+            if (this.state.loading || this.state.result) return;
+            if (!this.state.shelfInfo) {
+                this.state.shelfBarcode = barcode;
+                this.loadShelf();
+            }
+        };
+
+        onMounted(() => {
+            if (this.props.scanner) this.props.scanner.onScan(this._scanHandler);
+            if (this.shelfInputRef.el) this.shelfInputRef.el.focus();
+        });
+
+        onWillUnmount(() => {
+            if (this.props.scanner) this.props.scanner.offScan(this._scanHandler);
         });
     }
 

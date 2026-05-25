@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml } from "@odoo/owl";
+import { Component, useState, xml, onMounted, onWillUnmount, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 
 export class ShelfValidateScreen extends Component {
@@ -32,7 +32,8 @@ export class ShelfValidateScreen extends Component {
                                    placeholder="Raf barkodunu okutun..."
                                    t-att-value="state.shelfBarcode"
                                    t-on-input="(ev) => this.state.shelfBarcode = ev.target.value"
-                                   t-on-keydown="(e) => e.key === 'Enter' &amp;&amp; this.loadShelf()"/>
+                                   t-on-keydown="(e) => e.key === 'Enter' &amp;&amp; this.loadShelf()"
+                                   t-ref="shelfInput"/>
                             <button class="ub-scan-icon-btn" t-on-click="() => this.scanCamera('shelf')" title="Kamera ile tara">
                                 <i class="fa fa-barcode"></i>
                             </button>
@@ -102,7 +103,8 @@ export class ShelfValidateScreen extends Component {
                                    placeholder="Ürün barkodunu okutun..."
                                    t-att-value="state.productBarcode"
                                    t-on-input="(ev) => this.state.productBarcode = ev.target.value"
-                                   t-on-keydown="onProductKey"/>
+                                   t-on-keydown="onProductKey"
+                                   t-ref="productInput"/>
                             <button class="ub-scan-icon-btn" t-on-click="() => this.scanCamera('product')" title="Kamera ile tara">
                                 <i class="fa fa-barcode"></i>
                             </button>
@@ -155,6 +157,9 @@ export class ShelfValidateScreen extends Component {
     `;
 
     setup() {
+        this.shelfInputRef = useRef('shelfInput');
+        this.productInputRef = useRef('productInput');
+
         this.state = useState({
             shelfBarcode: '',
             shelfInfo: null,
@@ -164,6 +169,32 @@ export class ShelfValidateScreen extends Component {
             notFoundBarcode: null,
             error: null,
         });
+
+        this._scanHandler = (barcode) => {
+            if (!this.state.shelfInfo) {
+                this.state.shelfBarcode = barcode;
+                this.loadShelf();
+            } else {
+                this.state.productBarcode = barcode;
+                this.validateProduct();
+            }
+        };
+
+        onMounted(() => {
+            if (this.props.scanner) this.props.scanner.onScan(this._scanHandler);
+            this._focusCurrentInput();
+        });
+
+        onWillUnmount(() => {
+            if (this.props.scanner) this.props.scanner.offScan(this._scanHandler);
+        });
+    }
+
+    _focusCurrentInput() {
+        setTimeout(() => {
+            const ref = this.state.shelfInfo ? this.productInputRef : this.shelfInputRef;
+            if (ref && ref.el) { ref.el.focus(); ref.el.select(); }
+        }, 100);
     }
 
     async loadShelf() {

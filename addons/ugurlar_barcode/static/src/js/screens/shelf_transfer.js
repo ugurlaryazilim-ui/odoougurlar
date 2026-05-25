@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml, onWillUnmount } from "@odoo/owl";
+import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 import { playSoundTransfer, playSoundError, vibrate, vibrateError } from "../sound_utils";
 
@@ -27,7 +27,8 @@ export class ShelfTransferScreen extends Component {
                                placeholder="Kaynak raf barkodunu okutun..."
                                t-on-keydown="onSourceShelfKey"
                                t-att-value="state.sourceShelfBarcode"
-                               t-on-input="(ev) => this.state.sourceShelfBarcode = ev.target.value"/>
+                               t-on-input="(ev) => this.state.sourceShelfBarcode = ev.target.value"
+                               t-ref="sourceInput"/>
                         <button class="ub-scan-icon-btn" t-on-click="() => this.cameraScan('source_shelf')" title="Kamera ile tara">
                             <i class="fa fa-barcode"></i>
                         </button>
@@ -69,7 +70,8 @@ export class ShelfTransferScreen extends Component {
                                    placeholder="Hedef raf barkodunu okutun..."
                                    t-on-keydown="onTargetShelfKey"
                                    t-att-value="state.targetShelfBarcode"
-                                   t-on-input="(ev) => this.state.targetShelfBarcode = ev.target.value"/>
+                                   t-on-input="(ev) => this.state.targetShelfBarcode = ev.target.value"
+                                   t-ref="targetInput"/>
                             <button class="ub-scan-icon-btn" t-on-click="() => this.cameraScan('target_shelf')" title="Kamera ile tara">
                                 <i class="fa fa-barcode"></i>
                             </button>
@@ -112,7 +114,8 @@ export class ShelfTransferScreen extends Component {
                                    placeholder="Ürün barkodunu okutun..."
                                    t-on-keydown="onProductKey"
                                    t-att-value="state.productBarcode"
-                                   t-on-input="(ev) => this.state.productBarcode = ev.target.value"/>
+                                   t-on-input="(ev) => this.state.productBarcode = ev.target.value"
+                                   t-ref="productInput"/>
                             <button class="ub-scan-icon-btn" t-on-click="() => this.cameraScan('product')" title="Kamera ile tara">
                                 <i class="fa fa-barcode"></i>
                             </button>
@@ -217,6 +220,10 @@ export class ShelfTransferScreen extends Component {
     static props = { navigate: Function, scanner: { type: Object, optional: true } };
 
     setup() {
+        this.sourceInputRef = useRef('sourceInput');
+        this.targetInputRef = useRef('targetInput');
+        this.productInputRef = useRef('productInput');
+
         this.state = useState({
             step: 1,
             sourceShelfBarcode: '',
@@ -232,7 +239,37 @@ export class ShelfTransferScreen extends Component {
             history: [],
         });
 
-        onWillUnmount(() => {});
+        this._scanHandler = (barcode) => {
+            if (this.state.loading) return;
+            if (this.state.step === 1) {
+                this.state.sourceShelfBarcode = barcode;
+                this.onSourceShelfConfirm();
+            } else if (this.state.step === 2) {
+                this.state.targetShelfBarcode = barcode;
+                this.onTargetShelfConfirm();
+            } else if (this.state.step === 3) {
+                this.state.productBarcode = barcode;
+                this.doTransfer();
+            }
+        };
+
+        onMounted(() => {
+            if (this.props.scanner) this.props.scanner.onScan(this._scanHandler);
+            this._focusStep();
+        });
+
+        onWillUnmount(() => {
+            if (this.props.scanner) this.props.scanner.offScan(this._scanHandler);
+        });
+    }
+
+    _focusStep() {
+        setTimeout(() => {
+            const ref = this.state.step === 1 ? this.sourceInputRef
+                : this.state.step === 2 ? this.targetInputRef
+                : this.productInputRef;
+            if (ref && ref.el) { ref.el.focus(); ref.el.select(); }
+        }, 100);
     }
 
     onQuantityInput(ev) {
@@ -259,6 +296,7 @@ export class ShelfTransferScreen extends Component {
                 this.state.sourceShelfInfo = res.location;
                 this.state.sourceShelfInfo.total_quantity = res.total_quantity;
                 this.state.step = 2;
+                this._focusStep();
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
@@ -288,8 +326,9 @@ export class ShelfTransferScreen extends Component {
             if (res.error) {
                 this.state.error = res.error;
             } else {
-                this.state.targetShelfInfo = res.location;
+                this.state.targetShelfInfo = res;
                 this.state.step = 3;
+                this._focusStep();
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
