@@ -78,14 +78,9 @@
     </record>
 
     <!-- ═══ Menü — Mobil > Ayarlar > Seslendirmeler ═══ -->
-    <menuitem id="menu_ugurlar_barcode_settings"
-              name="Ayarlar"
-              parent="ugurlar_barcode.menu_ugurlar_barcode_root"
-              sequence="100"/>
-
     <menuitem id="menu_ugurlar_tts"
               name="Seslendirmeler"
-              parent="menu_ugurlar_barcode_settings"
+              parent="menu_barcode_config"
               action="action_ugurlar_tts_messages"
               sequence="10"/>
 
