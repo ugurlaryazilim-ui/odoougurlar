@@ -692,9 +692,11 @@ export class BatchPickingScreen extends Component {
             if (res.error) {
                 this.state.scanMsg = res.error;
                 this.state.scanOk = false;
+                speak('batch_error');
             } else {
                 this.state.scanMsg = res.message;
                 this.state.scanOk = true;
+                speak('batch_scan_success');
                 
                 // Miktarı UI kısmında da güncelle
                 item.collected_qty -= 1;

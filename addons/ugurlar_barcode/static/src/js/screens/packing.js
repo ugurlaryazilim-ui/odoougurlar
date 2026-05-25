@@ -601,9 +601,11 @@ export class PackingScreen extends Component {
             if (res.error) {
                 this.state.scanMsg = res.error;
                 this.state.scanOk = false;
+                speak('packing_error');
             } else {
                 this.state.scanMsg = res.message;
                 this.state.scanOk = true;
+                speak('packing_order_complete');
                 
                 // Detayı yeniden yükle
                 const fresh = await BarcodeService.call('/ugurlar_barcode/api/packing_batch_detail', {
@@ -638,6 +640,7 @@ export class PackingScreen extends Component {
         } catch (e) {
             this.state.scanMsg = 'Bağlantı hatası';
             this.state.scanOk = false;
+            speak('packing_error');
         }
         this.state.loading = false;
     }
@@ -654,9 +657,11 @@ export class PackingScreen extends Component {
             if (res.error) {
                 this.state.scanMsg = res.error;
                 this.state.scanOk = false;
+                speak('packing_error');
             } else {
                 this.state.scanMsg = res.message;
                 this.state.scanOk = true;
+                speak('packing_scan_success');
                 
                 // Refresh detail
                 const fresh = await BarcodeService.call('/ugurlar_barcode/api/packing_batch_detail', {
