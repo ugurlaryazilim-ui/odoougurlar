@@ -2,6 +2,7 @@
 
 import { Component, useState, xml } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
+import { playSoundClear, playSoundError, vibrate, vibrateError } from "../sound_utils";
 
 export class ShelfClearAllScreen extends Component {
     static template = xml`
@@ -197,9 +198,13 @@ export class ShelfClearAllScreen extends Component {
                 this.state.error = res.error;
             } else {
                 this.state.result = res;
+                playSoundClear();
+                vibrate();
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
+            playSoundError();
+            vibrateError();
         }
         this.state.loading = false;
     }

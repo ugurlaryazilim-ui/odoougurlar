@@ -2,6 +2,7 @@
 
 import { Component, useState, xml } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
+import { playSoundPutaway, playSoundError, vibrate, vibrateError } from "../sound_utils";
 
 export class BulkPutawayScreen extends Component {
     static template = xml`
@@ -204,6 +205,7 @@ export class BulkPutawayScreen extends Component {
             } else {
                 // Başarılı — toast mesajı
                 this.state.lastSuccess = `${res.product_name}: ${this.state.quantity} adet raflandı`;
+                playSoundPutaway();
 
                 // Oturum geçmişine ekle
                 this.state.sessionItems.unshift({
@@ -218,10 +220,12 @@ export class BulkPutawayScreen extends Component {
                 await this._refreshShelf();
 
                 // Titreşim feedback
-                if (navigator.vibrate) navigator.vibrate(100);
+                vibrate();
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
+            playSoundError();
+            vibrateError();
         }
 
         this.state.productBarcode = '';

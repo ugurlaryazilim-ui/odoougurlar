@@ -74,6 +74,10 @@ export const BarcodeService = {
     async shelfClearAll(shelf_barcode) {
         return await rpc('/ugurlar_barcode/api/shelf_clear_all', { shelf_barcode });
     },
+    // Ürün Stok Geçmişi
+    async productShelfHistory(product_id, location_id = 0) {
+        return await rpc('/ugurlar_barcode/api/product_shelf_history', { product_id, location_id });
+    },
     // Rota Toplama (Wave Picking)
     async batchRouteItems(batch_id) {
         return await rpc('/ugurlar_barcode/api/batch_route_items', { batch_id });

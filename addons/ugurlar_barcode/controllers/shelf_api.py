@@ -161,6 +161,46 @@ class ShelfApiController(BarcodeApiBase):
             'total_quantity': total_qty,
         }
 
+    # ─── ÜRÜN STOK GEÇMİŞİ ───────────────────────────────
+    @http.route('/ugurlar_barcode/api/product_shelf_history', type='json', auth='user')
+    def product_shelf_history(self, product_id=0, location_id=0, **kw):
+        """Belirli ürün + raf kombinasyonunun son işlem geçmişini döndür."""
+        product_id = int(product_id or 0)
+        if not product_id:
+            return {'error': 'Ürün ID gerekli'}
+
+        domain = [('product_id', '=', product_id)]
+        if location_id:
+            domain.append(('location_id', '=', int(location_id)))
+
+        operations = request.env['ugurlar.barcode.operation'].sudo().search(
+            domain, order='create_date desc', limit=10
+        )
+
+        history = []
+        for op in operations:
+            history.append({
+                'id': op.id,
+                'type': op.operation_type,
+                'type_label': {
+                    'putaway': '📦 Raflama',
+                    'remove': '📤 Kaldırma',
+                    'transfer': '🔄 Taşıma',
+                    'clear': '🗑️ Temizleme',
+                }.get(op.operation_type, op.operation_type),
+                'barcode': op.barcode,
+                'quantity': int(op.quantity),
+                'location': op.location_id.complete_name if op.location_id else '',
+                'date': op.create_date.strftime('%d.%m.%Y %H:%M') if op.create_date else '',
+                'user': op.create_uid.name if op.create_uid else '',
+            })
+
+        return {
+            'success': True,
+            'history': history,
+            'product_name': operations[0].product_id.name if operations else '',
+        }
+
     # ─── RAFLAMA (ürün → raf) ─────────────────────────────
     @http.route('/ugurlar_barcode/api/putaway', type='json', auth='user')
     def putaway(self, product_barcode='', shelf_barcode='', quantity=1, **kw):

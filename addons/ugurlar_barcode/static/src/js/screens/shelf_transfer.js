@@ -2,6 +2,7 @@
 
 import { Component, useState, xml, onWillUnmount } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
+import { playSoundTransfer, playSoundError, vibrate, vibrateError } from "../sound_utils";
 
 export class ShelfTransferScreen extends Component {
     static template = xml`
@@ -322,6 +323,8 @@ export class ShelfTransferScreen extends Component {
                 this.state.error = res.error;
             } else {
                 this.state.success = res.message;
+                playSoundTransfer();
+                vibrate();
                 this.state.history.unshift({
                     product_name: res.product_name,
                     from: this.state.sourceShelfInfo.complete_name,
@@ -338,6 +341,8 @@ export class ShelfTransferScreen extends Component {
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
+            playSoundError();
+            vibrateError();
         }
         this.state.loading = false;
     }

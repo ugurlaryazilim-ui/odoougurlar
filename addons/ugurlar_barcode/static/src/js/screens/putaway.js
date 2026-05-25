@@ -2,48 +2,8 @@
 
 import { Component, useState, useRef, xml, onWillUnmount, onMounted } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
+import { playSoundPutaway, playSoundRemove, playSoundError, vibrate, vibrateError } from "../sound_utils";
 
-// ─── SES EFEKTLERİ (Web Audio API) ────────────────────
-// Harici ses dosyası gerektirmez — tarayıcıda tone üretir
-const _audioCtx = typeof AudioContext !== 'undefined'
-    ? new AudioContext() : typeof webkitAudioContext !== 'undefined'
-        ? new webkitAudioContext() : null;
-
-function _playTone(frequencies, durations, type = 'sine', volume = 0.3) {
-    if (!_audioCtx) return;
-    // AudioContext askıya alınmışsa devam ettir (Chrome politikası)
-    if (_audioCtx.state === 'suspended') _audioCtx.resume();
-    const now = _audioCtx.currentTime;
-    let offset = 0;
-    for (let i = 0; i < frequencies.length; i++) {
-        const osc = _audioCtx.createOscillator();
-        const gain = _audioCtx.createGain();
-        osc.type = type;
-        osc.frequency.value = frequencies[i];
-        gain.gain.setValueAtTime(volume, now + offset);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + offset + durations[i]);
-        osc.connect(gain);
-        gain.connect(_audioCtx.destination);
-        osc.start(now + offset);
-        osc.stop(now + offset + durations[i]);
-        offset += durations[i] * 0.7; // Notalar hafif örtüşsün
-    }
-}
-
-/** ✅ Raflama başarılı — ascending chime (do-mi-sol) */
-function playSoundPutaway() {
-    _playTone([523, 659, 784], [0.12, 0.12, 0.25], 'sine', 0.35);
-}
-
-/** 📤 Raftan kaldırma başarılı — descending tone (sol-mi-do) */
-function playSoundRemove() {
-    _playTone([784, 659, 523], [0.1, 0.1, 0.2], 'triangle', 0.3);
-}
-
-/** ❌ Hata — kısa warning buzz */
-function playSoundError() {
-    _playTone([200, 150], [0.15, 0.25], 'square', 0.15);
-}
 
 export class PutawayScreen extends Component {
     static template = xml`
@@ -174,7 +134,7 @@ export class PutawayScreen extends Component {
                                 </thead>
                                 <tbody>
                                     <t t-foreach="state.shelfProducts" t-as="p" t-key="p.id">
-                                        <tr>
+                                        <tr style="cursor:pointer" t-on-click="() => this.showProductHistory(p)" title="Stok geçmişini gör">
                                             <td t-esc="p.code || '-'"/>
                                             <td><strong t-esc="p.name"/></td>
                                             <td class="ub-barcode-cell" t-esc="p.barcode || '-'"/>
@@ -185,6 +145,56 @@ export class PutawayScreen extends Component {
                                     </t>
                                 </tbody>
                             </table>
+                        </div>
+                    </div>
+                </t>
+
+                <!-- STOK GEÇMİŞİ MODALI -->
+                <t t-if="state.historyModal">
+                    <div class="ub-modal-overlay" t-on-click="closeHistoryModal">
+                        <div class="ub-modal-content" t-on-click.stop="">
+                            <div class="ub-modal-header">
+                                <h3><i class="fa fa-history"></i> Stok Geçmişi</h3>
+                                <button class="btn btn-sm btn-outline-secondary" t-on-click="closeHistoryModal">
+                                    <i class="fa fa-times"></i>
+                                </button>
+                            </div>
+                            <div class="ub-modal-product-name">
+                                <strong t-esc="state.historyModal.productName"/>
+                            </div>
+                            <t t-if="state.historyModal.loading">
+                                <div class="ub-loading"><i class="fa fa-spinner fa-spin"></i> Yükleniyor...</div>
+                            </t>
+                            <t t-elif="state.historyModal.items.length === 0">
+                                <div style="text-align:center;padding:1rem;color:#999;">
+                                    <i class="fa fa-inbox" style="font-size:1.5rem;"></i>
+                                    <p>Henüz işlem geçmişi yok</p>
+                                </div>
+                            </t>
+                            <t t-else="">
+                                <div class="ub-variant-table-wrap">
+                                    <table class="ub-variant-table ub-variant-table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>İşlem</th>
+                                                <th>Konum</th>
+                                                <th class="text-end">Adet</th>
+                                                <th>Tarih</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <t t-foreach="state.historyModal.items" t-as="h" t-key="h.id">
+                                                <tr>
+                                                    <td t-esc="h.type_label"/>
+                                                    <td style="font-size:0.8rem" t-esc="h.location"/>
+                                                    <td class="text-end"><strong t-esc="h.quantity"/></td>
+                                                    <td style="font-size:0.75rem;color:#666" t-esc="h.date"/>
+                                                </tr>
+                                            </t>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </t>
                         </div>
                     </div>
                 </t>
@@ -251,6 +261,7 @@ export class PutawayScreen extends Component {
             success: null,
             toast: null,
             history: [],
+            historyModal: null,  // Stok geçmişi modali
         });
 
         // Barkod okuyucu — SADECE scanner callback kullanılır
@@ -372,8 +383,25 @@ export class PutawayScreen extends Component {
 
         // ─── ÇIFT TETİKLENME KİLİDİ ───
         if (this.state.processing) {
-            return; // Zaten bir işlem devam ediyor, atla
+            return;
         }
+
+        // ─── QUANTITY VALIDATION (raftan kaldırmada) ───
+        if (this.state.mode === 'remove') {
+            const qty = this.state.quantity;
+            const existingProduct = this.state.shelfProducts.find(
+                p => p.barcode === barcode || p.code === barcode
+            );
+            if (existingProduct && qty > existingProduct.quantity) {
+                const msg = `Yetersiz stok! Rafta ${existingProduct.quantity} adet var, ${qty} adet kaldıramazsınız.`;
+                this.state.error = msg;
+                this._showToast('error', msg);
+                playSoundError();
+                vibrateError();
+                return;
+            }
+        }
+
         this.state.processing = true;
         this.state.loading = true;
         this.state.error = null;
@@ -393,7 +421,7 @@ export class PutawayScreen extends Component {
                 this.state.error = res.error;
                 this._showToast('error', res.error);
                 playSoundError();
-                if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+                vibrateError();
             } else {
                 const actionText = mode === 'putaway' ? '✅ Raflama başarılı' : '✅ Raftan kaldırıldı';
                 const msg = `${actionText}: ${res.message || barcode}`;
@@ -407,7 +435,7 @@ export class PutawayScreen extends Component {
                     playSoundRemove();
                 }
                 // 📳 Titreşim feedback (mobil)
-                if (navigator.vibrate) navigator.vibrate(150);
+                vibrate();
 
                 this.state.history.unshift({
                     type: mode,
@@ -454,6 +482,32 @@ export class PutawayScreen extends Component {
         this.state.success = null;
         this.state.toast = null;
         this._focusCurrentInput();
+    }
+
+    // ─── STOK GEÇMİŞİ MODAL ──────────────────────
+    async showProductHistory(product) {
+        this.state.historyModal = {
+            productName: product.name,
+            productId: product.product_id || product.id,
+            loading: true,
+            items: [],
+        };
+
+        try {
+            const locationId = this.state.shelfInfo?.id || 0;
+            const res = await BarcodeService.productShelfHistory(
+                product.product_id || product.id,
+                locationId
+            );
+            if (res.history) {
+                this.state.historyModal.items = res.history;
+            }
+        } catch (e) {}
+        this.state.historyModal.loading = false;
+    }
+
+    closeHistoryModal() {
+        this.state.historyModal = null;
     }
 
     // ─── KAMERA TARAYICI ──────────────────────────
