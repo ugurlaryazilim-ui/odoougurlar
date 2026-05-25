@@ -40,6 +40,7 @@
             'ugurlar_barcode/static/src/css/shelf_clear_all.css',
             'ugurlar_barcode/static/src/js/barcode_scanner.js',
             'ugurlar_barcode/static/src/js/barcode_service.js',
+            'ugurlar_barcode/static/src/js/sound_utils.js',
             'ugurlar_barcode/static/src/js/screens/main_menu.js',
             'ugurlar_barcode/static/src/js/screens/stock_search.js',
             'ugurlar_barcode/static/src/js/screens/shelf_search.js',
