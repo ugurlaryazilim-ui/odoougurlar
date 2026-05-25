@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml } from "@odoo/owl";
+import { Component, useState, useRef, xml, onMounted, onWillUnmount } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 import { playSoundPutaway, playSoundError, vibrate, vibrateError } from "../sound_utils";
 
@@ -32,7 +32,8 @@ export class BulkPutawayScreen extends Component {
                                    placeholder="Raf barkodunu okutun..."
                                    t-att-value="state.shelfBarcode"
                                    t-on-input="(ev) => this.state.shelfBarcode = ev.target.value"
-                                   t-on-keydown="(e) => e.key === 'Enter' &amp;&amp; this.loadShelf()"/>
+                                   t-on-keydown="(e) => e.key === 'Enter' &amp;&amp; this.loadShelf()"
+                                   t-ref="shelfInput"/>
                             <button class="ub-scan-icon-btn" t-on-click="() => this.scanCamera('shelf')" title="Kamera ile tara">
                                 <i class="fa fa-barcode"></i>
                             </button>
@@ -100,7 +101,8 @@ export class BulkPutawayScreen extends Component {
                                    placeholder="Ürün barkodunu okutun..."
                                    t-att-value="state.productBarcode"
                                    t-on-input="(ev) => this.state.productBarcode = ev.target.value"
-                                   t-on-keydown="onProductKey"/>
+                                   t-on-keydown="onProductKey"
+                                   t-ref="productInput"/>
                             <button class="ub-scan-icon-btn" t-on-click="() => this.scanCamera('product')" title="Kamera ile tara">
                                 <i class="fa fa-barcode"></i>
                             </button>
@@ -142,6 +144,9 @@ export class BulkPutawayScreen extends Component {
     `;
 
     setup() {
+        this.shelfInputRef = useRef('shelfInput');
+        this.productInputRef = useRef('productInput');
+
         this.state = useState({
             shelfBarcode: '',
             shelfInfo: null,
@@ -154,6 +159,17 @@ export class BulkPutawayScreen extends Component {
             error: null,
             loading: false,
         });
+
+        onMounted(() => this._focusCurrentInput());
+    }
+
+    _focusCurrentInput() {
+        setTimeout(() => {
+            const el = this.state.shelfInfo
+                ? this.productInputRef.el
+                : this.shelfInputRef.el;
+            if (el) { el.focus(); el.select(); }
+        }, 100);
     }
 
     onQtyInput(ev) {
@@ -178,6 +194,8 @@ export class BulkPutawayScreen extends Component {
                 ...p,
                 justAdded: false,
             }));
+            // Raf seçildi → ürün inputuna focus
+            this._focusCurrentInput();
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
         }
@@ -230,6 +248,8 @@ export class BulkPutawayScreen extends Component {
 
         this.state.productBarcode = '';
         this.state.loading = false;
+        // İşlem sonrası ürün inputuna tekrar focus
+        this._focusCurrentInput();
     }
 
     async _refreshShelf() {
