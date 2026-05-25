@@ -479,6 +479,9 @@ class PickingSchedule(models.Model):
                 'batch_schedule_time': window_end_utc,
             })
 
+            # Sale order'lara rota adını kalıcı olarak yaz
+            self._update_sale_order_batch_names(all_primary, batch_name)
+
             _logger.info(
                 "Batch %s olusturuldu: %d siparis (%s) — %s (%s)",
                 batch_name, len(all_primary), detail, wh_name, window_label)
@@ -504,6 +507,9 @@ class PickingSchedule(models.Model):
                 'batch_schedule_time': window_end_utc,
             })
 
+            # Sale order'lara rota adını kalıcı olarak yaz
+            self._update_sale_order_batch_names(fallback_pickings, batch_name)
+
             _logger.info(
                 "Batch %s olusturuldu: %d siparis — %s (%s)",
                 batch_name, len(fallback_pickings), fb_name, window_label)
@@ -527,6 +533,35 @@ class PickingSchedule(models.Model):
 
         # Ilk batch'i dondur (UI yonlendirmesi icin)
         return created_batches[0]
+
+    def _update_sale_order_batch_names(self, pickings, batch_name):
+        """Picking'lere ait sale order'ların 'Rota' alanını güncelle.
+
+        Kalıcı alan olduğu için faturalama sonrası silinmez.
+        Aynı siparişe birden fazla rota atanırsa virgülle eklenir.
+        """
+        SaleOrder = self.env['sale.order'].sudo()
+        order_ids = set()
+        for picking in pickings:
+            if picking.sale_id:
+                order_ids.add(picking.sale_id.id)
+            elif picking.origin:
+                so = SaleOrder.search([('name', '=', picking.origin)], limit=1)
+                if so:
+                    order_ids.add(so.id)
+
+        if not order_ids:
+            return
+
+        orders = SaleOrder.browse(list(order_ids))
+        for order in orders:
+            existing = order.picking_batch_names or ''
+            if batch_name in existing:
+                continue  # Zaten bu rota atanmış
+            if existing:
+                order.write({'picking_batch_names': f'{existing}, {batch_name}'})
+            else:
+                order.write({'picking_batch_names': batch_name})
 
 
 class PickingScheduleLine(models.Model):
