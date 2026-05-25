@@ -147,21 +147,83 @@ class CustomerProcessor(models.AbstractModel):
             name_parts = (partner.name or '').strip().split()
             first_name = name_parts[0] if name_parts else ''
             last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
-            payload = {
-                'ModelType': cari_model_type,
-                'CurrAccCode': '',
-                'CurrAccDescription': (partner.name or 'BIREYSEL')[:50],
-                'IsIndividualAcc': True,
-                'FirstName': first_name[:50],
-                'LastName': last_name[:50],
-                'IdentityNum': partner.vat or '11111111111',
-                'OfficeCode': 'M',
-                'CurrencyCode': 'TRY',
-            }
+
+            # ─── Bireysel müşteride VKN kontrolü ───
+            # Pazaryerleri bazen commercial=False gönderir ama partner.vat
+            # 10 haneli VKN içerir (GİB e-fatura mükellefi).
+            # Bu durumda Nebim'e kurumsal olarak aktarılmalı.
+            vat_raw = partner.vat or ''
+            vat_clean = ''.join(filter(str.isdigit, vat_raw))
+
+            if len(vat_clean) == 10:
+                # ─── 10 HANELİ VKN → KURUMSAL (TÜZEL KİŞİ) ───
+                # Partner bireysel kaydedilmiş ama VKN'si var
+                payload = {
+                    'ModelType': cari_model_type,
+                    'CurrAccCode': '',
+                    'CurrAccDescription': (partner.name or 'KURUMSAL')[:50],
+                    'IsIndividualAcc': False,
+                    'TaxNumber': vat_clean,
+                    'OfficeCode': 'M',
+                    'CurrencyCode': 'TRY',
+                }
+                _logger.info(
+                    "BİREYSEL→KURUMSAL DÖNÜŞÜM: %s | VKN (10 hane) tespit edildi → "
+                    "IsIndividualAcc=False, TaxNumber=%s***",
+                    partner.name, vat_clean[:3])
+            elif len(vat_clean) == 11:
+                # ─── 11 HANELİ TCKN → BİREYSEL (ŞAHIS) ───
+                payload = {
+                    'ModelType': cari_model_type,
+                    'CurrAccCode': '',
+                    'CurrAccDescription': (partner.name or 'BIREYSEL')[:50],
+                    'IsIndividualAcc': True,
+                    'FirstName': first_name[:50],
+                    'LastName': last_name[:50],
+                    'IdentityNum': vat_clean,
+                    'OfficeCode': 'M',
+                    'CurrencyCode': 'TRY',
+                }
+            else:
+                # ─── VKN/TCKN YOK veya geçersiz → BİREYSEL (varsayılan) ───
+                payload = {
+                    'ModelType': cari_model_type,
+                    'CurrAccCode': '',
+                    'CurrAccDescription': (partner.name or 'BIREYSEL')[:50],
+                    'IsIndividualAcc': True,
+                    'FirstName': first_name[:50],
+                    'LastName': last_name[:50],
+                    'IdentityNum': vat_clean if vat_clean else '11111111111',
+                    'OfficeCode': 'M',
+                    'CurrencyCode': 'TRY',
+                }
             # İhracat müşterisi ise ek alanlar
             if is_export:
                 payload['TaxNumber'] = '1111111111'
                 payload['CustomerTypeCode'] = 3
+
+            # ─── E-fatura ve Vergi Dairesi (10h VKN dönüşümü için de) ───
+            if len(vat_clean) == 10 and not is_export:
+                payload['IsSubjectToEInvoice'] = True
+                _logger.info("BİREYSEL→KURUMSAL E-FATURA: %s → IsSubjectToEInvoice=True", partner.name)
+
+            # Vergi dairesi eşleştirmesi (VKN varsa gerekli)
+            if len(vat_clean) == 10 and sale_order:
+                tax_office_name = ''
+                if hasattr(sale_order, 'trendyol_order_id') and sale_order.trendyol_order_id:
+                    tax_office_name = sale_order.trendyol_order_id.tax_office or ''
+                elif hasattr(sale_order, 'n11_order_id') and sale_order.n11_order_id:
+                    tax_office_name = sale_order.n11_order_id.tax_office or ''
+                elif hasattr(sale_order, 'hb_order_id') and sale_order.hb_order_id:
+                    tax_office_name = getattr(sale_order.hb_order_id, 'tax_office', '') or ''
+
+                if tax_office_name:
+                    tax_mapping = self.env['odoougurlar.tax.mapping'].sudo().search(
+                        [('name', '=ilike', tax_office_name.strip())], limit=1)
+                    if tax_mapping:
+                        payload['TaxOfficeCode'] = tax_mapping.nebim_tax_office_code
+                        _logger.info("BİREYSEL→KURUMSAL Vergi Dairesi: '%s' → %s",
+                                     tax_office_name, tax_mapping.nebim_tax_office_code)
 
         payload['PostalAddresses'] = [{
             'AddressTypeCode': "2",  # Hamurlabs "2" gönderiyor (Teslimat)
