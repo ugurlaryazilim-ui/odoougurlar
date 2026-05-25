@@ -42,38 +42,62 @@ export class PackingScreen extends Component {
                 </div>
 
                 <!-- FİLTRELER -->
-                <div style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center; margin-top:0.6rem;">
-                    <button t-att-class="'btn btn-sm ' + (state.filterState === 'all' ? 'btn-primary' : 'btn-outline-secondary')"
-                            t-on-click="() => this.setFilter('all')">Tümü</button>
-                    <button t-att-class="'btn btn-sm ' + (state.filterState === 'in_progress' ? 'btn-success' : 'btn-outline-secondary')"
-                            t-on-click="() => this.setFilter('in_progress')">Devam</button>
-                    <button t-att-class="'btn btn-sm ' + (state.filterState === 'draft' ? 'btn-warning' : 'btn-outline-secondary')"
-                            t-on-click="() => this.setFilter('draft')">Taslak</button>
-                    <button t-att-class="'btn btn-sm ' + (state.filterState === 'done' ? 'btn-info' : 'btn-outline-secondary')"
-                            t-on-click="() => this.setFilter('done')">Tamamlandı</button>
-                    <span style="margin-left:0.5rem; color:#666; font-size:0.8rem;">|</span>
-                    <input type="date" class="form-control form-control-sm" style="width:auto; font-size:0.8rem;"
-                           t-att-value="state.filterDateFrom"
-                           t-on-change="(ev) => { this.state.filterDateFrom = ev.target.value; this.loadBatchList(); }"/>
-                    <span style="color:#666; font-size:0.8rem;">—</span>
-                    <input type="date" class="form-control form-control-sm" style="width:auto; font-size:0.8rem;"
-                           t-att-value="state.filterDateTo"
-                           t-on-change="(ev) => { this.state.filterDateTo = ev.target.value; this.loadBatchList(); }"/>
+                <div style="background:#f8f9fa; border:1px solid #dee2e6; border-radius:8px; padding:0.6rem 0.8rem; margin-top:0.6rem;">
+                    <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                        <!-- Durum filtreleri -->
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button t-att-class="'btn ' + (state.filterState === 'all' ? 'btn-primary' : 'btn-outline-primary')"
+                                    t-on-click="() => this.setFilter('all')">
+                                <i class="fa fa-th-list"></i> Tümü
+                            </button>
+                            <button t-att-class="'btn ' + (state.filterState === 'in_progress' ? 'btn-success' : 'btn-outline-success')"
+                                    t-on-click="() => this.setFilter('in_progress')">
+                                <i class="fa fa-play-circle"></i> Devam
+                            </button>
+                            <button t-att-class="'btn ' + (state.filterState === 'draft' ? 'btn-warning' : 'btn-outline-warning')"
+                                    t-on-click="() => this.setFilter('draft')">
+                                <i class="fa fa-pencil"></i> Taslak
+                            </button>
+                            <button t-att-class="'btn ' + (state.filterState === 'done' ? 'btn-info' : 'btn-outline-info')"
+                                    t-on-click="() => this.setFilter('done')">
+                                <i class="fa fa-check-circle"></i> Tamamlandı
+                            </button>
+                        </div>
+
+                        <!-- Tarih filtreleri -->
+                        <div style="display:flex; align-items:center; gap:0.3rem; margin-left:auto;">
+                            <i class="fa fa-calendar" style="color:#714B67; font-size:0.85rem;"></i>
+                            <input type="date" class="form-control form-control-sm"
+                                   style="width:130px; font-size:0.8rem; border-color:#ced4da;"
+                                   t-att-value="state.filterDateFrom"
+                                   t-on-change="(ev) => { this.state.filterDateFrom = ev.target.value; this.loadBatchList(); }"/>
+                            <span style="color:#999; font-size:0.75rem;">—</span>
+                            <input type="date" class="form-control form-control-sm"
+                                   style="width:130px; font-size:0.8rem; border-color:#ced4da;"
+                                   t-att-value="state.filterDateTo"
+                                   t-on-change="(ev) => { this.state.filterDateTo = ev.target.value; this.loadBatchList(); }"/>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- Bugünkü batch listesi -->
+                <!-- Rota listesi -->
                 <div class="ub-packing-batch-list" t-if="state.batches.length">
                     <div class="ub-section-title-dark" style="margin-top:0.8rem;">
                         <i class="fa fa-list"></i> Rotalar
-                        <span class="badge bg-light text-dark" style="margin-left:0.5rem;" t-esc="state.batches.length + ' rota'"/>
+                        <span class="badge bg-light text-dark" style="margin-left:0.5rem; font-size:0.75rem;"
+                              t-esc="state.batches.length + ' rota'"/>
                     </div>
                     <t t-foreach="state.batches" t-as="b" t-key="b.id">
-                        <div class="ub-picking-row" t-on-click="() => this.loadBatch(b.id)">
+                        <div class="ub-picking-row" t-on-click="() => this.loadBatch(b.id)"
+                             t-att-style="b.state === 'done' ? 'opacity:0.7;' : ''">
                             <div class="ub-picking-info">
                                 <div class="ub-picking-name" t-esc="b.name"/>
                                 <div class="ub-picking-meta">
-                                    <span class="badge bg-info" t-esc="b.time_window"/>
-                                    <span class="badge bg-secondary" t-esc="b.state"/>
+                                    <span class="badge" style="font-size:0.7rem;"
+                                          t-att-class="'badge ' + (b.state === 'done' ? 'bg-success' : b.state === 'in_progress' ? 'bg-info' : 'bg-warning')"
+                                          t-esc="b.state === 'done' ? '✓ Tamamlandı' : b.state === 'in_progress' ? '▶ Devam' : '✎ Taslak'"/>
+                                    <span class="badge bg-secondary" style="font-size:0.7rem;" t-if="b.time_window"
+                                          t-esc="b.time_window"/>
                                 </div>
                             </div>
                             <div class="ub-picking-count">
