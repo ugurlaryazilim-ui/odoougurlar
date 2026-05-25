@@ -46,17 +46,15 @@
         <field name="name">ugurlar.tts.message.search</field>
         <field name="model">ugurlar.tts.message</field>
         <field name="arch" type="xml">
-            <search>
+            <search string="TTS Mesajları">
                 <field name="name"/>
                 <field name="key"/>
                 <field name="message"/>
                 <field name="category"/>
-                <filter name="active" string="Aktif" domain="[('active', '=', True)]"/>
-                <filter name="inactive" string="Pasif" domain="[('active', '=', False)]"/>
+                <filter string="Aktif" name="active" domain="[('active', '=', True)]"/>
+                <filter string="Pasif" name="inactive" domain="[('active', '=', False)]"/>
                 <separator/>
-                <group string="Grupla">
-                    <filter name="group_category" string="Kategori" context="{'group_by': 'category'}"/>
-                </group>
+                <filter string="Kategori" name="group_category" context="{'group_by': 'category'}"/>
             </search>
         </field>
     </record>
