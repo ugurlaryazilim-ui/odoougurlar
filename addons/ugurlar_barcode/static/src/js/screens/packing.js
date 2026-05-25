@@ -41,10 +41,31 @@ export class PackingScreen extends Component {
                     </div>
                 </div>
 
+                <!-- FİLTRELER -->
+                <div style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center; margin-top:0.6rem;">
+                    <button t-att-class="'btn btn-sm ' + (state.filterState === 'all' ? 'btn-primary' : 'btn-outline-secondary')"
+                            t-on-click="() => this.setFilter('all')">Tümü</button>
+                    <button t-att-class="'btn btn-sm ' + (state.filterState === 'in_progress' ? 'btn-success' : 'btn-outline-secondary')"
+                            t-on-click="() => this.setFilter('in_progress')">Devam</button>
+                    <button t-att-class="'btn btn-sm ' + (state.filterState === 'draft' ? 'btn-warning' : 'btn-outline-secondary')"
+                            t-on-click="() => this.setFilter('draft')">Taslak</button>
+                    <button t-att-class="'btn btn-sm ' + (state.filterState === 'done' ? 'btn-info' : 'btn-outline-secondary')"
+                            t-on-click="() => this.setFilter('done')">Tamamlandı</button>
+                    <span style="margin-left:0.5rem; color:#666; font-size:0.8rem;">|</span>
+                    <input type="date" class="form-control form-control-sm" style="width:auto; font-size:0.8rem;"
+                           t-att-value="state.filterDateFrom"
+                           t-on-change="(ev) => { this.state.filterDateFrom = ev.target.value; this.loadBatchList(); }"/>
+                    <span style="color:#666; font-size:0.8rem;">—</span>
+                    <input type="date" class="form-control form-control-sm" style="width:auto; font-size:0.8rem;"
+                           t-att-value="state.filterDateTo"
+                           t-on-change="(ev) => { this.state.filterDateTo = ev.target.value; this.loadBatchList(); }"/>
+                </div>
+
                 <!-- Bugünkü batch listesi -->
                 <div class="ub-packing-batch-list" t-if="state.batches.length">
                     <div class="ub-section-title-dark" style="margin-top:0.8rem;">
-                        <i class="fa fa-list"></i> Açık Rotalar
+                        <i class="fa fa-list"></i> Rotalar
+                        <span class="badge bg-light text-dark" style="margin-left:0.5rem;" t-esc="state.batches.length + ' rota'"/>
                     </div>
                     <t t-foreach="state.batches" t-as="b" t-key="b.id">
                         <div class="ub-picking-row" t-on-click="() => this.loadBatch(b.id)">
@@ -228,6 +249,10 @@ export class PackingScreen extends Component {
             // completed
             completed: false,
             completedPickings: [],
+            // filtreler
+            filterState: 'all',
+            filterDateFrom: '',
+            filterDateTo: '',
         });
 
         this._unsub = this.props.scanner.onScan(bc => {
@@ -294,14 +319,28 @@ export class PackingScreen extends Component {
     // ─── BATCH LİSTESİ ──────────────────────────
     async loadBatchList() {
         try {
-            const res = await BarcodeService.call('/ugurlar_barcode/api/batch_list', {
+            const params = {
                 exclude_transfers: true,
-                exclude_done: true,
-            });
+            };
+            if (this.state.filterState && this.state.filterState !== 'all') {
+                params.filter_state = this.state.filterState;
+            }
+            if (this.state.filterDateFrom) {
+                params.date_from = this.state.filterDateFrom;
+            }
+            if (this.state.filterDateTo) {
+                params.date_to = this.state.filterDateTo;
+            }
+            const res = await BarcodeService.call('/ugurlar_barcode/api/batch_list', params);
             this.state.batches = res.batches || [];
         } catch (e) {
             // sessiz
         }
+    }
+
+    setFilter(state) {
+        this.state.filterState = state;
+        this.loadBatchList();
     }
 
     onRouteKey(ev) {
@@ -336,7 +375,6 @@ export class PackingScreen extends Component {
             try {
                 const res = await BarcodeService.call('/ugurlar_barcode/api/batch_list', {
                     exclude_transfers: true,
-                    exclude_done: true,
                     barcode_search: name,
                 });
                 if (res.error) {
