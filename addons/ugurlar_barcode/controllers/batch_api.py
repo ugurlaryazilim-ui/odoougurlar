@@ -662,17 +662,16 @@ class BatchApiController(BarcodeApiBase):
                             ml.quantity = move.product_uom_qty
 
         # ─── 2. Picking'leri doğrula (stok aktarımı) ───
+        failed_pickings = []
         for picking in batch.picking_ids:
             if picking.state in ('assigned', 'confirmed'):
                 try:
-                    # Backorder/immediate wizard'ı atla
                     ctx = {
                         'skip_backorder': True,
                         'skip_immediate': True,
                         'picking_ids_not_to_backorder': picking.ids,
                     }
                     result = picking.with_context(**ctx).button_validate()
-                    # Eğer wizard action döndüyse, onu da çalıştır
                     if isinstance(result, dict) and result.get('res_model'):
                         try:
                             wizard_model = result['res_model']
@@ -684,25 +683,31 @@ class BatchApiController(BarcodeApiBase):
                                 wizard.action_done()
                         except Exception as e2:
                             _logger.warning("Wizard %s hatası: %s", wizard_model, e2)
+                    # Doğrulama sonrası kontrol
+                    picking.invalidate_recordset(['state'])
+                    if picking.state != 'done':
+                        failed_pickings.append(picking.name)
+                        _logger.warning(
+                            "Picking %s (origin: %s) button_validate sonrası state=%s",
+                            picking.name, picking.origin, picking.state)
                 except Exception as e:
+                    failed_pickings.append(picking.name)
                     _logger.warning("Picking %s doğrulama hatası: %s", picking.name, e)
 
         # ─── 3. Batch'i tamamla ───
         try:
             if batch.state != 'done':
-                # Tüm picking'ler done ise batch'i tamamla
                 all_done = all(p.state == 'done' for p in batch.picking_ids)
                 if all_done:
                     batch.action_done()
                 else:
-                    # Doğrudan state güncelle
-                    batch.write({'state': 'done'})
+                    not_done = [p.name for p in batch.picking_ids if p.state != 'done']
+                    _logger.warning(
+                        "Batch %s: %d/%d picking done DEĞİL: %s",
+                        batch.name, len(not_done), len(batch.picking_ids), not_done)
         except Exception as e:
             _logger.warning("Batch %s tamamlama hatası: %s", batch.name, e)
-            try:
-                batch.write({'state': 'done'})
-            except Exception:
-                pass
+
         # ─── 4. Ürün chatter'larına transfer tamamlanma logu ───
         try:
             user = request.env.user
@@ -726,13 +731,21 @@ class BatchApiController(BarcodeApiBase):
         except Exception as e:
             _logger.warning("Chatter log hatası: %s", e)
 
+        batch_done = all(p.state == 'done' for p in batch.picking_ids)
+        result_msg = f'{batch.name}: {collected_moves}/{total_moves} ürün toplandı ve aktarıldı'
+        if failed_pickings:
+            result_msg += f' ⚠️ ({len(failed_pickings)} picking done olmadı: {", ".join(failed_pickings)})'
+        else:
+            result_msg += ' ✅'
+
         return {
             'success': True,
             'batch_name': batch.name,
+            'batch_done': batch_done,
             'total_moves': total_moves,
             'collected_moves': collected_moves,
             'skipped_moves': skipped_moves,
             'partial_moves': total_moves - collected_moves - skipped_moves,
-            'message': f'{batch.name}: {collected_moves}/{total_moves} ürün toplandı ve aktarıldı ✅',
+            'failed_pickings': failed_pickings,
+            'message': result_msg,
         }
-
