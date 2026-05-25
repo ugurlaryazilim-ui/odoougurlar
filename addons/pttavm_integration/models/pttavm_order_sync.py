@@ -180,7 +180,7 @@ class PttavmOrderSync(models.Model):
                 'item_id': str(item.get('lineItemId', '')),
                 'product_id': str(item.get('urunId', '')),
                 'product_name': order_json.get('urunAdi') or item.get('urun'),
-                'product_code': item.get('urunBarkod') or order_json.get('urunKodu'),
+                'product_code': item.get('variantBarkod') or item.get('urunBarkod') or order_json.get('urunKodu'),
                 'quantity': qty,
                 # if qty > 1 given price usually includes total price in PttAvm, need to make unit price
                 'sale_price': price / qty if qty else price,
