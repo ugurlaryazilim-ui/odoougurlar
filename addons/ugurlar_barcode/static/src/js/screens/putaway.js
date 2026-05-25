@@ -1,7 +1,49 @@
 /** @odoo-module **/
 
-import { Component, useState, xml, onWillUnmount, onMounted } from "@odoo/owl";
+import { Component, useState, useRef, xml, onWillUnmount, onMounted } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
+
+// ─── SES EFEKTLERİ (Web Audio API) ────────────────────
+// Harici ses dosyası gerektirmez — tarayıcıda tone üretir
+const _audioCtx = typeof AudioContext !== 'undefined'
+    ? new AudioContext() : typeof webkitAudioContext !== 'undefined'
+        ? new webkitAudioContext() : null;
+
+function _playTone(frequencies, durations, type = 'sine', volume = 0.3) {
+    if (!_audioCtx) return;
+    // AudioContext askıya alınmışsa devam ettir (Chrome politikası)
+    if (_audioCtx.state === 'suspended') _audioCtx.resume();
+    const now = _audioCtx.currentTime;
+    let offset = 0;
+    for (let i = 0; i < frequencies.length; i++) {
+        const osc = _audioCtx.createOscillator();
+        const gain = _audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.value = frequencies[i];
+        gain.gain.setValueAtTime(volume, now + offset);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + offset + durations[i]);
+        osc.connect(gain);
+        gain.connect(_audioCtx.destination);
+        osc.start(now + offset);
+        osc.stop(now + offset + durations[i]);
+        offset += durations[i] * 0.7; // Notalar hafif örtüşsün
+    }
+}
+
+/** ✅ Raflama başarılı — ascending chime (do-mi-sol) */
+function playSoundPutaway() {
+    _playTone([523, 659, 784], [0.12, 0.12, 0.25], 'sine', 0.35);
+}
+
+/** 📤 Raftan kaldırma başarılı — descending tone (sol-mi-do) */
+function playSoundRemove() {
+    _playTone([784, 659, 523], [0.1, 0.1, 0.2], 'triangle', 0.3);
+}
+
+/** ❌ Hata — kısa warning buzz */
+function playSoundError() {
+    _playTone([200, 150], [0.15, 0.25], 'square', 0.15);
+}
 
 export class PutawayScreen extends Component {
     static template = xml`
@@ -191,6 +233,10 @@ export class PutawayScreen extends Component {
     static props = { navigate: Function, scanner: Object };
 
     setup() {
+        // OWL useRef — DOM erişimi için best-practice
+        this.shelfInputRef = useRef('shelfInput');
+        this.productInputRef = useRef('productInput');
+
         this.state = useState({
             mode: 'putaway',
             step: 1,
@@ -200,23 +246,17 @@ export class PutawayScreen extends Component {
             productBarcode: '',
             quantity: 1,
             loading: false,
-            processing: false,  // İşlem kilidi — çift tetiklenmeyi önler
+            processing: false,
             error: null,
             success: null,
-            toast: null,        // Anlık bildirim (3sn sonra kaybolur)
+            toast: null,
             history: [],
         });
 
-        // ─── Barkod okuyucu event listener ───
-        // SADECE scanner callback kullanılır.
-        // Input alanının kendi keydown/Enter'ı _detectScan ile AYRI çalışır.
-        // Çift tetiklenmeyi önlemek için _processing kilidi kullanılır.
+        // Barkod okuyucu — SADECE scanner callback kullanılır
         this._unsub = this.props.scanner.onScan(bc => this.onScanDetected(bc));
 
-        onMounted(() => {
-            // Adım 1'de raf inputuna focus
-            this._focusCurrentInput();
-        });
+        onMounted(() => this._focusCurrentInput());
 
         onWillUnmount(() => {
             if (this._unsub) this._unsub();
@@ -226,8 +266,9 @@ export class PutawayScreen extends Component {
 
     _focusCurrentInput() {
         setTimeout(() => {
-            const ref = this.state.step === 1 ? 'shelfInput' : 'productInput';
-            const el = this.__owl__.refs?.[ref];
+            const el = this.state.step === 1
+                ? this.shelfInputRef.el
+                : this.productInputRef.el;
             if (el) el.focus();
         }, 100);
     }
@@ -351,11 +392,23 @@ export class PutawayScreen extends Component {
             if (res.error) {
                 this.state.error = res.error;
                 this._showToast('error', res.error);
+                playSoundError();
+                if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
             } else {
                 const actionText = mode === 'putaway' ? '✅ Raflama başarılı' : '✅ Raftan kaldırıldı';
                 const msg = `${actionText}: ${res.message || barcode}`;
                 this.state.success = msg;
                 this._showToast('success', msg);
+
+                // 🔊 Ses efekti
+                if (mode === 'putaway') {
+                    playSoundPutaway();
+                } else {
+                    playSoundRemove();
+                }
+                // 📳 Titreşim feedback (mobil)
+                if (navigator.vibrate) navigator.vibrate(150);
+
                 this.state.history.unshift({
                     type: mode,
                     message: res.message || barcode,
@@ -374,6 +427,7 @@ export class PutawayScreen extends Component {
         } catch (e) {
             this.state.error = 'Hata: ' + (e.message || e);
             this._showToast('error', 'Hata: ' + (e.message || e));
+            playSoundError();
         }
 
         this.state.loading = false;
