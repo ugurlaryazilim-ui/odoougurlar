@@ -562,6 +562,45 @@ class BatchApiController(BarcodeApiBase):
         if batch.state == 'draft':
             batch.sudo().write({'state': 'in_progress'})
 
+        # ─── Picking bazlı anında stok düşürme ───
+        # Bu picking'in TÜM move'ları toplandıysa anında validate et
+        picking_all_collected = all(
+            (m.wave_collected_qty or 0) >= m.product_uom_qty
+            for m in target_picking.move_ids
+        )
+        picking_validated = False
+        if picking_all_collected and target_picking.state in ('assigned', 'confirmed'):
+            try:
+                # Move line'lara miktarları yaz
+                for move in target_picking.move_ids:
+                    collected = move.wave_collected_qty or 0
+                    if collected > 0:
+                        remaining = collected
+                        for ml in move.move_line_ids:
+                            ml.quantity = min(remaining, ml.reserved_uom_qty or move.product_uom_qty)
+                            remaining -= ml.quantity
+                # Picking'i doğrula → stok düşer
+                ctx = {
+                    'skip_backorder': True,
+                    'skip_immediate': True,
+                    'picking_ids_not_to_backorder': target_picking.ids,
+                }
+                result = target_picking.with_context(**ctx).button_validate()
+                if isinstance(result, dict) and result.get('res_model'):
+                    wizard_model = result['res_model']
+                    wizard_ctx = result.get('context', {})
+                    wizard = request.env[wizard_model].sudo().with_context(**wizard_ctx).create({})
+                    if hasattr(wizard, 'process'):
+                        wizard.process()
+                    elif hasattr(wizard, 'action_done'):
+                        wizard.action_done()
+                picking_validated = True
+                _logger.info("Rota toplama: %s anında validate edildi (batch: %s)",
+                            target_picking.name, batch.name)
+            except Exception as e:
+                _logger.warning("Rota toplama anında validate hatası: %s → %s",
+                              target_picking.name, e)
+
         # İşlem logu
         try:
             user = request.env.user
@@ -600,6 +639,7 @@ class BatchApiController(BarcodeApiBase):
             'picking_name': target_picking.name,
             'item_complete': item_complete,
             'all_collected': all_collected,
+            'picking_validated': picking_validated,
             'image_url': f'/web/image/product.product/{product.id}/image_256',
         }
 
@@ -643,6 +683,11 @@ class BatchApiController(BarcodeApiBase):
 
         # ─── 1. Toplanan miktarları move_line'lara yaz ───
         for picking in batch.picking_ids:
+            if picking.state == 'done':
+                # Zaten toplama sırasında validate edilmiş — atla
+                total_moves += len(picking.move_ids)
+                collected_moves += len(picking.move_ids)
+                continue
             for move in picking.move_ids:
                 total_moves += 1
                 collected = move.wave_collected_qty or 0

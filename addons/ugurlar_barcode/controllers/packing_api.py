@@ -164,7 +164,11 @@ class PackingApiController(BarcodeApiBase):
 
     @http.route('/ugurlar_barcode/api/packing_scan', type='json', auth='user')
     def packing_scan(self, batch_id=0, barcode='', **kw):
-        """Paketleme sırasında ürün barkodu tara → eşleştir."""
+        """Paketleme sırasında ürün barkodu tara → eşleştir.
+        
+        Stok düşürme YAPILMAZ — stok rota toplama sırasında düşer.
+        Burada sadece eşleştirme + etiket basma kontrolü yapılır.
+        """
         # Duplicate guard: aynı barkod 500ms içinde tekrar taranırsa atla
         if self._check_duplicate_request('packing_scan', batch_id, barcode):
             return {'warning': True, 'message': 'Çift okutma algılandı, lütfen tekrar deneyin'}
@@ -177,7 +181,7 @@ class PackingApiController(BarcodeApiBase):
         if not product:
             return {'error': f'Ürün bulunamadı: {barcode}'}
 
-        # Batch'teki picking'lerde bu ürünü bul (henüz tamamlanmamış)
+        # Batch'teki picking'lerde bu ürünü bul (henüz eşleştirilmemiş)
         target_move = None
         target_picking = None
         for picking in batch.picking_ids:
@@ -205,7 +209,17 @@ class PackingApiController(BarcodeApiBase):
                         }
             return {'error': f'Ürün toplama listesinde bulunamadı — barkod eşleşmedi (Yanlış beden/varyant okutmuş olabilirsiniz): [{product.barcode or "?"}] {product.display_name}'}
 
-        # Barkod eşleşti → qty artır
+        # ─── Rota toplama kontrolü ───
+        # Ürün rota toplamada toplanmadıysa uyarı ver
+        wave_qty = target_move.wave_collected_qty or 0
+        if wave_qty == 0:
+            return {
+                'error': f'⚠️ {product.display_name} henüz rota toplamadan toplanmamış!\n'
+                        f'Önce Rota Toplama ekranından toplayınız.',
+                'not_collected': True,
+            }
+
+        # Barkod eşleşti → qty artır (eşleştirme sayacı, stok hareketi değil)
         new_qty = target_move.quantity + 1
         target_move.write({'quantity': new_qty})
 
@@ -236,8 +250,6 @@ class PackingApiController(BarcodeApiBase):
         picking_completed = all(m.quantity >= m.product_uom_qty for m in target_picking.move_ids)
 
         # ─── Aynı siparişe ait diğer picking'leri kontrol et ───
-        # Aynı origin (satış siparişi) altındaki tüm picking'ler tamamlanmadan
-        # etiket yazdırılmamalı
         sibling_remaining = []
         all_siblings_complete = True
         if target_picking.origin:
@@ -258,22 +270,18 @@ class PackingApiController(BarcodeApiBase):
             if m.quantity < m.product_uom_qty:
                 remaining_items.append(f"{m.product_id.display_name} ({m.product_uom_qty - m.quantity} adet)")
 
-        # Kalan ürünlere aynı siparişteki diğer picking'lerinkini de ekle
         remaining_items.extend(sibling_remaining)
 
         # Gerçek tamamlanma: bu picking + aynı siparişteki diğer picking'ler
         order_completed = picking_completed and all_siblings_complete
 
-        if picking_completed and target_picking.state != 'done':
+        # Picking zaten done ise (rota'da validate edilmiş) → tekrar validate etme
+        # Picking henüz done değilse VE tüm ürünler eşleşmişse → validate et
+        if picking_completed and target_picking.state not in ('done', 'cancel'):
             try:
                 target_picking.packing_done = True
-                
-                # 1. Odoo Teslimatını (Picking) Doğrula
                 target_picking.button_validate()
-                
-                # SADECE ŞİMDİ PAKETLENENLER İÇİN 3 AŞAMALI SİNK TETİKLENİYOR
                 self._trigger_nebim_sync(target_picking)
-
             except Exception as e:
                 _logger.error("Auto-validate/sync error for %s: %s", target_picking.name, e)
 
@@ -291,7 +299,7 @@ class PackingApiController(BarcodeApiBase):
             'demand_qty': target_move.product_uom_qty,
             'picking_name': target_picking.name,
             'picking_id': target_picking.id,
-            'picking_completed': order_completed,  # Sipariş bazlı tamamlanma
+            'picking_completed': order_completed,
             'picking_total': picking_total,
             'picking_matched': picking_matched,
             'remaining_items': remaining_items,
