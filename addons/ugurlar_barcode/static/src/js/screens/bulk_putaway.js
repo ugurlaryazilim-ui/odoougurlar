@@ -5,6 +5,7 @@ import { BarcodeService } from "../barcode_service";
 import { playSoundPutaway, playSoundError, vibrate, vibrateError } from "../sound_utils";
 
 export class BulkPutawayScreen extends Component {
+    static props = { navigate: Function, scanner: { type: Object, optional: true } };
     static template = xml`
         <div class="ub-screen">
             <div class="ub-screen-header">
@@ -158,9 +159,31 @@ export class BulkPutawayScreen extends Component {
             lastSuccess: null,
             error: null,
             loading: false,
+            processing: false,
         });
 
-        onMounted(() => this._focusCurrentInput());
+        // Barkod okuyucu callback — okutulunca otomatik işlem yapar
+        this._scanHandler = (barcode) => {
+            if (this.state.processing || this.state.loading) return;
+            if (!this.state.shelfInfo) {
+                // Raf henüz seçilmedi → raf barkodu olarak işle
+                this.state.shelfBarcode = barcode;
+                this.loadShelf();
+            } else {
+                // Raf seçili → ürün barkodu olarak işle, otomatik rafla
+                this.state.productBarcode = barcode;
+                this.doPutaway();
+            }
+        };
+
+        onMounted(() => {
+            if (this.props.scanner) this.props.scanner.onScan(this._scanHandler);
+            this._focusCurrentInput();
+        });
+
+        onWillUnmount(() => {
+            if (this.props.scanner) this.props.scanner.offScan(this._scanHandler);
+        });
     }
 
     _focusCurrentInput() {
@@ -209,8 +232,9 @@ export class BulkPutawayScreen extends Component {
 
     async doPutaway() {
         const bc = this.state.productBarcode.trim();
-        if (!bc || this.state.loading) return;
+        if (!bc || this.state.loading || this.state.processing) return;
 
+        this.state.processing = true;
         this.state.error = null;
         this.state.lastSuccess = null;
         this.state.loading = true;
@@ -248,6 +272,8 @@ export class BulkPutawayScreen extends Component {
 
         this.state.productBarcode = '';
         this.state.loading = false;
+        // Kilidi kısa gecikme ile kaldır (scanner debounce)
+        setTimeout(() => { this.state.processing = false; }, 500);
         // İşlem sonrası ürün inputuna tekrar focus
         this._focusCurrentInput();
     }

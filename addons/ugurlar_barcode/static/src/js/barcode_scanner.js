@@ -43,6 +43,13 @@ export class BarcodeScanner {
     }
 
     /**
+     * Barkod callback kaldır
+     */
+    offScan(callback) {
+        this._listeners = this._listeners.filter(cb => cb !== callback);
+    }
+
+    /**
      * El terminali keyboard wedge handler
      * Hızlı ardışık tuş basımlarını algılar + Enter ile tamamlar
      */
