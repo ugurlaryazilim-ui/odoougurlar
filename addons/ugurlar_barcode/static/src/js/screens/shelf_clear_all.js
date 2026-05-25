@@ -2,7 +2,7 @@
 
 import { Component, useState, xml, onMounted, onWillUnmount, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
-import { playSoundClear, playSoundError, vibrate, vibrateError } from "../sound_utils";
+import { playSoundClear, playSoundPutaway, playSoundError, vibrate, vibrateError } from "../sound_utils";
 
 export class ShelfClearAllScreen extends Component {
     static template = xml`
@@ -197,14 +197,22 @@ export class ShelfClearAllScreen extends Component {
 
         try {
             const res = await BarcodeService.shelfControl(bc);
-            if (res.error) { this.state.error = res.error; return; }
+            if (res.error) {
+                this.state.error = res.error;
+                playSoundError();
+                vibrateError();
+                return;
+            }
 
             this.state.shelfInfo = res.location;
             const products = (res.products || []).filter(p => p.quantity > 0);
             this.state.products = products;
             this.state.totalQty = products.reduce((s, p) => s + p.quantity, 0);
+            playSoundPutaway();
+            vibrate();
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
+            playSoundError();
         }
     }
 

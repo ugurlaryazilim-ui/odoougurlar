@@ -2,6 +2,7 @@
 
 import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
+import { playSoundPutaway, playSoundError, vibrate, vibrateError } from "../sound_utils";
 
 export class ShelfSearch extends Component {
     static template = xml`
@@ -256,12 +257,23 @@ export class ShelfSearch extends Component {
         this.state.inputValue = barcode;
         try {
             const result = await BarcodeService.shelfSearch(barcode);
-            if (result.error) this.state.error = result.error;
-            else this.state.result = result;
+            if (result.error) {
+                this.state.error = result.error;
+                playSoundError();
+                vibrateError();
+            } else {
+                this.state.result = result;
+                playSoundPutaway();
+                vibrate();
+            }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
+            playSoundError();
         }
         this.state.loading = false;
+        // Arama sonrası input temizle + refocus
+        this.state.inputValue = '';
+        if (this.barcodeInputRef.el) { this.barcodeInputRef.el.focus(); }
     }
 
     // ─── İŞLEM BUTONLARI ─────────────────────────

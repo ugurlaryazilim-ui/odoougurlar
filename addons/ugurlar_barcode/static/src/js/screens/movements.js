@@ -2,6 +2,7 @@
 
 import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
+import { playSoundPutaway, playSoundError, vibrate, vibrateError } from "../sound_utils";
 
 export class MovementsScreen extends Component {
     static template = xml`
@@ -393,12 +394,22 @@ export class MovementsScreen extends Component {
         try {
             const result = await BarcodeService.stockMovements(
                 this.state.days, this.state.productBarcode.trim(), this.state.moveType);
-            if (result.error) this.state.error = result.error;
-            else this.state.result = result;
+            if (result.error) {
+                this.state.error = result.error;
+                playSoundError();
+                vibrateError();
+            } else {
+                this.state.result = result;
+                playSoundPutaway();
+                vibrate();
+            }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
+            playSoundError();
         }
         this.state.loading = false;
+        this.state.productBarcode = '';
+        if (this.barcodeInputRef.el) { this.barcodeInputRef.el.focus(); }
     }
 
     // ─── KAMERA ───────────────────────────────────

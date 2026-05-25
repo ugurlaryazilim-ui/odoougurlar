@@ -2,6 +2,7 @@
 
 import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
+import { playSoundPutaway, playSoundError, vibrate, vibrateError } from "../sound_utils";
 
 export class ShelfControl extends Component {
     static template = xml`
@@ -255,12 +256,22 @@ export class ShelfControl extends Component {
         this.state.inputValue = barcode;
         try {
             const result = await BarcodeService.shelfControl(barcode);
-            if (result.error) this.state.error = result.error;
-            else this.state.result = result;
+            if (result.error) {
+                this.state.error = result.error;
+                playSoundError();
+                vibrateError();
+            } else {
+                this.state.result = result;
+                playSoundPutaway();
+                vibrate();
+            }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
+            playSoundError();
         }
         this.state.loading = false;
+        this.state.inputValue = '';
+        if (this.barcodeInputRef.el) { this.barcodeInputRef.el.focus(); }
     }
 
 

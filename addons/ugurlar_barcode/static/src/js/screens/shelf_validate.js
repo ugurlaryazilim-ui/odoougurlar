@@ -2,6 +2,7 @@
 
 import { Component, useState, xml, onMounted, onWillUnmount, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
+import { playSoundPutaway, playSoundError, vibrate, vibrateError } from "../sound_utils";
 
 export class ShelfValidateScreen extends Component {
     static template = xml`
@@ -208,17 +209,23 @@ export class ShelfValidateScreen extends Component {
 
         try {
             const res = await BarcodeService.shelfControl(bc);
-            if (res.error) { this.state.error = res.error; return; }
-
-            // API: res.location = {id, name, complete_name, barcode, warehouse}
+            if (res.error) {
+                this.state.error = res.error;
+                playSoundError();
+                vibrateError();
+                return;
+            }
             this.state.shelfInfo = res.location;
-            // API: res.products = [{id, name, barcode, code, marka, quantity}]
             this.state.products = (res.products || []).filter(p => p.quantity > 0).map(p => ({
                 ...p,
                 counted: 0,
             }));
+            playSoundPutaway();
+            vibrate();
+            this._focusCurrentInput();
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
+            playSoundError();
         }
     }
 
@@ -235,24 +242,26 @@ export class ShelfValidateScreen extends Component {
         this.state.notFoundBarcode = null;
         this.state.error = null;
 
-        // Ürünü tabloda bul — barkod veya referans koduyla
         let found = false;
         for (const p of this.state.products) {
             if (p.barcode === bc || p.code === bc) {
                 p.counted += 1;
                 found = true;
                 this.state.validatedCount = this.state.products.filter(x => x.counted > 0).length;
-                if (navigator.vibrate) navigator.vibrate(100);
+                playSoundPutaway();
+                vibrate();
                 break;
             }
         }
 
         if (!found) {
             this.state.notFoundBarcode = bc;
-            if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+            playSoundError();
+            vibrateError();
         }
 
         this.state.productBarcode = '';
+        this._focusCurrentInput();
     }
 
     resetForm() {

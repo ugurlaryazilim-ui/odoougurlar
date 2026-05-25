@@ -2,6 +2,7 @@
 
 import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
+import { playSoundPutaway, playSoundError, vibrate, vibrateError } from "../sound_utils";
 
 export class CountingScreen extends Component {
     static template = xml`
@@ -15,7 +16,7 @@ export class CountingScreen extends Component {
                 </h2>
                 <div class="ub-mode-toggle" t-if="state.view !== 'menu'">
                     <button t-attf-class="btn btn-sm {{state.view === 'count' ? 'ub-mode-active-green' : 'btn-outline-secondary'}}"
-                            t-on-click="() => this.state.view = 'count'">
+                            t-on-click="startCounting">
                         Sayım
                     </button>
                     <button t-attf-class="btn btn-sm {{state.view === 'history' ? 'ub-mode-active-green' : 'btn-outline-secondary'}}"
@@ -28,7 +29,7 @@ export class CountingScreen extends Component {
             <!-- SAYIM MENÜSÜ -->
             <t t-if="state.view === 'menu'">
                 <div class="ub-menu-grid" style="padding:1.5rem;">
-                    <div class="ub-menu-card ub-card-counting" t-on-click="() => this.state.view = 'count'">
+                    <div class="ub-menu-card ub-card-counting" t-on-click="startCounting">
                         <div class="ub-card-icon"><i class="fa fa-barcode"></i></div>
                         <div class="ub-card-title">Sayım</div>
                         <div class="ub-card-desc">Raf sayımı yap</div>
@@ -361,13 +362,20 @@ export class CountingScreen extends Component {
 
     _focusCurrentInput() {
         setTimeout(() => {
-            const ref = this.state.step === 2 ? this.productInputRef : this.shelfInputRef;
-            if (ref && ref.el) { ref.el.focus(); ref.el.select(); }
-        }, 100);
+            if (this.state.view === 'count') {
+                const ref = this.state.step === 2 ? this.productInputRef : this.shelfInputRef;
+                if (ref && ref.el) { ref.el.focus(); ref.el.select(); }
+            }
+        }, 150);
     }
 
     get countedCount() {
         return this.state.items.filter(i => i.counted).length;
+    }
+
+    startCounting() {
+        this.state.view = 'count';
+        this._focusCurrentInput();
     }
 
     goBack() {
@@ -426,6 +434,8 @@ export class CountingScreen extends Component {
             const result = await BarcodeService.shelfControl(this.state.shelfBarcode.trim());
             if (result.error) {
                 this.state.error = result.error;
+                playSoundError();
+                vibrateError();
             } else {
                 this.state.shelfInfo = {
                     ...result.location,
@@ -441,9 +451,13 @@ export class CountingScreen extends Component {
                     isNew: false,
                 }));
                 this.state.step = 2;
+                playSoundPutaway();
+                vibrate();
+                this._focusCurrentInput();
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
+            playSoundError();
         }
         this.state.loading = false;
     }
@@ -476,7 +490,6 @@ export class CountingScreen extends Component {
             existing.quantity = (existing.quantity || 0) + 1;
             existing.counted = true;
         } else {
-            // Rafta olmayan yeni ürün — kırmızı ile göster
             this.state.items.push({
                 barcode: bc,
                 name: '',
@@ -487,6 +500,9 @@ export class CountingScreen extends Component {
             });
         }
         this.state.productInput = '';
+        playSoundPutaway();
+        vibrate();
+        this._focusCurrentInput();
     }
 
     updateQty(barcode, val) {

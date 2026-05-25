@@ -2,7 +2,7 @@
 
 import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
-import { playSoundTransfer, playSoundError, vibrate, vibrateError } from "../sound_utils";
+import { playSoundTransfer, playSoundPutaway, playSoundError, vibrate, vibrateError } from "../sound_utils";
 
 export class ShelfTransferScreen extends Component {
     static template = xml`
@@ -292,14 +292,19 @@ export class ShelfTransferScreen extends Component {
             const res = await BarcodeService.shelfControl(bc);
             if (res.error) {
                 this.state.error = res.error;
+                playSoundError();
+                vibrateError();
             } else {
                 this.state.sourceShelfInfo = res.location;
                 this.state.sourceShelfInfo.total_quantity = res.total_quantity;
                 this.state.step = 2;
+                playSoundPutaway();
+                vibrate();
                 this._focusStep();
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
+            playSoundError();
         }
         this.state.loading = false;
     }
@@ -325,13 +330,18 @@ export class ShelfTransferScreen extends Component {
             const res = await BarcodeService.shelfControl(bc);
             if (res.error) {
                 this.state.error = res.error;
+                playSoundError();
+                vibrateError();
             } else {
                 this.state.targetShelfInfo = res;
                 this.state.step = 3;
+                playSoundPutaway();
+                vibrate();
                 this._focusStep();
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
+            playSoundError();
         }
         this.state.loading = false;
     }
@@ -374,6 +384,7 @@ export class ShelfTransferScreen extends Component {
                 this.state.productBarcode = '';
                 this.state.quantity = 1;
                 this.state.reason = '';
+                this._focusStep();
 
                 // 3 saniye sonra success mesajını kaldır
                 setTimeout(() => { this.state.success = null; }, 3000);

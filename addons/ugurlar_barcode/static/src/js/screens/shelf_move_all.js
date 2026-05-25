@@ -2,7 +2,7 @@
 
 import { Component, useState, xml, onMounted, onWillUnmount, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
-import { playSoundTransfer, playSoundError, vibrate, vibrateError } from "../sound_utils";
+import { playSoundTransfer, playSoundPutaway, playSoundError, vibrate, vibrateError } from "../sound_utils";
 
 export class ShelfMoveAll extends Component {
     static template = xml`
@@ -276,13 +276,22 @@ export class ShelfMoveAll extends Component {
 
         try {
             const res = await BarcodeService.shelfControl(bc);
-            if (res.error) { this.state.error = res.error; return; }
+            if (res.error) {
+                this.state.error = res.error;
+                playSoundError();
+                vibrateError();
+                return;
+            }
             this.state.sourceInfo = res;
             const products = (res.products || []).filter(p => p.quantity > 0);
             this.state.sourceProducts = products;
             this.state.totalQty = products.reduce((s, p) => s + p.quantity, 0);
+            playSoundPutaway();
+            vibrate();
+            this._focusCurrentInput();
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
+            playSoundError();
         }
     }
 
@@ -300,10 +309,18 @@ export class ShelfMoveAll extends Component {
 
         try {
             const res = await BarcodeService.shelfControl(bc);
-            if (res.error) { this.state.error = res.error; return; }
+            if (res.error) {
+                this.state.error = res.error;
+                playSoundError();
+                vibrateError();
+                return;
+            }
             this.state.targetInfo = res;
+            playSoundPutaway();
+            vibrate();
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
+            playSoundError();
         }
     }
 
