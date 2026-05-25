@@ -204,4 +204,19 @@ class BarcodeApiBase(http.Controller):
         except Exception as e:
             _logger.warning('Chatter log hatası: %s', e)
 
+    # ═══ TTS CONFIG ═══
+
+    @http.route('/ugurlar_barcode/api/tts_config', type='json', auth='user')
+    def tts_config(self, **kw):
+        """Tüm aktif TTS mesajlarını key→message dict olarak döndür."""
+        try:
+            messages = request.env['ugurlar.tts.message'].sudo().search([
+                ('active', '=', True),
+            ])
+            return {
+                'messages': {msg.key: msg.message for msg in messages},
+            }
+        except Exception as e:
+            _logger.warning('TTS config hatası: %s', e)
+            return {'messages': {}}
 

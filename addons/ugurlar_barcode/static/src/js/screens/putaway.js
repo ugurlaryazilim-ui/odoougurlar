@@ -2,7 +2,7 @@
 
 import { Component, useState, useRef, xml, onWillUnmount, onMounted } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
-import { playSoundPutaway, playSoundRemove, playSoundError, vibrate, vibrateError } from "../sound_utils";
+import { vibrate, vibrateError, speak } from "../sound_utils";
 
 
 export class PutawayScreen extends Component {
@@ -396,7 +396,7 @@ export class PutawayScreen extends Component {
                 const msg = `Yetersiz stok! Rafta ${existingProduct.quantity} adet var, ${qty} adet kaldıramazsınız.`;
                 this.state.error = msg;
                 this._showToast('error', msg);
-                playSoundError();
+                speak('putaway_product_not_found');
                 vibrateError();
                 return;
             }
@@ -420,7 +420,7 @@ export class PutawayScreen extends Component {
             if (res.error) {
                 this.state.error = res.error;
                 this._showToast('error', res.error);
-                playSoundError();
+                speak('putaway_product_not_found');
                 vibrateError();
             } else {
                 const actionText = mode === 'putaway' ? '✅ Raflama başarılı' : '✅ Raftan kaldırıldı';
@@ -428,13 +428,11 @@ export class PutawayScreen extends Component {
                 this.state.success = msg;
                 this._showToast('success', msg);
 
-                // 🔊 Ses efekti
                 if (mode === 'putaway') {
-                    playSoundPutaway();
+                    speak('putaway_product_shelved');
                 } else {
-                    playSoundRemove();
+                    speak('putaway_product_removed');
                 }
-                // 📳 Titreşim feedback (mobil)
                 vibrate();
 
                 this.state.history.unshift({
@@ -455,7 +453,7 @@ export class PutawayScreen extends Component {
         } catch (e) {
             this.state.error = 'Hata: ' + (e.message || e);
             this._showToast('error', 'Hata: ' + (e.message || e));
-            playSoundError();
+            speak('putaway_error');
         }
 
         this.state.loading = false;

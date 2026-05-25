@@ -7,3 +7,5 @@ access_picking_schedule_user,ugurlar.picking.schedule user,model_ugurlar_picking
 access_picking_schedule_manager,ugurlar.picking.schedule manager,model_ugurlar_picking_schedule,stock.group_stock_manager,1,1,1,1
 access_picking_schedule_line_user,ugurlar.picking.schedule.line user,model_ugurlar_picking_schedule_line,stock.group_stock_user,1,0,0,0
 access_picking_schedule_line_manager,ugurlar.picking.schedule.line manager,model_ugurlar_picking_schedule_line,stock.group_stock_manager,1,1,1,1
+access_tts_message_user,ugurlar.tts.message user,model_ugurlar_tts_message,stock.group_stock_user,1,0,0,0
+access_tts_message_manager,ugurlar.tts.message manager,model_ugurlar_tts_message,stock.group_stock_manager,1,1,1,1

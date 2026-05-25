@@ -2,7 +2,7 @@
 
 import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
-import { playSoundTransfer, playSoundPutaway, playSoundError, vibrate, vibrateError } from "../sound_utils";
+import { vibrate, vibrateError, speak } from "../sound_utils";
 
 export class ShelfTransferScreen extends Component {
     static template = xml`
@@ -292,19 +292,19 @@ export class ShelfTransferScreen extends Component {
             const res = await BarcodeService.shelfControl(bc);
             if (res.error) {
                 this.state.error = res.error;
-                playSoundError();
+                speak('transfer_error');
                 vibrateError();
             } else {
                 this.state.sourceShelfInfo = res.location;
                 this.state.sourceShelfInfo.total_quantity = res.total_quantity;
                 this.state.step = 2;
-                playSoundPutaway();
+                speak('transfer_source_found');
                 vibrate();
                 this._focusStep();
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-            playSoundError();
+            speak('transfer_error');
         }
         this.state.loading = false;
     }
@@ -330,18 +330,18 @@ export class ShelfTransferScreen extends Component {
             const res = await BarcodeService.shelfControl(bc);
             if (res.error) {
                 this.state.error = res.error;
-                playSoundError();
+                speak('transfer_error');
                 vibrateError();
             } else {
                 this.state.targetShelfInfo = res;
                 this.state.step = 3;
-                playSoundPutaway();
+                speak('transfer_target_found');
                 vibrate();
                 this._focusStep();
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-            playSoundError();
+            speak('transfer_error');
         }
         this.state.loading = false;
     }
@@ -372,7 +372,7 @@ export class ShelfTransferScreen extends Component {
                 this.state.error = res.error;
             } else {
                 this.state.success = res.message;
-                playSoundTransfer();
+                speak('transfer_success');
                 vibrate();
                 this.state.history.unshift({
                     product_name: res.product_name,
@@ -391,7 +391,7 @@ export class ShelfTransferScreen extends Component {
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-            playSoundError();
+            speak('transfer_error');
             vibrateError();
         }
         this.state.loading = false;

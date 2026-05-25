@@ -2,7 +2,7 @@
 
 import { Component, useState, xml, onMounted, onWillUnmount, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
-import { playSoundClear, playSoundPutaway, playSoundError, vibrate, vibrateError } from "../sound_utils";
+import { vibrate, vibrateError, speak } from "../sound_utils";
 
 export class ShelfClearAllScreen extends Component {
     static template = xml`
@@ -199,7 +199,7 @@ export class ShelfClearAllScreen extends Component {
             const res = await BarcodeService.shelfControl(bc);
             if (res.error) {
                 this.state.error = res.error;
-                playSoundError();
+                speak('clear_error');
                 vibrateError();
                 return;
             }
@@ -208,11 +208,11 @@ export class ShelfClearAllScreen extends Component {
             const products = (res.products || []).filter(p => p.quantity > 0);
             this.state.products = products;
             this.state.totalQty = products.reduce((s, p) => s + p.quantity, 0);
-            playSoundPutaway();
+            speak('clear_shelf_found');
             vibrate();
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-            playSoundError();
+            speak('clear_error');
         }
     }
 
@@ -226,12 +226,12 @@ export class ShelfClearAllScreen extends Component {
                 this.state.error = res.error;
             } else {
                 this.state.result = res;
-                playSoundClear();
+                speak('clear_success');
                 vibrate();
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-            playSoundError();
+            speak('clear_error');
             vibrateError();
         }
         this.state.loading = false;

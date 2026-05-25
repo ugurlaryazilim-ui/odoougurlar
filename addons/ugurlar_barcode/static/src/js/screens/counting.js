@@ -2,7 +2,7 @@
 
 import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
-import { playSoundPutaway, playSoundError, vibrate, vibrateError } from "../sound_utils";
+import { vibrate, vibrateError, speak } from "../sound_utils";
 
 export class CountingScreen extends Component {
     static template = xml`
@@ -434,7 +434,7 @@ export class CountingScreen extends Component {
             const result = await BarcodeService.shelfControl(this.state.shelfBarcode.trim());
             if (result.error) {
                 this.state.error = result.error;
-                playSoundError();
+                speak('count_error');
                 vibrateError();
             } else {
                 this.state.shelfInfo = {
@@ -451,13 +451,13 @@ export class CountingScreen extends Component {
                     isNew: false,
                 }));
                 this.state.step = 2;
-                playSoundPutaway();
+                speak('count_shelf_found');
                 vibrate();
                 this._focusCurrentInput();
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-            playSoundError();
+            speak('count_error');
         }
         this.state.loading = false;
     }
@@ -500,7 +500,7 @@ export class CountingScreen extends Component {
             });
         }
         this.state.productInput = '';
-        playSoundPutaway();
+        speak('count_product_added');
         vibrate();
         this._focusCurrentInput();
     }

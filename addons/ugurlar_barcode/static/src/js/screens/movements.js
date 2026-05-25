@@ -2,7 +2,7 @@
 
 import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
-import { playSoundPutaway, playSoundError, vibrate, vibrateError } from "../sound_utils";
+import { vibrate, vibrateError, speak } from "../sound_utils";
 
 export class MovementsScreen extends Component {
     static template = xml`
@@ -396,16 +396,16 @@ export class MovementsScreen extends Component {
                 this.state.days, this.state.productBarcode.trim(), this.state.moveType);
             if (result.error) {
                 this.state.error = result.error;
-                playSoundError();
+                speak('movements_not_found');
                 vibrateError();
             } else {
                 this.state.result = result;
-                playSoundPutaway();
+                speak('movements_success');
                 vibrate();
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-            playSoundError();
+            speak('movements_error');
         }
         this.state.loading = false;
         this.state.productBarcode = '';

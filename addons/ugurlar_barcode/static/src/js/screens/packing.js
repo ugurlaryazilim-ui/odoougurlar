@@ -1,7 +1,8 @@
 /** @odoo-module **/
 
 import { Component, useState, xml, onMounted, onWillUnmount, useRef, onPatched } from "@odoo/owl";
-import { BarcodeService, AudioFeedback } from "../barcode_service";
+import { BarcodeService } from "../barcode_service";
+import { speak, vibrate, vibrateError } from "../sound_utils";
 import { generateBarcodeSVG } from "./label_designer";
 
 export class PackingScreen extends Component {
@@ -474,15 +475,15 @@ export class PackingScreen extends Component {
             if (res.error) {
                 this.state.scanMsg = res.error;
                 this.state.scanOk = false;
-                AudioFeedback.playError();
+                speak('packing_scan_wrong');
             } else if (res.warning) {
                 this.state.scanMsg = res.message;
                 this.state.scanOk = true;
-                AudioFeedback.playSuccess();
+                speak('packing_scan_success');
             } else {
                 this.state.scanMsg = `${res.product_name} — ${res.picking_name} (${res.done_qty}/${res.demand_qty})`;
                 this.state.scanOk = true;
-                AudioFeedback.playSuccess();
+                speak('packing_scan_success');
 
                 // Listeyi güncelle
                 for (const item of this.state.items) {
@@ -526,14 +527,14 @@ export class PackingScreen extends Component {
                     this.state.scanMsg = `${res.product_name} paketlendi ancak ${res.picking_name} siparişi BİTMEDİ. Lütfen şunları da okutun: ${res.remaining_items.join(', ')}`;
                     this.state.scanOk = false; // Farkındalık için kırmızı veya uyarı rengi
                     this.state.inc_picking_id = res.picking_id;
-                    AudioFeedback.playError(); // Uyarı sesi
+                    speak('packing_scan_wrong');
                 }
             }
         } catch (e) {
             this.state.scanMsg = 'Hata';
             this.state.scanOk = false;
             this.state.inc_picking_id = null;
-            AudioFeedback.playError();
+            speak('packing_error');
         }
         this.state.scanInput = '';
     }

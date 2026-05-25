@@ -1,7 +1,8 @@
 /** @odoo-module **/
 
 import { Component, useState, xml, onMounted, onWillUnmount } from "@odoo/owl";
-import { BarcodeService, AudioFeedback } from "../barcode_service";
+import { BarcodeService } from "../barcode_service";
+import { speak, vibrate, vibrateError } from "../sound_utils";
 
 export class BatchPickingScreen extends Component {
     static template = xml`
@@ -632,16 +633,16 @@ export class BatchPickingScreen extends Component {
             if (res.error) {
                 this.state.scanMsg = res.error;
                 this.state.scanOk = false;
-                AudioFeedback.playError();
+                speak('batch_scan_wrong');
                 this._vibrate(200);
             } else if (res.warning) {
                 this.state.scanMsg = res.message;
                 this.state.scanOk = true;
-                AudioFeedback.playError(); // Uyarı, o yüzden hata sesi veya farklı
+                speak('batch_scan_wrong');
             } else {
                 this.state.scanMsg = `✓ ${res.product_name} — ${res.collected_qty}/${res.demand_qty}`;
                 this.state.scanOk = true;
-                AudioFeedback.playSuccess();
+                speak('batch_scan_success');
 
                 // İlgili satırı güncelle
                 for (const item of this.state.items) {
@@ -669,7 +670,7 @@ export class BatchPickingScreen extends Component {
         } catch (e) {
             this.state.scanMsg = 'Tarama hatası';
             this.state.scanOk = false;
-            AudioFeedback.playError();
+            speak('batch_error');
         }
 
         this.state.scanInput = '';

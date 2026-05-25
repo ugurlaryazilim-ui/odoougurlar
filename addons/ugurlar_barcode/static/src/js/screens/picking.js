@@ -2,6 +2,7 @@
 
 import { Component, useState, xml, onMounted, onWillUnmount } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
+import { speak, vibrate, vibrateError } from "../sound_utils";
 
 export class PickingScreen extends Component {
     static template = xml`
@@ -153,11 +154,12 @@ export class PickingScreen extends Component {
         this.state.scanMsg = '';
         try {
             const res = await BarcodeService.pickingScan(this.state.picking.id, this.state.scanInput.trim(), 1);
-            if (res.error) { this.state.scanMsg = res.error; this.state.scanOk = false; }
+            if (res.error) { this.state.scanMsg = res.error; this.state.scanOk = false; speak('picking_not_found'); vibrateError(); }
             else {
                 this.state.scanMsg = res.product_name + ' → ' + res.done_qty + '/' + res.demand_qty;
                 this.state.scanOk = true;
-                // Satıtı güncelle
+                speak('picking_success');
+                vibrate();
                 for (const l of this.state.lines) {
                     if (l.product_id === undefined) continue;
                     const prod = await BarcodeService.pickingDetail(this.state.picking.id);
@@ -165,7 +167,7 @@ export class PickingScreen extends Component {
                     break;
                 }
             }
-        } catch (e) { this.state.scanMsg = 'Hata'; this.state.scanOk = false; }
+        } catch (e) { this.state.scanMsg = 'Hata'; this.state.scanOk = false; speak('picking_error'); }
         this.state.scanInput = '';
     }
 

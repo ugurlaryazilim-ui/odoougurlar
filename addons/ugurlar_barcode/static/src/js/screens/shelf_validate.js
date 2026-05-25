@@ -2,7 +2,7 @@
 
 import { Component, useState, xml, onMounted, onWillUnmount, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
-import { playSoundPutaway, playSoundError, vibrate, vibrateError } from "../sound_utils";
+import { vibrate, vibrateError, speak } from "../sound_utils";
 
 export class ShelfValidateScreen extends Component {
     static template = xml`
@@ -211,7 +211,7 @@ export class ShelfValidateScreen extends Component {
             const res = await BarcodeService.shelfControl(bc);
             if (res.error) {
                 this.state.error = res.error;
-                playSoundError();
+                speak('validate_error');
                 vibrateError();
                 return;
             }
@@ -220,12 +220,12 @@ export class ShelfValidateScreen extends Component {
                 ...p,
                 counted: 0,
             }));
-            playSoundPutaway();
+            speak('validate_shelf_found');
             vibrate();
             this._focusCurrentInput();
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-            playSoundError();
+            speak('validate_error');
         }
     }
 
@@ -248,7 +248,7 @@ export class ShelfValidateScreen extends Component {
                 p.counted += 1;
                 found = true;
                 this.state.validatedCount = this.state.products.filter(x => x.counted > 0).length;
-                playSoundPutaway();
+                speak('validate_product_found');
                 vibrate();
                 break;
             }
@@ -256,7 +256,7 @@ export class ShelfValidateScreen extends Component {
 
         if (!found) {
             this.state.notFoundBarcode = bc;
-            playSoundError();
+            speak('validate_product_not_found');
             vibrateError();
         }
 

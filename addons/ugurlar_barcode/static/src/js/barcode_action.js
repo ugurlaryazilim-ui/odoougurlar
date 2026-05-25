@@ -23,6 +23,7 @@ import { ShelfClearAllScreen } from "./screens/shelf_clear_all";
 import { PackingScreen } from "./screens/packing";
 import { BatchPickingScreen } from "./screens/batch_picking";
 import { CargoLabelDesigner } from "./screens/cargo_label_designer";
+import { loadTtsConfig } from "./sound_utils";
 
 // Geçerli ekran isimleri
 const VALID_SCREENS = new Set([
@@ -70,8 +71,9 @@ class BarcodeApp extends Component {
             this.scanner.start();
             window.addEventListener('hashchange', this._onHashChange);
             window.addEventListener('popstate', this._onPopState);
-            // Hash'i güncelle (mevcut ekranı yansıtsın)
             this._writeHash(this.state.screen, true);
+            // TTS mesajlarını backend'den yükle
+            loadTtsConfig();
         });
 
         onWillUnmount(() => {

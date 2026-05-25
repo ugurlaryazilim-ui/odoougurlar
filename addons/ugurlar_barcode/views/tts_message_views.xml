@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- ═══ Tree View ═══ -->
+    <record id="ugurlar_tts_message_tree" model="ir.ui.view">
+        <field name="name">ugurlar.tts.message.tree</field>
+        <field name="model">ugurlar.tts.message</field>
+        <field name="arch" type="xml">
+            <list editable="bottom" default_order="category, sequence">
+                <field name="sequence" widget="handle"/>
+                <field name="category"/>
+                <field name="name"/>
+                <field name="key"/>
+                <field name="message"/>
+                <field name="active"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- ═══ Form View ═══ -->
+    <record id="ugurlar_tts_message_form" model="ir.ui.view">
+        <field name="name">ugurlar.tts.message.form</field>
+        <field name="model">ugurlar.tts.message</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="name"/>
+                            <field name="key"/>
+                            <field name="category"/>
+                        </group>
+                        <group>
+                            <field name="message" placeholder="TTS ile okunacak metin..."/>
+                            <field name="active"/>
+                            <field name="sequence"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- ═══ Search View ═══ -->
+    <record id="ugurlar_tts_message_search" model="ir.ui.view">
+        <field name="name">ugurlar.tts.message.search</field>
+        <field name="model">ugurlar.tts.message</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name"/>
+                <field name="key"/>
+                <field name="message"/>
+                <field name="category"/>
+                <filter name="active" string="Aktif" domain="[('active', '=', True)]"/>
+                <filter name="inactive" string="Pasif" domain="[('active', '=', False)]"/>
+                <separator/>
+                <group string="Grupla">
+                    <filter name="group_category" string="Kategori" context="{'group_by': 'category'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- ═══ Action ═══ -->
+    <record id="action_ugurlar_tts_messages" model="ir.actions.act_window">
+        <field name="name">Seslendirme Ayarları</field>
+        <field name="res_model">ugurlar.tts.message</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="ugurlar_tts_message_search"/>
+        <field name="context">{'search_default_group_category': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Seslendirme mesajı ekleyin
+            </p>
+            <p>
+                Her ekran için başarı, hata ve bilgi mesajlarını buradan yönetin.
+                Mesajlar TTS (Text-to-Speech) ile sesli olarak okunur.
+            </p>
+        </field>
+    </record>
+
+    <!-- ═══ Menü — Mobil > Ayarlar > Seslendirmeler ═══ -->
+    <menuitem id="menu_ugurlar_barcode_settings"
+              name="Ayarlar"
+              parent="ugurlar_barcode.menu_ugurlar_barcode_root"
+              sequence="100"/>
+
+    <menuitem id="menu_ugurlar_tts"
+              name="Seslendirmeler"
+              parent="menu_ugurlar_barcode_settings"
+              action="action_ugurlar_tts_messages"
+              sequence="10"/>
+
+</odoo>

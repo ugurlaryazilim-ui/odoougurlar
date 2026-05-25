@@ -1,64 +1,24 @@
 /** @odoo-module **/
 
 /**
- * Ses Efektleri Modülü — Web Audio API
- * Harici ses dosyası gerektirmez, tarayıcıda tone üretir.
+ * TTS (Text-to-Speech) Seslendirme Modülü
+ * ========================================
+ * Backend'deki ugurlar.tts.message modelinden mesajları çeker,
+ * cache'ler ve Web Speech API ile Türkçe seslendirir.
  *
  * Kullanım:
- *   import { playSoundPutaway, playSoundRemove, playSoundTransfer, playSoundError } from "../sound_utils";
- *   playSoundPutaway();  // Raflama başarılı
+ *   import { speak, loadTtsConfig, vibrate, vibrateError } from "../sound_utils";
+ *   await loadTtsConfig();  // Uygulama başlangıcında 1 kez
+ *   speak('stock_search_success');  // → "Ürüne ait bilgiler"
  */
 
-const _audioCtx = typeof AudioContext !== 'undefined'
-    ? new AudioContext() : typeof webkitAudioContext !== 'undefined'
-        ? new webkitAudioContext() : null;
+import { rpc } from "@web/core/network/rpc";
 
-function _playTone(frequencies, durations, type = 'sine', volume = 0.3) {
-    if (!_audioCtx) return;
-    if (_audioCtx.state === 'suspended') _audioCtx.resume();
-    const now = _audioCtx.currentTime;
-    let offset = 0;
-    for (let i = 0; i < frequencies.length; i++) {
-        const osc = _audioCtx.createOscillator();
-        const gain = _audioCtx.createGain();
-        osc.type = type;
-        osc.frequency.value = frequencies[i];
-        gain.gain.setValueAtTime(volume, now + offset);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + offset + durations[i]);
-        osc.connect(gain);
-        gain.connect(_audioCtx.destination);
-        osc.start(now + offset);
-        osc.stop(now + offset + durations[i]);
-        offset += durations[i] * 0.7;
-    }
-}
+// ═══════════════════════════════════════════════════════
+// 📳 Titreşim (Haptic Feedback)
+// ═══════════════════════════════════════════════════════
 
-/** ✅ Raflama başarılı — ascending chime (do-mi-sol) */
-export function playSoundPutaway() {
-    _playTone([523, 659, 784], [0.15, 0.15, 0.3], 'sine', 1.0);
-}
-
-/** 📤 Raftan kaldırma — descending tone (sol-mi-do) */
-export function playSoundRemove() {
-    _playTone([784, 659, 523], [0.12, 0.12, 0.25], 'triangle', 0.9);
-}
-
-/** 🔄 Raf taşıma — swoosh effect (mi-fa#-la) */
-export function playSoundTransfer() {
-    _playTone([330, 370, 440], [0.1, 0.1, 0.25], 'sine', 0.85);
-}
-
-/** ❌ Hata — warning buzz */
-export function playSoundError() {
-    _playTone([200, 150], [0.18, 0.3], 'square', 0.6);
-}
-
-/** 🗑️ Toplu silme — deep tone */
-export function playSoundClear() {
-    _playTone([392, 330, 262], [0.12, 0.12, 0.35], 'triangle', 0.8);
-}
-
-/** 📳 Titreşim feedback (mobil) */
+/** 📳 Başarı titreşimi (mobil) */
 export function vibrate(pattern = 150) {
     if (navigator.vibrate) navigator.vibrate(pattern);
 }
@@ -71,33 +31,67 @@ export function vibrateError() {
 // ═══════════════════════════════════════════════════════
 // 🔊 TTS — Text-to-Speech (Sesli Mesaj)
 // Web Speech API ile Türkçe sesli geri bildirim
-// Kullanım: speak("Ürün bulundu");
 // ═══════════════════════════════════════════════════════
 
-let _ttsReady = false;
+// TTS mesaj cache'i — key → message
+let _ttsCache = {};
+let _ttsLoaded = false;
+let _ttsLoading = false;
 
-// İlk kullanıcı etkileşiminde TTS'i ısıt
+/**
+ * Backend'den TTS mesajlarını yükle ve cache'le.
+ * Uygulama başlangıcında 1 kez çağrılır.
+ * Tekrar çağrılırsa cache'i yeniler.
+ */
+export async function loadTtsConfig() {
+    if (_ttsLoading) return;
+    _ttsLoading = true;
+    try {
+        const res = await rpc('/ugurlar_barcode/api/tts_config', {});
+        if (res && res.messages) {
+            _ttsCache = res.messages;
+            _ttsLoaded = true;
+        }
+    } catch (e) {
+        console.warn('[TTS] Config yüklenemedi:', e);
+    }
+    _ttsLoading = false;
+}
+
+// İlk kullanıcı etkileşiminde TTS engine'i ısıt
+let _ttsWarmedUp = false;
 function _warmUpTTS() {
-    if (_ttsReady) return;
-    _ttsReady = true;
-    // Boş utterance ile engine'i başlat (bazı tarayıcılarda gerekli)
-    const warmup = new SpeechSynthesisUtterance('');
-    warmup.volume = 0;
-    speechSynthesis.speak(warmup);
+    if (_ttsWarmedUp) return;
+    _ttsWarmedUp = true;
+    try {
+        const warmup = new SpeechSynthesisUtterance('');
+        warmup.volume = 0;
+        speechSynthesis.speak(warmup);
+    } catch (e) { /* bazı tarayıcılarda hata verebilir */ }
 }
 document.addEventListener('click', _warmUpTTS, { once: true });
 document.addEventListener('keydown', _warmUpTTS, { once: true });
 
 /**
  * 🔊 Sesli mesaj oku (TTS)
- * @param {string} text - Okunacak metin
+ *
+ * @param {string} keyOrText - Cache'deki anahtar VEYA doğrudan metin.
+ *   Eğer key cache'de varsa → cache'deki metni okur.
+ *   Yoksa → parametre olarak gelen metni doğrudan okur.
+ *
  * @param {object} [opts] - Seçenekler
- * @param {number} [opts.rate=1.1] - Konuşma hızı (0.5-2.0)
+ * @param {number} [opts.rate=1.0] - Konuşma hızı (0.5-2.0)
  * @param {number} [opts.pitch=1.0] - Ses tonu (0-2)
  * @param {number} [opts.volume=1.0] - Ses seviyesi (0-1)
  */
-export function speak(text, opts = {}) {
-    if (!text || typeof speechSynthesis === 'undefined') return;
+export function speak(keyOrText, opts = {}) {
+    if (!keyOrText || typeof speechSynthesis === 'undefined') return;
+
+    // Cache'den metin çek veya doğrudan kullan
+    const text = _ttsCache[keyOrText] || keyOrText;
+
+    // Boş veya devre dışı mesaj
+    if (!text || text === '-' || text === 'off') return;
 
     // Önceki konuşmayı kes
     speechSynthesis.cancel();
@@ -106,7 +100,7 @@ export function speak(text, opts = {}) {
     utterance.lang = 'tr-TR';
     utterance.rate = opts.rate ?? 1.0;
     utterance.pitch = opts.pitch ?? 1.0;
-    utterance.volume = opts.volume ?? 1.0;  // MAX ses
+    utterance.volume = opts.volume ?? 1.0;
 
     // Türkçe ses varsa onu seç
     const voices = speechSynthesis.getVoices();
@@ -114,4 +108,14 @@ export function speak(text, opts = {}) {
     if (trVoice) utterance.voice = trVoice;
 
     speechSynthesis.speak(utterance);
+}
+
+/**
+ * TTS cache'inin yüklenip yüklenmediğini kontrol et.
+ * Yüklenmediyse otomatik yükle.
+ */
+export function ensureTtsLoaded() {
+    if (!_ttsLoaded && !_ttsLoading) {
+        loadTtsConfig();
+    }
 }

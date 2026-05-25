@@ -24,8 +24,10 @@
         'views/picking_schedule_views.xml',
         'views/picking_batch_views.xml',
         'views/stock_picking_ext_views.xml',
+        'views/tts_message_views.xml',
         'data/sequence.xml',
         'data/cron.xml',
+        'data/tts_defaults.xml',
     ],
     'assets': {
         'web.assets_backend': [

@@ -2,7 +2,7 @@
 
 import { Component, useState, xml, onMounted, onWillUnmount, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
-import { playSoundTransfer, playSoundPutaway, playSoundError, vibrate, vibrateError } from "../sound_utils";
+import { vibrate, vibrateError, speak } from "../sound_utils";
 
 export class ShelfMoveAll extends Component {
     static template = xml`
@@ -278,7 +278,7 @@ export class ShelfMoveAll extends Component {
             const res = await BarcodeService.shelfControl(bc);
             if (res.error) {
                 this.state.error = res.error;
-                playSoundError();
+                speak('move_all_error');
                 vibrateError();
                 return;
             }
@@ -286,12 +286,12 @@ export class ShelfMoveAll extends Component {
             const products = (res.products || []).filter(p => p.quantity > 0);
             this.state.sourceProducts = products;
             this.state.totalQty = products.reduce((s, p) => s + p.quantity, 0);
-            playSoundPutaway();
+            speak('move_all_source_found');
             vibrate();
             this._focusCurrentInput();
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-            playSoundError();
+            speak('move_all_error');
         }
     }
 
@@ -311,16 +311,16 @@ export class ShelfMoveAll extends Component {
             const res = await BarcodeService.shelfControl(bc);
             if (res.error) {
                 this.state.error = res.error;
-                playSoundError();
+                speak('move_all_error');
                 vibrateError();
                 return;
             }
             this.state.targetInfo = res;
-            playSoundPutaway();
+            speak('move_all_target_found');
             vibrate();
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-            playSoundError();
+            speak('move_all_error');
         }
     }
 
@@ -339,12 +339,12 @@ export class ShelfMoveAll extends Component {
                 this.state.error = res.error;
             } else {
                 this.state.result = res;
-                playSoundTransfer();
+                speak('move_all_success');
                 vibrate();
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-            playSoundError();
+            speak('move_all_error');
             vibrateError();
         }
         this.state.loading = false;

@@ -400,15 +400,15 @@ export class StockSearch extends Component {
             if (result.error) {
                 this.state.error = result.error;
                 vibrateError();
-                speak('Ürün bulunamadı');
+                speak('stock_search_not_found');
             } else {
                 this.state.result = result;
                 vibrate();
-                speak('Ürüne ait bilgiler');
+                speak('stock_search_success');
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-            speak('Bağlantı hatası');
+            speak('stock_search_error');
         }
         this.state.loading = false;
         // Arama sonrası input temizle + refocus

@@ -2,7 +2,7 @@
 
 import { Component, useState, useRef, xml, onMounted, onWillUnmount } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
-import { playSoundPutaway, playSoundError, vibrate, vibrateError } from "../sound_utils";
+import { vibrate, vibrateError, speak } from "../sound_utils";
 
 export class BulkPutawayScreen extends Component {
     static props = { navigate: Function, scanner: { type: Object, optional: true } };
@@ -247,7 +247,7 @@ export class BulkPutawayScreen extends Component {
             } else {
                 // Başarılı — toast mesajı
                 this.state.lastSuccess = `${res.product_name}: ${this.state.quantity} adet raflandı`;
-                playSoundPutaway();
+                speak('bulk_putaway_product_added');
 
                 // Oturum geçmişine ekle
                 this.state.sessionItems.unshift({
@@ -266,7 +266,7 @@ export class BulkPutawayScreen extends Component {
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-            playSoundError();
+            speak('bulk_putaway_error');
             vibrateError();
         }
 

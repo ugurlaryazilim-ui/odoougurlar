@@ -1,0 +1,451 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+
+        <!-- ══════════════════════════════════════════════ -->
+        <!-- 🔍 Ürün Stok Arama                            -->
+        <!-- ══════════════════════════════════════════════ -->
+        <record id="tts_stock_search_success" model="ugurlar.tts.message">
+            <field name="key">stock_search_success</field>
+            <field name="name">Ürün bulundu</field>
+            <field name="message">Ürüne ait bilgiler</field>
+            <field name="category">stock_search</field>
+            <field name="sequence">1</field>
+        </record>
+        <record id="tts_stock_search_not_found" model="ugurlar.tts.message">
+            <field name="key">stock_search_not_found</field>
+            <field name="name">Ürün bulunamadı</field>
+            <field name="message">Ürün bulunamadı</field>
+            <field name="category">stock_search</field>
+            <field name="sequence">2</field>
+        </record>
+        <record id="tts_stock_search_error" model="ugurlar.tts.message">
+            <field name="key">stock_search_error</field>
+            <field name="name">Bağlantı hatası</field>
+            <field name="message">Bağlantı hatası</field>
+            <field name="category">stock_search</field>
+            <field name="sequence">3</field>
+        </record>
+
+        <!-- ══════════════════════════════════════════════ -->
+        <!-- 📍 Ürün Raf Arama                             -->
+        <!-- ══════════════════════════════════════════════ -->
+        <record id="tts_shelf_search_success" model="ugurlar.tts.message">
+            <field name="key">shelf_search_success</field>
+            <field name="name">Ürün raf bilgisi bulundu</field>
+            <field name="message">Ürüne ait raf bilgileri</field>
+            <field name="category">shelf_search</field>
+            <field name="sequence">1</field>
+        </record>
+        <record id="tts_shelf_search_not_found" model="ugurlar.tts.message">
+            <field name="key">shelf_search_not_found</field>
+            <field name="name">Ürün bulunamadı</field>
+            <field name="message">Ürün bulunamadı</field>
+            <field name="category">shelf_search</field>
+            <field name="sequence">2</field>
+        </record>
+        <record id="tts_shelf_search_error" model="ugurlar.tts.message">
+            <field name="key">shelf_search_error</field>
+            <field name="name">Bağlantı hatası</field>
+            <field name="message">Bağlantı hatası</field>
+            <field name="category">shelf_search</field>
+            <field name="sequence">3</field>
+        </record>
+
+        <!-- ══════════════════════════════════════════════ -->
+        <!-- 📊 Raf Kontrol                                -->
+        <!-- ══════════════════════════════════════════════ -->
+        <record id="tts_shelf_control_success" model="ugurlar.tts.message">
+            <field name="key">shelf_control_success</field>
+            <field name="name">Raf bilgileri getirildi</field>
+            <field name="message">Raf bilgileri getirildi</field>
+            <field name="category">shelf_control</field>
+            <field name="sequence">1</field>
+        </record>
+        <record id="tts_shelf_control_not_found" model="ugurlar.tts.message">
+            <field name="key">shelf_control_not_found</field>
+            <field name="name">Raf bulunamadı</field>
+            <field name="message">Raf bulunamadı</field>
+            <field name="category">shelf_control</field>
+            <field name="sequence">2</field>
+        </record>
+        <record id="tts_shelf_control_error" model="ugurlar.tts.message">
+            <field name="key">shelf_control_error</field>
+            <field name="name">Bağlantı hatası</field>
+            <field name="message">Bağlantı hatası</field>
+            <field name="category">shelf_control</field>
+            <field name="sequence">3</field>
+        </record>
+
+        <!-- ══════════════════════════════════════════════ -->
+        <!-- ⬇ Raflama                                     -->
+        <!-- ══════════════════════════════════════════════ -->
+        <record id="tts_putaway_shelf_found" model="ugurlar.tts.message">
+            <field name="key">putaway_shelf_found</field>
+            <field name="name">Raf bulundu</field>
+            <field name="message">Raf bulundu</field>
+            <field name="category">putaway</field>
+            <field name="sequence">1</field>
+        </record>
+        <record id="tts_putaway_shelf_not_found" model="ugurlar.tts.message">
+            <field name="key">putaway_shelf_not_found</field>
+            <field name="name">Raf bulunamadı</field>
+            <field name="message">Raf bulunamadı</field>
+            <field name="category">putaway</field>
+            <field name="sequence">2</field>
+        </record>
+        <record id="tts_putaway_product_shelved" model="ugurlar.tts.message">
+            <field name="key">putaway_product_shelved</field>
+            <field name="name">Ürün raflandı</field>
+            <field name="message">Ürün raflandı</field>
+            <field name="category">putaway</field>
+            <field name="sequence">3</field>
+        </record>
+        <record id="tts_putaway_product_removed" model="ugurlar.tts.message">
+            <field name="key">putaway_product_removed</field>
+            <field name="name">Ürün raftan kaldırıldı</field>
+            <field name="message">Ürün raftan kaldırıldı</field>
+            <field name="category">putaway</field>
+            <field name="sequence">4</field>
+        </record>
+        <record id="tts_putaway_product_not_found" model="ugurlar.tts.message">
+            <field name="key">putaway_product_not_found</field>
+            <field name="name">Ürün bulunamadı</field>
+            <field name="message">Ürün bulunamadı</field>
+            <field name="category">putaway</field>
+            <field name="sequence">5</field>
+        </record>
+        <record id="tts_putaway_error" model="ugurlar.tts.message">
+            <field name="key">putaway_error</field>
+            <field name="name">İşlem hatası</field>
+            <field name="message">İşlem hatası</field>
+            <field name="category">putaway</field>
+            <field name="sequence">6</field>
+        </record>
+
+        <!-- ══════════════════════════════════════════════ -->
+        <!-- 📦 Toplu Raflama                              -->
+        <!-- ══════════════════════════════════════════════ -->
+        <record id="tts_bulk_putaway_shelf_found" model="ugurlar.tts.message">
+            <field name="key">bulk_putaway_shelf_found</field>
+            <field name="name">Raf bulundu, ürün okutun</field>
+            <field name="message">Raf bulundu, ürün okutun</field>
+            <field name="category">bulk_putaway</field>
+            <field name="sequence">1</field>
+        </record>
+        <record id="tts_bulk_putaway_product_added" model="ugurlar.tts.message">
+            <field name="key">bulk_putaway_product_added</field>
+            <field name="name">Ürün eklendi</field>
+            <field name="message">Ürün eklendi</field>
+            <field name="category">bulk_putaway</field>
+            <field name="sequence">2</field>
+        </record>
+        <record id="tts_bulk_putaway_success" model="ugurlar.tts.message">
+            <field name="key">bulk_putaway_success</field>
+            <field name="name">Toplu raflama tamamlandı</field>
+            <field name="message">Toplu raflama tamamlandı</field>
+            <field name="category">bulk_putaway</field>
+            <field name="sequence">3</field>
+        </record>
+        <record id="tts_bulk_putaway_error" model="ugurlar.tts.message">
+            <field name="key">bulk_putaway_error</field>
+            <field name="name">Raflama hatası</field>
+            <field name="message">Raflama hatası</field>
+            <field name="category">bulk_putaway</field>
+            <field name="sequence">4</field>
+        </record>
+
+        <!-- ══════════════════════════════════════════════ -->
+        <!-- 🚚 Ürün Raf Taşıma                            -->
+        <!-- ══════════════════════════════════════════════ -->
+        <record id="tts_transfer_source_found" model="ugurlar.tts.message">
+            <field name="key">transfer_source_found</field>
+            <field name="name">Kaynak raf bulundu</field>
+            <field name="message">Kaynak raf bulundu</field>
+            <field name="category">shelf_transfer</field>
+            <field name="sequence">1</field>
+        </record>
+        <record id="tts_transfer_target_found" model="ugurlar.tts.message">
+            <field name="key">transfer_target_found</field>
+            <field name="name">Hedef raf bulundu</field>
+            <field name="message">Hedef raf bulundu</field>
+            <field name="category">shelf_transfer</field>
+            <field name="sequence">2</field>
+        </record>
+        <record id="tts_transfer_success" model="ugurlar.tts.message">
+            <field name="key">transfer_success</field>
+            <field name="name">Taşıma başarılı</field>
+            <field name="message">Ürün taşındı</field>
+            <field name="category">shelf_transfer</field>
+            <field name="sequence">3</field>
+        </record>
+        <record id="tts_transfer_same_shelf" model="ugurlar.tts.message">
+            <field name="key">transfer_same_shelf</field>
+            <field name="name">Aynı raf hatası</field>
+            <field name="message">Kaynak ve hedef raf aynı olamaz</field>
+            <field name="category">shelf_transfer</field>
+            <field name="sequence">4</field>
+        </record>
+        <record id="tts_transfer_error" model="ugurlar.tts.message">
+            <field name="key">transfer_error</field>
+            <field name="name">Taşıma hatası</field>
+            <field name="message">Taşıma hatası</field>
+            <field name="category">shelf_transfer</field>
+            <field name="sequence">5</field>
+        </record>
+
+        <!-- ══════════════════════════════════════════════ -->
+        <!-- 🚛 Tüm Rafı Taşı                             -->
+        <!-- ══════════════════════════════════════════════ -->
+        <record id="tts_move_all_source_found" model="ugurlar.tts.message">
+            <field name="key">move_all_source_found</field>
+            <field name="name">Kaynak raf bulundu</field>
+            <field name="message">Kaynak raf bulundu</field>
+            <field name="category">shelf_move_all</field>
+            <field name="sequence">1</field>
+        </record>
+        <record id="tts_move_all_target_found" model="ugurlar.tts.message">
+            <field name="key">move_all_target_found</field>
+            <field name="name">Hedef raf bulundu</field>
+            <field name="message">Hedef raf bulundu</field>
+            <field name="category">shelf_move_all</field>
+            <field name="sequence">2</field>
+        </record>
+        <record id="tts_move_all_success" model="ugurlar.tts.message">
+            <field name="key">move_all_success</field>
+            <field name="name">Toplu taşıma başarılı</field>
+            <field name="message">Tüm ürünler taşındı</field>
+            <field name="category">shelf_move_all</field>
+            <field name="sequence">3</field>
+        </record>
+        <record id="tts_move_all_error" model="ugurlar.tts.message">
+            <field name="key">move_all_error</field>
+            <field name="name">Taşıma hatası</field>
+            <field name="message">Taşıma hatası</field>
+            <field name="category">shelf_move_all</field>
+            <field name="sequence">4</field>
+        </record>
+
+        <!-- ══════════════════════════════════════════════ -->
+        <!-- ✅ Raf Doğrulama                              -->
+        <!-- ══════════════════════════════════════════════ -->
+        <record id="tts_validate_shelf_found" model="ugurlar.tts.message">
+            <field name="key">validate_shelf_found</field>
+            <field name="name">Raf bilgileri getirildi</field>
+            <field name="message">Raf bilgileri getirildi</field>
+            <field name="category">shelf_validate</field>
+            <field name="sequence">1</field>
+        </record>
+        <record id="tts_validate_product_found" model="ugurlar.tts.message">
+            <field name="key">validate_product_found</field>
+            <field name="name">Ürün doğrulandı</field>
+            <field name="message">Ürün doğrulandı</field>
+            <field name="category">shelf_validate</field>
+            <field name="sequence">2</field>
+        </record>
+        <record id="tts_validate_product_not_found" model="ugurlar.tts.message">
+            <field name="key">validate_product_not_found</field>
+            <field name="name">Ürün rafta bulunamadı</field>
+            <field name="message">Ürün rafta bulunamadı</field>
+            <field name="category">shelf_validate</field>
+            <field name="sequence">3</field>
+        </record>
+        <record id="tts_validate_error" model="ugurlar.tts.message">
+            <field name="key">validate_error</field>
+            <field name="name">Doğrulama hatası</field>
+            <field name="message">Doğrulama hatası</field>
+            <field name="category">shelf_validate</field>
+            <field name="sequence">4</field>
+        </record>
+
+        <!-- ══════════════════════════════════════════════ -->
+        <!-- 🗑️ Toplu Raf Silme                            -->
+        <!-- ══════════════════════════════════════════════ -->
+        <record id="tts_clear_shelf_found" model="ugurlar.tts.message">
+            <field name="key">clear_shelf_found</field>
+            <field name="name">Raf bilgileri getirildi</field>
+            <field name="message">Raf bilgileri getirildi</field>
+            <field name="category">shelf_clear_all</field>
+            <field name="sequence">1</field>
+        </record>
+        <record id="tts_clear_success" model="ugurlar.tts.message">
+            <field name="key">clear_success</field>
+            <field name="name">Raf temizlendi</field>
+            <field name="message">Raf temizlendi</field>
+            <field name="category">shelf_clear_all</field>
+            <field name="sequence">2</field>
+        </record>
+        <record id="tts_clear_error" model="ugurlar.tts.message">
+            <field name="key">clear_error</field>
+            <field name="name">Silme hatası</field>
+            <field name="message">Silme hatası</field>
+            <field name="category">shelf_clear_all</field>
+            <field name="sequence">3</field>
+        </record>
+
+        <!-- ══════════════════════════════════════════════ -->
+        <!-- 🛒 Sipariş Toplama                            -->
+        <!-- ══════════════════════════════════════════════ -->
+        <record id="tts_picking_success" model="ugurlar.tts.message">
+            <field name="key">picking_success</field>
+            <field name="name">Ürün toplandı</field>
+            <field name="message">Ürün toplandı</field>
+            <field name="category">picking</field>
+            <field name="sequence">1</field>
+        </record>
+        <record id="tts_picking_not_found" model="ugurlar.tts.message">
+            <field name="key">picking_not_found</field>
+            <field name="name">Ürün bulunamadı</field>
+            <field name="message">Ürün bulunamadı</field>
+            <field name="category">picking</field>
+            <field name="sequence">2</field>
+        </record>
+        <record id="tts_picking_error" model="ugurlar.tts.message">
+            <field name="key">picking_error</field>
+            <field name="name">Toplama hatası</field>
+            <field name="message">Toplama hatası</field>
+            <field name="category">picking</field>
+            <field name="sequence">3</field>
+        </record>
+
+        <!-- ══════════════════════════════════════════════ -->
+        <!-- 📋 Rota Toplama                               -->
+        <!-- ══════════════════════════════════════════════ -->
+        <record id="tts_batch_scan_success" model="ugurlar.tts.message">
+            <field name="key">batch_scan_success</field>
+            <field name="name">Ürün toplandı</field>
+            <field name="message">Ürün toplandı</field>
+            <field name="category">batch_picking</field>
+            <field name="sequence">1</field>
+        </record>
+        <record id="tts_batch_scan_wrong" model="ugurlar.tts.message">
+            <field name="key">batch_scan_wrong</field>
+            <field name="name">Yanlış barkod</field>
+            <field name="message">Yanlış barkod</field>
+            <field name="category">batch_picking</field>
+            <field name="sequence">2</field>
+        </record>
+        <record id="tts_batch_all_collected" model="ugurlar.tts.message">
+            <field name="key">batch_all_collected</field>
+            <field name="name">Tüm ürünler toplandı</field>
+            <field name="message">Tüm ürünler toplandı</field>
+            <field name="category">batch_picking</field>
+            <field name="sequence">3</field>
+        </record>
+        <record id="tts_batch_complete" model="ugurlar.tts.message">
+            <field name="key">batch_complete</field>
+            <field name="name">Toplama tamamlandı</field>
+            <field name="message">Toplama tamamlandı</field>
+            <field name="category">batch_picking</field>
+            <field name="sequence">4</field>
+        </record>
+        <record id="tts_batch_error" model="ugurlar.tts.message">
+            <field name="key">batch_error</field>
+            <field name="name">Toplama hatası</field>
+            <field name="message">Toplama hatası</field>
+            <field name="category">batch_picking</field>
+            <field name="sequence">5</field>
+        </record>
+
+        <!-- ══════════════════════════════════════════════ -->
+        <!-- 🎁 Paketleme                                  -->
+        <!-- ══════════════════════════════════════════════ -->
+        <record id="tts_packing_scan_success" model="ugurlar.tts.message">
+            <field name="key">packing_scan_success</field>
+            <field name="name">Ürün paketlendi</field>
+            <field name="message">Ürün paketlendi</field>
+            <field name="category">packing</field>
+            <field name="sequence">1</field>
+        </record>
+        <record id="tts_packing_scan_wrong" model="ugurlar.tts.message">
+            <field name="key">packing_scan_wrong</field>
+            <field name="name">Yanlış barkod</field>
+            <field name="message">Yanlış barkod</field>
+            <field name="category">packing</field>
+            <field name="sequence">2</field>
+        </record>
+        <record id="tts_packing_complete" model="ugurlar.tts.message">
+            <field name="key">packing_complete</field>
+            <field name="name">Paketleme tamamlandı</field>
+            <field name="message">Paketleme tamamlandı</field>
+            <field name="category">packing</field>
+            <field name="sequence">3</field>
+        </record>
+        <record id="tts_packing_error" model="ugurlar.tts.message">
+            <field name="key">packing_error</field>
+            <field name="name">Paketleme hatası</field>
+            <field name="message">Paketleme hatası</field>
+            <field name="category">packing</field>
+            <field name="sequence">4</field>
+        </record>
+
+        <!-- ══════════════════════════════════════════════ -->
+        <!-- 🔢 Sayım                                      -->
+        <!-- ══════════════════════════════════════════════ -->
+        <record id="tts_count_shelf_found" model="ugurlar.tts.message">
+            <field name="key">count_shelf_found</field>
+            <field name="name">Raf bulundu</field>
+            <field name="message">Raf bulundu, sayıma başlayın</field>
+            <field name="category">counting</field>
+            <field name="sequence">1</field>
+        </record>
+        <record id="tts_count_product_added" model="ugurlar.tts.message">
+            <field name="key">count_product_added</field>
+            <field name="name">Ürün sayıldı</field>
+            <field name="message">Ürün sayıldı</field>
+            <field name="category">counting</field>
+            <field name="sequence">2</field>
+        </record>
+        <record id="tts_count_saved" model="ugurlar.tts.message">
+            <field name="key">count_saved</field>
+            <field name="name">Sayım kaydedildi</field>
+            <field name="message">Sayım kaydedildi</field>
+            <field name="category">counting</field>
+            <field name="sequence">3</field>
+        </record>
+        <record id="tts_count_error" model="ugurlar.tts.message">
+            <field name="key">count_error</field>
+            <field name="name">Sayım hatası</field>
+            <field name="message">Sayım hatası</field>
+            <field name="category">counting</field>
+            <field name="sequence">4</field>
+        </record>
+
+        <!-- ══════════════════════════════════════════════ -->
+        <!-- 📊 Stok Hareketleri                           -->
+        <!-- ══════════════════════════════════════════════ -->
+        <record id="tts_movements_success" model="ugurlar.tts.message">
+            <field name="key">movements_success</field>
+            <field name="name">Hareketler getirildi</field>
+            <field name="message">Hareketler getirildi</field>
+            <field name="category">movements</field>
+            <field name="sequence">1</field>
+        </record>
+        <record id="tts_movements_not_found" model="ugurlar.tts.message">
+            <field name="key">movements_not_found</field>
+            <field name="name">Hareket bulunamadı</field>
+            <field name="message">Hareket bulunamadı</field>
+            <field name="category">movements</field>
+            <field name="sequence">2</field>
+        </record>
+        <record id="tts_movements_error" model="ugurlar.tts.message">
+            <field name="key">movements_error</field>
+            <field name="name">Bağlantı hatası</field>
+            <field name="message">Bağlantı hatası</field>
+            <field name="category">movements</field>
+            <field name="sequence">3</field>
+        </record>
+
+        <!-- ══════════════════════════════════════════════ -->
+        <!-- 🌐 Genel                                      -->
+        <!-- ══════════════════════════════════════════════ -->
+        <record id="tts_general_connection_error" model="ugurlar.tts.message">
+            <field name="key">general_connection_error</field>
+            <field name="name">Genel bağlantı hatası</field>
+            <field name="message">Bağlantı hatası</field>
+            <field name="category">general</field>
+            <field name="sequence">1</field>
+        </record>
+
+    </data>
+</odoo>
