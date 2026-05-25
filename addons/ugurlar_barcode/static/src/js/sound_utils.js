@@ -35,27 +35,27 @@ function _playTone(frequencies, durations, type = 'sine', volume = 0.3) {
 
 /** ✅ Raflama başarılı — ascending chime (do-mi-sol) */
 export function playSoundPutaway() {
-    _playTone([523, 659, 784], [0.12, 0.12, 0.25], 'sine', 0.35);
+    _playTone([523, 659, 784], [0.15, 0.15, 0.3], 'sine', 1.0);
 }
 
 /** 📤 Raftan kaldırma — descending tone (sol-mi-do) */
 export function playSoundRemove() {
-    _playTone([784, 659, 523], [0.1, 0.1, 0.2], 'triangle', 0.3);
+    _playTone([784, 659, 523], [0.12, 0.12, 0.25], 'triangle', 0.9);
 }
 
 /** 🔄 Raf taşıma — swoosh effect (mi-fa#-la) */
 export function playSoundTransfer() {
-    _playTone([330, 370, 440], [0.08, 0.08, 0.2], 'sine', 0.25);
+    _playTone([330, 370, 440], [0.1, 0.1, 0.25], 'sine', 0.85);
 }
 
 /** ❌ Hata — warning buzz */
 export function playSoundError() {
-    _playTone([200, 150], [0.15, 0.25], 'square', 0.15);
+    _playTone([200, 150], [0.18, 0.3], 'square', 0.6);
 }
 
 /** 🗑️ Toplu silme — deep tone */
 export function playSoundClear() {
-    _playTone([392, 330, 262], [0.1, 0.1, 0.3], 'triangle', 0.2);
+    _playTone([392, 330, 262], [0.12, 0.12, 0.35], 'triangle', 0.8);
 }
 
 /** 📳 Titreşim feedback (mobil) */
