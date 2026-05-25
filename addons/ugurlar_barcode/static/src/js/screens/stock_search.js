@@ -2,7 +2,7 @@
 
 import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
-import { playSoundPutaway, playSoundError, vibrate, vibrateError, speak } from "../sound_utils";
+import { vibrate, vibrateError, speak } from "../sound_utils";
 
 export class StockSearch extends Component {
     static template = xml`
@@ -399,18 +399,16 @@ export class StockSearch extends Component {
             const result = await BarcodeService.productSearch(query, searchType);
             if (result.error) {
                 this.state.error = result.error;
-                playSoundError();
                 vibrateError();
                 speak('Ürün bulunamadı');
             } else {
                 this.state.result = result;
-                playSoundPutaway();
                 vibrate();
                 speak('Ürüne ait bilgiler');
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-            playSoundError();
+            speak('Bağlantı hatası');
         }
         this.state.loading = false;
         // Arama sonrası input temizle + refocus

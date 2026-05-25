@@ -104,9 +104,9 @@ export function speak(text, opts = {}) {
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'tr-TR';
-    utterance.rate = opts.rate ?? 1.1;
+    utterance.rate = opts.rate ?? 1.0;
     utterance.pitch = opts.pitch ?? 1.0;
-    utterance.volume = opts.volume ?? 1.0;
+    utterance.volume = opts.volume ?? 1.0;  // MAX ses
 
     // Türkçe ses varsa onu seç
     const voices = speechSynthesis.getVoices();
