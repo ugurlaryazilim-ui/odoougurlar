@@ -242,20 +242,27 @@ export class PackingScreen extends Component {
 
         this.routeInputRef = useRef('routeInput');
         this.scanInputRef = useRef('scanInput');
+        this._lastFocusedView = null;
 
         onMounted(() => {
             this.loadBatchList();
-            this._autoFocus();
+            this._autoFocus(true);
         });
 
-        onPatched(() => this._autoFocus());
+        onPatched(() => {
+            // Sadece view değiştiğinde focus at (yazı yazarken değil)
+            if (this._lastFocusedView !== this.state.view) {
+                this._autoFocus(true);
+            }
+        });
 
         onWillUnmount(() => {
             if (this._unsub) this._unsub();
         });
     }
 
-    _autoFocus() {
+    _autoFocus(force = false) {
+        this._lastFocusedView = this.state.view;
         // Önce ana pencereye focus ver (popup'tan dönüş için şart)
         window.focus();
         // DOM hazır olduktan sonra input'a focus at
@@ -263,10 +270,8 @@ export class PackingScreen extends Component {
             window.focus();
             if (this.state.view === 'search' && this.routeInputRef.el) {
                 this.routeInputRef.el.focus();
-                this.routeInputRef.el.select();
             } else if (this.state.view === 'detail' && this.scanInputRef.el) {
                 this.scanInputRef.el.focus();
-                this.scanInputRef.el.select();
             }
         }, 150);
     }
