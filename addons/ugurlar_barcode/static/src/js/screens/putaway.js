@@ -335,6 +335,7 @@ export class PutawayScreen extends Component {
             const result = await BarcodeService.shelfControl(this.state.shelfBarcode.trim());
             if (result.error) {
                 this.state.error = result.error;
+                speak('putaway_shelf_not_found');
             } else {
                 this.state.shelfInfo = {
                     ...result.location,
@@ -342,11 +343,13 @@ export class PutawayScreen extends Component {
                 };
                 this.state.shelfProducts = result.products || [];
                 this.state.step = 2;
+                speak('putaway_shelf_found');
                 // Ürün inputuna focus
                 this._focusCurrentInput();
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
+            speak('putaway_error');
         }
         this.state.loading = false;
     }

@@ -176,13 +176,14 @@ export class PickingScreen extends Component {
         this.state.error = null;
         try {
             const res = await BarcodeService.pickingValidate(this.state.picking.id);
-            if (res.error) { this.state.error = res.error; }
+            if (res.error) { this.state.error = res.error; speak('picking_error'); }
             else {
                 this.state.scanMsg = res.message;
                 this.state.scanOk = true;
+                speak('picking_success');
                 setTimeout(() => { this.state.view = 'list'; this.loadList(); }, 1500);
             }
-        } catch (e) { this.state.error = 'Doğrulama hatası'; }
+        } catch (e) { this.state.error = 'Doğrulama hatası'; speak('picking_error'); }
         this.state.loading = false;
     }
 

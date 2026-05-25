@@ -210,7 +210,7 @@ export class BulkPutawayScreen extends Component {
 
         try {
             const res = await BarcodeService.shelfControl(bc);
-            if (res.error) { this.state.error = res.error; return; }
+            if (res.error) { this.state.error = res.error; speak('bulk_putaway_error'); return; }
 
             this.state.shelfInfo = res.location;
             this.state.shelfProducts = (res.products || []).filter(p => p.quantity > 0).map(p => ({
@@ -218,9 +218,11 @@ export class BulkPutawayScreen extends Component {
                 justAdded: false,
             }));
             // Raf seçildi → ürün inputuna focus
+            speak('bulk_putaway_shelf_found');
             this._focusCurrentInput();
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
+            speak('bulk_putaway_error');
         }
     }
 

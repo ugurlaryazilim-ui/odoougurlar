@@ -535,9 +535,11 @@ export class CountingScreen extends Component {
                 this.state.results = res.results || [];
                 this.state.resultMsg = `${res.location}: ${res.total_counted} ürün sayıldı`;
                 this.state.step = 3;
+                speak('count_saved');
             }
         } catch (e) {
             this.state.error = 'Kaydetme hatası: ' + (e.message || e);
+            speak('count_error');
         }
         this.state.loading = false;
     }

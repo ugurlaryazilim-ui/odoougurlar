@@ -552,6 +552,7 @@ export class BatchPickingScreen extends Component {
             if (res.error) {
                 this.state.error = res.error;
                 this.state.loading = false;
+                speak('batch_route_not_found');
                 return;
             }
             this.state.batch = res.batch;
@@ -559,11 +560,13 @@ export class BatchPickingScreen extends Component {
             this._updateProgress();
             this._goToNextItem();
             this.state.view = 'collect';
+            speak('batch_route_found');
             
             // Sub-state ekle (Geri tuşu listeye dönsün diye)
             history.pushState(Object.assign({}, history.state, { bpView: 'collect' }), '');
         } catch (e) {
             this.state.error = 'Rota yüklenirken hata oluştu';
+            speak('batch_error');
         }
         this.state.loading = false;
     }
@@ -662,6 +665,7 @@ export class BatchPickingScreen extends Component {
                 // Tüm rota tamamlandıysa
                 if (res.all_collected) {
                     this.state.scanMsg = '🎉 Tüm ürünler toplandı!';
+                    speak('batch_all_collected');
                     setTimeout(() => {
                         this.state.currentItem = null;
                     }, 1000);
@@ -797,6 +801,7 @@ export class BatchPickingScreen extends Component {
             } else {
                 this.state.summary = res;
                 this.state.view = 'summary';
+                speak('batch_complete');
                 
                 // Sub-state güncelle (Geri tuşu listeye dönsün diye)
                 history.replaceState(Object.assign({}, history.state, { bpView: 'summary' }), '');

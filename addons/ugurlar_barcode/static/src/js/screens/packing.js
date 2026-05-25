@@ -389,11 +389,14 @@ export class PackingScreen extends Component {
                 });
                 if (res.error) {
                     this.state.error = res.error;
+                    speak('packing_route_not_found');
                 } else {
                     this._setBatchDetail(res);
+                    speak('packing_route_found');
                 }
             } catch (e) {
                 this.state.error = 'Bağlantı hatası';
+                speak('packing_error');
             }
         } else {
             // Barkod → o ürünün olduğu açık rotaları filtrele
@@ -405,11 +408,13 @@ export class PackingScreen extends Component {
                 if (res.error) {
                     this.state.error = res.error;
                     this.state.batches = [];
+                    speak('packing_route_not_found');
                 } else {
                     const batches = res.batches || [];
                     if (batches.length === 0) {
                         this.state.error = '"' + name + '" barkodlu ürün açık rotalarda bulunamadı';
                         this.state.batches = [];
+                        speak('packing_route_not_found');
                     } else if (batches.length === 1) {
                         // Tek rota bulundu → doğrudan aç
                         this.state.loading = false;
@@ -439,11 +444,14 @@ export class PackingScreen extends Component {
             });
             if (res.error) {
                 this.state.error = res.error;
+                speak('packing_route_not_found');
             } else {
                 this._setBatchDetail(res);
+                speak('packing_route_found');
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası';
+            speak('packing_error');
         }
         this.state.loading = false;
     }
@@ -501,6 +509,7 @@ export class PackingScreen extends Component {
                 // Eğer sipariş tamamen eşleştiyse kargo etiketini otomatik yazdır
                 if (res.picking_completed && res.picking_id) {
                     this.state.scanMsg = res.picking_name + " siparişi eşleşti, etiket yazdırılıyor...";
+                    speak('packing_order_complete');
                     
                     // Alt ekrandaki Kargo Etiketleri listesine anında ekle
                     this.state.completed = true;
@@ -554,6 +563,7 @@ export class PackingScreen extends Component {
                 this.state.scanMsg = res.message;
                 this.state.scanOk = true;
                 this.state.completed = true;
+                speak('packing_complete');
 
                 // Etiket bilgilerini hazırla
                 const pickingInfos = [];
