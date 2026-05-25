@@ -67,3 +67,51 @@ export function vibrate(pattern = 150) {
 export function vibrateError() {
     if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
 }
+
+// ═══════════════════════════════════════════════════════
+// 🔊 TTS — Text-to-Speech (Sesli Mesaj)
+// Web Speech API ile Türkçe sesli geri bildirim
+// Kullanım: speak("Ürün bulundu");
+// ═══════════════════════════════════════════════════════
+
+let _ttsReady = false;
+
+// İlk kullanıcı etkileşiminde TTS'i ısıt
+function _warmUpTTS() {
+    if (_ttsReady) return;
+    _ttsReady = true;
+    // Boş utterance ile engine'i başlat (bazı tarayıcılarda gerekli)
+    const warmup = new SpeechSynthesisUtterance('');
+    warmup.volume = 0;
+    speechSynthesis.speak(warmup);
+}
+document.addEventListener('click', _warmUpTTS, { once: true });
+document.addEventListener('keydown', _warmUpTTS, { once: true });
+
+/**
+ * 🔊 Sesli mesaj oku (TTS)
+ * @param {string} text - Okunacak metin
+ * @param {object} [opts] - Seçenekler
+ * @param {number} [opts.rate=1.1] - Konuşma hızı (0.5-2.0)
+ * @param {number} [opts.pitch=1.0] - Ses tonu (0-2)
+ * @param {number} [opts.volume=1.0] - Ses seviyesi (0-1)
+ */
+export function speak(text, opts = {}) {
+    if (!text || typeof speechSynthesis === 'undefined') return;
+
+    // Önceki konuşmayı kes
+    speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'tr-TR';
+    utterance.rate = opts.rate ?? 1.1;
+    utterance.pitch = opts.pitch ?? 1.0;
+    utterance.volume = opts.volume ?? 1.0;
+
+    // Türkçe ses varsa onu seç
+    const voices = speechSynthesis.getVoices();
+    const trVoice = voices.find(v => v.lang.startsWith('tr'));
+    if (trVoice) utterance.voice = trVoice;
+
+    speechSynthesis.speak(utterance);
+}
