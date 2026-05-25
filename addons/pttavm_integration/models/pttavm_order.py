@@ -56,6 +56,7 @@ class PttavmOrderLine(models.Model):
     
     quantity = fields.Integer(string='Miktar')
     sale_price = fields.Float(string='Satış Fiyatı')
+    vat_rate = fields.Float(string='KDV Oranı')
     
     status = fields.Char(string='Sipariş Statüsü')
     

@@ -174,7 +174,10 @@ class PttavmOrderSync(models.Model):
 
         for item in products:
             qty = item.get('toplamIslemAdedi', 1)
-            price = item.get('kdvDahilToplamTutar', 0.0)
+            kdv_dahil = float(item.get('kdvDahilToplamTutar', 0.0))
+            indirim = float(item.get('indirimToplam', 0.0))
+            # Net fiyat = KDV dahil toplam - indirim toplam
+            price = kdv_dahil - indirim
             
             line_vals = {
                 'item_id': str(item.get('lineItemId', '')),
@@ -182,8 +185,8 @@ class PttavmOrderSync(models.Model):
                 'product_name': order_json.get('urunAdi') or item.get('urun'),
                 'product_code': item.get('variantBarkod') or item.get('urunBarkod') or order_json.get('urunKodu'),
                 'quantity': qty,
-                # if qty > 1 given price usually includes total price in PttAvm, need to make unit price
                 'sale_price': price / qty if qty else price,
+                'vat_rate': float(item.get('kdvOrani', 0)),
                 'status': item.get('siparisDurumu', ''),
                 'cargo_tracking': cargo_tracking,
                 'cargo_company': item.get('kargoKimden', ''),
@@ -312,18 +315,42 @@ class PttavmOrderSync(models.Model):
                     if p.default_code:
                         product_map[p.default_code] = p
 
+        # KDV dahil vergi cache
+        tax_cache = {}
+
         for line in p_order.line_ids:
             product = product_map.get(line.product_code)
             
             if not product:
                 _logger.warning("Pttavm Urun Bulunamadi: %s", line.product_code)
                 continue
-                
-            sale_vals['order_line'].append((0, 0, {
+
+            ol_vals = {
                 'product_id': product.id,
                 'product_uom_qty': line.quantity,
                 'price_unit': line.sale_price,
                 'pttavm_item_id': line.item_id,
-            }))
+            }
+
+            # KDV dahil vergi ata
+            vat_rate = line.vat_rate if hasattr(line, 'vat_rate') and line.vat_rate else 0
+            if vat_rate > 0:
+                if vat_rate not in tax_cache:
+                    tax = self.env['account.tax'].sudo().search([
+                        ('type_tax_use', '=', 'sale'),
+                        ('amount', '=', vat_rate),
+                        ('price_include', '=', True),
+                        ('company_id', '=', self.env.company.id),
+                    ], limit=1)
+                    tax_cache[vat_rate] = tax
+                include_tax = tax_cache[vat_rate]
+                if include_tax:
+                    ol_vals['tax_id'] = [(6, 0, [include_tax.id])]
+                else:
+                    # KDV dahil vergi bulunamadı — KDV'yi düşerek KDV hariç fiyat ata
+                    ol_vals['price_unit'] = line.sale_price / (1 + vat_rate / 100)
+                    _logger.warning("PttAVM: %%%d KDV dahil vergi bulunamadi, manuel donusum", int(vat_rate))
+
+            sale_vals['order_line'].append((0, 0, ol_vals))
             
         return self.env['sale.order'].create(sale_vals)
