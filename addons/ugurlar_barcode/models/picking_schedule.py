@@ -363,7 +363,7 @@ class PickingSchedule(models.Model):
         pickings = Picking.search(domain)
 
         # ─── OTOMATİK BATCH SORUNU: Odoo'nun auto_batch'i picking'lere
-        # otomatik tekli batch oluşturmuş olabilir. Bu tekli "Manuel" batch'leri
+        # otomatik tekli batch oluşturmuş olabilir. Bu tekli batch'leri
         # de yakala ve gruplanan batch'e taşı ───
         solo_batch_pickings = Picking.browse()
         solo_batches_to_delete = self.env['stock.picking.batch'].browse()
@@ -375,8 +375,12 @@ class PickingSchedule(models.Model):
         ])
         for p in auto_batched:
             batch = p.batch_id
-            # Manuel (cron dışı) batch ise yakala — tüm tekli auto_batch'ler dahil
-            if (batch.time_window and 'Manuel' in batch.time_window
+            # Auto-batch (time_window boş = Odoo oto-batch) VEYA
+            # Manuel batch (time_window "Manuel" içeren = bizim cron'un tekli batch'i)
+            # Gruplu rota batch'leri (time_window "08:30-11:00" gibi) dokunulmaz
+            is_auto_batch = not batch.time_window  # Odoo auto-batch → time_window boş
+            is_manuel_batch = batch.time_window and 'Manuel' in batch.time_window
+            if ((is_auto_batch or is_manuel_batch)
                     and batch.state in ('draft', 'in_progress')):
                 solo_batch_pickings |= p
                 solo_batches_to_delete |= batch
@@ -384,8 +388,11 @@ class PickingSchedule(models.Model):
         # Tekli batch picking'lerini ana listeye ekle
         if solo_batch_pickings:
             _logger.info(
-                "Toplama [%s] %s — %d tekli Manuel batch picking konsolide ediliyor",
-                self.name, window_label, len(solo_batch_pickings))
+                "Toplama [%s] %s — %d tekli/auto batch picking konsolide ediliyor "
+                "(auto: %d, manuel: %d)",
+                self.name, window_label, len(solo_batch_pickings),
+                len(solo_batch_pickings.filtered(lambda p: not p.batch_id.time_window)),
+                len(solo_batch_pickings.filtered(lambda p: p.batch_id.time_window and 'Manuel' in p.batch_id.time_window)))
             # Batch bağlantısını geçici olarak kaldır
             solo_batch_pickings.write({'batch_id': False})
             pickings |= solo_batch_pickings
