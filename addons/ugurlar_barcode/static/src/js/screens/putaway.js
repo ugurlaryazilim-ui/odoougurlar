@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, xml, onWillUnmount } from "@odoo/owl";
+import { Component, useState, xml, onWillUnmount, onMounted } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 
 export class PutawayScreen extends Component {
@@ -36,7 +36,8 @@ export class PutawayScreen extends Component {
                                placeholder="Raf barkodunu okutun..."
                                t-on-keydown="onShelfKey"
                                t-att-value="state.shelfBarcode"
-                               t-on-input="(ev) => this.onShelfInput(ev)"/>
+                               t-on-input="(ev) => this.onShelfInput(ev)"
+                               t-ref="shelfInput"/>
                         <button class="ub-scan-icon-btn" t-on-click="() => this.cameraScan('shelf')" title="Kamera ile tara">
                             <i class="fa fa-barcode"></i>
                         </button>
@@ -79,7 +80,8 @@ export class PutawayScreen extends Component {
                                    placeholder="Ürün barkodunu okutun..."
                                    t-on-keydown="onProductKey"
                                    t-att-value="state.productBarcode"
-                                   t-on-input="(ev) => this.onProductInput(ev)"/>
+                                   t-on-input="(ev) => this.onProductInput(ev)"
+                                   t-ref="productInput"/>
                             <button class="ub-scan-icon-btn" t-on-click="() => this.cameraScan('product')" title="Kamera ile tara">
                                 <i class="fa fa-barcode"></i>
                             </button>
@@ -92,12 +94,22 @@ export class PutawayScreen extends Component {
                                t-on-input="onQuantityInput"/>
                     </div>
                     <button t-attf-class="btn ub-search-submit-btn {{state.mode === 'putaway' ? 'ub-action-putaway' : 'ub-action-remove'}}"
-                            t-on-click="onExecute">
+                            t-on-click="onExecute" t-att-disabled="state.loading || state.processing">
                         <i t-attf-class="fa {{state.mode === 'putaway' ? 'fa-arrow-down' : 'fa-arrow-up'}}"></i>
                         <t t-if="state.mode === 'putaway'"> Rafla</t>
                         <t t-else=""> Raftan Kaldır</t>
                     </button>
                 </div>
+
+                <!-- Bildirim alanı (başarı/hata) -->
+                <t t-if="state.toast">
+                    <div t-attf-class="ub-toast-card {{state.toast.type === 'success' ? 'ub-toast-success' : 'ub-toast-error'}}"
+                         style="margin: 0.5rem 0; padding: 0.75rem 1rem; border-radius: 8px; display: flex; align-items: center; gap: 0.5rem; animation: fadeInUp 0.3s ease;">
+                        <i t-attf-class="fa {{state.toast.type === 'success' ? 'fa-check-circle' : 'fa-exclamation-triangle'}}"
+                           style="font-size: 1.3rem;"></i>
+                        <span t-esc="state.toast.message" style="flex:1;"/>
+                    </div>
+                </t>
 
                 <!-- Raftaki ürünler tablosu -->
                 <t t-if="state.shelfProducts.length">
@@ -144,16 +156,6 @@ export class PutawayScreen extends Component {
                 <div class="ub-error-card"><i class="fa fa-exclamation-triangle"></i><p t-esc="state.error"/></div>
             </t>
 
-            <t t-if="state.success">
-                <div class="ub-success-card">
-                    <i class="fa fa-check-circle"></i>
-                    <p t-esc="state.success"/>
-                    <button class="btn btn-primary mt-2" t-on-click="resetProduct">
-                        <i class="fa fa-plus"></i> Yeni Ürün Okut
-                    </button>
-                </div>
-            </t>
-
             <!-- SON İŞLEMLER -->
             <div class="ub-variants-section" t-if="state.history.length" style="margin-top:0.5rem;">
                 <div class="ub-section-title-dark">
@@ -198,27 +200,60 @@ export class PutawayScreen extends Component {
             productBarcode: '',
             quantity: 1,
             loading: false,
+            processing: false,  // İşlem kilidi — çift tetiklenmeyi önler
             error: null,
             success: null,
+            toast: null,        // Anlık bildirim (3sn sonra kaybolur)
             history: [],
         });
+
+        // ─── Barkod okuyucu event listener ───
+        // SADECE scanner callback kullanılır.
+        // Input alanının kendi keydown/Enter'ı _detectScan ile AYRI çalışır.
+        // Çift tetiklenmeyi önlemek için _processing kilidi kullanılır.
         this._unsub = this.props.scanner.onScan(bc => this.onScanDetected(bc));
+
+        onMounted(() => {
+            // Adım 1'de raf inputuna focus
+            this._focusCurrentInput();
+        });
+
         onWillUnmount(() => {
             if (this._unsub) this._unsub();
+            if (this._toastTimer) clearTimeout(this._toastTimer);
         });
     }
 
+    _focusCurrentInput() {
+        setTimeout(() => {
+            const ref = this.state.step === 1 ? 'shelfInput' : 'productInput';
+            const el = this.__owl__.refs?.[ref];
+            if (el) el.focus();
+        }, 100);
+    }
+
     onQuantityInput(ev) {
-        this.state.quantity = Number.parseInt(ev.target.value, 10) || 1;
+        this.state.quantity = Math.max(1, Number.parseInt(ev.target.value, 10) || 1);
     }
 
     setMode(mode) {
         this.state.mode = mode;
         this.state.error = null;
         this.state.success = null;
+        this.state.toast = null;
     }
 
+    _showToast(type, message) {
+        this.state.toast = { type, message };
+        if (this._toastTimer) clearTimeout(this._toastTimer);
+        this._toastTimer = setTimeout(() => {
+            this.state.toast = null;
+        }, 4000);
+    }
+
+    // ─── BARKOD OKUYUCU CALLBACK ─────────────────
     onScanDetected(bc) {
+        if (this.state.processing) return; // Kilit varsa atla
         if (this.state.step === 1) {
             this.state.shelfBarcode = bc;
             this.onShelfConfirm();
@@ -231,7 +266,8 @@ export class PutawayScreen extends Component {
     // ─── ADIM 1: RAF TARA ─────────────────────────
     onShelfInput(ev) {
         this.state.shelfBarcode = ev.target.value;
-        this._detectScan(ev.target.value, 'shelf');
+        // _detectScan KALDIRILDI — scanner callback yeterli
+        // Manuel giriş için sadece Enter kullanılır
     }
 
     onShelfKey(ev) {
@@ -240,6 +276,7 @@ export class PutawayScreen extends Component {
 
     async onShelfConfirm() {
         if (!this.state.shelfBarcode.trim()) return;
+        if (this.state.loading) return;
         this.state.loading = true;
         this.state.error = null;
         try {
@@ -253,6 +290,8 @@ export class PutawayScreen extends Component {
                 };
                 this.state.shelfProducts = result.products || [];
                 this.state.step = 2;
+                // Ürün inputuna focus
+                this._focusCurrentInput();
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
@@ -268,41 +307,80 @@ export class PutawayScreen extends Component {
         this.state.productBarcode = '';
         this.state.error = null;
         this.state.success = null;
+        this.state.toast = null;
+        this._focusCurrentInput();
     }
 
     // ─── ADIM 2: ÜRÜN TARA + İŞLEM ───────────────
     onProductInput(ev) {
         this.state.productBarcode = ev.target.value;
-        this._detectScan(ev.target.value, 'product');
+        // _detectScan KALDIRILDI — scanner callback yeterli
+        // Manuel giriş için sadece Enter kullanılır
     }
 
     onProductKey(ev) {
-        if (ev.key === 'Enter') { ev.preventDefault(); this.onExecute(); }
+        if (ev.key === 'Enter') {
+            ev.preventDefault();
+            this.onExecute();
+        }
     }
 
     async onExecute() {
-        if (!this.state.productBarcode.trim()) return;
+        const barcode = this.state.productBarcode.trim();
+        if (!barcode) return;
+
+        // ─── ÇIFT TETİKLENME KİLİDİ ───
+        if (this.state.processing) {
+            return; // Zaten bir işlem devam ediyor, atla
+        }
+        this.state.processing = true;
         this.state.loading = true;
         this.state.error = null;
         this.state.success = null;
+        this.state.toast = null;
+
         try {
-            const fn = this.state.mode === 'putaway'
-                ? BarcodeService.putaway(this.state.productBarcode.trim(), this.state.shelfBarcode.trim(), this.state.quantity)
-                : BarcodeService.removeFromShelf(this.state.productBarcode.trim(), this.state.shelfBarcode.trim(), this.state.quantity);
-            const res = await fn;
+            const qty = this.state.quantity;
+            const shelf = this.state.shelfBarcode.trim();
+            const mode = this.state.mode;
+
+            const res = mode === 'putaway'
+                ? await BarcodeService.putaway(barcode, shelf, qty)
+                : await BarcodeService.removeFromShelf(barcode, shelf, qty);
+
             if (res.error) {
                 this.state.error = res.error;
+                this._showToast('error', res.error);
             } else {
-                this.state.success = res.message;
-                this.state.history.unshift({ type: this.state.mode, message: res.message, time: Date.now() });
+                const actionText = mode === 'putaway' ? '✅ Raflama başarılı' : '✅ Raftan kaldırıldı';
+                const msg = `${actionText}: ${res.message || barcode}`;
+                this.state.success = msg;
+                this._showToast('success', msg);
+                this.state.history.unshift({
+                    type: mode,
+                    message: res.message || barcode,
+                    time: Date.now(),
+                });
                 if (this.state.history.length > 10) this.state.history.pop();
+
                 // Raf bilgisini güncelle
                 this._refreshShelf();
+
+                // Barkod alanını temizle, yeni okutmaya hazır
+                this.state.productBarcode = '';
+                this.state.quantity = 1;
+                this._focusCurrentInput();
             }
         } catch (e) {
             this.state.error = 'Hata: ' + (e.message || e);
+            this._showToast('error', 'Hata: ' + (e.message || e));
         }
+
         this.state.loading = false;
+        // Kilidi kısa bir gecikme ile kaldır — scanner debounce
+        setTimeout(() => {
+            this.state.processing = false;
+        }, 600);
     }
 
     async _refreshShelf() {
@@ -320,25 +398,8 @@ export class PutawayScreen extends Component {
         this.state.quantity = 1;
         this.state.error = null;
         this.state.success = null;
-    }
-
-    // ─── AUTO-SCAN DETECTION ──────────────────────
-    _detectScan(val, target) {
-        const now = Date.now();
-        const key = '_rapid_' + target;
-        if (this[key + '_time'] && (now - this[key + '_time']) < 80) {
-            this[key + '_count'] = (this[key + '_count'] || 0) + 1;
-        } else {
-            this[key + '_count'] = 0;
-        }
-        this[key + '_time'] = now;
-        if (this[key + '_timer']) clearTimeout(this[key + '_timer']);
-        if (this[key + '_count'] >= 6 && val.trim().length >= 4) {
-            this[key + '_timer'] = setTimeout(() => {
-                if (target === 'shelf') this.onShelfConfirm();
-                else this.onExecute();
-            }, 300);
-        }
+        this.state.toast = null;
+        this._focusCurrentInput();
     }
 
     // ─── KAMERA TARAYICI ──────────────────────────

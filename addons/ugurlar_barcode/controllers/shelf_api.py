@@ -164,13 +164,19 @@ class ShelfApiController(BarcodeApiBase):
     # ─── RAFLAMA (ürün → raf) ─────────────────────────────
     @http.route('/ugurlar_barcode/api/putaway', type='json', auth='user')
     def putaway(self, product_barcode='', shelf_barcode='', quantity=1, **kw):
-        """Ürünü rafa yerleştir (concurrency-safe)."""
+        """Ürünü rafa yerleştir (concurrency-safe, debounce korumalı)."""
         if not product_barcode or not shelf_barcode:
             return {'error': 'Ürün ve raf barkodu gerekli'}
 
         product_barcode = product_barcode.strip()
         shelf_barcode = shelf_barcode.strip()
         quantity = float(quantity or 1)
+
+        # Duplicate request koruması (500ms)
+        if self._check_duplicate_request('putaway', product_barcode, shelf_barcode, quantity):
+            _logger.warning("Raflama: Duplicate istek atlandı — %s → %s (%s adet)",
+                            product_barcode, shelf_barcode, quantity)
+            return {'error': 'İşlem zaten yapılıyor, lütfen bekleyin'}
 
         product = self._find_product(product_barcode)
         if not product:
@@ -212,13 +218,19 @@ class ShelfApiController(BarcodeApiBase):
     # ─── RAFTAN KALDIRMA ──────────────────────────────────
     @http.route('/ugurlar_barcode/api/remove_from_shelf', type='json', auth='user')
     def remove_from_shelf(self, product_barcode='', shelf_barcode='', quantity=1, **kw):
-        """Ürünü raftan kaldır (concurrency-safe)."""
+        """Ürünü raftan kaldır (concurrency-safe, debounce korumalı)."""
         if not product_barcode or not shelf_barcode:
             return {'error': 'Ürün ve raf barkodu gerekli'}
 
         product_barcode = product_barcode.strip()
         shelf_barcode = shelf_barcode.strip()
         quantity = float(quantity or 1)
+
+        # Duplicate request koruması (500ms)
+        if self._check_duplicate_request('remove_from_shelf', product_barcode, shelf_barcode, quantity):
+            _logger.warning("Raftan Kaldırma: Duplicate istek atlandı — %s, %s (%s adet)",
+                            product_barcode, shelf_barcode, quantity)
+            return {'error': 'İşlem zaten yapılıyor, lütfen bekleyin'}
 
         product = self._find_product(product_barcode)
         if not product:
