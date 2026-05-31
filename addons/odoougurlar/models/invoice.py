@@ -99,3 +99,62 @@ class AccountMove(models.Model):
             self.write({'nebim_error': str(e)})
             return {'type': 'ir.actions.client', 'tag': 'display_notification',
                     'params': {'title': 'Hata', 'message': f'Nebim gönderim hatası: {str(e)}', 'type': 'danger'}}
+
+    def action_view_earchive_invoice(self):
+        """Nebim'den e-arşiv fatura URL'sini alıp yeni sekmede açar.
+        
+        usp_Invoice_EArchieveURL stored procedure'ü:
+            @DocumentNumber → InvoiceURL, EInvoiceNumber, InvoiceDate
+        """
+        self.ensure_one()
+
+        # 1. İlişkili satış siparişini bul
+        doc_number = ''
+        if self.invoice_origin:
+            sale_orders = self.env['sale.order'].sudo().search(
+                [('name', '=', self.invoice_origin.split(',')[0].strip())], limit=1
+            )
+            if sale_orders:
+                doc_number = sale_orders.client_order_ref or sale_orders.name
+
+        if not doc_number:
+            return {'type': 'ir.actions.client', 'tag': 'display_notification',
+                    'params': {'title': 'Hata',
+                               'message': 'Bu fatura için sipariş referansı (DocumentNumber) bulunamadı.',
+                               'type': 'warning'}}
+
+        # 2. Nebim SP çağır
+        try:
+            connector = self.env['odoougurlar.nebim.connector'].sudo()
+            params = [{'Name': 'DocumentNumber', 'Value': doc_number}]
+            result = connector.run_proc('usp_Invoice_EArchieveURL', params)
+
+            if not result or (isinstance(result, list) and len(result) == 0):
+                return {'type': 'ir.actions.client', 'tag': 'display_notification',
+                        'params': {'title': 'Bilgi',
+                                   'message': f'DocumentNumber "{doc_number}" için e-arşiv fatura bulunamadı.',
+                                   'type': 'warning'}}
+
+            # 3. URL'yi çıkar
+            row = result[0] if isinstance(result, list) else result
+            invoice_url = row.get('InvoiceURL', '') if isinstance(row, dict) else ''
+
+            if not invoice_url:
+                return {'type': 'ir.actions.client', 'tag': 'display_notification',
+                        'params': {'title': 'Bilgi',
+                                   'message': f'Fatura URL\'si henüz oluşmamış. (EInvoice: {row.get("EInvoiceNumber", "")})',
+                                   'type': 'warning'}}
+
+            # 4. Yeni sekmede aç
+            return {
+                'type': 'ir.actions.act_url',
+                'url': invoice_url,
+                'target': 'new',
+            }
+
+        except Exception as e:
+            _logger.error("E-Arşiv fatura URL hatası (DocumentNumber=%s): %s", doc_number, e)
+            return {'type': 'ir.actions.client', 'tag': 'display_notification',
+                    'params': {'title': 'Hata',
+                               'message': f'E-arşiv fatura sorgulanırken hata: {str(e)}',
+                               'type': 'danger'}}

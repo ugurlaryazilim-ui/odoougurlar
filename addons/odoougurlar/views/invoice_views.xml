@@ -12,6 +12,10 @@
                         class="btn-warning"
                         invisible="nebim_sent or move_type != 'out_invoice' or state != 'posted'"
                         confirm="Bu fatura Nebim'e tekrar gönderilsin mi?"/>
+                <button name="action_view_earchive_invoice" type="object"
+                        string="📄 Fatura Görüntüle"
+                        class="btn-info"
+                        invisible="not nebim_sent or move_type != 'out_invoice' or state != 'posted'"/>
             </xpath>
             <xpath expr="//sheet" position="inside">
                 <group string="Nebim Entegrasyon" name="nebim_info" invisible="move_type != 'out_invoice'">
