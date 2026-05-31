@@ -237,3 +237,22 @@
         max-width: 130px;
     }
 }
+
+/* ═══ RESPONSIVE — TABLO OVERFLOW ═══ */
+.ub-shelf-move-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 576px) {
+    .ub-shelf-move-preview-table {
+        font-size: 0.82rem;
+    }
+    .ub-shelf-move-preview-table thead th {
+        font-size: 0.75rem;
+        padding: 0.5rem 0.4rem;
+    }
+    .ub-shelf-move-preview-table tbody td {
+        padding: 0.5rem 0.4rem;
+    }
+}

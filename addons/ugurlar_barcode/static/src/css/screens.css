@@ -472,6 +472,32 @@
     .ub-variant-table tbody td { padding: 0.4rem 0.5rem; }
     .ub-stats-row { grid-template-columns: repeat(2, 1fr); }
     .ub-table-pagination { flex-direction: column; gap: 0.5rem; }
+    /* Kamera buton — touch-friendly */
+    .ub-camera-close-btn {
+        width: 44px;
+        height: 44px;
+        font-size: 1.5rem;
+    }
+    /* Sayım buton — touch-friendly */
+    .ub-count-ok-btn {
+        min-height: 40px;
+        padding: 0.5rem 0.8rem;
+        font-size: 0.9rem;
+    }
+    /* Raf istatistik — daralt */
+    .ub-shelf-summary {
+        gap: 1rem;
+    }
+    /* Operatör kart — mobil düzen */
+    .ub-operator-card {
+        flex-wrap: wrap;
+    }
+    .ub-count-input {
+        width: 60px;
+    }
+    .ub-filter-row {
+        flex-direction: column;
+    }
 }
 
 @media (min-width: 768px) {

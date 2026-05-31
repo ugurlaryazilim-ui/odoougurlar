@@ -373,3 +373,64 @@
     margin-bottom: 0.8rem;
     font-size: 0.9rem;
 }
+
+/* ═══ RESPONSIVE — MOBİL ═══ */
+@media (max-width: 576px) {
+    .ub-header {
+        padding: 1.2rem 1rem;
+    }
+    .ub-title {
+        font-size: 1.4rem;
+    }
+    .ub-subtitle {
+        font-size: 0.85rem;
+    }
+    .ub-screen-header {
+        padding: 0.6rem 0.8rem;
+    }
+    .ub-screen-title {
+        font-size: 1.05rem;
+    }
+    .ub-btn-back {
+        min-width: 44px;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.3rem;
+    }
+    .ub-menu-card {
+        padding: 1.2rem 0.6rem;
+    }
+    .ub-card-icon {
+        font-size: 1.6rem;
+        margin-bottom: 0.5rem;
+    }
+    .ub-card-title {
+        font-size: 0.85rem;
+    }
+    .ub-card-desc {
+        font-size: 0.72rem;
+    }
+    .ub-modal-content {
+        max-width: 95vw;
+        padding: 0.8rem;
+    }
+}
+
+/* Touch-friendly genel ayarlar */
+.ub-app {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+/* iOS Safe Area desteği */
+@supports (padding: env(safe-area-inset-bottom)) {
+    .ub-screen {
+        padding-bottom: calc(4rem + env(safe-area-inset-bottom));
+    }
+    .ub-screen-header {
+        padding-left: calc(1.5rem + env(safe-area-inset-left));
+        padding-right: calc(1.5rem + env(safe-area-inset-right));
+    }
+}

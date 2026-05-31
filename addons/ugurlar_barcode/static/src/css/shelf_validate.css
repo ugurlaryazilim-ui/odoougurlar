@@ -246,3 +246,25 @@
         font-size: 0.75rem;
     }
 }
+
+/* ═══ RESPONSIVE — TABLO OVERFLOW ═══ */
+.ub-validate-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 576px) {
+    .ub-validate-table {
+        font-size: 0.82rem;
+    }
+    .ub-validate-table thead th {
+        font-size: 0.75rem;
+        padding: 0.5rem 0.4rem;
+    }
+    .ub-validate-table tbody td {
+        padding: 0.5rem 0.4rem;
+    }
+    .ub-validate-stat-label {
+        font-size: 0.72rem;
+    }
+}

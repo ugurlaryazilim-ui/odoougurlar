@@ -156,3 +156,25 @@
         max-width: 120px;
     }
 }
+
+/* ═══ RESPONSIVE — TABLO OVERFLOW ═══ */
+.ub-bulk-putaway-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 576px) {
+    .ub-bulk-putaway-table {
+        font-size: 0.82rem;
+    }
+    .ub-bulk-putaway-table thead th {
+        font-size: 0.75rem;
+        padding: 0.5rem 0.4rem;
+    }
+    .ub-bulk-putaway-table tbody td {
+        padding: 0.5rem 0.4rem;
+    }
+    .ub-bulk-putaway-stat-label {
+        font-size: 0.72rem;
+    }
+}

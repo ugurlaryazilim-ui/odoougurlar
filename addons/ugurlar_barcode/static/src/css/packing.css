@@ -94,3 +94,20 @@
     50% { transform: scale(1.02); }
     100% { transform: scale(1); opacity: 1; }
 }
+
+/* ═══ RESPONSIVE — MOBİL ═══ */
+@media (max-width: 576px) {
+    .ub-packing-route-info {
+        font-size: 0.9rem;
+        padding: 0.6rem 0.8rem;
+    }
+    .ub-packing-progress-text {
+        font-size: 0.82rem;
+    }
+    .ub-packing-complete-btn {
+        min-height: 48px;
+        font-size: 1rem;
+        padding: 0.8rem 1.2rem;
+        width: 100%;
+    }
+}

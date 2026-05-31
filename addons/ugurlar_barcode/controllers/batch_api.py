@@ -216,27 +216,61 @@ class BatchApiController(BarcodeApiBase):
 
             result.append(item)
 
-        # Durum sayaçları (filtre dışı — tüm batch'ler için)
-        all_batches = request.env['stock.picking.batch'].sudo().search(
-            [('time_window', '!=', False)], limit=200,
-        )
-        state_counts = {'draft': 0, 'in_progress': 0, 'done': 0}
-        for ab in all_batches:
-            if ab.state in state_counts:
-                state_counts[ab.state] += 1
+        # Durum sayaçları — mevcut filtrelere (warehouse, tarih, arama) göre hesapla
+        # Böylece mağaza seçince badge'ler de güncellenir
+        count_domain_base = [
+            '|',
+            ('time_window', '!=', False),
+            ('name', 'like', 'T%'),
+        ]
+        if date_from:
+            try:
+                dt_from = datetime.strptime(date_from, '%Y-%m-%d')
+                count_domain_base.append(('schedule_time', '>=', dt_from))
+            except Exception:
+                pass
+        if date_to:
+            try:
+                dt_to = datetime.strptime(date_to, '%Y-%m-%d') + timedelta(days=1)
+                count_domain_base.append(('schedule_time', '<', dt_to))
+            except Exception:
+                pass
 
-        # Unique warehouse names for filter dropdown
+        # Filtreli batch'leri çek (sayaç + warehouse listesi için)
+        count_batches = request.env['stock.picking.batch'].sudo().search(
+            count_domain_base, limit=500,
+        )
+
+        # Warehouse ve arama filtresi uygula (Python tarafında)
+        state_counts = {'draft': 0, 'in_progress': 0, 'done': 0}
         warehouse_set = set()
-        for ab in all_batches:
+        for ab in count_batches:
+            # Warehouse adını çıkar
+            ab_wh = ''
             si = ab.source_info or ''
             if si:
-                wh = si.split(' - ')[0].strip()
-                if wh:
-                    warehouse_set.add(wh)
-            elif ab.picking_type_id and ab.picking_type_id.warehouse_id:
-                wh = ab.picking_type_id.warehouse_id.name or ''
-                if wh:
-                    warehouse_set.add(wh)
+                ab_wh = si.split(' - ')[0].strip()
+            if not ab_wh and ab.picking_type_id and ab.picking_type_id.warehouse_id:
+                ab_wh = ab.picking_type_id.warehouse_id.name or ''
+            if ab_wh:
+                warehouse_set.add(ab_wh)
+
+            # Warehouse filtresi uygula
+            if warehouse_filter and warehouse_filter.lower() not in ab_wh.lower():
+                continue
+
+            # Arama filtresi uygula
+            if search_text:
+                hay = (ab.name + ' ' + ab_wh).lower()
+                if search_text not in hay:
+                    continue
+
+            # Barkod filtresi uygula
+            if barcode_batch_ids is not None and ab.id not in barcode_batch_ids:
+                continue
+
+            if ab.state in state_counts:
+                state_counts[ab.state] += 1
 
         return {
             'batches': result,
@@ -748,10 +782,17 @@ class BatchApiController(BarcodeApiBase):
                 else:
                     not_done = [p.name for p in batch.picking_ids if p.state != 'done']
                     _logger.warning(
-                        "Batch %s: %d/%d picking done DEĞİL: %s",
+                        "Batch %s: %d/%d picking done DEĞİL: %s — yine de batch done yapılıyor",
                         batch.name, len(not_done), len(batch.picking_ids), not_done)
+                    # Bazı picking'ler done olmasa bile batch'i tamamla
+                    # (tamamlanan rotalar "Devam" sekmesinde kalmasın)
+                    batch.sudo().write({'state': 'done'})
         except Exception as e:
-            _logger.warning("Batch %s tamamlama hatası: %s", batch.name, e)
+            _logger.warning("Batch %s tamamlama hatası: %s — zorla done yapılıyor", batch.name, e)
+            try:
+                batch.sudo().write({'state': 'done'})
+            except Exception as e2:
+                _logger.error("Batch %s zorla done yapılamadı: %s", batch.name, e2)
 
         # ─── 4. Ürün chatter'larına transfer tamamlanma logu ───
         try:

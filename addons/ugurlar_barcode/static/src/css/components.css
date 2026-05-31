@@ -375,3 +375,43 @@
     background: #f8f9fa;
     border-top: 1px solid #dee2e6;
 }
+
+/* ═══ RESPONSIVE — MOBİL ═══ */
+@media (max-width: 576px) {
+    .ub-barcode-input-group {
+        flex-wrap: wrap;
+    }
+    .ub-barcode-input {
+        font-size: 1rem;
+        padding: 0.6rem 0.8rem;
+    }
+    .ub-scan-btn {
+        min-height: 44px;
+        font-size: 1rem;
+        padding: 0.7rem 1rem;
+    }
+    .ub-scan-icon-btn {
+        width: 48px;
+        min-height: 44px;
+    }
+    .ub-action-btn {
+        min-height: 44px;
+        font-size: 0.9rem;
+    }
+    .ub-barcode-cell {
+        font-size: 0.82rem;
+    }
+    .ub-variant-table {
+        font-size: 0.82rem;
+    }
+    .ub-variant-table thead th,
+    .ub-variant-table tbody td {
+        padding: 0.5rem 0.4rem;
+    }
+    .ub-field-label {
+        font-size: 0.82rem;
+    }
+    .ub-field-value {
+        font-size: 0.9rem;
+    }
+}

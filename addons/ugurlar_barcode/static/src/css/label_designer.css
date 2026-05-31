@@ -424,3 +424,72 @@
     }
 }
 
+/* ═══ RESPONSIVE — MOBİL ETİKET TASARIMCI ═══ */
+@media (max-width: 576px) {
+    .ub-designer-app {
+        height: auto;
+        min-height: 100vh;
+        overflow: auto;
+    }
+    .ub-designer-main-area {
+        flex-direction: column;
+        height: auto;
+    }
+    .ub-designer-left-panel {
+        width: 100%;
+        max-height: none;
+        border-right: none;
+        border-bottom: 1px solid #dee2e6;
+    }
+    .ub-designer-right-panel {
+        width: 100%;
+        max-height: none;
+        border-left: none;
+        border-top: 1px solid #dee2e6;
+    }
+    .ub-designer-canvas-area {
+        min-height: 300px;
+        overflow: auto;
+    }
+    .ub-tool-btn {
+        min-height: 44px;
+        padding: 0.7rem 0.85rem;
+        font-size: 0.82rem;
+    }
+    .ub-tool-group-label {
+        font-size: 0.75rem;
+    }
+    .ub-zoom-btn {
+        min-height: 44px;
+        min-width: 44px;
+        padding: 0.6rem;
+    }
+    .ub-prop-field label {
+        font-size: 0.75rem;
+    }
+    .ub-prop-field input,
+    .ub-prop-field select {
+        padding: 0.5rem;
+        font-size: 0.85rem;
+        min-height: 36px;
+    }
+    .ub-tpl-name {
+        min-width: 100px;
+    }
+    .ub-tpl-dim {
+        width: 50px;
+    }
+}
+
+@media (min-width: 577px) and (max-width: 900px) {
+    .ub-designer-left-panel {
+        width: 200px;
+    }
+    .ub-designer-right-panel {
+        width: 220px;
+    }
+    .ub-tool-btn {
+        min-height: 40px;
+        font-size: 0.78rem;
+    }
+}
