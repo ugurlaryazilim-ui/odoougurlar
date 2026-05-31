@@ -26,8 +26,8 @@
                     </group>
                     <group>
                         <field name="nebim_error" invisible="not nebim_error"/>
-                        <field name="nebim_response" widget="CopyClipboardChar"/>
-                        <field name="nebim_request" widget="CopyClipboardChar"/>
+                        <field name="nebim_response"/>
+                        <field name="nebim_request"/>
                     </group>
                 </group>
             </xpath>

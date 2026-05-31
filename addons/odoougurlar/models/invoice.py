@@ -145,15 +145,14 @@ class AccountMove(models.Model):
                                    'message': f'Fatura URL\'si henüz oluşmamış. (EInvoice: {row.get("EInvoiceNumber", "")})',
                                    'type': 'warning'}}
 
-            # 4. Modal viewer'da göster
-            einvoice_number = row.get('EInvoiceNumber', '') if isinstance(row, dict) else ''
+            # 4. Popup pencerede aç
             return {
                 'type': 'ir.actions.client',
                 'tag': 'earchive_viewer',
                 'name': 'E-Arşiv Fatura',
                 'params': {
                     'invoice_url': invoice_url,
-                    'einvoice_number': einvoice_number,
+                    'einvoice_number': row.get('EInvoiceNumber', '') if isinstance(row, dict) else '',
                 },
             }
 
