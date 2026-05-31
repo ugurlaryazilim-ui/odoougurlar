@@ -149,6 +149,24 @@
     margin: 0;
 }
 
+/* ─── Error ─── */
+.ea-error {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    color: #dc3545;
+}
+
+.ea-error p {
+    font-size: 1rem;
+    font-weight: 500;
+    margin: 0;
+    color: #666;
+}
+
 /* ─── Body / iframe ─── */
 .ea-body {
     flex: 1;

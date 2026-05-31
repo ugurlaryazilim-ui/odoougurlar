@@ -6,8 +6,8 @@ import { registry } from "@web/core/registry";
 /**
  * E-Arşiv Fatura Görüntüleyici
  *
- * Fatura PDF'ini modal overlay içinde iframe ile gösterir.
- * Yazdır butonu ile PDF'i popup pencerede açıp print dialog tetikler.
+ * Fatura PDF'ini modal overlay içinde doğrudan gösterir.
+ * Odoo proxy controller üzerinden PDF çekilir (cross-origin sorununu çözer).
  */
 class EArchiveViewer extends Component {
     static template = xml`
@@ -26,9 +26,6 @@ class EArchiveViewer extends Component {
                         <button class="ea-btn ea-btn-print" t-on-click="onPrint">
                             <i class="fa fa-print"/> Yazdır
                         </button>
-                        <button class="ea-btn ea-btn-download" t-on-click="onDownload">
-                            <i class="fa fa-download"/> İndir
-                        </button>
                         <button class="ea-btn ea-btn-close" t-on-click="onClose">
                             <i class="fa fa-times"/> Kapat
                         </button>
@@ -38,15 +35,25 @@ class EArchiveViewer extends Component {
                 <!-- Loading -->
                 <div class="ea-loading" t-if="state.loading">
                     <i class="fa fa-spinner fa-spin fa-3x"/>
-                    <p>Fatura yükleniyor...</p>
+                    <p>Fatura PDF yükleniyor...</p>
+                </div>
+
+                <!-- Error -->
+                <div class="ea-error" t-if="state.error">
+                    <i class="fa fa-exclamation-triangle fa-3x"/>
+                    <p><t t-esc="state.error"/></p>
+                    <button class="ea-btn ea-btn-print" t-on-click="onOpenExternal">
+                        <i class="fa fa-external-link"/> Harici Bağlantıda Aç
+                    </button>
                 </div>
 
                 <!-- PDF iframe -->
-                <div class="ea-body" t-att-class="{ 'ea-hidden': state.loading }">
+                <div class="ea-body" t-att-class="{ 'ea-hidden': state.loading || state.error }">
                     <iframe
-                        t-att-src="state.pdfUrl"
+                        t-att-src="state.proxyUrl"
                         class="ea-iframe"
                         t-on-load="onIframeLoad"
+                        t-ref="pdfFrame"
                         frameborder="0"
                         allowfullscreen="true"
                     />
@@ -61,20 +68,21 @@ class EArchiveViewer extends Component {
         const action = this.props.action || {};
         const params = action.params || {};
 
-        // E-arşiv portal URL'sinden PDF URL'sini türet
         const invoiceUrl = params.invoice_url || '';
-        let pdfUrl = invoiceUrl;
+        const einvoiceNumber = params.einvoice_number || '';
 
-        // Portal sayfasından doğrudan PDF viewer URL'sine dönüştür
-        // view-pdf-earchive.xhtml?webValidationKey=XXX → pdf/goruntule linkini doğrudan kullanamayız
-        // Bunun yerine portal URL'sini iframe'de gösteriyoruz
-        // Kullanıcı "PDF Görüntüle" butonuna tıklayacak
+        // Odoo proxy controller üzerinden PDF çek
+        // Bu sayede cross-origin ve cookie sorunları yaşanmaz
+        const proxyUrl = invoiceUrl
+            ? `/odoougurlar/earchive_pdf?url=${encodeURIComponent(invoiceUrl)}`
+            : '';
 
         this.state = useState({
             invoiceUrl: invoiceUrl,
-            pdfUrl: pdfUrl,
-            einvoiceNumber: params.einvoice_number || '',
+            proxyUrl: proxyUrl,
+            einvoiceNumber: einvoiceNumber,
             loading: true,
+            error: '',
         });
     }
 
@@ -83,47 +91,44 @@ class EArchiveViewer extends Component {
     }
 
     onPrint() {
-        // Cross-origin PDF olduğu için iframe.print() çalışmaz
-        // Yeni popup pencere açıp print dialog tetikliyoruz
-        const url = this.state.invoiceUrl;
-        const printWindow = window.open(url, '_blank',
-            'width=900,height=700,scrollbars=yes,resizable=yes,menubar=no,toolbar=no'
-        );
-
-        if (printWindow) {
-            // PDF yüklendikten sonra print dialog aç
-            printWindow.addEventListener('load', () => {
-                setTimeout(() => {
-                    try {
-                        printWindow.print();
-                    } catch (e) {
-                        // Cross-origin durumunda kullanıcı manuel yazdırsın
-                        console.warn('Print cross-origin engeli:', e);
-                    }
-                }, 1500);
-            });
-
-            // Print bittikten sonra pencereyi kapat
-            printWindow.addEventListener('afterprint', () => {
-                printWindow.close();
-            });
+        // Proxy URL same-origin olduğu için iframe.print() çalışır
+        const iframe = document.querySelector('.ea-iframe');
+        if (iframe) {
+            try {
+                iframe.contentWindow.focus();
+                iframe.contentWindow.print();
+            } catch (e) {
+                // Fallback: yeni pencerede aç ve yazdır
+                console.warn('iframe print hatası, popup açılıyor:', e);
+                const printWin = window.open(this.state.proxyUrl, '_blank',
+                    'width=900,height=700,scrollbars=yes,resizable=yes');
+                if (printWin) {
+                    printWin.addEventListener('load', () => {
+                        setTimeout(() => {
+                            try { printWin.print(); } catch (e2) { /* kullanıcı manuel yazdırsın */ }
+                        }, 1000);
+                    });
+                    printWin.addEventListener('afterprint', () => printWin.close());
+                }
+            }
         }
     }
 
-    onDownload() {
-        // PDF'i yeni sekmede aç (indirme için)
+    onOpenExternal() {
         window.open(this.state.invoiceUrl, '_blank');
     }
 
     onClose() {
-        // Odoo action manager ile geri dön
-        this.props.action?.onClose?.();
-        // Fallback: history back
-        window.history.back();
+        // Odoo breadcrumb'a geri dön
+        const actionService = this.env.services.action;
+        if (actionService) {
+            actionService.restore();
+        } else {
+            window.history.back();
+        }
     }
 
     onOverlayClick(ev) {
-        // Overlay'e tıklayınca kapat (modal dışına tıklama)
         if (ev.target.classList.contains('ea-overlay')) {
             this.onClose();
         }
