@@ -5,6 +5,13 @@
         <field name="model">sale.order</field>
         <field name="inherit_id" ref="sale.view_order_form"/>
         <field name="arch" type="xml">
+            <!-- Fatura Görüntüle butonu -->
+            <xpath expr="//header" position="inside">
+                <button name="action_view_earchive_invoice" type="object"
+                        string="📄 Fatura Görüntüle"
+                        class="btn-info"
+                        invisible="invoice_count == 0"/>
+            </xpath>
             <xpath expr="//notebook" position="inside">
                 <page string="Nebim Entegrasyonu" name="nebim_integration">
                     <group>
@@ -20,16 +27,16 @@
                                     confirm="Nebim sipariş ve fatura bayrakları sıfırlanacak. Nebim'deki eski siparişi sildiğinizden emin olun. Devam edilsin mi?"/>
                         </group>
                         <group>
-                            <field name="nebim_order_response" widget="CopyClipboardChar"/>
-                            <field name="nebim_order_request" widget="CopyClipboardChar"/>
+                            <field name="nebim_order_response"/>
+                            <field name="nebim_order_request"/>
                         </group>
                     </group>
                     <group string="Nebim Cari JSON">
                         <group>
-                            <field name="nebim_customer_request" widget="CopyClipboardChar"/>
+                            <field name="nebim_customer_request"/>
                         </group>
                         <group>
-                            <field name="nebim_customer_response" widget="CopyClipboardChar"/>
+                            <field name="nebim_customer_response"/>
                         </group>
                     </group>
                 </page>
