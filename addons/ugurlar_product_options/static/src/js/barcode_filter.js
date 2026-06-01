@@ -357,15 +357,10 @@ export class ProductBarcodeListController extends ListController {
                 { name: 'virtual_available', label: 'Öngörülen', type: 'float' },
             ];
 
-            // 3. fetch + blob ile XLSX indir
+            // 3. Kendi endpoint'imiz ile XLSX indir (wrap_text KAPALI)
             const exportPayload = JSON.stringify({
-                model: 'product.product',
-                fields: exportFields,
                 ids: ids,
-                domain: [],
-                groupby: [],
-                context: {},
-                import_compat: false,
+                fields: exportFields,
             });
 
             // CSRF token bul
@@ -382,7 +377,7 @@ export class ProductBarcodeListController extends ListController {
                 formData.append('csrf_token', csrfToken);
             }
 
-            const response = await fetch('/web/export/xlsx', {
+            const response = await fetch('/ugurlar/product/export', {
                 method: 'POST',
                 body: formData,
             });
