@@ -244,12 +244,37 @@ export class ProductBarcodeListController extends ListController {
     }
 
     _clearFilter(fieldName) {
+        // In-memory temizle
         delete this._bfFilterTexts[fieldName];
         delete this._bfFilterValues[fieldName];
-        this._bfSaveState('bfTexts', this._bfFilterTexts);
-        this._bfSaveState('bfValues', this._bfFilterValues);
+
+        // sessionStorage'ı tam temizle
+        const hasAnyFilter = Object.keys(this._bfFilterValues).length > 0;
+        if (hasAnyFilter) {
+            this._bfSaveState('bfTexts', this._bfFilterTexts);
+            this._bfSaveState('bfValues', this._bfFilterValues);
+        } else {
+            // Hiç filtre kalmadıysa tamamen sil
+            sessionStorage.removeItem('bf_bfTexts');
+            sessionStorage.removeItem('bf_bfValues');
+        }
+
         this._closeDropdown();
-        this._executeFilter();
+
+        if (hasAnyFilter) {
+            this._executeFilter();
+        } else {
+            // Filtresiz ana listeye dön
+            this.actionService.doAction({
+                type: "ir.actions.act_window",
+                res_model: "product.product",
+                name: "Ürün Varyantları",
+                views: [[false, "list"], [false, "form"]],
+                domain: [],
+                target: "current",
+            });
+            this.notification.add('Filtre temizlendi', { type: 'info' });
+        }
     }
 
     _executeFilter() {
@@ -278,6 +303,50 @@ export class ProductBarcodeListController extends ListController {
             const total = Object.values(this._bfFilterValues).reduce((s, v) => s + v.length, 0);
             this.notification.add(`${total} kayıt ile filtrelendi`, { type: "success" });
         }
+    }
+
+    // ═══════════════════════════════════════════════════
+    // Görünen sütunları oku (dinamik export)
+    // ═══════════════════════════════════════════════════
+
+    _getVisibleColumns() {
+        const columns = [];
+        const fields = this.model?.root?.fields || {};
+
+        // Many2many/one2many export'ta boş satır oluşturur — atla
+        const skipTypes = new Set(['many2many', 'one2many', 'many2one_reference']);
+
+        // DOM'dan görünen sütun başlıklarını oku
+        const ths = document.querySelectorAll('.o_list_view thead th[data-name]');
+
+        ths.forEach(th => {
+            const name = th.dataset.name;
+            if (!name) return;
+
+            const fieldDef = fields[name] || {};
+            const type = fieldDef.type || 'char';
+
+            // Boş satır oluşturan alanları atla
+            if (skipTypes.has(type)) return;
+
+            // Label'ı header'dan oku
+            const labelEl = th.querySelector('.text-truncate') || th.querySelector('span');
+            const label = labelEl?.textContent?.trim() || fieldDef.string || name;
+
+            columns.push({ name, label, type });
+        });
+
+        // Hiç sütun bulunamazsa fallback
+        if (columns.length === 0) {
+            return [
+                { name: 'default_code', label: 'İç Referans', type: 'char' },
+                { name: 'barcode', label: 'Barkod', type: 'char' },
+                { name: 'display_name', label: 'Ürün Adı', type: 'char' },
+                { name: 'list_price', label: 'Satış Fiyatı', type: 'monetary' },
+            ];
+        }
+
+        return columns;
     }
 
     // ═══════════════════════════════════════════════════
@@ -346,16 +415,8 @@ export class ProductBarcodeListController extends ListController {
                 { type: 'info' }
             );
 
-            // 2. Export alanları (many2many alanlar kullanılmaz — boş satır oluşturur)
-            const exportFields = [
-                { name: 'default_code', label: 'İç Referans', type: 'char' },
-                { name: 'barcode', label: 'Barkod', type: 'char' },
-                { name: 'display_name', label: 'Ürün Adı (Varyant)', type: 'char' },
-                { name: 'list_price', label: 'Satış Fiyatı', type: 'monetary' },
-                { name: 'standard_price', label: 'Maliyet', type: 'monetary' },
-                { name: 'qty_available', label: 'Stokta', type: 'float' },
-                { name: 'virtual_available', label: 'Öngörülen', type: 'float' },
-            ];
+            // 2. Listede görünen sütunları oku (dinamik)
+            const exportFields = this._getVisibleColumns();
 
             // 3. Kendi endpoint'imiz ile XLSX indir (wrap_text KAPALI)
             const exportPayload = JSON.stringify({
