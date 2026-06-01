@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!--
+        product.product list view'a js_class ekle.
+        Bu sayede özel OWL controller (barkod filtre butonu) aktif olur.
+    -->
+    <record id="view_product_product_list_barcode_filter" model="ir.ui.view">
+        <field name="name">product.product.list.barcode.filter</field>
+        <field name="model">product.product</field>
+        <field name="inherit_id" ref="product.product_product_tree_view"/>
+        <field name="arch" type="xml">
+            <xpath expr="//list" position="attributes">
+                <attribute name="js_class">product_barcode_list</attribute>
+            </xpath>
+        </field>
+    </record>
+</odoo>
