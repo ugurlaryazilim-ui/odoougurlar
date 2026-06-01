@@ -22,9 +22,10 @@ export class ProductBarcodeListController extends ListController {
         this.actionService = useService("action");
         this.notification = useService("notification");
 
-        this._bfFilterTexts = {};
-        this._bfFilterValues = {};
         this._bfActiveDropdown = null;
+        // sessionStorage'dan filtre state'ini yükle (doAction sonrası korunur)
+        this._bfFilterTexts = this._bfLoadState('bfTexts') || {};
+        this._bfFilterValues = this._bfLoadState('bfValues') || {};
         this._onDocClickBound = this._onDocClick.bind(this);
         this._observer = null;
 
@@ -139,6 +140,7 @@ export class ProductBarcodeListController extends ListController {
         const savedText = this._bfFilterTexts[fieldName] || '';
         const hasFilter = this._bfFilterValues[fieldName]?.length > 0;
         const count = this._bfFilterValues[fieldName]?.length || 0;
+        const hasAnyData = hasFilter || savedText.trim().length > 0;
 
         dropdown.innerHTML = `
             <div class="bf-dd-header">
@@ -152,7 +154,7 @@ export class ProductBarcodeListController extends ListController {
                 <button class="bf-dd-btn bf-dd-filter">
                     <i class="fa fa-filter"></i> Filtrele
                 </button>
-                <button class="bf-dd-btn bf-dd-clear" ${!hasFilter ? 'style="display:none"' : ''}>
+                <button class="bf-dd-btn bf-dd-clear" ${!hasAnyData ? 'style="display:none"' : ''}>
                     <i class="fa fa-eraser"></i> Temizle
                 </button>
             </div>
@@ -209,6 +211,7 @@ export class ProductBarcodeListController extends ListController {
             const textarea = dropdown.querySelector('.bf-dd-input');
             if (textarea) {
                 this._bfFilterTexts[this._bfActiveDropdown] = textarea.value;
+                this._bfSaveState('bfTexts', this._bfFilterTexts);
             }
         }
         this._bfActiveDropdown = null;
@@ -227,6 +230,8 @@ export class ProductBarcodeListController extends ListController {
 
         this._bfFilterTexts[fieldName] = text;
         this._bfFilterValues[fieldName] = values;
+        this._bfSaveState('bfTexts', this._bfFilterTexts);
+        this._bfSaveState('bfValues', this._bfFilterValues);
         this._closeDropdown();
         this._executeFilter();
     }
@@ -234,6 +239,8 @@ export class ProductBarcodeListController extends ListController {
     _clearFilter(fieldName) {
         delete this._bfFilterTexts[fieldName];
         delete this._bfFilterValues[fieldName];
+        this._bfSaveState('bfTexts', this._bfFilterTexts);
+        this._bfSaveState('bfValues', this._bfFilterValues);
         this._closeDropdown();
         this._executeFilter();
     }
@@ -263,6 +270,25 @@ export class ProductBarcodeListController extends ListController {
         if (hasFilter) {
             const total = Object.values(this._bfFilterValues).reduce((s, v) => s + v.length, 0);
             this.notification.add(`${total} kayıt ile filtrelendi`, { type: "success" });
+        }
+    }
+
+    // ═══════════════════════════════════════════════════
+    // sessionStorage — doAction sonrası state korunur
+    // ═══════════════════════════════════════════════════
+
+    _bfSaveState(key, data) {
+        try {
+            sessionStorage.setItem(`bf_${key}`, JSON.stringify(data));
+        } catch (e) { /* quota aşımı vb. */ }
+    }
+
+    _bfLoadState(key) {
+        try {
+            const raw = sessionStorage.getItem(`bf_${key}`);
+            return raw ? JSON.parse(raw) : null;
+        } catch (e) {
+            return null;
         }
     }
 }
