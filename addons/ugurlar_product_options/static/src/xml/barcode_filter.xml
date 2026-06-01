@@ -2,12 +2,21 @@
 <templates xml:space="preserve">
 
     <!--
-        Product list view — Sütun bazlı filtre desteği.
-        Sadece js_class binding yapar, ikon enjeksiyonu JS tarafında yapılır.
-        Büyük popup butonu kaldırıldı.
+        ProductFilterListRenderer — web.ListRenderer'dan inherit.
+        t-inherit-mode="primary" → sadece bu renderer kullanır.
+        Sort ikonunun hemen yanına filtre ikonu ekler.
     -->
-    <t t-name="ugurlar_product_options.ProductBarcodeListView" t-inherit="web.ListView" owl="1">
-        <!-- Boş inherit — controller binding için gerekli -->
+    <t t-name="ugurlar_product_options.ProductFilterListRenderer"
+       t-inherit="web.ListRenderer" t-inherit-mode="primary" owl="1">
+
+        <xpath expr="//i[contains(@class, 'o_list_sortable_icon')]" position="after">
+            <i t-if="column and column.name and (column.name === 'barcode' or column.name === 'default_code')"
+               class="fa fa-filter bf-icon"
+               t-att-data-bf-field="column.name"
+               t-att-title="column.name === 'barcode' ? 'Barkod Filtre' : 'İç Referans Filtre'"
+               t-on-click.stop.prevent="onBfFilterClick"/>
+        </xpath>
+
     </t>
 
 </templates>

@@ -1,52 +1,52 @@
 /* ═══════════════════════════════════════════════════════
    Sütun Bazlı Filtre — Uğurlar Ürün Seçenekleri
-   Odoo'nun opacity-trigger-hover sisteminden bağımsız
+   OWL Template ile enjekte edilen filtre ikonu
    ═══════════════════════════════════════════════════════ */
 
-/*
- * SORUN: Odoo <th class="opacity-trigger-hover"> hover'da
- * opacity-0 çocukları görünür yapıyor ama aynı zamanda
- * non-opacity-0 elementleri de etkileyebilir.
- *
- * ÇÖZÜM: bf-icon'a opacity: 1 !important zorlaması ile
- * Odoo'nun tüm opacity kurallarını override et.
- */
+/* ─── Filtre İkonu ─── */
+/* Template seviyesinde eklenen ikon — Odoo'nun opacity
+   trigger sisteminden bağımsız çünkü opacity class'ı yok. */
 
-/* ─── Filtre İkonu — HER DURUMDA görünür ─── */
-i.bf-icon.fa.fa-filter {
+i.bf-icon {
     cursor: pointer !important;
     font-size: 14px !important;
-    color: #9c9c9c !important;
-    margin-left: 6px !important;
+    color: #888 !important;
     opacity: 1 !important;
     visibility: visible !important;
     display: inline-block !important;
-    vertical-align: middle !important;
+    margin-left: 5px !important;
     padding: 2px 3px !important;
-    transition: color 0.15s !important;
-    position: relative !important;
-    z-index: 2 !important;
+    vertical-align: middle !important;
     flex-shrink: 0 !important;
+    transition: color 0.15s ease !important;
+    z-index: 2 !important;
+    position: relative !important;
 }
 
-/* Hover state */
-i.bf-icon.fa.fa-filter:hover {
+/* Hover — mor */
+i.bf-icon:hover {
     color: #714B67 !important;
 }
 
-/* Hover durumunda da ASLA kaybolmasın */
-.opacity-trigger-hover:hover i.bf-icon.fa.fa-filter,
-th:hover i.bf-icon.fa.fa-filter,
-th:focus i.bf-icon.fa.fa-filter,
-th:active i.bf-icon.fa.fa-filter,
-.o_column_sortable:hover i.bf-icon.fa.fa-filter {
+/* Odoo'nun opacity-trigger-hover hover durumunda da görünür kal */
+.opacity-trigger-hover:hover i.bf-icon,
+th:hover i.bf-icon,
+th:focus i.bf-icon,
+.o_column_sortable:hover i.bf-icon {
     opacity: 1 !important;
     visibility: visible !important;
     display: inline-block !important;
+    color: #888 !important;
 }
 
-/* Aktif filtre — mor renk + arka plan */
-i.bf-icon.bf-icon-active {
+.opacity-trigger-hover:hover i.bf-icon:hover,
+th:hover i.bf-icon:hover {
+    color: #714B67 !important;
+}
+
+/* Aktif filtre — mor arka plan */
+i.bf-icon.bf-icon-active,
+.opacity-trigger-hover:hover i.bf-icon.bf-icon-active {
     color: #714B67 !important;
     background: rgba(113, 75, 103, 0.15) !important;
     border-radius: 3px !important;
@@ -69,7 +69,7 @@ i.bf-icon.bf-icon-active {
     to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ─── Header ─── */
+/* Header */
 .bf-dd-header {
     display: flex;
     align-items: center;
@@ -97,7 +97,7 @@ i.bf-icon.bf-icon-active {
     font-weight: 700;
 }
 
-/* ─── Textarea ─── */
+/* Textarea */
 .bf-dd-input {
     width: 100%;
     border: none;
@@ -121,7 +121,7 @@ i.bf-icon.bf-icon-active {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
-/* ─── Actions ─── */
+/* Actions */
 .bf-dd-actions {
     display: flex;
     gap: 4px;
