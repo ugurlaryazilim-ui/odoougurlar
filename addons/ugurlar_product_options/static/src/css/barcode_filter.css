@@ -1,42 +1,30 @@
 /* ═══════════════════════════════════════════════════════
    Sütun Bazlı Filtre — Uğurlar Ürün Seçenekleri
-   Barkod / İç Referans sütun başlığı ikonları + dropdown
+   Sort ikonunun yanında, aynı hover davranışı
    ═══════════════════════════════════════════════════════ */
 
-/* ─── Filtre İkonu (sütun başlığında) ─── */
+/* ─── Filtre İkonu — sort ikonuyla yan yana ─── */
 .bf-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    margin-left: 4px;
-    border-radius: 4px;
     cursor: pointer;
-    color: #aaa;
     font-size: 11px;
-    transition: all 0.12s;
+    color: #999;
+    margin-left: 3px;
+    transition: color 0.12s, opacity 0.12s;
     vertical-align: middle;
-    position: relative;
-    top: -1px;
 }
 
 .bf-icon:hover {
-    background: rgba(113, 75, 103, 0.12);
-    color: #714B67;
+    color: #714B67 !important;
 }
 
+/* Aktif filtre — her zaman görünür, mor */
 .bf-icon-active {
-    color: #fff !important;
-    background: #714B67 !important;
-    border-radius: 4px;
+    color: #714B67 !important;
+    opacity: 1 !important;
+    text-shadow: 0 0 4px rgba(113, 75, 103, 0.3);
 }
 
-.bf-icon-active:hover {
-    background: #5d3d55 !important;
-}
-
-/* ─── Dropdown (sütun altında) ─── */
+/* ─── Dropdown ─── */
 .bf-dropdown {
     background: #fff;
     border-radius: 10px;
@@ -49,17 +37,11 @@
 }
 
 @keyframes bf-dd-open {
-    from {
-        opacity: 0;
-        transform: translateY(-4px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ─── Dropdown Header ─── */
+/* ─── Header ─── */
 .bf-dd-header {
     display: flex;
     align-items: center;
@@ -77,10 +59,7 @@
     gap: 5px;
 }
 
-.bf-dd-label i {
-    font-size: 10px;
-    opacity: 0.85;
-}
+.bf-dd-label i { font-size: 10px; opacity: 0.85; }
 
 .bf-dd-badge {
     background: rgba(255, 255, 255, 0.25);
@@ -106,9 +85,7 @@
     box-sizing: border-box;
 }
 
-.bf-dd-input:focus {
-    background: #fdfbfc;
-}
+.bf-dd-input:focus { background: #fdfbfc; }
 
 .bf-dd-input::placeholder {
     color: #bbb;
@@ -129,7 +106,7 @@
     align-items: center;
     justify-content: center;
     gap: 4px;
-    padding: 5px 12px;
+    padding: 6px 12px;
     border: none;
     border-radius: 6px;
     font-size: 0.78rem;
@@ -138,13 +115,8 @@
     transition: all 0.12s;
 }
 
-.bf-dd-btn:hover {
-    transform: translateY(-1px);
-}
-
-.bf-dd-btn:active {
-    transform: translateY(0);
-}
+.bf-dd-btn:hover { transform: translateY(-1px); }
+.bf-dd-btn:active { transform: translateY(0); }
 
 .bf-dd-filter {
     background: #714B67;
@@ -152,29 +124,18 @@
     flex: 1;
 }
 
-.bf-dd-filter:hover {
-    background: #5d3d55;
-}
+.bf-dd-filter:hover { background: #5d3d55; }
 
 .bf-dd-clear {
     background: #f0f0f0;
-    color: #999;
-    width: 30px;
-    padding: 5px;
+    color: #666;
+    flex: 1;
 }
 
-.bf-dd-clear:hover {
-    background: #fee;
-    color: #e44;
-}
+.bf-dd-clear:hover { background: #fee2e2; color: #dc3545; }
 
 /* ─── Responsive ─── */
 @media (max-width: 576px) {
-    .bf-dropdown {
-        width: 220px;
-    }
-
-    .bf-dd-input {
-        font-size: 0.8rem;
-    }
+    .bf-dropdown { width: 220px; }
+    .bf-dd-input { font-size: 0.8rem; }
 }

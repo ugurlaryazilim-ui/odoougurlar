@@ -9,12 +9,11 @@ import { onMounted, onPatched, useState } from "@odoo/owl";
 /**
  * Ürün Varyantları — Sütun Bazlı Barkod/Referans Filtre
  *
- * Barkod ve İç Referans sütun başlıklarına küçük filtre ikonu ekler.
- * Tıklanınca sütunun altında küçük yapıştırma alanı açılır.
- * Yapıştırma/Enter ile otomatik filtreler.
+ * Sort ikonunun yanına filtre ikonu ekler (aynı hover davranışı).
+ * Tıklayınca küçük dropdown açılır. Yapıştır → filtrele.
+ * Textarea içeriği korunur. Temizle butonu filtre + içeriği sıfırlar.
  */
 
-// Filtre eklenecek sütunlar
 const FILTERABLE_FIELDS = ['barcode', 'default_code'];
 
 export class ProductBarcodeListController extends ListController {
@@ -23,133 +22,138 @@ export class ProductBarcodeListController extends ListController {
         this.actionService = useService("action");
         this.notification = useService("notification");
 
-        this.filterState = useState({
-            activeField: null,     // Şu an açık dropdown'ın alanı
-            filters: {},           // { barcode: ['123','456'], default_code: ['X-1'] }
-        });
+        // Filtre state — alan bazlı textarea içeriklerini sakla
+        this._filterTexts = {};    // { barcode: "123\n456", default_code: "X-1" }
+        this._filterValues = {};   // { barcode: ['123','456'] }
+        this._activeDropdown = null;
+        this._onDocClickBound = this._onDocClick.bind(this);
 
-        // DOM'a filtre ikonlarını enjekte et
         onMounted(() => this._injectFilterIcons());
         onPatched(() => this._injectFilterIcons());
     }
 
     // ═══════════════════════════════════════════════════
-    // DOM Enjeksiyonu — Sütun başlıklarına filtre ikonu
+    // DOM Enjeksiyonu — Sort ikonunun yanına filtre ikonu
     // ═══════════════════════════════════════════════════
 
     _injectFilterIcons() {
         const el = this.rootRef?.el || document.querySelector('.o_list_view');
         if (!el) return;
 
-        // Tüm th header'larını bul
         const headers = el.querySelectorAll('thead th[data-name]');
 
         headers.forEach(th => {
             const fieldName = th.dataset.name;
             if (!FILTERABLE_FIELDS.includes(fieldName)) return;
-
-            // Zaten ikon varsa ekleme
             if (th.querySelector('.bf-icon')) return;
 
-            // Filtre ikonu oluştur
-            const icon = document.createElement('span');
-            icon.className = 'bf-icon';
-            icon.title = fieldName === 'barcode' ? 'Barkod Filtre' : 'İç Referans Filtre';
-            icon.innerHTML = '<i class="fa fa-filter"></i>';
+            // Sort ikonunu bul
+            const sortIcon = th.querySelector('.o_list_sortable_icon');
 
-            // Aktif filtre varsa rengi değiştir
-            if (this.filterState.filters[fieldName]?.length > 0) {
+            // Filtre ikonu oluştur — sort ikonuyla aynı class yapısı
+            const icon = document.createElement('i');
+            icon.className = 'bf-icon fa fa-filter opacity-0 opacity-100-hover';
+            icon.title = fieldName === 'barcode' ? 'Barkod Filtre' : 'İç Referans Filtre';
+
+            // Aktif filtre varsa her zaman görünür yap
+            if (this._filterValues[fieldName]?.length > 0) {
+                icon.classList.remove('opacity-0', 'opacity-100-hover');
                 icon.classList.add('bf-icon-active');
-                icon.title += ` (${this.filterState.filters[fieldName].length} filtre)`;
             }
 
-            // Tıklama olayı
             icon.addEventListener('click', (e) => {
-                e.stopPropagation(); // Sort tetiklemesin
+                e.stopPropagation();
+                e.preventDefault();
                 this._toggleDropdown(fieldName, th);
             });
 
-            // Sütun başlığının içine ekle (sort ikonunun yanına)
-            const headerContent = th.querySelector('.o_column_sortable') || th;
-            headerContent.style.position = 'relative';
-            headerContent.appendChild(icon);
+            // Sort ikonunun yanına ekle
+            if (sortIcon) {
+                sortIcon.parentNode.insertBefore(icon, sortIcon.nextSibling);
+            } else {
+                th.appendChild(icon);
+            }
+
+            // th hover'da filtre ikonunu da göster (sort ile aynı)
+            th.addEventListener('mouseenter', () => {
+                if (!icon.classList.contains('bf-icon-active')) {
+                    icon.classList.remove('opacity-0');
+                }
+            });
+            th.addEventListener('mouseleave', () => {
+                if (!icon.classList.contains('bf-icon-active') && this._activeDropdown !== fieldName) {
+                    icon.classList.add('opacity-0');
+                }
+            });
         });
     }
 
     // ═══════════════════════════════════════════════════
-    // Dropdown — Yapıştırma alanı
+    // Dropdown
     // ═══════════════════════════════════════════════════
 
     _toggleDropdown(fieldName, thElement) {
-        // Aynı alan açıksa kapat
-        if (this.filterState.activeField === fieldName) {
+        if (this._activeDropdown === fieldName) {
             this._closeDropdown();
             return;
         }
-
-        // Önce açık olanı kapat
         this._closeDropdown();
+        this._activeDropdown = fieldName;
 
-        this.filterState.activeField = fieldName;
-
-        // Dropdown oluştur
         const dropdown = document.createElement('div');
         dropdown.className = 'bf-dropdown';
         dropdown.id = `bf-dropdown-${fieldName}`;
 
         const label = fieldName === 'barcode' ? 'Barkod' : 'İç Referans';
-        const activeFilter = this.filterState.filters[fieldName];
-        const hasFilter = activeFilter && activeFilter.length > 0;
+        const savedText = this._filterTexts[fieldName] || '';
+        const hasFilter = this._filterValues[fieldName]?.length > 0;
+        const count = this._filterValues[fieldName]?.length || 0;
 
         dropdown.innerHTML = `
             <div class="bf-dd-header">
                 <span class="bf-dd-label"><i class="fa fa-filter"></i> ${label} Filtre</span>
-                ${hasFilter ? `<span class="bf-dd-badge">${activeFilter.length}</span>` : ''}
+                ${hasFilter ? `<span class="bf-dd-badge">${count}</span>` : ''}
             </div>
-            <textarea class="bf-dd-input" 
+            <textarea class="bf-dd-input"
                       placeholder="Yapıştırın...\nHer satıra bir ${label.toLowerCase()}"
-                      rows="5" spellcheck="false" autocomplete="off">${hasFilter ? activeFilter.join('\n') : ''}</textarea>
+                      rows="6" spellcheck="false" autocomplete="off">${savedText}</textarea>
             <div class="bf-dd-actions">
-                <button class="bf-dd-btn bf-dd-filter" ${!hasFilter ? '' : ''}>
+                <button class="bf-dd-btn bf-dd-filter">
                     <i class="fa fa-filter"></i> Filtrele
                 </button>
                 <button class="bf-dd-btn bf-dd-clear" ${!hasFilter ? 'style="display:none"' : ''}>
-                    <i class="fa fa-times"></i>
+                    <i class="fa fa-eraser"></i> Temizle
                 </button>
             </div>
         `;
 
-        // Dropdown'ı pozisyonla — sütun başlığının altına
+        // Pozisyonla
         const thRect = thElement.getBoundingClientRect();
-        const listView = document.querySelector('.o_list_view') || document.body;
-        const listRect = listView.getBoundingClientRect();
-
         dropdown.style.position = 'fixed';
-        dropdown.style.top = `${thRect.bottom + 4}px`;
+        dropdown.style.top = `${thRect.bottom + 2}px`;
         dropdown.style.left = `${Math.max(thRect.left, 8)}px`;
         dropdown.style.zIndex = '99999';
 
         document.body.appendChild(dropdown);
 
-        // Textarea'ya focus
         const textarea = dropdown.querySelector('.bf-dd-input');
         textarea.focus();
-        if (hasFilter) {
-            textarea.select();
-        }
 
-        // Paste event — yapıştırınca otomatik filtrele
+        // Kursor sona
+        textarea.selectionStart = textarea.selectionEnd = textarea.value.length;
+
+        // Paste → otomatik filtrele
         textarea.addEventListener('paste', () => {
             setTimeout(() => {
-                this._applyFilterFromTextarea(fieldName, textarea);
+                this._applyFilter(fieldName, textarea);
             }, 100);
         });
 
-        // Enter ile filtrele (Shift+Enter yeni satır)
+        // Enter → filtrele (Shift+Enter yeni satır)
         textarea.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                this._applyFilterFromTextarea(fieldName, textarea);
+                this._applyFilter(fieldName, textarea);
             }
             if (e.key === 'Escape') {
                 this._closeDropdown();
@@ -158,97 +162,99 @@ export class ProductBarcodeListController extends ListController {
 
         // Filtrele butonu
         dropdown.querySelector('.bf-dd-filter').addEventListener('click', () => {
-            this._applyFilterFromTextarea(fieldName, textarea);
+            this._applyFilter(fieldName, textarea);
         });
 
         // Temizle butonu
         dropdown.querySelector('.bf-dd-clear').addEventListener('click', () => {
-            this._clearFieldFilter(fieldName);
+            this._clearFilter(fieldName);
         });
 
-        // Dışarı tıklayınca kapat
+        // Dışarı tıkla → kapat
         setTimeout(() => {
-            document.addEventListener('click', this._onDocClick = (e) => {
-                if (!dropdown.contains(e.target) && !e.target.closest('.bf-icon')) {
-                    this._closeDropdown();
-                }
-            });
+            document.addEventListener('click', this._onDocClickBound);
         }, 50);
     }
 
-    _closeDropdown() {
-        this.filterState.activeField = null;
-        const existing = document.querySelectorAll('.bf-dropdown');
-        existing.forEach(el => el.remove());
-        if (this._onDocClick) {
-            document.removeEventListener('click', this._onDocClick);
-            this._onDocClick = null;
+    _onDocClick(e) {
+        const dropdown = document.querySelector('.bf-dropdown');
+        if (dropdown && !dropdown.contains(e.target) && !e.target.closest('.bf-icon')) {
+            this._closeDropdown();
         }
+    }
+
+    _closeDropdown() {
+        // Kapanmadan önce textarea içeriğini kaydet
+        const dropdown = document.querySelector('.bf-dropdown');
+        if (dropdown && this._activeDropdown) {
+            const textarea = dropdown.querySelector('.bf-dd-input');
+            if (textarea) {
+                this._filterTexts[this._activeDropdown] = textarea.value;
+            }
+        }
+
+        this._activeDropdown = null;
+        document.querySelectorAll('.bf-dropdown').forEach(el => el.remove());
+        document.removeEventListener('click', this._onDocClickBound);
     }
 
     // ═══════════════════════════════════════════════════
     // Filtreleme
     // ═══════════════════════════════════════════════════
 
-    _applyFilterFromTextarea(fieldName, textarea) {
-        const value = textarea.value;
-        const values = value.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    _applyFilter(fieldName, textarea) {
+        const text = textarea.value;
+        const values = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
         if (values.length === 0) return;
 
-        // Filtre state güncelle
-        this.filterState.filters[fieldName] = values;
+        // State kaydet — textarea içeriği korunsun
+        this._filterTexts[fieldName] = text;
+        this._filterValues[fieldName] = values;
+
         this._closeDropdown();
-
-        // Domain oluştur — tüm aktif filtreleri birleştir
-        const domain = this._buildDomain();
-        const label = fieldName === 'barcode' ? 'barkod' : 'iç referans';
-
-        this.actionService.doAction({
-            type: "ir.actions.act_window",
-            res_model: "product.product",
-            name: `Filtre: ${values.length} ${label}`,
-            views: [[false, "list"], [false, "form"]],
-            domain: domain,
-            target: "current",
-        });
-
-        this.notification.add(
-            `${values.length} ${label} ile filtrelendi`,
-            { type: "success" }
-        );
+        this._executeFilter();
     }
 
-    _clearFieldFilter(fieldName) {
-        delete this.filterState.filters[fieldName];
+    _clearFilter(fieldName) {
+        delete this._filterTexts[fieldName];
+        delete this._filterValues[fieldName];
+
         this._closeDropdown();
-
-        const domain = this._buildDomain();
-
-        this.actionService.doAction({
-            type: "ir.actions.act_window",
-            res_model: "product.product",
-            name: "Ürün Varyantları",
-            views: [[false, "list"], [false, "form"]],
-            domain: domain,
-            target: "current",
-        });
+        this._executeFilter();
     }
 
-    _buildDomain() {
+    _executeFilter() {
         const domain = [];
-        for (const [field, values] of Object.entries(this.filterState.filters)) {
+        for (const [field, values] of Object.entries(this._filterValues)) {
             if (values && values.length > 0) {
                 domain.push([field, "in", values]);
             }
         }
-        return domain;
+
+        const hasFilter = domain.length > 0;
+        const label = hasFilter
+            ? `Filtre: ${Object.entries(this._filterValues).map(([f, v]) => `${v.length} ${f === 'barcode' ? 'barkod' : 'referans'}`).join(' + ')}`
+            : 'Ürün Varyantları';
+
+        this.actionService.doAction({
+            type: "ir.actions.act_window",
+            res_model: "product.product",
+            name: label,
+            views: [[false, "list"], [false, "form"]],
+            domain: domain,
+            target: "current",
+        });
+
+        if (hasFilter) {
+            const total = Object.values(this._filterValues).reduce((s, v) => s + v.length, 0);
+            this.notification.add(`${total} kayıt ile filtrelendi`, { type: "success" });
+        }
     }
 }
 
 ProductBarcodeListController.template = "ugurlar_product_options.ProductBarcodeListView";
 
-// Custom view olarak kaydet
 registry.category("views").add("product_barcode_list", {
     ...listView,
     Controller: ProductBarcodeListController,
