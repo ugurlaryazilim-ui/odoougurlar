@@ -50,14 +50,13 @@ export class ProductBarcodeListController extends ListController {
             // Sort ikonunu bul
             const sortIcon = th.querySelector('.o_list_sortable_icon');
 
-            // Filtre ikonu oluştur — sort ikonuyla aynı class yapısı
+            // Filtre ikonu oluştur — her zaman görünür
             const icon = document.createElement('i');
-            icon.className = 'bf-icon fa fa-filter opacity-0 opacity-100-hover';
+            icon.className = 'bf-icon fa fa-filter';
             icon.title = fieldName === 'barcode' ? 'Barkod Filtre' : 'İç Referans Filtre';
 
-            // Aktif filtre varsa her zaman görünür yap
+            // Aktif filtre varsa belirgin yap
             if (this._filterValues[fieldName]?.length > 0) {
-                icon.classList.remove('opacity-0', 'opacity-100-hover');
                 icon.classList.add('bf-icon-active');
             }
 
@@ -73,18 +72,6 @@ export class ProductBarcodeListController extends ListController {
             } else {
                 th.appendChild(icon);
             }
-
-            // th hover'da filtre ikonunu da göster (sort ile aynı)
-            th.addEventListener('mouseenter', () => {
-                if (!icon.classList.contains('bf-icon-active')) {
-                    icon.classList.remove('opacity-0');
-                }
-            });
-            th.addEventListener('mouseleave', () => {
-                if (!icon.classList.contains('bf-icon-active') && this._activeDropdown !== fieldName) {
-                    icon.classList.add('opacity-0');
-                }
-            });
         });
     }
 

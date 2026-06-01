@@ -6,26 +6,25 @@
 /* ─── Filtre İkonu — sort ikonu ile aynı boyutta ─── */
 .bf-icon {
     cursor: pointer;
-    font-size: 13px !important;
-    color: #9c9c9c;
-    margin-left: 4px;
-    transition: color 0.12s, opacity 0.15s;
+    font-size: 15px !important;
+    color: #9c9c9c !important;
+    margin-left: 6px !important;
+    opacity: 1 !important;
     vertical-align: middle;
-    padding: 2px;
+    padding: 2px 3px;
+    transition: color 0.12s;
 }
 
 .bf-icon:hover {
     color: #714B67 !important;
-    opacity: 1 !important;
 }
 
 /* Aktif filtre — her zaman görünür, mor arka planlı */
 .bf-icon-active {
     color: #714B67 !important;
     opacity: 1 !important;
-    background: rgba(113, 75, 103, 0.12);
+    background: rgba(113, 75, 103, 0.15);
     border-radius: 3px;
-    padding: 2px 3px;
 }
 
 /* ─── Dropdown ─── */
