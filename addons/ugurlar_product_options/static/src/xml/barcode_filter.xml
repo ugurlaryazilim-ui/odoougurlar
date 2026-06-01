@@ -2,21 +2,15 @@
 <templates xml:space="preserve">
 
     <!--
-        web.ListRenderer template extension.
-        Sort ikonunun hemen yanına filtre ikonu ekler.
-        t-if sayesinde sadece barcode ve default_code sütunlarında görünür.
+        Product list view controller template.
+        web.ListView'u genişletir — sadece js_class binding için.
+        Filtre ikonları JS tarafında DOM enjeksiyonu ile eklenir.
     -->
-    <t t-name="ugurlar_product_options.ListRendererExtension"
-       t-inherit="web.ListRenderer" t-inherit-mode="extension" owl="1">
-
-        <xpath expr="//i[contains(@class, 'o_list_sortable_icon')]" position="after">
-            <i t-if="column and column.name and (column.name === 'barcode' or column.name === 'default_code')"
-               class="fa fa-filter bf-icon"
-               t-att-data-bf-field="column.name"
-               t-att-title="column.name === 'barcode' ? 'Barkod Filtre' : 'İç Referans Filtre'"
-               t-on-click.stop.prevent="onBfFilterClick"/>
+    <t t-name="ugurlar_product_options.ProductBarcodeListView"
+       t-inherit="web.ListView" t-inherit-mode="extension" owl="1">
+        <xpath expr="." position="attributes">
+            <!-- Marker - template registered -->
         </xpath>
-
     </t>
 
 </templates>
