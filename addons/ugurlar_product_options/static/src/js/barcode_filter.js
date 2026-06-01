@@ -32,6 +32,7 @@ export class ProductBarcodeListController extends ListController {
         onMounted(() => {
             this._injectFilterIcons();
             this._startObserver();
+            this._checkAutoSelect();
         });
         onPatched(() => this._injectFilterIcons());
         onWillUnmount(() => this._stopObserver());
@@ -154,6 +155,9 @@ export class ProductBarcodeListController extends ListController {
                 <button class="bf-dd-btn bf-dd-filter">
                     <i class="fa fa-filter"></i> Filtrele
                 </button>
+                <button class="bf-dd-btn bf-dd-select">
+                    <i class="fa fa-check-square-o"></i> Filtrele & Seç
+                </button>
                 <button class="bf-dd-btn bf-dd-clear" ${!hasAnyData ? 'style="display:none"' : ''}>
                     <i class="fa fa-eraser"></i> Temizle
                 </button>
@@ -188,6 +192,9 @@ export class ProductBarcodeListController extends ListController {
 
         dropdown.querySelector('.bf-dd-filter').addEventListener('click', () => {
             this._applyFilter(fieldName, textarea);
+        });
+        dropdown.querySelector('.bf-dd-select').addEventListener('click', () => {
+            this._applyFilterAndSelect(fieldName, textarea);
         });
         dropdown.querySelector('.bf-dd-clear').addEventListener('click', () => {
             this._clearFilter(fieldName);
@@ -290,6 +297,57 @@ export class ProductBarcodeListController extends ListController {
         } catch (e) {
             return null;
         }
+    }
+
+    // ═══════════════════════════════════════════════════
+    // Filtrele & Tümünü Seç
+    // ═══════════════════════════════════════════════════
+
+    _applyFilterAndSelect(fieldName, textarea) {
+        const text = textarea.value;
+        const values = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        if (values.length === 0) return;
+
+        this._bfFilterTexts[fieldName] = text;
+        this._bfFilterValues[fieldName] = values;
+        this._bfSaveState('bfTexts', this._bfFilterTexts);
+        this._bfSaveState('bfValues', this._bfFilterValues);
+
+        // doAction sonrası otomatik seçim yapılması için flag
+        sessionStorage.setItem('bf_autoSelect', 'true');
+
+        this._closeDropdown();
+        this._executeFilter();
+    }
+
+    _checkAutoSelect() {
+        const shouldSelect = sessionStorage.getItem('bf_autoSelect');
+        if (shouldSelect === 'true') {
+            sessionStorage.removeItem('bf_autoSelect');
+            // Liste render edildikten sonra çalıştır
+            setTimeout(() => this._autoSelectAll(), 800);
+        }
+    }
+
+    _autoSelectAll() {
+        // 1. Üst checkbox'a tıkla — sayfadaki tüm kayıtları seç
+        const headerCheckbox = document.querySelector(
+            '.o_list_view thead .o_list_record_selector input[type="checkbox"]'
+        );
+        if (headerCheckbox && !headerCheckbox.checked) {
+            headerCheckbox.click();
+        }
+
+        // 2. "Tümünü Seç" banner linkine tıkla — tüm domain'i seç
+        setTimeout(() => {
+            const selectDomainBtn = document.querySelector(
+                '.o_list_selection_box .o_list_select_domain'
+            );
+            if (selectDomainBtn) {
+                selectDomainBtn.click();
+                this.notification.add('Tüm filtrelenen kayıtlar seçildi', { type: 'success' });
+            }
+        }, 500);
     }
 }
 

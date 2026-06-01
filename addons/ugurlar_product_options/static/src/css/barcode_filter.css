@@ -124,6 +124,7 @@ i.bf-icon.bf-icon-active,
 /* Actions */
 .bf-dd-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 4px;
     padding: 6px 8px;
     background: #fafafa;
@@ -134,10 +135,10 @@ i.bf-icon.bf-icon-active,
     align-items: center;
     justify-content: center;
     gap: 4px;
-    padding: 6px 12px;
+    padding: 6px 10px;
     border: none;
     border-radius: 6px;
-    font-size: 0.78rem;
+    font-size: 0.75rem;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.12s;
@@ -154,10 +155,18 @@ i.bf-icon.bf-icon-active,
 
 .bf-dd-filter:hover { background: #5d3d55; }
 
+.bf-dd-select {
+    background: #2196F3;
+    color: #fff;
+    flex: 1;
+}
+
+.bf-dd-select:hover { background: #1976D2; }
+
 .bf-dd-clear {
     background: #f0f0f0;
     color: #666;
-    flex: 1;
+    width: 100%;
 }
 
 .bf-dd-clear:hover { background: #fee2e2; color: #dc3545; }
