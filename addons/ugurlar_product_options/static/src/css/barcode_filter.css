@@ -155,13 +155,13 @@ i.bf-icon.bf-icon-active,
 
 .bf-dd-filter:hover { background: #5d3d55; }
 
-.bf-dd-select {
-    background: #2196F3;
+.bf-dd-export {
+    background: #217346;
     color: #fff;
     flex: 1;
 }
 
-.bf-dd-select:hover { background: #1976D2; }
+.bf-dd-export:hover { background: #1a5c38; }
 
 .bf-dd-clear {
     background: #f0f0f0;

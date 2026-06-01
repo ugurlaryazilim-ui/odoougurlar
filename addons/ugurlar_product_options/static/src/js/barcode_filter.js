@@ -4,6 +4,7 @@ import { ListController } from "@web/views/list/list_controller";
 import { listView } from "@web/views/list/list_view";
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
+import { download } from "@web/core/network/download";
 import { onMounted, onPatched, onWillUnmount } from "@odoo/owl";
 
 /**
@@ -32,7 +33,6 @@ export class ProductBarcodeListController extends ListController {
         onMounted(() => {
             this._injectFilterIcons();
             this._startObserver();
-            this._checkAutoSelect();
         });
         onPatched(() => this._injectFilterIcons());
         onWillUnmount(() => this._stopObserver());
@@ -155,8 +155,8 @@ export class ProductBarcodeListController extends ListController {
                 <button class="bf-dd-btn bf-dd-filter">
                     <i class="fa fa-filter"></i> Filtrele
                 </button>
-                <button class="bf-dd-btn bf-dd-select">
-                    <i class="fa fa-check-square-o"></i> Filtrele & Seç
+                <button class="bf-dd-btn bf-dd-export">
+                    <i class="fa fa-file-excel-o"></i> Dışa Aktar
                 </button>
                 <button class="bf-dd-btn bf-dd-clear" ${!hasAnyData ? 'style="display:none"' : ''}>
                     <i class="fa fa-eraser"></i> Temizle
@@ -193,8 +193,8 @@ export class ProductBarcodeListController extends ListController {
         dropdown.querySelector('.bf-dd-filter').addEventListener('click', () => {
             this._applyFilter(fieldName, textarea);
         });
-        dropdown.querySelector('.bf-dd-select').addEventListener('click', () => {
-            this._applyFilterAndSelect(fieldName, textarea);
+        dropdown.querySelector('.bf-dd-export').addEventListener('click', () => {
+            this._applyFilterAndExport(fieldName, textarea);
         });
         dropdown.querySelector('.bf-dd-clear').addEventListener('click', () => {
             this._clearFilter(fieldName);
@@ -300,109 +300,76 @@ export class ProductBarcodeListController extends ListController {
     }
 
     // ═══════════════════════════════════════════════════
-    // Filtrele & Tümünü Seç
+    // Filtrele & Dışa Aktar (doğrudan XLSX indirme)
     // ═══════════════════════════════════════════════════
 
-    _applyFilterAndSelect(fieldName, textarea) {
+    async _applyFilterAndExport(fieldName, textarea) {
         const text = textarea.value;
         const values = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-        if (values.length === 0) return;
+        if (values.length === 0) {
+            this.notification.add('Lütfen en az bir değer girin', { type: 'warning' });
+            return;
+        }
 
+        // State'i kaydet
         this._bfFilterTexts[fieldName] = text;
         this._bfFilterValues[fieldName] = values;
         this._bfSaveState('bfTexts', this._bfFilterTexts);
         this._bfSaveState('bfValues', this._bfFilterValues);
 
-        // doAction sonrası otomatik seçim flag'i
-        sessionStorage.setItem('bf_autoSelect', 'true');
-
         this._closeDropdown();
-        this._executeFilter();
-    }
 
-    _checkAutoSelect() {
-        const shouldSelect = sessionStorage.getItem('bf_autoSelect');
-        if (shouldSelect === 'true') {
-            sessionStorage.removeItem('bf_autoSelect');
-            // Veri yüklenene kadar dene (max 5 saniye)
-            this._waitForDataAndSelect(0);
-        }
-    }
-
-    _waitForDataAndSelect(attempt) {
-        if (attempt > 10) {
-            // Timeout — DOM fallback
-            this._autoSelectDOM();
-            return;
-        }
-
-        const list = this.model?.root;
-        if (list && list.records && list.records.length > 0) {
-            this._autoSelectAPI(list);
-        } else {
-            // Veri henüz yüklenmedi, tekrar dene
-            setTimeout(() => this._waitForDataAndSelect(attempt + 1), 500);
-        }
-    }
-
-    /**
-     * Odoo 19 native API ile tüm kayıtları seç
-     * this.model.root → DynamicRecordList
-     */
-    _autoSelectAPI(list) {
-        try {
-            // 1. Sayfadaki kayıtları seç
-            if (typeof list.toggleSelection === 'function') {
-                list.toggleSelection();
-            } else {
-                // Fallback: tek tek seç
-                for (const record of list.records) {
-                    if (typeof record.toggleSelection === 'function' && !record.selected) {
-                        record.toggleSelection(true);
-                    }
-                }
+        // Domain oluştur (tüm aktif filtreler)
+        const domain = [];
+        // Mevcut filtre değerlerini kullan
+        for (const [field, vals] of Object.entries(this._bfFilterValues)) {
+            if (vals && vals.length > 0) {
+                domain.push([field, "in", vals]);
             }
+        }
 
-            // 2. Tüm domain'i seç (sayfa dışındaki kayıtlar dahil)
-            setTimeout(() => {
-                if (typeof list.selectDomain === 'function') {
-                    list.selectDomain(true);
-                    this.notification.add(
-                        'Tüm filtrelenen kayıtlar seçildi',
-                        { type: 'success' }
-                    );
-                } else {
-                    // selectDomain yoksa DOM fallback
-                    this._autoSelectDOM();
-                }
-            }, 300);
+        // Export edilecek alanlar
+        const exportFields = [
+            { name: 'default_code', label: 'İç Referans' },
+            { name: 'barcode', label: 'Barkod' },
+            { name: 'name', label: 'Adı' },
+            { name: 'product_template_variant_value_ids', label: 'Varyant Değerleri' },
+            { name: 'list_price', label: 'Satış Fiyatı' },
+            { name: 'standard_price', label: 'Maliyet' },
+            { name: 'qty_available', label: 'Stokta' },
+            { name: 'virtual_available', label: 'Öngörülen' },
+        ];
+
+        this.notification.add(
+            `${values.length} ${fieldName === 'barcode' ? 'barkod' : 'referans'} ile dışa aktarılıyor...`,
+            { type: 'info' }
+        );
+
+        try {
+            await download({
+                url: '/web/export/xlsx',
+                data: {
+                    data: JSON.stringify({
+                        model: 'product.product',
+                        fields: exportFields,
+                        ids: false,
+                        domain: domain,
+                        groupby: [],
+                        context: { active_model: 'product.product' },
+                        import_compat: false,
+                    }),
+                },
+            });
+
+            this.notification.add('Excel dosyası indirildi!', { type: 'success' });
 
         } catch (e) {
-            console.warn('[BarcodeFilter] API select failed, DOM fallback:', e);
-            this._autoSelectDOM();
-        }
-    }
-
-    /**
-     * DOM fallback — API çalışmazsa checkbox tıkla
-     */
-    _autoSelectDOM() {
-        const headerCheckbox = document.querySelector(
-            '.o_list_view thead .o_list_record_selector input[type="checkbox"]'
-        );
-        if (headerCheckbox && !headerCheckbox.checked) {
-            headerCheckbox.click();
-        }
-
-        setTimeout(() => {
-            const selectDomainBtn = document.querySelector(
-                '.o_list_selection_box .o_list_select_domain'
+            console.error('[BarcodeFilter] Export error:', e);
+            this.notification.add(
+                'Dışa aktarma hatası. Lütfen tekrar deneyin.',
+                { type: 'danger' }
             );
-            if (selectDomainBtn) {
-                selectDomainBtn.click();
-                this.notification.add('Tüm filtrelenen kayıtlar seçildi', { type: 'success' });
-            }
-        }, 600);
+        }
     }
 }
 
