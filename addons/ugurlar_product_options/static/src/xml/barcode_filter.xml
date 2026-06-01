@@ -2,12 +2,12 @@
 <templates xml:space="preserve">
 
     <!--
-        ProductFilterListRenderer — web.ListRenderer'dan inherit.
-        t-inherit-mode="primary" → sadece bu renderer kullanır.
+        web.ListRenderer template extension.
         Sort ikonunun hemen yanına filtre ikonu ekler.
+        t-if sayesinde sadece barcode ve default_code sütunlarında görünür.
     -->
-    <t t-name="ugurlar_product_options.ProductFilterListRenderer"
-       t-inherit="web.ListRenderer" t-inherit-mode="primary" owl="1">
+    <t t-name="ugurlar_product_options.ListRendererExtension"
+       t-inherit="web.ListRenderer" t-inherit-mode="extension" owl="1">
 
         <xpath expr="//i[contains(@class, 'o_list_sortable_icon')]" position="after">
             <i t-if="column and column.name and (column.name === 'barcode' or column.name === 'default_code')"
