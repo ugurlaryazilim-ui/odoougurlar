@@ -343,14 +343,14 @@ export class ProductBarcodeListController extends ListController {
 
             // 2. Export alanları
             const exportFields = [
-                { name: 'default_code', label: 'İç Referans' },
-                { name: 'barcode', label: 'Barkod' },
-                { name: 'name', label: 'Adı' },
-                { name: 'product_template_variant_value_ids', label: 'Varyant Değerleri' },
-                { name: 'list_price', label: 'Satış Fiyatı' },
-                { name: 'standard_price', label: 'Maliyet' },
-                { name: 'qty_available', label: 'Stokta' },
-                { name: 'virtual_available', label: 'Öngörülen' },
+                { name: 'default_code', label: 'İç Referans', type: 'char' },
+                { name: 'barcode', label: 'Barkod', type: 'char' },
+                { name: 'name', label: 'Adı', type: 'char' },
+                { name: 'product_template_variant_value_ids', label: 'Varyant Değerleri', type: 'many2many' },
+                { name: 'list_price', label: 'Satış Fiyatı', type: 'monetary' },
+                { name: 'standard_price', label: 'Maliyet', type: 'monetary' },
+                { name: 'qty_available', label: 'Stokta', type: 'float' },
+                { name: 'virtual_available', label: 'Öngörülen', type: 'float' },
             ];
 
             // 3. Form submission ile XLSX indir
