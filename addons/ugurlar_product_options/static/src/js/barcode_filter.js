@@ -87,19 +87,20 @@ export class ProductBarcodeListController extends ListController {
             icon.dataset.bfField = fieldName;
             icon.title = fieldName === 'barcode' ? 'Barkod Filtre' : 'İç Referans Filtre';
 
-            // Inline style ile Odoo CSS override — tek tek set et
+            // Sort ikonu position:absolute right:0.25rem kullanıyor
+            // Filtre ikonunu da absolute yap, sort ikonunun SOLUNA yerleştir
             icon.style.setProperty('opacity', '1', 'important');
             icon.style.setProperty('visibility', 'visible', 'important');
             icon.style.setProperty('display', 'inline-block', 'important');
-            icon.style.setProperty('font-size', '15px', 'important');
+            icon.style.setProperty('font-size', '14px', 'important');
             icon.style.setProperty('color', '#888', 'important');
-            icon.style.setProperty('margin-left', '12px', 'important');
             icon.style.setProperty('cursor', 'pointer', 'important');
-            icon.style.setProperty('flex-shrink', '0', 'important');
             icon.style.setProperty('z-index', '2', 'important');
-            icon.style.setProperty('position', 'relative', 'important');
+            icon.style.setProperty('position', 'absolute', 'important');
+            icon.style.setProperty('right', '1.5rem', 'important');
+            icon.style.setProperty('top', '50%', 'important');
+            icon.style.setProperty('transform', 'translateY(-50%)', 'important');
             icon.style.setProperty('padding', '2px 4px', 'important');
-            icon.style.setProperty('vertical-align', 'middle', 'important');
 
             if (this._bfFilterValues[fieldName]?.length > 0) {
                 icon.classList.add('bf-icon-active');
@@ -114,8 +115,8 @@ export class ProductBarcodeListController extends ListController {
                 this._toggleDropdown(fieldName, th);
             });
 
-            // Sort ikonunun yanına ekle
-            sortIcon.parentNode.insertBefore(icon, sortIcon.nextSibling);
+            // th'ye ekle (position:relative olan element — absolute için referans)
+            th.appendChild(icon);
         });
     }
 
