@@ -87,26 +87,25 @@ export class ProductBarcodeListController extends ListController {
             icon.dataset.bfField = fieldName;
             icon.title = fieldName === 'barcode' ? 'Barkod Filtre' : 'İç Referans Filtre';
 
-            // Inline style ile Odoo CSS override — en güvenli yol
-            icon.style.cssText = `
-                opacity: 1 !important;
-                visibility: visible !important;
-                display: inline-block !important;
-                font-size: 14px !important;
-                color: #888 !important;
-                margin-left: 10px !important;
-                cursor: pointer !important;
-                flex-shrink: 0 !important;
-                z-index: 2 !important;
-                position: relative !important;
-                padding: 2px 3px !important;
-            `;
+            // Inline style ile Odoo CSS override — tek tek set et
+            icon.style.setProperty('opacity', '1', 'important');
+            icon.style.setProperty('visibility', 'visible', 'important');
+            icon.style.setProperty('display', 'inline-block', 'important');
+            icon.style.setProperty('font-size', '15px', 'important');
+            icon.style.setProperty('color', '#888', 'important');
+            icon.style.setProperty('margin-left', '12px', 'important');
+            icon.style.setProperty('cursor', 'pointer', 'important');
+            icon.style.setProperty('flex-shrink', '0', 'important');
+            icon.style.setProperty('z-index', '2', 'important');
+            icon.style.setProperty('position', 'relative', 'important');
+            icon.style.setProperty('padding', '2px 4px', 'important');
+            icon.style.setProperty('vertical-align', 'middle', 'important');
 
             if (this._bfFilterValues[fieldName]?.length > 0) {
                 icon.classList.add('bf-icon-active');
-                icon.style.color = '#714B67';
-                icon.style.background = 'rgba(113, 75, 103, 0.15)';
-                icon.style.borderRadius = '3px';
+                icon.style.setProperty('color', '#714B67', 'important');
+                icon.style.setProperty('background', 'rgba(113, 75, 103, 0.15)', 'important');
+                icon.style.setProperty('border-radius', '3px', 'important');
             }
 
             icon.addEventListener('click', (e) => {
