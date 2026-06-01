@@ -4,7 +4,6 @@ import { ListController } from "@web/views/list/list_controller";
 import { listView } from "@web/views/list/list_view";
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
-import { download } from "@web/core/network/download";
 import { onMounted, onPatched, onWillUnmount } from "@odoo/owl";
 
 /**
@@ -22,6 +21,7 @@ export class ProductBarcodeListController extends ListController {
         super.setup();
         this.actionService = useService("action");
         this.notification = useService("notification");
+        this.orm = useService("orm");
 
         this._bfActiveDropdown = null;
         // sessionStorage'dan filtre state'ini yükle (doAction sonrası korunur)
@@ -319,26 +319,13 @@ export class ProductBarcodeListController extends ListController {
 
         this._closeDropdown();
 
-        // Domain oluştur (tüm aktif filtreler)
+        // Domain oluştur
         const domain = [];
-        // Mevcut filtre değerlerini kullan
         for (const [field, vals] of Object.entries(this._bfFilterValues)) {
             if (vals && vals.length > 0) {
                 domain.push([field, "in", vals]);
             }
         }
-
-        // Export edilecek alanlar
-        const exportFields = [
-            { name: 'default_code', label: 'İç Referans' },
-            { name: 'barcode', label: 'Barkod' },
-            { name: 'name', label: 'Adı' },
-            { name: 'product_template_variant_value_ids', label: 'Varyant Değerleri' },
-            { name: 'list_price', label: 'Satış Fiyatı' },
-            { name: 'standard_price', label: 'Maliyet' },
-            { name: 'qty_available', label: 'Stokta' },
-            { name: 'virtual_available', label: 'Öngörülen' },
-        ];
 
         this.notification.add(
             `${values.length} ${fieldName === 'barcode' ? 'barkod' : 'referans'} ile dışa aktarılıyor...`,
@@ -346,27 +333,76 @@ export class ProductBarcodeListController extends ListController {
         );
 
         try {
-            await download({
-                url: '/web/export/xlsx',
-                data: {
-                    data: JSON.stringify({
-                        model: 'product.product',
-                        fields: exportFields,
-                        ids: false,
-                        domain: domain,
-                        groupby: [],
-                        context: { active_model: 'product.product' },
-                        import_compat: false,
-                    }),
-                },
+            // 1. ORM ile eşleşen ID'leri bul
+            const ids = await this.orm.search('product.product', domain);
+
+            if (ids.length === 0) {
+                this.notification.add('Eşleşen ürün bulunamadı', { type: 'warning' });
+                return;
+            }
+
+            // 2. Export alanları
+            const exportFields = [
+                { name: 'default_code', label: 'İç Referans' },
+                { name: 'barcode', label: 'Barkod' },
+                { name: 'name', label: 'Adı' },
+                { name: 'product_template_variant_value_ids', label: 'Varyant Değerleri' },
+                { name: 'list_price', label: 'Satış Fiyatı' },
+                { name: 'standard_price', label: 'Maliyet' },
+                { name: 'qty_available', label: 'Stokta' },
+                { name: 'virtual_available', label: 'Öngörülen' },
+            ];
+
+            // 3. Form submission ile XLSX indir
+            const exportData = JSON.stringify({
+                model: 'product.product',
+                fields: exportFields,
+                ids: ids,
+                domain: [],
+                groupby: [],
+                context: {},
+                import_compat: false,
             });
 
-            this.notification.add('Excel dosyası indirildi!', { type: 'success' });
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/web/export/xlsx';
+            form.style.display = 'none';
+
+            const dataInput = document.createElement('input');
+            dataInput.type = 'hidden';
+            dataInput.name = 'data';
+            dataInput.value = exportData;
+            form.appendChild(dataInput);
+
+            // CSRF token
+            const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+            const csrfCookie = document.cookie.split(';').find(c => c.trim().startsWith('csrf_token='));
+            const csrfToken = csrfMeta?.content
+                || (csrfCookie ? csrfCookie.split('=')[1] : '')
+                || (window.odoo?.csrf_token || '');
+
+            if (csrfToken) {
+                const csrfInput = document.createElement('input');
+                csrfInput.type = 'hidden';
+                csrfInput.name = 'csrf_token';
+                csrfInput.value = csrfToken;
+                form.appendChild(csrfInput);
+            }
+
+            document.body.appendChild(form);
+            form.submit();
+            setTimeout(() => document.body.removeChild(form), 2000);
+
+            this.notification.add(
+                `${ids.length} ürün Excel'e aktarılıyor...`,
+                { type: 'success' }
+            );
 
         } catch (e) {
             console.error('[BarcodeFilter] Export error:', e);
             this.notification.add(
-                'Dışa aktarma hatası. Lütfen tekrar deneyin.',
+                `Dışa aktarma hatası: ${e.message || 'Bilinmeyen hata'}`,
                 { type: 'danger' }
             );
         }
