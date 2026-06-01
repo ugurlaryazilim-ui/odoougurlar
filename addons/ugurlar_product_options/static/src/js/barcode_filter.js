@@ -27,6 +27,7 @@ export class ProductBarcodeListController extends ListController {
         // sessionStorage'dan filtre state'ini yükle (doAction sonrası korunur)
         this._bfFilterTexts = this._bfLoadState('bfTexts') || {};
         this._bfFilterValues = this._bfLoadState('bfValues') || {};
+        console.log('[BF] setup loaded:', JSON.stringify(this._bfFilterTexts), 'keys in ss:', Object.keys(sessionStorage).filter(k => k.startsWith('bf_')));
         this._onDocClickBound = this._onDocClick.bind(this);
         this._observer = null;
 
@@ -248,7 +249,11 @@ export class ProductBarcodeListController extends ListController {
         this._bfFilterTexts = {};
         this._bfFilterValues = {};
 
-        // 2. sessionStorage'daki TÜM bf_ anahtarlarını sil
+        // 2. sessionStorage — garantili temizlik
+        // Bilinen anahtarları direkt sil
+        sessionStorage.removeItem('bf_bfTexts');
+        sessionStorage.removeItem('bf_bfValues');
+        // bf_ ile başlayan tüm anahtarları da sil
         const keysToRemove = [];
         for (let i = 0; i < sessionStorage.length; i++) {
             const key = sessionStorage.key(i);
@@ -257,18 +262,14 @@ export class ProductBarcodeListController extends ListController {
             }
         }
         keysToRemove.forEach(key => sessionStorage.removeItem(key));
+        console.log('[BF] CLEARED! keys remaining:', Object.keys(sessionStorage).filter(k => k.startsWith('bf_')));
 
-        // 3. Dropdown'u kapat
+        // 3. Dropdown kapat
         this._closeDropdown();
 
-        // 4. Sayfayı yenile — temiz state ile ana listeye dön
-        // URL'den action ID'yi çıkar (ör: /odoo/action-434)
+        // 4. Ana listeye dön — tam sayfa yenileme
         const match = window.location.pathname.match(/\/odoo\/action-\d+/);
-        if (match) {
-            window.location.href = match[0];
-        } else {
-            window.location.reload();
-        }
+        window.location.href = match ? match[0] : window.location.pathname;
     }
 
     _executeFilter() {
