@@ -1,27 +1,31 @@
 /* ═══════════════════════════════════════════════════════
    Sütun Bazlı Filtre — Uğurlar Ürün Seçenekleri
-   Sort ikonunun yanında, aynı hover davranışı
+   Sort ikonuyla aynı boyut ve görünürlük
    ═══════════════════════════════════════════════════════ */
 
-/* ─── Filtre İkonu — sort ikonuyla yan yana ─── */
+/* ─── Filtre İkonu — sort ikonu ile aynı boyutta ─── */
 .bf-icon {
     cursor: pointer;
-    font-size: 11px;
-    color: #999;
-    margin-left: 3px;
-    transition: color 0.12s, opacity 0.12s;
+    font-size: 13px !important;
+    color: #9c9c9c;
+    margin-left: 4px;
+    transition: color 0.12s, opacity 0.15s;
     vertical-align: middle;
+    padding: 2px;
 }
 
 .bf-icon:hover {
     color: #714B67 !important;
+    opacity: 1 !important;
 }
 
-/* Aktif filtre — her zaman görünür, mor */
+/* Aktif filtre — her zaman görünür, mor arka planlı */
 .bf-icon-active {
     color: #714B67 !important;
     opacity: 1 !important;
-    text-shadow: 0 0 4px rgba(113, 75, 103, 0.3);
+    background: rgba(113, 75, 103, 0.12);
+    border-radius: 3px;
+    padding: 2px 3px;
 }
 
 /* ─── Dropdown ─── */
