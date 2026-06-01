@@ -244,37 +244,32 @@ export class ProductBarcodeListController extends ListController {
     }
 
     _clearFilter(fieldName) {
-        // In-memory temizle
-        delete this._bfFilterTexts[fieldName];
-        delete this._bfFilterValues[fieldName];
+        // In-memory tamamen sıfırla
+        this._bfFilterTexts = {};
+        this._bfFilterValues = {};
 
-        // sessionStorage'ı tam temizle
-        const hasAnyFilter = Object.keys(this._bfFilterValues).length > 0;
-        if (hasAnyFilter) {
-            this._bfSaveState('bfTexts', this._bfFilterTexts);
-            this._bfSaveState('bfValues', this._bfFilterValues);
-        } else {
-            // Hiç filtre kalmadıysa tamamen sil
-            sessionStorage.removeItem('bf_bfTexts');
-            sessionStorage.removeItem('bf_bfValues');
+        // sessionStorage'daki TÜM bf_ anahtarlarını sil
+        const keysToRemove = [];
+        for (let i = 0; i < sessionStorage.length; i++) {
+            const key = sessionStorage.key(i);
+            if (key && key.startsWith('bf_')) {
+                keysToRemove.push(key);
+            }
         }
+        keysToRemove.forEach(key => sessionStorage.removeItem(key));
 
         this._closeDropdown();
 
-        if (hasAnyFilter) {
-            this._executeFilter();
-        } else {
-            // Filtresiz ana listeye dön
-            this.actionService.doAction({
-                type: "ir.actions.act_window",
-                res_model: "product.product",
-                name: "Ürün Varyantları",
-                views: [[false, "list"], [false, "form"]],
-                domain: [],
-                target: "current",
-            });
-            this.notification.add('Filtre temizlendi', { type: 'info' });
-        }
+        // Filtresiz ana listeye dön
+        this.actionService.doAction({
+            type: "ir.actions.act_window",
+            res_model: "product.product",
+            name: "Ürün Varyantları",
+            views: [[false, "list"], [false, "form"]],
+            domain: [],
+            target: "current",
+        });
+        this.notification.add('Filtre temizlendi', { type: 'info' });
     }
 
     _executeFilter() {
