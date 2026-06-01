@@ -244,11 +244,11 @@ export class ProductBarcodeListController extends ListController {
     }
 
     _clearFilter(fieldName) {
-        // In-memory tamamen sıfırla
+        // 1. In-memory tamamen sıfırla
         this._bfFilterTexts = {};
         this._bfFilterValues = {};
 
-        // sessionStorage'daki TÜM bf_ anahtarlarını sil
+        // 2. sessionStorage'daki TÜM bf_ anahtarlarını sil
         const keysToRemove = [];
         for (let i = 0; i < sessionStorage.length; i++) {
             const key = sessionStorage.key(i);
@@ -258,18 +258,17 @@ export class ProductBarcodeListController extends ListController {
         }
         keysToRemove.forEach(key => sessionStorage.removeItem(key));
 
+        // 3. Dropdown'u kapat
         this._closeDropdown();
 
-        // Filtresiz ana listeye dön
-        this.actionService.doAction({
-            type: "ir.actions.act_window",
-            res_model: "product.product",
-            name: "Ürün Varyantları",
-            views: [[false, "list"], [false, "form"]],
-            domain: [],
-            target: "current",
-        });
-        this.notification.add('Filtre temizlendi', { type: 'info' });
+        // 4. Sayfayı yenile — temiz state ile ana listeye dön
+        // URL'den action ID'yi çıkar (ör: /odoo/action-434)
+        const match = window.location.pathname.match(/\/odoo\/action-\d+/);
+        if (match) {
+            window.location.href = match[0];
+        } else {
+            window.location.reload();
+        }
     }
 
     _executeFilter() {
