@@ -313,7 +313,7 @@ export class ProductBarcodeListController extends ListController {
         this._bfSaveState('bfTexts', this._bfFilterTexts);
         this._bfSaveState('bfValues', this._bfFilterValues);
 
-        // doAction sonrası otomatik seçim yapılması için flag
+        // doAction sonrası otomatik seçim flag'i
         sessionStorage.setItem('bf_autoSelect', 'true');
 
         this._closeDropdown();
@@ -324,13 +324,69 @@ export class ProductBarcodeListController extends ListController {
         const shouldSelect = sessionStorage.getItem('bf_autoSelect');
         if (shouldSelect === 'true') {
             sessionStorage.removeItem('bf_autoSelect');
-            // Liste render edildikten sonra çalıştır
-            setTimeout(() => this._autoSelectAll(), 800);
+            // Veri yüklenene kadar dene (max 5 saniye)
+            this._waitForDataAndSelect(0);
         }
     }
 
-    _autoSelectAll() {
-        // 1. Üst checkbox'a tıkla — sayfadaki tüm kayıtları seç
+    _waitForDataAndSelect(attempt) {
+        if (attempt > 10) {
+            // Timeout — DOM fallback
+            this._autoSelectDOM();
+            return;
+        }
+
+        const list = this.model?.root;
+        if (list && list.records && list.records.length > 0) {
+            this._autoSelectAPI(list);
+        } else {
+            // Veri henüz yüklenmedi, tekrar dene
+            setTimeout(() => this._waitForDataAndSelect(attempt + 1), 500);
+        }
+    }
+
+    /**
+     * Odoo 19 native API ile tüm kayıtları seç
+     * this.model.root → DynamicRecordList
+     */
+    _autoSelectAPI(list) {
+        try {
+            // 1. Sayfadaki kayıtları seç
+            if (typeof list.toggleSelection === 'function') {
+                list.toggleSelection();
+            } else {
+                // Fallback: tek tek seç
+                for (const record of list.records) {
+                    if (typeof record.toggleSelection === 'function' && !record.selected) {
+                        record.toggleSelection(true);
+                    }
+                }
+            }
+
+            // 2. Tüm domain'i seç (sayfa dışındaki kayıtlar dahil)
+            setTimeout(() => {
+                if (typeof list.selectDomain === 'function') {
+                    list.selectDomain(true);
+                    this.notification.add(
+                        'Tüm filtrelenen kayıtlar seçildi',
+                        { type: 'success' }
+                    );
+                } else {
+                    // selectDomain yoksa DOM fallback
+                    this._autoSelectDOM();
+                }
+            }, 300);
+
+        } catch (e) {
+            console.warn('[BarcodeFilter] API select failed, DOM fallback:', e);
+            this._autoSelectDOM();
+        }
+    }
+
+    /**
+     * DOM fallback — API çalışmazsa checkbox tıkla
+     */
+    _autoSelectDOM() {
         const headerCheckbox = document.querySelector(
             '.o_list_view thead .o_list_record_selector input[type="checkbox"]'
         );
@@ -338,7 +394,6 @@ export class ProductBarcodeListController extends ListController {
             headerCheckbox.click();
         }
 
-        // 2. "Tümünü Seç" banner linkine tıkla — tüm domain'i seç
         setTimeout(() => {
             const selectDomainBtn = document.querySelector(
                 '.o_list_selection_box .o_list_select_domain'
@@ -347,7 +402,7 @@ export class ProductBarcodeListController extends ListController {
                 selectDomainBtn.click();
                 this.notification.add('Tüm filtrelenen kayıtlar seçildi', { type: 'success' });
             }
-        }, 500);
+        }, 600);
     }
 }
 
