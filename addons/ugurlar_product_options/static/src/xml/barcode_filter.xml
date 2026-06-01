@@ -2,51 +2,12 @@
 <templates xml:space="preserve">
 
     <!--
-        Product list view — Barkod Filtre butonu.
-        web.ListView template'ini inherit eder.
-        "Yeni" butonundan sonra Barkod Filtre butonu + dialog eklenir.
+        Product list view — Sütun bazlı filtre desteği.
+        Sadece js_class binding yapar, ikon enjeksiyonu JS tarafında yapılır.
+        Büyük popup butonu kaldırıldı.
     -->
     <t t-name="ugurlar_product_options.ProductBarcodeListView" t-inherit="web.ListView" owl="1">
-        <xpath expr="//button[hasclass('o_list_button_add')]" position="after">
-
-            <!-- Filtre butonu -->
-            <button type="button"
-                    class="btn btn-outline-primary o_barcode_filter_btn ms-1"
-                    t-on-click="onOpenBarcodeFilter"
-                    t-if="!dialogState.filterActive">
-                <i class="fa fa-barcode"/> Barkod Filtre
-            </button>
-
-            <!-- Aktif filtre badge -->
-            <button type="button"
-                    class="btn btn-warning o_barcode_filter_active_btn ms-1"
-                    t-on-click="onOpenBarcodeFilter"
-                    t-if="dialogState.filterActive">
-                <i class="fa fa-filter"/>
-                <t t-out="dialogState.filterCount"/>
-                <t t-out="dialogState.filterField === 'barcode' ? ' barkod' : ' referans'"/>
-                filtreli
-            </button>
-
-            <!-- Filtreyi kaldır -->
-            <button type="button"
-                    class="btn btn-outline-danger o_barcode_filter_clear_btn ms-1"
-                    t-on-click="onClearFilter"
-                    t-if="dialogState.filterActive"
-                    title="Filtreyi Kaldır">
-                <i class="fa fa-times"/>
-            </button>
-
-            <!-- Dialog overlay -->
-            <BarcodeFilterDialog
-                t-if="dialogState.show"
-                onFilter.bind="onApplyFilter"
-                onClear.bind="onClearFilter"
-                onClose.bind="onCloseDialog"
-                activeField="dialogState.activeField"
-            />
-
-        </xpath>
+        <!-- Boş inherit — controller binding için gerekli -->
     </t>
 
 </templates>

@@ -1,287 +1,180 @@
 /* ═══════════════════════════════════════════════════════
-   Barkod Filtre Dialog — Uğurlar Ürün Seçenekleri
+   Sütun Bazlı Filtre — Uğurlar Ürün Seçenekleri
+   Barkod / İç Referans sütun başlığı ikonları + dropdown
    ═══════════════════════════════════════════════════════ */
 
-/* ─── Overlay ─── */
-.bf-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.55);
-    z-index: 99999;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 1rem;
-    animation: bf-fade-in 0.15s ease;
-}
-
-@keyframes bf-fade-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-/* ─── Dialog ─── */
-.bf-dialog {
-    background: #fff;
-    border-radius: 14px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
-    width: 440px;
-    max-width: 95vw;
-    max-height: 85vh;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    animation: bf-slide-up 0.2s ease;
-}
-
-@keyframes bf-slide-up {
-    from { transform: translateY(16px); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
-}
-
-/* ─── Header ─── */
-.bf-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 14px 18px;
-    background: linear-gradient(135deg, #714B67, #875A7B);
-    color: #fff;
-}
-
-.bf-header-left {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.bf-header-icon {
-    font-size: 1.2rem;
-    opacity: 0.9;
-}
-
-.bf-header-title {
-    font-size: 1.05rem;
-    font-weight: 600;
-}
-
-.bf-close-btn {
-    background: rgba(255, 255, 255, 0.15);
-    border: none;
-    color: #fff;
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: background 0.15s;
-}
-
-.bf-close-btn:hover {
-    background: rgba(255, 255, 255, 0.3);
-}
-
-/* ─── Field Selector Tabs ─── */
-.bf-field-selector {
-    display: flex;
-    padding: 10px 18px 0;
-    gap: 6px;
-}
-
-.bf-tab {
-    flex: 1;
-    padding: 9px 12px;
-    border: 2px solid #e0e0e0;
-    border-radius: 10px;
-    background: #fafafa;
-    color: #555;
-    font-size: 0.88rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-}
-
-.bf-tab:hover {
-    border-color: #c0c0c0;
-    background: #f0f0f0;
-}
-
-.bf-tab-active {
-    border-color: #714B67;
-    background: #f3edf2;
-    color: #714B67;
-}
-
-.bf-tab-active:hover {
-    border-color: #714B67;
-    background: #ece2ea;
-}
-
-/* ─── Body ─── */
-.bf-body {
-    padding: 12px 18px;
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.bf-textarea {
-    width: 100%;
-    min-height: 220px;
-    max-height: 50vh;
-    border: 2px solid #e0e0e0;
-    border-radius: 10px;
-    padding: 12px 14px;
-    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-    font-size: 0.9rem;
-    line-height: 1.6;
-    resize: vertical;
-    outline: none;
-    transition: border-color 0.15s;
-    color: #333;
-}
-
-.bf-textarea:focus {
-    border-color: #714B67;
-    box-shadow: 0 0 0 3px rgba(113, 75, 103, 0.1);
-}
-
-.bf-textarea::placeholder {
-    color: #aaa;
-    font-style: italic;
-}
-
-/* ─── Counter ─── */
-.bf-counter {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 2px 0;
-}
-
-.bf-count-badge {
-    background: #714B67;
-    color: #fff;
-    font-size: 0.8rem;
-    font-weight: 700;
-    padding: 2px 10px;
-    border-radius: 10px;
-    min-width: 24px;
-    text-align: center;
-}
-
-.bf-count-label {
-    font-size: 0.82rem;
-    color: #888;
-    font-weight: 500;
-}
-
-/* ─── Actions ─── */
-.bf-actions {
-    display: flex;
-    gap: 8px;
-    padding: 0 18px 16px;
-}
-
-.bf-btn {
-    flex: 1;
+/* ─── Filtre İkonu (sütun başlığında) ─── */
+.bf-icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    padding: 10px 16px;
-    border: none;
+    width: 20px;
+    height: 20px;
+    margin-left: 4px;
+    border-radius: 4px;
+    cursor: pointer;
+    color: #aaa;
+    font-size: 11px;
+    transition: all 0.12s;
+    vertical-align: middle;
+    position: relative;
+    top: -1px;
+}
+
+.bf-icon:hover {
+    background: rgba(113, 75, 103, 0.12);
+    color: #714B67;
+}
+
+.bf-icon-active {
+    color: #fff !important;
+    background: #714B67 !important;
+    border-radius: 4px;
+}
+
+.bf-icon-active:hover {
+    background: #5d3d55 !important;
+}
+
+/* ─── Dropdown (sütun altında) ─── */
+.bf-dropdown {
+    background: #fff;
     border-radius: 10px;
-    font-size: 0.9rem;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18),
+                0 2px 8px rgba(0, 0, 0, 0.08);
+    width: 260px;
+    overflow: hidden;
+    animation: bf-dd-open 0.12s ease;
+    border: 1px solid #e0e0e0;
+}
+
+@keyframes bf-dd-open {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ─── Dropdown Header ─── */
+.bf-dd-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: linear-gradient(135deg, #714B67, #875A7B);
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.bf-dd-label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.bf-dd-label i {
+    font-size: 10px;
+    opacity: 0.85;
+}
+
+.bf-dd-badge {
+    background: rgba(255, 255, 255, 0.25);
+    padding: 1px 8px;
+    border-radius: 8px;
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+/* ─── Textarea ─── */
+.bf-dd-input {
+    width: 100%;
+    border: none;
+    border-top: 1px solid #eee;
+    border-bottom: 1px solid #eee;
+    padding: 10px 12px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.82rem;
+    line-height: 1.55;
+    resize: none;
+    outline: none;
+    color: #333;
+    box-sizing: border-box;
+}
+
+.bf-dd-input:focus {
+    background: #fdfbfc;
+}
+
+.bf-dd-input::placeholder {
+    color: #bbb;
+    font-style: italic;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* ─── Actions ─── */
+.bf-dd-actions {
+    display: flex;
+    gap: 4px;
+    padding: 6px 8px;
+    background: #fafafa;
+}
+
+.bf-dd-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 5px 12px;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.78rem;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.15s;
+    transition: all 0.12s;
 }
 
-.bf-btn:hover {
+.bf-dd-btn:hover {
     transform: translateY(-1px);
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12);
 }
 
-.bf-btn:active {
+.bf-dd-btn:active {
     transform: translateY(0);
 }
 
-.bf-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
-    box-shadow: none;
-}
-
-.bf-btn-filter {
+.bf-dd-filter {
     background: #714B67;
     color: #fff;
+    flex: 1;
 }
 
-.bf-btn-filter:hover:not(:disabled) {
+.bf-dd-filter:hover {
     background: #5d3d55;
 }
 
-.bf-btn-clear {
+.bf-dd-clear {
     background: #f0f0f0;
-    color: #555;
+    color: #999;
+    width: 30px;
+    padding: 5px;
 }
 
-.bf-btn-clear:hover {
-    background: #e0e0e0;
-}
-
-/* ─── Control Panel Buttons ─── */
-.o_barcode_filter_btn {
-    border-color: #714B67 !important;
-    color: #714B67 !important;
-    font-weight: 600;
-}
-
-.o_barcode_filter_btn:hover {
-    background: #714B67 !important;
-    color: #fff !important;
-}
-
-.o_barcode_filter_active_btn {
-    font-weight: 600;
-}
-
-.o_barcode_filter_clear_btn {
-    padding: 4px 8px;
+.bf-dd-clear:hover {
+    background: #fee;
+    color: #e44;
 }
 
 /* ─── Responsive ─── */
 @media (max-width: 576px) {
-    .bf-dialog {
-        width: 100vw;
-        max-width: none;
-        border-radius: 14px 14px 0 0;
-        max-height: 90vh;
+    .bf-dropdown {
+        width: 220px;
     }
 
-    .bf-overlay {
-        align-items: flex-end;
-        padding: 0;
-    }
-
-    .bf-textarea {
-        min-height: 180px;
-    }
-
-    .bf-tab {
-        padding: 10px 8px;
-        font-size: 0.82rem;
+    .bf-dd-input {
+        font-size: 0.8rem;
     }
 }
