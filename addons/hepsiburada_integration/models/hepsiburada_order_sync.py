@@ -176,8 +176,10 @@ class HepsiburadaOrderSync(models.AbstractModel):
                     existing_order = self.env['sale.order'].search([('client_order_ref', '=', str(order_no)), ('hb_store_id', '=', store.merchant_id)], limit=1)
                     if existing_order:
                         continue
-                    else:
-                        missing_orders.add(order_no)
+                    
+                    # hepsiburada.order var ama sale.order yoksa da missing sayılır
+                    # (_create_or_update_order orphan fix ile yeniden oluşturulacak)
+                    missing_orders.add(order_no)
                         
                 # Eksik siparişlerin tam JSON'larını çek
                 for m_order in missing_orders:
@@ -270,9 +272,15 @@ class HepsiburadaOrderSync(models.AbstractModel):
         
         existing = HbOrder.search([('hb_order_number', '=', order_no)], limit=1)
         if existing:
-            # sale.order silinmişse yeniden oluştur
+            # sale.order gerçekten var mı kontrol et (silinmiş olabilir)
+            sale_exists = False
             if existing.sale_order_id:
+                sale_exists = bool(env['sale.order'].search([('id', '=', existing.sale_order_id.id)], limit=1))
+            
+            if sale_exists:
                 return existing
+            
+            # sale.order silinmiş — yeniden oluştur
             _logger.info("HB sipariş %s: sale.order silinmiş, yeniden oluşturuluyor.", order_no)
             partner = self._find_or_create_partner(existing, store)
             sale_order = self._create_sale_order(existing, partner, store)
