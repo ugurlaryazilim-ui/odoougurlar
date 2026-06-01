@@ -267,8 +267,6 @@ export class ProductBarcodeListController extends ListController {
     }
 }
 
-// Template — web.ListView'u doğrudan kullan (inherit extension otomatik uygulanır)
-ProductBarcodeListController.template = "web.ListView";
 
 registry.category("views").add("product_barcode_list", {
     ...listView,

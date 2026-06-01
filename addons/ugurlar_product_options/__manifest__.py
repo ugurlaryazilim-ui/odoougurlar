@@ -21,7 +21,6 @@
         'web.assets_backend': [
             'ugurlar_product_options/static/src/css/barcode_filter.css',
             'ugurlar_product_options/static/src/js/barcode_filter.js',
-            'ugurlar_product_options/static/src/xml/barcode_filter.xml',
         ],
     },
     'installable': True,
