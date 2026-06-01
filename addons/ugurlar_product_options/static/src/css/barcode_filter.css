@@ -1,30 +1,55 @@
 /* ═══════════════════════════════════════════════════════
    Sütun Bazlı Filtre — Uğurlar Ürün Seçenekleri
-   Sort ikonuyla aynı boyut ve görünürlük
+   Odoo'nun opacity-trigger-hover sisteminden bağımsız
    ═══════════════════════════════════════════════════════ */
 
-/* ─── Filtre İkonu — sort ikonu ile aynı boyutta ─── */
-.bf-icon {
-    cursor: pointer;
-    font-size: 15px !important;
+/*
+ * SORUN: Odoo <th class="opacity-trigger-hover"> hover'da
+ * opacity-0 çocukları görünür yapıyor ama aynı zamanda
+ * non-opacity-0 elementleri de etkileyebilir.
+ *
+ * ÇÖZÜM: bf-icon'a opacity: 1 !important zorlaması ile
+ * Odoo'nun tüm opacity kurallarını override et.
+ */
+
+/* ─── Filtre İkonu — HER DURUMDA görünür ─── */
+i.bf-icon.fa.fa-filter {
+    cursor: pointer !important;
+    font-size: 14px !important;
     color: #9c9c9c !important;
     margin-left: 6px !important;
     opacity: 1 !important;
-    vertical-align: middle;
-    padding: 2px 3px;
-    transition: color 0.12s;
+    visibility: visible !important;
+    display: inline-block !important;
+    vertical-align: middle !important;
+    padding: 2px 3px !important;
+    transition: color 0.15s !important;
+    position: relative !important;
+    z-index: 2 !important;
+    flex-shrink: 0 !important;
 }
 
-.bf-icon:hover {
+/* Hover state */
+i.bf-icon.fa.fa-filter:hover {
     color: #714B67 !important;
 }
 
-/* Aktif filtre — her zaman görünür, mor arka planlı */
-.bf-icon-active {
-    color: #714B67 !important;
+/* Hover durumunda da ASLA kaybolmasın */
+.opacity-trigger-hover:hover i.bf-icon.fa.fa-filter,
+th:hover i.bf-icon.fa.fa-filter,
+th:focus i.bf-icon.fa.fa-filter,
+th:active i.bf-icon.fa.fa-filter,
+.o_column_sortable:hover i.bf-icon.fa.fa-filter {
     opacity: 1 !important;
-    background: rgba(113, 75, 103, 0.15);
-    border-radius: 3px;
+    visibility: visible !important;
+    display: inline-block !important;
+}
+
+/* Aktif filtre — mor renk + arka plan */
+i.bf-icon.bf-icon-active {
+    color: #714B67 !important;
+    background: rgba(113, 75, 103, 0.15) !important;
+    border-radius: 3px !important;
 }
 
 /* ─── Dropdown ─── */
@@ -136,9 +161,3 @@
 }
 
 .bf-dd-clear:hover { background: #fee2e2; color: #dc3545; }
-
-/* ─── Responsive ─── */
-@media (max-width: 576px) {
-    .bf-dropdown { width: 220px; }
-    .bf-dd-input { font-size: 0.8rem; }
-}
