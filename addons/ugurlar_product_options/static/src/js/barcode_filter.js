@@ -328,7 +328,7 @@ export class ProductBarcodeListController extends ListController {
         }
 
         this.notification.add(
-            `${values.length} ${fieldName === 'barcode' ? 'barkod' : 'referans'} ile dışa aktarılıyor...`,
+            `${values.length} ${fieldName === 'barcode' ? 'barkod' : 'referans'} sorgulanıyor...`,
             { type: 'info' }
         );
 
@@ -340,6 +340,11 @@ export class ProductBarcodeListController extends ListController {
                 this.notification.add('Eşleşen ürün bulunamadı', { type: 'warning' });
                 return;
             }
+
+            this.notification.add(
+                `${ids.length} ürün bulundu, Excel hazırlanıyor...`,
+                { type: 'info' }
+            );
 
             // 2. Export alanları
             const exportFields = [
@@ -353,8 +358,8 @@ export class ProductBarcodeListController extends ListController {
                 { name: 'virtual_available', label: 'Öngörülen', type: 'float' },
             ];
 
-            // 3. Form submission ile XLSX indir
-            const exportData = JSON.stringify({
+            // 3. fetch + blob ile XLSX indir
+            const exportPayload = JSON.stringify({
                 model: 'product.product',
                 fields: exportFields,
                 ids: ids,
@@ -364,38 +369,43 @@ export class ProductBarcodeListController extends ListController {
                 import_compat: false,
             });
 
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.action = '/web/export/xlsx';
-            form.style.display = 'none';
+            // CSRF token bul
+            const csrfToken = odoo?.csrf_token
+                || document.cookie.split(';')
+                    .map(c => c.trim())
+                    .find(c => c.startsWith('csrf_token='))
+                    ?.split('=')[1]
+                || '';
 
-            const dataInput = document.createElement('input');
-            dataInput.type = 'hidden';
-            dataInput.name = 'data';
-            dataInput.value = exportData;
-            form.appendChild(dataInput);
-
-            // CSRF token
-            const csrfMeta = document.querySelector('meta[name="csrf-token"]');
-            const csrfCookie = document.cookie.split(';').find(c => c.trim().startsWith('csrf_token='));
-            const csrfToken = csrfMeta?.content
-                || (csrfCookie ? csrfCookie.split('=')[1] : '')
-                || (window.odoo?.csrf_token || '');
-
+            const formData = new FormData();
+            formData.append('data', exportPayload);
             if (csrfToken) {
-                const csrfInput = document.createElement('input');
-                csrfInput.type = 'hidden';
-                csrfInput.name = 'csrf_token';
-                csrfInput.value = csrfToken;
-                form.appendChild(csrfInput);
+                formData.append('csrf_token', csrfToken);
             }
 
-            document.body.appendChild(form);
-            form.submit();
-            setTimeout(() => document.body.removeChild(form), 2000);
+            const response = await fetch('/web/export/xlsx', {
+                method: 'POST',
+                body: formData,
+            });
+
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`Sunucu hatası (${response.status}): ${errText.substring(0, 200)}`);
+            }
+
+            // 4. Blob'u indir
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `urunler_filtre_${ids.length}.xlsx`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
 
             this.notification.add(
-                `${ids.length} ürün Excel'e aktarılıyor...`,
+                `✓ ${ids.length} ürün Excel'e aktarıldı!`,
                 { type: 'success' }
             );
 
