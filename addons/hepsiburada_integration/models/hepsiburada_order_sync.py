@@ -270,6 +270,13 @@ class HepsiburadaOrderSync(models.AbstractModel):
         
         existing = HbOrder.search([('hb_order_number', '=', order_no)], limit=1)
         if existing:
+            # sale.order silinmişse yeniden oluştur
+            if existing.sale_order_id:
+                return existing
+            _logger.info("HB sipariş %s: sale.order silinmiş, yeniden oluşturuluyor.", order_no)
+            partner = self._find_or_create_partner(existing, store)
+            sale_order = self._create_sale_order(existing, partner, store)
+            existing.write({'sale_order_id': sale_order.id})
             return existing
 
         first_pkg = packages[0]

@@ -29,7 +29,7 @@ class HepsiburadaOrder(models.Model):
     total_price = fields.Float(string='Toplam Tutar')
     currency = fields.Char(string='Para Birimi', default='TRY')
 
-    sale_order_id = fields.Many2one('sale.order', string='Odoo Siparişi', readonly=True)
+    sale_order_id = fields.Many2one('sale.order', string='Odoo Siparişi', readonly=True, ondelete='cascade')
     line_ids = fields.One2many('hepsiburada.order.line', 'order_id', string='Satırlar')
     raw_payload = fields.Text(string='Raw JSON', help='API üzerinden gelen orijinal JSON verisi')
 

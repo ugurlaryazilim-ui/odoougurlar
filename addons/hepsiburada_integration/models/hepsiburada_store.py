@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import requests
 from requests.auth import HTTPBasicAuth
 
-from odoo import models, fields, api
+from odoo import models, fields, api, _
 from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
@@ -47,6 +47,13 @@ class HepsiburadaStore(models.Model):
         ('package_id', 'Paket Numarası'),
     ], string='Sipariş Referans Tipi', default='order_number',
         help='Odoo siparişinin referans formatı',
+    )
+
+    # ─── Tek Sipariş Çekme ───
+    fetch_order_number = fields.Char(
+        string='Sipariş No',
+        copy=False,
+        help='Hepsiburada sipariş numarasını yazıp "Sipariş Çek" butonuna basarak tek siparişi çekebilirsiniz',
     )
 
     # ─── Komisyon Ayarları ───
@@ -278,4 +285,74 @@ class HepsiburadaStore(models.Model):
             'view_mode': 'list,form',
             'domain': [('store_id', '=', self.id)],
             'context': {'default_store_id': self.id}
+        }
+
+    def action_fetch_single_order(self):
+        """Sipariş numarası ile tek sipariş çek."""
+        self.ensure_one()
+        order_number = self.fetch_order_number
+        if not order_number:
+            raise UserError(_('Lütfen bir sipariş numarası girin!'))
+
+        order_number = order_number.strip()
+        _logger.info("HB Tek sipariş çekiliyor: %s (mağaza: %s)", order_number, self.name)
+
+        clean_merchant, clean_user, clean_pass = self._get_clean_credentials()
+        if not clean_merchant or not clean_user or not clean_pass:
+            raise UserError(_('Mağaza API ayarları eksik!'))
+
+        session, _ = self._get_session()
+        domain = self._get_api_domain()
+
+        # Sipariş detay API
+        url = f"https://{domain}/orders/merchantId/{clean_merchant}/orderNumber/{order_number}"
+
+        try:
+            response = session.get(url, timeout=30)
+        except Exception as e:
+            raise UserError(_('❌ API bağlantı hatası:\n\n%s') % str(e))
+
+        if response.status_code != 200:
+            raise UserError(
+                _('❌ Sipariş bulunamadı: %s\n\nHTTP %s: %s') % (
+                    order_number, response.status_code, response.text[:500]
+                )
+            )
+
+        data = response.json()
+        if not data:
+            raise UserError(_('❌ Sipariş bulunamadı: %s\n\nAPI boş yanıt döndü.') % order_number)
+
+        # Tek siparişi işle
+        OrderSync = self.env['hepsiburada.order.sync']
+        packages = [data] if isinstance(data, dict) else data
+
+        try:
+            processed, created, errors, msgs = OrderSync._process_orders(packages, self)
+        except Exception as e:
+            raise UserError(_('❌ Sipariş işleme hatası:\n\n%s') % str(e))
+
+        # Input temizle
+        self.fetch_order_number = False
+
+        if errors > 0:
+            raise UserError(
+                _('⚠️ Sipariş çekildi ama hatalar var:\n\n%s') % '\n'.join(msgs)
+            )
+
+        msg = f'✅ Sipariş başarıyla çekildi! ({order_number})'
+        if created > 0:
+            msg += ' | Yeni oluşturuldu'
+        else:
+            msg += ' | Zaten mevcut'
+
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Hepsiburada Sipariş Çek',
+                'message': msg,
+                'type': 'success',
+                'sticky': False,
+            },
         }

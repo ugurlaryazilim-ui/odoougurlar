@@ -45,6 +45,12 @@
                                     <field name="auto_sync"/>
                                     <field name="sync_interval" invisible="not auto_sync"/>
                                     <field name="last_sync"/>
+                                    <separator string="Tek Sipariş Çek" colspan="2"/>
+                                    <field name="fetch_order_number" string="Sipariş No"
+                                           placeholder="Sipariş numarası girin..."/>
+                                    <button name="action_fetch_single_order" type="object"
+                                            string="📥 Sipariş Çek" class="btn-primary"
+                                            colspan="2"/>
                                 </group>
                             </group>
                             <group>
