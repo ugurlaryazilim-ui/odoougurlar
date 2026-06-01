@@ -346,12 +346,11 @@ export class ProductBarcodeListController extends ListController {
                 { type: 'info' }
             );
 
-            // 2. Export alanları
+            // 2. Export alanları (many2many alanlar kullanılmaz — boş satır oluşturur)
             const exportFields = [
                 { name: 'default_code', label: 'İç Referans', type: 'char' },
                 { name: 'barcode', label: 'Barkod', type: 'char' },
-                { name: 'name', label: 'Adı', type: 'char' },
-                { name: 'product_template_variant_value_ids', label: 'Varyant Değerleri', type: 'many2many' },
+                { name: 'display_name', label: 'Ürün Adı (Varyant)', type: 'char' },
                 { name: 'list_price', label: 'Satış Fiyatı', type: 'monetary' },
                 { name: 'standard_price', label: 'Maliyet', type: 'monetary' },
                 { name: 'qty_available', label: 'Stokta', type: 'float' },
