@@ -24,10 +24,11 @@ export class ProductBarcodeListController extends ListController {
         this.orm = useService("orm");
 
         this._bfActiveDropdown = null;
-        // sessionStorage'dan filtre state'ini yükle (doAction sonrası korunur)
-        this._bfFilterTexts = this._bfLoadState('bfTexts') || {};
-        this._bfFilterValues = this._bfLoadState('bfValues') || {};
-        console.log('[BF] setup loaded:', JSON.stringify(this._bfFilterTexts), 'keys in ss:', Object.keys(sessionStorage).filter(k => k.startsWith('bf_')));
+        // window global'den state yükle (doAction SPA navigasyonda korunur)
+        // window.location ile sayfa yenilenince otomatik temizlenir
+        const saved = window.__bfState || {};
+        this._bfFilterTexts = saved.texts || {};
+        this._bfFilterValues = saved.values || {};
         this._onDocClickBound = this._onDocClick.bind(this);
         this._observer = null;
 
@@ -219,7 +220,7 @@ export class ProductBarcodeListController extends ListController {
             const textarea = dropdown.querySelector('.bf-dd-input');
             if (textarea) {
                 this._bfFilterTexts[this._bfActiveDropdown] = textarea.value;
-                this._bfSaveState('bfTexts', this._bfFilterTexts);
+                this._bfSaveState();
             }
         }
         this._bfActiveDropdown = null;
@@ -238,36 +239,23 @@ export class ProductBarcodeListController extends ListController {
 
         this._bfFilterTexts[fieldName] = text;
         this._bfFilterValues[fieldName] = values;
-        this._bfSaveState('bfTexts', this._bfFilterTexts);
-        this._bfSaveState('bfValues', this._bfFilterValues);
+        this._bfSaveState();
         this._closeDropdown();
         this._executeFilter();
     }
 
     _clearFilter(fieldName) {
-        // 1. In-memory tamamen sıfırla
+        // 1. In-memory sıfırla
         this._bfFilterTexts = {};
         this._bfFilterValues = {};
 
-        // 2. sessionStorage — garantili temizlik
-        // Bilinen anahtarları direkt sil
-        sessionStorage.removeItem('bf_bfTexts');
-        sessionStorage.removeItem('bf_bfValues');
-        // bf_ ile başlayan tüm anahtarları da sil
-        const keysToRemove = [];
-        for (let i = 0; i < sessionStorage.length; i++) {
-            const key = sessionStorage.key(i);
-            if (key && key.startsWith('bf_')) {
-                keysToRemove.push(key);
-            }
-        }
-        keysToRemove.forEach(key => sessionStorage.removeItem(key));
-        console.log('[BF] CLEARED! keys remaining:', Object.keys(sessionStorage).filter(k => k.startsWith('bf_')));
+        // 2. Window global sil
+        delete window.__bfState;
 
         // 3. Dropdown kapat
         this._closeDropdown();
 
-        // 4. Ana listeye dön — tam sayfa yenileme
+        // 4. Tam sayfa yenileme — window globals otomatik silinir
         const match = window.location.pathname.match(/\/odoo\/action-\d+/);
         window.location.href = match ? match[0] : window.location.pathname;
     }
@@ -345,22 +333,14 @@ export class ProductBarcodeListController extends ListController {
     }
 
     // ═══════════════════════════════════════════════════
-    // sessionStorage — doAction sonrası state korunur
+    // State — window global (SPA'da korunur, reload'da silinir)
     // ═══════════════════════════════════════════════════
 
-    _bfSaveState(key, data) {
-        try {
-            sessionStorage.setItem(`bf_${key}`, JSON.stringify(data));
-        } catch (e) { /* quota aşımı vb. */ }
-    }
-
-    _bfLoadState(key) {
-        try {
-            const raw = sessionStorage.getItem(`bf_${key}`);
-            return raw ? JSON.parse(raw) : null;
-        } catch (e) {
-            return null;
-        }
+    _bfSaveState() {
+        window.__bfState = {
+            texts: this._bfFilterTexts,
+            values: this._bfFilterValues,
+        };
     }
 
     // ═══════════════════════════════════════════════════
@@ -378,8 +358,7 @@ export class ProductBarcodeListController extends ListController {
         // State'i kaydet
         this._bfFilterTexts[fieldName] = text;
         this._bfFilterValues[fieldName] = values;
-        this._bfSaveState('bfTexts', this._bfFilterTexts);
-        this._bfSaveState('bfValues', this._bfFilterValues);
+        this._bfSaveState();
 
         this._closeDropdown();
 
