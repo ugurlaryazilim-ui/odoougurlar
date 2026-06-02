@@ -596,44 +596,15 @@ class BatchApiController(BarcodeApiBase):
         if batch.state == 'draft':
             batch.sudo().write({'state': 'in_progress'})
 
-        # ─── Picking bazlı anında stok düşürme ───
-        # Bu picking'in TÜM move'ları toplandıysa anında validate et
+        # ─── Picking tamamlanma kontrolü (sadece log — otomatik validate KAPALI) ───
         picking_all_collected = all(
             (m.wave_collected_qty or 0) >= m.product_uom_qty
             for m in target_picking.move_ids
         )
         picking_validated = False
-        if picking_all_collected and target_picking.state in ('assigned', 'confirmed'):
-            try:
-                # Move line'lara miktarları yaz
-                for move in target_picking.move_ids:
-                    collected = move.wave_collected_qty or 0
-                    if collected > 0:
-                        remaining = collected
-                        for ml in move.move_line_ids:
-                            ml.quantity = min(remaining, ml.reserved_uom_qty or move.product_uom_qty)
-                            remaining -= ml.quantity
-                # Picking'i doğrula → stok düşer
-                ctx = {
-                    'skip_backorder': True,
-                    'skip_immediate': True,
-                    'picking_ids_not_to_backorder': target_picking.ids,
-                }
-                result = target_picking.with_context(**ctx).button_validate()
-                if isinstance(result, dict) and result.get('res_model'):
-                    wizard_model = result['res_model']
-                    wizard_ctx = result.get('context', {})
-                    wizard = request.env[wizard_model].sudo().with_context(**wizard_ctx).create({})
-                    if hasattr(wizard, 'process'):
-                        wizard.process()
-                    elif hasattr(wizard, 'action_done'):
-                        wizard.action_done()
-                picking_validated = True
-                _logger.info("Rota toplama: %s anında validate edildi (batch: %s)",
-                            target_picking.name, batch.name)
-            except Exception as e:
-                _logger.warning("Rota toplama anında validate hatası: %s → %s",
-                              target_picking.name, e)
+        if picking_all_collected:
+            _logger.info("Rota toplama: %s tüm ürünleri toplandı (batch: %s) — manuel tamamlama bekleniyor",
+                        target_picking.name, batch.name)
 
         # İşlem logu
         try:
@@ -773,7 +744,7 @@ class BatchApiController(BarcodeApiBase):
                     failed_pickings.append(picking.name)
                     _logger.warning("Picking %s doğrulama hatası: %s", picking.name, e)
 
-        # ─── 3. Batch'i tamamla ───
+        # ─── 3. Batch'i tamamla (sadece tüm picking'ler done ise) ───
         try:
             if batch.state != 'done':
                 all_done = all(p.state == 'done' for p in batch.picking_ids)
@@ -782,17 +753,11 @@ class BatchApiController(BarcodeApiBase):
                 else:
                     not_done = [p.name for p in batch.picking_ids if p.state != 'done']
                     _logger.warning(
-                        "Batch %s: %d/%d picking done DEĞİL: %s — yine de batch done yapılıyor",
+                        "Batch %s: %d/%d picking done DEĞİL: %s — batch tamamlanmadı",
                         batch.name, len(not_done), len(batch.picking_ids), not_done)
-                    # Bazı picking'ler done olmasa bile batch'i tamamla
-                    # (tamamlanan rotalar "Devam" sekmesinde kalmasın)
-                    batch.sudo().write({'state': 'done'})
+                    failed_pickings.extend(not_done)
         except Exception as e:
-            _logger.warning("Batch %s tamamlama hatası: %s — zorla done yapılıyor", batch.name, e)
-            try:
-                batch.sudo().write({'state': 'done'})
-            except Exception as e2:
-                _logger.error("Batch %s zorla done yapılamadı: %s", batch.name, e2)
+            _logger.error("Batch %s tamamlama hatası: %s", batch.name, e)
 
         # ─── 4. Ürün chatter'larına transfer tamamlanma logu ───
         try:

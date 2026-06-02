@@ -27,7 +27,7 @@ class HepsiburadaStore(models.Model):
     ], string='Ortam', default='prod', required=True)
 
     auto_sync = fields.Boolean(string='Otomatik Senkronizasyon', default=True)
-    sync_interval = fields.Integer(string='Senkron Aralığı (dk)', default=15)
+    sync_interval = fields.Integer(string='Senkron Aralığı (dk)', default=1)
     last_sync = fields.Datetime(string='Son Senkronizasyon', readonly=True)
 
     # ─── Sıralama ve Renk ───
