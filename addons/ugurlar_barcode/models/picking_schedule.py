@@ -152,6 +152,24 @@ class PickingSchedule(models.Model):
         """Cron tarafından çağrılır — aktif zamanlamaları kontrol et."""
         schedules = self.search([('active', '=', True)])
         _logger.info("Toplama zamanlayıcı cron başladı — %d aktif plan", len(schedules))
+
+        # ─── Auto-batch'i devre dışı bırak ───
+        # Odoo'nun yerleşik auto_batch özelliği her picking'e tekli batch
+        # oluşturur → pazaryeri bazlı ayrılmış gibi görünür.
+        # Bizim kendi batch gruplama mantığımız var, bu yüzden kapatıyoruz.
+        for schedule in schedules:
+            if schedule.warehouse_id:
+                picking_types = self.env['stock.picking.type'].search([
+                    ('warehouse_id', '=', schedule.warehouse_id.id),
+                    ('code', '=', 'outgoing'),
+                ])
+                for pt in picking_types:
+                    if hasattr(pt, 'use_auto_batch') and pt.use_auto_batch:
+                        pt.sudo().write({'use_auto_batch': False})
+                        _logger.info(
+                            "Auto-batch kapatıldı: %s (depo: %s)",
+                            pt.display_name, schedule.warehouse_id.name)
+
         for schedule in schedules:
             try:
                 schedule._check_and_create_batch()
