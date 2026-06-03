@@ -81,6 +81,60 @@ def _extract_marketplace_info(sale_order):
 class PackingApiController(BarcodeApiBase):
     """Paketleme & Faturalama API'leri."""
 
+    def _safe_validate_picking(self, picking):
+        """Picking'i güvenli şekilde validate et.
+        
+        Odoo wizard'larını (SMS onay, backorder, immediate transfer) otomatik
+        işler. 0 talepli move'ları önceden iptal eder.
+        
+        Returns:
+            bool: True → picking done oldu, False → başarısız
+        """
+        if picking.state in ('done', 'cancel'):
+            return picking.state == 'done'
+
+        # 0 talepli move'ları iptal et (validation'ı engelliyor)
+        for move in picking.move_ids:
+            if move.product_uom_qty == 0 and move.state != 'cancel':
+                move._action_cancel()
+
+        ctx = {
+            'skip_backorder': True,
+            'skip_immediate': True,
+            'picking_ids_not_to_backorder': picking.ids,
+            'button_validate_picking_ids': picking.ids,
+        }
+        result = picking.with_context(**ctx).button_validate()
+
+        # Wizard döndüyse otomatik işle (max 3 iterasyon — zincirleme wizard'lar için)
+        for _ in range(3):
+            if not isinstance(result, dict) or not result.get('res_model'):
+                break
+            try:
+                wiz_model = result['res_model']
+                wiz_ctx = {**ctx, **result.get('context', {})}
+                if result.get('res_id'):
+                    wizard = request.env[wiz_model].sudo().with_context(**wiz_ctx).browse(result['res_id'])
+                else:
+                    wizard = request.env[wiz_model].sudo().with_context(**wiz_ctx).create({})
+
+                # Wizard metodunu bul ve çağır
+                if hasattr(wizard, 'dont_send_sms'):
+                    result = wizard.dont_send_sms() or True
+                elif hasattr(wizard, 'process'):
+                    result = wizard.process() or True
+                elif hasattr(wizard, 'action_done'):
+                    result = wizard.action_done() or True
+                else:
+                    _logger.warning("Bilinmeyen wizard: %s — atlanıyor", wiz_model)
+                    break
+            except Exception as e:
+                _logger.warning("Wizard %s hatası: %s", wiz_model, e)
+                break
+
+        picking.invalidate_recordset(['state'])
+        return picking.state == 'done'
+
     @http.route('/ugurlar_barcode/api/packing_batch_detail', type='json', auth='user')
     def packing_batch_detail(self, batch_name='', batch_id=0, **kw):
         """Rota numarası veya ID ile batch detayı getir."""
@@ -280,25 +334,11 @@ class PackingApiController(BarcodeApiBase):
         if picking_completed and target_picking.state not in ('done', 'cancel'):
             try:
                 target_picking.packing_done = True
-                ctx = {
-                    'skip_backorder': True,
-                    'skip_immediate': True,
-                    'picking_ids_not_to_backorder': target_picking.ids,
-                }
-                result = target_picking.with_context(**ctx).button_validate()
-                # Wizard döndüyse (backorder vb.) otomatik işle
-                if isinstance(result, dict) and result.get('res_model'):
-                    try:
-                        wizard_model = result['res_model']
-                        wizard_ctx = result.get('context', {})
-                        wizard = request.env[wizard_model].sudo().with_context(**wizard_ctx).create({})
-                        if hasattr(wizard, 'process'):
-                            wizard.process()
-                        elif hasattr(wizard, 'action_done'):
-                            wizard.action_done()
-                    except Exception as e2:
-                        _logger.warning("Packing wizard %s hatası: %s", wizard_model, e2)
-                self._trigger_nebim_sync(target_picking)
+                if self._safe_validate_picking(target_picking):
+                    self._trigger_nebim_sync(target_picking)
+                else:
+                    _logger.warning("Picking %s validate edilemedi (state=%s)",
+                                    target_picking.name, target_picking.state)
             except Exception as e:
                 _logger.error("Auto-validate/sync error for %s: %s", target_picking.name, e)
 
@@ -433,31 +473,12 @@ class PackingApiController(BarcodeApiBase):
                     continue
 
                 picking.packing_done = True
-                ctx = {
-                    'skip_backorder': True,
-                    'skip_immediate': True,
-                    'picking_ids_not_to_backorder': picking.ids,
-                }
-                res = picking.with_context(**ctx).button_validate()
-                
-                # Wizard döndüyse (backorder vb.) otomatik işle
-                if isinstance(res, dict) and res.get('res_model'):
-                    try:
-                        wizard_model = res['res_model']
-                        wizard_ctx = res.get('context', {})
-                        wizard = request.env[wizard_model].sudo().with_context(**wizard_ctx).create({})
-                        if hasattr(wizard, 'process'):
-                            wizard.process()
-                        elif hasattr(wizard, 'action_done'):
-                            wizard.action_done()
-                    except Exception as e2:
-                        _logger.warning("Packing complete wizard %s hatası: %s", wizard_model, e2)
-                
-                # Sadece DONE olanları senkronize et
-                picking.invalidate_recordset(['state'])
-                if picking.state == 'done':
+                if self._safe_validate_picking(picking):
                     self._trigger_nebim_sync(picking)
                     validated += 1
+                else:
+                    _logger.warning("Picking %s validate edilemedi (state=%s)",
+                                    picking.name, picking.state)
                 
             except Exception as e:
                 _logger.exception("Sipariş Onay/Senkronizasyon Hatası %s:", picking.name)

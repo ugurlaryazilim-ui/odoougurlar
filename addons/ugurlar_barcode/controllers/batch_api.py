@@ -728,23 +728,41 @@ class BatchApiController(BarcodeApiBase):
                     continue
 
                 try:
+                    # 0 talepli move'ları iptal et (validation'ı engelliyor)
+                    for move in picking.move_ids:
+                        if move.product_uom_qty == 0 and move.state != 'cancel':
+                            move._action_cancel()
+
                     ctx = {
                         'skip_backorder': True,
                         'skip_immediate': True,
                         'picking_ids_not_to_backorder': picking.ids,
+                        'button_validate_picking_ids': picking.ids,
                     }
                     result = picking.with_context(**ctx).button_validate()
-                    if isinstance(result, dict) and result.get('res_model'):
+                    # Wizard döndüyse otomatik işle (max 3 — zincirleme wizard'lar)
+                    for _ in range(3):
+                        if not isinstance(result, dict) or not result.get('res_model'):
+                            break
                         try:
-                            wizard_model = result['res_model']
-                            wizard_ctx = result.get('context', {})
-                            wizard = request.env[wizard_model].sudo().with_context(**wizard_ctx).create({})
-                            if hasattr(wizard, 'process'):
-                                wizard.process()
+                            wiz_model = result['res_model']
+                            wiz_ctx = {**ctx, **result.get('context', {})}
+                            if result.get('res_id'):
+                                wizard = request.env[wiz_model].sudo().with_context(**wiz_ctx).browse(result['res_id'])
+                            else:
+                                wizard = request.env[wiz_model].sudo().with_context(**wiz_ctx).create({})
+                            if hasattr(wizard, 'dont_send_sms'):
+                                result = wizard.dont_send_sms() or True
+                            elif hasattr(wizard, 'process'):
+                                result = wizard.process() or True
                             elif hasattr(wizard, 'action_done'):
-                                wizard.action_done()
+                                result = wizard.action_done() or True
+                            else:
+                                _logger.warning("Bilinmeyen wizard: %s", wiz_model)
+                                break
                         except Exception as e2:
-                            _logger.warning("Wizard %s hatası: %s", wizard_model, e2)
+                            _logger.warning("Wizard %s hatası: %s", wiz_model, e2)
+                            break
                     # Doğrulama sonrası kontrol
                     picking.invalidate_recordset(['state'])
                     if picking.state != 'done':
