@@ -292,6 +292,17 @@ class PackingApiController(BarcodeApiBase):
             for m in p.move_ids
         )
 
+        # Batch state güncelle — tüm picking'ler done ise batch'i tamamla
+        try:
+            if batch.state != 'done':
+                batch.invalidate_recordset(['picking_ids'])
+                all_done = all(p.state == 'done' for p in batch.picking_ids)
+                if all_done:
+                    batch.action_done()
+                    _logger.info("Batch %s tamamlandı (packing_scan)", batch.name)
+        except Exception as e:
+            _logger.warning("Batch %s state güncelleme hatası: %s", batch.name, e)
+
         return {
             'success': True,
             'product_name': product.display_name,
@@ -421,6 +432,17 @@ class PackingApiController(BarcodeApiBase):
             except Exception as e:
                 _logger.exception("Sipariş Onay/Senkronizasyon Hatası %s:", picking.name)
                 errors.append(f"{picking.name}: {str(e)}")
+
+        # Batch state güncelle — tüm picking'ler done ise batch'i tamamla
+        try:
+            if batch.state != 'done':
+                batch.invalidate_recordset(['picking_ids'])
+                all_done = all(p.state == 'done' for p in batch.picking_ids)
+                if all_done:
+                    batch.action_done()
+                    _logger.info("Batch %s tamamlandı (packing_complete)", batch.name)
+        except Exception as e:
+            _logger.warning("Batch %s state güncelleme hatası: %s", batch.name, e)
 
         return {
             'success': len(errors) == 0,
