@@ -90,9 +90,17 @@ class SaleOrder(models.Model):
                 if hasattr(shopify_order, 'store_id') and shopify_order.store_id:
                     store_name = shopify_order.store_id.name or ''
 
-            # Hepsiburada özel: hb_store_id Char alanı (Many2one değil)
+            # Hepsiburada özel: hb_store_id Char alanı merchant_id tutar
+            # hepsiburada.store modelinden mağaza adını çek
             if not store_name and 'hb_store_id' in order._fields and order.hb_store_id:
-                store_name = order.hb_store_id
+                if 'hepsiburada.store' in order.env:
+                    hb_store = order.env['hepsiburada.store'].sudo().search(
+                        [('merchant_id', '=', order.hb_store_id)], limit=1)
+                    if hb_store:
+                        store_name = hb_store.name
+                        seller_id = order.hb_store_id  # Merchant ID → seller_id
+                    else:
+                        store_name = order.hb_store_id  # Fallback: merchant ID göster
 
             order.marketplace_name = mp_name
             order.marketplace_order_number = order.client_order_ref if mp_name else False
