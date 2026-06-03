@@ -382,9 +382,22 @@ class PackingApiController(BarcodeApiBase):
 
         validated = 0
         errors = []
+        skipped = []
 
         for picking in batch.picking_ids:
             try:
+                # Güvenlik: Hiç toplanmamış picking'i paketleme/faturala
+                has_collected = any(
+                    (m.wave_collected_qty or 0) > 0 for m in picking.move_ids
+                )
+                if not has_collected:
+                    skipped.append(picking.name)
+                    _logger.info(
+                        "Paketleme atlandı: %s (origin: %s) — hiçbir ürün "
+                        "toplanmadı (wave_collected_qty=0)",
+                        picking.name, picking.origin)
+                    continue
+
                 if picking.state == 'done':
                     # Eğer daha önce onaylanmış ama Nebim'de takılı kalmışsa tekrar dene
                     self._trigger_nebim_sync(picking)
@@ -413,6 +426,7 @@ class PackingApiController(BarcodeApiBase):
             'success': len(errors) == 0,
             'validated': validated,
             'total': len(batch.picking_ids),
+            'skipped': len(skipped),
             'errors': errors,
             'message': f'{validated} sipariş paketlendi ve doğrulandı',
         }

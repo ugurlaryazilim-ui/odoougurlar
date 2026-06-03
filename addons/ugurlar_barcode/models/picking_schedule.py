@@ -452,6 +452,12 @@ class PickingSchedule(models.Model):
             if status == 'available':
                 try:
                     picking.action_assign()
+                    # Odoo 19: action_assign() sonrası move.quantity otomatik
+                    # product_uom_qty kadar doluyor. Bunu sıfırla — depo personeli
+                    # barkod okutarak (batch_collect_scan / packing_scan) doldurmalı.
+                    for move in picking.move_ids:
+                        if move.quantity > 0 and move.state != 'done':
+                            move.quantity = 0
                 except Exception:
                     pass
                 primary_pickings |= picking

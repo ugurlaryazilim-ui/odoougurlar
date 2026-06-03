@@ -713,8 +713,20 @@ class BatchApiController(BarcodeApiBase):
 
         # ─── 2. Picking'leri doğrula (stok aktarımı) ───
         failed_pickings = []
+        skipped_pickings = []
         for picking in batch.picking_ids:
             if picking.state in ('assigned', 'confirmed'):
+                # Güvenlik: Hiç toplanmamış picking'i validate etme
+                has_collected = any(
+                    (m.wave_collected_qty or 0) > 0 for m in picking.move_ids
+                )
+                if not has_collected:
+                    skipped_pickings.append(picking.name)
+                    _logger.info(
+                        "Picking %s (origin: %s) atlandı — hiçbir ürün toplanmadı "
+                        "(wave_collected_qty=0)", picking.name, picking.origin)
+                    continue
+
                 try:
                     ctx = {
                         'skip_backorder': True,
