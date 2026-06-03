@@ -20,11 +20,19 @@ class SaleOrder(models.Model):
     # ─── Pazaryeri Bilgileri (Computed) ────────────────────
     marketplace_name = fields.Char(
         string='Pazaryeri', compute='_compute_marketplace_info',
-        readonly=True,
+        store=True, readonly=True,
     )
     marketplace_order_number = fields.Char(
         string='Pazaryeri Sipariş No', compute='_compute_marketplace_info',
-        readonly=True,
+        store=True, readonly=True,
+    )
+    marketplace_store_name = fields.Char(
+        string='Mağaza Adı', compute='_compute_marketplace_info',
+        store=True, readonly=True,
+    )
+    marketplace_seller_id = fields.Char(
+        string='Seller ID', compute='_compute_marketplace_info',
+        store=True, readonly=True,
     )
     picking_batch_names = fields.Char(
         string='Rota', readonly=True, copy=False,
@@ -44,16 +52,55 @@ class SaleOrder(models.Model):
         ('shopify_order_id', 'Shopify'),
     ]
 
-    @api.depends('client_order_ref')
+    # store_field → sale.order'daki Many2one alan, seller_field → store modeldeki seller alanı
+    _MP_STORE_FIELDS = [
+        ('trendyol_store_id', 'seller_id', 'Trendyol'),
+        ('n11_store_id', None, 'N11'),
+        ('amazon_store_id', None, 'Amazon'),
+        ('pazarama_store_id', None, 'Pazarama'),
+        ('flo_store_id', 'flo_seller_id', 'Flo'),
+        ('idefix_store_id', None, 'Idefix'),
+        ('pttavm_store_id', None, 'PttAvm'),
+    ]
+
+    @api.depends('client_order_ref',
+                 'trendyol_order_id', 'hb_order_id', 'amazon_order_id',
+                 'pazarama_order_id', 'n11_order_id', 'flo_order_id',
+                 'idefix_order_id', 'pttavm_order_id', 'shopify_order_id')
     def _compute_marketplace_info(self):
         for order in self:
             mp_name = False
+            store_name = False
+            seller_id = False
+
             for field, name in self._MP_FIELDS:
                 if field in order._fields and order[field]:
                     mp_name = name
                     break
+
+            # Mağaza adı ve seller ID — sale.order üzerindeki store Many2one'dan
+            for store_field, seller_field, mp in self._MP_STORE_FIELDS:
+                if store_field in order._fields and order[store_field]:
+                    store = order[store_field]
+                    store_name = store.name or ''
+                    if seller_field and hasattr(store, seller_field):
+                        seller_id = getattr(store, seller_field, '') or ''
+                    break
+
+            # Shopify özel: sale.order → shopify_order_id → store_id
+            if not store_name and 'shopify_order_id' in order._fields and order.shopify_order_id:
+                shopify_order = order.shopify_order_id
+                if hasattr(shopify_order, 'store_id') and shopify_order.store_id:
+                    store_name = shopify_order.store_id.name or ''
+
+            # Hepsiburada özel: hb_store_id Char alanı (Many2one değil)
+            if not store_name and 'hb_store_id' in order._fields and order.hb_store_id:
+                store_name = order.hb_store_id
+
             order.marketplace_name = mp_name
             order.marketplace_order_number = order.client_order_ref if mp_name else False
+            order.marketplace_store_name = store_name
+            order.marketplace_seller_id = seller_id
 
     def action_view_earchive_invoice(self):
         """Siparişin e-arşiv faturasını popup pencerede gösterir.

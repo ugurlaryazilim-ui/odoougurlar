@@ -63,6 +63,8 @@
                 <field name="marketplace_name" optional="show" string="Pazaryeri"/>
                 <field name="marketplace_order_number" optional="show" string="Sipariş No"
                        widget="CopyClipboardChar"/>
+                <field name="marketplace_store_name" optional="show" string="Mağaza Adı"/>
+                <field name="marketplace_seller_id" optional="show" string="Seller ID"/>
             </xpath>
         </field>
     </record>
@@ -80,6 +82,8 @@
                 <field name="marketplace_name" optional="show" string="Pazaryeri"/>
                 <field name="marketplace_order_number" optional="show" string="Sipariş No"
                        widget="CopyClipboardChar"/>
+                <field name="marketplace_store_name" optional="show" string="Mağaza Adı"/>
+                <field name="marketplace_seller_id" optional="show" string="Seller ID"/>
             </xpath>
         </field>
     </record>
