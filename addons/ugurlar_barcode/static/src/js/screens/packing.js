@@ -683,10 +683,28 @@ export class PackingScreen extends Component {
     // ─── ETİKET BAS ─────────────────────────────
     async printLabel(pickingId) {
         try {
-            const data = await BarcodeService.call('/ugurlar_barcode/api/packing_label_data', {
+            let data = await BarcodeService.call('/ugurlar_barcode/api/packing_label_data', {
                 picking_id: pickingId,
             });
             if (data.error) { this.state.error = data.error; return; }
+
+            // Fatura numarası kontrolü — Nebim API yavaş cevap verebilir
+            if (!data.nebim_invoice_no) {
+                // 3 saniye bekleyip tekrar dene (Nebim API'nin cevap vermesi için)
+                await new Promise(r => setTimeout(r, 3000));
+                const retry = await BarcodeService.call('/ugurlar_barcode/api/packing_label_data', {
+                    picking_id: pickingId,
+                });
+                if (!retry.error && retry.nebim_invoice_no) {
+                    data = retry;
+                }
+            }
+
+            // Fatura numarası hâlâ yoksa kullanıcıya uyarı göster
+            if (!data.nebim_invoice_no) {
+                this.state.scanMsg = '⚠️ Fatura numarası henüz oluşmadı! Nebim bağlantısını kontrol edin. Etiket fatura numarası olmadan basılacak.';
+                this.state.scanOk = false;
+            }
 
             let template = null;
             try {
