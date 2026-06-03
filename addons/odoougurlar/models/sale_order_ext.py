@@ -20,19 +20,19 @@ class SaleOrder(models.Model):
     # ─── Pazaryeri Bilgileri (Computed) ────────────────────
     marketplace_name = fields.Char(
         string='Pazaryeri', compute='_compute_marketplace_info',
-        store=True, readonly=True,
+        readonly=True,
     )
     marketplace_order_number = fields.Char(
         string='Pazaryeri Sipariş No', compute='_compute_marketplace_info',
-        store=True, readonly=True,
+        readonly=True,
     )
     marketplace_store_name = fields.Char(
         string='Mağaza Adı', compute='_compute_marketplace_info',
-        store=True, readonly=True,
+        readonly=True,
     )
     marketplace_seller_id = fields.Char(
         string='Seller ID', compute='_compute_marketplace_info',
-        store=True, readonly=True,
+        readonly=True,
     )
     picking_batch_names = fields.Char(
         string='Rota', readonly=True, copy=False,
@@ -63,10 +63,7 @@ class SaleOrder(models.Model):
         ('pttavm_store_id', None, 'PttAvm'),
     ]
 
-    @api.depends('client_order_ref',
-                 'trendyol_order_id', 'hb_order_id', 'amazon_order_id',
-                 'pazarama_order_id', 'n11_order_id', 'flo_order_id',
-                 'idefix_order_id', 'pttavm_order_id', 'shopify_order_id')
+    @api.depends('client_order_ref')
     def _compute_marketplace_info(self):
         for order in self:
             mp_name = False
