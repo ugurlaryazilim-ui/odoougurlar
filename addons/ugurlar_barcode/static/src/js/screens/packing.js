@@ -700,10 +700,12 @@ export class PackingScreen extends Component {
                 }
             }
 
-            // Fatura numarası hâlâ yoksa kullanıcıya uyarı göster
+            // Fatura numarası hâlâ yoksa kullanıcıya sesli ve görsel uyarı göster
             if (!data.nebim_invoice_no) {
                 this.state.scanMsg = '⚠️ Fatura numarası henüz oluşmadı! Nebim bağlantısını kontrol edin. Etiket fatura numarası olmadan basılacak.';
                 this.state.scanOk = false;
+                speak('Dikkat! Fatura numarası oluşmadı. Nebim bağlantısını kontrol edin.');
+                vibrateError();
             }
 
             let template = null;
