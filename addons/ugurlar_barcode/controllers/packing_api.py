@@ -280,7 +280,24 @@ class PackingApiController(BarcodeApiBase):
         if picking_completed and target_picking.state not in ('done', 'cancel'):
             try:
                 target_picking.packing_done = True
-                target_picking.button_validate()
+                ctx = {
+                    'skip_backorder': True,
+                    'skip_immediate': True,
+                    'picking_ids_not_to_backorder': target_picking.ids,
+                }
+                result = target_picking.with_context(**ctx).button_validate()
+                # Wizard döndüyse (backorder vb.) otomatik işle
+                if isinstance(result, dict) and result.get('res_model'):
+                    try:
+                        wizard_model = result['res_model']
+                        wizard_ctx = result.get('context', {})
+                        wizard = request.env[wizard_model].sudo().with_context(**wizard_ctx).create({})
+                        if hasattr(wizard, 'process'):
+                            wizard.process()
+                        elif hasattr(wizard, 'action_done'):
+                            wizard.action_done()
+                    except Exception as e2:
+                        _logger.warning("Packing wizard %s hatası: %s", wizard_model, e2)
                 self._trigger_nebim_sync(target_picking)
             except Exception as e:
                 _logger.error("Auto-validate/sync error for %s: %s", target_picking.name, e)
@@ -416,15 +433,28 @@ class PackingApiController(BarcodeApiBase):
                     continue
 
                 picking.packing_done = True
-                # API'den tekrar gelirse button_validate çağır
-                res = picking.button_validate()
+                ctx = {
+                    'skip_backorder': True,
+                    'skip_immediate': True,
+                    'picking_ids_not_to_backorder': picking.ids,
+                }
+                res = picking.with_context(**ctx).button_validate()
                 
-                # Eğer res bir Dict dönerse (örneğin Backorder Wizard) hata değildir ama bitmemiştir
-                if isinstance(res, dict):
-                    # Backorder popup API tarafında çalıştırılamaz, skip.
-                    _logger.warning("Picking was partially validated via Backorder Wizard return: %s", picking.name)
+                # Wizard döndüyse (backorder vb.) otomatik işle
+                if isinstance(res, dict) and res.get('res_model'):
+                    try:
+                        wizard_model = res['res_model']
+                        wizard_ctx = res.get('context', {})
+                        wizard = request.env[wizard_model].sudo().with_context(**wizard_ctx).create({})
+                        if hasattr(wizard, 'process'):
+                            wizard.process()
+                        elif hasattr(wizard, 'action_done'):
+                            wizard.action_done()
+                    except Exception as e2:
+                        _logger.warning("Packing complete wizard %s hatası: %s", wizard_model, e2)
                 
                 # Sadece DONE olanları senkronize et
+                picking.invalidate_recordset(['state'])
                 if picking.state == 'done':
                     self._trigger_nebim_sync(picking)
                     validated += 1
