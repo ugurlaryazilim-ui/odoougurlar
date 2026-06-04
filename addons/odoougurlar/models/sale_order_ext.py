@@ -107,6 +107,35 @@ class SaleOrder(models.Model):
             order.marketplace_store_name = store_name
             order.marketplace_seller_id = seller_id
 
+    def action_reprint_cargo_label(self):
+        """Siparişin kargo etiketini yeniden yazdır (PDF olarak yeni sekmede aç)."""
+        self.ensure_one()
+
+        # Siparişe ait picking'i bul (outgoing, done öncelikli)
+        picking = self.env['stock.picking'].sudo().search([
+            ('origin', '=', self.name),
+            ('picking_type_code', '=', 'outgoing'),
+        ], order='state desc, id desc', limit=1)
+
+        if not picking:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Uyarı',
+                    'message': f'{self.name} siparişine ait sevkiyat bulunamadı.',
+                    'type': 'warning',
+                    'sticky': False,
+                },
+            }
+
+        # cargo_label_pdf endpoint'ine yönlendir (yeni sekmede açılır)
+        return {
+            'type': 'ir.actions.act_url',
+            'url': f'/ugurlar_barcode/api/cargo_label_pdf?picking_id={picking.id}',
+            'target': 'new',
+        }
+
     def action_view_earchive_invoice(self):
         """Siparişin e-arşiv faturasını popup pencerede gösterir.
 

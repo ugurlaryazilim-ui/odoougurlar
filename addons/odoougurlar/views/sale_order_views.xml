@@ -11,6 +11,10 @@
                         string="📄 Fatura Görüntüle"
                         class="btn-info"
                         invisible="invoice_count == 0"/>
+                <button name="action_reprint_cargo_label" type="object"
+                        string="🏷️ Yeniden Etiket Yazdır"
+                        class="btn-warning"
+                        invisible="delivery_count == 0"/>
             </xpath>
             <xpath expr="//notebook" position="inside">
                 <page string="Nebim Entegrasyonu" name="nebim_integration">
