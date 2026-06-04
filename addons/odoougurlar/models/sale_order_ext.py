@@ -108,7 +108,7 @@ class SaleOrder(models.Model):
             order.marketplace_seller_id = seller_id
 
     def action_reprint_cargo_label(self):
-        """Siparişin kargo etiketini yeniden yazdır (PDF olarak yeni sekmede aç)."""
+        """Siparişin kargo etiketini yeniden yazdır (popup pencerede PDF aç)."""
         self.ensure_one()
 
         # Siparişe ait picking'i bul (outgoing, done öncelikli)
@@ -129,11 +129,15 @@ class SaleOrder(models.Model):
                 },
             }
 
-        # cargo_label_pdf endpoint'ine yönlendir (yeni sekmede açılır)
+        # Popup pencerede PDF etiket aç (earchive_viewer ile aynı pattern)
         return {
-            'type': 'ir.actions.act_url',
-            'url': f'/ugurlar_barcode/api/cargo_label_pdf?picking_id={picking.id}',
-            'target': 'new',
+            'type': 'ir.actions.client',
+            'tag': 'earchive_viewer',
+            'name': 'Kargo Etiketi',
+            'params': {
+                'invoice_url': f'/ugurlar_barcode/api/cargo_label_pdf?picking_id={picking.id}',
+                'einvoice_number': f'{self.name} — Kargo Etiketi',
+            },
         }
 
     def action_view_earchive_invoice(self):
