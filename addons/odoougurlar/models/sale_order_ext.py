@@ -129,14 +129,13 @@ class SaleOrder(models.Model):
                 },
             }
 
-        # Popup pencerede PDF etiket aç (earchive_viewer ile aynı pattern)
+        # Tarayıcıda JS ile render + window.print() (packing.js ile birebir aynı)
         return {
             'type': 'ir.actions.client',
-            'tag': 'earchive_viewer',
+            'tag': 'cargo_label_reprint',
             'name': 'Kargo Etiketi',
             'params': {
-                'invoice_url': f'/ugurlar_barcode/api/cargo_label_pdf?picking_id={picking.id}',
-                'einvoice_number': f'{self.name} — Kargo Etiketi',
+                'picking_id': picking.id,
             },
         }
 
