@@ -263,6 +263,7 @@
     bottom: 0;
     padding: 16px 0;
     background: var(--tailor-bg);
+    z-index: 10;
 }
 
 /* ── Filters ── */
@@ -316,9 +317,9 @@
 
 /* ── Item Container (scrollable) ── */
 .tailor-items {
-    max-height: calc(100vh - 260px);
     overflow-y: auto;
     padding-right: 4px;
+    padding-bottom: 80px;
 }
 
 .tailor-order-actions {
