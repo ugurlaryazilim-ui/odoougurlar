@@ -259,11 +259,8 @@
 
 /* ── Submit Bar ── */
 .tailor-submit-bar {
-    position: sticky;
-    bottom: 0;
     padding: 16px 0;
-    background: var(--tailor-bg);
-    z-index: 10;
+    margin-top: 12px;
 }
 
 /* ── Filters ── */
@@ -317,9 +314,7 @@
 
 /* ── Item Container (scrollable) ── */
 .tailor-items {
-    overflow-y: auto;
     padding-right: 4px;
-    padding-bottom: 80px;
 }
 
 .tailor-order-actions {
