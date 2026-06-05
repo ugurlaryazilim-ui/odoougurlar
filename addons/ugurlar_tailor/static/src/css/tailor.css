@@ -258,6 +258,25 @@
 
 .tailor-service-check:hover { background: #f1f5f9; }
 
+/* ── Hint (terzi secilmeden gosterilen mesaj) ── */
+.tailor-hint {
+    font-size: 13px;
+    color: var(--tailor-text-secondary);
+    font-style: italic;
+    padding: 8px 0;
+    text-align: center;
+}
+
+/* ── Fade-in animasyonu ── */
+@keyframes tailorFadeIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.tailor-fade-in {
+    animation: tailorFadeIn 0.3s ease-out;
+}
+
 .tailor-item-total {
     text-align: right;
     font-size: 15px;

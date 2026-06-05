@@ -98,8 +98,13 @@
                                 </select>
                             </div>
 
-                            <!-- Hizmet Secimi -->
-                            <div class="tailor-item-services">
+                            <!-- Terzi secilmediyse bilgi mesaji -->
+                            <div t-if="!state.itemSelections[item.barcode]?.tailor_id" class="tailor-hint">
+                                Hizmetleri gormek icin terzi seciniz
+                            </div>
+
+                            <!-- Hizmet Secimi — sadece terzi secilince gorunur -->
+                            <div t-if="state.itemSelections[item.barcode]?.tailor_id" class="tailor-item-services tailor-fade-in">
                                 <label>Hizmetler:</label>
                                 <div class="tailor-service-grid">
                                     <t t-foreach="state.services" t-as="svc" t-key="svc.id">
@@ -116,15 +121,15 @@
                                 </div>
                             </div>
 
-                            <!-- Not -->
-                            <div class="tailor-item-row">
+                            <!-- Not — sadece terzi secilince gorunur -->
+                            <div t-if="state.itemSelections[item.barcode]?.tailor_id" class="tailor-item-row tailor-fade-in">
                                 <input type="text" class="tailor-input tailor-input-sm"
                                        placeholder="Not ekleyin..."
                                        t-on-change="(ev) =&gt; this.onNotesChange(item.barcode, ev)"/>
                             </div>
 
-                            <!-- Toplam -->
-                            <div class="tailor-item-total">
+                            <!-- Toplam — sadece terzi secilince gorunur -->
+                            <div t-if="state.itemSelections[item.barcode]?.tailor_id" class="tailor-item-total tailor-fade-in">
                                 Toplam: <strong><t t-esc="this.getItemTotal(item.barcode).toFixed(2)"/> TL</strong>
                             </div>
                         </div>
