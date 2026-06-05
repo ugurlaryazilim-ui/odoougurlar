@@ -19,13 +19,20 @@
     --tailor-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
+/* Odoo action container override — allow scroll */
+.o_action_manager .o_action:has(.tailor-app),
+.o_action_manager:has(.tailor-app) {
+    overflow: auto !important;
+    -webkit-overflow-scrolling: touch;
+    height: 100% !important;
+}
+
 .tailor-app {
     background: var(--tailor-bg);
-    height: 100vh;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+    min-height: 100%;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     color: var(--tailor-text);
+    padding-bottom: 24px;
 }
 
 /* ── Screen ── */
