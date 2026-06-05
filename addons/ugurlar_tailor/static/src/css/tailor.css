@@ -21,7 +21,9 @@
 
 .tailor-app {
     background: var(--tailor-bg);
-    min-height: 100vh;
+    height: 100vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     color: var(--tailor-text);
 }
@@ -259,7 +261,7 @@
 
 /* ── Submit Bar ── */
 .tailor-submit-bar {
-    padding: 16px 0;
+    padding: 16px 0 32px;
     margin-top: 12px;
 }
 
