@@ -87,6 +87,22 @@ class TrendyolOrderSync(models.Model):
                         break
 
                     for package in content:
+                        # ── Client-side orderDate filtresi ──
+                        # Trendyol API startDate parametresi PackageLastModifiedDate'e
+                        # göre filtreliyor, orderDate'e göre değil. Bu yüzden eski
+                        # siparişler paketin son güncellenme tarihine göre gelebiliyor.
+                        # Burada gerçek sipariş tarihini kontrol ediyoruz.
+                        if start_date:
+                            order_date_ts = package.get('orderDate', 0)
+                            if order_date_ts:
+                                order_dt = datetime.fromtimestamp(
+                                    order_date_ts / 1000).replace(microsecond=0)
+                                if order_dt < start_date:
+                                    _logger.debug(
+                                        "Eski sipariş atlandı (orderDate=%s < startDate=%s): %s",
+                                        order_dt, start_date, package.get('orderNumber'))
+                                    continue
+
                         try:
                             with self.env.cr.savepoint():
                                 res = self._process_package(package, store)

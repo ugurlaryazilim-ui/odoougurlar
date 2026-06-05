@@ -236,8 +236,17 @@ class TrendyolOrder(models.Model):
         status = (data.get('status') or data.get('shipmentPackageStatus', '')).lower()
 
         # Tarih dönüşümü (timestamp ms → UTC datetime)
-        order_date_ts = data.get('orderDate', 0)
-        order_date = datetime.fromtimestamp(order_date_ts / 1000, tz=timezone.utc).replace(tzinfo=None) if order_date_ts else fields.Datetime.now()
+        # Farklı API yanıtlarında tarih farklı key'lerle gelebilir
+        order_date_ts = (data.get('orderDate')
+                         or data.get('orderCreatedDate')
+                         or data.get('createdDate', 0))
+        if order_date_ts:
+            order_date = datetime.fromtimestamp(order_date_ts / 1000, tz=timezone.utc).replace(tzinfo=None)
+        else:
+            order_date = fields.Datetime.now()
+            _logger.warning(
+                "Trendyol sipariş tarihi bulunamadı, şimdiki zaman kullanılıyor: %s",
+                data.get('orderNumber', '?'))
 
         # Müşteri bilgileri
         customer_name = f"{data.get('customerFirstName', '')} {data.get('customerLastName', '')}".strip()
