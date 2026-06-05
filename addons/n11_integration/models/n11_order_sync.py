@@ -50,6 +50,19 @@ class N11OrderSync(models.Model):
                 break
                 
             for order_json in content:
+                # ── Client-side tarih filtresi ──
+                order_date_ts = order_json.get('orderDate')
+                if order_date_ts:
+                    try:
+                        order_dt = datetime.utcfromtimestamp(int(order_date_ts))
+                        if order_dt < start_date:
+                            _logger.debug(
+                                "Eski sipariş atlandı (orderDate=%s < startDate=%s): %s",
+                                order_dt, start_date, order_json.get('orderNumber', '?'),
+                            )
+                            continue
+                    except Exception:
+                        pass
                 try:
                     with self.env.cr.savepoint():
                         action = self._process_order_json(order_json, store)

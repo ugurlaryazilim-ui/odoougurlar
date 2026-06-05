@@ -62,6 +62,19 @@ class IdefixOrderSync(models.Model):
                 break
                 
             for order_json in data_list:
+                # ── Client-side tarih filtresi ──
+                _od_str = order_json.get('orderDate') or order_json.get('createdAt')
+                if _od_str:
+                    try:
+                        order_dt = datetime.strptime(_od_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
+                        if order_dt < start_date:
+                            _logger.debug(
+                                "Eski sipariş atlandı (orderDate=%s < startDate=%s): %s",
+                                order_dt, start_date, order_json.get('orderNumber', '?'),
+                            )
+                            continue
+                    except Exception:
+                        pass
                 try:
                     with self.env.cr.savepoint():
                         action = self._process_order_json(order_json, store)

@@ -246,7 +246,22 @@ class HepsiburadaOrderSync(models.AbstractModel):
         error_count = 0
         log_msgs = []
 
+        day_limit = store.order_day_range if store.order_day_range else 14
+        cutoff_date = datetime.utcnow() - timedelta(days=day_limit)
         for order_no, line_items in orders_dict.items():
+            # ── Client-side tarih filtresi ──
+            first_pkg = line_items[0] if line_items else {}
+            order_date_str = first_pkg.get('orderDate')
+            if order_date_str:
+                try:
+                    order_dt = datetime.strptime(order_date_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
+                    if order_dt < cutoff_date:
+                        _logger.debug("Eski sipariş atlandı (orderDate=%s < startDate=%s): %s",
+                                      order_dt, cutoff_date, order_no)
+                        continue
+                except Exception:
+                    pass
+
             try:
                 with self.env.cr.savepoint():
                     self._create_or_update_order(order_no, line_items, store)

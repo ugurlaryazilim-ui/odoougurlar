@@ -66,6 +66,19 @@ class PttavmOrderSync(models.Model):
         _logger.info("PttAVM [%s] %d sipariş bulundu", store.name, len(data_list))
             
         for order_json in data_list:
+            # ── Client-side tarih filtresi ──
+            islem_tarihi = order_json.get('islemTarihi')
+            if islem_tarihi:
+                try:
+                    order_dt = datetime.strptime(islem_tarihi[:19], '%Y-%m-%dT%H:%M:%S')
+                    if order_dt < start_date:
+                        _logger.debug("Eski sipariş atlandı (orderDate=%s < startDate=%s): %s",
+                                      order_dt, start_date,
+                                      order_json.get('orderNumber') or order_json.get('id', '?'))
+                        continue
+                except Exception:
+                    pass
+
             try:
                 with self.env.cr.savepoint():
                     action = self._process_order_json(order_json, store)

@@ -65,6 +65,21 @@ class FloOrderSync(models.Model):
                 break
                 
             for order_json in content:
+                # ── Client-side tarih filtresi ──
+                order_date_ts = order_json.get('orderDate')
+                if order_date_ts:
+                    try:
+                        # UNIX timestamp → UTC → Türkiye saati (start_date Türkiye saatinde)
+                        _utc_dt = datetime.utcfromtimestamp(int(order_date_ts))
+                        order_dt = pytz.UTC.localize(_utc_dt).astimezone(IST).replace(tzinfo=None)
+                        if order_dt < start_date:
+                            _logger.debug(
+                                "Eski sipariş atlandı (orderDate=%s < startDate=%s): %s",
+                                order_dt, start_date, order_json.get('orderNumber', '?'),
+                            )
+                            continue
+                    except Exception:
+                        pass
                 try:
                     with self.env.cr.savepoint():
                         action = self._process_order_json(order_json, store)

@@ -139,7 +139,20 @@ class AmazonOrderSync(models.Model):
                 if not orders:
                     break
                     
+                start_dt = datetime.utcnow() - timedelta(days=days)
                 for order in orders:
+                    # ── Client-side tarih filtresi ──
+                    purchase_date = order.get('PurchaseDate')
+                    if purchase_date:
+                        try:
+                            order_dt = date_parser.parse(purchase_date).replace(tzinfo=None)
+                            if order_dt < start_dt:
+                                _logger.debug("Eski sipariş atlandı (orderDate=%s < startDate=%s): %s",
+                                              order_dt, start_dt, order.get('AmazonOrderId', '?'))
+                                continue
+                        except Exception:
+                            pass
+
                     try:
                         with self.env.cr.savepoint():
                             p, s, e, m = self._process_single_order(order, session, auth, base_url)

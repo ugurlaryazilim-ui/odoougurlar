@@ -56,6 +56,22 @@ class ShopifyOrderSync(models.Model):
         error_count = 0
 
         for order_json in orders_data:
+            # ── Client-side tarih filtresi ──
+            created_at_raw = order_json.get('created_at')
+            if created_at_raw:
+                try:
+                    naive_str = created_at_raw[:19].replace('T', ' ')
+                    naive_dt = datetime.strptime(naive_str, '%Y-%m-%d %H:%M:%S')
+                    turkey_dt = IST.localize(naive_dt)
+                    order_dt = turkey_dt.astimezone(pytz.UTC).replace(tzinfo=None)
+                    if order_dt < start_date:
+                        _logger.debug("Eski sipariş atlandı (orderDate=%s < startDate=%s): %s",
+                                      order_dt, start_date,
+                                      order_json.get('name') or order_json.get('order_number', '?'))
+                        continue
+                except Exception:
+                    pass
+
             try:
                 status = self._process_order_json(order_json, store)
                 if status == 'created':
