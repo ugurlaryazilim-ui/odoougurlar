@@ -36,16 +36,24 @@
     <t t-name="ugurlar_tailor.TailorNewOrder">
         <div class="tailor-screen tailor-new-order">
             <div class="tailor-toolbar">
-                <button class="tailor-btn tailor-btn-back" t-on-click="goBack">Geri</button>
+                <button class="tailor-btn tailor-btn-back" t-on-click="goBack">&#8592; Geri</button>
                 <h2 t-if="state.step === 1">Fatura Ara</h2>
                 <h2 t-if="state.step === 2">Urun ve Hizmet Sec</h2>
+                <h2 t-if="state.step === 3">Siparis Olusturuldu</h2>
+
+                <!-- Step Indicator -->
+                <div class="tailor-step-indicator" t-if="state.step &lt;= 2">
+                    <div t-att-class="'tailor-step-dot ' + (state.step === 1 ? 'active' : 'completed')"/>
+                    <div t-att-class="'tailor-step-line ' + (state.step >= 2 ? 'completed' : '')"/>
+                    <div t-att-class="'tailor-step-dot ' + (state.step === 2 ? 'active' : '')"/>
+                </div>
             </div>
 
             <!-- Step 1: Fatura Arama -->
             <div t-if="state.step === 1" class="tailor-step">
                 <div class="tailor-search-box">
                     <input type="text" class="tailor-input tailor-barcode-input"
-                           placeholder="Fatura numarasi giriniz veya barkod okutunuz..."
+                           placeholder="Fatura no veya barkod..."
                            t-model="state.searchQuery"
                            t-on-keydown="onSearchKeydown"
                            t-ref="searchInput"/>
@@ -55,8 +63,8 @@
                     </button>
                     <button class="tailor-btn tailor-btn-primary" t-on-click="searchInvoice"
                             t-att-disabled="state.searching">
-                        <t t-if="state.searching">Araniyor...</t>
-                        <t t-else="">Ara</t>
+                        <t t-if="state.searching"><span class="tailor-spinner"/> </t>
+                        <t t-if="!state.searching">Ara</t>
                     </button>
                 </div>
                 <div t-if="state.invoices.length &gt; 1" class="tailor-invoice-list">
@@ -74,14 +82,23 @@
             <!-- Step 2: Urun + Hizmet Secimi -->
             <div t-if="state.step === 2" class="tailor-step">
                 <div class="tailor-invoice-info">
-                    <strong>Fatura:</strong> <t t-esc="state.selectedInvoice.invoice_no"/> |
-                    <strong>Musteri:</strong> <t t-esc="state.selectedInvoice.customer_name"/> |
-                    <strong>Satis Pers.:</strong> <t t-esc="state.selectedInvoice.sales_person || '-'"/>
+                    <div class="tailor-info-row">
+                        <span class="tailor-info-label">Fatura:</span>
+                        <span class="tailor-info-value" t-esc="state.selectedInvoice.invoice_no"/>
+                    </div>
+                    <div class="tailor-info-row">
+                        <span class="tailor-info-label">Musteri:</span>
+                        <span class="tailor-info-value" t-esc="state.selectedInvoice.customer_name"/>
+                    </div>
+                    <div class="tailor-info-row">
+                        <span class="tailor-info-label">Satis Pers.:</span>
+                        <span class="tailor-info-value" t-esc="state.selectedInvoice.sales_person || '-'"/>
+                    </div>
                 </div>
 
                 <div class="tailor-items">
                     <t t-foreach="state.selectedInvoice.items || []" t-as="item" t-key="item.barcode">
-                        <div class="tailor-item-card">
+                        <div t-att-class="'tailor-item-card' + (state.itemSelections[item.barcode]?.tailor_id ? ' has-tailor' : '')">
                             <div class="tailor-item-header">
                                 <strong><t t-esc="item.product_code || item.barcode"/></strong>
                                 <span class="tailor-item-barcode">Barkod: <t t-esc="item.barcode"/></span>
@@ -140,9 +157,26 @@
                     <button class="tailor-btn tailor-btn-success tailor-btn-lg"
                             t-on-click="submitOrders"
                             t-att-disabled="state.submitting">
-                        <t t-if="state.submitting">Olusturuluyor...</t>
+                        <t t-if="state.submitting"><span class="tailor-spinner"/> Olusturuluyor...</t>
                         <t t-else="">Siparisleri Olustur</t>
                     </button>
+                </div>
+            </div>
+
+            <!-- Step 3: Basari Ekrani -->
+            <div t-if="state.step === 3" class="tailor-step">
+                <div class="tailor-success-screen">
+                    <div class="tailor-success-icon">&#10004;&#65039;</div>
+                    <h3>Siparisler Olusturuldu!</h3>
+                    <p><t t-esc="state.createdCount"/> adet siparis basariyla olusturuldu ve etiketler yazdirildi.</p>
+                    <div class="tailor-success-actions">
+                        <button class="tailor-btn tailor-btn-primary tailor-btn-lg" t-on-click="() =&gt; { this.state.step = 1; this.state.searchQuery = ''; this.state.invoices = []; this.state.selectedInvoice = null; }">
+                            Yeni Siparis Olustur
+                        </button>
+                        <button class="tailor-btn tailor-btn-back tailor-btn-lg" t-on-click="() =&gt; this.props.onNavigate('main_menu')">
+                            &#8592; Ana Menu
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -152,7 +186,7 @@
     <t t-name="ugurlar_tailor.TailorOrderList">
         <div class="tailor-screen tailor-order-list">
             <div class="tailor-toolbar">
-                <button class="tailor-btn tailor-btn-back" t-on-click="goBack">Geri</button>
+                <button class="tailor-btn tailor-btn-back" t-on-click="goBack">&#8592; Geri</button>
                 <h2>Siparis Listesi</h2>
             </div>
 
@@ -170,7 +204,10 @@
             </div>
 
             <!-- Loading -->
-            <div t-if="state.loading" class="tailor-loading">Yukleniyor...</div>
+            <div t-if="state.loading" class="tailor-loading">
+                <div class="tailor-spinner tailor-spinner-lg"/>
+                <span>Yukleniyor...</span>
+            </div>
 
             <!-- Liste -->
             <div t-if="!state.loading" class="tailor-orders">
@@ -189,6 +226,9 @@
                             <div><t t-esc="order.customer_name"/></div>
                             <div t-if="order.tailor_id"><t t-esc="order.tailor_id[1]"/></div>
                             <div><t t-esc="order.total_price?.toFixed(2)"/> TL</div>
+                            <div t-if="order.create_date" class="tailor-order-date">
+                                <t t-esc="order.create_date"/>
+                            </div>
                             <div t-if="order.services and order.services.length" class="tailor-order-services">
                                 <t t-foreach="order.services" t-as="s" t-key="s.id">
                                     <span class="tailor-service-tag" t-esc="s.service_name"/>
@@ -210,13 +250,13 @@
                 </t>
             </div>
 
-            <!-- Pagination -->
+            <!-- Pagination (Professional) -->
             <div class="tailor-pagination" t-if="state.total &gt; state.limit">
                 <button class="tailor-btn tailor-btn-sm" t-on-click="prevPage"
-                        t-att-disabled="state.page &lt;= 1">Onceki</button>
-                <span><t t-esc="state.page"/> / <t t-esc="totalPages"/></span>
+                        t-att-disabled="state.page &lt;= 1">&#8592; Onceki</button>
+                <span class="tailor-page-info"><t t-esc="state.page"/> / <t t-esc="totalPages"/></span>
                 <button class="tailor-btn tailor-btn-sm" t-on-click="nextPage"
-                        t-att-disabled="state.page &gt;= totalPages">Sonraki</button>
+                        t-att-disabled="state.page &gt;= totalPages">Sonraki &#8594;</button>
             </div>
         </div>
     </t>

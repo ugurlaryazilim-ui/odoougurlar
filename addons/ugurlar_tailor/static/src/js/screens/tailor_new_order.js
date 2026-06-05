@@ -3,6 +3,7 @@
 import { Component, useState, onMounted, onWillUnmount, useRef } from "@odoo/owl";
 import { useService } from "@web/core/utils/hooks";
 import { rpc } from "@web/core/network/rpc";
+import { _t } from "@web/core/l10n/translation";
 import { printTailorLabel, printMultipleTailorLabels } from "../label_print";
 
 export class TailorNewOrder extends Component {
@@ -24,6 +25,7 @@ export class TailorNewOrder extends Component {
             tailors: [],
             itemSelections: {},
             submitting: false,
+            createdCount: 0,
         });
 
         this.searchInputRef = useRef("searchInput");
@@ -53,7 +55,7 @@ export class TailorNewOrder extends Component {
         try {
             this.state.services = await rpc("/ugurlar_tailor/services", {});
         } catch (e) {
-            this.notification.add("Hizmetler yuklenemedi: " + e.message, { type: "danger" });
+            this.notification.add(_t("Hizmetler yuklenemedi: %(error)s", { error: e.message }), { type: "danger" });
         }
     }
 
@@ -61,14 +63,14 @@ export class TailorNewOrder extends Component {
         try {
             this.state.tailors = await rpc("/ugurlar_tailor/tailors", {});
         } catch (e) {
-            this.notification.add("Terziler yuklenemedi: " + e.message, { type: "danger" });
+            this.notification.add(_t("Terziler yuklenemedi: %(error)s", { error: e.message }), { type: "danger" });
         }
     }
 
     async searchInvoice() {
         const q = this.state.searchQuery.trim();
         if (q.length < 3) {
-            this.notification.add("En az 3 karakter giriniz.", { type: "warning" });
+            this.notification.add(_t("En az 3 karakter giriniz."), { type: "warning" });
             return;
         }
         this.state.searching = true;
@@ -78,10 +80,10 @@ export class TailorNewOrder extends Component {
             if (this.state.invoices.length === 1) {
                 await this.selectInvoice(this.state.invoices[0].invoice_no);
             } else if (this.state.invoices.length === 0) {
-                this.notification.add("Fatura bulunamadi.", { type: "warning" });
+                this.notification.add(_t("Fatura bulunamadi."), { type: "warning" });
             }
         } catch (e) {
-            this.notification.add("Arama hatasi: " + e.message, { type: "danger" });
+            this.notification.add(_t("Arama hatasi: %(error)s", { error: e.message }), { type: "danger" });
         }
         this.state.searching = false;
     }
@@ -103,7 +105,7 @@ export class TailorNewOrder extends Component {
                 this.state.itemSelections = selections;
             }
         } catch (e) {
-            this.notification.add("Fatura detayi alinamadi: " + e.message, { type: "danger" });
+            this.notification.add(_t("Fatura detayi alinamadi: %(error)s", { error: e.message }), { type: "danger" });
         }
     }
 
@@ -155,7 +157,7 @@ export class TailorNewOrder extends Component {
             if (!sel || sel.service_ids.length === 0) continue;
             if (!sel.tailor_id) {
                 this.notification.add(
-                    (item.product_code || item.barcode) + " icin terzi seciniz!",
+                    _t("%(product)s icin terzi seciniz!", { product: item.product_code || item.barcode }),
                     { type: "warning" }
                 );
                 return;
@@ -181,7 +183,7 @@ export class TailorNewOrder extends Component {
         }
 
         if (orders.length === 0) {
-            this.notification.add("En az bir urun icin hizmet seciniz!", { type: "warning" });
+            this.notification.add(_t("En az bir urun icin hizmet seciniz!"), { type: "warning" });
             return;
         }
 
@@ -190,7 +192,7 @@ export class TailorNewOrder extends Component {
             const result = await rpc("/ugurlar_tailor/create_order", { orders });
             if (result.success) {
                 this.notification.add(
-                    result.orders.length + " siparis basariyla olusturuldu!",
+                    _t("%(count)s siparis basariyla olusturuldu!", { count: result.orders.length }),
                     { type: "success" }
                 );
                 // Tum siparislerin etiket verisini topla, tek seferde yazdir
@@ -208,18 +210,25 @@ export class TailorNewOrder extends Component {
                 if (labelDataArray.length > 0) {
                     printMultipleTailorLabels(labelDataArray);
                 }
-                setTimeout(() => this.props.onNavigate("main_menu"), 3000);
+                // Basari ekranina gec (Step 3)
+                this.state.createdCount = result.orders.length;
+                this.state.step = 3;
             } else {
-                this.notification.add("Hata: " + (result.error || ""), { type: "danger" });
+                this.notification.add(_t("Hata: %(error)s", { error: result.error || "" }), { type: "danger" });
             }
         } catch (e) {
-            this.notification.add("Siparis olusturma hatasi: " + e.message, { type: "danger" });
+            this.notification.add(_t("Siparis olusturma hatasi: %(error)s", { error: e.message }), { type: "danger" });
         }
         this.state.submitting = false;
     }
 
     goBack() {
-        if (this.state.step === 2) {
+        if (this.state.step === 3) {
+            this.state.step = 1;
+            this.state.searchQuery = "";
+            this.state.invoices = [];
+            this.state.selectedInvoice = null;
+        } else if (this.state.step === 2) {
             this.state.step = 1;
             this.state.selectedInvoice = null;
         } else {
@@ -291,7 +300,7 @@ export class TailorNewOrder extends Component {
                 };
                 scan();
             }).catch(() => {
-                statusEl.textContent = 'Kamera erişim hatası';
+                statusEl.textContent = _t('Kamera erisim hatasi');
             });
         } else {
             // Html5Qrcode — iOS + tüm tarayıcılarda çalışır
@@ -302,18 +311,18 @@ export class TailorNewOrder extends Component {
     async _startHtml5QrScanner(readerEl, statusEl, overlay, onDetected) {
         try {
             if (!window.Html5Qrcode) {
-                statusEl.textContent = 'Tarayıcı yükleniyor...';
+                statusEl.textContent = _t('Tarayici yukleniyor...');
                 const s = document.createElement('script');
                 s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
                 document.head.appendChild(s);
                 await new Promise((resolve, reject) => {
                     s.onload = resolve;
-                    s.onerror = () => reject(new Error('CDN yüklenemedi'));
-                    setTimeout(() => reject(new Error('Zaman aşımı')), 10000);
+                    s.onerror = () => reject(new Error(_t('CDN yuklenemedi')));
+                    setTimeout(() => reject(new Error(_t('Zaman asimi'))), 10000);
                 });
             }
 
-            statusEl.textContent = 'Kamera başlatılıyor...';
+            statusEl.textContent = _t('Kamera baslatiliyor...');
 
             const scanner = new Html5Qrcode('tailor-camera-reader');
             const config = { fps: 10, qrbox: { width: 250, height: 150 }, aspectRatio: 1.0 };
@@ -337,7 +346,7 @@ export class TailorNewOrder extends Component {
             };
         } catch (e) {
             console.error('Html5Qrcode hatası:', e);
-            statusEl.textContent = 'Kamera başlatılamadı: ' + (e.message || e);
+            statusEl.textContent = _t('Kamera baslatilamadi: %(error)s', { error: e.message || e });
         }
     }
 }

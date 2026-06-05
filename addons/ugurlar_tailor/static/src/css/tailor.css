@@ -112,12 +112,51 @@
     padding: 12px 0;
     border-bottom: 1px solid var(--tailor-border);
     margin-bottom: 16px;
+    flex-wrap: wrap;
 }
 
 .tailor-toolbar h2 {
     margin: 0;
     font-size: 20px;
     font-weight: 600;
+    flex: 1;
+}
+
+/* ── Step Indicator ── */
+.tailor-step-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.tailor-step-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--tailor-border);
+    transition: all 0.3s ease;
+}
+
+.tailor-step-dot.active {
+    background: var(--tailor-primary);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+    transform: scale(1.2);
+}
+
+.tailor-step-dot.completed {
+    background: var(--tailor-success);
+}
+
+.tailor-step-line {
+    width: 24px;
+    height: 2px;
+    background: var(--tailor-border);
+    transition: background 0.3s ease;
+}
+
+.tailor-step-line.completed {
+    background: var(--tailor-success);
 }
 
 /* ── Buttons ── */
@@ -128,8 +167,12 @@
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background 0.2s, transform 0.1s;
     white-space: nowrap;
+}
+
+.tailor-btn:active {
+    transform: scale(0.97);
 }
 
 .tailor-btn:disabled {
@@ -141,9 +184,16 @@
 .tailor-btn-primary:hover:not(:disabled) { background: var(--tailor-primary-dark); }
 .tailor-btn-success { background: var(--tailor-success); color: #fff; }
 .tailor-btn-success:hover:not(:disabled) { background: var(--tailor-success-dark); }
-.tailor-btn-back { background: var(--tailor-border); color: var(--tailor-text); }
+.tailor-btn-back {
+    background: var(--tailor-border);
+    color: var(--tailor-text);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 600;
+}
 .tailor-btn-back:hover { background: #cbd5e1; }
-.tailor-btn-sm { padding: 6px 12px; font-size: 12px; }
+.tailor-btn-sm { padding: 8px 14px; font-size: 13px; }
 .tailor-btn-lg { padding: 14px 24px; font-size: 16px; width: 100%; }
 
 /* ── Inputs ── */
@@ -204,6 +254,22 @@
     padding: 12px;
     margin-bottom: 16px;
     font-size: 13px;
+    line-height: 1.8;
+}
+
+.tailor-invoice-info .tailor-info-row {
+    display: flex;
+    gap: 6px;
+}
+
+.tailor-invoice-info .tailor-info-label {
+    font-weight: 600;
+    color: var(--tailor-text);
+    white-space: nowrap;
+}
+
+.tailor-invoice-info .tailor-info-value {
+    color: var(--tailor-text-secondary);
 }
 
 /* ── Item Cards ── */
@@ -213,6 +279,12 @@
     border-radius: var(--tailor-radius);
     padding: 16px;
     margin-bottom: 12px;
+    transition: border-color 0.3s ease;
+}
+
+.tailor-item-card.has-tailor {
+    border-color: var(--tailor-primary);
+    border-width: 2px;
 }
 
 .tailor-item-header {
@@ -238,36 +310,71 @@
     display: block;
 }
 
-/* ── Service Grid ── */
+/* ── Service Grid — Chip Style ── */
 .tailor-service-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px;
-    margin-top: 4px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
 }
 
 .tailor-service-check {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     font-size: 13px;
     cursor: pointer;
-    padding: 4px;
-    border-radius: 4px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1.5px solid var(--tailor-border);
+    background: var(--tailor-card-bg);
+    transition: all 0.2s ease;
+    min-height: 44px;
+    box-sizing: border-box;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
-.tailor-service-check:hover { background: #f1f5f9; }
+.tailor-service-check:hover {
+    border-color: var(--tailor-primary);
+    background: #f5f3ff;
+}
+
+.tailor-service-check:active {
+    transform: scale(0.97);
+}
+
+/* Hide native checkbox, style the chip */
+.tailor-service-check input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--tailor-primary);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.tailor-service-check.checked,
+.tailor-service-check:has(input:checked) {
+    border-color: var(--tailor-primary);
+    background: #eef2ff;
+    color: var(--tailor-primary-dark);
+    font-weight: 500;
+}
 
 /* ── Hint (terzi secilmeden gosterilen mesaj) ── */
 .tailor-hint {
     font-size: 13px;
     color: var(--tailor-text-secondary);
     font-style: italic;
-    padding: 8px 0;
+    padding: 12px;
     text-align: center;
+    background: #f8fafc;
+    border: 1px dashed var(--tailor-border);
+    border-radius: 8px;
+    margin-top: 4px;
 }
 
-/* ── Fade-in animasyonu ── */
+/* ── Animations ── */
 @keyframes tailorFadeIn {
     from { opacity: 0; transform: translateY(-8px); }
     to { opacity: 1; transform: translateY(0); }
@@ -275,6 +382,56 @@
 
 .tailor-fade-in {
     animation: tailorFadeIn 0.3s ease-out;
+}
+
+@keyframes tailorPriceFlash {
+    0% { background-color: transparent; }
+    30% { background-color: #fef3c7; }
+    100% { background-color: transparent; }
+}
+
+.tailor-price-flash {
+    animation: tailorPriceFlash 0.8s ease;
+}
+
+/* ── Spinner ── */
+@keyframes tailorSpin {
+    to { transform: rotate(360deg); }
+}
+
+.tailor-spinner {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 2.5px solid var(--tailor-border);
+    border-top-color: var(--tailor-primary);
+    border-radius: 50%;
+    animation: tailorSpin 0.7s linear infinite;
+    vertical-align: middle;
+}
+
+.tailor-spinner-lg {
+    width: 36px;
+    height: 36px;
+    border-width: 3px;
+}
+
+.tailor-loading {
+    text-align: center;
+    padding: 40px;
+    color: var(--tailor-text-secondary);
+    font-size: 15px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+}
+
+.tailor-empty {
+    text-align: center;
+    padding: 40px;
+    color: var(--tailor-text-secondary);
+    font-size: 15px;
 }
 
 .tailor-item-total {
@@ -289,6 +446,40 @@
 .tailor-submit-bar {
     padding: 16px 0 32px;
     margin-top: 12px;
+}
+
+/* ── Success Screen ── */
+.tailor-success-screen {
+    text-align: center;
+    padding: 40px 20px;
+    animation: tailorFadeIn 0.4s ease-out;
+}
+
+.tailor-success-icon {
+    font-size: 64px;
+    margin-bottom: 16px;
+    line-height: 1;
+}
+
+.tailor-success-screen h3 {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--tailor-success);
+    margin: 0 0 8px;
+}
+
+.tailor-success-screen p {
+    color: var(--tailor-text-secondary);
+    font-size: 14px;
+    margin: 0 0 24px;
+}
+
+.tailor-success-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 320px;
+    margin: 0 auto;
 }
 
 /* ── Filters ── */
@@ -324,6 +515,12 @@
     line-height: 1.6;
 }
 
+.tailor-order-date {
+    font-size: 11px;
+    color: var(--tailor-text-secondary);
+    margin-top: 4px;
+}
+
 .tailor-order-services {
     display: flex;
     flex-wrap: wrap;
@@ -340,7 +537,7 @@
     font-weight: 500;
 }
 
-/* ── Item Container (scrollable) ── */
+/* ── Item Container ── */
 .tailor-items {
     padding-right: 4px;
 }
@@ -367,31 +564,46 @@
 .badge-completed { background: #d1fae5; color: #065f46; }
 .badge-delivered { background: #e2e8f0; color: #475569; }
 
-/* ── Pagination ── */
+/* ── Pagination (Professional) ── */
 .tailor-pagination {
     display: flex;
     justify-content: center;
     align-items: center;
-    gap: 12px;
-    padding: 16px 0;
+    gap: 8px;
+    padding: 20px 0;
     font-size: 14px;
 }
 
-/* ── Utils ── */
-.tailor-loading, .tailor-empty {
-    text-align: center;
-    padding: 40px;
+.tailor-pagination .tailor-page-info {
+    padding: 6px 14px;
+    background: var(--tailor-card-bg);
+    border: 1px solid var(--tailor-border);
+    border-radius: 6px;
+    font-weight: 500;
+    font-size: 13px;
     color: var(--tailor-text-secondary);
-    font-size: 15px;
 }
 
 /* ── Mobile Responsive ── */
 @media (max-width: 600px) {
     .tailor-menu-grid { grid-template-columns: 1fr; }
-    .tailor-service-grid { grid-template-columns: 1fr; }
+    .tailor-service-grid { flex-direction: column; }
+    .tailor-service-check { width: 100%; }
     .tailor-filters { flex-direction: column; }
     .tailor-filters .tailor-select { width: 100%; }
     .tailor-search-box { flex-direction: column; }
+
+    /* Bigger touch targets on mobile */
+    .tailor-btn-sm { padding: 10px 16px; font-size: 14px; min-height: 44px; }
+    .tailor-order-actions { flex-direction: column; }
+    .tailor-order-actions .tailor-btn-sm { width: 100%; text-align: center; }
+
+    /* Invoice info vertical layout */
+    .tailor-invoice-info {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
 }
 
 /* ─── KAMERA BARKOD TARAYICI OVERLAY ─────────────────── */

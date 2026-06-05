@@ -1,4 +1,5 @@
 import json
+from collections import defaultdict
 import logging
 
 from odoo import http
@@ -49,16 +50,19 @@ class TailorController(http.Controller):
             ['id', 'name', 'phone'],
             order='name',
         )
-        # Her terzi için özel fiyatları da ekle
-        for tailor in tailors:
-            prices = request.env['ugurlar.tailor.price'].search_read(
-                [('tailor_id', '=', tailor['id'])],
-                ['service_id', 'price'],
-            )
-            tailor['prices'] = [
+        # Tüm fiyatları tek sorguda getir ve tailor_id'ye göre grupla
+        tailor_ids = [t['id'] for t in tailors]
+        all_prices = request.env['ugurlar.tailor.price'].search_read(
+            [('tailor_id', 'in', tailor_ids)],
+            ['tailor_id', 'service_id', 'price'],
+        )
+        prices_by_tailor = defaultdict(list)
+        for p in all_prices:
+            prices_by_tailor[p['tailor_id'][0]].append(
                 {'service_id': p['service_id'][0], 'price': p['price']}
-                for p in prices
-            ]
+            )
+        for tailor in tailors:
+            tailor['prices'] = prices_by_tailor.get(tailor['id'], [])
         return tailors
 
     # ── Sipariş Oluştur ──
@@ -132,13 +136,17 @@ class TailorController(http.Controller):
             offset=offset,
         )
 
-        # Her sipariş için hizmet satırlarını ekle
+        # Tüm hizmet satırlarını tek sorguda getir ve order_id'ye göre grupla
+        order_ids = [o['id'] for o in orders]
+        all_lines = request.env['ugurlar.tailor.order.line'].search_read(
+            [('order_id', 'in', order_ids)],
+            ['order_id', 'service_name', 'price'],
+        )
+        lines_by_order = defaultdict(list)
+        for line in all_lines:
+            lines_by_order[line['order_id'][0]].append(line)
         for order in orders:
-            lines = request.env['ugurlar.tailor.order.line'].search_read(
-                [('order_id', '=', order['id'])],
-                ['service_name', 'price'],
-            )
-            order['services'] = lines
+            order['services'] = lines_by_order.get(order['id'], [])
 
         return {
             'orders': orders,

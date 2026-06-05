@@ -3,6 +3,8 @@
 import { Component, useState, onMounted } from "@odoo/owl";
 import { useService } from "@web/core/utils/hooks";
 import { rpc } from "@web/core/network/rpc";
+import { ConfirmationDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
+import { _t } from "@web/core/l10n/translation";
 import { printTailorLabel } from "../label_print";
 
 export class TailorOrderList extends Component {
@@ -14,6 +16,7 @@ export class TailorOrderList extends Component {
 
     setup() {
         this.notification = useService("notification");
+        this.dialog = useService("dialog");
         this.state = useState({
             orders: [],
             total: 0,
@@ -39,24 +42,31 @@ export class TailorOrderList extends Component {
             this.state.orders = result.orders || [];
             this.state.total = result.total || 0;
         } catch (e) {
-            this.notification.add("Siparisler yuklenemedi: " + e.message, { type: "danger" });
+            this.notification.add(_t("Siparisler yuklenemedi: %(error)s", { error: e.message }), { type: "danger" });
         }
         this.state.loading = false;
     }
 
     async updateStatus(orderId, newStatus) {
-        try {
-            const result = await rpc("/ugurlar_tailor/update_status", {
-                order_id: orderId,
-                status: newStatus,
-            });
-            if (result.success) {
-                this.notification.add("Durum guncellendi!", { type: "success" });
-                await this.loadOrders();
-            }
-        } catch (e) {
-            this.notification.add("Durum guncelleme hatasi: " + e.message, { type: "danger" });
-        }
+        this.dialog.add(ConfirmationDialog, {
+            title: _t("Durum Degisikligi"),
+            body: _t("Siparisi '%(status)s' durumuna gecirmek istediginize emin misiniz?", { status: this.getStatusLabel(newStatus) }),
+            confirm: async () => {
+                try {
+                    const result = await rpc("/ugurlar_tailor/update_status", {
+                        order_id: orderId,
+                        status: newStatus,
+                    });
+                    if (result.success) {
+                        this.notification.add(_t("Durum guncellendi!"), { type: "success" });
+                        await this.loadOrders();
+                    }
+                } catch (e) {
+                    this.notification.add(_t("Durum guncelleme hatasi: %(error)s", { error: e.message }), { type: "danger" });
+                }
+            },
+            cancel: () => {},
+        });
     }
 
     getNextStatus(currentStatus) {
@@ -70,10 +80,10 @@ export class TailorOrderList extends Component {
 
     getStatusLabel(status) {
         const labels = {
-            pending: "Bekliyor",
-            in_progress: "Terzide",
-            completed: "Hazir",
-            delivered: "Teslim",
+            pending: _t("Bekliyor"),
+            in_progress: _t("Terzide"),
+            completed: _t("Hazir"),
+            delivered: _t("Teslim"),
         };
         return labels[status] || status;
     }
@@ -133,7 +143,7 @@ export class TailorOrderList extends Component {
             }
             printTailorLabel(data);
         } catch (e) {
-            this.notification.add("Etiket verisi alinamadi: " + e.message, { type: "danger" });
+            this.notification.add(_t("Etiket verisi alinamadi: %(error)s", { error: e.message }), { type: "danger" });
         }
     }
 }
