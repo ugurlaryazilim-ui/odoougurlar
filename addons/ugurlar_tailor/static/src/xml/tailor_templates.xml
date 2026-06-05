@@ -194,6 +194,10 @@
             <div class="tailor-filters">
                 <input type="text" class="tailor-input" placeholder="Ara (fatura, musteri, siparis no)..."
                        t-model="state.search" t-on-keydown="onSearchKeydown"/>
+                <button class="tailor-btn" style="background:#f59e0b;color:#fff;font-size:18px;padding:8px 14px;"
+                        t-on-click="scanCamera" title="Kamera ile Barkod Okut">
+                    <i class="fa fa-barcode"/>
+                </button>
                 <select class="tailor-select" t-on-change="onFilterChange">
                     <option value="">Tumu</option>
                     <option value="pending">Bekliyor</option>
