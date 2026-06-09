@@ -497,7 +497,7 @@
 }
 .bp-route-table-header {
     display: grid;
-    grid-template-columns: 1.8fr 0.8fr 0.8fr 0.7fr 0.5fr 0.7fr 0.9fr 0.4fr 0.5fr;
+    grid-template-columns: 1.8fr 0.8fr 0.8fr 0.7fr 0.7fr 0.5fr 0.7fr 0.9fr 0.4fr 0.5fr;
     padding: 6px 8px;
     background: #5e3551; /* Ugurlar Odoo Mor */
     color: #fff;
@@ -508,7 +508,7 @@
 }
 .bp-route-table-row {
     display: grid;
-    grid-template-columns: 1.8fr 0.8fr 0.8fr 0.7fr 0.5fr 0.7fr 0.9fr 0.4fr 0.5fr;
+    grid-template-columns: 1.8fr 0.8fr 0.8fr 0.7fr 0.7fr 0.5fr 0.7fr 0.9fr 0.4fr 0.5fr;
     padding: 5px 8px;
     border-bottom: 1px solid #eee;
     align-items: center;
@@ -536,11 +536,39 @@
 }
 .bp-cell-brand,
 .bp-cell-color,
-.bp-cell-size {
+.bp-cell-size,
+.bp-cell-depot {
     font-size: 11px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* Depo tag'leri (tablo içi) */
+.bp-depot-tag {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-size: 10px;
+    font-weight: 700;
+    white-space: nowrap;
+    letter-spacing: 0.3px;
+}
+.bp-depot-tag-primary {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+.bp-depot-tag-fallback {
+    background: #fff8e1;
+    color: #f57f17;
+}
+.bp-depot-tag-return {
+    background: #ffebee;
+    color: #c62828;
+}
+.bp-depot-tag-default {
+    background: #f5f5f5;
+    color: #616161;
 }
 .bp-barcode-copy {
     cursor: pointer;
@@ -864,7 +892,7 @@
     }
     .bp-route-table-header,
     .bp-route-table-row {
-        min-width: 650px;
+        min-width: 720px;
     }
 
     /* Barkod input satırı */
@@ -954,7 +982,7 @@
     }
     .bp-route-table-header,
     .bp-route-table-row {
-        min-width: 600px;
+        min-width: 680px;
     }
     .bp-btn-collect {
         min-height: 40px;

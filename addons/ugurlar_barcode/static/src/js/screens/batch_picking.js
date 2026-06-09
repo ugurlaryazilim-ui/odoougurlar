@@ -267,50 +267,47 @@ export class BatchPickingScreen extends Component {
                              t-on-click="onImageClick"/>
                     </div>
 
-                    <!-- SAĞ PANEL: Rota Listesi Tablosu (Depo Bazlı Gruplu) -->
+                    <!-- SAĞ PANEL: Rota Listesi Tablosu -->
                     <div class="bp-route-table">
                         <div class="bp-route-table-header">
                             <span>Barkod</span>
                             <span>Marka</span>
                             <span>Kategori</span>
                             <span>Renk</span>
+                            <span>Depo</span>
                             <span>Beden</span>
                             <span>Sokak</span>
                             <span>Kat-Göz</span>
                             <span>Adet</span>
                             <span>Top.</span>
                         </div>
-                        <t t-foreach="state.groupedItems" t-as="group" t-key="group.depot">
-                            <!-- Depo Grup Başlığı -->
-                            <div t-attf-class="bp-depot-group-header bp-depot-{{group.colorClass}}">
-                                <span class="bp-depot-icon" t-esc="group.icon"/>
-                                <span class="bp-depot-name" t-esc="group.depot"/>
-                                <span class="bp-depot-count">
-                                    <t t-esc="group.items.length"/> ürün
+                        <t t-foreach="state.filteredItems" t-as="item" t-key="item.move_id">
+                            <div t-attf-class="bp-route-table-row {{item.move_id === state.currentItem?.move_id ? 'bp-row-active' : ''}} {{item.collected_qty >= item.demand_qty ? 'bp-row-done' : ''}}"
+                                 t-on-click="() => this.selectItem(item)">
+                                <span class="bp-cell-barcode bp-barcode-copy" t-att-data-barcode="item.barcode || ''" t-on-click.stop="(ev) => this.copyBarcode(ev)" t-esc="item.barcode || ''"/>
+                                <span class="bp-cell-brand" t-esc="item.brand || '-'"/>
+                                <span class="bp-cell-category" t-esc="item.category || '-'"/>
+                                <span class="bp-cell-color" t-esc="item.color || '-'"/>
+                                <span class="bp-cell-depot">
+                                    <span t-if="item.source_warehouse_name"
+                                          t-attf-class="bp-depot-tag bp-depot-tag-{{item._depotColor || 'default'}}"
+                                          t-esc="item._depotShort || item.source_warehouse_name"/>
+                                    <span t-else="">-</span>
+                                </span>
+                                <span class="bp-cell-size" t-esc="item.size || '-'"/>
+                                <span t-esc="(item.location_parts || {}).zone || '-'"/>
+                                <span>
+                                    <t t-esc="(item.location_parts || {}).section || ''"/>
+                                    <t t-if="(item.location_parts || {}).shelf"> - <t t-esc="item.location_parts.shelf"/></t>
+                                </span>
+                                <span t-esc="item.demand_qty"/>
+                                <span class="d-flex justify-content-between align-items-center">
+                                    <t t-esc="item.collected_qty"/>
+                                    <button class="btn btn-sm text-danger p-0 ms-1" t-if="item.collected_qty > 0" t-on-click.stop="() => this.onDecreaseQty(item)">
+                                        <i class="fa fa-minus-circle"></i>
+                                    </button>
                                 </span>
                             </div>
-                            <t t-foreach="group.items" t-as="item" t-key="item.move_id">
-                                <div t-attf-class="bp-route-table-row {{item.move_id === state.currentItem?.move_id ? 'bp-row-active' : ''}} {{item.collected_qty >= item.demand_qty ? 'bp-row-done' : ''}}"
-                                     t-on-click="() => this.selectItem(item)">
-                                    <span class="bp-cell-barcode bp-barcode-copy" t-att-data-barcode="item.barcode || ''" t-on-click.stop="(ev) => this.copyBarcode(ev)" t-esc="item.barcode || ''"/>
-                                    <span class="bp-cell-brand" t-esc="item.brand || '-'"/>
-                                    <span class="bp-cell-category" t-esc="item.category || '-'"/>
-                                    <span class="bp-cell-color" t-esc="item.color || '-'"/>
-                                    <span class="bp-cell-size" t-esc="item.size || '-'"/>
-                                    <span t-esc="(item.location_parts || {}).zone || '-'"/>
-                                    <span>
-                                        <t t-esc="(item.location_parts || {}).section || ''"/>
-                                        <t t-if="(item.location_parts || {}).shelf"> - <t t-esc="item.location_parts.shelf"/></t>
-                                    </span>
-                                    <span t-esc="item.demand_qty"/>
-                                    <span class="d-flex justify-content-between align-items-center">
-                                        <t t-esc="item.collected_qty"/>
-                                        <button class="btn btn-sm text-danger p-0 ms-1" t-if="item.collected_qty > 0" t-on-click.stop="() => this.onDecreaseQty(item)">
-                                            <i class="fa fa-minus-circle"></i>
-                                        </button>
-                                    </span>
-                                </div>
-                            </t>
                         </t>
                     </div>
                 </t>
@@ -378,7 +375,6 @@ export class BatchPickingScreen extends Component {
             batch: null,
             items: [],
             filteredItems: [],
-            groupedItems: [],
             currentItem: null,
             currentIndex: 0,
             collectedCount: 0,
@@ -674,42 +670,31 @@ export class BatchPickingScreen extends Component {
         } else {
             items = [...this.state.items];
         }
+        // Her item'a depo renk ve kısa ad bilgisi ekle
+        this._enrichItemsWithDepotInfo(items);
         this.state.filteredItems = items;
-        this._groupItemsByDepot(items);
     }
 
-    _groupItemsByDepot(items) {
-        // Depo öncelik sırası: Ana depo (primary) → Yedek → İade → Bilinmeyen
-        const groups = {};
+    _enrichItemsWithDepotInfo(items) {
         for (const item of items) {
-            const depot = item.source_warehouse_name || 'Bilinmiyor';
-            if (!groups[depot]) {
-                groups[depot] = { depot, items: [], icon: '📦', colorClass: 'default' };
-            }
-            groups[depot].items.push(item);
-        }
-
-        // Depo renklerini ata
-        const depotNames = Object.keys(groups);
-        for (const name of depotNames) {
-            const lower = name.toLowerCase();
-            if (lower.includes('internet') || lower.includes('İnternet')) {
-                groups[name].icon = '🟢';
-                groups[name].colorClass = 'primary';
-            } else if (lower.includes('heykel')) {
-                groups[name].icon = '🟡';
-                groups[name].colorClass = 'fallback';
-            } else if (lower.includes('iade') || lower.includes('iade')) {
-                groups[name].icon = '🔴';
-                groups[name].colorClass = 'return';
+            const name = (item.source_warehouse_name || '').toLowerCase();
+            if (name.includes('internet') || name.includes('İnternet') || name.includes('i\u0307nternet')) {
+                item._depotColor = 'primary';
+                item._depotShort = 'İnternet';
+            } else if (name.includes('heykel')) {
+                item._depotColor = 'fallback';
+                item._depotShort = 'Heykel';
+            } else if (name.includes('iade')) {
+                item._depotColor = 'return';
+                item._depotShort = 'İade';
+            } else if (name) {
+                item._depotColor = 'default';
+                item._depotShort = item.source_warehouse_name;
+            } else {
+                item._depotColor = 'default';
+                item._depotShort = '';
             }
         }
-
-        // Sırala: primary → fallback → return → default
-        const order = { primary: 0, fallback: 1, return: 2, default: 3 };
-        this.state.groupedItems = Object.values(groups).sort(
-            (a, b) => (order[a.colorClass] || 3) - (order[b.colorClass] || 3)
-        );
     }
 
     // ═══ BARKOD TARA ═══
