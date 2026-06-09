@@ -415,11 +415,83 @@ class BatchApiController(BarcodeApiBase):
             # Toplu ürün lokasyon haritası (detaylı: zone/section/shelf parçaları ile)
             location_data_dict = self._get_product_location_map(batch, detailed=True)
 
+            # ─── source_warehouse_id boş olan move'lar için anlık depo tespiti ───
+            # Eski batch'lerde (yeni kod deploy edilmeden oluşturulanlarda) depo bilgisi yok.
+            # Bu move'lar için anlık stok kontrolü yapıp depo bilgisini dolduruyoruz.
+            needs_depot_check = any(
+                not m.source_warehouse_id
+                for p in batch.picking_ids for m in p.move_ids
+            )
+            depot_map = {}  # product_id → warehouse record
+            if needs_depot_check:
+                Schedule = request.env['ugurlar.picking.schedule'].sudo()
+                schedule = Schedule.search([('active', '=', True)], limit=1)
+                if schedule:
+                    primary_wh = schedule.warehouse_id
+                    fallback_wh = schedule.fallback_warehouse_id
+                    return_wh = schedule.return_warehouse_id
+                    # Tüm ürün ID'lerini topla
+                    check_pids = list({
+                        m.product_id.id
+                        for p in batch.picking_ids for m in p.move_ids
+                        if not m.source_warehouse_id
+                    })
+                    Quant = request.env['stock.quant'].sudo()
+                    # Primary depo stok
+                    primary_stock = set()
+                    if primary_wh and primary_wh.lot_stock_id:
+                        for q in Quant.search([
+                            ('product_id', 'in', check_pids),
+                            ('location_id', 'child_of', primary_wh.lot_stock_id.id),
+                            ('quantity', '>', 0),
+                        ]):
+                            primary_stock.add(q.product_id.id)
+                    # Fallback depo stok
+                    fallback_stock = set()
+                    if fallback_wh and fallback_wh.lot_stock_id:
+                        for q in Quant.search([
+                            ('product_id', 'in', check_pids),
+                            ('location_id', 'child_of', fallback_wh.lot_stock_id.id),
+                            ('quantity', '>', 0),
+                        ]):
+                            fallback_stock.add(q.product_id.id)
+                    # Return depo stok
+                    return_stock = set()
+                    if return_wh and return_wh.lot_stock_id:
+                        for q in Quant.search([
+                            ('product_id', 'in', check_pids),
+                            ('location_id', 'child_of', return_wh.lot_stock_id.id),
+                            ('quantity', '>', 0),
+                        ]):
+                            return_stock.add(q.product_id.id)
+                    # Harita oluştur
+                    for pid in check_pids:
+                        if pid in primary_stock:
+                            depot_map[pid] = primary_wh
+                        elif pid in fallback_stock:
+                            depot_map[pid] = fallback_wh
+                        elif pid in return_stock and return_wh:
+                            depot_map[pid] = return_wh
+                        elif return_wh:
+                            depot_map[pid] = return_wh
+                        else:
+                            depot_map[pid] = primary_wh
+
             # Tüm move'ları topla
             route_items = []
             for picking in batch.picking_ids:
                 for move in picking.move_ids:
                     product = move.product_id
+
+                    # Depo bilgisi: move'da varsa kullan, yoksa anlık tespiti kullan
+                    src_wh = move.source_warehouse_id
+                    if not src_wh and depot_map.get(product.id):
+                        src_wh = depot_map[product.id]
+                        # Kalıcı olarak move'a yaz
+                        try:
+                            move.sudo().write({'source_warehouse_id': src_wh.id})
+                        except Exception:
+                            pass
 
                     # Önceden çekilen toplu dict'ten raf konumunu bul
                     loc_data = location_data_dict.get(product.id, {'location_name': '', 'location_parts': {}})
@@ -497,8 +569,8 @@ class BatchApiController(BarcodeApiBase):
                         'image_url': f'/web/image/product.product/{product.id}/image_256',
                         'origin': picking.origin or '',
                         'partner_name': picking.partner_id.name or '',
-                        'source_warehouse_id': move.source_warehouse_id.id if move.source_warehouse_id else 0,
-                        'source_warehouse_name': move.source_warehouse_id.name if move.source_warehouse_id else '',
+                        'source_warehouse_id': src_wh.id if src_wh else 0,
+                        'source_warehouse_name': src_wh.name if src_wh else '',
                     })
 
             # Lokasyona göre sırala (aynı raftakiler bir arada)
