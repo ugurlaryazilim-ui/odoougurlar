@@ -497,6 +497,8 @@ class BatchApiController(BarcodeApiBase):
                         'image_url': f'/web/image/product.product/{product.id}/image_256',
                         'origin': picking.origin or '',
                         'partner_name': picking.partner_id.name or '',
+                        'source_warehouse_id': move.source_warehouse_id.id if move.source_warehouse_id else 0,
+                        'source_warehouse_name': move.source_warehouse_id.name if move.source_warehouse_id else '',
                     })
 
             # Lokasyona göre sırala (aynı raftakiler bir arada)

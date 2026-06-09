@@ -558,6 +558,92 @@
     font-weight: 700;
 }
 
+/* ─── DEPO FİLTRESİ (TOPLAMA EKRANI ÜST BAR) ─── */
+.bp-depot-filter {
+    flex: 1;
+    text-align: center;
+}
+.bp-depot-select {
+    padding: 4px 12px;
+    border: 1.5px solid rgba(255,255,255,0.3);
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    background: rgba(255,255,255,0.15);
+    color: #fff;
+    cursor: pointer;
+    outline: none;
+    transition: all 0.2s;
+    max-width: 200px;
+}
+.bp-depot-select:focus {
+    border-color: rgba(255,255,255,0.6);
+    background: rgba(255,255,255,0.25);
+}
+.bp-depot-select option {
+    color: #333;
+    background: #fff;
+}
+
+/* ─── DEPO GRUP BAŞLIKLARI (ROTA TABLOSU İÇİ) ─── */
+.bp-depot-group-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    font-weight: 700;
+    font-size: 13px;
+    border-bottom: 2px solid rgba(0,0,0,0.1);
+    position: sticky;
+    top: 28px;
+    z-index: 5;
+}
+.bp-depot-icon {
+    font-size: 16px;
+}
+.bp-depot-name {
+    flex: 1;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.bp-depot-count {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 10px;
+    border-radius: 10px;
+    background: rgba(0,0,0,0.1);
+}
+
+/* Depo renkleri */
+.bp-depot-primary {
+    background: linear-gradient(135deg, #e8f5e9, #c8e6c9);
+    color: #2e7d32;
+}
+.bp-depot-primary .bp-depot-count {
+    background: rgba(46,125,50,0.15);
+    color: #1b5e20;
+}
+.bp-depot-fallback {
+    background: linear-gradient(135deg, #fff8e1, #ffecb3);
+    color: #f57f17;
+}
+.bp-depot-fallback .bp-depot-count {
+    background: rgba(245,127,23,0.15);
+    color: #e65100;
+}
+.bp-depot-return {
+    background: linear-gradient(135deg, #ffebee, #ffcdd2);
+    color: #c62828;
+}
+.bp-depot-return .bp-depot-count {
+    background: rgba(198,40,40,0.15);
+    color: #b71c1c;
+}
+.bp-depot-default {
+    background: linear-gradient(135deg, #f5f5f5, #eeeeee);
+    color: #616161;
+}
+
 /* ─── DEPO BADGE (LİSTE) ─── */
 .bp-warehouse-badge {
     background: #e3f2fd;

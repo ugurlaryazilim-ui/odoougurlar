@@ -29,6 +29,10 @@ class PickingSchedule(models.Model):
         'stock.warehouse', string='Yedek Depo',
         help='Ana depoda stok yoksa kontrol edilecek depo (HEYKEL MAĞAZA DEPO)',
     )
+    return_warehouse_id = fields.Many2one(
+        'stock.warehouse', string='İade Deposu',
+        help='Ana ve yedek depoda stok yoksa yönlendirilecek depo (MAĞAZA İADE DEPOSU)',
+    )
 
     schedule_line_ids = fields.One2many(
         'ugurlar.picking.schedule.line', 'schedule_id',
@@ -125,20 +129,24 @@ class PickingSchedule(models.Model):
 
         stock_available = 0
         stock_fallback = 0
+        stock_return = 0
         stock_unavailable = 0
 
         for picking in eligible_pickings:
             status = picking._check_availability_status(
-                self.warehouse_id, self.fallback_warehouse_id)
+                self.warehouse_id, self.fallback_warehouse_id, self.return_warehouse_id)
             if status == 'available':
                 stock_available += 1
             elif status in ('other_warehouse', 'partial'):
                 stock_fallback += 1
+            elif status == 'return_warehouse':
+                stock_return += 1
             else:
                 stock_unavailable += 1
 
         result['stock_available'] = stock_available
         result['stock_fallback'] = stock_fallback
+        result['stock_return'] = stock_return
         result['stock_unavailable'] = stock_unavailable
 
         return result
@@ -339,9 +347,10 @@ class PickingSchedule(models.Model):
     def _create_batch_for_window(self, schedule_line, today, now_tz):
         """Belirli bir zaman penceresi icin batch olustur.
 
-        Her zaman diliminde 2 ayri batch olusturulur:
+        Tek batch olusturulur. Her move'a source_warehouse_id atanir:
         1) Ana depoda (INTERNET) stoku olanlar
         2) Yedek depoda (HEYKEL) stoku olanlar
+        3) Iade deposunda stoku olanlar / Stoksuz olanlar
         """
         self.ensure_one()
 
@@ -356,7 +365,6 @@ class PickingSchedule(models.Model):
         window_end_utc = IST.localize(window_end).astimezone(
             pytz.UTC).replace(tzinfo=None)
 
-        # Bu depodan cikis yapacak, henuz batch'e atanmamis picking'ler
         Picking = self.env['stock.picking'].sudo()
 
         # Deponun outgoing picking type'ini bul
@@ -440,110 +448,128 @@ class PickingSchedule(models.Model):
                 self.name, state_summary)
             return None
 
-        # Stok kontrolu ve gruplama
-        primary_pickings = self.env['stock.picking']     # INTERNET DEPO'da var
-        fallback_pickings = self.env['stock.picking']    # HEYKEL DEPO'da var
-        unavailable_pickings = self.env['stock.picking'] # Hiçbir depoda stok yok
+        # ═══ MOVE SEVİYESİNDE DEPO ATAMASI ═══
+        primary_wh = self.warehouse_id
+        fallback_wh = self.fallback_warehouse_id
+        return_wh = self.return_warehouse_id
+
+        # Toplu stok sorgusu için tüm ürün ID'lerini topla
+        all_product_ids = set()
+        for picking in pickings:
+            for move in picking.move_ids:
+                all_product_ids.add(move.product_id.id)
+        all_product_ids = list(all_product_ids)
+
+        Quant = self.env['stock.quant'].sudo()
+
+        # Yedek depo stok haritası
+        fallback_qty_map = {}
+        if fallback_wh and fallback_wh.lot_stock_id:
+            fb_quants = Quant.search([
+                ('product_id', 'in', all_product_ids),
+                ('location_id', 'child_of', fallback_wh.lot_stock_id.id),
+            ])
+            for q in fb_quants:
+                fallback_qty_map.setdefault(q.product_id.id, 0)
+                fallback_qty_map[q.product_id.id] += (q.quantity - q.reserved_quantity)
+
+        # İade depo stok haritası
+        return_qty_map = {}
+        if return_wh and return_wh.lot_stock_id:
+            ret_quants = Quant.search([
+                ('product_id', 'in', all_product_ids),
+                ('location_id', 'child_of', return_wh.lot_stock_id.id),
+            ])
+            for q in ret_quants:
+                return_qty_map.setdefault(q.product_id.id, 0)
+                return_qty_map[q.product_id.id] += (q.quantity - q.reserved_quantity)
+
+        # Sayaçlar
+        count_primary = 0
+        count_fallback = 0
+        count_return = 0
+        count_unavailable = 0
 
         for picking in pickings:
-            status = picking._check_availability_status(
-                self.warehouse_id, self.fallback_warehouse_id)
+            # action_assign ile primary depodaki stoku rezerve et
+            try:
+                picking.action_assign()
+            except Exception:
+                pass
 
-            if status == 'available':
-                try:
-                    picking.action_assign()
-                    # Odoo 19: action_assign() sonrası move.quantity otomatik
-                    # product_uom_qty kadar doluyor. Bunu sıfırla — depo personeli
-                    # barkod okutarak (batch_collect_scan / packing_scan) doldurmalı.
-                    for move in picking.move_ids:
-                        if move.quantity > 0 and move.state != 'done':
-                            move.quantity = 0
-                except Exception:
-                    pass
-                primary_pickings |= picking
-            elif status in ('other_warehouse', 'partial'):
-                fallback_pickings |= picking
-            else:
-                unavailable_pickings |= picking
+            for move in picking.move_ids:
+                demand = move.product_uom_qty
+
+                if move.state == 'assigned':
+                    # Odoo stoku primary depoda rezerve edebildi
+                    move.sudo().write({'source_warehouse_id': primary_wh.id})
+                    count_primary += 1
+                else:
+                    # Primary'de yok — fallback kontrol
+                    fb_qty = max(0, fallback_qty_map.get(move.product_id.id, 0))
+                    if fb_qty >= demand and fallback_wh:
+                        move.sudo().write({'source_warehouse_id': fallback_wh.id})
+                        count_fallback += 1
+                    else:
+                        # Return warehouse kontrol
+                        ret_qty = max(0, return_qty_map.get(move.product_id.id, 0))
+                        if ret_qty >= demand and return_wh:
+                            move.sudo().write({'source_warehouse_id': return_wh.id})
+                            count_return += 1
+                        elif return_wh:
+                            # Hiçbir depoda yok — default olarak iade deposuna at
+                            move.sudo().write({'source_warehouse_id': return_wh.id})
+                            count_unavailable += 1
+                        else:
+                            # İade deposu tanımlı değil — primary'ye at
+                            move.sudo().write({'source_warehouse_id': primary_wh.id})
+                            count_unavailable += 1
+
+                # move.quantity sıfırla — personel barkod okutarak dolduracak
+                if move.quantity > 0 and move.state != 'done':
+                    move.quantity = 0
 
         _logger.info(
-            "Toplama [%s] %s — stok dağılımı: ana=%d, yedek=%d, stoksuz=%d",
+            "Toplama [%s] %s — depo dağılımı: ana=%d, yedek=%d, iade=%d, stoksuz=%d",
             self.name, window_label,
-            len(primary_pickings), len(fallback_pickings), len(unavailable_pickings))
+            count_primary, count_fallback, count_return, count_unavailable)
 
-        created_batches = []
+        # ═══ TEK BATCH OLUŞTUR ═══
+        batch_name = self.env['ir.sequence'].next_by_code(
+            'ugurlar.picking.batch.route') or 'R00000'
 
-        # ── BATCH 1: ANA DEPO (INTERNET MAGAZA DEPO) ──
-        # Stokta olan + stoksuz olanlar birlikte aynı batch'e eklenir
-        # Depocu stok durumunu picking üzerinden görür
-        all_primary = primary_pickings | unavailable_pickings
-        if all_primary:
-            batch_name = self.env['ir.sequence'].next_by_code(
-                'ugurlar.picking.batch.route') or 'R00000'
+        wh_name = primary_wh.name or 'Ana Depo'
+        parts = []
+        if count_primary:
+            parts.append(f'{count_primary} ana depo')
+        if count_fallback:
+            fb_name = fallback_wh.name if fallback_wh else 'Yedek'
+            parts.append(f'{count_fallback} {fb_name}')
+        if count_return + count_unavailable:
+            ret_name = return_wh.name if return_wh else 'İade'
+            parts.append(f'{count_return + count_unavailable} {ret_name}')
+        detail = ', '.join(parts)
 
-            wh_name = self.warehouse_id.name or 'Ana Depo'
-            parts = []
-            if primary_pickings:
-                parts.append(f'{len(primary_pickings)} stokta')
-            if unavailable_pickings:
-                parts.append(f'{len(unavailable_pickings)} stoksuz')
-            detail = ', '.join(parts)
+        batch = self.env['stock.picking.batch'].sudo().create({
+            'name': batch_name,
+            'picking_type_id': picking_type.id,
+            'schedule_time': window_end_utc,
+            'time_window': window_label,
+            'company_id': primary_wh.company_id.id,
+            'source_info': f'{wh_name} - {len(pickings)} sipariş ({detail}) ({window_label})',
+        })
 
-            batch = self.env['stock.picking.batch'].sudo().create({
-                'name': batch_name,
-                'picking_type_id': picking_type.id,
-                'schedule_time': window_end_utc,
-                'time_window': window_label,
-                'company_id': self.warehouse_id.company_id.id,
-                'source_info': f'{wh_name} - {len(all_primary)} siparis ({detail}) ({window_label})',
-            })
+        pickings.write({
+            'batch_id': batch.id,
+            'batch_schedule_time': window_end_utc,
+        })
 
-            all_primary.write({
-                'batch_id': batch.id,
-                'batch_schedule_time': window_end_utc,
-            })
+        # Sale order'lara rota adını kalıcı olarak yaz
+        self._update_sale_order_batch_names(pickings, batch_name)
 
-            # Sale order'lara rota adını kalıcı olarak yaz
-            self._update_sale_order_batch_names(all_primary, batch_name)
-
-            _logger.info(
-                "Batch %s olusturuldu: %d siparis (%s) — %s (%s)",
-                batch_name, len(all_primary), detail, wh_name, window_label)
-            created_batches.append(batch)
-
-        # ── BATCH 2: YEDEK DEPO (HEYKEL MAGAZA DEPO) ──
-        if fallback_pickings and self.fallback_warehouse_id:
-            batch_name = self.env['ir.sequence'].next_by_code(
-                'ugurlar.picking.batch.route') or 'R00000'
-
-            fb_name = self.fallback_warehouse_id.name or 'Yedek Depo'
-            batch = self.env['stock.picking.batch'].sudo().create({
-                'name': batch_name,
-                'picking_type_id': picking_type.id,
-                'schedule_time': window_end_utc,
-                'time_window': window_label,
-                'company_id': self.warehouse_id.company_id.id,
-                'source_info': f'{fb_name} - {len(fallback_pickings)} siparis ({window_label})',
-            })
-
-            fallback_pickings.write({
-                'batch_id': batch.id,
-                'batch_schedule_time': window_end_utc,
-            })
-
-            # Sale order'lara rota adını kalıcı olarak yaz
-            self._update_sale_order_batch_names(fallback_pickings, batch_name)
-
-            _logger.info(
-                "Batch %s olusturuldu: %d siparis — %s (%s)",
-                batch_name, len(fallback_pickings), fb_name, window_label)
-            created_batches.append(batch)
-
-        if not created_batches:
-            _logger.info(
-                "Toplama [%s] %s — hiç picking bulunamadı",
-                self.name, window_label)
-            return None
+        _logger.info(
+            "Batch %s olusturuldu: %d sipariş (%s) — %s (%s)",
+            batch_name, len(pickings), detail, wh_name, window_label)
 
         # ─── Boş kalan eski tekli batch'leri temizle ───
         if solo_batches_to_delete:
@@ -555,8 +581,7 @@ class PickingSchedule(models.Model):
                     except Exception as e:
                         _logger.warning("Batch silinemedi %s: %s", old_batch.name, e)
 
-        # Ilk batch'i dondur (UI yonlendirmesi icin)
-        return created_batches[0]
+        return batch
 
     def _update_sale_order_batch_names(self, pickings, batch_name):
         """Picking'lere ait sale order'ların 'Rota' alanını güncelle.

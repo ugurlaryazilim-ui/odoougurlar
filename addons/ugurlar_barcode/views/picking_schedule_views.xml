@@ -21,6 +21,7 @@
                         <group string="Depo Ayarları">
                             <field name="warehouse_id"/>
                             <field name="fallback_warehouse_id"/>
+                            <field name="return_warehouse_id"/>
                         </group>
                         <group string="Durum">
                             <field name="active"/>
@@ -64,6 +65,7 @@
                 <field name="name"/>
                 <field name="warehouse_id"/>
                 <field name="fallback_warehouse_id"/>
+                <field name="return_warehouse_id"/>
                 <field name="last_batch_date"/>
                 <field name="last_batch_time"/>
                 <field name="active"/>

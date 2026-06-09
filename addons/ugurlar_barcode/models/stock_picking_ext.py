@@ -15,11 +15,16 @@ class StockMoveExt(models.Model):
         help='Rota toplama sırasında barkod okutarak toplanan miktar. '
              'Paketleme aşamasında done_qty olarak aktarılır.',
     )
+    source_warehouse_id = fields.Many2one(
+        'stock.warehouse', string='Toplama Deposu',
+        help='Bu ürünün toplanacağı depo. Batch oluşturulurken otomatik atanır.',
+    )
 
 AVAILABILITY_STATUS = [
     ('available', 'Stokta Mevcut'),
     ('partial', 'Kısmi Stok'),
     ('other_warehouse', 'Başka Depoda'),
+    ('return_warehouse', 'İade Deposunda'),
     ('unavailable', 'Stoksuz'),
 ]
 
@@ -45,15 +50,16 @@ class StockPickingExt(models.Model):
     packing_done = fields.Boolean(string='Paketlendi', default=False)
     invoice_done = fields.Boolean(string='Faturalandı', default=False)
 
-    def _check_availability_status(self, primary_warehouse, fallback_warehouse=None):
+    def _check_availability_status(self, primary_warehouse, fallback_warehouse=None, return_warehouse=None):
         """Ürün stoğunu kontrol et ve durumu ata.
 
         Args:
             primary_warehouse: Ana depo (İNTERNET MAĞAZA DEPO)
             fallback_warehouse: Yedek depo (HEYKEL MAĞAZA DEPO)
+            return_warehouse: İade deposu (MAĞAZA İADE DEPOSU)
 
         Returns:
-            'available' | 'partial' | 'other_warehouse' | 'unavailable'
+            'available' | 'partial' | 'other_warehouse' | 'return_warehouse' | 'unavailable'
         """
         self.ensure_one()
         Quant = self.env['stock.quant'].sudo()
@@ -92,9 +98,22 @@ class StockPickingExt(models.Model):
                 fallback_qty_map.setdefault(q.product_id.id, 0)
                 fallback_qty_map[q.product_id.id] += (q.quantity - q.reserved_quantity)
 
+        # İade depo: tüm ürünler için tek sorgu
+        return_qty_map = {}
+        return_names = set()
+        if return_warehouse and return_warehouse.lot_stock_id:
+            ret_quants = Quant.search([
+                ('product_id', 'in', product_ids),
+                ('location_id', 'child_of', return_warehouse.lot_stock_id.id),
+            ])
+            for q in ret_quants:
+                return_qty_map.setdefault(q.product_id.id, 0)
+                return_qty_map[q.product_id.id] += (q.quantity - q.reserved_quantity)
+
         total_lines = len(self.move_ids)
         available_in_primary = 0
         available_in_fallback = 0
+        available_in_return = 0
 
         for move in self.move_ids:
             demand = move.product_uom_qty
@@ -109,6 +128,13 @@ class StockPickingExt(models.Model):
                 available_in_fallback += 1
                 if fallback_warehouse:
                     fallback_names.add(fallback_warehouse.name)
+                continue
+
+            return_qty = max(0, return_qty_map.get(move.product_id.id, 0))
+            if return_qty >= demand:
+                available_in_return += 1
+                if return_warehouse:
+                    return_names.add(return_warehouse.name)
 
         # Durum belirle
         if available_in_primary == total_lines:
@@ -119,9 +145,14 @@ class StockPickingExt(models.Model):
             info = f"{available_in_primary}/{total_lines} ürün ana depoda"
             if fallback_names:
                 info += f", geri kalanı {', '.join(fallback_names)}'da"
+            elif return_names:
+                info += f", geri kalanı {', '.join(return_names)}'da"
         elif available_in_fallback > 0:
             status = 'other_warehouse'
             info = f"{', '.join(fallback_names)}'da mevcut"
+        elif available_in_return > 0:
+            status = 'return_warehouse'
+            info = f"{', '.join(return_names)}'da mevcut"
         else:
             status = 'unavailable'
             info = 'Hiçbir depoda stok yok'
@@ -145,4 +176,5 @@ class StockPickingExt(models.Model):
                 ('active', '=', True),
             ], limit=1)
             fallback_wh = schedule.fallback_warehouse_id if schedule else None
-            picking._check_availability_status(primary_wh, fallback_wh)
+            return_wh = schedule.return_warehouse_id if schedule else None
+            picking._check_availability_status(primary_wh, fallback_wh, return_wh)
