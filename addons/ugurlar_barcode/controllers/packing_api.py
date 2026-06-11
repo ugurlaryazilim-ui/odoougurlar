@@ -154,8 +154,11 @@ class PackingApiController(BarcodeApiBase):
         if not batch or not batch.exists():
             return {'error': f'Rota bulunamadı: {batch_name or batch_id}'}
 
+        # Odoo done olunca batch_id temizliyor — kalıcı alan kullan
+        all_pickings = self._get_all_pickings(batch)
+
         # OPTIMIZASYON: Tüm siparişleri (sale order) toplu çek
-        picking_origins = [p.origin for p in batch.picking_ids if p.origin]
+        picking_origins = [p.origin for p in all_pickings if p.origin]
         sales_dict = {}
         if picking_origins:
             sales = request.env['sale.order'].sudo().search([('name', 'in', picking_origins)])
@@ -164,7 +167,7 @@ class PackingApiController(BarcodeApiBase):
 
         # Tüm picking'lerdeki ürünleri topla
         items = []
-        for picking in batch.picking_ids:
+        for picking in all_pickings:
             # Kargo bilgileri (sale order üzerinden - prefetch edilmiş veriden al)
             cargo_tracking = ''
             cargo_provider = ''
@@ -238,7 +241,8 @@ class PackingApiController(BarcodeApiBase):
         # Batch'teki picking'lerde bu ürünü bul (henüz eşleştirilmemiş)
         target_move = None
         target_picking = None
-        for picking in batch.picking_ids:
+        all_pickings = self._get_all_pickings(batch)
+        for picking in all_pickings:
             for move in picking.move_ids:
                 if (move.product_id.id == product.id and
                         move.quantity < move.product_uom_qty):
@@ -250,7 +254,7 @@ class PackingApiController(BarcodeApiBase):
 
         if not target_move:
             # Belki tamamlanmış — bilgi ver
-            for picking in batch.picking_ids:
+            for picking in all_pickings:
                 for move in picking.move_ids:
                     if move.product_id.id == product.id:
                         return {
@@ -307,7 +311,7 @@ class PackingApiController(BarcodeApiBase):
         sibling_remaining = []
         all_siblings_complete = True
         if target_picking.origin:
-            sibling_pickings = batch.picking_ids.filtered(
+            sibling_pickings = all_pickings.filtered(
                 lambda p: p.origin == target_picking.origin and p.id != target_picking.id
             )
             for sp in sibling_pickings:
@@ -345,7 +349,7 @@ class PackingApiController(BarcodeApiBase):
         # Tüm batch kontrolü
         all_matched = all(
             m.quantity >= m.product_uom_qty
-            for p in batch.picking_ids
+            for p in all_pickings
             for m in p.move_ids
         )
 
@@ -353,7 +357,7 @@ class PackingApiController(BarcodeApiBase):
         try:
             if batch.state != 'done':
                 batch.invalidate_recordset(['picking_ids'])
-                all_done = all(p.state == 'done' for p in batch.picking_ids)
+                all_done = all(p.state == 'done' for p in all_pickings)
                 if all_done:
                     batch.action_done()
                     _logger.info("Batch %s tamamlandı (packing_scan)", batch.name)
@@ -452,7 +456,8 @@ class PackingApiController(BarcodeApiBase):
         errors = []
         skipped = []
 
-        for picking in batch.picking_ids:
+        all_pickings = self._get_all_pickings(batch)
+        for picking in all_pickings:
             try:
                 # Güvenlik: Hiç toplanmamış picking'i paketleme/faturala
                 has_collected = any(
@@ -488,7 +493,7 @@ class PackingApiController(BarcodeApiBase):
         try:
             if batch.state != 'done':
                 batch.invalidate_recordset(['picking_ids'])
-                all_done = all(p.state == 'done' for p in batch.picking_ids)
+                all_done = all(p.state == 'done' for p in all_pickings)
                 if all_done:
                     batch.action_done()
                     _logger.info("Batch %s tamamlandı (packing_complete)", batch.name)
@@ -498,7 +503,7 @@ class PackingApiController(BarcodeApiBase):
         return {
             'success': len(errors) == 0,
             'validated': validated,
-            'total': len(batch.picking_ids),
+            'total': len(all_pickings),
             'skipped': len(skipped),
             'errors': errors,
             'message': f'{validated} sipariş paketlendi ve doğrulandı',

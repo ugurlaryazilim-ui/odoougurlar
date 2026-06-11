@@ -17,6 +17,53 @@ _DEBOUNCE_SECONDS = 0.5  # 500ms içinde aynı istek tekrarlanırsa atla
 class BarcodeApiBase(http.Controller):
     """Ortak yardımcı fonksiyonlar."""
 
+    def _get_all_pickings(self, batch):
+        """Batch'e ait tüm picking'leri döndür (done dahil).
+
+        Odoo picking done olunca batch_id'yi temizliyor.
+        all_picking_ids kalıcı alanı varsa onu kullan, yoksa fallback'ler.
+        """
+        # 1. Kalıcı alan
+        pickings = batch.all_picking_ids
+        if pickings:
+            return pickings
+
+        # 2. DB sorgusu (henüz done olmamış, batch_id temizlenmemiş)
+        pickings = request.env['stock.picking'].sudo().search([
+            ('batch_id', '=', batch.id),
+        ])
+        if pickings:
+            try:
+                batch.sudo().all_picking_ids = [(6, 0, pickings.ids)]
+            except Exception:
+                pass
+            return pickings
+
+        # 3. Eski batch migrasyon — sale.order.picking_batch_names
+        try:
+            orders = request.env['sale.order'].sudo().search([
+                ('picking_batch_names', '=', batch.name),
+            ])
+            if orders:
+                pickings = request.env['stock.picking'].sudo().search([
+                    ('origin', 'in', orders.mapped('name')),
+                    ('picking_type_code', '=', 'outgoing'),
+                ])
+                if pickings:
+                    try:
+                        batch.sudo().all_picking_ids = [(6, 0, pickings.ids)]
+                        _logger.info(
+                            "Eski batch %s için %d picking migre edildi",
+                            batch.name, len(pickings))
+                    except Exception as e:
+                        _logger.warning("all_picking_ids migrasyon hatası: %s", e)
+                    return pickings
+        except Exception as e:
+            _logger.warning("Eski batch picking tespiti hatası (%s): %s", batch.name, e)
+
+        # 4. Son çare
+        return batch.picking_ids
+
     def _json_response(self, data, status=200):
         return Response(
             json.dumps(data, ensure_ascii=False, default=str),

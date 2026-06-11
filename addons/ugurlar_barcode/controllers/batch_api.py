@@ -18,57 +18,6 @@ class BatchApiController(BarcodeApiBase):
     batch_route_items tarafından paylaşılır.
     """
 
-    def _get_all_pickings(self, batch):
-        """Batch'e ait tüm picking'leri döndür (done dahil).
-
-        Odoo picking done olunca batch_id'yi temizliyor.
-        all_picking_ids kalıcı alanı varsa onu kullan, yoksa fallback'ler:
-        1. DB'den batch_id ile ara
-        2. sale.order.picking_batch_names üzerinden migrasyon
-        3. Mevcut picking_ids
-        """
-        # 1. Kalıcı alan
-        pickings = batch.all_picking_ids
-        if pickings:
-            return pickings
-
-        # 2. DB sorgusu (henüz done olmamış, batch_id temizlenmemiş)
-        pickings = request.env['stock.picking'].sudo().search([
-            ('batch_id', '=', batch.id),
-        ])
-        if pickings:
-            # Kalıcı alana yaz
-            try:
-                batch.sudo().all_picking_ids = [(6, 0, pickings.ids)]
-            except Exception:
-                pass
-            return pickings
-
-        # 3. Eski batch migrasyon — sale.order.picking_batch_names
-        try:
-            orders = request.env['sale.order'].sudo().search([
-                ('picking_batch_names', '=', batch.name),
-            ])
-            if orders:
-                pickings = request.env['stock.picking'].sudo().search([
-                    ('origin', 'in', orders.mapped('name')),
-                    ('picking_type_code', '=', 'outgoing'),
-                ])
-                if pickings:
-                    try:
-                        batch.sudo().all_picking_ids = [(6, 0, pickings.ids)]
-                        _logger.info(
-                            "Eski batch %s için %d picking migre edildi",
-                            batch.name, len(pickings))
-                    except Exception as e:
-                        _logger.warning("all_picking_ids migrasyon hatası: %s", e)
-                    return pickings
-        except Exception as e:
-            _logger.warning("Eski batch picking tespiti hatası (%s): %s", batch.name, e)
-
-        # 4. Son çare
-        return batch.picking_ids
-
     def _get_product_location_map(self, batch, detailed=False):
         """Batch'teki ürünlerin raf konumlarını toplu sorgula.
 
@@ -816,8 +765,10 @@ class BatchApiController(BarcodeApiBase):
         collected_moves = 0
         skipped_moves = 0
 
+        all_pickings = self._get_all_pickings(batch)
+
         # ─── 1. Toplanan miktarları move_line'lara yaz ───
-        for picking in batch.picking_ids:
+        for picking in all_pickings:
             if picking.state == 'done':
                 # Zaten toplama sırasında validate edilmiş — atla
                 total_moves += len(picking.move_ids)
@@ -844,7 +795,7 @@ class BatchApiController(BarcodeApiBase):
         # ─── 2. Picking'leri doğrula (stok aktarımı) ───
         failed_pickings = []
         skipped_pickings = []
-        for picking in batch.picking_ids:
+        for picking in all_pickings:
             if picking.state in ('assigned', 'confirmed'):
                 # Güvenlik: Hiç toplanmamış picking'i validate etme
                 has_collected = any(
@@ -907,14 +858,14 @@ class BatchApiController(BarcodeApiBase):
         # ─── 3. Batch'i tamamla (sadece tüm picking'ler done ise) ───
         try:
             if batch.state != 'done':
-                all_done = all(p.state == 'done' for p in batch.picking_ids)
+                all_done = all(p.state == 'done' for p in all_pickings)
                 if all_done:
                     batch.action_done()
                 else:
-                    not_done = [p.name for p in batch.picking_ids if p.state != 'done']
+                    not_done = [p.name for p in all_pickings if p.state != 'done']
                     _logger.warning(
                         "Batch %s: %d/%d picking done DEĞİL: %s — batch tamamlanmadı",
-                        batch.name, len(not_done), len(batch.picking_ids), not_done)
+                        batch.name, len(not_done), len(all_pickings), not_done)
                     failed_pickings.extend(not_done)
         except Exception as e:
             _logger.error("Batch %s tamamlama hatası: %s", batch.name, e)
@@ -922,7 +873,7 @@ class BatchApiController(BarcodeApiBase):
         # ─── 4. Ürün chatter'larına transfer tamamlanma logu ───
         try:
             user = request.env.user
-            for picking in batch.picking_ids:
+            for picking in all_pickings:
                 source_name = picking.location_id.display_name or ''
                 dest_name = picking.location_dest_id.display_name or ''
                 for move in picking.move_ids:
@@ -942,7 +893,7 @@ class BatchApiController(BarcodeApiBase):
         except Exception as e:
             _logger.warning("Chatter log hatası: %s", e)
 
-        batch_done = all(p.state == 'done' for p in batch.picking_ids)
+        batch_done = all(p.state == 'done' for p in all_pickings)
         result_msg = f'{batch.name}: {collected_moves}/{total_moves} ürün toplandı ve aktarıldı'
         if failed_pickings:
             result_msg += f' ⚠️ ({len(failed_pickings)} picking done olmadı: {", ".join(failed_pickings)})'
