@@ -39,6 +39,7 @@
             'ugurlar_tailor/static/src/js/screens/tailor_main_menu.js',
             'ugurlar_tailor/static/src/js/screens/tailor_new_order.js',
             'ugurlar_tailor/static/src/js/screens/tailor_order_list.js',
+            'ugurlar_tailor/static/src/js/screens/tailor_gift_label.js',
         ],
     },
     'installable': True,
