@@ -29,7 +29,12 @@ class BatchApiController(BarcodeApiBase):
             dict: {product_id: location_name} veya
                   {product_id: {'location_name': ..., 'location_parts': ...}}
         """
-        product_ids = batch.picking_ids.mapped('move_ids.product_id').ids
+        # batch.picking_ids ORM domain'i done picking'leri filtreleyebilir
+        # Bu yüzden doğrudan DB'den tüm picking'leri çekiyoruz
+        all_pickings = request.env['stock.picking'].sudo().search([
+            ('batch_id', '=', batch.id),
+        ])
+        product_ids = all_pickings.mapped('move_ids.product_id').ids
         result = {}
 
         warehouse = batch.picking_type_id.warehouse_id
@@ -293,7 +298,8 @@ class BatchApiController(BarcodeApiBase):
         # Toplu ürün lokasyon haritası
         location_dict = self._get_product_location_map(batch, detailed=False)
 
-        for p in batch.picking_ids.sorted(key=lambda x: x.name):
+        for p in request.env['stock.picking'].sudo().search(
+                [('batch_id', '=', batch.id)], order='name'):
             picking_lines = []
             for move in p.move_ids:
                 product = move.product_id
@@ -415,12 +421,18 @@ class BatchApiController(BarcodeApiBase):
             # Toplu ürün lokasyon haritası (detaylı: zone/section/shelf parçaları ile)
             location_data_dict = self._get_product_location_map(batch, detailed=True)
 
+            # Tüm picking'leri çek — batch.picking_ids ORM domain'i bazı
+            # state'leri filtreleyebilir, bu yüzden doğrudan DB'den çekiyoruz
+            all_pickings = request.env['stock.picking'].sudo().search([
+                ('batch_id', '=', batch.id),
+            ])
+
             # ─── source_warehouse_id boş olan move'lar için anlık depo tespiti ───
             # Eski batch'lerde (yeni kod deploy edilmeden oluşturulanlarda) depo bilgisi yok.
             # Bu move'lar için anlık stok kontrolü yapıp depo bilgisini dolduruyoruz.
             needs_depot_check = any(
                 not m.source_warehouse_id
-                for p in batch.picking_ids for m in p.move_ids
+                for p in all_pickings for m in p.move_ids
             )
             depot_map = {}  # product_id → warehouse record
             if needs_depot_check:
@@ -433,7 +445,7 @@ class BatchApiController(BarcodeApiBase):
                     # Tüm ürün ID'lerini topla
                     check_pids = list({
                         m.product_id.id
-                        for p in batch.picking_ids for m in p.move_ids
+                        for p in all_pickings for m in p.move_ids
                         if not m.source_warehouse_id
                     })
                     Quant = request.env['stock.quant'].sudo()
@@ -479,7 +491,7 @@ class BatchApiController(BarcodeApiBase):
 
             # Tüm move'ları topla
             route_items = []
-            for picking in batch.picking_ids:
+            for picking in all_pickings:
                 for move in picking.move_ids:
                     product = move.product_id
 

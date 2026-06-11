@@ -33,8 +33,11 @@ class StockPickingBatchExt(models.Model):
     @api.depends('picking_ids', 'picking_ids.availability_status',
                  'picking_ids.move_ids')
     def _compute_totals(self):
+        Picking = self.env['stock.picking'].sudo()
         for batch in self:
-            pickings = batch.picking_ids
+            # batch.picking_ids ORM domain'i done picking'leri filtreleyebilir
+            # Doğrudan DB'den tüm picking'leri çekiyoruz
+            pickings = Picking.search([('batch_id', '=', batch.id)])
             batch.total_orders = len(pickings)
             batch.total_items = sum(
                 len(p.move_ids) for p in pickings)
