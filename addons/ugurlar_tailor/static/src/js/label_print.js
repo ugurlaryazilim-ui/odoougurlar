@@ -58,6 +58,45 @@ function _buildOrderLabel(data, copyType) {
     `;
 }
 
+function _buildGiftLabel(data) {
+    const servicesHtml = data.services.map(s =>
+        `<div style="padding:2px 4px;font-size:12px;font-weight:600;">🪡 ${s.name}</div>`
+    ).join('');
+
+    return `
+        <div class="label">
+            <div class="label-hdr" style="border-bottom:3px double #000;">🎁 HEDİYE FİŞİ</div>
+            <div class="label-store">UĞURLAR</div>
+            <div class="label-sub">Terzi Takip Sistemi</div>
+            <hr class="label-div"/>
+            <div style="text-align:center;font-size:14px;font-weight:800;padding:6px 4px;line-height:1.4;">
+                Bu ürün size hediye edilmiştir.
+            </div>
+            <hr class="label-div"/>
+            <div class="label-r"><span class="ll">Fiş No:</span><span class="vv" style="font-size:13px;font-weight:bold;">${data.name}</span></div>
+            <div class="label-r"><span class="ll">Fatura No:</span><span class="vv">${data.invoice_no}</span></div>
+            <hr class="label-div"/>
+            <div class="label-r"><span class="ll">Ürün:</span><span class="vv">${data.product_code || data.product_name}</span></div>
+            <div class="label-r"><span class="ll">Barkod:</span><span class="vv">${data.product_barcode}</span></div>
+            <hr class="label-div"/>
+            <div class="label-section">YAPILAN İŞLEMLER</div>
+            ${servicesHtml}
+            <hr class="label-div"/>
+            <div class="label-dt">${data.date}</div>
+            <div style="margin-top:10px;padding:6px 4px;border:2px solid #000;border-radius:4px;">
+                <div style="text-align:center;font-size:13px;font-weight:900;margin-bottom:4px;">DEĞİŞİM KOŞULLARI</div>
+                <div style="font-size:11px;font-weight:600;line-height:1.5;">
+                    • Değişim için bu fiş ile mağazamıza başvurunuz.<br/>
+                    • Değişim süresi: Teslim tarihinden itibaren 14 gündür.<br/>
+                    • Ürün kullanılmamış ve etiketli olmalıdır.
+                </div>
+            </div>
+            <div class="label-thanks" style="margin-top:8px;">MUTLU GÜNLER DİLERİZ 🎁</div>
+            ${data.notes ? `<hr class="label-div"/><div style="font-size:10px;"><b>Not:</b> ${data.notes}</div>` : ''}
+        </div>
+    `;
+}
+
 function _buildCustomerSummaryLabel(dataArray) {
     // Musteri bilgisi ilk siparisten alinir (hepsi ayni musteri)
     const first = dataArray[0];
@@ -240,7 +279,8 @@ export function printTailorLabel(data) {
     const terzi = _buildOrderLabel(data, 'terzi');
     const magaza = _buildOrderLabel(data, 'magaza');
     const musteri = _buildCustomerSummaryLabel([data]);
-    _printHtml(terzi + magaza + musteri, `Terzi Etiket — ${data.name}`);
+    const hediye = _buildGiftLabel(data);
+    _printHtml(terzi + magaza + musteri + hediye, `Terzi Etiket — ${data.name}`);
 }
 
 /**
@@ -258,6 +298,11 @@ export function printMultipleTailorLabels(dataArray) {
 
     // En sona tek bir musteri ozet nushasi
     allLabels += _buildCustomerSummaryLabel(dataArray);
+
+    // En sona hediye nushalari (her urun icin ayri)
+    for (const data of dataArray) {
+        allLabels += _buildGiftLabel(data);
+    }
 
     const names = dataArray.map(d => d.name).join(', ');
     _printHtml(allLabels, `Terzi Etiketler — ${names}`);
