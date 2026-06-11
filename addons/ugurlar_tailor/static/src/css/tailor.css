@@ -87,6 +87,10 @@
 
 .tailor-card-primary { border-color: var(--tailor-primary); }
 .tailor-card-secondary { border-color: var(--tailor-success); }
+.tailor-card-gift {
+    border-color: #8b5cf6;
+    background: linear-gradient(135deg, #faf5ff, #f3e8ff);
+}
 
 .tailor-card-icon {
     font-size: 40px;

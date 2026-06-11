@@ -6,11 +6,12 @@ import { useService } from "@web/core/utils/hooks";
 import { TailorMainMenu } from "./screens/tailor_main_menu";
 import { TailorNewOrder } from "./screens/tailor_new_order";
 import { TailorOrderList } from "./screens/tailor_order_list";
+import { TailorGiftLabel } from "./screens/tailor_gift_label";
 import { TailorBarcodeScanner } from "./tailor_scanner";
 
 export class TailorAction extends Component {
     static template = "ugurlar_tailor.TailorAction";
-    static components = { TailorMainMenu, TailorNewOrder, TailorOrderList };
+    static components = { TailorMainMenu, TailorNewOrder, TailorOrderList, TailorGiftLabel };
 
     setup() {
         this.notification = useService("notification");

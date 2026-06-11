@@ -7,6 +7,7 @@
             <TailorMainMenu t-if="state.screen === 'main_menu'" onNavigate.bind="switchScreen"/>
             <TailorNewOrder t-if="state.screen === 'new_order'" onNavigate.bind="switchScreen" scanner="scanner"/>
             <TailorOrderList t-if="state.screen === 'order_list'" onNavigate.bind="switchScreen" scanner="scanner"/>
+            <TailorGiftLabel t-if="state.screen === 'gift_label'" onNavigate.bind="switchScreen" scanner="scanner"/>
         </div>
     </t>
 
@@ -27,6 +28,11 @@
                     <div class="tailor-card-icon">&#128230;</div>
                     <div class="tailor-card-title">Siparis Listesi</div>
                     <div class="tailor-card-desc">Tum siparisleri goruntuleyin ve yonetin</div>
+                </div>
+                <div class="tailor-menu-card tailor-card-gift" t-on-click="onGiftLabel">
+                    <div class="tailor-card-icon">&#127873;</div>
+                    <div class="tailor-card-title">Hediye Etiketi</div>
+                    <div class="tailor-card-desc">Hediye fisi yazdirin</div>
                 </div>
             </div>
         </div>
@@ -261,6 +267,117 @@
                 <span class="tailor-page-info"><t t-esc="state.page"/> / <t t-esc="totalPages"/></span>
                 <button class="tailor-btn tailor-btn-sm" t-on-click="nextPage"
                         t-att-disabled="state.page &gt;= totalPages">Sonraki &#8594;</button>
+            </div>
+        </div>
+    </t>
+
+    <!-- Gift Label Screen -->
+    <t t-name="ugurlar_tailor.TailorGiftLabel">
+        <div class="tailor-screen tailor-new-order">
+            <div class="tailor-toolbar">
+                <button class="tailor-btn tailor-btn-back" t-on-click="goBack">&#8592; Geri</button>
+                <h2 t-if="state.step === 1">&#127873; Hediye Etiketi — Fatura Ara</h2>
+                <h2 t-if="state.step === 2">&#127873; Hediye Etiketi — Ürün Seç</h2>
+                <h2 t-if="state.step === 3">&#127873; Hediye Etiketi Yazdırıldı</h2>
+            </div>
+
+            <!-- Step 1: Fatura Arama -->
+            <div t-if="state.step === 1" class="tailor-step">
+                <div class="tailor-search-box">
+                    <input type="text" class="tailor-input tailor-barcode-input"
+                           placeholder="Fatura no veya barkod..."
+                           t-model="state.searchQuery"
+                           t-on-keydown="onSearchKeydown"
+                           t-ref="giftSearchInput"/>
+                    <button class="tailor-btn tailor-btn-primary" t-on-click="searchInvoice"
+                            t-att-disabled="state.searching">
+                        <t t-if="state.searching"><span class="tailor-spinner"/> </t>
+                        <t t-if="!state.searching">Ara</t>
+                    </button>
+                </div>
+                <div t-if="state.invoices.length > 1" class="tailor-invoice-list">
+                    <t t-foreach="state.invoices" t-as="inv" t-key="inv.invoice_no">
+                        <div class="tailor-invoice-card" t-on-click="() =&gt; this.selectInvoice(inv.invoice_no)">
+                            <strong t-esc="inv.invoice_no"/>
+                            <span class="tailor-invoice-meta">
+                                <t t-esc="inv.customer_name"/> - <t t-esc="inv.sales_person || '-'"/>
+                            </span>
+                        </div>
+                    </t>
+                </div>
+            </div>
+
+            <!-- Step 2: Ürün Seçimi + Hediye Notu -->
+            <div t-if="state.step === 2" class="tailor-step">
+                <div class="tailor-invoice-info">
+                    <div class="tailor-info-row">
+                        <span class="tailor-info-label">Fatura:</span>
+                        <span class="tailor-info-value" t-esc="state.selectedInvoice.invoice_no"/>
+                    </div>
+                    <div class="tailor-info-row">
+                        <span class="tailor-info-label">Müşteri:</span>
+                        <span class="tailor-info-value" t-esc="state.selectedInvoice.customer_name"/>
+                    </div>
+                </div>
+
+                <div style="text-align:center;padding:12px;background:#f3e8ff;border-radius:8px;margin:8px 0;">
+                    <span style="font-size:15px;font-weight:700;color:#7c3aed;">🎁 Hediye edilecek ürünleri seçin ve not ekleyin</span>
+                </div>
+
+                <div class="tailor-items">
+                    <t t-foreach="state.selectedInvoice.items || []" t-as="item" t-key="item.barcode">
+                        <div t-att-class="'tailor-item-card' + (state.selectedItems[item.barcode]?.selected ? ' has-tailor' : '')" 
+                             style="cursor:pointer;" t-on-click="() =&gt; this.toggleItem(item.barcode)">
+                            <div class="tailor-item-header" style="display:flex;align-items:center;gap:10px;">
+                                <input type="checkbox" t-att-checked="state.selectedItems[item.barcode]?.selected"
+                                       style="width:20px;height:20px;" t-on-click.stop="() =&gt; this.toggleItem(item.barcode)"/>
+                                <div>
+                                    <strong><t t-esc="item.product_code || item.barcode"/></strong>
+                                    <span class="tailor-item-barcode"> — Barkod: <t t-esc="item.barcode"/></span>
+                                </div>
+                            </div>
+
+                            <!-- Hediye Notu — sadece seçiliyse -->
+                            <div t-if="state.selectedItems[item.barcode]?.selected" 
+                                 class="tailor-fade-in" style="margin-top:8px;">
+                                <input type="text" class="tailor-input tailor-input-sm"
+                                       placeholder="🎁 Hediye notu yazın (opsiyonel)..."
+                                       t-att-value="state.selectedItems[item.barcode]?.gift_note || ''"
+                                       t-on-change="(ev) =&gt; this.onGiftNoteChange(item.barcode, ev)"
+                                       t-on-click.stop="() =&gt; {}"/>
+                            </div>
+                        </div>
+                    </t>
+                </div>
+
+                <div class="tailor-submit-bar">
+                    <button class="tailor-btn tailor-btn-lg" 
+                            style="background:linear-gradient(135deg,#8b5cf6,#7c3aed);color:#fff;font-size:16px;"
+                            t-on-click="printGiftLabels"
+                            t-att-disabled="state.printing || selectedCount === 0">
+                        <t t-if="state.printing"><span class="tailor-spinner"/> Yazdırılıyor...</t>
+                        <t t-else="">🎁 Hediye Etiketi Yazdır (<t t-esc="selectedCount"/> ürün)</t>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 3: Başarı -->
+            <div t-if="state.step === 3" class="tailor-step">
+                <div class="tailor-success-screen">
+                    <div class="tailor-success-icon">🎁</div>
+                    <h3>Hediye Etiketleri Yazdırıldı!</h3>
+                    <p>Etiketler başarıyla yazdırıldı.</p>
+                    <div class="tailor-success-actions">
+                        <button class="tailor-btn tailor-btn-lg" 
+                                style="background:linear-gradient(135deg,#8b5cf6,#7c3aed);color:#fff;"
+                                t-on-click="() =&gt; { this.state.step = 1; this.state.searchQuery = ''; this.state.invoices = []; this.state.selectedInvoice = null; }">
+                            Yeni Hediye Etiketi
+                        </button>
+                        <button class="tailor-btn tailor-btn-back tailor-btn-lg" t-on-click="() =&gt; this.props.onNavigate('main_menu')">
+                            &#8592; Ana Menü
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </t>

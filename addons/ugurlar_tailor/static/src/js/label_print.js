@@ -307,3 +307,15 @@ export function printMultipleTailorLabels(dataArray) {
     const names = dataArray.map(d => d.name).join(', ');
     _printHtml(allLabels, `Terzi Etiketler — ${names}`);
 }
+
+/**
+ * SADECE hediye etiketi yazdir (bağımsız ekrandan).
+ */
+export function printGiftLabelOnly(dataArray) {
+    let allLabels = '';
+    for (const data of dataArray) {
+        allLabels += _buildGiftLabel(data);
+    }
+    const names = dataArray.map(d => d.product_code || d.product_barcode || d.name).join(', ');
+    _printHtml(allLabels, `Hediye Etiketi — ${names}`);
+}
