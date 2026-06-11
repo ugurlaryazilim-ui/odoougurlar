@@ -638,31 +638,13 @@ class BatchApiController(BarcodeApiBase):
             if target_move:
                 break
 
-        # ── Exact match bulunamadı → aynı şablon ile dene ──
-        if not target_move and product.product_tmpl_id:
-            scanned_tmpl_id = product.product_tmpl_id.id
-            for picking in batch.picking_ids:
-                for move in picking.move_ids:
-                    if (move.product_id.product_tmpl_id.id == scanned_tmpl_id and
-                            (move.wave_collected_qty or 0) < move.product_uom_qty):
-                        target_move = move
-                        target_picking = picking
-                        _logger.info(
-                            "Şablon eşleşmesi (toplama): taranan=%s → rotadaki=%s",
-                            product.display_name, move.product_id.display_name)
-                        break
-                if target_move:
-                    break
-
         if not target_move:
-            # Belki tamamlanmış
+            # Belki tamamlanmış — sadece birebir product_id eşleşmesi
             for picking in batch.picking_ids:
                 for move in picking.move_ids:
                     if move.state == 'cancel':
                         continue
-                    if (move.product_id.id == product.id or
-                        (product.product_tmpl_id and
-                         move.product_id.product_tmpl_id.id == product.product_tmpl_id.id)):
+                    if move.product_id.id == product.id:
                         return {
                             'warning': True,
                             'message': f'{product.display_name} zaten toplandı ✓',
