@@ -59,17 +59,8 @@ export class BatchPickingScreen extends Component {
                                 </button>
                             </div>
                         </div>
-                        <!-- Satır 2: Mağaza + Tarih filtreleri -->
+                        <!-- Satır 2: Tarih filtreleri -->
                         <div class="bp-filter-row bp-filter-advanced">
-                            <div class="bp-filter-group">
-                                <label class="bp-filter-label"><i class="fa fa-building"></i> Mağaza</label>
-                                <select class="bp-filter-select" t-on-change="(ev) => this.setWarehouse(ev.target.value)">
-                                    <option value="">Tüm Mağazalar</option>
-                                    <t t-foreach="state.warehouses" t-as="wh" t-key="wh">
-                                        <option t-att-value="wh" t-att-selected="state.filterWarehouse === wh" t-esc="wh"/>
-                                    </t>
-                                </select>
-                            </div>
                             <div class="bp-filter-group">
                                 <label class="bp-filter-label"><i class="fa fa-calendar"></i> Başlangıç</label>
                                 <input type="date" class="bp-filter-date"
@@ -82,7 +73,7 @@ export class BatchPickingScreen extends Component {
                                        t-att-value="state.filterDateTo"
                                        t-on-change="(ev) => this.setDateTo(ev.target.value)"/>
                             </div>
-                            <button class="bp-filter-clear-btn" t-if="state.filterWarehouse || state.filterDateFrom || state.filterDateTo"
+                            <button class="bp-filter-clear-btn" t-if="state.filterDateFrom || state.filterDateTo"
                                     t-on-click="clearAdvancedFilters">
                                 <i class="fa fa-times-circle"></i> Temizle
                             </button>
@@ -98,7 +89,6 @@ export class BatchPickingScreen extends Component {
                     <div class="bp-table" t-if="state.batches.length">
                         <div class="bp-table-head">
                             <span class="bp-col-name">Rota</span>
-                            <span class="bp-col-wh">Depo</span>
                             <span class="bp-col-time">Zaman</span>
                             <span class="bp-col-orders">Sipariş</span>
                             <span class="bp-col-items">Ürün</span>
@@ -110,9 +100,6 @@ export class BatchPickingScreen extends Component {
                                 <span class="bp-col-name">
                                     <strong t-esc="b.name"/>
                                     <small class="bp-batch-type" t-esc="b.batch_type"/>
-                                </span>
-                                <span class="bp-col-wh">
-                                    <span class="bp-wh-tag" t-if="b.warehouse_name" t-esc="b.warehouse_name"/>
                                 </span>
                                 <span class="bp-col-time">
                                     <span t-esc="b.time_window"/>

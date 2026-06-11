@@ -192,7 +192,7 @@
 }
 .bp-table-head {
     display: grid;
-    grid-template-columns: 1.5fr 1.5fr 1.5fr 0.7fr 0.7fr 1fr 0.8fr;
+    grid-template-columns: 1.5fr 1.5fr 0.7fr 0.7fr 1fr 0.8fr;
     padding: 8px 12px;
     background: #5e3551;
     color: #fff;
@@ -206,7 +206,7 @@
 }
 .bp-table-row {
     display: grid;
-    grid-template-columns: 1.5fr 1.5fr 1.5fr 0.7fr 0.7fr 1fr 0.8fr;
+    grid-template-columns: 1.5fr 1.5fr 0.7fr 0.7fr 1fr 0.8fr;
     padding: 10px 12px;
     border-bottom: 1px solid #f0f0f0;
     align-items: center;
@@ -970,7 +970,7 @@
 @media (min-width: 577px) and (max-width: 768px) {
     .bp-table-head,
     .bp-table-row {
-        grid-template-columns: 1.5fr 1.2fr 1fr 0.7fr 0.7fr 0.8fr 0.8fr;
+        grid-template-columns: 1.5fr 1.2fr 0.7fr 0.7fr 0.8fr 0.8fr;
         font-size: 12px;
     }
     .bp-filter-search {
