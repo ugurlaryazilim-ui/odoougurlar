@@ -164,4 +164,108 @@ export class TailorGiftLabel extends Component {
             this.searchInvoice();
         }
     }
+
+    scanCamera() {
+        const overlay = document.createElement('div');
+        overlay.className = 'tailor-camera-overlay';
+        overlay.innerHTML = `
+            <div class="tailor-camera-controls">
+                <button class="tailor-camera-close">&times;</button>
+                <div id="gift-camera-reader" style="width:100%"></div>
+                <div class="tailor-camera-status">Fatura barkodunu kameraya gösterin...</div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        overlay.querySelector('.tailor-camera-close').onclick = () => { overlay.remove(); };
+
+        const readerEl = overlay.querySelector('#gift-camera-reader');
+        const statusEl = overlay.querySelector('.tailor-camera-status');
+
+        const onDetected = (code) => {
+            this.state.searchQuery = code;
+            this.searchInvoice();
+        };
+
+        const useBarcodeDetector = ('BarcodeDetector' in window) && !/iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+        if (useBarcodeDetector) {
+            navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment' }
+            }).then(async (stream) => {
+                const video = document.createElement('video');
+                video.srcObject = stream;
+                video.setAttribute('playsinline', 'true');
+                video.setAttribute('autoplay', 'true');
+                video.muted = true;
+                video.style.width = '100%';
+                video.style.borderRadius = '8px';
+                readerEl.appendChild(video);
+                await video.play();
+
+                const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'qr_code'] });
+                const scan = async () => {
+                    if (!document.body.contains(overlay)) {
+                        stream.getTracks().forEach(t => t.stop());
+                        return;
+                    }
+                    try {
+                        const barcodes = await detector.detect(video);
+                        if (barcodes.length > 0) {
+                            stream.getTracks().forEach(t => t.stop());
+                            overlay.remove();
+                            onDetected(barcodes[0].rawValue);
+                            return;
+                        }
+                    } catch (e) {}
+                    requestAnimationFrame(scan);
+                };
+                scan();
+            }).catch(() => {
+                statusEl.textContent = _t('Kamera erisim hatasi');
+            });
+        } else {
+            this._startHtml5QrScanner(readerEl, statusEl, overlay, onDetected);
+        }
+    }
+
+    async _startHtml5QrScanner(readerEl, statusEl, overlay, onDetected) {
+        try {
+            if (!window.Html5Qrcode) {
+                statusEl.textContent = _t('Tarayici yukleniyor...');
+                const s = document.createElement('script');
+                s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
+                document.head.appendChild(s);
+                await new Promise((resolve, reject) => {
+                    s.onload = resolve;
+                    s.onerror = () => reject(new Error(_t('CDN yuklenemedi')));
+                    setTimeout(() => reject(new Error(_t('Zaman asimi'))), 10000);
+                });
+            }
+
+            statusEl.textContent = _t('Kamera baslatiliyor...');
+
+            const scanner = new Html5Qrcode('gift-camera-reader');
+            const config = { fps: 10, qrbox: { width: 250, height: 150 }, aspectRatio: 1.0 };
+            const successCb = (code) => {
+                scanner.stop().catch(() => {});
+                overlay.remove();
+                onDetected(code);
+            };
+
+            await scanner.start(
+                { facingMode: 'environment' },
+                config,
+                successCb,
+                () => {}
+            );
+
+            overlay.querySelector('.tailor-camera-close').onclick = () => {
+                scanner.stop().catch(() => {});
+                overlay.remove();
+            };
+        } catch (e) {
+            console.error('Html5Qrcode hatası:', e);
+            statusEl.textContent = _t('Kamera baslatilamadi: %(error)s', { error: e.message || e });
+        }
+    }
 }
