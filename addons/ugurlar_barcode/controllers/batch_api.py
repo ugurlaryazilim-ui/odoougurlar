@@ -18,6 +18,57 @@ class BatchApiController(BarcodeApiBase):
     batch_route_items tarafından paylaşılır.
     """
 
+    def _get_all_pickings(self, batch):
+        """Batch'e ait tüm picking'leri döndür (done dahil).
+
+        Odoo picking done olunca batch_id'yi temizliyor.
+        all_picking_ids kalıcı alanı varsa onu kullan, yoksa fallback'ler:
+        1. DB'den batch_id ile ara
+        2. sale.order.picking_batch_names üzerinden migrasyon
+        3. Mevcut picking_ids
+        """
+        # 1. Kalıcı alan
+        pickings = batch.all_picking_ids
+        if pickings:
+            return pickings
+
+        # 2. DB sorgusu (henüz done olmamış, batch_id temizlenmemiş)
+        pickings = request.env['stock.picking'].sudo().search([
+            ('batch_id', '=', batch.id),
+        ])
+        if pickings:
+            # Kalıcı alana yaz
+            try:
+                batch.sudo().all_picking_ids = [(6, 0, pickings.ids)]
+            except Exception:
+                pass
+            return pickings
+
+        # 3. Eski batch migrasyon — sale.order.picking_batch_names
+        try:
+            orders = request.env['sale.order'].sudo().search([
+                ('picking_batch_names', '=', batch.name),
+            ])
+            if orders:
+                pickings = request.env['stock.picking'].sudo().search([
+                    ('origin', 'in', orders.mapped('name')),
+                    ('picking_type_code', '=', 'outgoing'),
+                ])
+                if pickings:
+                    try:
+                        batch.sudo().all_picking_ids = [(6, 0, pickings.ids)]
+                        _logger.info(
+                            "Eski batch %s için %d picking migre edildi",
+                            batch.name, len(pickings))
+                    except Exception as e:
+                        _logger.warning("all_picking_ids migrasyon hatası: %s", e)
+                    return pickings
+        except Exception as e:
+            _logger.warning("Eski batch picking tespiti hatası (%s): %s", batch.name, e)
+
+        # 4. Son çare
+        return batch.picking_ids
+
     def _get_product_location_map(self, batch, detailed=False):
         """Batch'teki ürünlerin raf konumlarını toplu sorgula.
 
@@ -29,11 +80,8 @@ class BatchApiController(BarcodeApiBase):
             dict: {product_id: location_name} veya
                   {product_id: {'location_name': ..., 'location_parts': ...}}
         """
-        # batch.picking_ids ORM domain'i done picking'leri filtreleyebilir
-        # Bu yüzden doğrudan DB'den tüm picking'leri çekiyoruz
-        all_pickings = request.env['stock.picking'].sudo().search([
-            ('batch_id', '=', batch.id),
-        ])
+        # Kalıcı alan varsa onu kullan (done picking'ler dahil)
+        all_pickings = self._get_all_pickings(batch)
         product_ids = all_pickings.mapped('move_ids.product_id').ids
         result = {}
 
@@ -298,8 +346,7 @@ class BatchApiController(BarcodeApiBase):
         # Toplu ürün lokasyon haritası
         location_dict = self._get_product_location_map(batch, detailed=False)
 
-        for p in request.env['stock.picking'].sudo().search(
-                [('batch_id', '=', batch.id)], order='name'):
+        for p in self._get_all_pickings(batch).sorted(key=lambda x: x.name):
             picking_lines = []
             for move in p.move_ids:
                 product = move.product_id
@@ -421,11 +468,8 @@ class BatchApiController(BarcodeApiBase):
             # Toplu ürün lokasyon haritası (detaylı: zone/section/shelf parçaları ile)
             location_data_dict = self._get_product_location_map(batch, detailed=True)
 
-            # Tüm picking'leri çek — batch.picking_ids ORM domain'i bazı
-            # state'leri filtreleyebilir, bu yüzden doğrudan DB'den çekiyoruz
-            all_pickings = request.env['stock.picking'].sudo().search([
-                ('batch_id', '=', batch.id),
-            ])
+            # Tüm picking'leri çek (done dahil, migrasyon dahil)
+            all_pickings = self._get_all_pickings(batch)
 
             # ─── source_warehouse_id boş olan move'lar için anlık depo tespiti ───
             # Eski batch'lerde (yeni kod deploy edilmeden oluşturulanlarda) depo bilgisi yok.

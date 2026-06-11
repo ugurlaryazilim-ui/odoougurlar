@@ -564,6 +564,10 @@ class PickingSchedule(models.Model):
             'batch_schedule_time': window_end_utc,
         })
 
+        # Kalıcı picking ilişkisi — Odoo done olunca batch_id'yi temizleyebilir,
+        # all_picking_ids ise silinmez (geçmiş kaydı)
+        batch.all_picking_ids = [(6, 0, pickings.ids)]
+
         # Sale order'lara rota adını kalıcı olarak yaz
         self._update_sale_order_batch_names(pickings, batch_name)
 

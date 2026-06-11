@@ -9,6 +9,14 @@ class StockPickingBatchExt(models.Model):
     time_window = fields.Char(string='Zaman Dilimi', readonly=True)
     source_info = fields.Char(string='Depo / Aciklama', readonly=True)
 
+    # Kalıcı picking ilişkisi — Odoo picking done olunca batch_id'yi temizliyor,
+    # bu alan ise silinmez, geçmiş kaydı olarak kalır
+    all_picking_ids = fields.Many2many(
+        'stock.picking', 'batch_all_picking_rel', 'batch_id', 'picking_id',
+        string='Tüm Transferler (Kalıcı)',
+        help='Batch\'e atanmış tüm picking\'ler — done olsa bile silinmez.',
+    )
+
     total_items = fields.Integer(
         string='Toplam Ürün Adedi',
         compute='_compute_totals', store=True,
@@ -31,13 +39,11 @@ class StockPickingBatchExt(models.Model):
     )
 
     @api.depends('picking_ids', 'picking_ids.availability_status',
-                 'picking_ids.move_ids')
+                 'picking_ids.move_ids', 'all_picking_ids')
     def _compute_totals(self):
-        Picking = self.env['stock.picking'].sudo()
         for batch in self:
-            # batch.picking_ids ORM domain'i done picking'leri filtreleyebilir
-            # Doğrudan DB'den tüm picking'leri çekiyoruz
-            pickings = Picking.search([('batch_id', '=', batch.id)])
+            # Kalıcı alan varsa onu kullan, yoksa mevcut picking_ids
+            pickings = batch.all_picking_ids or batch.picking_ids
             batch.total_orders = len(pickings)
             batch.total_items = sum(
                 len(p.move_ids) for p in pickings)
@@ -47,6 +53,19 @@ class StockPickingBatchExt(models.Model):
                 pickings.filtered(lambda p: p.availability_status == 'other_warehouse'))
             batch.unavailable_count = len(
                 pickings.filtered(lambda p: p.availability_status == 'unavailable'))
+
+    def write(self, vals):
+        """picking_ids değiştiğinde all_picking_ids'i de güncelle."""
+        res = super().write(vals)
+        if 'picking_ids' in vals:
+            for batch in self:
+                # Mevcut picking_ids'i all_picking_ids'e ekle (sadece ekleme, çıkarma yok)
+                current_all = set(batch.all_picking_ids.ids)
+                current_picking = batch.picking_ids.ids
+                new_ids = [pid for pid in current_picking if pid not in current_all]
+                if new_ids:
+                    batch.all_picking_ids = [(4, pid) for pid in new_ids]
+        return res
 
     @api.model_create_multi
     def create(self, vals_list):
@@ -70,5 +89,9 @@ class StockPickingBatchExt(models.Model):
                 upd['schedule_time'] = fields.Datetime.now()
             if upd:
                 rec.write(upd)
+
+            # Picking'leri kalıcı alana da yaz
+            if rec.picking_ids:
+                rec.all_picking_ids = [(6, 0, rec.picking_ids.ids)]
 
         return records
