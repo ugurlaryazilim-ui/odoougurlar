@@ -262,6 +262,75 @@ class PackingApiController(BarcodeApiBase):
                 break
 
         if not target_move:
+            # ─── Fallback: İptal edilmiş move varsa yeniden yönlendirilmiş olabilir ───
+            # Odoo stok yeniden yönlendirme yapınca orijinal move'u iptal edip
+            # yeni bir picking/move oluşturur (örn: İade deposundan gelen ürün)
+            cancelled_move = None
+            cancelled_picking = None
+            for picking in all_pickings:
+                for move in picking.move_ids:
+                    if move.product_id.id == product.id and move.state == 'cancel':
+                        cancelled_move = move
+                        cancelled_picking = picking
+                        break
+                if cancelled_move:
+                    break
+
+            if cancelled_move and cancelled_picking and cancelled_picking.origin:
+                # Aynı siparişe ait yeni (aktif) picking'de ürünü ara
+                replacement_pickings = request.env['stock.picking'].sudo().search([
+                    ('origin', '=', cancelled_picking.origin),
+                    ('state', 'not in', ['cancel']),
+                    ('id', 'not in', all_pickings.ids if hasattr(all_pickings, 'ids') else []),
+                ])
+                for rp in replacement_pickings:
+                    for move in rp.move_ids:
+                        if (move.product_id.id == product.id and
+                                move.state != 'cancel' and
+                                move.quantity < move.product_uom_qty):
+                            target_move = move
+                            target_picking = rp
+                            _logger.info(
+                                "Yeniden yönlendirilmiş move bulundu: %s → %s (origin: %s)",
+                                cancelled_picking.name, rp.name, rp.origin)
+                            # Yeni picking'i batch'e ekle
+                            try:
+                                batch.sudo().all_picking_ids = [(4, rp.id)]
+                            except Exception:
+                                pass
+                            break
+                    if target_move:
+                        break
+
+            # Hâlâ bulunamadı ama iptal edilmiş move var →
+            # "soft match" yap (paketleme sadece doğrulama, stok hareketi değil)
+            if not target_move and cancelled_move:
+                wave_qty = cancelled_move.wave_collected_qty or 0
+                _logger.info(
+                    "Soft match: %s (cancelled move, wave_qty=%s, picking=%s)",
+                    product.display_name, wave_qty, cancelled_picking.name if cancelled_picking else '?')
+                return {
+                    'success': True,
+                    'product_name': product.display_name,
+                    'done_qty': 1,
+                    'demand_qty': cancelled_move.product_uom_qty,
+                    'picking_name': cancelled_picking.name if cancelled_picking else batch.name,
+                    'picking_id': cancelled_picking.id if cancelled_picking else 0,
+                    'picking_completed': True,
+                    'picking_total': 1,
+                    'picking_matched': 1,
+                    'remaining_items': [],
+                    'complete': True,
+                    'all_matched': all(
+                        m.quantity >= m.product_uom_qty
+                        for p in all_pickings
+                        for m in p.move_ids
+                        if m.state != 'cancel'
+                    ),
+                    'soft_match': True,
+                }
+
+        if not target_move:
             # Belki tamamlanmış — bilgi ver
             for picking in all_pickings:
                 for move in picking.move_ids:
@@ -270,7 +339,7 @@ class PackingApiController(BarcodeApiBase):
                             'warning': True,
                             'message': f'{product.display_name} zaten tamamlandı',
                             'product_name': product.display_name,
-                            'picking_completed': all(m.quantity >= m.product_uom_qty for m in picking.move_ids),
+                            'picking_completed': all(m.quantity >= m.product_uom_qty for m in picking.move_ids if m.state != 'cancel'),
                             'picking_id': picking.id,
                             'picking_name': picking.name,
                         }
