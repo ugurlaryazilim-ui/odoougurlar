@@ -526,6 +526,24 @@
     text-decoration: line-through;
     opacity: 0.7;
 }
+/* Geçmiş tablosunda line-through kaldır — tamamlanan satırlar okunabilir kalmalı */
+.bp-route-table-history .bp-row-done {
+    text-decoration: none;
+    opacity: 1;
+}
+.bp-row-partial {
+    background: #fff3e0;
+    color: #e65100;
+    border-left: 3px solid #ff9800;
+}
+.bp-row-skipped {
+    background: #ffebee;
+    color: #c62828;
+    border-left: 3px solid #ef5350;
+}
+.bp-route-table-history {
+    margin-top: 16px;
+}
 .bp-cell-barcode {
     font-family: monospace;
     font-size: 11px;

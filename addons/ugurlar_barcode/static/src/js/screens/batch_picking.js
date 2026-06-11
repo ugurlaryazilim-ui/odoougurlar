@@ -305,9 +305,49 @@ export class BatchPickingScreen extends Component {
                         <i class="fa fa-check-circle fa-3x"></i>
                         <h3>Tüm Ürünler Toplandı!</h3>
                         <p t-esc="state.collectedCount + '/' + state.items.length + ' ürün'"/>
-                        <button class="btn btn-success btn-lg" t-on-click="onComplete">
+                        <button class="btn btn-success btn-lg" t-on-click="onComplete"
+                                t-if="state.batch and state.batch.state !== 'done'">
                             <i class="fa fa-flag-checkered"></i> Toplamayı Tamamla
                         </button>
+                    </div>
+
+                    <!-- Tamamlanan rotanın ürün listesi (geçmiş kaydı) -->
+                    <div class="bp-route-table bp-route-table-history">
+                        <div class="bp-route-table-header">
+                            <span>Barkod</span>
+                            <span>Marka</span>
+                            <span>Kategori</span>
+                            <span>Renk</span>
+                            <span>Depo</span>
+                            <span>Beden</span>
+                            <span>Sokak</span>
+                            <span>Kat-Göz</span>
+                            <span>Adet</span>
+                            <span>Top.</span>
+                        </div>
+                        <t t-foreach="state.filteredItems" t-as="item" t-key="item.move_id">
+                            <div t-attf-class="bp-route-table-row {{item.collected_qty >= item.demand_qty ? 'bp-row-done' : (item.collected_qty > 0 ? 'bp-row-partial' : 'bp-row-skipped')}}"
+                                 t-on-click="() => this.selectItem(item)">
+                                <span class="bp-cell-barcode bp-barcode-copy" t-att-data-barcode="item.barcode || ''" t-on-click.stop="(ev) => this.copyBarcode(ev)" t-esc="item.barcode || ''"/>
+                                <span class="bp-cell-brand" t-esc="item.brand || '-'"/>
+                                <span class="bp-cell-category" t-esc="item.category || '-'"/>
+                                <span class="bp-cell-color" t-esc="item.color || '-'"/>
+                                <span class="bp-cell-depot">
+                                    <span t-if="item.source_warehouse_name"
+                                          t-attf-class="bp-depot-tag bp-depot-tag-{{item._depotColor || 'default'}}"
+                                          t-esc="item._depotShort || item.source_warehouse_name"/>
+                                    <span t-else="">-</span>
+                                </span>
+                                <span class="bp-cell-size" t-esc="item.size || '-'"/>
+                                <span t-esc="(item.location_parts || {}).zone || '-'"/>
+                                <span>
+                                    <t t-esc="(item.location_parts || {}).section || ''"/>
+                                    <t t-if="(item.location_parts || {}).shelf"> - <t t-esc="item.location_parts.shelf"/></t>
+                                </span>
+                                <span t-esc="item.demand_qty"/>
+                                <span t-esc="item.collected_qty"/>
+                            </div>
+                        </t>
                     </div>
                 </t>
             </t>
