@@ -253,6 +253,7 @@ class PackingApiController(BarcodeApiBase):
         for picking in all_pickings:
             for move in picking.move_ids:
                 if (move.product_id.id == product.id and
+                        move.state != 'cancel' and
                         move.quantity < move.product_uom_qty):
                     target_move = move
                     target_picking = picking
@@ -264,7 +265,7 @@ class PackingApiController(BarcodeApiBase):
             # Belki tamamlanmış — bilgi ver
             for picking in all_pickings:
                 for move in picking.move_ids:
-                    if move.product_id.id == product.id:
+                    if move.product_id.id == product.id and move.state != 'cancel':
                         return {
                             'warning': True,
                             'message': f'{product.display_name} zaten tamamlandı',

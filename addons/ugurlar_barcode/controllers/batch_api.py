@@ -630,6 +630,7 @@ class BatchApiController(BarcodeApiBase):
         for picking in batch.picking_ids:
             for move in picking.move_ids:
                 if (move.product_id.id == product.id and
+                        move.state != 'cancel' and
                         (move.wave_collected_qty or 0) < move.product_uom_qty):
                     target_move = move
                     target_picking = picking
@@ -657,6 +658,8 @@ class BatchApiController(BarcodeApiBase):
             # Belki tamamlanmış
             for picking in batch.picking_ids:
                 for move in picking.move_ids:
+                    if move.state == 'cancel':
+                        continue
                     if (move.product_id.id == product.id or
                         (product.product_tmpl_id and
                          move.product_id.product_tmpl_id.id == product.product_tmpl_id.id)):
