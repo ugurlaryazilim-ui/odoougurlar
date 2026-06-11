@@ -23,12 +23,16 @@ class BarcodeApiBase(http.Controller):
         Odoo picking done olunca batch_id'yi temizliyor.
         all_picking_ids kalıcı alanı varsa onu kullan, yoksa fallback'ler.
         """
-        # 1. Kalıcı alan
-        pickings = batch.all_picking_ids
-        if pickings:
-            return pickings
+        # 1. Kalıcı alan (tablo yoksa hata verir — yakala)
+        try:
+            pickings = batch.all_picking_ids
+            if pickings:
+                return pickings
+        except Exception:
+            # Tablo henüz oluşturulmamış (modül upgrade edilmemiş)
+            _logger.debug("all_picking_ids tablosu mevcut değil — fallback kullanılacak")
 
-        # 2. DB sorgusu (henüz done olmamış, batch_id temizlenmemiş)
+        # 2. DB sorgusu (batch_id henüz temizlenmemiş olanlar)
         pickings = request.env['stock.picking'].sudo().search([
             ('batch_id', '=', batch.id),
         ])
@@ -55,13 +59,13 @@ class BarcodeApiBase(http.Controller):
                         _logger.info(
                             "Eski batch %s için %d picking migre edildi",
                             batch.name, len(pickings))
-                    except Exception as e:
-                        _logger.warning("all_picking_ids migrasyon hatası: %s", e)
+                    except Exception:
+                        pass
                     return pickings
         except Exception as e:
             _logger.warning("Eski batch picking tespiti hatası (%s): %s", batch.name, e)
 
-        # 4. Son çare
+        # 4. Son çare — picking_ids (done olanlar burada görünmeyebilir)
         return batch.picking_ids
 
     def _json_response(self, data, status=200):

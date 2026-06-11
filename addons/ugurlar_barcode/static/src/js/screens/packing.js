@@ -540,7 +540,8 @@ export class PackingScreen extends Component {
                 }
             }
         } catch (e) {
-            this.state.scanMsg = 'Hata';
+            const detail = (e && e.data && e.data.message) || e.message || e.toString() || '';
+            this.state.scanMsg = 'Hata' + (detail ? ': ' + detail : '');
             this.state.scanOk = false;
             this.state.inc_picking_id = null;
             speak('packing_error');

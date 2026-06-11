@@ -43,7 +43,10 @@ class StockPickingBatchExt(models.Model):
     def _compute_totals(self):
         for batch in self:
             # Kalıcı alan varsa onu kullan, yoksa mevcut picking_ids
-            pickings = batch.all_picking_ids or batch.picking_ids
+            try:
+                pickings = batch.all_picking_ids or batch.picking_ids
+            except Exception:
+                pickings = batch.picking_ids
             batch.total_orders = len(pickings)
             batch.total_items = sum(
                 len(p.move_ids) for p in pickings)
@@ -58,13 +61,16 @@ class StockPickingBatchExt(models.Model):
         """picking_ids değiştiğinde all_picking_ids'i de güncelle."""
         res = super().write(vals)
         if 'picking_ids' in vals:
-            for batch in self:
-                # Mevcut picking_ids'i all_picking_ids'e ekle (sadece ekleme, çıkarma yok)
-                current_all = set(batch.all_picking_ids.ids)
-                current_picking = batch.picking_ids.ids
-                new_ids = [pid for pid in current_picking if pid not in current_all]
-                if new_ids:
-                    batch.all_picking_ids = [(4, pid) for pid in new_ids]
+            try:
+                for batch in self:
+                    # Mevcut picking_ids'i all_picking_ids'e ekle (sadece ekleme, çıkarma yok)
+                    current_all = set(batch.all_picking_ids.ids)
+                    current_picking = batch.picking_ids.ids
+                    new_ids = [pid for pid in current_picking if pid not in current_all]
+                    if new_ids:
+                        batch.all_picking_ids = [(4, pid) for pid in new_ids]
+            except Exception:
+                pass  # Tablo henüz oluşturulmamış olabilir
         return res
 
     @api.model_create_multi
@@ -91,7 +97,10 @@ class StockPickingBatchExt(models.Model):
                 rec.write(upd)
 
             # Picking'leri kalıcı alana da yaz
-            if rec.picking_ids:
-                rec.all_picking_ids = [(6, 0, rec.picking_ids.ids)]
+            try:
+                if rec.picking_ids:
+                    rec.all_picking_ids = [(6, 0, rec.picking_ids.ids)]
+            except Exception:
+                pass  # Tablo henüz oluşturulmamış olabilir
 
         return records

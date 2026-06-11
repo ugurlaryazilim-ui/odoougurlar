@@ -226,6 +226,14 @@ class PackingApiController(BarcodeApiBase):
         Stok düşürme YAPILMAZ — stok rota toplama sırasında düşer.
         Burada sadece eşleştirme + etiket basma kontrolü yapılır.
         """
+        try:
+            return self._packing_scan_impl(batch_id, barcode, **kw)
+        except Exception as e:
+            _logger.error("packing_scan exception (batch=%s, barcode=%s): %s", batch_id, barcode, e, exc_info=True)
+            return {'error': f'Sunucu hatası: {str(e)}'}
+
+    def _packing_scan_impl(self, batch_id, barcode, **kw):
+        """packing_scan asıl implementasyonu."""
         # Duplicate guard: aynı barkod 500ms içinde tekrar taranırsa atla
         if self._check_duplicate_request('packing_scan', batch_id, barcode):
             return {'warning': True, 'message': 'Çift okutma algılandı, lütfen tekrar deneyin'}
