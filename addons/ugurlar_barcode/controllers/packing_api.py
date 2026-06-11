@@ -183,6 +183,64 @@ class PackingApiController(BarcodeApiBase):
                 order_number = mp_info['order_number']
 
             for move in picking.move_ids:
+                # İptal edilmiş move'ları atla — replacement'ı bul
+                if move.state == 'cancel':
+                    # Replacement picking'de aynı ürün var mı?
+                    replacement_found = False
+                    if picking.origin:
+                        rep_pickings = request.env['stock.picking'].sudo().search([
+                            ('origin', '=', picking.origin),
+                            ('state', 'not in', ['cancel']),
+                            ('id', '!=', picking.id),
+                        ])
+                        for rp in rep_pickings:
+                            for rm in rp.move_ids:
+                                if rm.product_id.id == move.product_id.id and rm.state != 'cancel':
+                                    product = rm.product_id
+                                    items.append({
+                                        'move_id': rm.id,
+                                        'picking_id': rp.id,
+                                        'picking_name': rp.name,
+                                        'product_id': product.id,
+                                        'product_name': product.display_name,
+                                        'barcode': product.barcode or '',
+                                        'demand_qty': rm.product_uom_qty,
+                                        'done_qty': rm.quantity,
+                                        'matched': rm.quantity >= rm.product_uom_qty or rm.state == 'done',
+                                        'origin': rp.origin or '',
+                                        'customer_name': customer_name,
+                                        'cargo_tracking': cargo_tracking,
+                                        'cargo_provider': cargo_provider,
+                                        'order_number': order_number,
+                                        'image_url': f'/web/image/product.product/{product.id}/image_128',
+                                    })
+                                    replacement_found = True
+                                    break
+                            if replacement_found:
+                                break
+                    if not replacement_found:
+                        # Replacement bulunamadı — iptal edilmiş move'u göster ama matched yap
+                        product = move.product_id
+                        items.append({
+                            'move_id': move.id,
+                            'picking_id': picking.id,
+                            'picking_name': picking.name,
+                            'product_id': product.id,
+                            'product_name': product.display_name,
+                            'barcode': product.barcode or '',
+                            'demand_qty': move.product_uom_qty,
+                            'done_qty': 0,
+                            'matched': False,
+                            'origin': picking.origin or '',
+                            'customer_name': customer_name,
+                            'cargo_tracking': cargo_tracking,
+                            'cargo_provider': cargo_provider,
+                            'order_number': order_number,
+                            'image_url': f'/web/image/product.product/{product.id}/image_128',
+                            'cancelled': True,
+                        })
+                    continue
+
                 product = move.product_id
 
                 items.append({
@@ -277,23 +335,24 @@ class PackingApiController(BarcodeApiBase):
                     break
 
             if cancelled_move and cancelled_picking and cancelled_picking.origin:
-                # Aynı siparişe ait yeni (aktif) picking'de ürünü ara
+                # Aynı siparişe ait tüm picking'lerde (done dahil) ürünü ara
                 replacement_pickings = request.env['stock.picking'].sudo().search([
                     ('origin', '=', cancelled_picking.origin),
                     ('state', 'not in', ['cancel']),
-                    ('id', 'not in', all_pickings.ids if hasattr(all_pickings, 'ids') else []),
                 ])
+                # 1) Önce henüz tamamlanmamış aktif move ara
                 for rp in replacement_pickings:
+                    if rp.id in (all_pickings.ids if hasattr(all_pickings, 'ids') else []):
+                        continue
                     for move in rp.move_ids:
                         if (move.product_id.id == product.id and
-                                move.state != 'cancel' and
+                                move.state not in ('cancel', 'done') and
                                 move.quantity < move.product_uom_qty):
                             target_move = move
                             target_picking = rp
                             _logger.info(
-                                "Yeniden yönlendirilmiş move bulundu: %s → %s (origin: %s)",
+                                "Replacement move (aktif): %s → %s (origin: %s)",
                                 cancelled_picking.name, rp.name, rp.origin)
-                            # Yeni picking'i batch'e ekle
                             try:
                                 batch.sudo().all_picking_ids = [(4, rp.id)]
                             except Exception:
@@ -302,13 +361,80 @@ class PackingApiController(BarcodeApiBase):
                     if target_move:
                         break
 
+                # 2) Aktif bulunamadı → done move var mı? (zaten tamamlanmış replacement)
+                if not target_move:
+                    done_replacement = None
+                    done_replacement_picking = None
+                    for rp in replacement_pickings:
+                        for move in rp.move_ids:
+                            if move.product_id.id == product.id and move.state == 'done':
+                                done_replacement = move
+                                done_replacement_picking = rp
+                                break
+                        if done_replacement:
+                            break
+
+                    if done_replacement:
+                        _logger.info(
+                            "Replacement move (done): %s → %s (origin: %s)",
+                            cancelled_picking.name, done_replacement_picking.name,
+                            done_replacement_picking.origin)
+                        # Batch'e ekle
+                        try:
+                            batch.sudo().all_picking_ids = [(4, done_replacement_picking.id)]
+                        except Exception:
+                            pass
+                        # Nebim sync'i tetikle (fatura oluşsun)
+                        try:
+                            self._trigger_nebim_sync(done_replacement_picking)
+                        except Exception as e:
+                            _logger.error("Nebim sync hatası (replacement): %s", e)
+
+                        # Tüm batch kontrolü
+                        all_matched = all(
+                            m.quantity >= m.product_uom_qty
+                            for p in all_pickings
+                            for m in p.move_ids
+                            if m.state != 'cancel'
+                        )
+                        return {
+                            'success': True,
+                            'product_name': product.display_name,
+                            'done_qty': int(done_replacement.product_uom_qty),
+                            'demand_qty': done_replacement.product_uom_qty,
+                            'picking_name': done_replacement_picking.name,
+                            'picking_id': done_replacement_picking.id,
+                            'picking_completed': True,
+                            'picking_total': 1,
+                            'picking_matched': 1,
+                            'remaining_items': [],
+                            'complete': True,
+                            'all_matched': all_matched,
+                            'replacement_match': True,
+                        }
+
             # Hâlâ bulunamadı ama iptal edilmiş move var →
             # "soft match" yap (paketleme sadece doğrulama, stok hareketi değil)
             if not target_move and cancelled_move:
-                wave_qty = cancelled_move.wave_collected_qty or 0
                 _logger.info(
-                    "Soft match: %s (cancelled move, wave_qty=%s, picking=%s)",
-                    product.display_name, wave_qty, cancelled_picking.name if cancelled_picking else '?')
+                    "Soft match: %s (cancelled move, picking=%s)",
+                    product.display_name, cancelled_picking.name if cancelled_picking else '?')
+                # Sale order üzerinden Nebim sync dene
+                try:
+                    if cancelled_picking and cancelled_picking.origin:
+                        so = request.env['sale.order'].sudo().search(
+                            [('name', '=', cancelled_picking.origin)], limit=1)
+                        if so:
+                            # Siparişin tamamlanmış picking'lerinden birini bul
+                            done_picking = request.env['stock.picking'].sudo().search([
+                                ('origin', '=', so.name),
+                                ('state', '=', 'done'),
+                            ], limit=1)
+                            if done_picking:
+                                self._trigger_nebim_sync(done_picking)
+                except Exception as e:
+                    _logger.error("Soft match Nebim hatası: %s", e)
+
                 return {
                     'success': True,
                     'product_name': product.display_name,
