@@ -428,3 +428,158 @@ class NebimDashboardWarehouse(models.TransientModel):
             "Nebim iptal temizliği cron tamamlandı: %d silindi, %d başarısız (toplam %d)",
             deleted, failed, len(orders)
         )
+
+    # -----------------------------------------------------------------
+    #  Nebim Delete Debug Testi
+    # -----------------------------------------------------------------
+    def action_nebim_delete_debug(self):
+        """İptal siparişlerden İLK BİRİNİ alıp farklı Delete yöntemlerini dener.
+        
+        Her yöntemin raw HTTP yanıtını, status code'unu ve headers'ını gösterir.
+        Böylece Nebim'in hangi yönteme gerçek silme yanıtı verdiğini anlayabiliriz.
+        """
+        import json as _json
+        import requests as _requests
+
+        SaleOrder = self.env['sale.order'].sudo()
+        
+        # nebim_order_sent True olan iptal siparişi bul
+        order = SaleOrder.search([
+            ('state', '=', 'cancel'),
+            ('nebim_order_sent', '=', True),
+        ], limit=1)
+
+        if not order:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Delete Debug',
+                    'message': 'İptal + nebim_order_sent=True sipariş bulunamadı.',
+                    'type': 'warning',
+                    'sticky': False,
+                }
+            }
+
+        connector = self.env['odoougurlar.nebim.connector'].sudo()
+        doc_number = order.client_order_ref or order.name
+        customer_code = order.nebim_customer_code or ''
+
+        results = []
+        results.append(f"📋 Sipariş: {order.name}")
+        results.append(f"📋 DocumentNumber (client_order_ref): {doc_number}")
+        results.append(f"📋 CurrAccCode (nebim_customer_code): {customer_code}")
+        results.append(f"📋 nebim_order_request var mı: {'EVET' if order.nebim_order_request else 'HAYIR'}")
+        results.append("")
+
+        # ─── TOKEN al ───
+        try:
+            token = connector._connect()
+            root_url = connector._get_root_url(
+                self.env['ir.config_parameter'].sudo().get_param('odoougurlar.nebim_url', '')
+            )
+            results.append(f"✅ Token alındı: {token[:20]}...")
+        except Exception as e:
+            results.append(f"❌ Token hatası: {e}")
+            return self._show_debug_result(results)
+
+        # ─── YÖNTEM 1: Orijinal request payload ile Delete ───
+        results.append("\n═══ YÖNTEM 1: Orijinal payload → Delete endpoint ═══")
+        try:
+            if order.nebim_order_request:
+                payload1 = _json.loads(order.nebim_order_request)
+            else:
+                payload1 = {
+                    'ModelType': 13,
+                    'InternalDescription': doc_number,
+                    'DocumentNumber': doc_number,
+                    'OfficeCode': 'M',
+                    'StoreCode': '002',
+                    'WarehouseCode': '002',
+                    'CurrAccCode': customer_code,
+                    'CustomerCode': customer_code,
+                }
+
+            url1 = f"{root_url}/(S({token}))/IntegratorService/Delete"
+            results.append(f"URL: {url1}")
+            results.append(f"Payload keys: {list(payload1.keys())}")
+
+            resp1 = _requests.post(url1, json=payload1, timeout=30)
+            results.append(f"HTTP Status: {resp1.status_code}")
+            results.append(f"Response Headers: {dict(resp1.headers)}")
+            results.append(f"Response Body: {resp1.text[:500]}")
+        except Exception as e:
+            results.append(f"❌ Hata: {e}")
+
+        # ─── YÖNTEM 2: Minimal payload (sadece ModelType + InternalDescription) ───
+        results.append("\n═══ YÖNTEM 2: Minimal payload → Delete endpoint ═══")
+        try:
+            payload2 = {
+                'ModelType': 5,
+                'InternalDescription': doc_number,
+            }
+            url2 = f"{root_url}/(S({token}))/IntegratorService/Delete"
+            results.append(f"Payload: {_json.dumps(payload2)}")
+
+            resp2 = _requests.post(url2, json=payload2, timeout=30)
+            results.append(f"HTTP Status: {resp2.status_code}")
+            results.append(f"Response Body: {resp2.text[:500]}")
+        except Exception as e:
+            results.append(f"❌ Hata: {e}")
+
+        # ─── YÖNTEM 3: ModelType 13 + tüm alanlar ───
+        results.append("\n═══ YÖNTEM 3: ModelType 13 + CurrAccCode → Delete ═══")
+        try:
+            payload3 = {
+                'ModelType': 13,
+                'InternalDescription': doc_number,
+                'DocumentNumber': doc_number,
+                'Description': doc_number,
+                'OfficeCode': 'M',
+                'StoreCode': '002',
+                'WarehouseCode': '002',
+                'CurrAccCode': customer_code,
+                'CustomerCode': customer_code,
+            }
+            results.append(f"Payload: {_json.dumps(payload3, ensure_ascii=False)}")
+
+            resp3 = _requests.post(url2, json=payload3, timeout=30)
+            results.append(f"HTTP Status: {resp3.status_code}")
+            results.append(f"Response Body: {resp3.text[:500]}")
+        except Exception as e:
+            results.append(f"❌ Hata: {e}")
+
+        # ─── YÖNTEM 4: HTTP DELETE metodu ───
+        results.append("\n═══ YÖNTEM 4: HTTP DELETE metodu ═══")
+        try:
+            url4 = f"{root_url}/(S({token}))/IntegratorService/Delete"
+            payload4 = {
+                'ModelType': 5,
+                'InternalDescription': doc_number,
+                'DocumentNumber': doc_number,
+                'CurrAccCode': customer_code,
+            }
+            results.append(f"HTTP DELETE → {url4}")
+
+            resp4 = _requests.delete(url4, json=payload4, timeout=30)
+            results.append(f"HTTP Status: {resp4.status_code}")
+            results.append(f"Response Body: {resp4.text[:500]}")
+        except Exception as e:
+            results.append(f"❌ Hata: {e}")
+
+        return self._show_debug_result(results)
+
+    def _show_debug_result(self, results):
+        """Debug sonuçlarını wizard'da göster."""
+        message = '\n'.join(results)
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'Nebim Delete Debug Sonuçları',
+            'res_model': 'odoougurlar.test.result.wizard',
+            'view_mode': 'form',
+            'target': 'new',
+            'context': {
+                'default_title': 'Nebim Delete Debug',
+                'default_result_text': message,
+            },
+        }

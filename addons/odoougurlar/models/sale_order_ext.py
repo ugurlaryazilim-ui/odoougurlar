@@ -457,71 +457,96 @@ class SaleOrder(models.Model):
     def _nebim_delete_order(self, order):
         """Nebim'den siparişi siler.
 
-        Sipariş oluşturulurken post_data('Post', payload) kullanılıyor.
-        Silme için post_data('Delete', payload) — aynı yapıda payload.
+        Strateji: Sipariş oluşturulurken Nebim'e gönderilen orijinal payload'u
+        (nebim_order_request) alıp aynısını Delete endpoint'ine göndeririz.
+        Nebim kaydı tam olarak aynı yapıda eşleştirir.
 
-        Kritik: CurrAccCode, CustomerCode, ModelType, InternalDescription,
-        DocumentNumber dahil tüm alanlar gerećkli.
+        Fallback: Orijinal request yoksa minimal payload ile dener.
         """
+        import json as _json
+
         connector = self.env['odoougurlar.nebim.connector'].sudo()
         doc_number = order.client_order_ref or order.name
         customer_code = order.nebim_customer_code or ''
 
-        # Mapping'den StoreCode, WarehouseCode, ModelType al
-        model_type = 13  # Varsayılan
-        store_code = '002'
-        warehouse_code = '002'
-
-        marketplace_name = order.marketplace_name
-        if marketplace_name:
+        # ── 1. Orijinal sipariş request payload'unu kullan
+        payload = None
+        if order.nebim_order_request:
             try:
-                mapping = self.env['odoougurlar.marketplace.mapping'].sudo().find_mapping(
-                    marketplace_name, order.partner_id.country_id.id
+                payload = _json.loads(order.nebim_order_request)
+                _logger.info(
+                    "Nebim silme: Orijinal request payload kullanılıyor: %s (DocNum: %s)",
+                    order.name, doc_number
                 )
-                if mapping:
-                    model_type = int(mapping.nebim_order_model_type) if mapping.nebim_order_model_type else 13
-                    is_export = int(mapping.nebim_invoice_model_type) == 24 if mapping.nebim_invoice_model_type else False
-                    if is_export:
-                        model_type = 14
-                    store_code = mapping.store_code or '002'
-                    warehouse_code = mapping.warehouse_code or '002'
             except Exception as e:
-                _logger.warning("Nebim silme: mapping alınamadı (%s): %s", order.name, e)
+                _logger.warning("Nebim silme: Orijinal request parse edilemedi (%s): %s", order.name, e)
 
-        # Delete payload — sipariş oluştururken kullanılan aynı alanlar
-        payload = {
-            'ModelType': model_type,
-            'InternalDescription': doc_number,
-            'DocumentNumber': doc_number,
-            'Description': doc_number,
-            'OfficeCode': 'M',
-            'StoreCode': store_code,
-            'WarehouseCode': warehouse_code,
-            'CurrAccCode': customer_code,
-            'CustomerCode': customer_code,
-        }
+        # ── 2. Fallback: Orijinal request yoksa minimal payload
+        if not payload:
+            model_type = 13
+            store_code = '002'
+            warehouse_code = '002'
+
+            marketplace_name = order.marketplace_name
+            if marketplace_name:
+                try:
+                    mapping = self.env['odoougurlar.marketplace.mapping'].sudo().find_mapping(
+                        marketplace_name, order.partner_id.country_id.id
+                    )
+                    if mapping:
+                        model_type = int(mapping.nebim_order_model_type) if mapping.nebim_order_model_type else 13
+                        is_export = int(mapping.nebim_invoice_model_type) == 24 if mapping.nebim_invoice_model_type else False
+                        if is_export:
+                            model_type = 14
+                        store_code = mapping.store_code or '002'
+                        warehouse_code = mapping.warehouse_code or '002'
+                except Exception:
+                    pass
+
+            payload = {
+                'ModelType': model_type,
+                'InternalDescription': doc_number,
+                'DocumentNumber': doc_number,
+                'Description': doc_number,
+                'OfficeCode': 'M',
+                'StoreCode': store_code,
+                'WarehouseCode': warehouse_code,
+                'CurrAccCode': customer_code,
+                'CustomerCode': customer_code,
+            }
+            _logger.info(
+                "Nebim silme: Fallback minimal payload kullanılıyor: %s (DocNum: %s)",
+                order.name, doc_number
+            )
 
         _logger.info(
-            "Nebim sipariş silme başlatılıyor: %s (DocNum: %s, CurrAccCode: %s, ModelType: %d)",
-            order.name, doc_number, customer_code, model_type
+            "Nebim sipariş silme isteği: %s → Delete endpoint | Payload: %s",
+            order.name, _json.dumps(payload, ensure_ascii=False, default=str)[:500]
         )
 
         # Sipariş oluşturmadaki aynı metod — endpoint olarak 'Delete' gönder
         result = connector.post_data('Delete', payload)
 
-        # Nebim kendi hatasını döndürebilir
+        # ── Sonuç doğrulama
         if isinstance(result, dict) and result.get('ExceptionMessage'):
             raise Exception(f"Nebim Delete Hatası: {result['ExceptionMessage']}")
 
-        # Nebim'den silme başarılı — bayrakları sıfırla
+        # Boş yanıt kontrolü — Nebim hata vermeden boş dönüyorsa uyar
+        if result is None or result == '' or result == {}:
+            _logger.warning(
+                "⚠️ Nebim Delete boş yanıt döndü! Sipariş silinmemiş olabilir: %s (DocNum: %s, CurrAccCode: %s)",
+                order.name, doc_number, customer_code
+            )
+
+        # Bayrakları sıfırla
         order.sudo().write({
             'nebim_order_sent': False,
-            'nebim_order_response': f'[İPTAL] Nebim siparişi silindi. Yanıt: {result}',
+            'nebim_order_response': f'[İPTAL] Nebim Delete yanıt: {result}',
         })
 
         _logger.info(
-            "✅ Nebim sipariş silindi: %s → DocNum: %s, CurrAccCode: %s",
-            order.name, doc_number, customer_code
+            "Nebim sipariş silme tamamlandı: %s → DocNum: %s, CurrAccCode: %s, Yanıt: %s",
+            order.name, doc_number, customer_code, result
         )
 
     def action_confirm(self):

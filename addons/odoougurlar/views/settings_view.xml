@@ -185,6 +185,7 @@
                         <button name="action_import_shelves" type="object" string="📦 Rafları Import Et" class="btn-warning" confirm="HamurLabs Excel dosyalarından raf lokasyonları ve ürün yerleşimleri import edilsin mi?"/>
                         <button name="action_sync_districts" type="object" string="🏘️ İlçe Senkronizasyonu" class="btn-info" confirm="Nebim'den tüm il/ilçe/bölge kodları çekilsin mi?"/>
                         <button name="action_nebim_cancel_cleanup" type="object" string="🗑️ İptal Siparişleri Temizle" class="btn-danger" confirm="Nebim'de hâlâ duran iptal siparişler silinecek. Devam edilsin mi?"/>
+                        <button name="action_nebim_delete_debug" type="object" string="🔍 Delete Debug Test" class="btn-secondary"/>
                     </header>
                     <sheet>
                         <div class="oe_title">
