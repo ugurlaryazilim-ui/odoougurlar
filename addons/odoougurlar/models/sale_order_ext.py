@@ -500,11 +500,16 @@ class SaleOrder(models.Model):
                 raise Exception(f"Nebim SQL silme hatası: {error_msg}")
 
             if sp_result == 'SUCCESS':
-                deleted_lines = row.get('DeletedLines', 0)
                 order_number = row.get('OrderNumber', '')
                 _logger.info(
-                    "✅ Nebim sipariş silindi: %s → OrderNumber: %s, %d satır silindi",
-                    order.name, order_number, deleted_lines
+                    "✅ Nebim sipariş silindi: %s → OrderNumber: %s",
+                    order.name, order_number
+                )
+
+            if sp_result == 'CC_ONLY':
+                _logger.info(
+                    "✅ Nebim CC temizlendi (OrderHeader zaten yok): %s (DocNum: %s)",
+                    order.name, doc_number
                 )
 
         # Bayrakları sıfırla
