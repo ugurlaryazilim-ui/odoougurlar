@@ -109,6 +109,15 @@ class HepsiburadaOrderSync(models.AbstractModel):
         error_count += hist_err
         log_msgs.extend(hist_msgs)
 
+        # 3. Veritabanındaki iptal siparişleri tara (tarih filtresi dışındakiler dahil)
+        try:
+            with self.env.cr.savepoint():
+                cancel_count = self._cancel_pending_orders(store)
+                if cancel_count:
+                    _logger.info("HB — %d sipariş Odoo'da iptal edildi", cancel_count)
+        except Exception as e:
+            _logger.exception("HB iptal tarama hatası: %s", e)
+
         store.write({'last_sync': fields.Datetime.now()})
         details_txt = "\n".join(log_msgs) if log_msgs else "Tüm kayıtlar sorunsuz aktarıldı."
         sync_log.mark_done(
@@ -174,7 +183,18 @@ class HepsiburadaOrderSync(models.AbstractModel):
                         continue
                         
                     existing_order = self.env['sale.order'].search([('client_order_ref', '=', str(order_no)), ('hb_store_id', '=', store.merchant_id)], limit=1)
+                    
+                    # Mevcut sipariş varsa status güncelle
                     if existing_order:
+                        # HB order kaydını da bul ve status güncelle
+                        hb_existing = self.env['hepsiburada.order'].search([('hb_order_number', '=', str(order_no))], limit=1)
+                        if hb_existing and hb_existing.status != status.capitalize():
+                            new_status = {
+                                'shipped': 'Shipped', 'delivered': 'Delivered',
+                                'cancelled': 'Cancelled', 'unpacked': 'Unpacked',
+                                'undelivered': 'UnDelivered'
+                            }.get(status, status.capitalize())
+                            hb_existing.write({'status': new_status})
                         continue
                     
                     # hepsiburada.order var ama sale.order yoksa da missing sayılır
@@ -287,6 +307,16 @@ class HepsiburadaOrderSync(models.AbstractModel):
         
         existing = HbOrder.search([('hb_order_number', '=', order_no)], limit=1)
         if existing:
+            # Status güncelle
+            first_pkg = packages[0]
+            all_items = []
+            for pkg in packages:
+                all_items.extend(pkg.get('items', []))
+            first_item = all_items[0] if all_items else {}
+            new_status = first_item.get('status', '') or first_pkg.get('status', '') or ''
+            if new_status and existing.status != new_status:
+                existing.write({'status': new_status})
+
             # sale.order gerçekten var mı kontrol et (silinmiş olabilir)
             sale_exists = False
             if existing.sale_order_id:
@@ -655,3 +685,40 @@ class HepsiburadaOrderSync(models.AbstractModel):
         if store.auto_confirm:
             sale_order.action_confirm()
         return sale_order
+
+    # ═════════════════════════════════════════════════════════════
+    # İPTAL YÖNETİMİ
+    # ═════════════════════════════════════════════════════════════
+
+    @api.private
+    def _cancel_odoo_order(self, hb_order, store=None):
+        """Odoo siparişini iptal et."""
+        if store and not store.auto_cancel:
+            return
+        so = hb_order.sale_order_id
+        if so and so.state not in ('cancel', 'done'):
+            try:
+                so._action_cancel()
+                _logger.info("HB — Odoo sipariş iptal edildi: %s (HB: %s)", so.name, hb_order.hb_order_number)
+            except Exception as e:
+                _logger.warning("HB — Sipariş iptal hatası: %s - %s", so.name, e)
+
+    @api.private
+    def _cancel_pending_orders(self, store):
+        """Veritabanındaki iptal HB siparişlerini tara,
+        bağlı Odoo sale order henüz iptal edilmemişse iptal et.
+        Tarih filtresi dışında kalan eski siparişler dahil tümünü yakalar."""
+        cancelled_orders = self.env['hepsiburada.order'].search([
+            ('merchant_id', '=', store.merchant_id),
+            ('status', 'in', ['Cancelled', 'cancelled']),
+            ('sale_order_id', '!=', False),
+            ('sale_order_id.state', 'not in', ['cancel', 'done']),
+        ])
+        count = 0
+        for hb_order in cancelled_orders:
+            try:
+                self._cancel_odoo_order(hb_order, store)
+                count += 1
+            except Exception as e:
+                _logger.warning("HB — Bekleyen iptal hatası: %s - %s", hb_order.hb_order_number, e)
+        return count
