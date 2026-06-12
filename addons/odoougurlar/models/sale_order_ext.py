@@ -457,68 +457,65 @@ class SaleOrder(models.Model):
     def _nebim_delete_order(self, order):
         """Nebim'den siparişi siler.
 
-        HTTP DELETE metodu ile IntegratorService/Delete endpoint'ine istek atar.
-        POST metodu sahte 'Object deleted successfully' döner — HTTP DELETE gerçek silme yapar.
+        IntegratorService Delete endpoint'i çalışmadığı için (POST sahte success,
+        HTTP DELETE 'Invalid V3 Model Type' hatası) doğrudan SQL ile silme yapılır.
 
-        ModelType: Sipariş oluşturulurken mapping'den gelen değer (13 veya 14).
-        CurrAccCode: nebim_customer_code (ör: 1-4-168457).
-        InternalDescription: client_order_ref (ör: #2066, 11315555842).
+        RunProc → sp_DeleteOrder_Ugurlar stored procedure'ünü çağırır.
+        SP, trOrderHeader ve trOrderLine tablolarından InternalDescription'a göre siler.
         """
         connector = self.env['odoougurlar.nebim.connector'].sudo()
         doc_number = order.client_order_ref or order.name
-        customer_code = order.nebim_customer_code or ''
-
-        # Mapping'den ModelType, StoreCode, WarehouseCode al
-        model_type = 13  # Varsayılan — Nebim V3 Delete'te ModelType 5 "Invalid" döner
-        store_code = '002'
-        warehouse_code = '002'
-
-        marketplace_name = order.marketplace_name
-        if marketplace_name:
-            try:
-                mapping = self.env['odoougurlar.marketplace.mapping'].sudo().find_mapping(
-                    marketplace_name, order.partner_id.country_id.id
-                )
-                if mapping:
-                    model_type = int(mapping.nebim_order_model_type) if mapping.nebim_order_model_type else 13
-                    is_export = int(mapping.nebim_invoice_model_type) == 24 if mapping.nebim_invoice_model_type else False
-                    if is_export:
-                        model_type = 14
-                    store_code = mapping.store_code or '002'
-                    warehouse_code = mapping.warehouse_code or '002'
-            except Exception as e:
-                _logger.warning("Nebim silme: mapping alınamadı (%s): %s", order.name, e)
-
-        # HTTP DELETE payload
-        payload = {
-            'ModelType': model_type,
-            'InternalDescription': doc_number,
-            'DocumentNumber': doc_number,
-            'Description': doc_number,
-            'OfficeCode': 'M',
-            'StoreCode': store_code,
-            'WarehouseCode': warehouse_code,
-            'CurrAccCode': customer_code,
-            'CustomerCode': customer_code,
-        }
 
         _logger.info(
-            "Nebim sipariş silme (HTTP DELETE): %s (DocNum: %s, CurrAccCode: %s, ModelType: %d)",
-            order.name, doc_number, customer_code, model_type
+            "Nebim sipariş silme (RunProc): %s (DocNum: %s, CurrAccCode: %s)",
+            order.name, doc_number, order.nebim_customer_code or ''
         )
 
-        # HTTP DELETE metodu ile sil
-        result = connector.delete_data(payload)
+        # RunProc ile SP çağır
+        sp_params = [
+            {'Name': 'InternalDescription', 'Value': doc_number},
+        ]
+
+        try:
+            result = connector.run_proc('sp_DeleteOrder_Ugurlar', sp_params)
+        except Exception as e:
+            raise Exception(f"Nebim SP çağırma hatası (sp_DeleteOrder_Ugurlar): {str(e)}")
+
+        # SP sonucunu kontrol et
+        sp_result = 'UNKNOWN'
+        sp_message = str(result)
+
+        if isinstance(result, list) and len(result) > 0:
+            row = result[0]
+            sp_result = row.get('Result', 'UNKNOWN')
+            sp_message = row.get('Message', str(result))
+
+            if sp_result == 'NOT_FOUND':
+                _logger.warning("Nebim sipariş bulunamadı: %s (DocNum: %s)", order.name, doc_number)
+                raise Exception(f"Nebim'de sipariş bulunamadı: {doc_number}")
+
+            if sp_result == 'ERROR':
+                error_msg = row.get('Message', 'Bilinmeyen hata')
+                _logger.error("Nebim silme SQL hatası: %s → %s", order.name, error_msg)
+                raise Exception(f"Nebim SQL silme hatası: {error_msg}")
+
+            if sp_result == 'SUCCESS':
+                deleted_lines = row.get('DeletedLines', 0)
+                order_number = row.get('OrderNumber', '')
+                _logger.info(
+                    "✅ Nebim sipariş silindi: %s → OrderNumber: %s, %d satır silindi",
+                    order.name, order_number, deleted_lines
+                )
 
         # Bayrakları sıfırla
         order.sudo().write({
             'nebim_order_sent': False,
-            'nebim_order_response': f'[İPTAL] Nebim HTTP DELETE yanıt: {result}',
+            'nebim_order_response': f'[İPTAL] Nebim SQL ile silindi. SP Sonuç: {sp_result} | {sp_message}',
         })
 
         _logger.info(
-            "Nebim sipariş silme tamamlandı: %s → DocNum: %s, Yanıt: %s",
-            order.name, doc_number, result
+            "Nebim sipariş silme tamamlandı: %s → DocNum: %s, Sonuç: %s",
+            order.name, doc_number, sp_result
         )
 
     def action_confirm(self):
