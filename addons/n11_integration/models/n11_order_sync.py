@@ -91,11 +91,11 @@ class N11OrderSync(models.Model):
         order_status = order_json.get('shipmentPackageStatus', '')
         
         if existing_n11:
-            old_status = existing_n11.order_status
             existing_n11.write({'order_status': order_status})
-            # İptal kontrolü — Trendyol mantığıyla aynı
-            if order_status in ('Cancelled', 'CANCELLED') and old_status not in ('Cancelled', 'CANCELLED'):
-                if existing_n11.sale_order_id:
+            # İptal kontrolü — durum Cancelled ise Odoo siparişini de iptal et
+            # (eski kayıtlar için de çalışır: sale order henüz iptal edilmemişse iptal eder)
+            if order_status in ('Cancelled', 'CANCELLED'):
+                if existing_n11.sale_order_id and existing_n11.sale_order_id.state not in ('cancel', 'done'):
                     self._cancel_odoo_order(existing_n11, store)
             return 'updated'
 
