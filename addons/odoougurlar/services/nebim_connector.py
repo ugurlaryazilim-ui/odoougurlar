@@ -250,41 +250,50 @@ class NebimConnector(models.AbstractModel):
         """
         Nebim'den kayıt siler (sipariş, fatura vb.).
         
-        Nebim V3 IntegratorService Delete endpoint'i POST metodu ile çalışır.
-        URL: POST {root}/(S({SessionID}))/IntegratorService/Delete
+        ÖNEMLİ: HTTP DELETE metodu kullanılır (POST DEĞİL!).
+        POST ile "Object deleted successfully" sahte yanıt döner ama silmez.
+        HTTP DELETE ile gerçek silme işlemi yapılır.
+        
+        URL: DELETE {root}/(S({SessionID}))/IntegratorService/Delete
         
         Payload örneği (sipariş silme):
             {
                 "ModelType": 13,
-                "InternalDescription": "TY-123456",
-                "DocumentNumber": "TY-123456",
+                "InternalDescription": "#2066",
+                "DocumentNumber": "#2066",
                 "OfficeCode": "M",
                 "StoreCode": "002",
-                "WarehouseCode": "002"
+                "WarehouseCode": "002",
+                "CurrAccCode": "1-4-168457",
+                "CustomerCode": "1-4-168457"
             }
         """
         token = self._connect()
         url = self._build_session_url(token, 'Delete')
 
-        _logger.info("Nebim'den siliniyor: Delete → %s | Payload: %s", url, json.dumps(payload, ensure_ascii=False))
+        _logger.info("Nebim'den siliniyor: HTTP DELETE → %s | Payload: %s", url, json.dumps(payload, ensure_ascii=False))
 
         for attempt in range(1, MAX_RETRIES + 1):
             try:
-                resp = _http_session.post(
-                    url, json=payload, timeout=30  # Silme için 30sn yeterli
+                # ÖNEMLİ: HTTP DELETE metodu — POST sahte success döner!
+                resp = _http_session.delete(
+                    url, json=payload, timeout=30
                 )
-                
-                # HTTP hata kontrolü
-                if resp.status_code >= 400:
-                    error_body = resp.text[:500]
-                    _logger.error("Nebim Delete HTTP %d: %s", resp.status_code, error_body)
-                    raise Exception(f"Nebim Delete HTTP {resp.status_code}: {error_body}")
                 
                 # Yanıt parse
                 try:
                     result = resp.json()
                 except Exception:
-                    result = resp.text
+                    result = {'raw': resp.text, 'status_code': resp.status_code}
+                
+                _logger.info("Nebim Delete yanıtı: HTTP %d | Body: %s", 
+                           resp.status_code, json.dumps(result, ensure_ascii=False)[:300])
+
+                # HTTP hata kontrolü
+                if resp.status_code >= 400:
+                    error_body = resp.text[:500]
+                    _logger.error("Nebim Delete HTTP %d: %s", resp.status_code, error_body)
+                    raise Exception(f"Nebim Delete HTTP {resp.status_code}: {error_body}")
                 
                 # Nebim kendi hata mesajını döndürebilir
                 if isinstance(result, dict) and result.get('ExceptionMessage'):
