@@ -506,6 +506,28 @@
     position: sticky;
     top: 0;
 }
+/* Sıralama — Odoo tarzı */
+.bp-sortable {
+    cursor: pointer;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    white-space: nowrap;
+}
+.bp-sortable:hover {
+    opacity: 0.85;
+}
+.bp-sortable .fa {
+    font-size: 10px;
+    transition: opacity 0.15s;
+}
+.bp-sort-idle {
+    opacity: 0.35;
+}
+.bp-sortable:hover .bp-sort-idle {
+    opacity: 0.7;
+}
 .bp-route-table-row {
     display: grid;
     grid-template-columns: 1.8fr 0.8fr 0.8fr 0.7fr 0.7fr 0.5fr 0.7fr 0.9fr 0.4fr 0.5fr;

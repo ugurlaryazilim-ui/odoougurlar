@@ -257,16 +257,16 @@ export class BatchPickingScreen extends Component {
                     <!-- SAĞ PANEL: Rota Listesi Tablosu -->
                     <div class="bp-route-table">
                         <div class="bp-route-table-header">
-                            <span>Barkod</span>
-                            <span>Marka</span>
-                            <span>Kategori</span>
-                            <span>Renk</span>
-                            <span>Depo</span>
-                            <span>Beden</span>
-                            <span>Sokak</span>
-                            <span>Kat-Göz</span>
-                            <span>Adet</span>
-                            <span>Top.</span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('barcode')">Barkod<i t-attf-class="fa ms-1 {{state.sortField === 'barcode' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('brand')">Marka<i t-attf-class="fa ms-1 {{state.sortField === 'brand' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('category')">Kategori<i t-attf-class="fa ms-1 {{state.sortField === 'category' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('color')">Renk<i t-attf-class="fa ms-1 {{state.sortField === 'color' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('source_warehouse_name')">Depo<i t-attf-class="fa ms-1 {{state.sortField === 'source_warehouse_name' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('size')">Beden<i t-attf-class="fa ms-1 {{state.sortField === 'size' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('zone')">Sokak<i t-attf-class="fa ms-1 {{state.sortField === 'zone' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('section')">Kat-Göz<i t-attf-class="fa ms-1 {{state.sortField === 'section' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('demand_qty')">Adet<i t-attf-class="fa ms-1 {{state.sortField === 'demand_qty' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('collected_qty')">Top.<i t-attf-class="fa ms-1 {{state.sortField === 'collected_qty' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
                         </div>
                         <t t-foreach="state.filteredItems" t-as="item" t-key="item.move_id">
                             <div t-attf-class="bp-route-table-row {{item.move_id === state.currentItem?.move_id ? 'bp-row-active' : ''}} {{item.collected_qty >= item.demand_qty ? 'bp-row-done' : ''}}"
@@ -314,16 +314,16 @@ export class BatchPickingScreen extends Component {
                     <!-- Tamamlanan rotanın ürün listesi (geçmiş kaydı) -->
                     <div class="bp-route-table bp-route-table-history">
                         <div class="bp-route-table-header">
-                            <span>Barkod</span>
-                            <span>Marka</span>
-                            <span>Kategori</span>
-                            <span>Renk</span>
-                            <span>Depo</span>
-                            <span>Beden</span>
-                            <span>Sokak</span>
-                            <span>Kat-Göz</span>
-                            <span>Adet</span>
-                            <span>Top.</span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('barcode')">Barkod<i t-attf-class="fa ms-1 {{state.sortField === 'barcode' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('brand')">Marka<i t-attf-class="fa ms-1 {{state.sortField === 'brand' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('category')">Kategori<i t-attf-class="fa ms-1 {{state.sortField === 'category' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('color')">Renk<i t-attf-class="fa ms-1 {{state.sortField === 'color' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('source_warehouse_name')">Depo<i t-attf-class="fa ms-1 {{state.sortField === 'source_warehouse_name' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('size')">Beden<i t-attf-class="fa ms-1 {{state.sortField === 'size' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('zone')">Sokak<i t-attf-class="fa ms-1 {{state.sortField === 'zone' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('section')">Kat-Göz<i t-attf-class="fa ms-1 {{state.sortField === 'section' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('demand_qty')">Adet<i t-attf-class="fa ms-1 {{state.sortField === 'demand_qty' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
+                            <span class="bp-sortable" t-on-click="() => this.onSort('collected_qty')">Top.<i t-attf-class="fa ms-1 {{state.sortField === 'collected_qty' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
                         </div>
                         <t t-foreach="state.filteredItems" t-as="item" t-key="item.move_id">
                             <div t-attf-class="bp-route-table-row {{item.collected_qty >= item.demand_qty ? 'bp-row-done' : (item.collected_qty > 0 ? 'bp-row-partial' : 'bp-row-skipped')}}"
@@ -422,6 +422,9 @@ export class BatchPickingScreen extends Component {
             // ── Depo filtresi (toplama ekranı) ──
             depotFilter: '',
             depotList: [],
+            // ── Sıralama ──
+            sortField: '',
+            sortDir: 'asc',
         });
 
         // ── Filtreleri localStorage'dan yükle (günlük cache) ──
@@ -699,7 +702,45 @@ export class BatchPickingScreen extends Component {
         }
         // Her item'a depo renk ve kısa ad bilgisi ekle
         this._enrichItemsWithDepotInfo(items);
+        this._applySort(items);
         this.state.filteredItems = items;
+    }
+
+    // ═══ SIRALAMA ═══
+    onSort(field) {
+        if (this.state.sortField === field) {
+            this.state.sortDir = this.state.sortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+            this.state.sortField = field;
+            this.state.sortDir = 'asc';
+        }
+        this._applyDepotFilter();
+    }
+
+    _applySort(items) {
+        const field = this.state.sortField;
+        if (!field) return;
+        const dir = this.state.sortDir === 'asc' ? 1 : -1;
+
+        items.sort((a, b) => {
+            let va, vb;
+            if (field === 'zone') {
+                va = (a.location_parts || {}).zone || '';
+                vb = (b.location_parts || {}).zone || '';
+            } else if (field === 'section') {
+                va = (a.location_parts || {}).section || '';
+                vb = (b.location_parts || {}).section || '';
+            } else {
+                va = a[field] ?? '';
+                vb = b[field] ?? '';
+            }
+            // Sayısal alanlar
+            if (typeof va === 'number' && typeof vb === 'number') {
+                return (va - vb) * dir;
+            }
+            // String karşılaştırma (Türkçe locale)
+            return String(va).localeCompare(String(vb), 'tr', { sensitivity: 'base' }) * dir;
+        });
     }
 
     _enrichItemsWithDepotInfo(items) {
