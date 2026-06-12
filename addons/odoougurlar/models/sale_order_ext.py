@@ -472,8 +472,10 @@ class SaleOrder(models.Model):
         )
 
         # RunProc ile SP çağır
+        customer_code = order.nebim_customer_code or ''
         sp_params = [
             {'Name': 'InternalDescription', 'Value': doc_number},
+            {'Name': 'CurrAccCode', 'Value': customer_code},
         ]
 
         try:
