@@ -1,4 +1,4 @@
-from odoo import models, fields
+from odoo import models, fields, api
 
 class N11Order(models.Model):
     _name = 'n11.order'
@@ -14,6 +14,7 @@ class N11Order(models.Model):
     order_date = fields.Datetime(string='Sipariş Tarihi')
     
     order_status = fields.Char(string='Sipariş Statüsü')
+    order_status_display = fields.Char(string='N11 Durumu', compute='_compute_order_status_display')
     payment_type = fields.Integer(string='Ödeme Tipi')
     invoice_type = fields.Integer(string='Fatura Tipi', help="1: Bireysel, 2: Kurumsal")
     tax_office = fields.Char(string='Vergi Dairesi', readonly=True)
@@ -43,6 +44,30 @@ class N11Order(models.Model):
     
     line_ids = fields.One2many('n11.order.line', 'order_id', string='Sipariş Satırları')
 
+    N11_STATUS_MAP = {
+        'New': 'Yeni',
+        'Approved': 'Onaylandı',
+        'Picking': 'Toplanıyor',
+        'Invoiced': 'Faturalandı',
+        'Shipped': 'Kargoda',
+        'Delivered': 'Teslim Edildi',
+        'Cancelled': 'İptal',
+        'Rejected': 'Reddedildi',
+        'Rejected By Seller': 'Satıcı Reddetti',
+        'Completed': 'Tamamlandı',
+        'DELIVERED': 'Teslim Edildi',
+        'SHIPPED': 'Kargoda',
+        'PICKING': 'Toplanıyor',
+        'CANCELLED': 'İptal',
+    }
+
+    @api.depends('order_status')
+    def _compute_order_status_display(self):
+        for rec in self:
+            rec.order_status_display = self.N11_STATUS_MAP.get(
+                rec.order_status, rec.order_status or ''
+            )
+
 
 class N11OrderLine(models.Model):
     _name = 'n11.order.line'
@@ -60,6 +85,30 @@ class N11OrderLine(models.Model):
     vat_rate = fields.Float(string='KDV Oranı (%)')
     
     status = fields.Char(string='Sipariş Statüsü')
+    status_display = fields.Char(string='Durum', compute='_compute_status_display')
+
+    STATUS_MAP = {
+        'New': 'Yeni',
+        'Approved': 'Onaylandı',
+        'Picking': 'Toplanıyor',
+        'Invoiced': 'Faturalandı',
+        'Shipped': 'Kargoda',
+        'Delivered': 'Teslim Edildi',
+        'Cancelled': 'İptal',
+        'Rejected': 'Reddedildi',
+        'Completed': 'Tamamlandı',
+        'DELIVERED': 'Teslim Edildi',
+        'SHIPPED': 'Kargoda',
+        'PICKING': 'Toplanıyor',
+        'CANCELLED': 'İptal',
+    }
+
+    @api.depends('status')
+    def _compute_status_display(self):
+        for rec in self:
+            rec.status_display = self.STATUS_MAP.get(
+                rec.status, rec.status or ''
+            )
     
     cargo_tracking = fields.Char(string='Kargo Takip')
     cargo_company = fields.Char(string='Kargo Firması')

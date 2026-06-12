@@ -16,7 +16,7 @@
                             <field name="store_id"/>
                             <field name="sale_order_id"/>
                             <field name="order_date"/>
-                            <field name="order_status"/>
+                            <field name="order_status_display" string="Pazarama Durumu"/>
                         </group>
                         <group>
                             <field name="customer_name"/>
@@ -33,7 +33,7 @@
                                     <field name="product_code"/>
                                     <field name="quantity"/>
                                     <field name="sale_price"/>
-                                    <field name="status"/>
+                                    <field name="status_display" string="Durum"/>
                                 </list>
                             </field>
                         </page>
@@ -60,7 +60,12 @@
                 <field name="order_date"/>
                 <field name="customer_name"/>
                 <field name="total_price"/>
-                <field name="order_status"/>
+                <field name="order_status" column_invisible="1"/>
+                <field name="order_status_display" string="Pazarama Durumu" widget="badge"
+                       decoration-success="order_status in (7,)"
+                       decoration-info="order_status in (5, 6)"
+                       decoration-warning="order_status in (1, 2, 3, 4, 12)"
+                       decoration-danger="order_status in (8, 9, 10, 11)"/>
                 <field name="store_id"/>
                 <field name="sale_order_id"/>
             </list>

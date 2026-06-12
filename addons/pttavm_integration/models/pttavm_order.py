@@ -1,4 +1,4 @@
-from odoo import models, fields
+from odoo import models, fields, api
 
 class PttavmOrder(models.Model):
     _name = 'pttavm.order'
@@ -14,6 +14,7 @@ class PttavmOrder(models.Model):
     order_date = fields.Datetime(string='Sipariş Tarihi')
     
     order_status = fields.Char(string='Sipariş Statüsü')
+    order_status_display = fields.Char(string='PttAvm Durumu', compute='_compute_order_status_display')
     payment_type = fields.Integer(string='Ödeme Tipi')
     invoice_type = fields.Integer(string='Fatura Tipi', help="1: Bireysel, 2: Kurumsal")
     
@@ -42,6 +43,26 @@ class PttavmOrder(models.Model):
     
     line_ids = fields.One2many('pttavm.order.line', 'order_id', string='Sipariş Satırları')
 
+    PTTAVM_STATUS_MAP = {
+        'kargo_yapilmasi_bekleniyor': 'Kargo Bekliyor',
+        'gonderilmis': 'Gönderilmiş',
+        'tamamlandi': 'Tamamlandı',
+        'iptal': 'İptal',
+        'iade': 'İade',
+        'kargoda': 'Kargoda',
+        'teslim_edildi': 'Teslim Edildi',
+        'hazirlaniyor': 'Hazırlanıyor',
+        'onay_bekliyor': 'Onay Bekliyor',
+    }
+
+    @api.depends('order_status')
+    def _compute_order_status_display(self):
+        for rec in self:
+            raw = rec.order_status or ''
+            rec.order_status_display = self.PTTAVM_STATUS_MAP.get(
+                raw, raw.replace('_', ' ').title() if raw else ''
+            )
+
 
 class PttavmOrderLine(models.Model):
     _name = 'pttavm.order.line'
@@ -59,6 +80,27 @@ class PttavmOrderLine(models.Model):
     vat_rate = fields.Float(string='KDV Oranı')
     
     status = fields.Char(string='Sipariş Statüsü')
+    status_display = fields.Char(string='Durum', compute='_compute_status_display')
+
+    STATUS_MAP = {
+        'kargo_yapilmasi_bekleniyor': 'Kargo Bekliyor',
+        'gonderilmis': 'Gönderilmiş',
+        'tamamlandi': 'Tamamlandı',
+        'iptal': 'İptal',
+        'iade': 'İade',
+        'kargoda': 'Kargoda',
+        'teslim_edildi': 'Teslim Edildi',
+        'hazirlaniyor': 'Hazırlanıyor',
+        'onay_bekliyor': 'Onay Bekliyor',
+    }
+
+    @api.depends('status')
+    def _compute_status_display(self):
+        for rec in self:
+            raw = rec.status or ''
+            rec.status_display = self.STATUS_MAP.get(
+                raw, raw.replace('_', ' ').title() if raw else ''
+            )
     
     cargo_tracking = fields.Char(string='Kargo Takip')
     cargo_company = fields.Char(string='Kargo Firması')

@@ -1,4 +1,4 @@
-from odoo import models, fields
+from odoo import models, fields, api
 
 class PazaramaOrder(models.Model):
     _name = 'pazarama.order'
@@ -14,6 +14,7 @@ class PazaramaOrder(models.Model):
     order_date = fields.Datetime(string='Sipariş Tarihi')
     
     order_status = fields.Integer(string='Sipariş Statüsü')
+    order_status_display = fields.Char(string='Pazarama Durumu', compute='_compute_order_status_display')
     payment_type = fields.Integer(string='Ödeme Tipi')
     invoice_type = fields.Integer(string='Fatura Tipi', help="1: Bireysel, 2: Kurumsal")
     
@@ -42,6 +43,28 @@ class PazaramaOrder(models.Model):
     
     line_ids = fields.One2many('pazarama.order.line', 'order_id', string='Sipariş Satırları')
 
+    PAZARAMA_STATUS_MAP = {
+        1: 'Onay Bekliyor',
+        2: 'Onaylandı',
+        3: 'Sipariş Alındı',
+        4: 'Paketleniyor',
+        5: 'Kargoya Verildi',
+        6: 'Kargoda',
+        7: 'Teslim Edildi',
+        8: 'İptal',
+        9: 'İade',
+        10: 'İade Edildi',
+        11: 'Kısmi İade',
+        12: 'Hazırlanıyor',
+    }
+
+    @api.depends('order_status')
+    def _compute_order_status_display(self):
+        for rec in self:
+            rec.order_status_display = self.PAZARAMA_STATUS_MAP.get(
+                rec.order_status, str(rec.order_status) if rec.order_status else ''
+            )
+
 
 class PazaramaOrderLine(models.Model):
     _name = 'pazarama.order.line'
@@ -61,6 +84,29 @@ class PazaramaOrderLine(models.Model):
     discount_description = fields.Char(string='İndirim Açıklaması')
     
     status = fields.Integer(string='Sipariş Statüsü')
+    status_display = fields.Char(string='Durum', compute='_compute_status_display')
+
+    STATUS_MAP = {
+        1: 'Onay Bekliyor',
+        2: 'Onaylandı',
+        3: 'Sipariş Alındı',
+        4: 'Paketleniyor',
+        5: 'Kargoya Verildi',
+        6: 'Kargoda',
+        7: 'Teslim Edildi',
+        8: 'İptal',
+        9: 'İade',
+        10: 'İade Edildi',
+        11: 'Kısmi İade',
+        12: 'Hazırlanıyor',
+    }
+
+    @api.depends('status')
+    def _compute_status_display(self):
+        for rec in self:
+            rec.status_display = self.STATUS_MAP.get(
+                rec.status, str(rec.status) if rec.status else ''
+            )
     
     cargo_tracking = fields.Char(string='Kargo Takip')
     cargo_company = fields.Char(string='Kargo Firması')

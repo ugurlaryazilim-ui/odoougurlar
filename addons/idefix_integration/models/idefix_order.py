@@ -1,4 +1,4 @@
-from odoo import models, fields
+from odoo import models, fields, api
 
 class IdefixOrder(models.Model):
     _name = 'idefix.order'
@@ -14,6 +14,7 @@ class IdefixOrder(models.Model):
     order_date = fields.Datetime(string='Sipariş Tarihi')
     
     order_status = fields.Char(string='Sipariş Statüsü')
+    order_status_display = fields.Char(string='İdefix Durumu', compute='_compute_order_status_display')
     payment_type = fields.Integer(string='Ödeme Tipi')
     invoice_type = fields.Integer(string='Fatura Tipi', help="1: Bireysel, 2: Kurumsal")
     
@@ -42,6 +43,23 @@ class IdefixOrder(models.Model):
     
     line_ids = fields.One2many('idefix.order.line', 'order_id', string='Sipariş Satırları')
 
+    IDEFIX_STATUS_MAP = {
+        'created': 'Oluşturuldu',
+        'shipment_ready': 'Sevke Hazır',
+        'shipment_in_cargo': 'Kargoda',
+        'shipment_delivered': 'Teslim Edildi',
+        'shipment_unsupplied': 'Tedarik Edilemedi',
+        'shipment_cancelled': 'İptal',
+        'shipment_returned': 'İade',
+    }
+
+    @api.depends('order_status')
+    def _compute_order_status_display(self):
+        for rec in self:
+            rec.order_status_display = self.IDEFIX_STATUS_MAP.get(
+                rec.order_status, rec.order_status or ''
+            )
+
 
 class IdefixOrderLine(models.Model):
     _name = 'idefix.order.line'
@@ -60,6 +78,24 @@ class IdefixOrderLine(models.Model):
     vat_rate = fields.Integer(string='KDV Oranı (%)', default=10)
     
     status = fields.Char(string='Sipariş Statüsü')
+    status_display = fields.Char(string='Durum', compute='_compute_status_display')
+
+    STATUS_MAP = {
+        'created': 'Oluşturuldu',
+        'shipment_ready': 'Sevke Hazır',
+        'shipment_in_cargo': 'Kargoda',
+        'shipment_delivered': 'Teslim Edildi',
+        'shipment_unsupplied': 'Tedarik Edilemedi',
+        'shipment_cancelled': 'İptal',
+        'shipment_returned': 'İade',
+    }
+
+    @api.depends('status')
+    def _compute_status_display(self):
+        for rec in self:
+            rec.status_display = self.STATUS_MAP.get(
+                rec.status, rec.status or ''
+            )
     
     cargo_tracking = fields.Char(string='Kargo Takip')
     cargo_company = fields.Char(string='Kargo Firması')

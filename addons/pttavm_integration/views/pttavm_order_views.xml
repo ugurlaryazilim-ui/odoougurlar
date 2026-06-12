@@ -16,7 +16,7 @@
                             <field name="store_id"/>
                             <field name="sale_order_id"/>
                             <field name="order_date"/>
-                            <field name="order_status"/>
+                            <field name="order_status_display" string="PttAvm Durumu"/>
                         </group>
                         <group>
                             <field name="customer_name"/>
@@ -33,7 +33,7 @@
                                     <field name="product_code"/>
                                     <field name="quantity"/>
                                     <field name="sale_price"/>
-                                    <field name="status"/>
+                                    <field name="status_display" string="Durum"/>
                                 </list>
                             </field>
                         </page>
@@ -60,7 +60,12 @@
                 <field name="order_date"/>
                 <field name="customer_name"/>
                 <field name="total_price"/>
-                <field name="order_status"/>
+                <field name="order_status" column_invisible="1"/>
+                <field name="order_status_display" string="PttAvm Durumu" widget="badge"
+                       decoration-success="order_status in ('tamamlandi', 'teslim_edildi', 'gonderilmis')"
+                       decoration-info="order_status in ('kargoda', 'kargo_yapilmasi_bekleniyor')"
+                       decoration-warning="order_status in ('hazirlaniyor', 'onay_bekliyor')"
+                       decoration-danger="order_status in ('iptal', 'iade')"/>
                 <field name="store_id"/>
                 <field name="sale_order_id"/>
             </list>
