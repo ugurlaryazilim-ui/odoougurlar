@@ -130,6 +130,23 @@
                 <field name="client_order_ref" string="Sipariş No"/>
                 <field name="order_line" string="Ürün Barkodu"
                        filter_domain="[('order_line.product_id.barcode', 'ilike', self)]"/>
+                <field name="marketplace_name" string="Pazaryeri"/>
+            </xpath>
+            <!-- Filtre butonları -->
+            <xpath expr="//filter[@name='my_sale_orders_filter']" position="before">
+                <separator/>
+                <filter name="filter_cancelled" string="🔴 İptal Edildi"
+                        domain="[('state', '=', 'cancel')]"/>
+                <filter name="filter_nebim_sent" string="📦 Nebim Gönderildi"
+                        domain="[('nebim_order_sent', '=', True)]"/>
+                <filter name="filter_cancel_nebim" string="⚠️ İptal + Nebim'de"
+                        domain="[('state', '=', 'cancel'), ('nebim_order_sent', '=', True)]"/>
+                <separator/>
+            </xpath>
+            <!-- Gruplandırma -->
+            <xpath expr="//filter[@name='order_state']" position="after">
+                <filter name="group_marketplace" string="Pazaryeri"
+                        context="{'group_by': 'marketplace_name'}"/>
             </xpath>
         </field>
     </record>
