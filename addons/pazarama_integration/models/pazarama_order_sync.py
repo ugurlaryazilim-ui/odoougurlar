@@ -14,8 +14,9 @@ IST = pytz.timezone('Europe/Istanbul')
 # 3 = Siparişiniz Alındı, 12 = Siparişiniz Hazırlanıyor
 PAZARAMA_VALID_ORDER_STATUSES = (3, 12)
 
-# İptal sayılan statüler (Odoo sale order iptal edilecek)
-PAZARAMA_CANCEL_STATUSES = (8, 9, 10, 11)
+# İptal sayılan statüler — API dokümantasyonuna göre doğru kodlar
+# 6 = Siparişiniz İptal Edildi, 13 = Tedarik Edilemedi, 14 = Teslim Edilemedi, 18 = İptal Süreci Başlatıldı
+PAZARAMA_CANCEL_STATUSES = (6, 13, 14, 18)
 
 class PazaramaOrderSync(models.Model):
     _inherit = 'pazarama.order'
@@ -505,23 +506,40 @@ class PazaramaOrderSync(models.Model):
                     break
 
                 if not res.get('success'):
+                    _logger.warning("Pazarama iptal API başarısız (status=%s): %s", cancel_status, res.get('error', ''))
                     break
 
-                data_list = res.get('data', {}).get('data', [])
+                data_obj = res.get('data', {})
+                # API yanıtı farklı formatlarda olabilir
+                if isinstance(data_obj, dict):
+                    data_list = data_obj.get('data', [])
+                elif isinstance(data_obj, list):
+                    data_list = data_obj
+                else:
+                    data_list = []
+
                 if not data_list:
                     break
 
                 for order_json in data_list:
-                    order_id = order_json.get('orderId')
-                    if not order_id:
+                    order_id = str(order_json.get('orderId', ''))
+                    order_number = str(order_json.get('orderNumber', ''))
+                    if not order_id and not order_number:
                         continue
 
-                    existing = PzOrder.search([('order_id', '=', order_id)], limit=1)
+                    # Hem orderId hem orderNumber ile eşleştirmeyi dene
+                    existing = None
+                    if order_id:
+                        existing = PzOrder.search([('order_id', '=', order_id)], limit=1)
+                    if not existing and order_number:
+                        existing = PzOrder.search([('order_number', '=', order_number)], limit=1)
+
                     if existing and existing.order_status != cancel_status:
+                        old_status = existing.order_status
                         existing.write({'order_status': cancel_status})
                         updated += 1
                         _logger.info("Pazarama — Sipariş %s status güncellendi: %s → %s",
-                                     existing.order_number, existing.order_status, cancel_status)
+                                     existing.order_number, old_status, cancel_status)
 
                 if len(data_list) < 500:
                     break

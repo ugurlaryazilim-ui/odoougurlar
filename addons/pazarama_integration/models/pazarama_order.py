@@ -44,18 +44,14 @@ class PazaramaOrder(models.Model):
     line_ids = fields.One2many('pazarama.order.line', 'order_id', string='Sipariş Satırları')
 
     PAZARAMA_STATUS_MAP = {
-        1: 'Onay Bekliyor',
-        2: 'Onaylandı',
         3: 'Sipariş Alındı',
-        4: 'Paketleniyor',
         5: 'Kargoya Verildi',
-        6: 'Kargoda',
-        7: 'Teslim Edildi',
-        8: 'İptal',
-        9: 'İade',
-        10: 'İade Edildi',
-        11: 'Kısmi İade',
+        6: 'İptal Edildi',
+        11: 'Teslim Edildi',
         12: 'Hazırlanıyor',
+        13: 'Tedarik Edilemedi',
+        14: 'Teslim Edilemedi',
+        18: 'İptal Süreci Başlatıldı',
     }
 
     @api.depends('order_status')
@@ -87,18 +83,14 @@ class PazaramaOrderLine(models.Model):
     status_display = fields.Char(string='Durum', compute='_compute_status_display')
 
     STATUS_MAP = {
-        1: 'Onay Bekliyor',
-        2: 'Onaylandı',
         3: 'Sipariş Alındı',
-        4: 'Paketleniyor',
         5: 'Kargoya Verildi',
-        6: 'Kargoda',
-        7: 'Teslim Edildi',
-        8: 'İptal',
-        9: 'İade',
-        10: 'İade Edildi',
-        11: 'Kısmi İade',
+        6: 'İptal Edildi',
+        11: 'Teslim Edildi',
         12: 'Hazırlanıyor',
+        13: 'Tedarik Edilemedi',
+        14: 'Teslim Edilemedi',
+        18: 'İptal Süreci Başlatıldı',
     }
 
     @api.depends('status')
