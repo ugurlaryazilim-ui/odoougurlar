@@ -75,7 +75,16 @@ class N11OrderSync(models.Model):
                     _logger.exception("N11 Sipariş İşleme Hatası: %s", e)
             
             page += 1
-        
+
+        # ── Veritabanındaki iptal siparişleri tara (tarih filtresi dışındakiler dahil) ──
+        try:
+            with self.env.cr.savepoint():
+                cancel_count = self._cancel_pending_orders(store)
+                if cancel_count:
+                    _logger.info("N11 — %d sipariş Odoo'da iptal edildi", cancel_count)
+        except Exception as e:
+            _logger.exception("N11 iptal tarama hatası: %s", e)
+
         store.sudo().write({'last_sync': fields.Datetime.now()})
         return {'created': created_count, 'updated': updated_count, 'errors': error_count}
 
@@ -400,6 +409,26 @@ class N11OrderSync(models.Model):
                 _logger.info("N11 — Odoo sipariş iptal edildi: %s (N11: %s)", so.name, n11_order.order_number)
             except Exception as e:
                 _logger.warning("N11 — Sipariş iptal hatası: %s - %s", so.name, e)
+
+    @api.private
+    def _cancel_pending_orders(self, store):
+        """Veritabanındaki iptal N11 siparişlerini tara,
+        bağlı Odoo sale order henüz iptal edilmemişse iptal et.
+        Tarih filtresi dışında kalan eski siparişler dahil tümünü yakalar."""
+        cancelled_orders = self.search([
+            ('store_id', '=', store.id),
+            ('order_status', 'in', ['Cancelled', 'CANCELLED']),
+            ('sale_order_id', '!=', False),
+            ('sale_order_id.state', 'not in', ['cancel', 'done']),
+        ])
+        count = 0
+        for n11_order in cancelled_orders:
+            try:
+                self._cancel_odoo_order(n11_order, store)
+                count += 1
+            except Exception as e:
+                _logger.warning("N11 — Bekleyen iptal hatası: %s - %s", n11_order.order_number, e)
+        return count
 
     # ─── CRON ────────────────────────────────────────────
 
