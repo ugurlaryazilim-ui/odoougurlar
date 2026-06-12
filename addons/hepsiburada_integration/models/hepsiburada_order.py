@@ -1,4 +1,4 @@
-from odoo import models, fields
+from odoo import models, fields, api
 
 class HepsiburadaOrder(models.Model):
     _name = 'hepsiburada.order'
@@ -9,6 +9,7 @@ class HepsiburadaOrder(models.Model):
     merchant_id = fields.Char(string='Merchant ID')
     order_date = fields.Datetime(string='Sipariş Tarihi')
     status = fields.Char(string='Sipariş Statüsü')
+    status_display = fields.Char(string='Hepsiburada Durumu', compute='_compute_status_display')
     
     # Kargo ve Paketleme Verisi
     cargo_company = fields.Char(string='Kargo Firması')
@@ -33,6 +34,28 @@ class HepsiburadaOrder(models.Model):
     line_ids = fields.One2many('hepsiburada.order.line', 'order_id', string='Satırlar')
     raw_payload = fields.Text(string='Raw JSON', help='API üzerinden gelen orijinal JSON verisi')
 
+    HB_STATUS_MAP = {
+        'Open': 'Açık',
+        'InTransit': 'Kargoda',
+        'Delivered': 'Teslim Edildi',
+        'Cancelled': 'İptal',
+        'UnDelivered': 'Teslim Edilemedi',
+        'Returned': 'İade',
+        'Shipped': 'Kargolandı',
+        'Unpacked': 'Paketlenmedi',
+        'Packed': 'Paketlendi',
+        'AtWarehouse': 'Depoda',
+        'Processing': 'İşleniyor',
+        'Completed': 'Tamamlandı',
+    }
+
+    @api.depends('status')
+    def _compute_status_display(self):
+        for rec in self:
+            rec.status_display = self.HB_STATUS_MAP.get(
+                rec.status, rec.status or ''
+            )
+
 
 class HepsiburadaOrderLine(models.Model):
     _name = 'hepsiburada.order.line'
@@ -53,3 +76,24 @@ class HepsiburadaOrderLine(models.Model):
     commission_amount = fields.Float(string='Komisyon')
     commission_rate = fields.Float(string='Komisyon Oranı')
     status = fields.Char(string='Satır Statüsü')
+    status_display = fields.Char(string='Durum', compute='_compute_status_display')
+
+    STATUS_MAP = {
+        'Open': 'Açık',
+        'InTransit': 'Kargoda',
+        'Delivered': 'Teslim Edildi',
+        'Cancelled': 'İptal',
+        'UnDelivered': 'Teslim Edilemedi',
+        'Returned': 'İade',
+        'Shipped': 'Kargolandı',
+        'Unpacked': 'Paketlenmedi',
+        'Packed': 'Paketlendi',
+        'Completed': 'Tamamlandı',
+    }
+
+    @api.depends('status')
+    def _compute_status_display(self):
+        for rec in self:
+            rec.status_display = self.STATUS_MAP.get(
+                rec.status, rec.status or ''
+            )

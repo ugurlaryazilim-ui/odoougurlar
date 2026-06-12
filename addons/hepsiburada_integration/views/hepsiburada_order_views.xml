@@ -16,7 +16,7 @@
                             <field name="merchant_id"/>
                             <field name="sale_order_id"/>
                             <field name="order_date"/>
-                            <field name="status"/>
+                            <field name="status_display" string="Hepsiburada Durumu"/>
                         </group>
                         <group>
                             <field name="customer_name"/>
@@ -47,7 +47,7 @@
                                     <field name="merchant_sku"/>
                                     <field name="quantity"/>
                                     <field name="merchant_unit_price"/>
-                                    <field name="status"/>
+                                    <field name="status_display" string="Durum"/>
                                 </list>
                             </field>
                         </page>
@@ -70,7 +70,12 @@
                 <field name="customer_name"/>
                 <field name="total_price" widget="monetary" options="{'currency_field': 'currency'}"/>
                 <field name="currency" column_invisible="1"/>
-                <field name="status"/>
+                <field name="status" column_invisible="1"/>
+                <field name="status_display" string="Hepsiburada Durumu" widget="badge"
+                       decoration-success="status in ('Delivered', 'Completed')"
+                       decoration-info="status in ('InTransit', 'Shipped')"
+                       decoration-warning="status in ('Open', 'Processing', 'Packed', 'AtWarehouse')"
+                       decoration-danger="status in ('Cancelled', 'UnDelivered', 'Returned')"/>
                 <field name="sale_order_id"/>
             </list>
         </field>
