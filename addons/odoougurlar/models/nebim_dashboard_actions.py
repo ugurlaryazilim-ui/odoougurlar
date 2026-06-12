@@ -318,3 +318,104 @@ class NebimDashboardWarehouse(models.TransientModel):
                     'sticky': True,
                 }
             }
+
+    # -----------------------------------------------------------------
+    #  İptal Siparişleri Nebim'den Toplu Silme
+    # -----------------------------------------------------------------
+    def action_nebim_cancel_cleanup(self):
+        """İptal edilmiş ama Nebim'de hâlâ duran siparişleri toplu siler.
+
+        Koşul: state='cancel' AND nebim_order_sent=True
+        """
+        SaleOrder = self.env['sale.order'].sudo()
+        orders = SaleOrder.search([
+            ('state', '=', 'cancel'),
+            ('nebim_order_sent', '=', True),
+        ])
+
+        if not orders:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Nebim İptal Temizliği',
+                    'message': 'Nebim\'de silinecek iptal sipariş bulunamadı. Tümü zaten temiz! ✅',
+                    'type': 'success',
+                    'sticky': False,
+                }
+            }
+
+        deleted = 0
+        failed = 0
+        details = []
+
+        for order in orders:
+            try:
+                with self.env.cr.savepoint():
+                    SaleOrder._nebim_delete_order(order)
+                deleted += 1
+                details.append(f"✅ {order.name} ({order.client_order_ref}) silindi")
+            except Exception as e:
+                failed += 1
+                details.append(f"❌ {order.name} ({order.client_order_ref}): {str(e)[:100]}")
+                _logger.error("Nebim toplu silme hatası (%s): %s", order.name, e)
+
+        message = (
+            f"Toplam {len(orders)} iptal sipariş işlendi:\n"
+            f"✅ {deleted} silindi, ❌ {failed} başarısız\n\n"
+            + '\n'.join(details[:20])  # İlk 20 detay
+        )
+
+        _logger.info("Nebim iptal temizliği: %d silindi, %d başarısız", deleted, failed)
+
+        return {
+            'type': 'ir.actions.act_window',
+            'name': f'Nebim İptal Temizliği ({deleted} silindi, {failed} hata)',
+            'res_model': 'odoougurlar.test.result.wizard',
+            'view_mode': 'form',
+            'target': 'new',
+            'context': {
+                'default_title': f'Nebim İptal Temizliği ({deleted} silindi, {failed} hata)',
+                'default_result_text': message,
+            },
+        }
+
+    @api.model
+    def cron_nebim_cancel_cleanup(self):
+        """Cron: İptal siparişleri Nebim'den otomatik sil.
+
+        Ayarlardaki toggle açıksa çalışır.
+        """
+        ICP = self.env['ir.config_parameter'].sudo()
+        enabled = ICP.get_param('odoougurlar.nebim_auto_delete_on_cancel', 'True') == 'True'
+
+        if not enabled:
+            _logger.info("Nebim iptal temizliği cron'u devre dışı — ayarlardan aktif edin.")
+            return
+
+        SaleOrder = self.env['sale.order'].sudo()
+        orders = SaleOrder.search([
+            ('state', '=', 'cancel'),
+            ('nebim_order_sent', '=', True),
+        ])
+
+        if not orders:
+            _logger.info("Nebim iptal temizliği: Silinecek sipariş yok.")
+            return
+
+        deleted = 0
+        failed = 0
+
+        for order in orders:
+            try:
+                with self.env.cr.savepoint():
+                    SaleOrder._nebim_delete_order(order)
+                deleted += 1
+            except Exception as e:
+                failed += 1
+                _logger.error("Cron: Nebim silme hatası (%s): %s", order.name, e)
+
+        _logger.info(
+            "Nebim iptal temizliği cron tamamlandı: %d silindi, %d başarısız (toplam %d)",
+            deleted, failed, len(orders)
+        )

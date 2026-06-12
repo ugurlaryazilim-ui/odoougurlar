@@ -99,6 +99,13 @@
                             <setting string="İptal Siparişi Nebim'den Sil" help="Açık olduğunda, pazaryerinden iptal edilen siparişler Odoo'da iptal edildiğinde Nebim'deki siparişi de otomatik siler. Stok serbest kalır.">
                                 <field name="nebim_auto_delete_on_cancel"/>
                             </setting>
+                            <setting string="Otomatik İptal Temizliği" help="Açık olduğunda, belirli aralıklarla Nebim'de kalan eski iptal siparişler otomatik silinir">
+                                <field name="nebim_cancel_cleanup_auto"/>
+                                <div class="content-group mt-2" invisible="not nebim_cancel_cleanup_auto">
+                                    <label for="nebim_cancel_cleanup_interval"/>
+                                    <field name="nebim_cancel_cleanup_interval"/>
+                                </div>
+                            </setting>
                         </block>
                         <block title="Senkronizasyon Ayarları" name="nebim_sync">
                             <setting string="Otomatik Ürün Senkronizasyon" help="Saatte 1 kez otomatik ürün senkronizasyonu yapar">
@@ -177,6 +184,7 @@
                         <button name="action_test_connection" type="object" string="Bağlantı Testi" class="btn-secondary"/>
                         <button name="action_import_shelves" type="object" string="📦 Rafları Import Et" class="btn-warning" confirm="HamurLabs Excel dosyalarından raf lokasyonları ve ürün yerleşimleri import edilsin mi?"/>
                         <button name="action_sync_districts" type="object" string="🏘️ İlçe Senkronizasyonu" class="btn-info" confirm="Nebim'den tüm il/ilçe/bölge kodları çekilsin mi?"/>
+                        <button name="action_nebim_cancel_cleanup" type="object" string="🗑️ İptal Siparişleri Temizle" class="btn-danger" confirm="Nebim'de hâlâ duran iptal siparişler silinecek. Devam edilsin mi?"/>
                     </header>
                     <sheet>
                         <div class="oe_title">

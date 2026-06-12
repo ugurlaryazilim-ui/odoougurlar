@@ -127,6 +127,24 @@ class ResConfigSettings(models.TransientModel):
              'Odoo\'da iptal edildiğinde Nebim\'deki siparişi de otomatik siler. '
              'Bu sayede Nebim\'in ayırdığı stok serbest kalır.',
     )
+    nebim_cancel_cleanup_auto = fields.Boolean(
+        string='Otomatik İptal Temizliği',
+        config_parameter='odoougurlar.nebim_cancel_cleanup_auto',
+        default=False,
+        help='Aktif olduğunda, belirli aralıklarla Nebim\'de kalan iptal siparişler otomatik silinir.',
+    )
+    nebim_cancel_cleanup_interval = fields.Selection([
+        ('5', '5 Dakika'),
+        ('10', '10 Dakika'),
+        ('15', '15 Dakika'),
+        ('30', '30 Dakika'),
+        ('60', '1 Saat'),
+    ],
+        string='İptal Temizliği Aralığı',
+        config_parameter='odoougurlar.nebim_cancel_cleanup_interval',
+        default='10',
+        help='İptal siparişlerin Nebim\'den temizlenme sıklığı',
+    )
 
     # -----------------------------------------------------------------
     #  Test Ayarları
@@ -211,3 +229,21 @@ class ResConfigSettings(models.TransientModel):
         if product_cron:
             product_cron.sudo().write({'active': self.nebim_auto_sync})
             _logger.info("Ürün auto sync cron %s", 'aktif' if self.nebim_auto_sync else 'pasif')
+
+        # İptal temizliği cron'u aktifleştir/pasifleştir + aralık güncelle
+        cancel_cron = self.env.ref('odoougurlar.cron_nebim_cancel_cleanup', raise_if_not_found=False)
+        if cancel_cron:
+            interval_minutes = int(self.nebim_cancel_cleanup_interval or '10')
+            cron_vals = {
+                'active': self.nebim_cancel_cleanup_auto,
+                'interval_number': interval_minutes,
+                'interval_type': 'minutes',
+            }
+            if self.nebim_cancel_cleanup_auto:
+                cron_vals['nextcall'] = fields.Datetime.now()
+            cancel_cron.sudo().write(cron_vals)
+            _logger.info(
+                "İptal temizliği cron %s, aralık: %d dk",
+                'aktif' if self.nebim_cancel_cleanup_auto else 'pasif',
+                interval_minutes
+            )
