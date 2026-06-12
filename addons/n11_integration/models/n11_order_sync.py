@@ -91,7 +91,12 @@ class N11OrderSync(models.Model):
         order_status = order_json.get('shipmentPackageStatus', '')
         
         if existing_n11:
+            old_status = existing_n11.order_status
             existing_n11.write({'order_status': order_status})
+            # İptal kontrolü — Trendyol mantığıyla aynı
+            if order_status in ('Cancelled', 'CANCELLED') and old_status not in ('Cancelled', 'CANCELLED'):
+                if existing_n11.sale_order_id:
+                    self._cancel_odoo_order(existing_n11, store)
             return 'updated'
 
         order_date_ts = order_json.get('orderDate')
@@ -376,6 +381,25 @@ class N11OrderSync(models.Model):
             sale_vals['order_line'].append((0, 0, ol_vals))
             
         return self.env['sale.order'].create(sale_vals)
+
+    # ─── İPTAL ────────────────────────────────────────────
+
+    @api.private
+    def _cancel_odoo_order(self, n11_order, store=None):
+        """Odoo siparişini iptal et (Trendyol mantığıyla aynı)."""
+        if store and not store.auto_cancel:
+            return
+        if not store:
+            if n11_order.store_id and not n11_order.store_id.auto_cancel:
+                return
+
+        so = n11_order.sale_order_id
+        if so and so.state not in ('cancel', 'done'):
+            try:
+                so._action_cancel()
+                _logger.info("N11 — Odoo sipariş iptal edildi: %s (N11: %s)", so.name, n11_order.order_number)
+            except Exception as e:
+                _logger.warning("N11 — Sipariş iptal hatası: %s - %s", so.name, e)
 
     # ─── CRON ────────────────────────────────────────────
 
