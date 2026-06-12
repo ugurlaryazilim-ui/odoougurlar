@@ -457,15 +457,18 @@ class SaleOrder(models.Model):
     def _nebim_delete_order(self, order):
         """Nebim'den siparişi siler.
 
-        Öncelik sırası:
-        1. nebim_header_id varsa → HeaderID ile sil (en güvenilir)
-        2. Yoksa nebim_order_response'dan HeaderID parse etmeyi dene
-        3. Hiçbiri yoksa DocumentNumber ile dene
+        Sipariş oluşturulurken post_data('Post', payload) kullanılıyor.
+        Silme için post_data('Delete', payload) — aynı yapıda payload.
+
+        Kritik: CurrAccCode, CustomerCode, ModelType, InternalDescription,
+        DocumentNumber dahil tüm alanlar gerećkli.
         """
         connector = self.env['odoougurlar.nebim.connector'].sudo()
         doc_number = order.client_order_ref or order.name
+        customer_code = order.nebim_customer_code or ''
 
-        # Mapping'den StoreCode, WarehouseCode al
+        # Mapping'den StoreCode, WarehouseCode, ModelType al
+        model_type = 13  # Varsayılan
         store_code = '002'
         warehouse_code = '002'
 
@@ -476,55 +479,49 @@ class SaleOrder(models.Model):
                     marketplace_name, order.partner_id.country_id.id
                 )
                 if mapping:
+                    model_type = int(mapping.nebim_order_model_type) if mapping.nebim_order_model_type else 13
+                    is_export = int(mapping.nebim_invoice_model_type) == 24 if mapping.nebim_invoice_model_type else False
+                    if is_export:
+                        model_type = 14
                     store_code = mapping.store_code or '002'
                     warehouse_code = mapping.warehouse_code or '002'
             except Exception as e:
                 _logger.warning("Nebim silme: mapping alınamadı (%s): %s", order.name, e)
 
-        # ── Nebim yanıtından gerçek ModelType ve HeaderID çıkar
-        nebim_model_type = 5  # Nebim genelde ModelType 5 olarak kaydeder
-        header_id = order.nebim_header_id or ''
-
-        if not header_id and order.nebim_order_response:
-            try:
-                import ast
-                resp_data = ast.literal_eval(order.nebim_order_response)
-                if isinstance(resp_data, dict):
-                    header_id = resp_data.get('HeaderID') or resp_data.get('ApplicationID') or ''
-                    nebim_model_type = resp_data.get('ModelType', 5)
-            except Exception:
-                pass
-
-        _logger.info(
-            "Nebim sipariş silme başlatılıyor: %s (DocNum: %s, HeaderID: %s, ModelType: %s)",
-            order.name, doc_number, header_id or 'YOK', nebim_model_type
-        )
-
-        # Silme payload'u — HeaderID varsa onu kullan
+        # Delete payload — sipariş oluştururken kullanılan aynı alanlar
         payload = {
-            'ModelType': nebim_model_type,
+            'ModelType': model_type,
             'InternalDescription': doc_number,
             'DocumentNumber': doc_number,
+            'Description': doc_number,
             'OfficeCode': 'M',
             'StoreCode': store_code,
             'WarehouseCode': warehouse_code,
+            'CurrAccCode': customer_code,
+            'CustomerCode': customer_code,
         }
 
-        if header_id:
-            payload['HeaderID'] = header_id
-            payload['ApplicationID'] = header_id
+        _logger.info(
+            "Nebim sipariş silme başlatılıyor: %s (DocNum: %s, CurrAccCode: %s, ModelType: %d)",
+            order.name, doc_number, customer_code, model_type
+        )
 
-        result = connector.delete_data(payload)
+        # Sipariş oluşturmadaki aynı metod — endpoint olarak 'Delete' gönder
+        result = connector.post_data('Delete', payload)
+
+        # Nebim kendi hatasını döndürebilir
+        if isinstance(result, dict) and result.get('ExceptionMessage'):
+            raise Exception(f"Nebim Delete Hatası: {result['ExceptionMessage']}")
 
         # Nebim'den silme başarılı — bayrakları sıfırla
         order.sudo().write({
             'nebim_order_sent': False,
-            'nebim_order_response': f'[İPTAL] Nebim siparişi otomatik silindi. Yanıt: {result}',
+            'nebim_order_response': f'[İPTAL] Nebim siparişi silindi. Yanıt: {result}',
         })
 
         _logger.info(
-            "✅ Nebim sipariş silindi: %s → DocumentNumber: %s",
-            order.name, doc_number
+            "✅ Nebim sipariş silindi: %s → DocNum: %s, CurrAccCode: %s",
+            order.name, doc_number, customer_code
         )
 
     def action_confirm(self):
