@@ -143,11 +143,6 @@
                         domain="[('state', '=', 'cancel'), ('nebim_order_sent', '=', True)]"/>
                 <separator/>
             </xpath>
-            <!-- Gruplandırma -->
-            <xpath expr="//filter[@name='order_state']" position="after">
-                <filter name="group_marketplace" string="Pazaryeri"
-                        context="{'group_by': 'marketplace_name'}"/>
-            </xpath>
         </field>
     </record>
 
