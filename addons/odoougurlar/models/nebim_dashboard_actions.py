@@ -326,14 +326,18 @@ class NebimDashboardWarehouse(models.TransientModel):
         """İptal edilmiş ama Nebim'de hâlâ duran siparişleri toplu siler.
 
         Koşul: state='cancel' AND nebim_order_sent=True
+        Timeout önleme: Her seferinde max 10 sipariş işler.
         """
+        BATCH_SIZE = 10  # Timeout önleme — her seferinde max 10
+
         SaleOrder = self.env['sale.order'].sudo()
-        orders = SaleOrder.search([
+        all_orders = SaleOrder.search([
             ('state', '=', 'cancel'),
             ('nebim_order_sent', '=', True),
         ])
+        total_pending = len(all_orders)
 
-        if not orders:
+        if not all_orders:
             return {
                 'type': 'ir.actions.client',
                 'tag': 'display_notification',
@@ -345,6 +349,8 @@ class NebimDashboardWarehouse(models.TransientModel):
                 }
             }
 
+        # Batch olarak işle
+        orders = all_orders[:BATCH_SIZE]
         deleted = 0
         failed = 0
         details = []
@@ -357,25 +363,28 @@ class NebimDashboardWarehouse(models.TransientModel):
                 details.append(f"✅ {order.name} ({order.client_order_ref}) silindi")
             except Exception as e:
                 failed += 1
-                details.append(f"❌ {order.name} ({order.client_order_ref}): {str(e)[:100]}")
+                details.append(f"❌ {order.name} ({order.client_order_ref}): {str(e)[:200]}")
                 _logger.error("Nebim toplu silme hatası (%s): %s", order.name, e)
 
+        remaining = total_pending - deleted
         message = (
-            f"Toplam {len(orders)} iptal sipariş işlendi:\n"
-            f"✅ {deleted} silindi, ❌ {failed} başarısız\n\n"
-            + '\n'.join(details[:20])  # İlk 20 detay
+            f"Toplam {total_pending} iptal sipariş bulundu.\n"
+            f"Bu turda {len(orders)} işlendi: ✅ {deleted} silindi, ❌ {failed} başarısız\n"
         )
+        if remaining > 0:
+            message += f"⏳ Kalan: {remaining} sipariş — tekrar basarak devam edin.\n"
+        message += "\n" + '\n'.join(details)
 
-        _logger.info("Nebim iptal temizliği: %d silindi, %d başarısız", deleted, failed)
+        _logger.info("Nebim iptal temizliği: %d silindi, %d başarısız, %d kalan", deleted, failed, remaining)
 
         return {
             'type': 'ir.actions.act_window',
-            'name': f'Nebim İptal Temizliği ({deleted} silindi, {failed} hata)',
+            'name': f'Nebim İptal Temizliği ({deleted} silindi, {remaining} kalan)',
             'res_model': 'odoougurlar.test.result.wizard',
             'view_mode': 'form',
             'target': 'new',
             'context': {
-                'default_title': f'Nebim İptal Temizliği ({deleted} silindi, {failed} hata)',
+                'default_title': f'Nebim İptal Temizliği ({deleted}/{total_pending})',
                 'default_result_text': message,
             },
         }

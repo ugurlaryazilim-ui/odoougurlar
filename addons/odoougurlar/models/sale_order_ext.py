@@ -455,8 +455,10 @@ class SaleOrder(models.Model):
     def _nebim_delete_order(self, order):
         """Nebim'den siparişi siler.
 
-        DocumentNumber = client_order_ref (pazaryeri sipariş no) — Nebim'e bu değerle gönderildi.
-        ModelType = 13 (Perakende Satış Siparişi) veya 14 (İhracat) — mapping'den alınır.
+        Nebim V3 IntegratorService Delete endpoint'ine:
+        - InternalDescription = client_order_ref (Nebim'e bu değerle gönderildi)
+        - DocumentNumber = client_order_ref
+        - ModelType = 13 (Perakende) veya 14 (İhracat)
         """
         connector = self.env['odoougurlar.nebim.connector'].sudo()
         doc_number = order.client_order_ref or order.name
@@ -474,7 +476,6 @@ class SaleOrder(models.Model):
                 )
                 if mapping:
                     mt = int(mapping.nebim_order_model_type) if mapping.nebim_order_model_type else 13
-                    # İhracat siparişlerinde model_type=14
                     is_export = int(mapping.nebim_invoice_model_type) == 24 if mapping.nebim_invoice_model_type else False
                     model_type = 14 if is_export else mt
                     store_code = mapping.store_code or '002'
@@ -484,6 +485,7 @@ class SaleOrder(models.Model):
 
         payload = {
             'ModelType': model_type,
+            'InternalDescription': doc_number,
             'DocumentNumber': doc_number,
             'OfficeCode': 'M',
             'StoreCode': store_code,

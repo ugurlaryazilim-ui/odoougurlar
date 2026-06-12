@@ -256,6 +256,7 @@ class NebimConnector(models.AbstractModel):
         Payload örneği (sipariş silme):
             {
                 "ModelType": 13,
+                "InternalDescription": "TY-123456",
                 "DocumentNumber": "TY-123456",
                 "OfficeCode": "M",
                 "StoreCode": "002",
@@ -270,15 +271,27 @@ class NebimConnector(models.AbstractModel):
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 resp = _http_session.post(
-                    url, json=payload, timeout=DATA_TIMEOUT
+                    url, json=payload, timeout=30  # Silme için 30sn yeterli
                 )
-                resp.raise_for_status()
-                # Nebim Delete başarılıysa genelde boş veya basit yanıt döner
+                
+                # HTTP hata kontrolü
+                if resp.status_code >= 400:
+                    error_body = resp.text[:500]
+                    _logger.error("Nebim Delete HTTP %d: %s", resp.status_code, error_body)
+                    raise Exception(f"Nebim Delete HTTP {resp.status_code}: {error_body}")
+                
+                # Yanıt parse
                 try:
                     result = resp.json()
                 except Exception:
                     result = resp.text
-                _logger.info("Nebim silme başarılı: %s", payload.get('DocumentNumber', ''))
+                
+                # Nebim kendi hata mesajını döndürebilir
+                if isinstance(result, dict) and result.get('ExceptionMessage'):
+                    raise Exception(f"Nebim Delete Hatası: {result['ExceptionMessage']}")
+                
+                _logger.info("Nebim silme başarılı: %s (HTTP %d)", 
+                           payload.get('DocumentNumber', ''), resp.status_code)
                 return result
 
             except requests.exceptions.RequestException as e:
@@ -292,4 +305,5 @@ class NebimConnector(models.AbstractModel):
                     time.sleep(2 ** attempt)
                 else:
                     raise Exception(f'Nebim silme hatası (Delete): {str(e)}')
+
 
