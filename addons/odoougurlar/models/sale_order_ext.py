@@ -414,6 +414,100 @@ class SaleOrder(models.Model):
                     'sticky': True,
                 }}
 
+    def _action_cancel(self):
+        """Sipariş iptal edildiğinde, Nebim'e gönderilmişse otomatik sil.
+
+        Nebim V3 IntegratorService Delete endpoint'ine istek göndererek
+        siparişi Nebim'den siler. Stok serbest kalır.
+
+        Kritik Kurallar:
+        - Sadece nebim_order_sent=True olan siparişler silinir
+        - Nebim silme hatası Odoo iptalini ASLA engellemez
+        - cr.savepoint() ile korumalı — Nebim hatası rollback yapılır
+        - Her işlem loglanır
+        """
+        # Önce Odoo'nun kendi iptalini yap
+        res = super()._action_cancel()
+
+        # Toggle kontrolü
+        ICP = self.env['ir.config_parameter'].sudo()
+        auto_delete = ICP.get_param('odoougurlar.nebim_auto_delete_on_cancel', 'True') == 'True'
+
+        if not auto_delete:
+            return res
+
+        for order in self:
+            if not order.nebim_order_sent:
+                continue  # Nebim'e hiç gönderilmemiş, atlat
+
+            try:
+                with self.env.cr.savepoint():
+                    self._nebim_delete_order(order)
+            except Exception as e:
+                # Nebim silme hatası Odoo iptalini ASLA engellemez
+                _logger.error(
+                    "Nebim sipariş silme hatası (Odoo iptal yine de geçerli): %s - %s",
+                    order.name, e
+                )
+
+        return res
+
+    def _nebim_delete_order(self, order):
+        """Nebim'den siparişi siler.
+
+        DocumentNumber = client_order_ref (pazaryeri sipariş no) — Nebim'e bu değerle gönderildi.
+        ModelType = 13 (Perakende Satış Siparişi) veya 14 (İhracat) — mapping'den alınır.
+        """
+        connector = self.env['odoougurlar.nebim.connector'].sudo()
+        doc_number = order.client_order_ref or order.name
+
+        # Mapping'den ModelType, StoreCode, WarehouseCode al
+        model_type = 13  # Varsayılan: Perakende Satış Siparişi
+        store_code = '002'
+        warehouse_code = '002'
+
+        marketplace_name = order.marketplace_name
+        if marketplace_name:
+            try:
+                mapping = self.env['odoougurlar.marketplace.mapping'].sudo().find_mapping(
+                    marketplace_name, order.partner_id.country_id.id
+                )
+                if mapping:
+                    mt = int(mapping.nebim_order_model_type) if mapping.nebim_order_model_type else 13
+                    # İhracat siparişlerinde model_type=14
+                    is_export = int(mapping.nebim_invoice_model_type) == 24 if mapping.nebim_invoice_model_type else False
+                    model_type = 14 if is_export else mt
+                    store_code = mapping.store_code or '002'
+                    warehouse_code = mapping.warehouse_code or '002'
+            except Exception as e:
+                _logger.warning("Nebim silme: mapping alınamadı (%s): %s", order.name, e)
+
+        payload = {
+            'ModelType': model_type,
+            'DocumentNumber': doc_number,
+            'OfficeCode': 'M',
+            'StoreCode': store_code,
+            'WarehouseCode': warehouse_code,
+        }
+
+        _logger.info(
+            "Nebim sipariş silme başlatılıyor: %s (DocNum: %s, ModelType: %d)",
+            order.name, doc_number, model_type
+        )
+
+        result = connector.delete_data(payload)
+
+        # Nebim'den silme başarılı — bayrakları sıfırla
+        order.sudo().write({
+            'nebim_order_sent': False,
+            'nebim_order_response': f'[İPTAL] Nebim siparişi otomatik silindi. Yanıt: {result}',
+        })
+
+        _logger.info(
+            "✅ Nebim sipariş silindi: %s → DocumentNumber: %s",
+            order.name, doc_number
+        )
+
     def action_confirm(self):
         """Sipariş onaylandığında, toggle açıksa Cari ve Sipariş Nebim'e gönderilir."""
         res = super().action_confirm()

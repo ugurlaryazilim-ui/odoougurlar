@@ -119,6 +119,14 @@ class ResConfigSettings(models.TransientModel):
         default=False,
         help='Aktif olduğunda fatura oluşturulup Nebim\'e gönderilir.',
     )
+    nebim_auto_delete_on_cancel = fields.Boolean(
+        string='İptal Siparişi Nebim\'den Sil',
+        config_parameter='odoougurlar.nebim_auto_delete_on_cancel',
+        default=True,
+        help='Aktif olduğunda, pazaryerinden iptal edilen siparişler '
+             'Odoo\'da iptal edildiğinde Nebim\'deki siparişi de otomatik siler. '
+             'Bu sayede Nebim\'in ayırdığı stok serbest kalır.',
+    )
 
     # -----------------------------------------------------------------
     #  Test Ayarları

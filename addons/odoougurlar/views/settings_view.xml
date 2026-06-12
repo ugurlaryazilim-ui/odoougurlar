@@ -96,6 +96,9 @@
                             <setting string="Fatura İşle" help="Açık olduğunda fatura oluşturulup Nebim'e gönderilir">
                                 <field name="nebim_sync_invoice_enabled"/>
                             </setting>
+                            <setting string="İptal Siparişi Nebim'den Sil" help="Açık olduğunda, pazaryerinden iptal edilen siparişler Odoo'da iptal edildiğinde Nebim'deki siparişi de otomatik siler. Stok serbest kalır.">
+                                <field name="nebim_auto_delete_on_cancel"/>
+                            </setting>
                         </block>
                         <block title="Senkronizasyon Ayarları" name="nebim_sync">
                             <setting string="Otomatik Ürün Senkronizasyon" help="Saatte 1 kez otomatik ürün senkronizasyonu yapar">
