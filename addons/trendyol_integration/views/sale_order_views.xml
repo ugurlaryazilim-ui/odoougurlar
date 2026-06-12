@@ -30,10 +30,6 @@
                 <field name="trendyol_order_number" optional="hide"/>
                 <field name="trendyol_store_name" optional="hide"/>
                 <field name="trendyol_seller_id" optional="hide"/>
-                <field name="trendyol_status" widget="badge" optional="hide"
-                       decoration-success="trendyol_status in ('delivered', 'shipped')"
-                       decoration-warning="trendyol_status in ('created', 'picking')"
-                       decoration-danger="trendyol_status in ('cancelled', 'unsupplied')"/>
             </xpath>
         </field>
     </record>

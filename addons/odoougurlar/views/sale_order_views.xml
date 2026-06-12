@@ -69,6 +69,13 @@
                        widget="CopyClipboardChar"/>
                 <field name="marketplace_store_name" optional="show" string="Mağaza Adı"/>
                 <field name="marketplace_seller_id" optional="show" string="Seller ID"/>
+                <field name="marketplace_status_category" column_invisible="1"/>
+                <field name="marketplace_status_display" optional="show" string="Pazaryeri Durumu"
+                       widget="badge"
+                       decoration-success="marketplace_status_category == 'success'"
+                       decoration-warning="marketplace_status_category == 'warning'"
+                       decoration-danger="marketplace_status_category == 'danger'"
+                       decoration-info="marketplace_status_category == 'info'"/>
             </xpath>
         </field>
     </record>
@@ -88,6 +95,13 @@
                        widget="CopyClipboardChar"/>
                 <field name="marketplace_store_name" optional="show" string="Mağaza Adı"/>
                 <field name="marketplace_seller_id" optional="show" string="Seller ID"/>
+                <field name="marketplace_status_category" column_invisible="1"/>
+                <field name="marketplace_status_display" optional="show" string="Pazaryeri Durumu"
+                       widget="badge"
+                       decoration-success="marketplace_status_category == 'success'"
+                       decoration-warning="marketplace_status_category == 'warning'"
+                       decoration-danger="marketplace_status_category == 'danger'"
+                       decoration-info="marketplace_status_category == 'info'"/>
             </xpath>
         </field>
     </record>

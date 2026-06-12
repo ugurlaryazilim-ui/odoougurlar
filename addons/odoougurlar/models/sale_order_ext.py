@@ -34,6 +34,18 @@ class SaleOrder(models.Model):
         string='Seller ID', compute='_compute_marketplace_info',
         readonly=True,
     )
+    marketplace_status_display = fields.Char(
+        string='Pazaryeri Durumu', compute='_compute_marketplace_status',
+        readonly=True,
+    )
+    marketplace_status_category = fields.Selection([
+        ('success', 'Teslim/Kargo'),
+        ('warning', 'Beklemede'),
+        ('danger', 'İptal/İade'),
+        ('info', 'Diğer'),
+    ], string='Durum Kategorisi', compute='_compute_marketplace_status',
+        readonly=True,
+    )
     picking_batch_names = fields.Char(
         string='Rota', readonly=True, copy=False,
         help='Picking batch ataması sırasında otomatik yazılır. '
@@ -106,6 +118,126 @@ class SaleOrder(models.Model):
             order.marketplace_order_number = order.client_order_ref if mp_name else False
             order.marketplace_store_name = store_name
             order.marketplace_seller_id = seller_id
+
+    # Trendyol status değerlerinden Türkçe karşılıklar
+    _TY_STATUS_TR = {
+        'awaiting': 'Beklemede',
+        'created': 'Oluşturuldu',
+        'picking': 'Toplanıyor',
+        'invoiced': 'Faturalandi',
+        'shipped': 'Kargoda',
+        'cancelled': 'İptal',
+        'delivered': 'Teslim Edildi',
+        'undelivered': 'Teslim Edilemedi',
+        'returned': 'İade',
+        'unsupplied': 'Tedarik Edilemedi',
+    }
+
+    # İptal/İade sayılan Trendyol statüleri
+    _TY_CANCEL = {'cancelled', 'unsupplied', 'returned', 'undelivered'}
+    _TY_SUCCESS = {'delivered', 'shipped'}
+    _TY_WARNING = {'created', 'picking', 'awaiting'}
+
+    @api.depends('client_order_ref')
+    def _compute_marketplace_status(self):
+        for order in self:
+            display = ''
+            category = 'info'
+
+            # Trendyol
+            if 'trendyol_order_id' in order._fields and order.trendyol_order_id:
+                ty = order.trendyol_order_id
+                status_val = ty.trendyol_status or ''
+                display = self._TY_STATUS_TR.get(status_val, status_val)
+                if status_val in self._TY_CANCEL:
+                    category = 'danger'
+                elif status_val in self._TY_SUCCESS:
+                    category = 'success'
+                elif status_val in self._TY_WARNING:
+                    category = 'warning'
+
+            # Hepsiburada
+            elif 'hb_order_id' in order._fields and order.hb_order_id:
+                hb = order.hb_order_id
+                display = hb.status_display if hasattr(hb, 'status_display') and hb.status_display else (hb.status or '')
+                status_raw = (hb.status or '').lower()
+                if status_raw in ('cancelled', 'undelivered'):
+                    category = 'danger'
+                elif status_raw in ('delivered',):
+                    category = 'success'
+                elif status_raw in ('shipped',):
+                    category = 'success'
+                else:
+                    category = 'warning'
+
+            # N11
+            elif 'n11_order_id' in order._fields and order.n11_order_id:
+                n11 = order.n11_order_id
+                display = n11.order_status_display if hasattr(n11, 'order_status_display') and n11.order_status_display else (n11.order_status or '')
+                status_raw = (n11.order_status or '').lower()
+                if 'iptal' in status_raw or 'cancel' in status_raw or 'iade' in status_raw:
+                    category = 'danger'
+                elif 'teslim' in status_raw or 'deliver' in status_raw:
+                    category = 'success'
+                elif 'kargo' in status_raw or 'ship' in status_raw:
+                    category = 'success'
+                else:
+                    category = 'warning'
+
+            # Pazarama
+            elif 'pazarama_order_id' in order._fields and order.pazarama_order_id:
+                pz = order.pazarama_order_id
+                display = pz.order_status_display if hasattr(pz, 'order_status_display') and pz.order_status_display else str(pz.order_status or '')
+                pz_status = pz.order_status or 0
+                if pz_status in (6, 13, 14, 18):
+                    category = 'danger'
+                elif pz_status == 11:
+                    category = 'success'
+                elif pz_status in (5,):
+                    category = 'success'
+                else:
+                    category = 'warning'
+
+            # İdefix
+            elif 'idefix_order_id' in order._fields and order.idefix_order_id:
+                ix = order.idefix_order_id
+                display = ix.order_status_display if hasattr(ix, 'order_status_display') and ix.order_status_display else (ix.order_status or '')
+                status_raw = (ix.order_status or '').lower()
+                if status_raw in ('cancelled', 'canceled', 'refunded', 'returned'):
+                    category = 'danger'
+                elif status_raw in ('delivered',):
+                    category = 'success'
+                elif status_raw in ('shipped',):
+                    category = 'success'
+                else:
+                    category = 'warning'
+
+            # PttAvm
+            elif 'pttavm_order_id' in order._fields and order.pttavm_order_id:
+                pt = order.pttavm_order_id
+                display = pt.order_status_display if hasattr(pt, 'order_status_display') and pt.order_status_display else (pt.order_status or '')
+                status_raw = (pt.order_status or '').lower()
+                if 'iptal' in status_raw or 'iade' in status_raw:
+                    category = 'danger'
+                elif 'teslim' in status_raw:
+                    category = 'success'
+                elif 'kargo' in status_raw:
+                    category = 'success'
+                else:
+                    category = 'warning'
+
+            # Amazon
+            elif 'amazon_order_id' in order._fields and order.amazon_order_id:
+                display = 'Amazon'
+                category = 'info'
+
+            # Shopify
+            elif 'shopify_order_id' in order._fields and order.shopify_order_id:
+                display = 'Shopify'
+                category = 'info'
+
+            order.marketplace_status_display = display
+            order.marketplace_status_category = category
 
     def action_reprint_cargo_label(self):
         """Siparişin kargo etiketini yeniden yazdır (popup pencerede PDF aç)."""
