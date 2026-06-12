@@ -10,6 +10,9 @@ _logger = logging.getLogger(__name__)
 
 IST = pytz.timezone('Europe/Istanbul')
 
+# PttAVM iptal sayılan statüler
+PTTAVM_CANCEL_STATUSES = ('İptal Edildi', 'iptal', 'İade', 'İade Edildi')
+
 class PttavmOrderSync(models.Model):
     _inherit = 'pttavm.order'
 
@@ -91,6 +94,16 @@ class PttavmOrderSync(models.Model):
                 _logger.exception("Pttavm Sipariş İşleme Hatası: %s", e)
         
         store.sudo().write({'last_sync': fields.Datetime.now()})
+
+        # ── Veritabanındaki iptal siparişleri tara ──
+        try:
+            with self.env.cr.savepoint():
+                cancel_count = self._cancel_pending_orders(store)
+                if cancel_count:
+                    _logger.info("PttAVM — %d sipariş Odoo'da iptal edildi", cancel_count)
+        except Exception as e:
+            _logger.exception("PttAVM iptal tarama hatası: %s", e)
+
         return {'created': created_count, 'updated': updated_count, 'errors': error_count}
 
     @api.private
@@ -113,6 +126,10 @@ class PttavmOrderSync(models.Model):
             if cargo_tracking and not existing_pttavm.cargo_tracking_number:
                 update_vals['cargo_tracking_number'] = cargo_tracking
             existing_pttavm.write(update_vals)
+            # İptal kontrolü
+            if first_product_status in PTTAVM_CANCEL_STATUSES:
+                if existing_pttavm.sale_order_id and existing_pttavm.sale_order_id.state not in ('cancel', 'done'):
+                    self._cancel_odoo_order(existing_pttavm, store)
             return 'updated'
 
         order_date_str = order_json.get('islemTarihi')
@@ -367,3 +384,40 @@ class PttavmOrderSync(models.Model):
             sale_vals['order_line'].append((0, 0, ol_vals))
             
         return self.env['sale.order'].create(sale_vals)
+
+    # ─── İPTAL YÖNETİMİ ────────────────────────────────────────
+
+    @api.private
+    def _cancel_odoo_order(self, pttavm_order, store=None):
+        """Odoo siparişini iptal et."""
+        if store and not store.auto_cancel:
+            return
+        if not store:
+            if pttavm_order.store_id and not pttavm_order.store_id.auto_cancel:
+                return
+
+        so = pttavm_order.sale_order_id
+        if so and so.state not in ('cancel', 'done'):
+            try:
+                so._action_cancel()
+                _logger.info("PttAVM — Odoo sipariş iptal edildi: %s (PttAVM: %s)", so.name, pttavm_order.order_number)
+            except Exception as e:
+                _logger.warning("PttAVM — Sipariş iptal hatası: %s - %s", so.name, e)
+
+    @api.private
+    def _cancel_pending_orders(self, store):
+        """Veritabanındaki iptal PttAVM siparişlerini tara."""
+        cancelled_orders = self.search([
+            ('store_id', '=', store.id),
+            ('order_status', 'in', list(PTTAVM_CANCEL_STATUSES)),
+            ('sale_order_id', '!=', False),
+            ('sale_order_id.state', 'not in', ['cancel', 'done']),
+        ])
+        count = 0
+        for pt_order in cancelled_orders:
+            try:
+                self._cancel_odoo_order(pt_order, store)
+                count += 1
+            except Exception as e:
+                _logger.warning("PttAVM — Bekleyen iptal hatası: %s - %s", pt_order.order_number, e)
+        return count

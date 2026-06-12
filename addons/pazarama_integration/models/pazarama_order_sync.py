@@ -14,6 +14,9 @@ IST = pytz.timezone('Europe/Istanbul')
 # 3 = Siparişiniz Alındı, 12 = Siparişiniz Hazırlanıyor
 PAZARAMA_VALID_ORDER_STATUSES = (3, 12)
 
+# İptal sayılan statüler (Odoo sale order iptal edilecek)
+PAZARAMA_CANCEL_STATUSES = (8, 9, 10, 11)
+
 class PazaramaOrderSync(models.Model):
     _inherit = 'pazarama.order'
 
@@ -90,7 +93,16 @@ class PazaramaOrderSync(models.Model):
             if len(data_list) < 100:
                 break
             page += 1
-            
+
+        # ── Veritabanındaki iptal siparişleri tara (tarih filtresi dışındakiler dahil) ──
+        try:
+            with self.env.cr.savepoint():
+                cancel_count = self._cancel_pending_orders(store)
+                if cancel_count:
+                    _logger.info("Pazarama — %d sipariş Odoo'da iptal edildi", cancel_count)
+        except Exception as e:
+            _logger.exception("Pazarama iptal tarama hatası: %s", e)
+
         store.sudo().write({'last_sync': fields.Datetime.now()})
         return {'created': created_count, 'updated': updated_count, 'errors': error_count}
 
@@ -132,6 +144,10 @@ class PazaramaOrderSync(models.Model):
                         update_vals['cargo_provider'] = str(cargo['companyName'])
                         break
             existing_pazarama.write(update_vals)
+            # İptal kontrolü — status iptal kodlarından biriyse Odoo siparişini de iptal et
+            if order_status in PAZARAMA_CANCEL_STATUSES:
+                if existing_pazarama.sale_order_id and existing_pazarama.sale_order_id.state not in ('cancel', 'done'):
+                    self._cancel_odoo_order(existing_pazarama, store)
             return 'updated'
 
         # Tarih formatı: "2023-01-25 15:22" -> Türkiye saatinden UTC'ye çevir
@@ -424,3 +440,42 @@ class PazaramaOrderSync(models.Model):
             }))
             
         return self.env['sale.order'].create(sale_vals)
+
+    # ─── İPTAL YÖNETİMİ ────────────────────────────────────────
+
+    @api.private
+    def _cancel_odoo_order(self, pazarama_order, store=None):
+        """Odoo siparişini iptal et."""
+        if store and not store.auto_cancel:
+            return
+        if not store:
+            if pazarama_order.store_id and not pazarama_order.store_id.auto_cancel:
+                return
+
+        so = pazarama_order.sale_order_id
+        if so and so.state not in ('cancel', 'done'):
+            try:
+                so._action_cancel()
+                _logger.info("Pazarama — Odoo sipariş iptal edildi: %s (PZ: %s)", so.name, pazarama_order.order_number)
+            except Exception as e:
+                _logger.warning("Pazarama — Sipariş iptal hatası: %s - %s", so.name, e)
+
+    @api.private
+    def _cancel_pending_orders(self, store):
+        """Veritabanındaki iptal Pazarama siparişlerini tara,
+        bağlı Odoo sale order henüz iptal edilmemişse iptal et.
+        Tarih filtresi dışında kalan eski siparişler dahil tümünü yakalar."""
+        cancelled_orders = self.search([
+            ('store_id', '=', store.id),
+            ('order_status', 'in', list(PAZARAMA_CANCEL_STATUSES)),
+            ('sale_order_id', '!=', False),
+            ('sale_order_id.state', 'not in', ['cancel', 'done']),
+        ])
+        count = 0
+        for pz_order in cancelled_orders:
+            try:
+                self._cancel_odoo_order(pz_order, store)
+                count += 1
+            except Exception as e:
+                _logger.warning("Pazarama — Bekleyen iptal hatası: %s - %s", pz_order.order_number, e)
+        return count

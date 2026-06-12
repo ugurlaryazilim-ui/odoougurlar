@@ -13,6 +13,9 @@ IST = pytz.timezone('Europe/Istanbul')
 # Idefix'in kabul ettiği sipariş statüleri (string)
 IDEFIX_VALID_ORDER_STATUSES = ('created', 'shipment_ready')
 
+# İptal sayılan statüler
+IDEFIX_CANCEL_STATUSES = ('cancelled', 'canceled', 'refunded', 'returned')
+
 class IdefixOrderSync(models.Model):
     _inherit = 'idefix.order'
 
@@ -89,7 +92,16 @@ class IdefixOrderSync(models.Model):
             if len(data_list) < 50:
                 break
             page += 1
-            
+
+        # ── Veritabanındaki iptal siparişleri tara ──
+        try:
+            with self.env.cr.savepoint():
+                cancel_count = self._cancel_pending_orders(store)
+                if cancel_count:
+                    _logger.info("Idefix — %d sipariş Odoo'da iptal edildi", cancel_count)
+        except Exception as e:
+            _logger.exception("Idefix iptal tarama hatası: %s", e)
+
         store.sudo().write({'last_sync': fields.Datetime.now()})
         return {'created': created_count, 'updated': updated_count, 'errors': error_count}
 
@@ -114,6 +126,10 @@ class IdefixOrderSync(models.Model):
             if cargo_provider and not existing_idefix.cargo_provider:
                 update_vals['cargo_provider'] = cargo_provider
             existing_idefix.write(update_vals)
+            # İptal kontrolü
+            if order_status in IDEFIX_CANCEL_STATUSES:
+                if existing_idefix.sale_order_id and existing_idefix.sale_order_id.state not in ('cancel', 'done'):
+                    self._cancel_odoo_order(existing_idefix, store)
             return 'updated'
 
         order_date_str = order_json.get('orderDate') or order_json.get('createdAt')
@@ -331,3 +347,40 @@ class IdefixOrderSync(models.Model):
             }))
             
         return self.env['sale.order'].create(sale_vals)
+
+    # ─── İPTAL YÖNETİMİ ────────────────────────────────────────
+
+    @api.private
+    def _cancel_odoo_order(self, idefix_order, store=None):
+        """Odoo siparişini iptal et."""
+        if store and not store.auto_cancel:
+            return
+        if not store:
+            if idefix_order.store_id and not idefix_order.store_id.auto_cancel:
+                return
+
+        so = idefix_order.sale_order_id
+        if so and so.state not in ('cancel', 'done'):
+            try:
+                so._action_cancel()
+                _logger.info("Idefix — Odoo sipariş iptal edildi: %s (Idefix: %s)", so.name, idefix_order.order_number)
+            except Exception as e:
+                _logger.warning("Idefix — Sipariş iptal hatası: %s - %s", so.name, e)
+
+    @api.private
+    def _cancel_pending_orders(self, store):
+        """Veritabanındaki iptal Idefix siparişlerini tara."""
+        cancelled_orders = self.search([
+            ('store_id', '=', store.id),
+            ('order_status', 'in', list(IDEFIX_CANCEL_STATUSES)),
+            ('sale_order_id', '!=', False),
+            ('sale_order_id.state', 'not in', ['cancel', 'done']),
+        ])
+        count = 0
+        for ix_order in cancelled_orders:
+            try:
+                self._cancel_odoo_order(ix_order, store)
+                count += 1
+            except Exception as e:
+                _logger.warning("Idefix — Bekleyen iptal hatası: %s - %s", ix_order.order_number, e)
+        return count
