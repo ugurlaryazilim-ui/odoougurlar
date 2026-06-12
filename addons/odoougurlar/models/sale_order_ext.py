@@ -414,7 +414,7 @@ class SaleOrder(models.Model):
                     'sticky': True,
                 }}
 
-    def _action_cancel(self):
+    def action_cancel(self):
         """Sipariş iptal edildiğinde, Nebim'e gönderilmişse otomatik sil.
 
         Nebim V3 IntegratorService Delete endpoint'ine istek göndererek
@@ -427,7 +427,7 @@ class SaleOrder(models.Model):
         - Her işlem loglanır
         """
         # Önce Odoo'nun kendi iptalini yap
-        res = super()._action_cancel()
+        res = super().action_cancel()
 
         # Toggle kontrolü
         ICP = self.env['ir.config_parameter'].sudo()
