@@ -171,8 +171,13 @@ class OrderProcessor(models.AbstractModel):
                 'nebim_order_sent': True,
                 'nebim_order_response': str(result),
                 'nebim_export_file_number': export_file_number or '',
+                'nebim_header_id': (
+                    result.get('HeaderID') or result.get('ApplicationID') or ''
+                ) if isinstance(result, dict) else '',
             })
-            _logger.info("Sipariş başarıyla Nebim'e aktarıldı: %s", sale_order.name)
+            _logger.info("Sipariş başarıyla Nebim'e aktarıldı: %s (HeaderID: %s)", 
+                        sale_order.name,
+                        result.get('HeaderID', '') if isinstance(result, dict) else '')
             return True
             
         except Exception as e:

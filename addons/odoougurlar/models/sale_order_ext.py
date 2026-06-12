@@ -16,6 +16,8 @@ class SaleOrder(models.Model):
     nebim_order_response = fields.Text(string='Nebim Sipariş Cevabı', readonly=True)
     nebim_order_request = fields.Text(string='Nebim Sipariş İstek', readonly=True)
     nebim_export_file_number = fields.Char(string='Nebim ExportFileNumber', readonly=True)
+    nebim_header_id = fields.Char(string='Nebim HeaderID', readonly=True,
+                                  help='Nebim sipariş yanıtından alınan benzersiz HeaderID (GUID). Silme işleminde kullanılır.')
 
     # ─── Pazaryeri Bilgileri (Computed) ────────────────────
     marketplace_name = fields.Char(
@@ -455,16 +457,15 @@ class SaleOrder(models.Model):
     def _nebim_delete_order(self, order):
         """Nebim'den siparişi siler.
 
-        Nebim V3 IntegratorService Delete endpoint'ine:
-        - InternalDescription = client_order_ref (Nebim'e bu değerle gönderildi)
-        - DocumentNumber = client_order_ref
-        - ModelType = 13 (Perakende) veya 14 (İhracat)
+        Öncelik sırası:
+        1. nebim_header_id varsa → HeaderID ile sil (en güvenilir)
+        2. Yoksa nebim_order_response'dan HeaderID parse etmeyi dene
+        3. Hiçbiri yoksa DocumentNumber ile dene
         """
         connector = self.env['odoougurlar.nebim.connector'].sudo()
         doc_number = order.client_order_ref or order.name
 
-        # Mapping'den ModelType, StoreCode, WarehouseCode al
-        model_type = 13  # Varsayılan: Perakende Satış Siparişi
+        # Mapping'den StoreCode, WarehouseCode al
         store_code = '002'
         warehouse_code = '002'
 
@@ -475,16 +476,33 @@ class SaleOrder(models.Model):
                     marketplace_name, order.partner_id.country_id.id
                 )
                 if mapping:
-                    mt = int(mapping.nebim_order_model_type) if mapping.nebim_order_model_type else 13
-                    is_export = int(mapping.nebim_invoice_model_type) == 24 if mapping.nebim_invoice_model_type else False
-                    model_type = 14 if is_export else mt
                     store_code = mapping.store_code or '002'
                     warehouse_code = mapping.warehouse_code or '002'
             except Exception as e:
                 _logger.warning("Nebim silme: mapping alınamadı (%s): %s", order.name, e)
 
+        # ── Nebim yanıtından gerçek ModelType ve HeaderID çıkar
+        nebim_model_type = 5  # Nebim genelde ModelType 5 olarak kaydeder
+        header_id = order.nebim_header_id or ''
+
+        if not header_id and order.nebim_order_response:
+            try:
+                import ast
+                resp_data = ast.literal_eval(order.nebim_order_response)
+                if isinstance(resp_data, dict):
+                    header_id = resp_data.get('HeaderID') or resp_data.get('ApplicationID') or ''
+                    nebim_model_type = resp_data.get('ModelType', 5)
+            except Exception:
+                pass
+
+        _logger.info(
+            "Nebim sipariş silme başlatılıyor: %s (DocNum: %s, HeaderID: %s, ModelType: %s)",
+            order.name, doc_number, header_id or 'YOK', nebim_model_type
+        )
+
+        # Silme payload'u — HeaderID varsa onu kullan
         payload = {
-            'ModelType': model_type,
+            'ModelType': nebim_model_type,
             'InternalDescription': doc_number,
             'DocumentNumber': doc_number,
             'OfficeCode': 'M',
@@ -492,10 +510,9 @@ class SaleOrder(models.Model):
             'WarehouseCode': warehouse_code,
         }
 
-        _logger.info(
-            "Nebim sipariş silme başlatılıyor: %s (DocNum: %s, ModelType: %d)",
-            order.name, doc_number, model_type
-        )
+        if header_id:
+            payload['HeaderID'] = header_id
+            payload['ApplicationID'] = header_id
 
         result = connector.delete_data(payload)
 
