@@ -94,6 +94,13 @@ class PazaramaOrderSync(models.Model):
                 break
             page += 1
 
+        # ── API'den iptal siparişlerini çek ve DB'deki kayıtları güncelle ──
+        try:
+            with self.env.cr.savepoint():
+                self._fetch_cancelled_from_api(store, api_client)
+        except Exception as e:
+            _logger.exception("Pazarama iptal çekme hatası: %s", e)
+
         # ── Veritabanındaki iptal siparişleri tara (tarih filtresi dışındakiler dahil) ──
         try:
             with self.env.cr.savepoint():
@@ -479,3 +486,46 @@ class PazaramaOrderSync(models.Model):
             except Exception as e:
                 _logger.warning("Pazarama — Bekleyen iptal hatası: %s - %s", pz_order.order_number, e)
         return count
+
+    @api.private
+    def _fetch_cancelled_from_api(self, store, api_client):
+        """API'den iptal durumundaki siparişleri çek ve DB'deki
+        pazarama.order kayıtlarının status'unu güncelle.
+        Bu sayede tarih filtresi dışındaki eski iptal siparişler de yakalanır."""
+        PzOrder = self.env['pazarama.order']
+        updated = 0
+
+        for cancel_status in PAZARAMA_CANCEL_STATUSES:
+            page = 1
+            while True:
+                try:
+                    res = api_client.get_orders_by_status(cancel_status, page=page, size=500)
+                except Exception as e:
+                    _logger.error("Pazarama iptal API hatası (status=%s): %s", cancel_status, e)
+                    break
+
+                if not res.get('success'):
+                    break
+
+                data_list = res.get('data', {}).get('data', [])
+                if not data_list:
+                    break
+
+                for order_json in data_list:
+                    order_id = order_json.get('orderId')
+                    if not order_id:
+                        continue
+
+                    existing = PzOrder.search([('order_id', '=', order_id)], limit=1)
+                    if existing and existing.order_status != cancel_status:
+                        existing.write({'order_status': cancel_status})
+                        updated += 1
+                        _logger.info("Pazarama — Sipariş %s status güncellendi: %s → %s",
+                                     existing.order_number, existing.order_status, cancel_status)
+
+                if len(data_list) < 500:
+                    break
+                page += 1
+
+        if updated:
+            _logger.info("Pazarama — API'den %d iptal sipariş status güncellendi", updated)

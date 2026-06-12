@@ -121,6 +121,15 @@ class PazaramaAPIClient:
 
         return self._request('POST', '/order/getOrdersForApi', data=body)
 
+    def get_orders_by_status(self, order_status, page=1, size=500):
+        """Belirli bir statüdeki siparişleri çek (örn: iptal = 8)."""
+        body = {
+            'pageSize': min(size, 500),
+            'pageNumber': page,
+            'orderStatus': order_status,
+        }
+        return self._request('POST', '/order/getOrdersForApi', data=body)
+
     def update_tracking_number(self, order_number, order_item_id, tracking_number, cargo_company_id, tracking_url=""):
         """Kargo takip bilgisi gönder."""
         body = {
