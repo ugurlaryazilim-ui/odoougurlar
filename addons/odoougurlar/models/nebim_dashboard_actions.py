@@ -396,7 +396,7 @@ class NebimDashboardWarehouse(models.TransientModel):
         Ayarlardaki toggle açıksa çalışır.
         """
         ICP = self.env['ir.config_parameter'].sudo()
-        enabled = ICP.get_param('odoougurlar.nebim_auto_delete_on_cancel', 'True') == 'True'
+        enabled = ICP.get_param('odoougurlar.nebim_cancel_cleanup_auto', 'False') == 'True'
 
         if not enabled:
             _logger.info("Nebim iptal temizliği cron'u devre dışı — ayarlardan aktif edin.")
