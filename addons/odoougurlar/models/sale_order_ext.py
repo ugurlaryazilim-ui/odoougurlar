@@ -416,11 +416,12 @@ class SaleOrder(models.Model):
                     'sticky': True,
                 }}
 
-    def action_cancel(self):
+    def _action_cancel(self):
         """Sipariş iptal edildiğinde, Nebim'e gönderilmişse otomatik sil.
 
-        Nebim V3 IntegratorService Delete endpoint'ine istek göndererek
-        siparişi Nebim'den siler. Stok serbest kalır.
+        Trendyol ve diğer pazaryerleri _action_cancel() çağırır,
+        Manuel iptal ise action_cancel() → _action_cancel() zinciri ile çalışır.
+        Bu yüzden hook _action_cancel() üzerinde olmalı.
 
         Kritik Kurallar:
         - Sadece nebim_order_sent=True olan siparişler silinir
@@ -429,7 +430,7 @@ class SaleOrder(models.Model):
         - Her işlem loglanır
         """
         # Önce Odoo'nun kendi iptalini yap
-        res = super().action_cancel()
+        res = super()._action_cancel()
 
         # Toggle kontrolü
         ICP = self.env['ir.config_parameter'].sudo()
