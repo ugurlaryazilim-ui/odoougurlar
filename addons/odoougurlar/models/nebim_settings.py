@@ -224,11 +224,35 @@ class ResConfigSettings(models.TransientModel):
                 interval_seconds
             )
 
-        # Ürün auto sync cron'u aktifleştir/pasifleştir
+        # Ürün auto sync cron'u aktifleştir/pasifleştir + sync moduna göre aralık güncelle
         product_cron = self.env.ref('odoougurlar.cron_auto_product_sync', raise_if_not_found=False)
+        daily_cron = self.env.ref('odoougurlar.cron_product_sync', raise_if_not_found=False)
+
+        sync_mode = self.nebim_sync_mode or 'daily'
+        if sync_mode == 'hourly':
+            interval_number = 1
+            interval_type = 'hours'
+        else:  # daily veya full
+            interval_number = 1
+            interval_type = 'days'
+
+        cron_vals = {
+            'active': self.nebim_auto_sync,
+            'interval_number': interval_number,
+            'interval_type': interval_type,
+        }
+        if self.nebim_auto_sync:
+            cron_vals['nextcall'] = fields.Datetime.now()
+
         if product_cron:
-            product_cron.sudo().write({'active': self.nebim_auto_sync})
-            _logger.info("Ürün auto sync cron %s", 'aktif' if self.nebim_auto_sync else 'pasif')
+            product_cron.sudo().write(cron_vals)
+        if daily_cron:
+            daily_cron.sudo().write(cron_vals)
+        _logger.info(
+            "Ürün sync cron %s, mod: %s, aralık: %d %s",
+            'aktif' if self.nebim_auto_sync else 'pasif',
+            sync_mode, interval_number, interval_type
+        )
 
         # İptal temizliği cron'u aktifleştir/pasifleştir + aralık güncelle
         cancel_cron = self.env.ref('odoougurlar.cron_nebim_cancel_cleanup', raise_if_not_found=False)
