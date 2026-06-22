@@ -301,47 +301,23 @@ class ShopifyOrderSync(models.Model):
             'order_line': [],
         }
 
-        # ─── Batch ürün arama (N+1 önleme) — idefix pattern ───
+        # ─── Batch ürün arama (merkezi metod) ───
         Product = self.env['product.product'].sudo()
         skus = [line.sku for line in shopify_order.line_ids if line.sku]
-        product_map = {}
+        product_map = Product.batch_find_by_marketplace_barcodes(skus) if skus else {}
 
         if skus:
-            # 1. Barcode ile ara
-            products = Product.search([('barcode', 'in', skus)])
-            for p in products:
-                if p.barcode:
-                    product_map[p.barcode] = p
-
-            # 2. nebim_barcode fallback
-            missing = [s for s in skus if s not in product_map]
-            if missing and 'nebim_barcode' in Product._fields:
-                for sku in missing:
-                    p = Product.search([('nebim_barcode', '=', sku)], limit=1)
-                    if not p:
-                        p = Product.search([('nebim_barcode', 'ilike', sku)], limit=1)
-                    if p:
-                        product_map[sku] = p
-
-            # 3. default_code exact match
-            still_missing = [s for s in skus if s not in product_map]
-            if still_missing:
-                products = Product.search([('default_code', 'in', still_missing)])
-                for p in products:
-                    if p.default_code:
-                        product_map[p.default_code] = p
-
-            # 4. Shopify SKU → Odoo İç Referans dönüşümü
+            # Shopify SKU → Odoo İç Referans dönüşümü (tireli fallback)
             # Shopify: 24K91231000436 (birleşik)
             # Odoo:    24K91231-0004-36 (tireli)
             # Tireler çıkarıldığında eşleşir
-            final_missing = [s for s in skus if s not in product_map]
+            final_missing = [s for s in skus if not product_map.get(s)]
             if final_missing:
-                # İlk 8 karakter ürün kodu — bunla başlayan tüm varyantları çek
+                # İlk 6 karakter ürün kodu — bunla başlayan tüm varyantları çek
                 prefix_set = set()
                 for sku in final_missing:
                     if len(sku) >= 6:
-                        prefix_set.add(sku[:6])  # İlk 6 karakter yeterli
+                        prefix_set.add(sku[:6])
                 for prefix in prefix_set:
                     candidates = Product.search([
                         ('default_code', '=like', f'{prefix}%')
@@ -352,7 +328,7 @@ class ShopifyOrderSync(models.Model):
                             clean_code = p.default_code.replace('-', '').replace(' ', '')
                             for sku in final_missing:
                                 clean_sku = sku.replace('-', '').replace(' ', '')
-                                if clean_code == clean_sku and sku not in product_map:
+                                if clean_code == clean_sku and not product_map.get(sku):
                                     product_map[sku] = p
                                     _logger.info(
                                         "Shopify SKU eşleşti (tireli dönüşüm): %s → %s",
@@ -503,26 +479,7 @@ class ShopifyOrderSync(models.Model):
     # ─── Product Matching ────────────────────────────────
 
     def _find_product_by_sku(self, sku):
-        """SKU/barkod ile ürün bul."""
+        """SKU/barkod ile ürün bul (merkezi metod)."""
         if not sku:
             return False
-
-        Product = self.env['product.product'].sudo()
-
-        # 1. Barcode ile ara
-        product = Product.search([('barcode', '=', sku)], limit=1)
-        if product:
-            return product
-
-        # 2. nebim_barcode fallback
-        if 'nebim_barcode' in Product._fields:
-            product = Product.search([('nebim_barcode', '=', sku)], limit=1)
-            if product:
-                return product
-
-        # 3. Default code ile ara
-        product = Product.search([('default_code', '=', sku)], limit=1)
-        if product:
-            return product
-
-        return False
+        return self.env['product.product'].sudo().find_by_marketplace_barcode(sku) or False

@@ -587,47 +587,28 @@ class HepsiburadaOrderSync(models.AbstractModel):
     @api.private
     def _create_sale_order(self, hb_order, partner, store):
         SaleOrder = self.env['sale.order']
-        Product = self.env['product.product'].sudo()
+        Product = self.env['product.product']
 
-        # Batch ürün arama — N+1 önleme
-        all_skus = []
+        # Batch ürün arama — merkezî metod
+        all_codes = []
         for line in hb_order.line_ids:
             if line.merchant_sku:
-                all_skus.append(line.merchant_sku)
+                all_codes.append(line.merchant_sku)
             if line.sku:
-                all_skus.append(line.sku)
-
-        product_map = {}
-        if all_skus:
-            # default_code ile toplu arama
-            products = Product.search([('default_code', 'in', all_skus)])
-            for p in products:
-                if p.default_code:
-                    product_map[p.default_code] = p
-            # barcode ile toplu arama (fallback)
-            missing = [s for s in all_skus if s not in product_map]
-            if missing:
-                products = Product.search([('barcode', 'in', missing)])
-                for p in products:
-                    if p.barcode:
-                        product_map[p.barcode] = p
-            # nebim_barcode fallback
-            still_missing = [s for s in all_skus if s not in product_map]
-            if still_missing and 'nebim_barcode' in Product._fields:
-                for bc in still_missing:
-                    p = Product.search([('nebim_barcode', '=', bc)], limit=1)
-                    if not p:
-                        p = Product.search([('nebim_barcode', 'ilike', bc)], limit=1)
-                    if p:
-                        product_map[bc] = p
+                all_codes.append(line.sku)
+        product_map = Product.batch_find_by_marketplace_barcodes(all_codes) if all_codes else {}
 
         # Tax cache — N+1 önleme
         tax_cache = {}
 
         order_lines = []
         for line in hb_order.line_ids:
-            # Ürünü bul
+            # Ürünü bul — batch'ten, yoksa tekli fallback
             product = product_map.get(line.merchant_sku) or product_map.get(line.sku)
+            if not product and line.merchant_sku:
+                product = Product.find_by_marketplace_barcode(line.merchant_sku)
+            if not product and line.sku:
+                product = Product.find_by_marketplace_barcode(line.sku)
             
             if not product:
                 _logger.warning("HB Ürün bulunamadı: merchant_sku=%s, sku=%s, ürün adı=%s",

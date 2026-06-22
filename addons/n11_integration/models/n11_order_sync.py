@@ -323,37 +323,16 @@ class N11OrderSync(models.Model):
         if warehouse_id:
             sale_vals['warehouse_id'] = warehouse_id
         
-        # Batch ürün arama (N+1 önleme) — önce barcode, sonra nebim, sonra default_code
-        Product = self.env['product.product'].sudo()
+        # Batch ürün arama — merkezî metod
+        Product = self.env['product.product']
         codes = [line.product_code for line in p_order.line_ids if line.product_code]
-        product_map = {}
-        if codes:
-            products = Product.search([('barcode', 'in', codes)])
-            for p in products:
-                if p.barcode:
-                    product_map[p.barcode] = p
-            # nebim_barcode fallback
-            missing = [c for c in codes if c not in product_map]
-            if missing and 'nebim_barcode' in Product._fields:
-                for bc in missing:
-                    p = Product.search([('nebim_barcode', '=', bc)], limit=1)
-                    if not p:
-                        p = Product.search([('nebim_barcode', 'ilike', bc)], limit=1)
-                    if p:
-                        product_map[bc] = p
-            # default_code fallback
-            still_missing = [c for c in codes if c not in product_map]
-            if still_missing:
-                products = Product.search([('default_code', 'in', still_missing)])
-                for p in products:
-                    if p.default_code:
-                        product_map[p.default_code] = p
+        product_map = Product.batch_find_by_marketplace_barcodes(codes) if codes else {}
 
         # KDV dahil vergi cache'i — aynı oranı tekrar aramamak için
         _tax_cache = {}
 
         for line in p_order.line_ids:
-            product = product_map.get(line.product_code)
+            product = product_map.get(line.product_code) or Product.find_by_marketplace_barcode(line.product_code) if line.product_code else None
             
             if not product:
                 _logger.warning("N11 Urun Bulunamadi: %s", line.product_code)

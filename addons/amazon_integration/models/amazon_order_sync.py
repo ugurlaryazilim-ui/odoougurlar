@@ -230,32 +230,10 @@ class AmazonOrderSync(models.Model):
         if not items_val:
             return processed, 0, 1, [f"{amazon_order_id} ürün detayları alınamadı, atlandı."]
 
-        # Batch ürün arama — N+1 önleme
+        # Batch ürün arama (merkezi metod)
         Product = self.env['product.product'].sudo()
         all_skus = [item.get('SellerSKU') for item in items_val if item.get('SellerSKU')]
-        product_map = {}
-        if all_skus:
-            # default_code ile toplu arama
-            products = Product.search([('default_code', 'in', all_skus)])
-            for p in products:
-                if p.default_code:
-                    product_map[p.default_code] = p
-            # barcode fallback
-            missing = [s for s in all_skus if s not in product_map]
-            if missing:
-                products = Product.search([('barcode', 'in', missing)])
-                for p in products:
-                    if p.barcode:
-                        product_map[p.barcode] = p
-            # nebim_barcode fallback
-            still_missing = [s for s in all_skus if s not in product_map]
-            if still_missing and 'nebim_barcode' in Product._fields:
-                for bc in still_missing:
-                    p = Product.search([('nebim_barcode', '=', bc)], limit=1)
-                    if not p:
-                        p = Product.search([('nebim_barcode', 'ilike', bc)], limit=1)
-                    if p:
-                        product_map[bc] = p
+        product_map = Product.batch_find_by_marketplace_barcodes(all_skus) if all_skus else {}
 
         order_lines = []
         for item in items_val:

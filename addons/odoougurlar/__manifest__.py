@@ -33,6 +33,7 @@
         'views/marketplace_mapping_views.xml',
         'views/tax_mapping_views.xml',
         'views/sale_order_views.xml',
+        'views/product_views.xml',
         'views/invoice_views.xml',
         'views/transfer_wizard_view.xml',
     ],

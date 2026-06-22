@@ -367,9 +367,18 @@ class TrendyolOrder(models.Model):
         if warehouse_id and 'warehouse_id' in self.env['sale.order']._fields:
             so_vals['warehouse_id'] = warehouse_id
 
-        # Ürünleri toplu bul (N+1 → 2 sorgu)
+        # Ürünleri toplu bul — merkezî metod
         api_lines = package_data.get('lines', [])
-        product_map = self._batch_find_products(api_lines)
+        Product = self.env['product.product']
+        all_codes = []
+        for _ln in api_lines:
+            bc = _ln.get('barcode', '').strip()
+            sku = _ln.get('merchantSku', '').strip()
+            if bc:
+                all_codes.append(bc)
+            if sku:
+                all_codes.append(sku)
+        product_map = Product.batch_find_by_marketplace_barcodes(all_codes) if all_codes else {}
 
         # KDV dahil vergi cache'i — aynı oranı tekrar aramamak için
         _tax_cache = {}
@@ -380,8 +389,10 @@ class TrendyolOrder(models.Model):
             sku = line.get('merchantSku', '').strip()
             product = product_map.get(bc) or product_map.get(sku)
             if not product:
-                # Batch'te bulunamadı, tek tek dene (nebim_barcode fallback)
-                product = self._find_product_by_barcode(bc, sku)
+                # Batch'te bulunamadı, tek tek dene (fallback)
+                product = Product.find_by_marketplace_barcode(bc) if bc else Product
+                if not product:
+                    product = Product.find_by_marketplace_barcode(sku) if sku else Product
 
             # Trendyol price/lineUnitPrice KDV DAHİL tutardır (indirim sonrası)
             price = (line.get('price')
@@ -627,75 +638,7 @@ class TrendyolOrder(models.Model):
 
         return result
 
-    @api.private
-    def _find_product_by_barcode(self, barcode, merchant_sku=''):
-        """Barkod ile ürün bul. Bulunamazsa merchantSku dene.
 
-        Arama sırası:
-        1. barcode alanı (exact match)
-        2. nebim_barcode alanı (exact match, sonra ilike)
-        3. default_code (merchantSku)
-        """
-        Product = self.env['product.product'].sudo()
-
-        if barcode:
-            product = Product.search([('barcode', '=', barcode)], limit=1)
-            if product:
-                return product
-            # nebim_barcode desteği — önce exact, sonra ilike
-            if 'nebim_barcode' in Product._fields:
-                product = Product.search([('nebim_barcode', '=', barcode)], limit=1)
-                if not product:
-                    product = Product.search([('nebim_barcode', 'ilike', barcode)], limit=1)
-                if product:
-                    return product
-
-        if merchant_sku:
-            product = Product.search([('default_code', '=', merchant_sku)], limit=1)
-            if product:
-                return product
-
-        _logger.warning("Ürün bulunamadı: barcode=%s, sku=%s", barcode, merchant_sku)
-        return False
-
-    @api.private
-    def _batch_find_products(self, lines):
-        """Birden fazla kalem için ürünleri toplu olarak bul.
-
-        Tek sorguda tüm barkod ve SKU'ları arar, N+1 sorgu sorununu çözer.
-        Returns: dict {barcode_or_sku: product_record}
-        """
-        Product = self.env['product.product'].sudo()
-        barcodes = [l.get('barcode', '').strip() for l in lines if l.get('barcode', '').strip()]
-        skus = [l.get('merchantSku', '').strip() for l in lines if l.get('merchantSku', '').strip()]
-
-        product_map = {}
-
-        if barcodes:
-            products = Product.search([('barcode', 'in', barcodes)])
-            for p in products:
-                if p.barcode:
-                    product_map[p.barcode] = p
-
-            # nebim_barcode fallback — batch
-            missing_barcodes = [b for b in barcodes if b not in product_map]
-            if missing_barcodes and 'nebim_barcode' in Product._fields:
-                for bc in missing_barcodes:
-                    product = Product.search([('nebim_barcode', '=', bc)], limit=1)
-                    if not product:
-                        product = Product.search([('nebim_barcode', 'ilike', bc)], limit=1)
-                    if product:
-                        product_map[bc] = product
-
-        # Henüz bulunamayanlar için SKU ile dene
-        missing_skus = [s for s in skus if s not in product_map]
-        if missing_skus:
-            products = Product.search([('default_code', 'in', missing_skus)])
-            for p in products:
-                if p.default_code:
-                    product_map[p.default_code] = p
-
-        return product_map
 
     # ═══════════════════════════════════════════════════════
     # Aşağıdaki metodlar _inherit ile ayrı dosyalarda tanımlı:
