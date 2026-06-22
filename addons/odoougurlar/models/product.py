@@ -27,6 +27,12 @@ class ProductTemplate(models.Model):
         default=False,
         help='Bu ürün Nebim ile senkronize edildi mi?',
     )
+    substitute_product_id = fields.Many2one(
+        'product.product',
+        string='İkame Ürün (Paket)',
+        related='product_variant_ids.substitute_product_id',
+        readonly=False,
+    )
 
 
 class ProductProduct(models.Model):

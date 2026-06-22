@@ -14,13 +14,11 @@
                     <group string="Ürün İkame (Paket Eşleştirme)">
                         <group>
                             <field name="substitute_product_id"
-                                   related="product_variant_ids.substitute_product_id"
-                                   readonly="0"
                                    options="{'no_create': True}"/>
                         </group>
                     </group>
                     <div class="alert alert-info" role="alert"
-                         invisible="not product_variant_ids.substitute_product_id">
+                         invisible="not substitute_product_id">
                         <i class="fa fa-exchange me-1"/>
                         <strong>Paket Ürün Aktif:</strong>
                         Pazaryerinden bu barkod ile sipariş geldiğinde,
