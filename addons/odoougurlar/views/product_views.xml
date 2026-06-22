@@ -2,20 +2,49 @@
 <odoo>
 
     <!-- ═══════════════════════════════════════════════════ -->
-    <!-- ÜRÜN FORM — Paket Sekmesi (product.product)        -->
+    <!-- ÜRÜN ŞABLON FORM — Paket Sekmesi (product.template)-->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <record id="view_product_template_form_paket" model="ir.ui.view">
+        <field name="name">product.template.form.paket</field>
+        <field name="model">product.template</field>
+        <field name="inherit_id" ref="product.product_template_only_form_view"/>
+        <field name="arch" type="xml">
+            <xpath expr="//notebook" position="inside">
+                <page string="Paket" name="package_tab">
+                    <group string="Ürün İkame (Paket Eşleştirme)">
+                        <group>
+                            <field name="substitute_product_id"
+                                   related="product_variant_ids.substitute_product_id"
+                                   readonly="0"
+                                   options="{'no_create': True}"/>
+                        </group>
+                    </group>
+                    <div class="alert alert-info" role="alert"
+                         invisible="not product_variant_ids.substitute_product_id">
+                        <i class="fa fa-exchange me-1"/>
+                        <strong>Paket Ürün Aktif:</strong>
+                        Pazaryerinden bu barkod ile sipariş geldiğinde,
+                        sipariş satırına ikame ürün yazılacak.
+                    </div>
+                </page>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- ÜRÜN VARYANT FORM — Paket Sekmesi (product.product)-->
     <!-- ═══════════════════════════════════════════════════ -->
     <record id="view_product_form_paket" model="ir.ui.view">
         <field name="name">product.product.form.paket</field>
         <field name="model">product.product</field>
         <field name="inherit_id" ref="product.product_normal_form_view"/>
         <field name="arch" type="xml">
-            <xpath expr="//page[@name='variants']" position="after">
+            <xpath expr="//notebook" position="inside">
                 <page string="Paket" name="package_tab">
                     <group string="Ürün İkame (Paket Eşleştirme)">
                         <group>
                             <field name="substitute_product_id"
-                                   options="{'no_create': True}"
-                                   context="{'show_barcode': True}"/>
+                                   options="{'no_create': True}"/>
                         </group>
                     </group>
                     <div class="alert alert-info" role="alert"
@@ -35,37 +64,6 @@
                             </list>
                         </field>
                     </group>
-                </page>
-            </xpath>
-        </field>
-    </record>
-
-    <!-- ═══════════════════════════════════════════════════ -->
-    <!-- ÜRÜN ŞABLON FORM — Paket Sekmesi (product.template)-->
-    <!-- ═══════════════════════════════════════════════════ -->
-    <record id="view_product_template_form_paket" model="ir.ui.view">
-        <field name="name">product.template.form.paket</field>
-        <field name="model">product.template</field>
-        <field name="inherit_id" ref="product.product_template_only_form_view"/>
-        <field name="arch" type="xml">
-            <xpath expr="//page[@name='variants']" position="after">
-                <page string="Paket" name="package_tab"
-                      invisible="product_variant_count != 1">
-                    <group string="Ürün İkame (Paket Eşleştirme)">
-                        <group>
-                            <field name="substitute_product_id"
-                                   related="product_variant_ids.substitute_product_id"
-                                   readonly="0"
-                                   options="{'no_create': True}"/>
-                        </group>
-                    </group>
-                    <div class="alert alert-info" role="alert"
-                         invisible="not product_variant_ids.substitute_product_id">
-                        <i class="fa fa-exchange me-1"/>
-                        <strong>Paket Ürün Aktif:</strong>
-                        Pazaryerinden bu barkod ile sipariş geldiğinde,
-                        sipariş satırına ikame ürün yazılacak.
-                    </div>
                 </page>
             </xpath>
         </field>
