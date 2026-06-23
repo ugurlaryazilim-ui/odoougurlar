@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <record id="view_ai_studio_generation_list" model="ir.ui.view">
+        <field name="name">ai.studio.generation.list</field>
+        <field name="model">ai.studio.generation</field>
+        <field name="arch" type="xml">
+            <list string="AI Üretimler"
+                  decoration-success="is_approved"
+                  decoration-danger="state == 'failed'">
+                <field name="session_id"/>
+                <field name="photo_type"/>
+                <field name="state" widget="badge"/>
+                <field name="is_approved"/>
+                <field name="is_primary"/>
+                <field name="revision_number"/>
+                <field name="cost" widget="monetary"/>
+                <field name="generation_time_seconds"/>
+                <field name="provider"/>
+                <field name="create_date"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_ai_studio_generation_form" model="ir.ui.view">
+        <field name="name">ai.studio.generation.form</field>
+        <field name="model">ai.studio.generation</field>
+        <field name="arch" type="xml">
+            <form string="AI Üretim Detayı">
+                <header>
+                    <button name="action_approve" string="✅ Onayla" type="object"
+                            class="btn-success"
+                            invisible="state != 'done' or is_approved"/>
+                    <button name="action_reject" string="❌ Reddet" type="object"
+                            class="btn-danger"
+                            invisible="state != 'done' or is_approved"/>
+                    <button name="action_set_primary" string="⭐ Ana Resim Yap" type="object"
+                            invisible="not is_approved or is_primary"/>
+                    <button name="action_retry" string="🔄 Tekrar Dene" type="object"
+                            invisible="state != 'failed'"/>
+                    <field name="state" widget="statusbar"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group string="Karşılaştırma">
+                            <field name="original_image" widget="image" class="oe_avatar"/>
+                            <field name="generated_image" widget="image" class="oe_avatar"/>
+                        </group>
+                        <group string="Bilgiler">
+                            <field name="session_id"/>
+                            <field name="photo_type"/>
+                            <field name="revision_number"/>
+                            <field name="is_approved"/>
+                            <field name="is_primary"/>
+                            <field name="provider"/>
+                            <field name="fal_endpoint"/>
+                            <field name="generation_time_seconds"/>
+                            <field name="cost" widget="monetary"/>
+                        </group>
+                    </group>
+                    <group string="Red/Revizyon" invisible="not reject_reason_id and not revision_prompt">
+                        <field name="reject_reason_id"/>
+                        <field name="revision_prompt"/>
+                        <field name="parent_generation_id"/>
+                    </group>
+                    <group string="Hata" invisible="not error_message">
+                        <field name="error_message"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_ai_studio_generation" model="ir.actions.act_window">
+        <field name="name">AI Üretimler</field>
+        <field name="res_model">ai.studio.generation</field>
+        <field name="view_mode">list,form</field>
+    </record>
+</odoo>

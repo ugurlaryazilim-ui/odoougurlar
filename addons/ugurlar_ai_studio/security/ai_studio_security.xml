@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- ============================================================ -->
+    <!-- AI Stüdyo Modül Kategorisi                                   -->
+    <!-- ============================================================ -->
+    <record id="module_category_ai_studio" model="ir.module.category">
+        <field name="name">AI Stüdyo</field>
+        <field name="sequence">60</field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!-- Güvenlik Grupları                                             -->
+    <!-- ============================================================ -->
+    <record id="group_ai_studio_operator" model="res.groups">
+        <field name="name">Operatör</field>
+        <field name="category_id" ref="module_category_ai_studio"/>
+        <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
+        <field name="comment">Fotoğraf çekme, AI'ya gönderme, kendi oturumlarını görme</field>
+    </record>
+
+    <record id="group_ai_studio_reviewer" model="res.groups">
+        <field name="name">Onayıcı</field>
+        <field name="category_id" ref="module_category_ai_studio"/>
+        <field name="implied_ids" eval="[(4, ref('group_ai_studio_operator'))]"/>
+        <field name="comment">Tüm oturumları görme, onay/red yetkisi</field>
+    </record>
+
+    <record id="group_ai_studio_manager" model="res.groups">
+        <field name="name">Yönetici</field>
+        <field name="category_id" ref="module_category_ai_studio"/>
+        <field name="implied_ids" eval="[(4, ref('group_ai_studio_reviewer'))]"/>
+        <field name="comment">Ayarlar, presetler, maliyet raporları, süpervizör onayı</field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!-- Kayıt Kuralları (Record Rules)                               -->
+    <!-- ============================================================ -->
+    <data noupdate="1">
+        <!-- Operatör: sadece kendi oturumlarını görür -->
+        <record id="rule_session_operator" model="ir.rule">
+            <field name="name">AI Stüdyo Oturum: Operatör kendi oturumları</field>
+            <field name="model_id" ref="model_ai_studio_session"/>
+            <field name="domain_force">[('user_id', '=', user.id)]</field>
+            <field name="groups" eval="[(4, ref('group_ai_studio_operator'))]"/>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="True"/>
+            <field name="perm_unlink" eval="False"/>
+        </record>
+
+        <!-- Onayıcı: tüm oturumları görür -->
+        <record id="rule_session_reviewer" model="ir.rule">
+            <field name="name">AI Stüdyo Oturum: Onayıcı tüm oturumlar</field>
+            <field name="model_id" ref="model_ai_studio_session"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="groups" eval="[(4, ref('group_ai_studio_reviewer'))]"/>
+        </record>
+
+        <!-- Fotoğraf: oturum sahibi veya onayıcı -->
+        <record id="rule_photo_operator" model="ir.rule">
+            <field name="name">AI Stüdyo Fotoğraf: Operatör</field>
+            <field name="model_id" ref="model_ai_studio_photo"/>
+            <field name="domain_force">[('session_id.user_id', '=', user.id)]</field>
+            <field name="groups" eval="[(4, ref('group_ai_studio_operator'))]"/>
+        </record>
+
+        <record id="rule_photo_reviewer" model="ir.rule">
+            <field name="name">AI Stüdyo Fotoğraf: Onayıcı</field>
+            <field name="model_id" ref="model_ai_studio_photo"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="groups" eval="[(4, ref('group_ai_studio_reviewer'))]"/>
+        </record>
+
+        <!-- Generation: oturum sahibi veya onayıcı -->
+        <record id="rule_generation_operator" model="ir.rule">
+            <field name="name">AI Stüdyo Üretim: Operatör</field>
+            <field name="model_id" ref="model_ai_studio_generation"/>
+            <field name="domain_force">[('session_id.user_id', '=', user.id)]</field>
+            <field name="groups" eval="[(4, ref('group_ai_studio_operator'))]"/>
+        </record>
+
+        <record id="rule_generation_reviewer" model="ir.rule">
+            <field name="name">AI Stüdyo Üretim: Onayıcı</field>
+            <field name="model_id" ref="model_ai_studio_generation"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="groups" eval="[(4, ref('group_ai_studio_reviewer'))]"/>
+        </record>
+    </data>
+</odoo>

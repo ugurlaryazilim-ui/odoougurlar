@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <record id="view_ai_studio_reject_list" model="ir.ui.view">
+        <field name="name">ai.studio.reject.reason.list</field>
+        <field name="model">ai.studio.reject.reason</field>
+        <field name="arch" type="xml">
+            <list string="Red Sebepleri" editable="bottom">
+                <field name="sequence" widget="handle"/>
+                <field name="name"/>
+                <field name="code"/>
+                <field name="suggested_prompt"/>
+                <field name="count"/>
+                <field name="active"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="action_ai_studio_reject" model="ir.actions.act_window">
+        <field name="name">Red Sebepleri</field>
+        <field name="res_model">ai.studio.reject.reason</field>
+        <field name="view_mode">list</field>
+    </record>
+</odoo>

@@ -1,0 +1,378 @@
+/* ============================================================ */
+/* Onay Ekranı ve Modal Stilleri                               */
+/* ============================================================ */
+
+/* --- Primary Toggle --- */
+.ais-primary-toggle {
+    background: var(--ais-card-bg);
+    padding: 12px 16px;
+    border-radius: var(--ais-radius-sm);
+    margin: 12px 0;
+    box-shadow: var(--ais-shadow);
+}
+
+.ais-primary-toggle label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.ais-primary-toggle input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--ais-primary);
+}
+
+/* --- Action Buttons --- */
+.ais-action-buttons {
+    display: flex;
+    gap: 12px;
+    margin: 16px 0;
+}
+
+.ais-btn-approve {
+    flex: 1;
+    padding: 14px;
+    background: var(--ais-success);
+    color: white;
+    border: none;
+    border-radius: var(--ais-radius);
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--ais-transition);
+}
+
+.ais-btn-approve:hover {
+    filter: brightness(1.05);
+}
+
+.ais-btn-approve:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.ais-btn-reject {
+    flex: 1;
+    padding: 14px;
+    background: var(--ais-card-bg);
+    color: var(--ais-danger);
+    border: 2px solid var(--ais-danger);
+    border-radius: var(--ais-radius);
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--ais-transition);
+}
+
+.ais-btn-reject:hover {
+    background: rgba(231, 76, 60, 0.08);
+}
+
+.ais-btn-reject:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+/* --- Navigation --- */
+.ais-nav-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 8px 0;
+}
+
+.ais-btn-nav {
+    padding: 8px 16px;
+    border: 1px solid var(--ais-border);
+    background: var(--ais-card-bg);
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--ais-text);
+}
+
+.ais-btn-nav:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+.ais-nav-counter {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ais-text-muted);
+}
+
+/* ============================================================ */
+/* Modal                                                         */
+/* ============================================================ */
+
+.ais-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.ais-modal {
+    background: var(--ais-card-bg);
+    border-radius: var(--ais-radius) var(--ais-radius) 0 0;
+    width: 100%;
+    max-width: 768px;
+    max-height: 85vh;
+    overflow-y: auto;
+    animation: ais-slide-up 0.3s ease;
+}
+
+@keyframes ais-slide-up {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+}
+
+.ais-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+    border-bottom: 1px solid var(--ais-border);
+}
+
+.ais-modal-header h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.ais-modal-close {
+    background: none;
+    border: none;
+    font-size: 22px;
+    cursor: pointer;
+    color: var(--ais-text-muted);
+    padding: 4px;
+}
+
+.ais-modal-body {
+    padding: 16px;
+}
+
+.ais-modal-footer {
+    padding: 16px;
+    border-top: 1px solid var(--ais-border);
+}
+
+/* --- Reason List --- */
+.ais-reason-list {
+    margin-bottom: 16px;
+}
+
+.ais-reason-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--ais-border);
+    border-radius: var(--ais-radius-sm);
+    margin-bottom: 6px;
+    cursor: pointer;
+    transition: var(--ais-transition);
+    font-size: 14px;
+}
+
+.ais-reason-item:hover,
+.ais-reason-item.selected {
+    border-color: var(--ais-primary);
+    background: rgba(108, 99, 255, 0.05);
+}
+
+.ais-reason-item input[type="radio"] {
+    accent-color: var(--ais-primary);
+}
+
+/* --- Revision Prompt --- */
+.ais-revision-prompt {
+    margin-top: 16px;
+}
+
+.ais-revision-prompt label {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 6px;
+}
+
+.ais-revision-count {
+    margin-top: 12px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--ais-text-muted);
+}
+
+/* ============================================================ */
+/* Processing Screen                                             */
+/* ============================================================ */
+
+.ais-progress-list {
+    margin: 16px 0;
+}
+
+.ais-progress-item {
+    background: var(--ais-card-bg);
+    border-radius: var(--ais-radius-sm);
+    padding: 14px;
+    margin-bottom: 10px;
+    box-shadow: var(--ais-shadow);
+}
+
+.ais-progress-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.ais-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.ais-status-dot.pending { background: var(--ais-text-muted); }
+.ais-status-dot.processing { background: var(--ais-warning); animation: ais-pulse 1s infinite; }
+.ais-status-dot.done { background: var(--ais-success); }
+.ais-status-dot.failed { background: var(--ais-danger); }
+
+@keyframes ais-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+.ais-progress-state {
+    font-size: 12px;
+    color: var(--ais-text-muted);
+    margin-left: auto;
+}
+
+.ais-progress-bar-container {
+    height: 6px;
+    background: var(--ais-bg);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.ais-progress-bar {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.5s ease;
+}
+
+.ais-progress-fill.pending { width: 0; background: var(--ais-text-muted); }
+.ais-progress-fill.processing { background: var(--ais-warning); animation: ais-progress-anim 2s infinite; }
+.ais-progress-fill.done { background: var(--ais-success); }
+.ais-progress-fill.failed { background: var(--ais-danger); }
+
+@keyframes ais-progress-anim {
+    0% { opacity: 0.7; }
+    50% { opacity: 1; }
+    100% { opacity: 0.7; }
+}
+
+.ais-error-text {
+    font-size: 12px;
+    color: var(--ais-danger);
+    margin-top: 6px;
+}
+
+/* ============================================================ */
+/* Preset Grid                                                   */
+/* ============================================================ */
+
+.ais-preset-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+}
+
+.ais-preset-card {
+    position: relative;
+    background: var(--ais-card-bg);
+    border: 2px solid var(--ais-border);
+    border-radius: var(--ais-radius);
+    padding: 10px;
+    text-align: center;
+    cursor: pointer;
+    transition: var(--ais-transition);
+}
+
+.ais-preset-card:hover {
+    border-color: var(--ais-primary);
+}
+
+.ais-preset-card.selected {
+    border-color: var(--ais-primary);
+    background: rgba(108, 99, 255, 0.05);
+    box-shadow: 0 0 0 3px rgba(108, 99, 255, 0.15);
+}
+
+.ais-preset-image {
+    width: 100%;
+    aspect-ratio: 3/4;
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--ais-bg);
+    margin-bottom: 8px;
+}
+
+.ais-preset-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.ais-preset-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    font-size: 48px;
+}
+
+.ais-preset-name {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.ais-preset-meta {
+    font-size: 11px;
+    color: var(--ais-text-muted);
+}
+
+.ais-preset-check {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--ais-primary);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+}

@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <!-- ============================================================ -->
+    <!-- Ana Uygulama — Ekran Yöneticisi                              -->
+    <!-- ============================================================ -->
+    <t t-name="ugurlar_ai_studio.AiStudioAction" owl="1">
+        <div class="ais-app">
+            <t t-if="state.currentScreen === 'scan'">
+                <ScanScreen
+                    dashboardStats="state.dashboardStats"
+                    onProductFound.bind="onProductFound"
+                    onGoToHistory.bind="onGoToHistory"
+                    onGoToBatchReview.bind="onGoToBatchReview"/>
+            </t>
+            <t t-elif="state.currentScreen === 'capture'">
+                <CaptureScreen
+                    productInfo="state.productInfo"
+                    onPhotosReady.bind="onPhotosReady"
+                    onBackToScan.bind="onBackToScan"/>
+            </t>
+            <t t-elif="state.currentScreen === 'settings'">
+                <SettingsScreen
+                    productInfo="state.productInfo"
+                    presets="state.presets"
+                    promptTemplates="state.promptTemplates"
+                    onStartProcessing.bind="onStartProcessing"
+                    onBackToScan.bind="onBackToScan"/>
+            </t>
+            <t t-elif="state.currentScreen === 'processing'">
+                <ProcessingScreen
+                    sessionId="state.sessionId"
+                    sessionName="state.sessionName"
+                    onProcessingComplete.bind="onProcessingComplete"
+                    onBackToScan.bind="onBackToScan"/>
+            </t>
+            <t t-elif="state.currentScreen === 'review'">
+                <ReviewScreen
+                    sessionId="state.sessionId"
+                    generations="state.generations"
+                    rejectReasons="state.rejectReasons"
+                    onApproveGeneration.bind="onApproveGeneration"
+                    onRejectGeneration.bind="onRejectGeneration"
+                    onCompleteSession.bind="onCompleteSession"
+                    onBackToScan.bind="onBackToScan"/>
+            </t>
+            <t t-elif="state.currentScreen === 'batch'">
+                <BatchReview onBackToScan.bind="onBackToScan"/>
+            </t>
+            <t t-elif="state.currentScreen === 'history'">
+                <HistoryScreen
+                    dashboardStats="state.dashboardStats"
+                    onBackToScan.bind="onBackToScan"/>
+            </t>
+        </div>
+    </t>
+
+    <!-- ============================================================ -->
+    <!-- Scan Screen — Barkod Tarama                                  -->
+    <!-- ============================================================ -->
+    <t t-name="ugurlar_ai_studio.ScanScreen" owl="1">
+        <div class="ais-screen ais-scan">
+            <div class="ais-header">
+                <h2 class="ais-title">🎨 AI Stüdyo</h2>
+                <div class="ais-header-actions">
+                    <button class="btn btn-outline-secondary btn-sm" t-on-click="props.onGoToHistory">📊</button>
+                    <button class="btn btn-outline-primary btn-sm" t-on-click="props.onGoToBatchReview">📋</button>
+                </div>
+            </div>
+
+            <!-- Arama Kutusu -->
+            <div class="ais-search-box">
+                <div class="ais-search-input-wrap">
+                    <input type="text"
+                           class="ais-search-input"
+                           t-att-value="state.query"
+                           t-on-input="onInputChange"
+                           t-on-keydown="onKeyDown"
+                           placeholder="🔍 Barkod, SKU veya ürün adı..."
+                           autofocus="autofocus"
+                           inputmode="search"/>
+                    <button class="ais-search-btn" t-on-click="searchProduct"
+                            t-att-disabled="state.searching">
+                        <t t-if="state.searching">⏳</t>
+                        <t t-else="">🔍</t>
+                    </button>
+                </div>
+                <t t-if="state.query">
+                    <button class="ais-clear-btn" t-on-click="clearSearch">✕</button>
+                </t>
+            </div>
+
+            <!-- Arama Sonuçları -->
+            <t t-if="state.showResults">
+                <div class="ais-results">
+                    <h4 class="ais-results-title">Sonuçlar</h4>
+                    <t t-foreach="state.results" t-as="product" t-key="product.id">
+                        <div class="ais-product-card" t-on-click="() => this.selectProduct(product)">
+                            <div class="ais-product-image">
+                                <t t-if="product.image_128">
+                                    <img t-att-src="'data:image/png;base64,' + product.image_128"/>
+                                </t>
+                                <t t-else="">
+                                    <div class="ais-no-image">📦</div>
+                                </t>
+                            </div>
+                            <div class="ais-product-info">
+                                <div class="ais-product-name" t-out="product.name"/>
+                                <div class="ais-product-meta">
+                                    <t t-if="product.barcode">
+                                        <span class="ais-badge">📊 <t t-out="product.barcode"/></span>
+                                    </t>
+                                    <t t-if="product.default_code">
+                                        <span class="ais-badge">🏷️ <t t-out="product.default_code"/></span>
+                                    </t>
+                                </div>
+                                <div class="ais-product-category" t-out="product.categ_name"/>
+                            </div>
+                            <div class="ais-product-arrow">→</div>
+                        </div>
+                    </t>
+                </div>
+            </t>
+
+            <!-- Dashboard İstatistikleri -->
+            <t t-if="!state.showResults">
+                <div class="ais-dashboard">
+                    <div class="ais-stat-grid">
+                        <div class="ais-stat-card">
+                            <div class="ais-stat-value" t-out="props.dashboardStats.today_sessions or 0"/>
+                            <div class="ais-stat-label">Bugün</div>
+                        </div>
+                        <div class="ais-stat-card">
+                            <div class="ais-stat-value" t-out="props.dashboardStats.month_sessions or 0"/>
+                            <div class="ais-stat-label">Bu Ay</div>
+                        </div>
+                        <div class="ais-stat-card">
+                            <div class="ais-stat-value">
+                                %<t t-out="Math.round(props.dashboardStats.month_approval_rate or 0)"/>
+                            </div>
+                            <div class="ais-stat-label">Onay</div>
+                        </div>
+                        <div class="ais-stat-card">
+                            <div class="ais-stat-value">
+                                $<t t-out="(props.dashboardStats.month_cost or 0).toFixed(2)"/>
+                            </div>
+                            <div class="ais-stat-label">Maliyet</div>
+                        </div>
+                    </div>
+                </div>
+            </t>
+        </div>
+    </t>
+
+</templates>

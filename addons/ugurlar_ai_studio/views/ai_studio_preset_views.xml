@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <record id="view_ai_studio_preset_list" model="ir.ui.view">
+        <field name="name">ai.studio.model.preset.list</field>
+        <field name="model">ai.studio.model.preset</field>
+        <field name="arch" type="xml">
+            <list string="Manken Presetleri">
+                <field name="name"/>
+                <field name="gender"/>
+                <field name="body_type"/>
+                <field name="garment_type"/>
+                <field name="background_type"/>
+                <field name="usage_count"/>
+                <field name="approval_rate" widget="progressbar"/>
+                <field name="mannequin_generation_state" widget="badge"/>
+                <field name="active"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_ai_studio_preset_form" model="ir.ui.view">
+        <field name="name">ai.studio.model.preset.form</field>
+        <field name="model">ai.studio.model.preset</field>
+        <field name="arch" type="xml">
+            <form string="Manken Preseti">
+                <header>
+                    <button name="action_generate_mannequin"
+                            string="🤖 AI ile Manken Oluştur" type="object"
+                            class="btn-primary"
+                            invisible="mannequin_generation_state == 'generating'"/>
+                    <field name="mannequin_generation_state" widget="statusbar"
+                           statusbar_visible="idle,generating,done"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="name" placeholder="Preset adı..."/></h1>
+                    </div>
+                    <group>
+                        <group string="Manken Görselleri">
+                            <field name="model_image_front" widget="image"/>
+                            <field name="model_image_back" widget="image"/>
+                            <field name="preview_image" widget="image"/>
+                        </group>
+                        <group string="Özellikler">
+                            <field name="gender"/>
+                            <field name="body_type"/>
+                            <field name="garment_type"/>
+                            <field name="target_audience"/>
+                            <field name="age_range"/>
+                            <field name="background_type"/>
+                            <field name="active"/>
+                        </group>
+                    </group>
+                    <group string="AI Manken Oluşturma">
+                        <field name="mannequin_prompt"
+                               placeholder="Örn: Young woman, slim build, long brown hair, natural makeup, elegant pose, studio lighting..."
+                               widget="text"/>
+                    </group>
+                    <group>
+                        <group string="Stil ve Prompt">
+                            <field name="style_notes" placeholder="Stil açıklaması..."/>
+                            <field name="default_prompt" placeholder="Varsayılan ek prompt..."/>
+                        </group>
+                        <group string="Kategoriler ve İstatistikler">
+                            <field name="category_ids" widget="many2many_tags"/>
+                            <field name="usage_count"/>
+                            <field name="approval_rate" widget="progressbar"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_ai_studio_preset_kanban" model="ir.ui.view">
+        <field name="name">ai.studio.model.preset.kanban</field>
+        <field name="model">ai.studio.model.preset</field>
+        <field name="arch" type="xml">
+            <kanban string="Manken Presetleri">
+                <field name="name"/>
+                <field name="gender"/>
+                <field name="garment_type"/>
+                <field name="approval_rate"/>
+                <field name="model_image_front"/>
+                <templates>
+                    <t t-name="card">
+                        <div class="o_kanban_image">
+                            <field name="model_image_front" widget="image" width="80" height="120"/>
+                        </div>
+                        <div class="oe_kanban_details">
+                            <strong><field name="name"/></strong>
+                            <div><field name="gender"/> | <field name="garment_type"/></div>
+                            <div>Onay: <field name="approval_rate"/>%</div>
+                        </div>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <record id="action_ai_studio_preset" model="ir.actions.act_window">
+        <field name="name">Manken Presetleri</field>
+        <field name="res_model">ai.studio.model.preset</field>
+        <field name="view_mode">kanban,list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                İlk manken presetinizi oluşturun!
+            </p>
+            <p>
+                Manken fotoğrafı yükleyin veya AI ile oluşturun.
+            </p>
+        </field>
+    </record>
+</odoo>

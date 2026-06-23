@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- Root Menu -->
+    <menuitem id="menu_ai_studio_root"
+              name="AI Stüdyo"
+              web_icon="ugurlar_ai_studio,static/description/icon.png"
+              sequence="45"/>
+
+    <!-- AI Stüdyo Ana Uygulama -->
+    <menuitem id="menu_ai_studio_app"
+              name="AI Stüdyo"
+              parent="menu_ai_studio_root"
+              action="ai_studio_client_action"
+              sequence="1"/>
+
+    <!-- Oturumlar -->
+    <menuitem id="menu_ai_studio_sessions"
+              name="Oturumlar"
+              parent="menu_ai_studio_root"
+              action="action_ai_studio_session"
+              sequence="10"/>
+
+    <!-- AI Üretimler -->
+    <menuitem id="menu_ai_studio_generations"
+              name="AI Üretimler"
+              parent="menu_ai_studio_root"
+              action="action_ai_studio_generation"
+              sequence="20"/>
+
+    <!-- Ayarlar Üst Menü -->
+    <menuitem id="menu_ai_studio_config"
+              name="Ayarlar"
+              parent="menu_ai_studio_root"
+              sequence="90"/>
+
+    <menuitem id="menu_ai_studio_presets"
+              name="Manken Presetleri"
+              parent="menu_ai_studio_config"
+              action="action_ai_studio_preset"
+              sequence="1"/>
+
+    <menuitem id="menu_ai_studio_prompts"
+              name="Prompt Şablonları"
+              parent="menu_ai_studio_config"
+              action="action_ai_studio_prompt"
+              sequence="2"/>
+
+    <menuitem id="menu_ai_studio_reject_reasons"
+              name="Red Sebepleri"
+              parent="menu_ai_studio_config"
+              action="action_ai_studio_reject"
+              sequence="3"/>
+
+    <menuitem id="menu_ai_studio_settings"
+              name="Genel Ayarlar"
+              parent="menu_ai_studio_config"
+              action="base_setup.action_general_configuration"
+              sequence="99"/>
+</odoo>

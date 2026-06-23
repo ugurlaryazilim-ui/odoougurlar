@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="ugurlar_ai_studio.SettingsScreen" owl="1">
+        <div class="ais-screen ais-settings">
+            <div class="ais-header">
+                <button class="btn btn-link" t-on-click="props.onBackToScan">← Geri</button>
+                <h2 class="ais-title">⚙️ AI Ayarları</h2>
+            </div>
+
+            <!-- Manken Preset Seçimi -->
+            <div class="ais-section">
+                <h4>👤 Manken Seçin</h4>
+                <div class="ais-preset-grid">
+                    <t t-foreach="props.presets" t-as="preset" t-key="preset.id">
+                        <div t-attf-class="ais-preset-card {{ state.selectedPresetId === preset.id ? 'selected' : '' }}"
+                             t-on-click="() => this.selectPreset(preset.id)">
+                            <div class="ais-preset-image">
+                                <t t-if="preset.preview_image">
+                                    <img t-att-src="'data:image/png;base64,' + preset.preview_image"/>
+                                </t>
+                                <t t-else="">
+                                    <div class="ais-preset-placeholder">👤</div>
+                                </t>
+                            </div>
+                            <div class="ais-preset-name" t-out="preset.name"/>
+                            <div class="ais-preset-meta">
+                                <t t-if="preset.approval_rate > 0">
+                                    ✅ %<t t-out="Math.round(preset.approval_rate)"/>
+                                </t>
+                            </div>
+                            <t t-if="state.selectedPresetId === preset.id">
+                                <div class="ais-preset-check">✓</div>
+                            </t>
+                        </div>
+                    </t>
+                </div>
+            </div>
+
+            <!-- Kategori -->
+            <div class="ais-section">
+                <h4>👗 Ürün Kategorisi</h4>
+                <select class="ais-select" t-on-change="(ev) => this.state.category = ev.target.value">
+                    <option value="auto">Otomatik</option>
+                    <option value="tops">Üst Giyim</option>
+                    <option value="bottoms">Alt Giyim</option>
+                    <option value="one_piece">Tek Parça / Elbise</option>
+                    <option value="shoes">Ayakkabı</option>
+                    <option value="bags">Çanta</option>
+                    <option value="accessories">Aksesuar</option>
+                </select>
+            </div>
+
+            <!-- Kalite Modu -->
+            <div class="ais-section">
+                <h4>⚡ Kalite Modu</h4>
+                <div class="ais-radio-group">
+                    <label t-attf-class="ais-radio {{ state.qualityMode === 'performance' ? 'active' : '' }}">
+                        <input type="radio" name="quality" value="performance"
+                               t-on-change="(ev) => this.state.qualityMode = ev.target.value"/>
+                        🚀 Hızlı
+                    </label>
+                    <label t-attf-class="ais-radio {{ state.qualityMode === 'balanced' ? 'active' : '' }}">
+                        <input type="radio" name="quality" value="balanced" checked="checked"
+                               t-on-change="(ev) => this.state.qualityMode = ev.target.value"/>
+                        ⚖️ Dengeli
+                    </label>
+                    <label t-attf-class="ais-radio {{ state.qualityMode === 'quality' ? 'active' : '' }}">
+                        <input type="radio" name="quality" value="quality"
+                               t-on-change="(ev) => this.state.qualityMode = ev.target.value"/>
+                        💎 Kaliteli
+                    </label>
+                </div>
+            </div>
+
+            <!-- Prompt Şablonu -->
+            <div class="ais-section">
+                <h4>📝 Prompt Şablonu (opsiyonel)</h4>
+                <select class="ais-select" t-on-change="onTemplateChange">
+                    <option value="">Şablon seçin...</option>
+                    <t t-foreach="props.promptTemplates" t-as="tmpl" t-key="tmpl.id">
+                        <option t-att-value="tmpl.id" t-out="tmpl.name"/>
+                    </t>
+                </select>
+                <textarea class="ais-textarea" t-att-value="state.extraPrompt"
+                          t-on-input="(ev) => this.state.extraPrompt = ev.target.value"
+                          placeholder="İlave AI talimatı yazın..."/>
+            </div>
+
+            <!-- Maliyet Tahmini -->
+            <div class="ais-cost-estimate">
+                💰 Tahmini maliyet: <strong>$<t t-out="estimatedCost"/></strong> / görsel
+            </div>
+
+            <!-- Başlat -->
+            <div class="ais-bottom-bar">
+                <button class="ais-btn-primary ais-btn-large"
+                        t-on-click="startProcessing"
+                        t-att-disabled="!state.selectedPresetId">
+                    🚀 AI İşlemeyi Başlat
+                </button>
+            </div>
+        </div>
+    </t>
+
+</templates>

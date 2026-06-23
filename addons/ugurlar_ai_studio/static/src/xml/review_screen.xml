@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="ugurlar_ai_studio.ReviewScreen" owl="1">
+        <div class="ais-screen ais-review">
+            <div class="ais-header">
+                <button class="btn btn-link" t-on-click="props.onBackToScan">← Geri</button>
+                <h2 class="ais-title">🖼️ Onay</h2>
+                <span class="ais-counter">
+                    <t t-out="approvedCount"/>/<t t-out="totalCount"/>
+                </span>
+            </div>
+
+            <t t-if="currentGen">
+                <!-- Fotoğraf Tipi Badge -->
+                <div class="ais-type-badge">
+                    <t t-out="getTypeLabel(currentGen.photo_type)"/>
+                    <t t-if="currentGen.revision_number > 1">
+                        (v<t t-out="currentGen.revision_number"/>)
+                    </t>
+                </div>
+
+                <!-- Karşılaştırma Modu Seçici -->
+                <div class="ais-compare-modes">
+                    <button t-attf-class="ais-mode-btn {{ state.compareMode === 'side' ? 'active' : '' }}"
+                            t-on-click="() => this.setCompareMode('side')">Yan Yana</button>
+                    <button t-attf-class="ais-mode-btn {{ state.compareMode === 'slider' ? 'active' : '' }}"
+                            t-on-click="() => this.setCompareMode('slider')">Slider</button>
+                    <button t-attf-class="ais-mode-btn {{ state.compareMode === 'overlay' ? 'active' : '' }}"
+                            t-on-click="() => this.setCompareMode('overlay')">Üst Üste</button>
+                </div>
+
+                <!-- Yan Yana Karşılaştırma -->
+                <t t-if="state.compareMode === 'side'">
+                    <div class="ais-comparison-side">
+                        <div class="ais-compare-panel">
+                            <div class="ais-compare-label">ORJİNAL</div>
+                            <img t-att-src="'/web/image/ai.studio.generation/' + currentGen.id + '/original_image'"
+                                 class="ais-compare-img"/>
+                        </div>
+                        <div class="ais-compare-panel">
+                            <div class="ais-compare-label">AI</div>
+                            <img t-att-src="'/web/image/ai.studio.generation/' + currentGen.id + '/generated_image'"
+                                 class="ais-compare-img"/>
+                        </div>
+                    </div>
+                </t>
+
+                <!-- Slider Karşılaştırma -->
+                <t t-if="state.compareMode === 'slider'">
+                    <div class="ais-comparison-slider">
+                        <div class="ais-slider-container">
+                            <img t-att-src="'/web/image/ai.studio.generation/' + currentGen.id + '/generated_image'"
+                                 class="ais-slider-bg"/>
+                            <div class="ais-slider-overlay"
+                                 t-attf-style="width: {{ state.sliderPosition }}%">
+                                <img t-att-src="'/web/image/ai.studio.generation/' + currentGen.id + '/original_image'"
+                                     class="ais-slider-fg"/>
+                            </div>
+                            <input type="range" min="0" max="100"
+                                   t-att-value="state.sliderPosition"
+                                   t-on-input="onSliderChange"
+                                   class="ais-slider-range"/>
+                        </div>
+                    </div>
+                </t>
+
+                <!-- Üst Üste Karşılaştırma -->
+                <t t-if="state.compareMode === 'overlay'">
+                    <div class="ais-comparison-overlay">
+                        <img t-att-src="'/web/image/ai.studio.generation/' + currentGen.id + '/generated_image'"
+                             class="ais-overlay-base"/>
+                        <img t-att-src="'/web/image/ai.studio.generation/' + currentGen.id + '/original_image'"
+                             class="ais-overlay-top"
+                             t-attf-style="opacity: {{ state.sliderPosition / 100 }}"/>
+                        <input type="range" min="0" max="100"
+                               t-att-value="state.sliderPosition"
+                               t-on-input="onSliderChange"
+                               class="ais-overlay-slider"/>
+                    </div>
+                </t>
+
+                <!-- Ana Resim Toggle -->
+                <div class="ais-primary-toggle">
+                    <label>
+                        <input type="checkbox" t-att-checked="state.isPrimary"
+                               t-on-change="(ev) => this.state.isPrimary = ev.target.checked"/>
+                        ⭐ Ana resim olarak kaydet
+                    </label>
+                </div>
+
+                <!-- Onay/Red Butonları -->
+                <div class="ais-action-buttons">
+                    <button class="ais-btn-reject" t-on-click="openRejectModal"
+                            t-att-disabled="currentGen.is_approved">
+                        ❌ Reddet
+                    </button>
+                    <button class="ais-btn-approve" t-on-click="approve"
+                            t-att-disabled="currentGen.is_approved">
+                        <t t-if="currentGen.is_approved">✅ Onaylandı</t>
+                        <t t-else="">✅ Onayla</t>
+                    </button>
+                </div>
+
+                <!-- Navigasyon -->
+                <div class="ais-nav-buttons">
+                    <button class="ais-btn-nav" t-on-click="prevGeneration"
+                            t-att-disabled="state.currentIndex === 0">
+                        ← Önceki
+                    </button>
+                    <span class="ais-nav-counter">
+                        <t t-out="state.currentIndex + 1"/> / <t t-out="totalCount"/>
+                    </span>
+                    <button class="ais-btn-nav" t-on-click="nextGeneration"
+                            t-att-disabled="state.currentIndex >= totalCount - 1">
+                        Sonraki →
+                    </button>
+                </div>
+            </t>
+
+            <!-- Tamamla Butonu -->
+            <t t-if="approvedCount > 0">
+                <div class="ais-bottom-bar">
+                    <button class="ais-btn-primary ais-btn-large" t-on-click="completeSession">
+                        ✅ Tamamla ve Ürüne Kaydet (<t t-out="approvedCount"/> görsel)
+                    </button>
+                </div>
+            </t>
+
+            <!-- Red Modal -->
+            <t t-if="state.showRejectModal">
+                <div class="ais-modal-overlay" t-on-click="closeRejectModal">
+                    <div class="ais-modal" t-on-click.stop="">
+                        <div class="ais-modal-header">
+                            <h3>❌ Red Sebebi</h3>
+                            <button class="ais-modal-close" t-on-click="closeRejectModal">✕</button>
+                        </div>
+                        <div class="ais-modal-body">
+                            <div class="ais-reason-list">
+                                <t t-foreach="props.rejectReasons" t-as="reason" t-key="reason.id">
+                                    <label t-attf-class="ais-reason-item {{ state.selectedReasonId === reason.id ? 'selected' : '' }}"
+                                           t-on-click="() => this.selectReason(reason.id)">
+                                        <input type="radio" name="reason"
+                                               t-att-checked="state.selectedReasonId === reason.id"/>
+                                        <span t-out="reason.name"/>
+                                    </label>
+                                </t>
+                            </div>
+                            <div class="ais-revision-prompt">
+                                <label>📝 Revizyon Talimatı:</label>
+                                <textarea class="ais-textarea"
+                                          t-att-value="state.revisionPrompt"
+                                          t-on-input="(ev) => this.state.revisionPrompt = ev.target.value"
+                                          placeholder="Ek talimat yazın..."/>
+                            </div>
+                            <t t-if="currentGen">
+                                <div class="ais-revision-count">
+                                    Revizyon: <t t-out="currentGen.revision_number"/>/5
+                                </div>
+                            </t>
+                        </div>
+                        <div class="ais-modal-footer">
+                            <button class="ais-btn-primary" t-on-click="submitRejection">
+                                🔄 Revizeye Gönder
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </t>
+        </div>
+    </t>
+
+</templates>

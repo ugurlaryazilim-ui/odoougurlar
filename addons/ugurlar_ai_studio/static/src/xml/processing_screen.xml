@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="ugurlar_ai_studio.ProcessingScreen" owl="1">
+        <div class="ais-screen ais-processing">
+            <div class="ais-header">
+                <h2 class="ais-title">⏳ AI İşliyor...</h2>
+            </div>
+
+            <div class="ais-session-badge">
+                <t t-out="props.sessionName"/>
+            </div>
+
+            <!-- Progress Bars -->
+            <div class="ais-progress-list">
+                <t t-foreach="state.generations" t-as="gen" t-key="gen.id">
+                    <div class="ais-progress-item">
+                        <div class="ais-progress-label">
+                            <span t-out="getTypeLabel(gen.photo_type)"/>
+                            <span t-attf-class="ais-status-dot {{ gen.state }}"/>
+                            <span class="ais-progress-state" t-out="getStateLabel(gen.state)"/>
+                        </div>
+                        <div class="ais-progress-bar-container">
+                            <div class="ais-progress-bar"
+                                 t-attf-style="width: {{ getProgressPercent(gen) }}%"
+                                 t-attf-class="ais-progress-fill {{ gen.state }}"/>
+                        </div>
+                        <t t-if="gen.state === 'failed'">
+                            <div class="ais-error-text">❌ <t t-out="gen.error_message"/></div>
+                        </t>
+                    </div>
+                </t>
+            </div>
+
+            <!-- Info Box -->
+            <div class="ais-info-box">
+                <p>💡 İşlem devam ederken başka ürüne geçebilirsiniz. Tamamlandığında bildirim alacaksınız.</p>
+            </div>
+
+            <!-- Butonlar -->
+            <div class="ais-bottom-bar">
+                <t t-if="state.allDone">
+                    <button class="ais-btn-primary ais-btn-large" t-on-click="goToReview">
+                        👁️ Sonuçları İncele
+                    </button>
+                </t>
+                <t t-else="">
+                    <button class="ais-btn-secondary" t-on-click="props.onBackToScan">
+                        🔍 Başka Ürün Tara
+                    </button>
+                </t>
+            </div>
+        </div>
+    </t>
+
+</templates>

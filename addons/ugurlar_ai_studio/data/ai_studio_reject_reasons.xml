@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <data noupdate="1">
+        <record id="reject_fabric_wrong" model="ai.studio.reject.reason">
+            <field name="name">Kumaş dokusu yanlış</field>
+            <field name="code">fabric_wrong</field>
+            <field name="suggested_prompt">Kumaş dokusunu daha gerçekçi yap, orijinal kumaşın yapısını koru</field>
+            <field name="sequence">1</field>
+        </record>
+        <record id="reject_color_mismatch" model="ai.studio.reject.reason">
+            <field name="name">Renk uyumsuz</field>
+            <field name="code">color_mismatch</field>
+            <field name="suggested_prompt">Rengi orijinal ürüne daha yakın yap, ton ve doygunluğu koru</field>
+            <field name="sequence">2</field>
+        </record>
+        <record id="reject_pose_unnatural" model="ai.studio.reject.reason">
+            <field name="name">Duruş yapay görünüyor</field>
+            <field name="code">pose_unnatural</field>
+            <field name="suggested_prompt">Daha doğal ve rahat bir duruş kullan</field>
+            <field name="sequence">3</field>
+        </record>
+        <record id="reject_hand_error" model="ai.studio.reject.reason">
+            <field name="name">El/Parmak hatası</field>
+            <field name="code">hand_error</field>
+            <field name="suggested_prompt">Elleri ve parmakları düzelt, doğal görünmesini sağla</field>
+            <field name="sequence">4</field>
+        </record>
+        <record id="reject_face_issue" model="ai.studio.reject.reason">
+            <field name="name">Yüz ifadesi uygunsuz</field>
+            <field name="code">face_issue</field>
+            <field name="suggested_prompt">Yüz ifadesini düzelt, doğal ve profesyonel görünmesini sağla</field>
+            <field name="sequence">5</field>
+        </record>
+        <record id="reject_detail_lost" model="ai.studio.reject.reason">
+            <field name="name">Detay/desen kaybolmuş</field>
+            <field name="code">detail_lost</field>
+            <field name="suggested_prompt">Ürün detaylarını, desenini ve işlemelerini koru</field>
+            <field name="sequence">6</field>
+        </record>
+        <record id="reject_background_issue" model="ai.studio.reject.reason">
+            <field name="name">Arka plan uygunsuz</field>
+            <field name="code">background_issue</field>
+            <field name="suggested_prompt">Arka planı temiz ve profesyonel yap</field>
+            <field name="sequence">7</field>
+        </record>
+        <record id="reject_proportion_wrong" model="ai.studio.reject.reason">
+            <field name="name">Ürün boyutu/oranı yanlış</field>
+            <field name="code">proportion_wrong</field>
+            <field name="suggested_prompt">Ürün oranlarını ve boyutunu düzelt</field>
+            <field name="sequence">8</field>
+        </record>
+        <record id="reject_low_quality" model="ai.studio.reject.reason">
+            <field name="name">Genel kalite düşük</field>
+            <field name="code">low_quality</field>
+            <field name="suggested_prompt">Daha yüksek kalitede ve detaylı üret</field>
+            <field name="sequence">9</field>
+        </record>
+        <record id="reject_other" model="ai.studio.reject.reason">
+            <field name="name">Diğer</field>
+            <field name="code">other</field>
+            <field name="sequence">99</field>
+        </record>
+    </data>
+</odoo>

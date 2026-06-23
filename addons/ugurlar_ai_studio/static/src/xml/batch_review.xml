@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="ugurlar_ai_studio.BatchReview" owl="1">
+        <div class="ais-screen ais-batch">
+            <div class="ais-header">
+                <button class="btn btn-link" t-on-click="props.onBackToScan">← Geri</button>
+                <h2 class="ais-title">📋 Toplu Onay</h2>
+            </div>
+            <div class="ais-batch-grid">
+                <t t-foreach="state.sessions" t-as="session" t-key="session.id">
+                    <div class="ais-batch-card" t-on-click="() => this.openSession(session.id)">
+                        <div class="ais-batch-name" t-out="session.name"/>
+                        <div class="ais-batch-product" t-out="session.product_id[1]"/>
+                        <div class="ais-batch-meta">
+                            🤖 <t t-out="session.generation_count"/>
+                            | %<t t-out="Math.round(session.approval_rate)"/>
+                        </div>
+                    </div>
+                </t>
+                <t t-if="state.sessions.length === 0">
+                    <div class="ais-empty">Onay bekleyen oturum yok.</div>
+                </t>
+            </div>
+        </div>
+    </t>
+
+    <t t-name="ugurlar_ai_studio.HistoryScreen" owl="1">
+        <div class="ais-screen ais-history">
+            <div class="ais-header">
+                <button class="btn btn-link" t-on-click="props.onBackToScan">← Geri</button>
+                <h2 class="ais-title">📊 Dashboard</h2>
+            </div>
+
+            <div class="ais-stat-grid">
+                <div class="ais-stat-card large">
+                    <div class="ais-stat-value" t-out="props.dashboardStats.month_sessions or 0"/>
+                    <div class="ais-stat-label">📸 Oturum</div>
+                </div>
+                <div class="ais-stat-card large">
+                    <div class="ais-stat-value" t-out="props.dashboardStats.month_generations or 0"/>
+                    <div class="ais-stat-label">🤖 Üretim</div>
+                </div>
+                <div class="ais-stat-card large">
+                    <div class="ais-stat-value">
+                        %<t t-out="Math.round(props.dashboardStats.month_approval_rate or 0)"/>
+                    </div>
+                    <div class="ais-stat-label">✅ Onay</div>
+                </div>
+                <div class="ais-stat-card large">
+                    <div class="ais-stat-value">
+                        $<t t-out="(props.dashboardStats.month_cost or 0).toFixed(2)"/>
+                    </div>
+                    <div class="ais-stat-label">💰 Maliyet</div>
+                </div>
+            </div>
+
+            <h4 class="ais-section-title">Son Oturumlar</h4>
+            <div class="ais-history-list">
+                <t t-foreach="state.recentSessions" t-as="session" t-key="session.id">
+                    <div class="ais-history-item">
+                        <span class="ais-history-icon" t-out="getStateIcon(session.state)"/>
+                        <div class="ais-history-info">
+                            <div class="ais-history-name" t-out="session.product_id[1]"/>
+                            <div class="ais-history-meta">
+                                <t t-out="session.name"/> |
+                                $<t t-out="(session.total_cost or 0).toFixed(2)"/>
+                            </div>
+                        </div>
+                    </div>
+                </t>
+            </div>
+        </div>
+    </t>
+
+</templates>

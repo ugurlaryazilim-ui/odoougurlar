@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <record id="view_ai_studio_settings" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.ai.studio</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base_setup.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app data-string="AI Stüdyo" string="AI Stüdyo" groups="ugurlar_ai_studio.group_ai_studio_manager">
+                    <block title="fal.ai API Ayarları">
+                        <setting string="API Anahtarı" help="fal.ai dashboard'tan alınan API key">
+                            <field name="ai_studio_fal_api_key" password="True"/>
+                        </setting>
+                        <setting string="Varsayılan AI Sağlayıcı">
+                            <field name="ai_studio_default_provider"/>
+                        </setting>
+                        <setting string="Varsayılan Endpoint" help="fal.ai model endpoint ID">
+                            <field name="ai_studio_default_endpoint"/>
+                        </setting>
+                    </block>
+                    <block title="Üretim Ayarları">
+                        <setting string="Varsayılan Kalite Modu">
+                            <field name="ai_studio_quality_mode"/>
+                        </setting>
+                        <setting string="Otomatik Arka Plan Kaldırma"
+                                 help="Fotoğrafları AI'ya göndermeden önce arka planı otomatik kaldır">
+                            <field name="ai_studio_auto_bg_remove"/>
+                        </setting>
+                        <setting string="Maksimum Revizyon Sayısı"
+                                 help="Süpervizör onayı gerektirmeden yapılabilecek revize sayısı">
+                            <field name="ai_studio_max_revisions"/>
+                        </setting>
+                        <setting string="Eşzamanlı İstek Limiti"
+                                 help="Aynı anda kaç AI isteği gönderilebilir">
+                            <field name="ai_studio_concurrent_limit"/>
+                        </setting>
+                    </block>
+                    <block title="Bakım">
+                        <setting string="Çöp Temizleme Süresi (gün)"
+                                 help="Reddedilen görsellerin kaç gün sonra temizleneceği">
+                            <field name="ai_studio_garbage_days"/>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+</odoo>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <data noupdate="1">
+        <!-- Stuck generation kontrolü: her 5 dakikada -->
+        <record id="cron_check_stuck" model="ir.cron">
+            <field name="name">AI Stüdyo: Takılmış İşlemleri Kontrol Et</field>
+            <field name="model_id" ref="model_ai_studio_session"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_check_stuck_generations()</field>
+            <field name="interval_number">5</field>
+            <field name="interval_type">minutes</field>
+            <field name="numbercall">-1</field>
+            <field name="active" eval="True"/>
+        </record>
+
+        <!-- Çöp temizleme: günlük -->
+        <record id="cron_garbage_collect" model="ir.cron">
+            <field name="name">AI Stüdyo: Reddedilen Görselleri Temizle</field>
+            <field name="model_id" ref="model_ai_studio_generation"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_garbage_collect()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="numbercall">-1</field>
+            <field name="active" eval="True"/>
+        </record>
+    </data>
+</odoo>
