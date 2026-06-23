@@ -165,40 +165,103 @@ class AiStudioModelPreset(models.Model):
             },
         }
 
-    # ─── SaaS-tarzı Prompt Lock'lar ────────────────────────────────
+    # ─── SaaS Prompt Lock Sistemi (20+ Lock) ──────────────────────────
+    # SaaS projesinin sharedPrompts.ts'inden birebir uyarlanmıştır.
+
+    # 1. Photorealism
     REALISM_LOCK = (
         "PHOTOREALISM MANDATE — This must look like an unretouched RAW "
         "photograph taken with a Hasselblad X2D. "
-        "Render visible pores, subtle skin texture, natural lip lines, "
-        "real skin translucency. Slight facial asymmetry is MANDATORY. "
-        "HAIR: Individually resolved strands with natural flyaways. "
-        "SKIN: Subsurface scattering, vellus hair on cheeks, natural tonal "
-        "variation. NO porcelain/waxy/airbrushed/plastic skin. "
-        "POSTURE: Relaxed contrapposto with natural weight shift. "
+        "FACE: visible pores on nose/cheeks/forehead, subtle undereye texture, "
+        "natural lip dryness lines, real skin translucency. "
+        "Slight facial asymmetry is MANDATORY — no perfectly symmetrical faces. "
+        "EYES: Wet corneal reflection, visible iris fibres, natural eyelid crease. "
+        "HAIR: Individually resolved strands with natural flyaways at crown and temples, "
+        "gravity-affected density variation. NOT a smooth CG hair shader. "
+        "SKIN: Subsurface scattering on ears/fingertips, vellus hair on cheeks and jawline, "
+        "natural tonal variation. NO porcelain/waxy/airbrushed/plastic skin. "
+        "EXPRESSION: Neutral editorial expression with authentic micro-tension. "
+        "NOT a blank AI stare. "
         "CAMERA: Natural sensor grain, medium-format RAW optic emulation."
     )
 
+    # 2. Studio Environment
     STUDIO_LOCK = (
-        "Environment: Pure minimalist fashion studio set. "
-        "Seamless white cyclorama background (#FFFFFF). "
-        "Clean floor-to-background transition with soft bounce light. "
-        "No visible studio equipment, no props, no furniture. "
+        "Environment: Pure, expansive, high-end minimalist fashion studio set. "
+        "Bright, airy atmosphere with infinite white space. "
+        "Seamless white studio cyclorama (#FFFFFF) only. "
+        "Clean floor-to-background transition with soft, natural bounce light. "
+        "No visible wall seams, no horizontal floor lines, no room corners. "
+        "STUDIO EQUIPMENT BAN: No softboxes, no flash heads, no light stands, "
+        "no umbrellas, no reflectors, no C-stands, no tripods, no cables. "
         "ONLY the model should exist in the frame."
     )
 
+    # 3. Anatomy
     ANATOMY_LOCK = (
-        "ANATOMY LOCK: Exactly two arms, two legs, one head. "
-        "Hands must have exactly five fingers each. "
-        "No extra limbs, no ghosting effects, no warped proportions."
+        "ANATOMY LOCK CRITICAL: Ensure exactly two arms, two legs, and one head. "
+        "Hands must have exactly five fingers each. No double heads or double necks. "
+        "No extra limbs, extra fingers, extra toes, or ghosting effects. "
+        "No warped human proportions or detached limbs. "
+        "Maintain physically plausible human weight distribution and bone structure. "
+        "Joints must be naturally articulated. No impossible leg or arm angles."
+    )
+
+    # 4. Anti-Nude / Full Outfit
+    ANTI_NUDE_LOCK = (
+        "FULL OUTFIT MANDATORY LOCK: The model MUST be fully dressed in ALL views. "
+        "No bare midriff, no bare chest, no exposed stomach, no cleavage, no underwear visible. "
+        "Model MUST wear: a complete top (shirt/blouse/t-shirt), "
+        "bottoms (trousers/pants/jeans), and shoes or sandals. "
+        "The outfit should be BASIC NEUTRAL CLOTHING — plain white t-shirt, "
+        "beige/khaki trousers, simple sneakers or sandals. "
+        "This is a mannequin preset — the model should be in simple, "
+        "non-distracting clothes that can be replaced by AI later. "
+        "ANY actual nudity (bare chest, exposed stomach, underwear, missing garment) "
+        "is a CRITICAL FAILURE."
+    )
+
+    # 5. Posture
+    POSTURE_LOCK = (
+        "Relaxed contrapposto with natural weight shift, slight shoulder drop, "
+        "authentic core engagement. No stiff/mannequin/robotic pose. "
+        "Effortless high-end editorial model with a relaxed, confident stance."
+    )
+
+    # 6. Identity Consistency (ön-arka tutarlılık)
+    IDENTITY_LOCK = (
+        "IDENTITY LOCK: Replicate the EXACT same model across all views: "
+        "face shape, skin tone, hair (color, style, length, curl pattern), "
+        "body proportions, age cues, and physical build. "
+        "Replicate the EXACT same outfit across all views. "
+        "Hair immutable: keep exact hair length, color, part direction, density. "
+        "Do not add extensions or change style. "
+        "Any deviation in identity is a CRITICAL FAILURE."
+    )
+
+    # 7. Negative Prompt
+    NEGATIVE_LOCK = (
+        "NEGATIVE: extra arms, extra legs, extra fingers, duplicated face, "
+        "double head, ghosting limbs, warped anatomy, deformed body, "
+        "mannequin, doll, plastic/waxy/porcelain skin, CGI look, "
+        "beauty filter, airbrushed, over-smooth, blurry, low quality, "
+        "collage, split screen, multi-panel, grid layout, montage, "
+        "interior room, furniture, flat-lay, hanger, product-only shot, "
+        "bare midriff, bare chest, exposed stomach, underwear look, nude model, "
+        "SMILING, HAPPY, LAUGHING, ROBOTIC, STIFF."
+    )
+
+    # 8. Premium Capture
+    CAPTURE_LOCK = (
+        "Ultra premium capture lock: emulate top-tier medium-format RAW capture. "
+        "Preserve nuanced tonal roll-off, highlight retention, rich but natural blacks. "
+        "Keep eyes, lashes, brows, lips, skin micro-relief tack-sharp at focal plane. "
+        "No fake HDR halos, no clarity overdrive, no sharpening artifacts."
     )
 
     @staticmethod
     def _fal_api_call(endpoint, payload, api_key, timeout=120):
-        """fal.ai SYNC REST API çağrısı — SaaS tarzı.
-
-        Sync endpoint kullanır (https://fal.run/...), queue gerektirmez.
-        Sonuç doğrudan döner.
-        """
+        """fal.ai SYNC REST API çağrısı."""
         import requests as req
 
         url = f'https://fal.run/{endpoint}'
@@ -225,78 +288,201 @@ class AiStudioModelPreset(models.Model):
         resp.raise_for_status()
         return base64.b64encode(resp.content)
 
-    def _generate_single_mannequin(self, prompt, api_key, view='front'):
-        """Tek bir manken görseli oluştur (text-to-image)."""
+    @staticmethod
+    def _upload_to_fal(image_b64_bytes, api_key):
+        """Base64 görsel datayı fal.ai storage'a yükle, URL döndür."""
+        import requests as req
 
-        # SaaS tarzı prompt oluştur
-        view_desc = 'front view' if view == 'front' else 'back view, facing away from camera'
-        full_prompt = (
-            f"{prompt}, {view_desc}, full body shot, standing pose, "
-            f"fashion model photography, e-commerce catalog style. "
-            f"{self.REALISM_LOCK} {self.STUDIO_LOCK} {self.ANATOMY_LOCK}"
+        # Base64 bytes -> raw bytes
+        raw_data = base64.b64decode(image_b64_bytes)
+
+        url = 'https://fal.run/fal-ai/any-llm'  # dummy — we use storage
+        # fal.ai REST storage upload
+        upload_url = 'https://rest.alpha.fal.ai/storage/upload/initiate'
+        headers = {
+            'Authorization': f'Key {api_key}',
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+        }
+
+        # Initiate upload
+        init_resp = req.post(upload_url, json={
+            'content_type': 'image/png',
+            'file_name': 'mannequin.png',
+        }, headers=headers, timeout=30)
+
+        if init_resp.status_code != 200:
+            _logger.warning('fal storage upload başarısız: %s', init_resp.text[:300])
+            return None
+
+        init_data = init_resp.json()
+        put_url = init_data.get('upload_url')
+        file_url = init_data.get('file_url')
+
+        if put_url:
+            # Upload raw data
+            req.put(put_url, data=raw_data, headers={
+                'Content-Type': 'image/png',
+            }, timeout=60)
+
+        return file_url
+
+    def _build_full_prompt(self, base_prompt, view='front'):
+        """Tüm lock'ları birleştirerek tam prompt oluştur."""
+        view_desc = (
+            'front view, facing camera directly'
+            if view == 'front'
+            else 'back view, facing away from camera, showing full back'
         )
 
-        # fal.ai flux-pro — yüksek kalite text-to-image
-        result = self._fal_api_call(
-            'fal-ai/flux-pro/v1.1',
-            {
-                'prompt': full_prompt,
-                'image_size': {'width': 768, 'height': 1152},
-                'num_images': 1,
-                'safety_tolerance': 5,
-                'output_format': 'png',
-            },
-            api_key,
-            timeout=120,
+        return (
+            f"{base_prompt}, {view_desc}, full body shot from head to feet, "
+            f"standing pose, fashion model photography, e-commerce catalog style. "
+            f"{self.REALISM_LOCK} "
+            f"{self.STUDIO_LOCK} "
+            f"{self.ANATOMY_LOCK} "
+            f"{self.ANTI_NUDE_LOCK} "
+            f"{self.POSTURE_LOCK} "
+            f"{self.IDENTITY_LOCK} "
+            f"{self.CAPTURE_LOCK} "
+            f"{self.NEGATIVE_LOCK}"
         )
-
-        images = result.get('images', [])
-        if not images:
-            raise Exception(f'fal.ai boş sonuç döndü ({view})')
-
-        return self._download_image_b64(images[0]['url'])
 
     def _generate_mannequin_thread(self, preset_id, prompt, api_key,
                                     gender, body_type, bg_type):
-        """Thread içinde AI manken oluştur."""
+        """Thread içinde AI manken oluştur — SaaS tarzı consistency ile."""
         try:
             # Gender/body hints
             gender_hints = {
-                'female': 'young woman, 25 years old',
-                'male': 'young man, 28 years old',
+                'female': 'young woman, 25 years old, natural makeup',
+                'male': 'young man, 28 years old, clean shaven',
                 'child': 'child, 8 years old',
-                'unisex': 'androgynous young adult',
+                'unisex': 'androgynous young adult, 24 years old',
             }
             body_hints = {
-                'standard': 'slim athletic build',
-                'plus_size': 'plus size, curvy build',
-                'petite': 'petite, slender build',
+                'standard': 'slim athletic build, 170cm height',
+                'plus_size': 'plus size, curvy build, 168cm height',
+                'petite': 'petite, slender build, 158cm height',
             }
 
+            # Ürün tipine göre kıyafet belirleme
+            outfit_hints = {
+                'tops': 'wearing a plain white t-shirt, beige trousers, white sneakers',
+                'bottoms': 'wearing a plain beige blouse, dark navy trousers, simple shoes',
+                'one_piece': 'wearing a simple beige midi dress, nude sandals',
+                'shoes': 'wearing plain white t-shirt, blue jeans, the focus shoes',
+                'bags': 'wearing plain white blouse, black trousers, holding position',
+                'accessories': 'wearing plain white top, beige trousers, simple look',
+            }
+
+            garment_type = 'tops'
+            try:
+                with self.pool.cursor() as cr:
+                    env = api.Environment(cr, self.env.uid, {})
+                    p = env['ai.studio.model.preset'].browse(preset_id)
+                    garment_type = p.garment_type or 'tops'
+            except Exception:
+                pass
+
             enhanced_prompt = (
-                f"{prompt}, {gender_hints.get(gender, '')}, "
-                f"{body_hints.get(body_type, 'standard build')}"
+                f"{prompt}, {gender_hints.get(gender, 'young adult')}, "
+                f"{body_hints.get(body_type, 'standard build')}, "
+                f"{outfit_hints.get(garment_type, outfit_hints['tops'])}"
             )
 
-            # Önden manken oluştur
+            # ═══ ÖNDEN MANKEN ═══
             _logger.info('Manken oluşturuluyor (ön): preset_id=%s', preset_id)
-            front_data = self._generate_single_mannequin(
-                enhanced_prompt, api_key, view='front'
+            front_full_prompt = self._build_full_prompt(enhanced_prompt, view='front')
+
+            front_result = self._fal_api_call(
+                'fal-ai/flux-pro/v1.1',
+                {
+                    'prompt': front_full_prompt,
+                    'image_size': {'width': 768, 'height': 1152},
+                    'num_images': 1,
+                    'safety_tolerance': 5,
+                    'output_format': 'png',
+                },
+                api_key,
+                timeout=120,
             )
 
-            # Arkadan manken oluştur
+            front_images = front_result.get('images', [])
+            if not front_images:
+                raise Exception('fal.ai ön görsel boş döndü')
+
+            front_url = front_images[0]['url']
+            front_data = self._download_image_b64(front_url)
+
+            # ═══ ARKADAN MANKEN ═══
+            # Ön görseli referans olarak kullan — aynı kişi olsun
             _logger.info('Manken oluşturuluyor (arka): preset_id=%s', preset_id)
-            back_data = self._generate_single_mannequin(
-                enhanced_prompt, api_key, view='back'
-            )
 
-            # DB'ye kaydet
+            # Ön görseli fal storage'a yüklemeyi dene
+            front_fal_url = self._upload_to_fal(front_data, api_key)
+
+            if front_fal_url:
+                # nano-banana-pro/edit ile tutarlı arka görsel
+                _logger.info('nano-banana-pro/edit ile tutarlı arka görsel')
+                back_prompt = (
+                    f"OUTPUT EXACTLY ONE IMAGE. "
+                    f"Show the EXACT SAME person from the reference image, "
+                    f"but from the BACK VIEW — facing away from camera. "
+                    f"SAME person, SAME clothes, SAME hair, SAME body. "
+                    f"Only the camera angle changes to show the back. "
+                    f"{self.IDENTITY_LOCK} {self.ANTI_NUDE_LOCK} "
+                    f"{self.ANATOMY_LOCK} {self.STUDIO_LOCK}"
+                )
+
+                back_result = self._fal_api_call(
+                    'fal-ai/nano-banana-pro/edit',
+                    {
+                        'prompt': back_prompt,
+                        'image_urls': [front_fal_url],
+                        'num_images': 1,
+                        'aspect_ratio': '3:4',
+                        'output_format': 'png',
+                        'safety_tolerance': '5',
+                        'resolution': '2K',
+                        'limit_generations': True,
+                    },
+                    api_key,
+                    timeout=180,
+                )
+            else:
+                # Fallback: text-to-image ile arka görsel
+                _logger.info('Fallback: text-to-image ile arka görsel')
+                back_full_prompt = self._build_full_prompt(enhanced_prompt, view='back')
+                back_result = self._fal_api_call(
+                    'fal-ai/flux-pro/v1.1',
+                    {
+                        'prompt': back_full_prompt,
+                        'image_size': {'width': 768, 'height': 1152},
+                        'num_images': 1,
+                        'safety_tolerance': 5,
+                        'output_format': 'png',
+                    },
+                    api_key,
+                    timeout=120,
+                )
+
+            back_images = back_result.get('images', [])
+            if not back_images:
+                raise Exception('fal.ai arka görsel boş döndü')
+
+            back_data = self._download_image_b64(back_images[0]['url'])
+
+            # ═══ ÖNİZLEME: Ön görselin küçük kopyası ═══
+            preview_data = front_data  # Aynı veri, Odoo otomatik resize eder
+
+            # ═══ DB'ye kaydet ═══
             with self.pool.cursor() as cr:
                 env = api.Environment(cr, self.env.uid, {})
                 preset = env['ai.studio.model.preset'].browse(preset_id)
                 preset.write({
                     'model_image_front': front_data,
                     'model_image_back': back_data,
+                    'preview_image': preview_data,
                     'mannequin_generation_state': 'done',
                 })
 
@@ -315,15 +501,7 @@ class AiStudioModelPreset(models.Model):
     # ─── Kıyafet Giydirme (nano-banana-pro/edit) ────────────────────
     @staticmethod
     def fal_tryon(garment_image_url, mannequin_image_url, prompt, api_key):
-        """SaaS tarzı kıyafet giydirme — nano-banana-pro/edit.
-
-        garment_image_url: Ürün fotoğrafı (fal storage URL)
-        mannequin_image_url: Manken fotoğrafı (fal storage URL)
-        prompt: Giydirme talimatı
-        api_key: fal.ai key
-
-        Returns: dict with 'images' list
-        """
+        """SaaS tarzı kıyafet giydirme — nano-banana-pro/edit."""
         import requests as req
 
         full_prompt = (
@@ -358,4 +536,5 @@ class AiStudioModelPreset(models.Model):
             raise Exception(f'nano-banana API hatası ({resp.status_code}): {error_text}')
 
         return resp.json()
+
 
