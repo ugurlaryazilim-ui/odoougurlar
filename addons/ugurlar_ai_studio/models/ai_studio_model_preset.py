@@ -207,18 +207,14 @@ class AiStudioModelPreset(models.Model):
         "Joints must be naturally articulated. No impossible leg or arm angles."
     )
 
-    # 4. Anti-Nude / Full Outfit
+    # 4. Anti-Nude / Full Outfit (İç Çamaşırı / Sade Spor Giyim Modu)
     ANTI_NUDE_LOCK = (
-        "FULL OUTFIT MANDATORY LOCK: The model MUST be fully dressed in ALL views. "
-        "No bare midriff, no bare chest, no exposed stomach, no cleavage, no underwear visible. "
-        "Model MUST wear: a complete top (shirt/blouse/t-shirt), "
-        "bottoms (trousers/pants/jeans), and shoes or sandals. "
-        "The outfit should be BASIC NEUTRAL CLOTHING — plain white t-shirt, "
-        "beige/khaki trousers, simple sneakers or sandals. "
-        "This is a mannequin preset — the model should be in simple, "
-        "non-distracting clothes that can be replaced by AI later. "
-        "ANY actual nudity (bare chest, exposed stomach, underwear, missing garment) "
-        "is a CRITICAL FAILURE."
+        "OUTFIT MANDATORY LOCK: The model MUST wear minimal form-fitting activewear or underwear. "
+        "Model MUST wear: a simple form-fitting neutral crop top / sports bra and matching boy shorts / briefs / leggings. "
+        "No bare chest, no total nudity. The undergarments should be completely plain, neutral gray or black color, with no patterns. "
+        "This is a mannequin preset — the model should be in tight, skin-hugging undergarments or sportswear "
+        "so that clothes can be easily dressed over them by AI later. "
+        "ANY actual total nudity (completely bare body) is a CRITICAL FAILURE."
     )
 
     # 5. Posture
@@ -365,14 +361,14 @@ class AiStudioModelPreset(models.Model):
                 'petite': 'petite, slender build, 158cm height',
             }
 
-            # Ürün tipine göre kıyafet belirleme
+            # Ürün tipine göre kıyafet belirleme (İç çamaşırı / minimal spor giyim)
             outfit_hints = {
-                'tops': 'wearing a plain white t-shirt, beige trousers, white sneakers',
-                'bottoms': 'wearing a plain beige blouse, dark navy trousers, simple shoes',
-                'one_piece': 'wearing a simple beige midi dress, nude sandals',
-                'shoes': 'wearing plain white t-shirt, blue jeans, the focus shoes',
-                'bags': 'wearing plain white blouse, black trousers, holding position',
-                'accessories': 'wearing plain white top, beige trousers, simple look',
+                'tops': 'wearing a tight simple sports bra, minimal shorts, barefoot',
+                'bottoms': 'wearing a tight crop top, simple neutral briefs, barefoot',
+                'one_piece': 'wearing a tight minimalist sports crop top and matching boy shorts, barefoot',
+                'shoes': 'wearing a minimal sports bra and tight short leggings, bare feet',
+                'bags': 'wearing a tight black crop top and simple grey sports shorts, barefoot',
+                'accessories': 'wearing a simple neutral sports bra and basic boy shorts, barefoot',
             }
 
             garment_type = 'tops'
