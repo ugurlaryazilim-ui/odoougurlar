@@ -70,9 +70,5 @@
         </field>
     </record>
 
-    <record id="action_ai_studio_generation" model="ir.actions.act_window">
-        <field name="name">AI Üretimler</field>
-        <field name="res_model">ai.studio.generation</field>
-        <field name="view_mode">list,form</field>
-    </record>
 </odoo>
+

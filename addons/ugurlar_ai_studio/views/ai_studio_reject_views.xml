@@ -9,15 +9,8 @@
                 <field name="name"/>
                 <field name="code"/>
                 <field name="suggested_prompt"/>
-                <field name="count"/>
                 <field name="active"/>
             </list>
         </field>
-    </record>
-
-    <record id="action_ai_studio_reject" model="ir.actions.act_window">
-        <field name="name">Red Sebepleri</field>
-        <field name="res_model">ai.studio.reject.reason</field>
-        <field name="view_mode">list</field>
     </record>
 </odoo>
