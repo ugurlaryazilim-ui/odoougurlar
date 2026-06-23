@@ -609,3 +609,326 @@
     padding: 4px 10px;
     border-radius: 20px;
 }
+
+/* ============================================================ */
+/* MOBIL RESPONSIVE — A'dan Z'ye tam uyum                       */
+/* ============================================================ */
+
+/* Odoo container override — mobilde full-width */
+.o_action_manager .o_action {
+    padding: 0 !important;
+}
+
+.o_content {
+    padding: 0 !important;
+}
+
+/* Odoo navbar altindan baslasinn */
+.ais-app {
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    min-height: calc(100vh - 46px);
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Ekran guvenli alan (notch/home bar) */
+.ais-screen {
+    padding: 12px;
+    padding-bottom: env(safe-area-inset-bottom, 100px);
+}
+
+/* Odoo control panel gizle — kendi header'imiz var */
+.o_cp_searchview,
+.o_control_panel .o_cp_bottom_right,
+.o_control_panel .o_cp_action_menus {
+    display: none !important;
+}
+
+/* --- Small Screen (< 480px) --- */
+@media screen and (max-width: 480px) {
+    .ais-app {
+        max-width: 100%;
+    }
+
+    .ais-screen {
+        padding: 10px;
+        padding-bottom: 90px;
+    }
+
+    .ais-title {
+        font-size: 17px;
+    }
+
+    /* Arama kutusu */
+    .ais-search-input {
+        padding: 12px 10px;
+        font-size: 15px;
+    }
+
+    .ais-search-btn,
+    .ais-camera-btn {
+        padding: 12px 14px;
+        font-size: 16px;
+    }
+
+    .ais-clear-btn {
+        right: 100px;
+    }
+
+    /* Dashboard */
+    .ais-stat-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+
+    .ais-stat-card {
+        padding: 12px;
+    }
+
+    .ais-stat-value {
+        font-size: 22px;
+    }
+
+    .ais-stat-label {
+        font-size: 10px;
+    }
+
+    /* Urun karti */
+    .ais-product-image {
+        width: 48px;
+        height: 48px;
+    }
+
+    .ais-product-name {
+        font-size: 13px;
+    }
+
+    /* Preset grid */
+    .ais-preset-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+
+    .ais-preset-card {
+        padding: 8px;
+    }
+
+    .ais-preset-name {
+        font-size: 12px;
+    }
+
+    /* Batch grid */
+    .ais-batch-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+
+    /* Karsilastirma */
+    .ais-comparison-side {
+        grid-template-columns: 1fr 1fr;
+        gap: 2px;
+    }
+
+    /* Alt bar */
+    .ais-bottom-bar {
+        max-width: 100%;
+        padding: 12px;
+        padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    }
+
+    /* Modal */
+    .ais-modal {
+        max-height: 90vh;
+    }
+
+    /* Butonlar touch-friendly */
+    .ais-btn-primary,
+    .ais-btn-secondary,
+    .ais-btn-approve,
+    .ais-btn-reject {
+        min-height: 48px;
+        font-size: 15px;
+    }
+
+    /* Radio group */
+    .ais-radio-group {
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .ais-radio {
+        padding: 10px;
+    }
+
+    /* Select */
+    .ais-select {
+        padding: 10px;
+        font-size: 14px;
+    }
+
+    /* Photo tabs */
+    .ais-photo-tabs {
+        gap: 2px;
+    }
+
+    .ais-tab {
+        padding: 8px;
+        font-size: 13px;
+    }
+
+    /* Capture buton */
+    .ais-btn-capture {
+        width: 64px;
+        height: 64px;
+        font-size: 20px;
+    }
+
+    /* Info box */
+    .ais-info-box {
+        font-size: 13px;
+        padding: 10px 12px;
+    }
+
+    /* Header actions */
+    .ais-header-actions button {
+        padding: 8px 12px;
+        font-size: 12px;
+    }
+}
+
+/* --- Medium Screen (480px - 768px) --- */
+@media screen and (min-width: 481px) and (max-width: 768px) {
+    .ais-app {
+        max-width: 100%;
+    }
+
+    .ais-screen {
+        padding: 14px;
+    }
+
+    .ais-stat-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .ais-preset-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+/* --- Touch device optimizations --- */
+@media (hover: none) and (pointer: coarse) {
+    /* Daha buyuk touch hedefleri */
+    .ais-btn-primary,
+    .ais-btn-secondary,
+    .ais-btn-approve,
+    .ais-btn-reject,
+    .ais-search-btn,
+    .ais-camera-btn {
+        min-height: 48px;
+    }
+
+    .ais-tab,
+    .ais-mode-btn {
+        min-height: 44px;
+    }
+
+    .ais-product-card {
+        padding: 14px;
+    }
+
+    .ais-reason-item {
+        padding: 14px;
+    }
+
+    /* Hover efektlerini kaldir */
+    .ais-product-card:hover,
+    .ais-batch-card:hover,
+    .ais-preset-card:hover {
+        transform: none;
+    }
+}
+
+/* --- Landscape mode --- */
+@media screen and (max-height: 500px) and (orientation: landscape) {
+    .ais-camera-container {
+        aspect-ratio: 16/9;
+        max-height: 60vh;
+    }
+
+    .ais-screen {
+        padding-bottom: 60px;
+    }
+
+    .ais-stat-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+/* --- Very small screen (< 360px) --- */
+@media screen and (max-width: 360px) {
+    .ais-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .ais-stat-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+    }
+
+    .ais-stat-value {
+        font-size: 20px;
+    }
+
+    .ais-preset-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+    }
+
+    .ais-search-input {
+        padding: 10px 8px;
+        font-size: 14px;
+    }
+
+    .ais-btn-primary {
+        padding: 12px;
+        font-size: 14px;
+    }
+
+    .ais-batch-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* --- Odoo specific overrides for mobile --- */
+@media screen and (max-width: 768px) {
+    /* Odoo navbar compact */
+    .o_main_navbar {
+        height: auto !important;
+        min-height: 46px;
+    }
+
+    /* Control panel kisalt */
+    .o_control_panel {
+        display: none !important;
+    }
+
+    /* Full width content */
+    .o_action_manager {
+        padding: 0 !important;
+    }
+
+    /* No margin on web client */
+    .o_web_client .o_action_manager .o_action .o_content {
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+
+    /* Form view override */
+    .o_form_view .o_content {
+        padding: 0 !important;
+    }
+}
