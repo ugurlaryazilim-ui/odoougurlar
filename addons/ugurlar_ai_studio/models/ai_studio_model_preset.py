@@ -135,7 +135,10 @@ class AiStudioModelPreset(models.Model):
             'ugurlar_ai_studio.fal_api_key'
         )
         if not api_key:
-            raise UserError(_('fal.ai API anahtarı ayarlanmamış. Ayarlar menüsünden girin.'))
+            raise UserError(_(
+                'fal.ai API anahtarı ayarlanmamış.\n'
+                'Yapılandırma → Genel Ayarlar → AI Studio bölümünden API anahtarınızı girin.'
+            ))
 
         self.mannequin_generation_state = 'generating'
 
@@ -152,58 +155,89 @@ class AiStudioModelPreset(models.Model):
             'tag': 'display_notification',
             'params': {
                 'title': _('Manken Oluşturuluyor'),
-                'message': _('AI manken fotoğrafı oluşturuluyor. Tamamlandığında bildirim alacaksınız.'),
+                'message': _(
+                    'AI manken fotoğrafı oluşturuluyor (ön + arka).\n'
+                    'İşlem 30-60 saniye sürebilir. Tamamlandığında sayfayı yenileyin.'
+                ),
                 'type': 'info',
-                'sticky': False,
+                'sticky': True,
             },
         }
 
+    def _fal_generate_image(self, prompt, api_key, width=864, height=1296):
+        """fal.ai REST API ile görsel oluştur (requests ile)."""
+        import requests as req
+
+        url = 'https://queue.fal.run/fal-ai/flux/schnell'
+        headers = {
+            'Authorization': f'Key {api_key}',
+            'Content-Type': 'application/json',
+        }
+        payload = {
+            'prompt': prompt,
+            'image_size': {'width': width, 'height': height},
+            'num_images': 1,
+            'enable_safety_checker': False,
+        }
+
+        # 1) İsteği kuyruğa gönder
+        resp = req.post(url, json=payload, headers=headers, timeout=30)
+        resp.raise_for_status()
+        queue_data = resp.json()
+
+        request_id = queue_data.get('request_id')
+        status_url = queue_data.get('status_url') or f'https://queue.fal.run/fal-ai/flux/schnell/requests/{request_id}/status'
+        result_url = queue_data.get('response_url') or f'https://queue.fal.run/fal-ai/flux/schnell/requests/{request_id}'
+
+        # 2) Sonuç bekle (polling)
+        import time
+        for attempt in range(60):  # max 120 saniye
+            time.sleep(2)
+            status_resp = req.get(status_url, headers=headers, timeout=15)
+            status_resp.raise_for_status()
+            status_data = status_resp.json()
+            status = status_data.get('status')
+
+            if status == 'COMPLETED':
+                # Sonucu al
+                result_resp = req.get(result_url, headers=headers, timeout=30)
+                result_resp.raise_for_status()
+                result_data = result_resp.json()
+                images = result_data.get('images', [])
+                if images:
+                    img_url = images[0].get('url')
+                    img_resp = req.get(img_url, timeout=30)
+                    img_resp.raise_for_status()
+                    return base64.b64encode(img_resp.content)
+                raise UserError(_('AI görsel oluşturdu ama sonuç boş döndü.'))
+            elif status in ('FAILED', 'CANCELLED'):
+                error = status_data.get('error', 'Bilinmeyen hata')
+                raise UserError(_('AI görsel oluşturma başarısız: %s') % error)
+
+        raise UserError(_('AI görsel oluşturma zaman aşımına uğradı (120sn).'))
+
     def _generate_mannequin_thread(self, preset_id, prompt, api_key):
-        """Thread içinde AI manken oluştur."""
-        import os
-        os.environ['FAL_KEY'] = api_key
-
-        try:
-            import fal_client
-        except ImportError:
-            _logger.error('fal-client kurulu değil. pip install fal-client')
-            with self.pool.cursor() as cr:
-                env = api.Environment(cr, self.env.uid, {})
-                preset = env['ai.studio.model.preset'].browse(preset_id)
-                preset.write({'mannequin_generation_state': 'failed'})
-            return
-
+        """Thread içinde AI manken oluştur (requests ile)."""
         try:
             # Önden manken oluştur
-            front_prompt = f"{prompt}, front view, full body, standing pose, fashion model, studio photography, white background"
-            result_front = fal_client.subscribe(
-                'fal-ai/flux/schnell',
-                arguments={
-                    'prompt': front_prompt,
-                    'image_size': {'width': 864, 'height': 1296},
-                    'num_images': 1,
-                },
+            _logger.info('Manken oluşturuluyor (ön): preset_id=%s', preset_id)
+            front_prompt = (
+                f"{prompt}, front view, full body, standing pose, "
+                "fashion model, studio photography, white background, "
+                "high quality, 8k, photorealistic"
             )
+            front_data = self._fal_generate_image(front_prompt, api_key)
 
             # Arkadan manken oluştur
-            back_prompt = f"{prompt}, back view, full body, standing pose, fashion model, studio photography, white background"
-            result_back = fal_client.subscribe(
-                'fal-ai/flux/schnell',
-                arguments={
-                    'prompt': back_prompt,
-                    'image_size': {'width': 864, 'height': 1296},
-                    'num_images': 1,
-                },
+            _logger.info('Manken oluşturuluyor (arka): preset_id=%s', preset_id)
+            back_prompt = (
+                f"{prompt}, back view, full body, standing pose, "
+                "fashion model, studio photography, white background, "
+                "high quality, 8k, photorealistic"
             )
+            back_data = self._fal_generate_image(back_prompt, api_key)
 
-            # Görselleri indir ve kaydet
-            import requests
-            front_url = result_front['images'][0]['url']
-            back_url = result_back['images'][0]['url']
-
-            front_data = base64.b64encode(requests.get(front_url).content)
-            back_data = base64.b64encode(requests.get(back_url).content)
-
+            # DB'ye kaydet
             with self.pool.cursor() as cr:
                 env = api.Environment(cr, self.env.uid, {})
                 preset = env['ai.studio.model.preset'].browse(preset_id)
@@ -217,7 +251,11 @@ class AiStudioModelPreset(models.Model):
 
         except Exception as e:
             _logger.error('Manken oluşturma hatası: %s', e)
-            with self.pool.cursor() as cr:
-                env = api.Environment(cr, self.env.uid, {})
-                preset = env['ai.studio.model.preset'].browse(preset_id)
-                preset.write({'mannequin_generation_state': 'failed'})
+            try:
+                with self.pool.cursor() as cr:
+                    env = api.Environment(cr, self.env.uid, {})
+                    preset = env['ai.studio.model.preset'].browse(preset_id)
+                    preset.write({'mannequin_generation_state': 'failed'})
+            except Exception:
+                _logger.error('Durum güncelleme de başarısız oldu')
+

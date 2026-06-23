@@ -11,6 +11,10 @@
                 <field name="body_type"/>
                 <field name="garment_type"/>
                 <field name="background_type"/>
+                <field name="mannequin_generation_state" widget="badge"
+                       decoration-info="mannequin_generation_state == 'generating'"
+                       decoration-success="mannequin_generation_state == 'done'"
+                       decoration-danger="mannequin_generation_state == 'failed'"/>
                 <field name="active"/>
             </list>
         </field>
@@ -22,6 +26,15 @@
         <field name="model">ai.studio.model.preset</field>
         <field name="arch" type="xml">
             <form string="Manken Preseti">
+                <header>
+                    <button name="action_generate_mannequin"
+                            string="🤖 AI ile Manken Oluştur" type="object"
+                            class="btn-primary"
+                            invisible="mannequin_generation_state == 'generating'"
+                            confirm="fal.ai ile manken fotoğrafı oluşturulsun mu? (API ücreti uygulanır)"/>
+                    <field name="mannequin_generation_state" widget="statusbar"
+                           statusbar_visible="idle,generating,done"/>
+                </header>
                 <sheet>
                     <div class="oe_title">
                         <h1><field name="name" placeholder="Preset adi..."/></h1>
@@ -44,7 +57,7 @@
                     </group>
                     <group string="AI Manken Olusturma">
                         <field name="mannequin_prompt"
-                               placeholder="Orn: Young woman, slim build, long brown hair..."
+                               placeholder="Orn: Young woman, 25 years old, slim build, long brown hair, natural makeup, elegant standing pose, white studio background, fashion model, professional photography"
                                widget="text"/>
                     </group>
                     <group>
