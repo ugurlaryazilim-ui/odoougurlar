@@ -51,9 +51,17 @@
               action="action_ai_studio_reject"
               sequence="3"/>
 
+    <record id="action_ai_studio_config" model="ir.actions.act_window">
+        <field name="name">AI Studio Ayarlari</field>
+        <field name="res_model">res.config.settings</field>
+        <field name="view_mode">form</field>
+        <field name="target">inline</field>
+        <field name="context">{'module': 'ugurlar_ai_studio'}</field>
+    </record>
+
     <menuitem id="menu_ai_studio_settings"
               name="Genel Ayarlar"
               parent="menu_ai_studio_config"
-              action="base_setup.action_general_configuration"
+              action="action_ai_studio_config"
               sequence="99"/>
 </odoo>
