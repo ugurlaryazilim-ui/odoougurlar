@@ -140,8 +140,6 @@
                 <filter string="Onay Bekliyor" name="review" domain="[('state', '=', 'review')]"/>
                 <filter string="Tamamlandi" name="done" domain="[('state', '=', 'done')]"/>
                 <separator/>
-                <filter string="Tarih" name="filter_date" date="create_date"/>
-                <separator/>
                 <group expand="0" string="Grupla">
                     <filter string="Durum" name="group_state" context="{'group_by': 'state'}"/>
                     <filter string="Operator" name="group_user" context="{'group_by': 'user_id'}"/>
