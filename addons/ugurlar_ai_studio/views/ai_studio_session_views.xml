@@ -1,54 +1,41 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
-    <!-- ============================================================ -->
-    <!-- Oturum List View                                              -->
-    <!-- ============================================================ -->
+    <!-- List View -->
     <record id="view_ai_studio_session_list" model="ir.ui.view">
         <field name="name">ai.studio.session.list</field>
         <field name="model">ai.studio.session</field>
         <field name="arch" type="xml">
-            <list string="AI Stüdyo Oturumları" decoration-info="state == 'draft'"
-                  decoration-warning="state == 'processing'"
-                  decoration-success="state == 'done'"
-                  decoration-danger="state == 'cancelled'">
+            <list>
                 <field name="name"/>
                 <field name="product_id"/>
-                <field name="model_preset_id" optional="show"/>
-                <field name="state" widget="badge"
-                       decoration-info="state == 'draft'"
-                       decoration-warning="state in ('processing','preprocessing','review')"
-                       decoration-success="state == 'done'"
-                       decoration-danger="state == 'cancelled'"/>
-                <field name="total_cost" widget="monetary" optional="show"/>
+                <field name="state" widget="badge"/>
                 <field name="user_id" widget="many2one_avatar_user"/>
                 <field name="create_date"/>
             </list>
         </field>
     </record>
 
-    <!-- ============================================================ -->
-    <!-- Oturum Form View                                              -->
-    <!-- ============================================================ -->
+    <!-- Form View -->
     <record id="view_ai_studio_session_form" model="ir.ui.view">
         <field name="name">ai.studio.session.form</field>
         <field name="model">ai.studio.session</field>
         <field name="arch" type="xml">
-            <form string="AI Stüdyo Oturum">
+            <form>
                 <header>
-                    <button name="action_photos_ready" string="Fotoğraflar Hazır"
+                    <button name="action_photos_ready" string="Fotograflar Hazir"
                             type="object" class="btn-primary"
                             invisible="state != 'draft'"/>
-                    <button name="action_start_processing" string="AI İşlemeyi Başlat"
+                    <button name="action_start_processing" string="AI Islemeyi Baslat"
                             type="object" class="btn-primary"
                             invisible="state != 'photos_ready'"
-                            confirm="AI işleme başlatılsın mı? Bu işlem fal.ai kredisi kullanacak."/>
+                            confirm="AI isleme baslatilsin mi?"/>
                     <button name="action_mark_done" string="Tamamla ve Kaydet"
-                            type="object" class="btn-success"
+                            type="object" class="btn-primary"
                             invisible="state != 'review'"/>
-                    <button name="action_cancel" string="İptal"
+                    <button name="action_cancel" string="Iptal"
                             type="object"
                             invisible="state in ('done', 'cancelled')"/>
-                    <button name="action_reset_draft" string="Taslağa Dön"
+                    <button name="action_reset_draft" string="Taslaga Don"
                             type="object"
                             invisible="state != 'cancelled'"/>
                     <field name="state" widget="statusbar"
@@ -59,22 +46,22 @@
                         <h1><field name="name" readonly="1"/></h1>
                     </div>
                     <group>
-                        <group string="Ürün Bilgileri">
+                        <group>
                             <field name="product_id"/>
                             <field name="apply_to_siblings"/>
-                            <field name="sibling_product_ids" widget="many2many_tags"
-                                   invisible="not apply_to_siblings"/>
                         </group>
-                        <group string="AI Ayarları">
+                        <group>
                             <field name="model_preset_id"/>
                             <field name="category"/>
                             <field name="quality_mode"/>
                             <field name="prompt_template_id"/>
-                            <field name="extra_prompt" placeholder="İlave AI talimatı yazın..."/>
                         </group>
                     </group>
+                    <group>
+                        <field name="extra_prompt"/>
+                    </group>
                     <notebook>
-                        <page string="Fotoğraflar" name="photos">
+                        <page string="Fotograflar" name="photos">
                             <field name="photo_ids">
                                 <list editable="bottom">
                                     <field name="photo_type"/>
@@ -85,14 +72,10 @@
                                 </list>
                             </field>
                         </page>
-                        <page string="AI Üretimler" name="generations">
+                        <page string="AI Uretimler" name="generations">
                             <field name="generation_ids">
-                                <list decoration-success="is_approved"
-                                      decoration-danger="state == 'failed'"
-                                      decoration-warning="state == 'processing'">
+                                <list>
                                     <field name="photo_type"/>
-                                    <field name="original_image" widget="image" width="80"/>
-                                    <field name="generated_image" widget="image" width="80"/>
                                     <field name="state" widget="badge"/>
                                     <field name="is_approved"/>
                                     <field name="is_primary"/>
@@ -103,7 +86,7 @@
                                 </list>
                             </field>
                         </page>
-                        <page string="İstatistikler" name="stats">
+                        <page string="Istatistikler" name="stats">
                             <group>
                                 <group>
                                     <field name="total_cost" widget="monetary"/>
@@ -111,8 +94,8 @@
                                     <field name="approval_rate"/>
                                 </group>
                                 <group>
-                                    <field name="user_id" widget="many2one_avatar_user"/>
-                                    <field name="reviewer_id" widget="many2one_avatar_user"/>
+                                    <field name="user_id"/>
+                                    <field name="reviewer_id"/>
                                     <field name="company_id" groups="base.group_multi_company"/>
                                 </group>
                             </group>
@@ -124,35 +107,26 @@
         </field>
     </record>
 
-    <!-- ============================================================ -->
-    <!-- Oturum Search View                                            -->
-    <!-- ============================================================ -->
+    <!-- Search View -->
     <record id="view_ai_studio_session_search" model="ir.ui.view">
         <field name="name">ai.studio.session.search</field>
         <field name="model">ai.studio.session</field>
         <field name="arch" type="xml">
-            <search string="Oturumlar">
+            <search>
                 <field name="name"/>
                 <field name="product_id"/>
                 <field name="user_id"/>
                 <filter string="Taslak" name="draft" domain="[('state', '=', 'draft')]"/>
-                <filter string="Isleniyor" name="processing" domain="[('state', 'in', ['preprocessing','processing'])]"/>
                 <filter string="Onay Bekliyor" name="review" domain="[('state', '=', 'review')]"/>
                 <filter string="Tamamlandi" name="done" domain="[('state', '=', 'done')]"/>
                 <separator/>
-                <group expand="0" string="Grupla">
-                    <filter string="Durum" name="group_state" context="{'group_by': 'state'}"/>
-                    <filter string="Operator" name="group_user" context="{'group_by': 'user_id'}"/>
-                    <filter string="Preset" name="group_preset" context="{'group_by': 'model_preset_id'}"/>
-                    <filter string="Tarih" name="group_date" context="{'group_by': 'create_date:month'}"/>
-                </group>
+                <filter string="Durum" name="group_state" context="{'group_by': 'state'}"/>
+                <filter string="Operator" name="group_user" context="{'group_by': 'user_id'}"/>
             </search>
         </field>
     </record>
 
-    <!-- ============================================================ -->
-    <!-- Session Action                                                -->
-    <!-- ============================================================ -->
+    <!-- Action -->
     <record id="action_ai_studio_session" model="ir.actions.act_window">
         <field name="name">Oturumlar</field>
         <field name="res_model">ai.studio.session</field>
@@ -160,10 +134,7 @@
         <field name="search_view_id" ref="view_ai_studio_session_search"/>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">
-                İlk AI çekim oturumunuzu başlatın!
-            </p>
-            <p>
-                Barkod tarayarak veya ürün arayarak yeni oturum oluşturun.
+                Ilk AI cekim oturumunuzu baslatin!
             </p>
         </field>
     </record>
