@@ -9,7 +9,6 @@
             <field name="code">model._cron_check_stuck_generations()</field>
             <field name="interval_number">5</field>
             <field name="interval_type">minutes</field>
-            <field name="numbercall">-1</field>
             <field name="active" eval="True"/>
         </record>
 
@@ -21,7 +20,6 @@
             <field name="code">model._cron_garbage_collect()</field>
             <field name="interval_number">1</field>
             <field name="interval_type">days</field>
-            <field name="numbercall">-1</field>
             <field name="active" eval="True"/>
         </record>
     </data>
