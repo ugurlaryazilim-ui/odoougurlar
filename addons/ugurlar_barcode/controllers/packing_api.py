@@ -165,6 +165,29 @@ class PackingApiController(BarcodeApiBase):
             for s in sales:
                 sales_dict[s.name] = s
 
+        # ── İptal edilen siparişlerin picking'lerini filtrele ──
+        # Sale order cancel ise → picking'i listeden çıkar + iptal et
+        cancelled_origins = {
+            name for name, sale in sales_dict.items()
+            if sale.state == 'cancel'
+        }
+        active_pickings = request.env['stock.picking'].sudo().browse()
+        for picking in all_pickings:
+            if picking.origin and picking.origin in cancelled_origins:
+                # Picking henüz cancel değilse iptal et
+                if picking.state not in ('done', 'cancel'):
+                    try:
+                        picking.action_cancel()
+                        _logger.info(
+                            "İptal sipariş picking'i otomatik iptal edildi: %s (origin: %s)",
+                            picking.name, picking.origin)
+                    except Exception as e:
+                        _logger.warning(
+                            "Picking iptal hatası: %s - %s", picking.name, e)
+                continue  # Listeden çıkar
+            active_pickings |= picking
+        all_pickings = active_pickings
+
         # Tüm picking'lerdeki ürünleri topla
         items = []
         for picking in all_pickings:
@@ -661,6 +684,30 @@ class PackingApiController(BarcodeApiBase):
         skipped = []
 
         all_pickings = self._get_all_pickings(batch)
+
+        # ── İptal edilen siparişlerin picking'lerini filtrele ──
+        origins = list({p.origin for p in all_pickings if p.origin})
+        cancelled_origins = set()
+        if origins:
+            cancelled_sales = request.env['sale.order'].sudo().search([
+                ('name', 'in', origins), ('state', '=', 'cancel'),
+            ])
+            cancelled_origins = set(cancelled_sales.mapped('name'))
+
+        filtered_pickings = request.env['stock.picking'].sudo().browse()
+        for picking in all_pickings:
+            if picking.origin and picking.origin in cancelled_origins:
+                if picking.state not in ('done', 'cancel'):
+                    try:
+                        picking.action_cancel()
+                        _logger.info("İptal sipariş picking'i iptal edildi: %s", picking.name)
+                    except Exception:
+                        pass
+                skipped.append(f"{picking.name} (sipariş iptal)")
+                continue
+            filtered_pickings |= picking
+        all_pickings = filtered_pickings
+
         for picking in all_pickings:
             try:
                 # Güvenlik: Hiç toplanmamış picking'i paketleme/faturala
