@@ -13,7 +13,7 @@ class AiStudioPromptTemplate(models.Model):
     """
     _name = 'ai.studio.prompt.template'
     _description = 'AI Stüdyo Prompt Şablonu'
-    _order = 'usage_count desc, name'
+    _order = 'name'
 
     name = fields.Char(string='Şablon Adı', required=True)
     scope = fields.Selection([

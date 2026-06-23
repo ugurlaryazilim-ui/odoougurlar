@@ -614,12 +614,13 @@
 /* MOBIL RESPONSIVE — A'dan Z'ye tam uyum                       */
 /* ============================================================ */
 
-/* Odoo container override — mobilde full-width */
-.o_action_manager .o_action {
+/* Odoo container override — SADECE AI Studio icinde mobilde full-width */
+.ais-app .o_action_manager .o_action,
+.ais-app.o_action {
     padding: 0 !important;
 }
 
-.o_content {
+.ais-app .o_content {
     padding: 0 !important;
 }
 
@@ -639,10 +640,10 @@
     padding-bottom: env(safe-area-inset-bottom, 100px);
 }
 
-/* Odoo control panel gizle — kendi header'imiz var */
-.o_cp_searchview,
-.o_control_panel .o_cp_bottom_right,
-.o_control_panel .o_cp_action_menus {
+/* Odoo control panel gizle — SADECE AI Studio icinde (kendi header'imiz var) */
+.ais-app .o_cp_searchview,
+.ais-app .o_control_panel .o_cp_bottom_right,
+.ais-app .o_control_panel .o_cp_action_menus {
     display: none !important;
 }
 
@@ -903,32 +904,27 @@
     }
 }
 
-/* --- Odoo specific overrides for mobile --- */
+/* --- Odoo specific overrides for mobile — SADECE AI Studio icinde --- */
 @media screen and (max-width: 768px) {
-    /* Odoo navbar compact */
+    /* Odoo navbar compact — bu global kalabilir */
     .o_main_navbar {
         height: auto !important;
         min-height: 46px;
     }
 
-    /* Control panel kisalt */
-    .o_control_panel {
+    /* Control panel kisalt — SADECE AI Studio icinde */
+    .ais-app .o_control_panel {
         display: none !important;
     }
 
-    /* Full width content */
-    .o_action_manager {
+    /* Full width content — SADECE AI Studio icinde */
+    .ais-app .o_action_manager {
         padding: 0 !important;
     }
 
-    /* No margin on web client */
-    .o_web_client .o_action_manager .o_action .o_content {
+    /* No margin on web client — SADECE AI Studio icinde */
+    .ais-app .o_content {
         padding: 0 !important;
         margin: 0 !important;
-    }
-
-    /* Form view override */
-    .o_form_view .o_content {
-        padding: 0 !important;
     }
 }

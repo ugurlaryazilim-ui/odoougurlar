@@ -17,7 +17,7 @@ class AiStudioModelPreset(models.Model):
     """
     _name = 'ai.studio.model.preset'
     _description = 'AI Stüdyo Manken Preseti'
-    _order = 'usage_count desc, name'
+    _order = 'name'
 
     name = fields.Char(string='Preset Adı', required=True)
     gender = fields.Selection([
