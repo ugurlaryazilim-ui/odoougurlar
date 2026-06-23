@@ -13,16 +13,13 @@
                   decoration-danger="state == 'cancelled'">
                 <field name="name"/>
                 <field name="product_id"/>
-                <field name="model_preset_id"/>
+                <field name="model_preset_id" optional="show"/>
                 <field name="state" widget="badge"
                        decoration-info="state == 'draft'"
                        decoration-warning="state in ('processing','preprocessing','review')"
                        decoration-success="state == 'done'"
                        decoration-danger="state == 'cancelled'"/>
-                <field name="photo_count" string="📸"/>
-                <field name="generation_count" string="🤖"/>
-                <field name="total_cost" widget="monetary"/>
-                <field name="approval_rate" widget="progressbar"/>
+                <field name="total_cost" widget="monetary" optional="show"/>
                 <field name="user_id" widget="many2one_avatar_user"/>
                 <field name="create_date"/>
             </list>
@@ -41,11 +38,11 @@
                     <button name="action_photos_ready" string="Fotoğraflar Hazır"
                             type="object" class="btn-primary"
                             invisible="state != 'draft'"/>
-                    <button name="action_start_processing" string="🤖 AI İşlemeyi Başlat"
+                    <button name="action_start_processing" string="AI İşlemeyi Başlat"
                             type="object" class="btn-primary"
                             invisible="state != 'photos_ready'"
                             confirm="AI işleme başlatılsın mı? Bu işlem fal.ai kredisi kullanacak."/>
-                    <button name="action_mark_done" string="✅ Tamamla ve Kaydet"
+                    <button name="action_mark_done" string="Tamamla ve Kaydet"
                             type="object" class="btn-success"
                             invisible="state != 'review'"/>
                     <button name="action_cancel" string="İptal"
@@ -64,8 +61,6 @@
                     <group>
                         <group string="Ürün Bilgileri">
                             <field name="product_id"/>
-                            <field name="product_barcode"/>
-                            <field name="product_image" widget="image" class="oe_avatar"/>
                             <field name="apply_to_siblings"/>
                             <field name="sibling_product_ids" widget="many2many_tags"
                                    invisible="not apply_to_siblings"/>
@@ -79,18 +74,18 @@
                         </group>
                     </group>
                     <notebook>
-                        <page string="📸 Fotoğraflar" name="photos">
+                        <page string="Fotoğraflar" name="photos">
                             <field name="photo_ids">
                                 <list editable="bottom">
                                     <field name="photo_type"/>
                                     <field name="image_original" widget="image" width="120"/>
                                     <field name="image_processed" widget="image" width="120"/>
-                                    <field name="quality_score" widget="progressbar"/>
+                                    <field name="quality_score"/>
                                     <field name="sequence" widget="handle"/>
                                 </list>
                             </field>
                         </page>
-                        <page string="🤖 AI Üretimler" name="generations">
+                        <page string="AI Üretimler" name="generations">
                             <field name="generation_ids">
                                 <list decoration-success="is_approved"
                                       decoration-danger="state == 'failed'"
@@ -108,12 +103,12 @@
                                 </list>
                             </field>
                         </page>
-                        <page string="📊 İstatistikler" name="stats">
+                        <page string="İstatistikler" name="stats">
                             <group>
                                 <group>
                                     <field name="total_cost" widget="monetary"/>
                                     <field name="revision_count"/>
-                                    <field name="approval_rate" widget="progressbar"/>
+                                    <field name="approval_rate"/>
                                 </group>
                                 <group>
                                     <field name="user_id" widget="many2one_avatar_user"/>
@@ -145,8 +140,8 @@
                 <filter string="Onay Bekliyor" name="review" domain="[('state', '=', 'review')]"/>
                 <filter string="Tamamlandı" name="done" domain="[('state', '=', 'done')]"/>
                 <separator/>
-                <filter string="Bugün" name="today" domain="[('create_date', '&gt;=', (context_today()).strftime('%Y-%m-%d'))]"/>
-                <filter string="Bu Hafta" name="this_week" domain="[('create_date', '&gt;=', (context_today() - datetime.timedelta(days=7)).strftime('%Y-%m-%d'))]"/>
+                <filter string="Bugün" name="today"
+                        domain="[('create_date', '&gt;=', (context_today()).strftime('%%Y-%%m-%%d'))]"/>
                 <separator/>
                 <group expand="0" string="Grupla">
                     <filter string="Durum" name="group_state" context="{'group_by': 'state'}"/>
@@ -166,7 +161,6 @@
         <field name="res_model">ai.studio.session</field>
         <field name="view_mode">list,form</field>
         <field name="search_view_id" ref="view_ai_studio_session_search"/>
-        <field name="context">{'search_default_review': 1}</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">
                 İlk AI çekim oturumunuzu başlatın!
