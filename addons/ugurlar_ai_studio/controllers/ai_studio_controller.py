@@ -359,3 +359,149 @@ class AiStudioController(http.Controller):
                 'month_cost': 0,
                 'today_sessions': 0,
             }
+
+    @http.route('/ai_studio/analyze_garment', type='json', auth='user', methods=['POST'])
+    def analyze_garment(self, image_data):
+        """Kiyafet gorseli AI ile analiz et — tur, renk, kumas, detaylar."""
+        try:
+            api_key = request.env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.fal_api_key', ''
+            )
+            if not api_key:
+                return {'error': 'fal.ai API anahtari tanimlanmamis. Ayarlar > AI Studio'}
+
+            # Base64 gorseli fal.ai'ya yukle
+            from ..services.fal_provider import FalProvider
+            provider = FalProvider(api_key)
+            image_url = provider.upload_image(image_data)
+
+            # Analiz yap
+            from ..services.garment_analyzer import analyze_garment as do_analyze
+            analysis = do_analyze(api_key, image_url)
+
+            return {'success': True, 'analysis': analysis}
+        except Exception as e:
+            _logger.exception('analyze_garment hatasi: %s', e)
+            return {'error': str(e)}
+
+    @http.route('/ai_studio/build_prompt', type='json', auth='user', methods=['POST'])
+    def build_prompt(self, analysis, preset_id=None, lock_ids=None, extra_prompt=''):
+        """Analiz sonuclarina gore AI gorsel uretim promptu olustur."""
+        try:
+            # Preset bilgisi
+            preset_data = {}
+            if preset_id:
+                preset = request.env['ai.studio.model.preset'].browse(int(preset_id))
+                if preset.exists():
+                    preset_data = {
+                        'gender': preset.gender,
+                        'body_type': preset.body_type,
+                        'target_audience': preset.target_audience or '',
+                    }
+
+            # Prompt lock'lari
+            prompt_locks = []
+            if lock_ids:
+                templates = request.env['ai.studio.prompt.template'].browse(lock_ids)
+                for t in templates:
+                    prompt_locks.append(t.prompt_text)
+            else:
+                # Varsayilan olarak tum global lock'lari kullan
+                all_locks = request.env['ai.studio.prompt.template'].search([
+                    ('scope', '=', 'global'),
+                    ('active', '=', True),
+                ])
+                for t in all_locks:
+                    prompt_locks.append(t.prompt_text)
+
+            from ..services.garment_analyzer import build_generation_prompt
+            result = build_generation_prompt(
+                analysis, preset_data, prompt_locks, extra_prompt
+            )
+
+            return {'success': True, 'prompt': result}
+        except Exception as e:
+            _logger.exception('build_prompt hatasi: %s', e)
+            return {'error': str(e)}
+
+    @http.route('/ai_studio/generate_image', type='json', auth='user', methods=['POST'])
+    def generate_image(self, session_id, photo_id, preset_id, prompt=None):
+        """AI gorsel uretim — fal.ai FASHN virtual try-on."""
+        try:
+            api_key = request.env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.fal_api_key', ''
+            )
+            if not api_key:
+                return {'error': 'fal.ai API anahtari tanimlanmamis.'}
+
+            session = request.env['ai.studio.session'].browse(int(session_id))
+            if not session.exists():
+                return {'error': 'Oturum bulunamadi.'}
+
+            photo = request.env['ai.studio.photo'].browse(int(photo_id))
+            if not photo.exists():
+                return {'error': 'Fotograf bulunamadi.'}
+
+            preset = request.env['ai.studio.model.preset'].browse(int(preset_id))
+            if not preset.exists():
+                return {'error': 'Manken preseti bulunamadi.'}
+
+            from ..services.fal_provider import FalProvider
+            provider = FalProvider(api_key)
+
+            # Gorsel yukle
+            garment_url = provider.upload_image(photo.image_original)
+
+            # Manken gorseli
+            model_image = preset.model_image_front
+            if photo.photo_type == 'back' and preset.model_image_back:
+                model_image = preset.model_image_back
+
+            if not model_image:
+                return {'error': 'Manken gorseli bulunamadi.'}
+
+            model_image_raw = model_image
+            if isinstance(model_image_raw, bytes):
+                model_image_raw = model_image_raw.decode('ascii')
+            model_url = provider.upload_image(model_image_raw)
+
+            # Kategori belirle
+            category = session.category or 'tops'
+
+            # Virtual try-on
+            result = provider.virtual_tryon(
+                model_image_url=model_url,
+                garment_image_url=garment_url,
+                category=category,
+            )
+
+            if result.get('image_url'):
+                # Sonucu indir ve kaydet
+                import requests as req_lib
+                img_response = req_lib.get(result['image_url'], timeout=120)
+                generated_b64 = base64.b64encode(img_response.content).decode()
+
+                # Generation kaydı olustur
+                gen = request.env['ai.studio.generation'].create({
+                    'session_id': session.id,
+                    'source_photo_id': photo.id,
+                    'photo_type': photo.photo_type,
+                    'original_image': photo.image_original,
+                    'generated_image': generated_b64,
+                    'state': 'done',
+                    'cost': result.get('cost', 0.075),
+                    'provider': 'fal_fashn',
+                    'provider_request_id': result.get('request_id', ''),
+                })
+
+                return {
+                    'success': True,
+                    'generation_id': gen.id,
+                    'cost': result.get('cost', 0.075),
+                }
+
+            return {'error': 'AI gorsel uretilemedi.'}
+        except Exception as e:
+            _logger.exception('generate_image hatasi: %s', e)
+            return {'error': str(e)}
+

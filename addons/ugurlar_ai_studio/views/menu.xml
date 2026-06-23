@@ -1,58 +1,71 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
-    <!-- Root Menu -->
+    <!-- ======================================================= -->
+    <!-- Root Menu — Navbar'da AI Studio uygulamasi               -->
+    <!-- ======================================================= -->
     <menuitem id="menu_ai_studio_root"
               name="AI Stüdyo"
               web_icon="ugurlar_ai_studio,static/description/icon.png"
               sequence="45"/>
 
-    <!-- AI Stüdyo Ana Uygulama -->
+    <!-- ======================================================= -->
+    <!-- 1. Seviye: Ana Navbar Menuleri                           -->
+    <!-- ======================================================= -->
+
+    <!-- AI Studyo — Mobil uygulama (client action) -->
     <menuitem id="menu_ai_studio_app"
               name="AI Stüdyo"
               parent="menu_ai_studio_root"
               action="ai_studio_client_action"
               sequence="1"/>
 
-    <!-- Oturumlar -->
+    <!-- Oturumlar — Tum cekim oturumlari listesi -->
     <menuitem id="menu_ai_studio_sessions"
               name="Oturumlar"
               parent="menu_ai_studio_root"
               action="action_ai_studio_session"
               sequence="10"/>
 
-    <!-- AI Üretimler -->
+    <!-- AI Uretimler — Tum AI gorsel uretimler -->
     <menuitem id="menu_ai_studio_generations"
               name="AI Üretimler"
               parent="menu_ai_studio_root"
               action="action_ai_studio_generation"
               sequence="20"/>
 
-    <!-- Ayarlar Üst Menü -->
+    <!-- ======================================================= -->
+    <!-- 2. Seviye: Yapilandirma Alt Menusu                      -->
+    <!-- ======================================================= -->
+
     <menuitem id="menu_ai_studio_config"
-              name="Ayarlar"
+              name="Yapılandırma"
               parent="menu_ai_studio_root"
               sequence="90"/>
 
+    <!-- Manken Presetleri -->
     <menuitem id="menu_ai_studio_presets"
               name="Manken Presetleri"
               parent="menu_ai_studio_config"
               action="action_ai_studio_preset"
               sequence="1"/>
 
+    <!-- Prompt Sablonlari -->
     <menuitem id="menu_ai_studio_prompts"
               name="Prompt Şablonları"
               parent="menu_ai_studio_config"
               action="action_ai_studio_prompt"
               sequence="2"/>
 
+    <!-- Red Sebepleri -->
     <menuitem id="menu_ai_studio_reject_reasons"
               name="Red Sebepleri"
               parent="menu_ai_studio_config"
               action="action_ai_studio_reject"
               sequence="3"/>
 
+    <!-- Genel Ayarlar — res.config.settings sayfasi -->
     <record id="action_ai_studio_config" model="ir.actions.act_window">
-        <field name="name">AI Studio Ayarlari</field>
+        <field name="name">AI Studio Ayarları</field>
         <field name="res_model">res.config.settings</field>
         <field name="view_mode">form</field>
         <field name="target">current</field>

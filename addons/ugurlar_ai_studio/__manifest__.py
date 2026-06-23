@@ -30,6 +30,7 @@
         'security/ir.model.access.csv',
         'data/sequence.xml',
         'data/ai_studio_reject_reasons.xml',
+        'data/ai_studio_prompt_locks.xml',
         'data/cron.xml',
         'views/ai_studio_session_views.xml',
         'views/ai_studio_generation_views.xml',
