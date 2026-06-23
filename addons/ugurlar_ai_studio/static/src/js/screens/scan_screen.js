@@ -14,7 +14,6 @@ export class ScanScreen extends Component {
     };
 
     setup() {
-        this.rpc = useService("rpc");
         this.notification = useService("notification");
 
         this.state = useState({
@@ -23,6 +22,19 @@ export class ScanScreen extends Component {
             results: [],
             showResults: false,
         });
+    }
+
+    async _jsonRpc(url, params = {}) {
+        const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", method: "call", params }),
+        });
+        const data = await response.json();
+        if (data.error) {
+            throw new Error(data.error.data?.message || data.error.message || "RPC Error");
+        }
+        return data.result;
     }
 
     async onInputChange(ev) {
@@ -43,19 +55,17 @@ export class ScanScreen extends Component {
         this.state.showResults = false;
 
         try {
-            const res = await this.rpc("/ai_studio/find_product", { query });
+            const res = await this._jsonRpc("/ai_studio/find_product", { query });
             if (res.found && res.products.length === 1) {
-                // Tek sonuç → doğrudan seç
                 this.props.onProductFound(res.products[0]);
             } else if (res.found && res.products.length > 1) {
-                // Birden fazla sonuç → listele
                 this.state.results = res.products;
                 this.state.showResults = true;
             } else {
-                this.notification.add(_t("Ürün bulunamadı."), { type: "warning" });
+                this.notification.add(_t("Urun bulunamadi."), { type: "warning" });
             }
         } catch (e) {
-            this.notification.add(_t("Arama hatası."), { type: "danger" });
+            this.notification.add(_t("Arama hatasi."), { type: "danger" });
         } finally {
             this.state.searching = false;
         }

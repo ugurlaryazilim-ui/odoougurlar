@@ -14,10 +14,8 @@ import { BatchReview } from "./screens/batch_review";
 import { HistoryScreen } from "./screens/history_screen";
 
 /**
- * Ana AI Stüdyo Client Action — Ekran yöneticisi.
- *
- * Mobil-first SPA mimarisi ile tüm ekranları yönetir.
- * Her ekran bağımsız bir OWL component'idir.
+ * Ana AI Studio Client Action — Ekran yoneticisi.
+ * Mobil-first SPA mimarisi.
  */
 export class AiStudioAction extends Component {
     static template = "ugurlar_ai_studio.AiStudioAction";
@@ -30,16 +28,15 @@ export class AiStudioAction extends Component {
         BatchReview,
         HistoryScreen,
     };
-    static props = {};
+    static props = { "*": true };
 
     setup() {
         this.orm = useService("orm");
-        this.rpc = useService("rpc");
         this.notification = useService("notification");
-        this.action = useService("action");
+        this.actionService = useService("action");
 
         this.state = useState({
-            currentScreen: "scan", // scan, capture, settings, processing, review, batch, history
+            currentScreen: "scan",
             sessionId: null,
             sessionName: "",
             productId: null,
@@ -57,20 +54,39 @@ export class AiStudioAction extends Component {
         });
     }
 
+    async _jsonRpc(url, params = {}) {
+        const response = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                jsonrpc: "2.0",
+                method: "call",
+                params: params,
+            }),
+        });
+        const data = await response.json();
+        if (data.error) {
+            throw new Error(data.error.data?.message || data.error.message || "RPC Error");
+        }
+        return data.result;
+    }
+
     async loadInitialData() {
         try {
             const [presetsRes, reasonsRes, templatesRes, statsRes] = await Promise.all([
-                this.rpc("/ai_studio/get_presets", {}),
-                this.rpc("/ai_studio/get_reject_reasons", {}),
-                this.rpc("/ai_studio/get_prompt_templates", {}),
-                this.rpc("/ai_studio/dashboard_stats", {}),
+                this._jsonRpc("/ai_studio/get_presets", {}),
+                this._jsonRpc("/ai_studio/get_reject_reasons", {}),
+                this._jsonRpc("/ai_studio/get_prompt_templates", {}),
+                this._jsonRpc("/ai_studio/dashboard_stats", {}),
             ]);
             this.state.presets = presetsRes.presets || [];
             this.state.rejectReasons = reasonsRes.reasons || [];
             this.state.promptTemplates = templatesRes.templates || [];
             this.state.dashboardStats = statsRes || {};
         } catch (e) {
-            console.error("AI Stüdyo başlangıç verisi yüklenemedi:", e);
+            console.error("AI Studio initial data load failed:", e);
         }
     }
 
@@ -89,19 +105,16 @@ export class AiStudioAction extends Component {
 
     async onPhotosReady(photos) {
         this.state.photos = photos;
-
-        // Oturum oluştur
         try {
-            const res = await this.rpc("/ai_studio/create_session", {
+            const res = await this._jsonRpc("/ai_studio/create_session", {
                 product_id: this.state.productId,
             });
             if (res.success) {
                 this.state.sessionId = res.session_id;
                 this.state.sessionName = res.session_name;
 
-                // Fotoğrafları yükle
                 for (const photo of photos) {
-                    await this.rpc("/ai_studio/upload_photo", {
+                    await this._jsonRpc("/ai_studio/upload_photo", {
                         session_id: res.session_id,
                         photo_type: photo.type,
                         image_data: photo.data,
@@ -110,14 +123,13 @@ export class AiStudioAction extends Component {
                 this.navigateTo("settings");
             }
         } catch (e) {
-            this.notification.add(_t("Oturum oluşturulamadı."), { type: "danger" });
+            this.notification.add(_t("Oturum olusturulamadi."), { type: "danger" });
             console.error(e);
         }
     }
 
     async onStartProcessing(settings) {
         try {
-            // Oturum ayarlarını güncelle
             await this.orm.write("ai.studio.session", [this.state.sessionId], {
                 model_preset_id: settings.presetId,
                 category: settings.category,
@@ -125,42 +137,38 @@ export class AiStudioAction extends Component {
                 extra_prompt: settings.extraPrompt || "",
                 prompt_template_id: settings.promptTemplateId || false,
             });
-
-            // AI işlemeyi başlat
             await this.orm.call("ai.studio.session", "action_start_processing", [this.state.sessionId]);
-
             this.navigateTo("processing");
         } catch (e) {
-            this.notification.add(e.message || _t("İşlem başlatılamadı."), { type: "danger" });
+            this.notification.add(e.message || _t("Islem baslatilamadi."), { type: "danger" });
         }
     }
 
     async onProcessingComplete() {
-        // Generation durumlarını yükle
-        const res = await this.rpc("/ai_studio/generation_status/" + this.state.sessionId, {});
+        const res = await this._jsonRpc("/ai_studio/generation_status/" + this.state.sessionId, {});
         this.state.generations = res.generations || [];
         this.navigateTo("review");
     }
 
     async onApproveGeneration(genId, isPrimary) {
-        const res = await this.rpc("/ai_studio/approve_generation", {
+        const res = await this._jsonRpc("/ai_studio/approve_generation", {
             generation_id: genId,
             is_primary: isPrimary,
         });
         if (res.success) {
-            this.notification.add(_t("Görsel onaylandı."), { type: "success" });
+            this.notification.add(_t("Gorsel onaylandi."), { type: "success" });
             await this.refreshGenerations();
         }
     }
 
     async onRejectGeneration(genId, reasonId, prompt) {
-        const res = await this.rpc("/ai_studio/reject_generation", {
+        const res = await this._jsonRpc("/ai_studio/reject_generation", {
             generation_id: genId,
             reason_id: reasonId,
             revision_prompt: prompt,
         });
         if (res.success) {
-            this.notification.add(_t("Revizyon gönderildi."), { type: "warning" });
+            this.notification.add(_t("Revizyon gonderildi."), { type: "warning" });
             this.navigateTo("processing");
         } else if (res.needs_supervisor) {
             this.notification.add(res.error, { type: "danger" });
@@ -168,20 +176,20 @@ export class AiStudioAction extends Component {
     }
 
     async onCompleteSession() {
-        const res = await this.rpc("/ai_studio/complete_session", {
+        const res = await this._jsonRpc("/ai_studio/complete_session", {
             session_id: this.state.sessionId,
         });
         if (res.success) {
-            this.notification.add(_t("Görseller ürüne kaydedildi!"), { type: "success", sticky: true });
+            this.notification.add(_t("Gorseller urune kaydedildi!"), { type: "success", sticky: true });
             this.resetSession();
             this.navigateTo("scan");
         } else {
-            this.notification.add(res.error || _t("Hata oluştu."), { type: "danger" });
+            this.notification.add(res.error || _t("Hata olustu."), { type: "danger" });
         }
     }
 
     async refreshGenerations() {
-        const res = await this.rpc("/ai_studio/generation_status/" + this.state.sessionId, {});
+        const res = await this._jsonRpc("/ai_studio/generation_status/" + this.state.sessionId, {});
         this.state.generations = res.generations || [];
     }
 
