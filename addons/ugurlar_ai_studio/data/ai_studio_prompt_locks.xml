@@ -110,5 +110,40 @@
             <field name="scope">global</field>
             <field name="prompt_text">Detail fidelity lock: preserve buttons, labels/tags, stitching, seam lines, and neckline shape exactly. Do not move, remove, or invent buttons/labels. DETAIL VIEW CLOTHING REQUIREMENT: In the detail/macro view, the model MUST be wearing the FULL outfit. ALL closures must be FASTENED as designed. Show a close-up of garment construction detail while the model wears the complete outfit. No bare skin beyond wrists, neck, and face.</field>
         </record>
+
+        <!-- 16. Premium Capture Lock -->
+        <record id="prompt_capture_lock" model="ai.studio.prompt.template">
+            <field name="name">Premium Capture Lock</field>
+            <field name="scope">global</field>
+            <field name="prompt_text">Ultra premium capture lock: emulate top-tier medium-format RAW capture with physically plausible optics and high dynamic range. Preserve nuanced tonal roll-off, highlight retention, rich but natural blacks, and true color separation. Keep eyes, lashes, brows, lips, skin micro-relief, and garment weave tack-sharp at the focal plane while maintaining realistic depth falloff. No fake HDR halos, no clarity overdrive, no sharpening artifacts.</field>
+        </record>
+
+        <!-- 17. Anti-Plastik Yuz Lock -->
+        <record id="prompt_anti_plastic_lock" model="ai.studio.prompt.template">
+            <field name="name">Anti-Plastik Yuz Lock</field>
+            <field name="scope">global</field>
+            <field name="prompt_text">NEGATIVE LOCK — ANTI-PLASTIC FACE: beauty filter, airbrushed skin, frequency-separation retouch, plastic skin, waxy skin, porcelain skin, silicone skin, rubber skin, over-denoise, skin smoothing, fake CGI texture, doll face, mannequin face, glass-marble eyes, dead-doll eyes, perfectly symmetrical face, uncanny valley face, CG hair shader, helmet hair, painted-on eyebrows, blank AI stare, vacant expression, frozen smile, empty eyes, 3D render face, video game character, digital avatar.</field>
+        </record>
+
+        <!-- 18. Sac Degismezlik Lock -->
+        <record id="prompt_hair_lock" model="ai.studio.prompt.template">
+            <field name="name">Sac Degismezlik Lock</field>
+            <field name="scope">global</field>
+            <field name="prompt_text">Hair immutable lock: keep exact hair length class, color family, part direction, density, and nape/jawline silhouette across views. Do not add extensions or output longer hair than anchor. Canonical identity anchor lock: treat the first generated FRONT image/reference as the single source of truth for identity across all other views.</field>
+        </record>
+
+        <!-- 19. Omuz ve Dusus Lock -->
+        <record id="prompt_shoulder_drape_lock" model="ai.studio.prompt.template">
+            <field name="name">Omuz ve Dusus Lock</field>
+            <field name="scope">global</field>
+            <field name="prompt_text">[SHOULDER LOCK] Ensure shoulder structure matches the input explicitly (padded/structured, strong, or natural). Do NOT slope or soften shoulders if the input has clear structured shoulder padding. [DRAPE LOCK] Natural fabric drape conforming to human body; smooth out flat-lay packaging wrinkles completely. [LAYERING LOCK] No ghost layering. No undergarments, undershirts, or inner linings should be randomly visible at the collar or hem.</field>
+        </record>
+
+        <!-- 20. Sosyal Tutarlilik Lock -->
+        <record id="prompt_social_identity_lock" model="ai.studio.prompt.template">
+            <field name="name">Sosyal Tutarlilik Lock</field>
+            <field name="scope">global</field>
+            <field name="prompt_text">STRICT IDENTITY LOCK. The reference model is the single source of truth. Match face geometry exactly: skull/face shape, jawline, cheekbones, nose, lips, eyes, brows. Preserve facial proportions, symmetry/asymmetry, and distinctive marks. Match full-body identity: height, silhouette, shoulder/hip width, torso/limb lengths. Do not alter age, ethnicity, gender presentation, or expression. Do not stylize, beautify, or modify identity.</field>
+        </record>
     </data>
 </odoo>
