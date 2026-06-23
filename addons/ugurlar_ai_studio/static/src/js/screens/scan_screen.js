@@ -80,4 +80,73 @@ export class ScanScreen extends Component {
         this.state.results = [];
         this.state.showResults = false;
     }
+
+    /**
+     * Kamera ile barkod okuma — ugurlar_barcode modulu ile ayni pattern.
+     * Chrome/Android'de native BarcodeDetector API kullanir.
+     */
+    startCameraScan() {
+        if (!('BarcodeDetector' in window)) {
+            alert('Bu tarayici kamera ile barkod okumayi desteklemiyor.\nChrome (Android) veya Edge kullanin.');
+            return;
+        }
+        const overlay = document.createElement('div');
+        overlay.className = 'ub-camera-overlay';
+        overlay.innerHTML = `
+            <div class="ub-camera-header">
+                <span>Barkodu kameraya gosterin...</span>
+                <button class="ub-camera-close-btn" id="ais-cam-close">&#10005;</button>
+            </div>
+            <video id="ais-cam-video" autoplay playsinline muted></video>
+            <div class="ub-camera-target"></div>
+            <div class="ub-camera-status" id="ais-cam-status">Kamera baslatiliyor...</div>
+        `;
+        document.body.appendChild(overlay);
+        const video = document.getElementById('ais-cam-video');
+        const statusEl = document.getElementById('ais-cam-status');
+        let stream = null, animFrame = null, scanning = true;
+
+        const cleanup = () => {
+            scanning = false;
+            if (animFrame) cancelAnimationFrame(animFrame);
+            if (stream) stream.getTracks().forEach(t => t.stop());
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        };
+
+        document.getElementById('ais-cam-close').onclick = cleanup;
+        overlay.onclick = (e) => { if (e.target === overlay) cleanup(); };
+
+        navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+        }).then(s => {
+            stream = s;
+            video.srcObject = stream;
+            statusEl.textContent = 'Barkodu kameraya gosterin...';
+            const detector = new BarcodeDetector({
+                formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'itf', 'qr_code']
+            });
+            const scanFrame = async () => {
+                if (!scanning || video.readyState < 2) {
+                    animFrame = requestAnimationFrame(scanFrame);
+                    return;
+                }
+                try {
+                    const barcodes = await detector.detect(video);
+                    if (barcodes.length > 0) {
+                        if (navigator.vibrate) navigator.vibrate(200);
+                        cleanup();
+                        // Okunan barkodu arama kutusuna yaz ve ara
+                        this.state.query = barcodes[0].rawValue;
+                        await this.searchProduct();
+                        return;
+                    }
+                } catch (e) {}
+                animFrame = requestAnimationFrame(scanFrame);
+            };
+            video.onloadedmetadata = () => scanFrame();
+        }).catch(err => {
+            statusEl.textContent = 'Kamera erisimi reddedildi: ' + err.message;
+            setTimeout(cleanup, 3000);
+        });
+    }
 }
