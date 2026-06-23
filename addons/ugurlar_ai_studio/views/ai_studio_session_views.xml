@@ -140,8 +140,7 @@
                 <filter string="Onay Bekliyor" name="review" domain="[('state', '=', 'review')]"/>
                 <filter string="Tamamlandi" name="done" domain="[('state', '=', 'done')]"/>
                 <separator/>
-                <filter string="Bugün" name="today" date="create_date" default_period="today"/>
-                <filter string="Bu Hafta" name="this_week" date="create_date" default_period="this_week"/>
+                <filter string="Tarih" name="filter_date" date="create_date"/>
                 <separator/>
                 <group expand="0" string="Grupla">
                     <filter string="Durum" name="group_state" context="{'group_by': 'state'}"/>
