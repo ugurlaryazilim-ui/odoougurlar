@@ -109,22 +109,31 @@ export class AiStudioAction extends Component {
             const res = await this._jsonRpc("/ai_studio/create_session", {
                 product_id: this.state.productId,
             });
+            if (res.error) {
+                this.notification.add(res.error, { type: "danger" });
+                console.error("Session create error:", res.error);
+                return;
+            }
             if (res.success) {
                 this.state.sessionId = res.session_id;
                 this.state.sessionName = res.session_name;
 
                 for (const photo of photos) {
-                    await this._jsonRpc("/ai_studio/upload_photo", {
-                        session_id: res.session_id,
-                        photo_type: photo.type,
-                        image_data: photo.data,
-                    });
+                    try {
+                        await this._jsonRpc("/ai_studio/upload_photo", {
+                            session_id: res.session_id,
+                            photo_type: photo.type,
+                            image_data: photo.data,
+                        });
+                    } catch (uploadErr) {
+                        console.error("Photo upload error:", uploadErr);
+                    }
                 }
                 this.navigateTo("settings");
             }
         } catch (e) {
-            this.notification.add(_t("Oturum olusturulamadi."), { type: "danger" });
-            console.error(e);
+            this.notification.add(e.message || _t("Oturum olusturulamadi."), { type: "danger" });
+            console.error("Session creation exception:", e);
         }
     }
 
