@@ -22,9 +22,6 @@
     'author': 'Uğurlar Yazılım',
     'website': 'https://ugurlar.com',
     'depends': ['base_setup', 'product', 'mail', 'ugurlar_images', 'ugurlar_barcode'],
-    'external_dependencies': {
-        'python': ['fal_client', 'requests'],
-    },
     'data': [
         'security/ai_studio_security.xml',
         'security/ir.model.access.csv',

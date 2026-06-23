@@ -7,22 +7,34 @@
         <field name="priority">90</field>
         <field name="arch" type="xml">
             <xpath expr="//form" position="inside">
-                <app data-string="AI Studio" string="AI Studio" name="ugurlar_ai_studio" groups="base.group_system">
+                <app data-string="AI Studio" string="AI Studio"
+                     name="ugurlar_ai_studio"
+                     data-key="ugurlar_ai_studio"
+                     groups="base.group_system">
 
                     <block title="fal.ai API Ayarlari" name="fal_api_settings">
                         <setting string="API Anahtari" help="fal.ai API key">
                             <div class="content-group">
-                                <field name="ai_studio_fal_api_key" password="True"/>
+                                <div class="row mt16">
+                                    <label for="ai_studio_fal_api_key" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="ai_studio_fal_api_key" class="col-4" password="True"/>
+                                </div>
                             </div>
                         </setting>
                         <setting string="Varsayilan AI Saglayici">
                             <div class="content-group">
-                                <field name="ai_studio_default_provider"/>
+                                <div class="row mt16">
+                                    <label for="ai_studio_default_provider" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="ai_studio_default_provider" class="col-4"/>
+                                </div>
                             </div>
                         </setting>
                         <setting string="Varsayilan Endpoint" help="fal.ai model endpoint ID">
                             <div class="content-group">
-                                <field name="ai_studio_default_endpoint"/>
+                                <div class="row mt16">
+                                    <label for="ai_studio_default_endpoint" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="ai_studio_default_endpoint" class="col-4"/>
+                                </div>
                             </div>
                         </setting>
                     </block>
@@ -30,7 +42,10 @@
                     <block title="Uretim Ayarlari" name="generation_settings">
                         <setting string="Varsayilan Kalite Modu">
                             <div class="content-group">
-                                <field name="ai_studio_quality_mode"/>
+                                <div class="row mt16">
+                                    <label for="ai_studio_quality_mode" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="ai_studio_quality_mode" class="col-4"/>
+                                </div>
                             </div>
                         </setting>
                         <setting string="Otomatik Arka Plan Kaldirma"
@@ -40,13 +55,19 @@
                         <setting string="Maksimum Revizyon Sayisi"
                                  help="Supervizoer onayi gerektirmeden yapilabilecek revize sayisi">
                             <div class="content-group">
-                                <field name="ai_studio_max_revisions"/>
+                                <div class="row mt16">
+                                    <label for="ai_studio_max_revisions" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="ai_studio_max_revisions" class="col-4"/>
+                                </div>
                             </div>
                         </setting>
                         <setting string="Eszamanli Istek Limiti"
                                  help="Ayni anda kac AI istegi gonderilebilir">
                             <div class="content-group">
-                                <field name="ai_studio_concurrent_limit"/>
+                                <div class="row mt16">
+                                    <label for="ai_studio_concurrent_limit" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="ai_studio_concurrent_limit" class="col-4"/>
+                                </div>
                             </div>
                         </setting>
                     </block>
@@ -55,7 +76,10 @@
                         <setting string="Cop Temizleme Suresi (gun)"
                                  help="Reddedilen gorsellerin kac gun sonra temizlenecegi">
                             <div class="content-group">
-                                <field name="ai_studio_garbage_days"/>
+                                <div class="row mt16">
+                                    <label for="ai_studio_garbage_days" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="ai_studio_garbage_days" class="col-4"/>
+                                </div>
                             </div>
                         </setting>
                     </block>

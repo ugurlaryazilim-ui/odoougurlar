@@ -490,8 +490,8 @@ class AiStudioController(http.Controller):
                     'generated_image': generated_b64,
                     'state': 'done',
                     'cost': result.get('cost', 0.075),
-                    'provider': 'fal_fashn',
-                    'provider_request_id': result.get('request_id', ''),
+                    'provider': 'fal',
+                    'fal_request_id': result.get('request_id', ''),
                 })
 
                 return {

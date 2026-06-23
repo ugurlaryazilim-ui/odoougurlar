@@ -52,7 +52,7 @@ class AiStudioGeneration(models.Model):
         ('processing', 'İşleniyor'),
         ('done', 'Tamamlandı'),
         ('failed', 'Başarısız'),
-    ], string='Durum', default='pending', tracking=True)
+    ], string='Durum', default='pending')
     error_message = fields.Text(string='Hata Mesajı')
 
     # --- Onay ---
