@@ -11,7 +11,7 @@
                 <field name="garment_type"/>
                 <field name="background_type"/>
                 <field name="usage_count"/>
-                <field name="approval_rate" widget="progressbar"/>
+                <field name="approval_rate"/>
                 <field name="mannequin_generation_state" widget="badge"/>
                 <field name="active"/>
             </list>
@@ -64,7 +64,7 @@
                         <group string="Kategoriler ve İstatistikler">
                             <field name="category_ids" widget="many2many_tags"/>
                             <field name="usage_count"/>
-                            <field name="approval_rate" widget="progressbar"/>
+                            <field name="approval_rate"/>
                         </group>
                     </group>
                 </sheet>

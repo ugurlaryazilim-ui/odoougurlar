@@ -131,21 +131,21 @@
         <field name="name">ai.studio.session.search</field>
         <field name="model">ai.studio.session</field>
         <field name="arch" type="xml">
-            <search string="AI Stüdyo Oturumları">
+            <search string="Oturumlar">
                 <field name="name"/>
                 <field name="product_id"/>
                 <field name="user_id"/>
                 <filter string="Taslak" name="draft" domain="[('state', '=', 'draft')]"/>
-                <filter string="İşleniyor" name="processing" domain="[('state', 'in', ['preprocessing','processing'])]"/>
+                <filter string="Isleniyor" name="processing" domain="[('state', 'in', ['preprocessing','processing'])]"/>
                 <filter string="Onay Bekliyor" name="review" domain="[('state', '=', 'review')]"/>
-                <filter string="Tamamlandı" name="done" domain="[('state', '=', 'done')]"/>
+                <filter string="Tamamlandi" name="done" domain="[('state', '=', 'done')]"/>
                 <separator/>
-                <filter string="Bugün" name="today"
-                        domain="[('create_date', '&gt;=', (context_today()).strftime('%%Y-%%m-%%d'))]"/>
+                <filter string="Bugün" name="today" date="create_date" default_period="today"/>
+                <filter string="Bu Hafta" name="this_week" date="create_date" default_period="this_week"/>
                 <separator/>
                 <group expand="0" string="Grupla">
                     <filter string="Durum" name="group_state" context="{'group_by': 'state'}"/>
-                    <filter string="Operatör" name="group_user" context="{'group_by': 'user_id'}"/>
+                    <filter string="Operator" name="group_user" context="{'group_by': 'user_id'}"/>
                     <filter string="Preset" name="group_preset" context="{'group_by': 'model_preset_id'}"/>
                     <filter string="Tarih" name="group_date" context="{'group_by': 'create_date:month'}"/>
                 </group>
