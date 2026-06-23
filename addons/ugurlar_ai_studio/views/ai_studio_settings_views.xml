@@ -1,46 +1,65 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
     <record id="view_ai_studio_settings" model="ir.ui.view">
-        <field name="name">res.config.settings.view.form.inherit.ai.studio</field>
+        <field name="name">res.config.settings.view.form.ugurlar_ai_studio</field>
         <field name="model">res.config.settings</field>
-        <field name="inherit_id" ref="base_setup.res_config_settings_view_form"/>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="priority">90</field>
         <field name="arch" type="xml">
             <xpath expr="//form" position="inside">
-                <app data-string="AI Stüdyo" string="AI Stüdyo" groups="ugurlar_ai_studio.group_ai_studio_manager">
-                    <block title="fal.ai API Ayarları">
-                        <setting string="API Anahtarı" help="fal.ai dashboard'tan alınan API key">
-                            <field name="ai_studio_fal_api_key" password="True"/>
+                <app data-string="AI Studio" string="AI Studio" name="ugurlar_ai_studio" groups="base.group_system">
+
+                    <block title="fal.ai API Ayarlari" name="fal_api_settings">
+                        <setting string="API Anahtari" help="fal.ai API key">
+                            <div class="content-group">
+                                <field name="ai_studio_fal_api_key" password="True"/>
+                            </div>
                         </setting>
-                        <setting string="Varsayılan AI Sağlayıcı">
-                            <field name="ai_studio_default_provider"/>
+                        <setting string="Varsayilan AI Saglayici">
+                            <div class="content-group">
+                                <field name="ai_studio_default_provider"/>
+                            </div>
                         </setting>
-                        <setting string="Varsayılan Endpoint" help="fal.ai model endpoint ID">
-                            <field name="ai_studio_default_endpoint"/>
+                        <setting string="Varsayilan Endpoint" help="fal.ai model endpoint ID">
+                            <div class="content-group">
+                                <field name="ai_studio_default_endpoint"/>
+                            </div>
                         </setting>
                     </block>
-                    <block title="Üretim Ayarları">
-                        <setting string="Varsayılan Kalite Modu">
-                            <field name="ai_studio_quality_mode"/>
+
+                    <block title="Uretim Ayarlari" name="generation_settings">
+                        <setting string="Varsayilan Kalite Modu">
+                            <div class="content-group">
+                                <field name="ai_studio_quality_mode"/>
+                            </div>
                         </setting>
-                        <setting string="Otomatik Arka Plan Kaldırma"
-                                 help="Fotoğrafları AI'ya göndermeden önce arka planı otomatik kaldır">
+                        <setting string="Otomatik Arka Plan Kaldirma"
+                                 help="Fotograflari AI ya gondermeden once arka plani otomatik kaldir">
                             <field name="ai_studio_auto_bg_remove"/>
                         </setting>
-                        <setting string="Maksimum Revizyon Sayısı"
-                                 help="Süpervizör onayı gerektirmeden yapılabilecek revize sayısı">
-                            <field name="ai_studio_max_revisions"/>
+                        <setting string="Maksimum Revizyon Sayisi"
+                                 help="Supervizoer onayi gerektirmeden yapilabilecek revize sayisi">
+                            <div class="content-group">
+                                <field name="ai_studio_max_revisions"/>
+                            </div>
                         </setting>
-                        <setting string="Eşzamanlı İstek Limiti"
-                                 help="Aynı anda kaç AI isteği gönderilebilir">
-                            <field name="ai_studio_concurrent_limit"/>
-                        </setting>
-                    </block>
-                    <block title="Bakım">
-                        <setting string="Çöp Temizleme Süresi (gün)"
-                                 help="Reddedilen görsellerin kaç gün sonra temizleneceği">
-                            <field name="ai_studio_garbage_days"/>
+                        <setting string="Eszamanli Istek Limiti"
+                                 help="Ayni anda kac AI istegi gonderilebilir">
+                            <div class="content-group">
+                                <field name="ai_studio_concurrent_limit"/>
+                            </div>
                         </setting>
                     </block>
+
+                    <block title="Bakim" name="maintenance_settings">
+                        <setting string="Cop Temizleme Suresi (gun)"
+                                 help="Reddedilen gorsellerin kac gun sonra temizlenecegi">
+                            <div class="content-group">
+                                <field name="ai_studio_garbage_days"/>
+                            </div>
+                        </setting>
+                    </block>
+
                 </app>
             </xpath>
         </field>
