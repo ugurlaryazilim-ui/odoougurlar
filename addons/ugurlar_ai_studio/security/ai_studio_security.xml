@@ -9,25 +9,33 @@
     </record>
 
     <!-- ============================================================ -->
+    <!-- Privilege (Odoo 19 — category_id yerine privilege_id)        -->
+    <!-- ============================================================ -->
+    <record id="privilege_ai_studio" model="res.groups.privilege">
+        <field name="name">AI Stüdyo Erişimi</field>
+        <field name="category_id" ref="module_category_ai_studio"/>
+    </record>
+
+    <!-- ============================================================ -->
     <!-- Güvenlik Grupları                                             -->
     <!-- ============================================================ -->
     <record id="group_ai_studio_operator" model="res.groups">
         <field name="name">Operatör</field>
-        <field name="category_id" ref="module_category_ai_studio"/>
+        <field name="privilege_id" ref="privilege_ai_studio"/>
         <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
         <field name="comment">Fotoğraf çekme, AI'ya gönderme, kendi oturumlarını görme</field>
     </record>
 
     <record id="group_ai_studio_reviewer" model="res.groups">
         <field name="name">Onayıcı</field>
-        <field name="category_id" ref="module_category_ai_studio"/>
+        <field name="privilege_id" ref="privilege_ai_studio"/>
         <field name="implied_ids" eval="[(4, ref('group_ai_studio_operator'))]"/>
         <field name="comment">Tüm oturumları görme, onay/red yetkisi</field>
     </record>
 
     <record id="group_ai_studio_manager" model="res.groups">
         <field name="name">Yönetici</field>
-        <field name="category_id" ref="module_category_ai_studio"/>
+        <field name="privilege_id" ref="privilege_ai_studio"/>
         <field name="implied_ids" eval="[(4, ref('group_ai_studio_reviewer'))]"/>
         <field name="comment">Ayarlar, presetler, maliyet raporları, süpervizör onayı</field>
     </record>
