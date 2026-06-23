@@ -1,6 +1,81 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
     <!-- ======================================================= -->
+    <!-- Action tanimlari — view dosyalarindaki action'lari       -->
+    <!-- tekrar tanimlayarak DB senkronizasyonunu garanti ederiz  -->
+    <!-- ======================================================= -->
+
+    <!-- Preset Action -->
+    <record id="action_ai_studio_preset" model="ir.actions.act_window">
+        <field name="name">Manken Presetleri</field>
+        <field name="res_model">ai.studio.model.preset</field>
+        <field name="view_mode">kanban,list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                İlk manken presetinizi oluşturun!
+            </p>
+        </field>
+    </record>
+
+    <!-- Prompt Action -->
+    <record id="action_ai_studio_prompt" model="ir.actions.act_window">
+        <field name="name">Prompt Şablonları</field>
+        <field name="res_model">ai.studio.prompt.template</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Prompt şablonu ekleyin
+            </p>
+        </field>
+    </record>
+
+    <!-- Reject Reason Action -->
+    <record id="action_ai_studio_reject" model="ir.actions.act_window">
+        <field name="name">Red Sebepleri</field>
+        <field name="res_model">ai.studio.reject.reason</field>
+        <field name="view_mode">list</field>
+    </record>
+
+    <!-- Session Action -->
+    <record id="action_ai_studio_session" model="ir.actions.act_window">
+        <field name="name">Oturumlar</field>
+        <field name="res_model">ai.studio.session</field>
+        <field name="view_mode">list,kanban,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Henüz çekim oturumu yok
+            </p>
+        </field>
+    </record>
+
+    <!-- Generation Action -->
+    <record id="action_ai_studio_generation" model="ir.actions.act_window">
+        <field name="name">AI Üretimler</field>
+        <field name="res_model">ai.studio.generation</field>
+        <field name="view_mode">list,kanban,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Henüz AI üretimi yok
+            </p>
+        </field>
+    </record>
+
+    <!-- Settings Action -->
+    <record id="action_ai_studio_config" model="ir.actions.act_window">
+        <field name="name">AI Studio Ayarları</field>
+        <field name="res_model">res.config.settings</field>
+        <field name="view_mode">form</field>
+        <field name="target">current</field>
+        <field name="context">{'module': 'ugurlar_ai_studio'}</field>
+    </record>
+
+    <!-- Client Action — OWL uygulamasi giris noktasi -->
+    <record id="ai_studio_client_action" model="ir.actions.client">
+        <field name="name">AI Stüdyo</field>
+        <field name="tag">ugurlar_ai_studio.main</field>
+    </record>
+
+    <!-- ======================================================= -->
     <!-- Root Menu — Navbar'da AI Studio uygulamasi               -->
     <!-- ======================================================= -->
     <menuitem id="menu_ai_studio_root"
@@ -64,14 +139,6 @@
               sequence="3"/>
 
     <!-- Genel Ayarlar — res.config.settings sayfasi -->
-    <record id="action_ai_studio_config" model="ir.actions.act_window">
-        <field name="name">AI Studio Ayarları</field>
-        <field name="res_model">res.config.settings</field>
-        <field name="view_mode">form</field>
-        <field name="target">current</field>
-        <field name="context">{'module': 'ugurlar_ai_studio'}</field>
-    </record>
-
     <menuitem id="menu_ai_studio_settings"
               name="Genel Ayarlar"
               parent="menu_ai_studio_config"
