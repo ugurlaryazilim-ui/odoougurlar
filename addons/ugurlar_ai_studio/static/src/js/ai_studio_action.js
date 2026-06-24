@@ -226,3 +226,83 @@ export class AiStudioAction extends Component {
 }
 
 registry.category("actions").add("ugurlar_ai_studio.main", AiStudioAction);
+
+// --- Global Lightbox Zoom Handler ---
+document.addEventListener("click", (ev) => {
+    const img = ev.target.closest(".ais-zoomable-img img");
+    if (!img) return;
+
+    // Edit modunda ise (dosya seçme/silme modunda) lightbox açma
+    const form = img.closest(".o_form_view");
+    if (form && form.classList.contains("o_form_editable")) {
+        return;
+    }
+
+    ev.preventDefault();
+    ev.stopPropagation();
+
+    // Mevcut lightbox varsa kaldır
+    const existing = document.getElementById("ais_lightbox");
+    if (existing) existing.remove();
+
+    const lightbox = document.createElement("div");
+    lightbox.id = "ais_lightbox";
+    lightbox.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(0, 0, 0, 0.85);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 999999;
+        cursor: pointer;
+        opacity: 0;
+        transition: opacity 0.25s ease;
+    `;
+
+    const closeBtn = document.createElement("div");
+    closeBtn.innerText = "✕";
+    closeBtn.style.cssText = `
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        color: #fff;
+        font-size: 30px;
+        font-weight: bold;
+        cursor: pointer;
+    `;
+    lightbox.appendChild(closeBtn);
+
+    const imgEl = document.createElement("img");
+    imgEl.src = img.src;
+    imgEl.style.cssText = `
+        max-width: 90%;
+        max-height: 90%;
+        object-fit: contain;
+        border-radius: 8px;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+        transform: scale(0.95);
+        transition: transform 0.25s ease;
+    `;
+
+    lightbox.appendChild(imgEl);
+    document.body.appendChild(lightbox);
+
+    // Fade in
+    requestAnimationFrame(() => {
+        lightbox.style.opacity = "1";
+        imgEl.style.transform = "scale(1)";
+    });
+
+    // Kapatma tetikleyicileri
+    const closeLightbox = () => {
+        lightbox.style.opacity = "0";
+        imgEl.style.transform = "scale(0.95)";
+        setTimeout(() => lightbox.remove(), 250);
+    };
+
+    lightbox.addEventListener("click", closeLightbox);
+});

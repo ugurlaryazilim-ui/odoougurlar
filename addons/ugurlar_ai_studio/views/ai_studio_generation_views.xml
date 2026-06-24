@@ -42,8 +42,8 @@
                 <sheet>
                     <group>
                         <group string="Karşılaştırma">
-                            <field name="original_image" widget="image" options="{'zoom': true}"/>
-                            <field name="generated_image" widget="image" options="{'zoom': true}"/>
+                            <field name="original_image" widget="image" class="oe_avatar ais-zoomable-img"/>
+                            <field name="generated_image" widget="image" class="oe_avatar ais-zoomable-img"/>
                         </group>
                         <group string="Bilgiler">
                             <field name="session_id"/>
