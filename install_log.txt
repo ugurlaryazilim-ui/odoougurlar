@@ -1,0 +1,8 @@
+﻿python : C:\Users\PC\AppData\Local\Programs\Python\Python312\python.exe: can't open file 'C:\\Users\\PC\\Desktop\\odoou
+gurlar\\odoo-bin': [Errno 2] No such file or directory
+At line:1 char:1
++ python odoo-bin -c odoo.conf -u ugurlar_ai_studio --stop-after-init 2 ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\PC\App...le or directory:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

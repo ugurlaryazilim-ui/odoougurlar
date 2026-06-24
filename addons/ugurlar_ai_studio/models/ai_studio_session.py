@@ -320,11 +320,11 @@ class AiStudioSession(models.Model):
                         )
 
                     # 2. Manken resmini yükle
-                    model_image_field = (
-                        'model_image_front'
-                        if gen.photo_type in ('front', 'detail')
-                        else 'model_image_back'
-                    )
+                    model_image_field = 'model_image_front'
+                    if gen.photo_type == 'back':
+                        model_image_field = 'model_image_back'
+                    elif gen.photo_type == 'side':
+                        model_image_field = 'model_image_side'
                     model_image_data = getattr(preset, model_image_field)
                     if not model_image_data:
                         model_image_data = preset.model_image_front
@@ -369,7 +369,12 @@ class AiStudioSession(models.Model):
 
                     # 6. Sonucu indir ve kaydet
                     import requests
-                    output_url = result.get('image', {}).get('url', '')
+                    output_url = ''
+                    if 'images' in result and result['images']:
+                        output_url = result['images'][0].get('url', '')
+                    elif 'image' in result and result['image']:
+                        output_url = result['image'].get('url', '')
+
                     if output_url:
                         img_data = requests.get(output_url, timeout=60).content
                         gen.write({
@@ -441,7 +446,12 @@ class AiStudioSession(models.Model):
                 )
 
                 preset = session.model_preset_id
-                model_image = preset.model_image_front or preset.model_image_back
+                model_image_field = 'model_image_front'
+                if gen.photo_type == 'back':
+                    model_image_field = 'model_image_back'
+                elif gen.photo_type == 'side':
+                    model_image_field = 'model_image_side'
+                model_image = getattr(preset, model_image_field, False) or preset.model_image_front
                 if not model_image:
                     raise Exception('Preset manken resmi eksik.')
 
@@ -465,7 +475,12 @@ class AiStudioSession(models.Model):
                 )
 
                 import requests
-                output_url = result.get('image', {}).get('url', '')
+                output_url = ''
+                if 'images' in result and result['images']:
+                    output_url = result['images'][0].get('url', '')
+                elif 'image' in result and result['image']:
+                    output_url = result['image'].get('url', '')
+
                 if output_url:
                     img_data = requests.get(output_url, timeout=60).content
                     gen.write({

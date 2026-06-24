@@ -43,6 +43,7 @@
                         <group string="Manken Gorselleri">
                             <field name="model_image_front" widget="image"/>
                             <field name="model_image_back" widget="image"/>
+                            <field name="model_image_side" widget="image"/>
                             <field name="preview_image" widget="image"/>
                         </group>
                         <group string="Ozellikler">

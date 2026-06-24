@@ -29,7 +29,7 @@
                 </t>
             </div>
 
-            <!-- Tab Bar: Ön / Arka / Detay -->
+            <!-- Tab Bar: Ön / Arka / Yan / Detay -->
             <div class="ais-photo-tabs">
                 <button t-attf-class="ais-tab {{ state.activeTab === 'front' ? 'active' : '' }}"
                         t-on-click="() => this.setTab('front')">
@@ -38,6 +38,10 @@
                 <button t-attf-class="ais-tab {{ state.activeTab === 'back' ? 'active' : '' }}"
                         t-on-click="() => this.setTab('back')">
                     <t t-if="state.hasBack">✅</t><t t-else="">⬜</t> Arka
+                </button>
+                <button t-attf-class="ais-tab {{ state.activeTab === 'side' ? 'active' : '' }}"
+                        t-on-click="() => this.setTab('side')">
+                    <t t-if="state.hasSide">✅</t><t t-else="">⬜</t> Yan
                 </button>
                 <button t-attf-class="ais-tab {{ state.activeTab === 'detail' ? 'active' : '' }}"
                         t-on-click="() => this.setTab('detail')">

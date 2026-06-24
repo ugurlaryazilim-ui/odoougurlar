@@ -25,6 +25,7 @@ class AiStudioPhoto(models.Model):
     photo_type = fields.Selection([
         ('front', 'Ön Yüz'),
         ('back', 'Arka Yüz'),
+        ('side', 'Yan Yüz'),
         ('detail', 'Detay'),
     ], string='Fotoğraf Tipi', required=True)
     image_original = fields.Image(

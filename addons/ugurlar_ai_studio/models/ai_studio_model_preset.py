@@ -56,6 +56,11 @@ class AiStudioModelPreset(models.Model):
         max_width=1920, max_height=1920,
         help='Mankenin arkadan fotoğrafı',
     )
+    model_image_side = fields.Image(
+        string='Yandan Manken',
+        max_width=1920, max_height=1920,
+        help='Mankenin yandan fotoğrafı',
+    )
     background_type = fields.Selection([
         ('white', 'Beyaz Stüdyo'),
         ('studio', 'Profesyonel Stüdyo'),
@@ -470,6 +475,43 @@ class AiStudioModelPreset(models.Model):
 
             back_data = self._download_image_b64(back_images[0]['url'])
 
+            # ═══ YANDAN MANKEN ═══
+            _logger.info('Manken oluşturuluyor (yan): preset_id=%s', preset_id)
+            side_data = False
+            if front_fal_url:
+                _logger.info('nano-banana-pro/edit ile tutarlı yan görsel')
+                side_prompt = (
+                    f"OUTPUT EXACTLY ONE IMAGE. "
+                    f"Show the EXACT SAME person from the reference image, "
+                    f"but from the SIDE PROFILE VIEW — standing profile. "
+                    f"SAME person, SAME clothes, SAME hair, SAME body. "
+                    f"Only the camera angle changes to show the side profile. "
+                    f"{self.IDENTITY_LOCK} {self.ANTI_NUDE_LOCK} "
+                    f"{self.ANATOMY_LOCK} {self.STUDIO_LOCK}"
+                )
+
+                try:
+                    side_result = self._fal_api_call(
+                        'fal-ai/nano-banana-pro/edit',
+                        {
+                            'prompt': side_prompt,
+                            'image_urls': [front_fal_url],
+                            'num_images': 1,
+                            'aspect_ratio': '3:4',
+                            'output_format': 'png',
+                            'safety_tolerance': '5',
+                            'resolution': '2K',
+                            'limit_generations': True,
+                        },
+                        api_key,
+                        timeout=180,
+                    )
+                    side_images = side_result.get('images', [])
+                    if side_images:
+                        side_data = self._download_image_b64(side_images[0]['url'])
+                except Exception as e:
+                    _logger.warning('Yandan manken oluşturulamadı, es geçiliyor: %s', e)
+
             # ═══ ÖNİZLEME: Ön görselin küçük kopyası ═══
             preview_data = front_data  # Aynı veri, Odoo otomatik resize eder
 
@@ -480,6 +522,7 @@ class AiStudioModelPreset(models.Model):
                 preset.write({
                     'model_image_front': front_data,
                     'model_image_back': back_data,
+                    'model_image_side': side_data or False,
                     'preview_image': preview_data,
                     'mannequin_generation_state': 'done',
                 })

@@ -63,7 +63,11 @@ class FalProvider(AIProviderBase):
             },
         )
 
-        image_url = result.get('image', {}).get('url', '')
+        image_url = ''
+        if 'images' in result and result['images']:
+            image_url = result['images'][0].get('url', '')
+        elif 'image' in result and result['image']:
+            image_url = result['image'].get('url', '')
         request_id = result.get('request_id', '')
 
         return {

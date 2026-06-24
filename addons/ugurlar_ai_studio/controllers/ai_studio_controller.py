@@ -251,6 +251,18 @@ class AiStudioController(http.Controller):
             presets = request.env['ai.studio.model.preset'].search(domain)
             result = []
             for p in presets:
+                # Safe base64 decoding for preview_image or model_image_front
+                preview_data = False
+                raw_preview = p.preview_image or p.model_image_front
+                if raw_preview:
+                    try:
+                        if isinstance(raw_preview, bytes):
+                            preview_data = raw_preview.decode('ascii')
+                        else:
+                            preview_data = str(raw_preview)
+                    except Exception:
+                        preview_data = False
+
                 result.append({
                     'id': p.id,
                     'name': p.name,
@@ -263,7 +275,7 @@ class AiStudioController(http.Controller):
                     'background_type': p.background_type,
                     'usage_count': p.usage_count,
                     'approval_rate': p.approval_rate,
-                    'preview_image': bool(p.preview_image or p.model_image_front),
+                    'preview_image': preview_data,
                 })
 
             return {'presets': result}
