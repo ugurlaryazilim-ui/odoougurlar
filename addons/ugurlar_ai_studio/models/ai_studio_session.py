@@ -295,8 +295,8 @@ class AiStudioSession(models.Model):
                     start_time = time.time()
                     source_image = gen.original_image
 
-                    # 1. Arka plan kaldırma (opsiyonel)
-                    if auto_bg and source_image:
+                    # 1. Arka plan kaldırma (opsiyonel veya detay için zorunlu)
+                    if (auto_bg or gen.photo_type == 'detail') and source_image:
                         try:
                             garment_url = fal_client.upload(
                                 base64.b64decode(source_image),
@@ -318,6 +318,21 @@ class AiStudioSession(models.Model):
                             base64.b64decode(source_image),
                             'image/jpeg',
                         )
+
+                    # Detay fotoğrafı ise giydirme yapma, direkt arka planı temizlenmiş resmi kaydet
+                    if gen.photo_type == 'detail':
+                        import requests
+                        img_data = requests.get(garment_url, timeout=60).content
+                        elapsed = time.time() - start_time
+                        gen.write({
+                            'generated_image': base64.b64encode(img_data),
+                            'state': 'done',
+                            'fal_endpoint': 'fal-ai/birefnet',
+                            'generation_time_seconds': elapsed,
+                            'cost': 0.002,  # Birefnet maliyeti
+                        })
+                        cr.commit()
+                        continue
 
                     # 2. Manken resmini yükle
                     model_image_field = 'model_image_front'
@@ -441,6 +456,35 @@ class AiStudioSession(models.Model):
                 cr.commit()
 
                 source_image = gen.original_image
+
+                # Detay ise direkt arka plan temizleme yapıp bitir
+                if gen.photo_type == 'detail':
+                    try:
+                        garment_url = fal_client.upload(
+                            base64.b64decode(source_image), 'image/jpeg'
+                        )
+                        bg_result = fal_client.subscribe(
+                            'fal-ai/birefnet',
+                            arguments={'image_url': garment_url},
+                        )
+                        garment_url = bg_result['image']['url']
+                    except Exception as e:
+                        _logger.warning('Retry BG remove başarısız: %s', e)
+                        garment_url = fal_client.upload(
+                            base64.b64decode(source_image), 'image/jpeg'
+                        )
+                    
+                    import requests
+                    img_data = requests.get(garment_url, timeout=60).content
+                    gen.write({
+                        'generated_image': base64.b64encode(img_data),
+                        'state': 'done',
+                        'fal_endpoint': 'fal-ai/birefnet',
+                        'error_message': False,
+                    })
+                    cr.commit()
+                    return
+
                 garment_url = fal_client.upload(
                     base64.b64decode(source_image), 'image/jpeg'
                 )

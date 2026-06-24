@@ -65,8 +65,8 @@
                             <field name="photo_ids">
                                 <list editable="bottom">
                                     <field name="photo_type"/>
-                                    <field name="image_original" widget="image" width="120"/>
-                                    <field name="image_processed" widget="image" width="120"/>
+                                    <field name="image_original" widget="image" width="120" options="{'zoom': true}"/>
+                                    <field name="image_processed" widget="image" width="120" options="{'zoom': true}"/>
                                     <field name="quality_score"/>
                                     <field name="sequence" widget="handle"/>
                                 </list>
