@@ -65,6 +65,7 @@
                             <field name="photo_ids">
                                 <list editable="bottom">
                                     <field name="photo_type"/>
+                                    <field name="detail_placement" invisible="photo_type != 'detail'"/>
                                     <field name="image_original" widget="image" width="120" class="ais-zoomable-img"/>
                                     <field name="image_processed" widget="image" width="120" class="ais-zoomable-img"/>
                                     <field name="quality_score"/>

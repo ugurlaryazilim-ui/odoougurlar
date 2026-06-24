@@ -28,6 +28,10 @@ class AiStudioPhoto(models.Model):
         ('side', 'Yan Yüz'),
         ('detail', 'Detay'),
     ], string='Fotoğraf Tipi', required=True)
+    detail_placement = fields.Selection([
+        ('front', 'Ön Yüzde'),
+        ('back', 'Arka Yüzde'),
+    ], string='Detay Konumu', default='front')
     image_original = fields.Image(
         string='Orijinal Fotoğraf',
         max_width=1920, max_height=1920,

@@ -195,6 +195,46 @@ class AiStudioSession(models.Model):
             session.photo_count = len(session.photo_ids)
             session.generation_count = len(session.generation_ids)
 
+    def _crop_image_detail(self, image_base64, category='tops'):
+        """Base64 formatındaki resmi Pillow ile kırpar ve base64 döner."""
+        if not image_base64:
+            return False
+        try:
+            import io
+            import base64
+            from PIL import Image
+            
+            # Base64 decode
+            img_data = base64.b64decode(image_base64)
+            img = Image.open(io.BytesIO(img_data))
+            w, h = img.size
+            
+            # Kategoriye göre koordinatları belirle
+            if category == 'bottoms':
+                # Alt giyim için kalça/cep hizası
+                left = int(w * 0.20)
+                top = int(h * 0.42)
+                right = int(w * 0.80)
+                bottom = int(h * 0.75)
+            else:
+                # Üst giyim ve tek parça için göğüs/yaka hizası
+                left = int(w * 0.22)
+                top = int(h * 0.20)
+                right = int(w * 0.78)
+                bottom = int(h * 0.55)
+                
+            # Kırpma işlemi
+            cropped_img = img.crop((left, top, right, bottom))
+            
+            # Tekrar base64'e dönüştür
+            buffered = io.BytesIO()
+            img_format = img.format or 'JPEG'
+            cropped_img.save(buffered, format=img_format, quality=95)
+            return base64.b64encode(buffered.getvalue())
+        except Exception as e:
+            _logger.error("Kırpma hatası: %s", e)
+            return image_base64
+
     # --- Durum Geçişleri ---
 
     def action_photos_ready(self):
@@ -221,18 +261,61 @@ class AiStudioSession(models.Model):
                 'Ayarlar → AI Stüdyo menüsünden girin.'
             ))
 
+        # Ön yüz fotoğrafını doğrula
+        photos_by_type = {p.photo_type: p for p in self.photo_ids}
+        front_photo = photos_by_type.get('front')
+        if not front_photo:
+            raise UserError(_('AI işlemeyi başlatabilmek için en azından Ön Yüz fotoğrafı yüklenmiş olmalıdır.'))
+
         self.state = 'preprocessing'
 
-        # Her fotoğraf için generation kaydı oluştur
-        for photo in self.photo_ids:
+        # Eski generation kayıtlarını temizle
+        self.generation_ids.unlink()
+
+        # 4 görsel çıktısı için generation kayıtlarını oluştur
+        # 1. Ön Görsel
+        self.env['ai.studio.generation'].create({
+            'session_id': self.id,
+            'source_photo_id': front_photo.id,
+            'photo_type': 'front',
+            'original_image': front_photo.image_original,
+            'state': 'pending',
+            'provider': 'fal',
+        })
+
+        # 2. Arka Görsel (varsa)
+        back_photo = photos_by_type.get('back')
+        if back_photo:
             self.env['ai.studio.generation'].create({
                 'session_id': self.id,
-                'source_photo_id': photo.id,
-                'photo_type': photo.photo_type,
-                'original_image': photo.image_original,
+                'source_photo_id': back_photo.id,
+                'photo_type': 'back',
+                'original_image': back_photo.image_original,
                 'state': 'pending',
                 'provider': 'fal',
             })
+
+        # 3. Yan Görsel (varsa side_photo, yoksa front_photo kullanılır)
+        side_photo = photos_by_type.get('side')
+        self.env['ai.studio.generation'].create({
+            'session_id': self.id,
+            'source_photo_id': (side_photo or front_photo).id,
+            'photo_type': 'side',
+            'original_image': (side_photo or front_photo).image_original,
+            'state': 'pending',
+            'provider': 'fal',
+        })
+
+        # 4. Detay Görsel (varsa detail_photo, yoksa front_photo kullanılır)
+        detail_photo = photos_by_type.get('detail')
+        self.env['ai.studio.generation'].create({
+            'session_id': self.id,
+            'source_photo_id': (detail_photo or front_photo).id,
+            'photo_type': 'detail',
+            'original_image': (detail_photo or front_photo).image_original,
+            'state': 'pending',
+            'provider': 'fal',
+        })
 
         # Arka planda AI işlemeyi başlat
         thread = threading.Thread(
@@ -287,7 +370,12 @@ class AiStudioSession(models.Model):
                 'ugurlar_ai_studio.auto_bg_remove', 'True'
             ) == 'True'
 
-            for gen in generations:
+            # Try-on (giydirme) ve Detay üretimlerini ayır
+            tryon_gens = generations.filtered(lambda g: g.photo_type in ('front', 'back', 'side'))
+            detail_gens = generations.filtered(lambda g: g.photo_type == 'detail')
+
+            # 1. Önce try-on üretimlerini gerçekleştir
+            for gen in tryon_gens:
                 try:
                     gen.write({'state': 'processing'})
                     cr.commit()
@@ -295,8 +383,8 @@ class AiStudioSession(models.Model):
                     start_time = time.time()
                     source_image = gen.original_image
 
-                    # 1. Arka plan kaldırma (opsiyonel veya detay için zorunlu)
-                    if (auto_bg or gen.photo_type == 'detail') and source_image:
+                    # Arka plan kaldırma
+                    if auto_bg and source_image:
                         try:
                             garment_url = fal_client.upload(
                                 base64.b64decode(source_image),
@@ -319,27 +407,13 @@ class AiStudioSession(models.Model):
                             'image/jpeg',
                         )
 
-                    # Detay fotoğrafı ise giydirme yapma, direkt arka planı temizlenmiş resmi kaydet
-                    if gen.photo_type == 'detail':
-                        import requests
-                        img_data = requests.get(garment_url, timeout=60).content
-                        elapsed = time.time() - start_time
-                        gen.write({
-                            'generated_image': base64.b64encode(img_data),
-                            'state': 'done',
-                            'fal_endpoint': 'fal-ai/birefnet',
-                            'generation_time_seconds': elapsed,
-                            'cost': 0.002,  # Birefnet maliyeti
-                        })
-                        cr.commit()
-                        continue
-
-                    # 2. Manken resmini yükle
+                    # Manken resmini yükle
                     model_image_field = 'model_image_front'
                     if gen.photo_type == 'back':
                         model_image_field = 'model_image_back'
                     elif gen.photo_type == 'side':
                         model_image_field = 'model_image_side'
+                    
                     model_image_data = getattr(preset, model_image_field)
                     if not model_image_data:
                         model_image_data = preset.model_image_front
@@ -352,7 +426,7 @@ class AiStudioSession(models.Model):
                         'image/jpeg',
                     )
 
-                    # 3. Kategori belirleme
+                    # Kategori belirleme
                     cat = session.category
                     if cat == 'auto':
                         cat = preset.garment_type or 'tops'
@@ -362,13 +436,13 @@ class AiStudioSession(models.Model):
                         'one_piece': 'one-piece',
                     }.get(cat, 'tops')
 
-                    # 4. Endpoint belirleme
+                    # Endpoint belirleme
                     endpoint = env['ir.config_parameter'].sudo().get_param(
                         'ugurlar_ai_studio.default_endpoint',
                         'fal-ai/fashn/tryon/v1.6',
                     )
 
-                    # 5. Virtual try-on çağrısı
+                    # Virtual try-on çağrısı
                     result = fal_client.subscribe(
                         endpoint,
                         arguments={
@@ -382,7 +456,7 @@ class AiStudioSession(models.Model):
 
                     elapsed = time.time() - start_time
 
-                    # 6. Sonucu indir ve kaydet
+                    # Sonucu indir ve kaydet
                     import requests
                     output_url = ''
                     if 'images' in result and result['images']:
@@ -415,10 +489,85 @@ class AiStudioSession(models.Model):
                     })
                     cr.commit()
 
+            # 2. Sonra detay üretimlerini (kırpma işlemi ile) gerçekleştir
+            for gen in detail_gens:
+                try:
+                    gen.write({'state': 'processing'})
+                    cr.commit()
+
+                    start_time = time.time()
+
+                    # Hangi görselden kırpılacağını belirle (Ön veya Arka)
+                    target_type = 'front'
+                    if gen.source_photo_id and gen.source_photo_id.photo_type == 'detail':
+                        if gen.source_photo_id.detail_placement == 'back':
+                            target_type = 'back'
+
+                    # İlgili tamamlanmış giydirme görselini bul
+                    target_gen = session.generation_ids.filtered(
+                        lambda g: g.photo_type == target_type and g.state == 'done' and g.generated_image
+                    )
+
+                    # Arka giydirme bulunamadıysa öne geri dön
+                    if not target_gen and target_type == 'back':
+                        target_gen = session.generation_ids.filtered(
+                            lambda g: g.photo_type == 'front' and g.state == 'done' and g.generated_image
+                        )
+
+                    if target_gen:
+                        # Görseli kırp
+                        cropped_image = session._crop_image_detail(
+                            target_gen[0].generated_image,
+                            category=preset.garment_type or 'tops'
+                        )
+                        elapsed = time.time() - start_time
+                        gen.write({
+                            'generated_image': cropped_image,
+                            'state': 'done',
+                            'fal_endpoint': 'local-crop',
+                            'generation_time_seconds': elapsed,
+                            'cost': 0.0,  # Lokal kırpma ücretsizdir
+                        })
+                    else:
+                        # Fallback: Eğer başarılı try-on görseli bulunamadıysa ama orijinal detay varsa, arka plan temizleyip kaydet
+                        if gen.source_photo_id and gen.source_photo_id.image_original:
+                            source_image = gen.source_photo_id.image_original
+                            garment_url = fal_client.upload(
+                                base64.b64decode(source_image),
+                                'image/jpeg',
+                            )
+                            bg_result = fal_client.subscribe(
+                                'fal-ai/birefnet',
+                                arguments={'image_url': garment_url},
+                            )
+                            garment_url = bg_result['image']['url']
+                            import requests
+                            img_data = requests.get(garment_url, timeout=60).content
+                            elapsed = time.time() - start_time
+                            gen.write({
+                                'generated_image': base64.b64encode(img_data),
+                                'state': 'done',
+                                'fal_endpoint': 'fal-ai/birefnet',
+                                'generation_time_seconds': elapsed,
+                                'cost': 0.002,
+                            })
+                        else:
+                            raise Exception("Kırpılacak başarılı giydirilmiş manken görseli bulunamadı.")
+
+                    cr.commit()
+
+                except Exception as e:
+                    _logger.error('AI detay üretim hatası (gen=%s): %s', gen.id, e)
+                    gen.write({
+                        'state': 'failed',
+                        'error_message': str(e)[:500],
+                    })
+                    cr.commit()
+
             # Tüm üretimler tamamlandı
             session.write({'state': 'review'})
             session.message_post(
-                body=_('AI üretimi tamamlandı. %d görsel onay bekliyor.') % len(generations),
+                body=_('AI üretimi tamamlandı. %d görsel onay bekliyor.') % len(session.generation_ids),
             )
             cr.commit()
 
@@ -457,31 +606,57 @@ class AiStudioSession(models.Model):
 
                 source_image = gen.original_image
 
-                # Detay ise direkt arka plan temizleme yapıp bitir
+                # Detay ise kırpma işlemini yap
                 if gen.photo_type == 'detail':
-                    try:
-                        garment_url = fal_client.upload(
-                            base64.b64decode(source_image), 'image/jpeg'
-                        )
-                        bg_result = fal_client.subscribe(
-                            'fal-ai/birefnet',
-                            arguments={'image_url': garment_url},
-                        )
-                        garment_url = bg_result['image']['url']
-                    except Exception as e:
-                        _logger.warning('Retry BG remove başarısız: %s', e)
-                        garment_url = fal_client.upload(
-                            base64.b64decode(source_image), 'image/jpeg'
-                        )
+                    target_type = 'front'
+                    if gen.source_photo_id and gen.source_photo_id.photo_type == 'detail':
+                        if gen.source_photo_id.detail_placement == 'back':
+                            target_type = 'back'
+
+                    target_gen = session.generation_ids.filtered(
+                        lambda g: g.photo_type == target_type and g.state == 'done' and g.generated_image
+                    )
                     
-                    import requests
-                    img_data = requests.get(garment_url, timeout=60).content
-                    gen.write({
-                        'generated_image': base64.b64encode(img_data),
-                        'state': 'done',
-                        'fal_endpoint': 'fal-ai/birefnet',
-                        'error_message': False,
-                    })
+                    if not target_gen and target_type == 'back':
+                        target_gen = session.generation_ids.filtered(
+                            lambda g: g.photo_type == 'front' and g.state == 'done' and g.generated_image
+                        )
+
+                    if target_gen:
+                        cropped_image = session._crop_image_detail(
+                            target_gen[0].generated_image,
+                            category=preset.garment_type or 'tops'
+                        )
+                        gen.write({
+                            'generated_image': cropped_image,
+                            'state': 'done',
+                            'fal_endpoint': 'local-crop',
+                            'error_message': False,
+                        })
+                    else:
+                        # Fallback: başarılı try-on bulunamazsa background remove yap
+                        if gen.source_photo_id and gen.source_photo_id.image_original:
+                            try:
+                                garment_url = fal_client.upload(
+                                    base64.b64decode(gen.source_photo_id.image_original), 'image/jpeg'
+                                )
+                                bg_result = fal_client.subscribe(
+                                    'fal-ai/birefnet',
+                                    arguments={'image_url': garment_url},
+                                )
+                                garment_url = bg_result['image']['url']
+                                import requests
+                                img_data = requests.get(garment_url, timeout=60).content
+                                gen.write({
+                                    'generated_image': base64.b64encode(img_data),
+                                    'state': 'done',
+                                    'fal_endpoint': 'fal-ai/birefnet',
+                                    'error_message': False,
+                                })
+                            except Exception as e:
+                                raise Exception(f"Kırpılacak görsel bulunamadı ve fallback arka plan kaldırma başarısız oldu: {e}")
+                        else:
+                            raise Exception("Kırpılacak başarılı giydirilmiş manken görseli bulunamadı.")
                     cr.commit()
                     return
 
