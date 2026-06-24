@@ -255,6 +255,7 @@ class AiStudioSession(models.Model):
 
     def _process_ai_thread(self, session_id, api_key):
         """Thread içinde tüm generation'ları işle."""
+        time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
         import os
         os.environ['FAL_KEY'] = api_key
 
@@ -418,6 +419,7 @@ class AiStudioSession(models.Model):
 
     def _retry_generation_thread(self, session_id, gen_id, api_key):
         """Tek generation retry thread'i."""
+        time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
         import os
         os.environ['FAL_KEY'] = api_key
 

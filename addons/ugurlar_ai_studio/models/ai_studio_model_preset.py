@@ -1,6 +1,7 @@
 import logging
 import base64
 import threading
+import time
 
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
@@ -347,6 +348,7 @@ class AiStudioModelPreset(models.Model):
     def _generate_mannequin_thread(self, preset_id, prompt, api_key,
                                     gender, body_type, bg_type):
         """Thread içinde AI manken oluştur — SaaS tarzı consistency ile."""
+        time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
         try:
             # Gender/body hints
             gender_hints = {
