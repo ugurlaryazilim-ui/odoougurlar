@@ -213,14 +213,13 @@ class AiStudioModelPreset(models.Model):
         "Joints must be naturally articulated. No impossible leg or arm angles."
     )
 
-    # 4. Anti-Nude / Full Outfit (İç Çamaşırı / Sade Spor Giyim Modu)
+    # 4. Anti-Nude / Full Outfit (Profesyonel Tam Giyim Modu)
     ANTI_NUDE_LOCK = (
-        "OUTFIT MANDATORY LOCK: The model MUST wear minimal form-fitting activewear or underwear. "
-        "Model MUST wear: a simple form-fitting neutral crop top / sports bra and matching boy shorts / briefs / leggings. "
-        "No bare chest, no total nudity. The undergarments should be completely plain, neutral gray or black color, with no patterns. "
-        "This is a mannequin preset — the model should be in tight, skin-hugging undergarments or sportswear "
-        "so that clothes can be easily dressed over them by AI later. "
-        "ANY actual total nudity (completely bare body) is a CRITICAL FAILURE."
+        "OUTFIT MANDATORY LOCK: The model MUST wear a professional neutral matching outfit. "
+        "Model MUST wear: a simple solid-colored form-fitting crop top / sports bra, paired with casual long trousers (like beige or grey cotton pants), and clean white sneakers. "
+        "No bare chest, no bare legs, no underwear look, no swimsuit look. The model must look fully clothed on the lower body. "
+        "The crop top is form-fitting to facilitate virtual try-on, and the trousers and sneakers provide a complete professional look. "
+        "ANY underwear-only look or barefoot look is a CRITICAL FAILURE."
     )
 
     # 5. Posture
@@ -249,7 +248,7 @@ class AiStudioModelPreset(models.Model):
         "beauty filter, airbrushed, over-smooth, blurry, low quality, "
         "collage, split screen, multi-panel, grid layout, montage, "
         "interior room, furniture, flat-lay, hanger, product-only shot, "
-        "bare midriff, bare chest, exposed stomach, underwear look, nude model, "
+        "underwear look, nude model, "
         "SMILING, HAPPY, LAUGHING, ROBOTIC, STIFF."
     )
 
@@ -368,14 +367,23 @@ class AiStudioModelPreset(models.Model):
                 'petite': 'petite, slender build, 158cm height',
             }
 
-            # Ürün tipine göre kıyafet belirleme (İç çamaşırı / minimal spor giyim)
-            outfit_hints = {
-                'tops': 'wearing a tight simple sports bra, minimal shorts, barefoot',
-                'bottoms': 'wearing a tight crop top, simple neutral briefs, barefoot',
-                'one_piece': 'wearing a tight minimalist sports crop top and matching boy shorts, barefoot',
-                'shoes': 'wearing a minimal sports bra and tight short leggings, bare feet',
-                'bags': 'wearing a tight black crop top and simple grey sports shorts, barefoot',
-                'accessories': 'wearing a simple neutral sports bra and basic boy shorts, barefoot',
+            # Ürün tipine göre kıyafet belirleme (Tam giyinik profesyonel model)
+            outfit_hints_front = {
+                'tops': 'wearing a tight form-fitting solid-colored crop top, matching beige cotton trousers, and clean white sneakers',
+                'bottoms': 'wearing a tight form-fitting solid-colored crop top, matching beige cotton trousers, and clean white sneakers',
+                'one_piece': 'wearing a tight form-fitting solid-colored crop top, matching beige cotton trousers, and clean white sneakers',
+                'shoes': 'wearing a tight form-fitting solid-colored crop top, matching beige cotton trousers, and clean white sneakers',
+                'bags': 'wearing a tight form-fitting solid-colored crop top, matching beige cotton trousers, and clean white sneakers',
+                'accessories': 'wearing a tight form-fitting solid-colored crop top, matching beige cotton trousers, and clean white sneakers',
+            }
+
+            outfit_hints_back = {
+                'tops': 'wearing a tight solid-colored sports bra that leaves the entire back completely bare and exposed, matching beige cotton trousers, and clean white sneakers',
+                'bottoms': 'wearing a tight solid-colored sports bra that leaves the entire back completely bare and exposed, matching beige cotton trousers, and clean white sneakers',
+                'one_piece': 'wearing a tight solid-colored sports bra that leaves the entire back completely bare and exposed, matching beige cotton trousers, and clean white sneakers',
+                'shoes': 'wearing a tight solid-colored sports bra that leaves the entire back completely bare and exposed, matching beige cotton trousers, and clean white sneakers',
+                'bags': 'wearing a tight solid-colored sports bra that leaves the entire back completely bare and exposed, matching beige cotton trousers, and clean white sneakers',
+                'accessories': 'wearing a tight solid-colored sports bra that leaves the entire back completely bare and exposed, matching beige cotton trousers, and clean white sneakers',
             }
 
             garment_type = 'tops'
@@ -387,15 +395,21 @@ class AiStudioModelPreset(models.Model):
             except Exception:
                 pass
 
-            enhanced_prompt = (
+            enhanced_prompt_front = (
                 f"{prompt}, {gender_hints.get(gender, 'young adult')}, "
                 f"{body_hints.get(body_type, 'standard build')}, "
-                f"{outfit_hints.get(garment_type, outfit_hints['tops'])}"
+                f"{outfit_hints_front.get(garment_type, outfit_hints_front['tops'])}"
+            )
+
+            enhanced_prompt_back = (
+                f"{prompt}, {gender_hints.get(gender, 'young adult')}, "
+                f"{body_hints.get(body_type, 'standard build')}, "
+                f"{outfit_hints_back.get(garment_type, outfit_hints_back['tops'])}"
             )
 
             # ═══ ÖNDEN MANKEN ═══
             _logger.info('Manken oluşturuluyor (ön): preset_id=%s', preset_id)
-            front_full_prompt = self._build_full_prompt(enhanced_prompt, view='front')
+            front_full_prompt = self._build_full_prompt(enhanced_prompt_front, view='front')
 
             front_result = self._fal_api_call(
                 'fal-ai/flux-pro/v1.1',
@@ -418,20 +432,20 @@ class AiStudioModelPreset(models.Model):
             front_data = self._download_image_b64(front_url)
 
             # ═══ ARKADAN MANKEN ═══
-            # Ön görseli referans olarak kullan — aynı kişi olsun
             _logger.info('Manken oluşturuluyor (arka): preset_id=%s', preset_id)
 
-            # Ön görseli fal storage'a yüklemeyi dene
+            # Ön görseli fal storage'a yükle
             front_fal_url = self._upload_to_fal(front_data, api_key)
 
             if front_fal_url:
-                # nano-banana-pro/edit ile tutarlı arka görsel
                 _logger.info('nano-banana-pro/edit ile tutarlı arka görsel')
                 back_prompt = (
                     f"OUTPUT EXACTLY ONE IMAGE. "
                     f"Show the EXACT SAME person from the reference image, "
                     f"but from the BACK VIEW — facing away from camera. "
-                    f"SAME person, SAME clothes, SAME hair, SAME body. "
+                    f"SAME person, SAME trousers, SAME hair, SAME body. "
+                    f"The top she is wearing is a crop top / sports bra that is completely open in the back, "
+                    f"leaving her entire back bare and exposed, showing her skin. "
                     f"Only the camera angle changes to show the back. "
                     f"{self.IDENTITY_LOCK} {self.ANTI_NUDE_LOCK} "
                     f"{self.ANATOMY_LOCK} {self.STUDIO_LOCK}"
@@ -453,9 +467,8 @@ class AiStudioModelPreset(models.Model):
                     timeout=180,
                 )
             else:
-                # Fallback: text-to-image ile arka görsel
                 _logger.info('Fallback: text-to-image ile arka görsel')
-                back_full_prompt = self._build_full_prompt(enhanced_prompt, view='back')
+                back_full_prompt = self._build_full_prompt(enhanced_prompt_back, view='back')
                 back_result = self._fal_api_call(
                     'fal-ai/flux-pro/v1.1',
                     {

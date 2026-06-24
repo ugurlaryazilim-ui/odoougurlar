@@ -235,6 +235,50 @@ class AiStudioSession(models.Model):
             _logger.error("Kırpma hatası: %s", e)
             return image_base64
 
+    def _remove_hanger_hook(self, image_base64):
+        """Görseldeki askı kancasını (en üstteki ince çıkıntıyı) temizler."""
+        if not image_base64:
+            return False
+        try:
+            import io
+            import base64
+            from PIL import Image
+            
+            # Base64 decode
+            img_data = base64.b64decode(image_base64)
+            img = Image.open(io.BytesIO(img_data))
+            
+            # RGBA moduna çevir (şeffaflık için)
+            if img.mode != 'RGBA':
+                img = img.convert('RGBA')
+                
+            w, h = img.size
+            pixels = img.load()
+            
+            # Satır satır yukarıdan aşağıya tara
+            for y in range(int(h * 0.25)): # İlk %25'lik alanı tara
+                non_transparent_count = 0
+                for x in range(w):
+                    r, g, b, a = pixels[x, y]
+                    if a > 30: # 30'dan büyükse yarı-şeffaf veya doludur
+                        non_transparent_count += 1
+                
+                # Eğer satırdaki dolu piksel sayısı resim genişliğinin %10'undan az ise kanca kabul et ve şeffaflaştır
+                if non_transparent_count > 0 and non_transparent_count < (w * 0.10):
+                    for x in range(w):
+                        pixels[x, y] = (0, 0, 0, 0)
+                elif non_transparent_count >= (w * 0.10):
+                    # Geniş bir alana ulaştık (omuz/yaka), temizlemeyi durdur
+                    break
+                    
+            # Tekrar base64'e dönüştür
+            buffered = io.BytesIO()
+            img.save(buffered, format='PNG')
+            return base64.b64encode(buffered.getvalue())
+        except Exception as e:
+            _logger.error("Askı kancası temizleme hatası: %s", e)
+            return image_base64
+
     # --- Durum Geçişleri ---
 
     def action_photos_ready(self):
@@ -383,7 +427,7 @@ class AiStudioSession(models.Model):
                     start_time = time.time()
                     source_image = gen.original_image
 
-                    # Arka plan kaldırma
+                    # Arka plan kaldırma ve askı temizleme
                     if auto_bg and source_image:
                         try:
                             garment_url = fal_client.upload(
@@ -395,8 +439,18 @@ class AiStudioSession(models.Model):
                                 arguments={'image_url': garment_url},
                             )
                             garment_url = bg_result['image']['url']
+                            
+                            # Askı temizleme işlemi (arka plan kaldırılmış görsel üzerinde)
+                            import requests
+                            bg_removed_data = requests.get(garment_url, timeout=60).content
+                            bg_removed_b64 = base64.b64encode(bg_removed_data)
+                            cleaned_b64 = session._remove_hanger_hook(bg_removed_b64)
+                            garment_url = fal_client.upload(
+                                base64.b64decode(cleaned_b64),
+                                'image/png',
+                            )
                         except Exception as e:
-                            _logger.warning('BG remove başarısız, orijinal kullanılıyor: %s', e)
+                            _logger.warning('BG remove veya askı temizleme başarısız, orijinal kullanılıyor: %s', e)
                             garment_url = fal_client.upload(
                                 base64.b64decode(source_image),
                                 'image/jpeg',
@@ -660,9 +714,43 @@ class AiStudioSession(models.Model):
                     cr.commit()
                     return
 
-                garment_url = fal_client.upload(
-                    base64.b64decode(source_image), 'image/jpeg'
-                )
+                auto_bg = env['ir.config_parameter'].sudo().get_param(
+                    'ugurlar_ai_studio.auto_bg_remove', 'True'
+                ) == 'True'
+
+                # Arka plan kaldırma ve askı temizleme
+                if auto_bg and source_image:
+                    try:
+                        garment_url = fal_client.upload(
+                            base64.b64decode(source_image),
+                            'image/jpeg',
+                        )
+                        bg_result = fal_client.subscribe(
+                            'fal-ai/birefnet',
+                            arguments={'image_url': garment_url},
+                        )
+                        garment_url = bg_result['image']['url']
+                        
+                        # Askı temizleme işlemi
+                        import requests
+                        bg_removed_data = requests.get(garment_url, timeout=60).content
+                        bg_removed_b64 = base64.b64encode(bg_removed_data)
+                        cleaned_b64 = session._remove_hanger_hook(bg_removed_b64)
+                        garment_url = fal_client.upload(
+                            base64.b64decode(cleaned_b64),
+                            'image/png',
+                        )
+                    except Exception as e:
+                        _logger.warning('Retry BG remove veya askı temizleme başarısız, orijinal kullanılıyor: %s', e)
+                        garment_url = fal_client.upload(
+                            base64.b64decode(source_image),
+                            'image/jpeg',
+                        )
+                else:
+                    garment_url = fal_client.upload(
+                        base64.b64decode(source_image),
+                        'image/jpeg',
+                    )
 
                 preset = session.model_preset_id
                 model_image_field = 'model_image_front'
@@ -683,13 +771,23 @@ class AiStudioSession(models.Model):
                     'fal-ai/fashn/tryon/v1.6',
                 )
 
+                cat = session.category
+                if cat == 'auto':
+                    cat = preset.garment_type or 'tops'
+                fal_category = {
+                    'tops': 'tops',
+                    'bottoms': 'bottoms',
+                    'one_piece': 'one-piece',
+                }.get(cat, 'tops')
+
                 result = fal_client.subscribe(
                     endpoint,
                     arguments={
                         'model_image': model_url,
                         'garment_image': garment_url,
-                        'category': 'tops',
+                        'category': fal_category,
                         'mode': session.quality_mode or 'balanced',
+                        'garment_photo_type': 'flat-lay',
                     },
                 )
 
