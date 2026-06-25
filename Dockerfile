@@ -9,6 +9,9 @@ RUN pip install --break-system-packages --ignore-installed fashn
 COPY ./addons /mnt/extra-addons
 COPY ./config /etc/odoo
 
+# 2.5. Orijinal Odoo kodundaki MemoryError hatasını yamalıyoruz
+RUN python3 /mnt/extra-addons/patch_odoo.py
+
 # 3. İzinlerin Odoo kullanıcısına devredilmesi (Production güvenliği)
 RUN chown -R odoo:odoo /mnt/extra-addons \
  && chown -R odoo:odoo /etc/odoo
