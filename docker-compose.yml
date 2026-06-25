@@ -19,6 +19,7 @@ services:
     build: .
     container_name: odoougurlar-odoo
     restart: unless-stopped
+    command: odoo -u ugurlar_images -d ugurlar
     depends_on:
       db:
         condition: service_healthy
