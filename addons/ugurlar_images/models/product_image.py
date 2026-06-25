@@ -7,32 +7,31 @@ _logger = logging.getLogger(__name__)
 
 class ProductImage(models.Model):
     """Ürünlere birden fazla alternatif görsel ekleme desteği."""
-    _name = 'product.image'
-    _description = 'Ürün Görseli'
-    _order = 'sequence, id'
-    _rec_name = 'name'
-
-    name = fields.Char(string='Açıklama', required=True)
-    sequence = fields.Integer(string='Sıra', default=10)
-    image_1920 = fields.Image(string='Görsel', max_width=1920, max_height=1920, required=True)
-    product_tmpl_id = fields.Many2one(
-        'product.template',
-        string='Ürün Şablonu',
-        index=True,
-        ondelete='cascade',
-    )
-    product_variant_id = fields.Many2one(
-        'product.product',
-        string='Ürün Varyantı',
-        index=True,
-        ondelete='cascade',
-    )
+    _inherit = 'product.image'
 
     # Odoo 19: models.Constraint (eski _sql_constraints kaldırıldı)
     _unique_variant_name = models.Constraint(
         'UNIQUE(product_variant_id, name)',
         'Bu varyant için bu isimde sadece bir görsel olabilir!',
     )
+
+    def _compute_can_image_1024_be_zoomed(self):
+        """
+        Görsel boyut kontrolü.
+        MemoryError hatasını önlemek için prefetch kapatılarak teker teker işlenir.
+        """
+        if hasattr(super(), '_compute_can_image_1024_be_zoomed'):
+            from odoo.tools.image import is_image_size_above
+            for image in self.with_context(prefetch_fields=False):
+                try:
+                    image.can_image_1024_be_zoomed = image.image_1920 and is_image_size_above(image.image_1920, image.image_1024)
+                except Exception as e:
+                    _logger.warning('Zoom recompute error for image %s: %s', image.id, e)
+                    image.can_image_1024_be_zoomed = False
+        else:
+            if 'can_image_1024_be_zoomed' in self._fields:
+                for image in self:
+                    image.can_image_1024_be_zoomed = False
 
 
 class ProductProductImageExtend(models.Model):
