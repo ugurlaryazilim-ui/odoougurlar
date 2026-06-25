@@ -1,6 +1,7 @@
 import logging
 
-from odoo import models, fields, api
+from odoo import models, fields, api, _
+from odoo.exceptions import ValidationError
 
 _logger = logging.getLogger(__name__)
 
@@ -25,11 +26,17 @@ class ProductImage(models.Model):
         ondelete='cascade',
     )
 
-    # Odoo 19: models.Constraint (eski _sql_constraints kaldırıldı)
-    _unique_variant_name = models.Constraint(
-        'UNIQUE(product_variant_id, name)',
-        'Bu varyant için bu isimde sadece bir görsel olabilir!',
-    )
+    @api.constrains('product_variant_id', 'name')
+    def _check_unique_variant_name(self):
+        for image in self:
+            if image.product_variant_id and image.name:
+                duplicates = self.search_count([
+                    ('product_variant_id', '=', image.product_variant_id.id),
+                    ('name', '=', image.name),
+                    ('id', '!=', image.id),
+                ])
+                if duplicates > 0:
+                    raise ValidationError(_('Bu varyant için bu isimde sadece bir görsel olabilir!'))
 
     def _compute_can_image_1024_be_zoomed(self):
         """
