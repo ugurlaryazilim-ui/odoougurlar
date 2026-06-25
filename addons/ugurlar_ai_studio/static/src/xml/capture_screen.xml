@@ -2,20 +2,8 @@
 <templates xml:space="preserve">
 
     <t t-name="ugurlar_ai_studio.CaptureScreen" owl="1">
-        <div class="ais-screen ais-capture">
-            <div class="ais-header">
-                <button class="btn btn-link" t-on-click="props.onBackToScan">← Geri</button>
-                <h2 class="ais-title">📸 Fotoğraf Çekimi</h2>
-            </div>
-
-            <!-- Ürün Bilgisi -->
-            <div class="ais-product-strip">
-                <t t-if="props.productInfo">
-                    <strong t-out="props.productInfo.name"/>
-                </t>
-            </div>
-
-            <!-- Kamera Önizleme -->
+        <div class="ais-capture-fullscreen">
+            <!-- Arka Planda Kamera Önizleme -->
             <div class="ais-camera-container">
                 <t t-if="state.cameraError">
                     <div class="ais-camera-error">
@@ -24,70 +12,137 @@
                 </t>
                 <t t-else="">
                     <video t-ref="cameraVideo" autoplay="true" playsinline="true" class="ais-camera-video"/>
-                    <div class="ais-camera-grid"/>
+                    
+                    <!-- Kılavuz Çizgiler ve Ürün Hizalama Rehberi -->
+                    <div class="ais-camera-overlay-layer">
+                        <div class="ais-camera-grid"/>
+                        
+                        <!-- Görsel Rehber (Manken/Kıyafet Silüeti) -->
+                        <div class="ais-camera-guide">
+                            <svg viewBox="0 0 100 100" class="ais-guide-svg">
+                                <path d="M 50 15 
+                                         C 45 15, 43 18, 40 20 
+                                         C 37 22, 30 25, 25 25 
+                                         C 22 25, 20 27, 20 30 
+                                         L 23 45 
+                                         C 23 47, 25 48, 27 48 
+                                         L 30 48 
+                                         L 30 85 
+                                         C 30 88, 33 90, 36 90 
+                                         L 64 90 
+                                         C 67 90, 70 88, 70 85 
+                                         L 70 48 
+                                         L 73 48 
+                                         C 75 48, 77 47, 77 45 
+                                         L 80 30 
+                                         C 80 27, 78 25, 75 25 
+                                         C 70 25, 63 22, 60 20 
+                                         C 57 18, 55 15, 50 15 Z" 
+                                      fill="none" 
+                                      stroke="rgba(255, 255, 255, 0.45)" 
+                                      stroke-width="0.8" 
+                                      stroke-dasharray="2,2" />
+                            </svg>
+                            <span class="ais-guide-text">Ürünü / Mankeninizi bu alana hizalayın</span>
+                        </div>
+                    </div>
                     <canvas t-ref="captureCanvas" class="d-none"/>
                 </t>
             </div>
 
-            <!-- Tab Bar: Ön / Arka / Yan / Detay -->
-            <div class="ais-photo-tabs">
-                <button t-attf-class="ais-tab {{ state.activeTab === 'front' ? 'active' : '' }}"
-                        t-on-click="() => this.setTab('front')">
-                    <t t-if="state.hasFront">✅</t><t t-else="">⬜</t> Ön
-                </button>
-                <button t-attf-class="ais-tab {{ state.activeTab === 'back' ? 'active' : '' }}"
-                        t-on-click="() => this.setTab('back')">
-                    <t t-if="state.hasBack">✅</t><t t-else="">⬜</t> Arka
-                </button>
-                <button t-attf-class="ais-tab {{ state.activeTab === 'side' ? 'active' : '' }}"
-                        t-on-click="() => this.setTab('side')">
-                    <t t-if="state.hasSide">✅</t><t t-else="">⬜</t> Yan
-                </button>
-                <button t-attf-class="ais-tab {{ state.activeTab === 'detail' ? 'active' : '' }}"
-                        t-on-click="() => this.setTab('detail')">
-                    ➕ Detay (<t t-out="state.detailCount"/>)
-                </button>
-            </div>
-
-            <!-- Çekilmiş Fotoğraf Önizleme -->
-            <t t-if="currentPhoto and state.activeTab !== 'detail'">
-                <div class="ais-preview-strip">
-                    <img t-att-src="currentPhoto.preview" class="ais-preview-thumb"/>
-                    <button class="btn btn-sm btn-warning" t-on-click="retakePhoto">🔄 Tekrar</button>
+            <!-- Üst Arayüz Katmanı (Header + Ürün Bilgisi) -->
+            <div class="ais-ui-top">
+                <div class="ais-header-transparent">
+                    <button class="btn btn-back" t-on-click="props.onBackToScan">
+                        <span class="back-icon">←</span> Geri
+                    </button>
+                    <h2 class="ais-title-light">📸 Fotoğraf Çekimi</h2>
+                    <div class="ais-header-spacer"></div>
                 </div>
-            </t>
 
-            <!-- Detay Fotoğraf Listesi -->
-            <t t-if="state.activeTab === 'detail' and state.photos.details.length > 0">
-                <div class="ais-detail-gallery">
-                    <t t-foreach="state.photos.details" t-as="detail" t-key="detail_index">
-                        <div class="ais-detail-item">
-                            <img t-att-src="detail.preview" class="ais-detail-thumb"/>
-                            <button class="ais-detail-remove" t-on-click="() => this.removeDetail(detail_index)">✕</button>
+                <!-- Ürün Bilgisi Şeridi -->
+                <div class="ais-product-strip-glass">
+                    <t t-if="props.productInfo">
+                        <div class="ais-product-details">
+                            <span class="ais-product-tag">Ürün</span>
+                            <strong class="ais-product-name" t-out="props.productInfo.name"/>
                         </div>
                     </t>
                 </div>
-            </t>
-
-            <!-- Aksiyon Butonları -->
-            <div class="ais-capture-actions">
-                <button class="ais-btn-capture" t-on-click="capturePhoto"
-                        t-att-disabled="!state.cameraActive">
-                    📷 Çek
-                </button>
-                <button class="ais-btn-toggle-cam" t-on-click="toggleCamera">
-                    🔄
-                </button>
             </div>
 
-            <!-- Devam Butonu -->
-            <t t-if="canProceed">
-                <div class="ais-bottom-bar">
-                    <button class="ais-btn-primary" t-on-click="proceed">
-                        Devam → AI Ayarları
+            <!-- Alt Arayüz Katmanı (Tablar + Önizlemeler + Çekim Butonları) -->
+            <div class="ais-ui-bottom">
+                <!-- Fotoğraf Modu / Tab Bar -->
+                <div class="ais-photo-tabs-glass">
+                    <button t-attf-class="ais-tab-glass {{ state.activeTab === 'front' ? 'active' : '' }}"
+                            t-on-click="() => this.setTab('front')">
+                        <span class="status-indicator" t-att-class="{ active: state.hasFront }"></span> Ön
+                    </button>
+                    <button t-attf-class="ais-tab-glass {{ state.activeTab === 'back' ? 'active' : '' }}"
+                            t-on-click="() => this.setTab('back')">
+                        <span class="status-indicator" t-att-class="{ active: state.hasBack }"></span> Arka
+                    </button>
+                    <button t-attf-class="ais-tab-glass {{ state.activeTab === 'side' ? 'active' : '' }}"
+                            t-on-click="() => this.setTab('side')">
+                        <span class="status-indicator" t-att-class="{ active: state.hasSide }"></span> Yan
+                    </button>
+                    <button t-attf-class="ais-tab-glass {{ state.activeTab === 'detail' ? 'active' : '' }}"
+                            t-on-click="() => this.setTab('detail')">
+                        <span class="plus-icon">+</span> Detay (<t t-out="state.detailCount"/>)
                     </button>
                 </div>
-            </t>
+
+                <!-- Çekilmiş Fotoğraf Önizleme -->
+                <t t-if="currentPhoto and state.activeTab !== 'detail'">
+                    <div class="ais-preview-strip-glass">
+                        <img t-att-src="currentPhoto.preview" class="ais-preview-thumb-glass"/>
+                        <div class="ais-preview-info">
+                            <span class="text-white-50 small">Çekim Yapıldı</span>
+                            <button class="btn btn-retake" t-on-click="retakePhoto">🔄 Yeniden Çek</button>
+                        </div>
+                    </div>
+                </t>
+
+                <!-- Detay Fotoğraf Listesi -->
+                <t t-if="state.activeTab === 'detail' and state.photos.details.length > 0">
+                    <div class="ais-detail-gallery-glass">
+                        <t t-foreach="state.photos.details" t-as="detail" t-key="detail_index">
+                            <div class="ais-detail-item-glass">
+                                <img t-att-src="detail.preview" class="ais-detail-thumb-glass"/>
+                                <button class="ais-detail-remove-glass" t-on-click="() => this.removeDetail(detail_index)">✕</button>
+                            </div>
+                        </t>
+                    </div>
+                </t>
+
+                <!-- Ana Kontroller (Kamera Değiştirme + Çekim) -->
+                <div class="ais-capture-controls">
+                    <div class="control-side">
+                        <!-- Spacer to balance -->
+                    </div>
+                    
+                    <button class="ais-btn-shutter" t-on-click="capturePhoto"
+                            t-att-disabled="!state.cameraActive">
+                        <div class="shutter-inner"></div>
+                    </button>
+                    
+                    <button class="ais-btn-rotate" t-on-click="toggleCamera" title="Kamera Değiştir">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-rotate">
+                            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Devam Et Barı -->
+                <t t-if="canProceed">
+                    <div class="ais-proceed-bar">
+                        <button class="ais-btn-proceed" t-on-click="proceed">
+                            Devam Et (AI Giydirme Ayarları) →
+                        </button>
+                    </div>
+                </t>
+            </div>
         </div>
     </t>
 

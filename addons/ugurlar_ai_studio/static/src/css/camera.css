@@ -1,15 +1,33 @@
 /* ============================================================ */
-/* Kamera Ekranı Stilleri                                       */
+/* Kamera Ekranı Stilleri — İmmersif Fullscreen & responsive   */
 /* ============================================================ */
 
-.ais-camera-container {
-    position: relative;
-    width: 100%;
-    aspect-ratio: 4/3;
-    border-radius: var(--ais-radius);
-    overflow: hidden;
+.ais-capture-fullscreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 1050;
     background: #000;
-    margin-bottom: 12px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    font-family: 'Inter', -apple-system, system-ui, sans-serif;
+}
+
+/* Kamera Önizleme */
+.ais-camera-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+    background: #000;
 }
 
 .ais-camera-video {
@@ -23,161 +41,468 @@
     align-items: center;
     justify-content: center;
     height: 100%;
-    color: var(--ais-danger);
-    font-size: 15px;
+    color: #fff;
+    font-size: 16px;
     text-align: center;
     padding: 20px;
-    background: rgba(0, 0, 0, 0.05);
+    background: #111;
 }
 
-/* Kılavuz çizgiler */
+/* Kılavuz Çizgileri ve Rehber Katmanı */
+.ais-camera-overlay-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+}
+
 .ais-camera-grid {
     position: absolute;
     top: 0;
     left: 0;
-    right: 0;
-    bottom: 0;
-    pointer-events: none;
+    width: 100%;
+    height: 100%;
     background:
-        linear-gradient(to right, rgba(255,255,255,0.15) 1px, transparent 1px),
-        linear-gradient(to bottom, rgba(255,255,255,0.15) 1px, transparent 1px);
+        linear-gradient(to right, rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
     background-size: 33.33% 33.33%;
 }
 
-/* Tab Bar */
-.ais-photo-tabs {
+/* Görsel Rehber (Silhouette) */
+.ais-camera-guide {
     display: flex;
-    gap: 4px;
-    margin-bottom: 12px;
-    background: var(--ais-card-bg);
-    padding: 4px;
-    border-radius: var(--ais-radius-sm);
-    box-shadow: var(--ais-shadow);
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 85%;
+    max-width: 320px;
+    height: 65%;
+    max-height: 480px;
+    animation: fadeInPulse 3s infinite ease-in-out;
 }
 
-.ais-tab {
-    flex: 1;
-    padding: 10px;
-    border: none;
-    background: transparent;
-    border-radius: 6px;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: var(--ais-transition);
-    color: var(--ais-text-muted);
+.ais-guide-svg {
+    width: 100%;
+    height: 100%;
+    opacity: 0.5;
+    filter: drop-shadow(0px 4px 12px rgba(0, 0, 0, 0.6));
 }
 
-.ais-tab.active {
-    background: var(--ais-primary);
-    color: white;
+.ais-guide-text {
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+    margin-top: 16px;
+    background: rgba(0, 0, 0, 0.6);
+    padding: 6px 16px;
+    border-radius: 20px;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }
 
-/* Preview Strip */
-.ais-preview-strip {
+/* Üst Arayüz Katmanı */
+.ais-ui-top {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    padding: calc(env(safe-area-inset-top, 16px) + 8px) 16px 20px;
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0.4) 60%, rgba(0, 0, 0, 0) 100%);
+}
+
+.ais-header-transparent {
     display: flex;
     align-items: center;
-    gap: 12px;
-    background: var(--ais-card-bg);
-    padding: 8px;
-    border-radius: var(--ais-radius-sm);
-    margin-bottom: 12px;
-    box-shadow: var(--ais-shadow);
+    justify-content: space-between;
+    height: 44px;
 }
 
-.ais-preview-thumb {
-    width: 64px;
-    height: 64px;
-    border-radius: 6px;
-    object-fit: cover;
-}
-
-/* Detail Gallery */
-.ais-detail-gallery {
+.ais-header-transparent .btn-back {
+    background: rgba(255, 255, 255, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #fff;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 600;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     display: flex;
-    gap: 8px;
-    overflow-x: auto;
-    padding: 8px 0;
-    margin-bottom: 12px;
-    -webkit-overflow-scrolling: touch;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.2s;
 }
 
-.ais-detail-item {
+.ais-header-transparent .btn-back:active {
+    transform: scale(0.95);
+    background: rgba(255, 255, 255, 0.25);
+}
+
+.ais-title-light {
+    color: #fff;
+    font-size: 18px;
+    font-weight: 700;
+    margin: 0;
+    letter-spacing: -0.3px;
+}
+
+.ais-header-spacer {
+    width: 72px; /* to balance the back button */
+}
+
+/* Ürün Bilgi Şeridi */
+.ais-product-strip-glass {
+    margin-top: 14px;
+    background: rgba(0, 0, 0, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    padding: 10px 14px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    width: 100%;
+    max-width: 480px;
+    align-self: center;
+}
+
+.ais-product-details {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.ais-product-tag {
+    background: #6C63FF;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 6px;
+    letter-spacing: 0.5px;
+}
+
+.ais-product-name {
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+/* Alt Arayüz Katmanı */
+.ais-ui-bottom {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    padding: 24px 16px calc(env(safe-area-inset-bottom, 16px) + 12px);
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.4) 65%, rgba(0, 0, 0, 0) 100%);
+}
+
+/* Tab Bar */
+.ais-photo-tabs-glass {
+    display: flex;
+    gap: 6px;
+    background: rgba(0, 0, 0, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 4px;
+    border-radius: 30px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    margin-bottom: 18px;
+    width: 100%;
+    max-width: 440px;
+    align-self: center;
+}
+
+.ais-tab-glass {
+    flex: 1;
+    padding: 10px 4px;
+    border: none;
+    background: transparent;
+    border-radius: 26px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.65);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ais-tab-glass.active {
+    background: #fff;
+    color: #000;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.25);
+    display: inline-block;
+    transition: background 0.3s, box-shadow 0.3s;
+}
+
+.status-indicator.active {
+    background: #2ECC71;
+    box-shadow: 0 0 8px #2ECC71;
+}
+
+.plus-icon {
+    font-weight: 800;
+}
+
+/* Çekilmiş Fotoğraf Önizleme Şeridi */
+.ais-preview-strip-glass {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    padding: 8px 14px;
+    border-radius: 14px;
+    margin-bottom: 18px;
+    backdrop-filter: blur(25px);
+    -webkit-backdrop-filter: blur(25px);
+    width: fit-content;
+    min-width: 260px;
+    max-width: 340px;
+    align-self: center;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
+    animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ais-preview-thumb-glass {
+    width: 52px;
+    height: 52px;
+    border-radius: 8px;
+    object-fit: cover;
+    border: 2px solid rgba(255, 255, 255, 0.25);
+}
+
+.ais-preview-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+}
+
+.ais-preview-info .btn-retake {
+    background: rgba(243, 156, 18, 0.18);
+    border: 1px solid #F39C12;
+    color: #F39C12;
+    padding: 5px 12px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    width: fit-content;
+}
+
+.ais-preview-info .btn-retake:active {
+    transform: scale(0.95);
+    background: rgba(243, 156, 18, 0.3);
+}
+
+/* Detay Fotoğraf Galerisi */
+.ais-detail-gallery-glass {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    padding: 8px 4px;
+    margin-bottom: 18px;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+    max-width: 440px;
+    align-self: center;
+    scrollbar-width: none;
+}
+
+.ais-detail-gallery-glass::-webkit-scrollbar {
+    display: none;
+}
+
+.ais-detail-item-glass {
     position: relative;
     flex-shrink: 0;
 }
 
-.ais-detail-thumb {
-    width: 80px;
-    height: 80px;
-    border-radius: 8px;
+.ais-detail-thumb-glass {
+    width: 72px;
+    height: 72px;
+    border-radius: 10px;
     object-fit: cover;
+    border: 2px solid rgba(255, 255, 255, 0.25);
 }
 
-.ais-detail-remove {
+.ais-detail-remove-glass {
     position: absolute;
     top: -6px;
     right: -6px;
-    width: 24px;
-    height: 24px;
+    width: 22px;
+    height: 22px;
     border-radius: 50%;
-    background: var(--ais-danger);
+    background: #E74C3C;
     color: white;
-    border: 2px solid white;
-    font-size: 12px;
+    border: 1.5px solid white;
+    font-size: 11px;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     line-height: 1;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
 }
 
-/* Capture Button */
-.ais-capture-actions {
+/* Ana Çekim Butonları */
+.ais-capture-controls {
     display: flex;
-    gap: 12px;
-    justify-content: center;
+    justify-content: space-between;
     align-items: center;
-    margin: 16px 0;
+    margin: 10px 0;
+    width: 100%;
+    max-width: 320px;
+    align-self: center;
 }
 
-.ais-btn-capture {
-    width: 72px;
-    height: 72px;
+.control-side {
+    width: 48px; /* switches size to balance */
+}
+
+/* Dekanşör Butonu */
+.ais-btn-shutter {
+    width: 78px;
+    height: 78px;
     border-radius: 50%;
-    background: var(--ais-primary);
-    color: white;
-    border: 4px solid rgba(108, 99, 255, 0.3);
-    font-size: 24px;
-    cursor: pointer;
-    transition: var(--ais-transition);
+    background: transparent;
+    border: 4px solid #fff;
     display: flex;
     align-items: center;
     justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    outline: none;
+    transition: transform 0.15s ease, opacity 0.15s ease;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
 }
 
-.ais-btn-capture:hover {
-    transform: scale(1.05);
+.shutter-inner {
+    width: 62px;
+    height: 62px;
+    border-radius: 50%;
+    background: #fff;
+    transition: background-color 0.2s, transform 0.15s;
 }
 
-.ais-btn-capture:active {
-    transform: scale(0.95);
-    background: var(--ais-primary-dark);
+.ais-btn-shutter:active {
+    transform: scale(0.92);
 }
 
-.ais-btn-capture:disabled {
+.ais-btn-shutter:active .shutter-inner {
+    transform: scale(0.9);
+    background-color: rgba(255, 255, 255, 0.8);
+}
+
+.ais-btn-shutter:disabled {
     opacity: 0.4;
+    cursor: not-allowed;
 }
 
-.ais-btn-toggle-cam {
+/* Kamera Çevir Butonu */
+.ais-btn-rotate {
     width: 48px;
     height: 48px;
     border-radius: 50%;
-    background: var(--ais-card-bg);
-    border: 2px solid var(--ais-border);
-    font-size: 20px;
-    cursor: pointer;
+    background: rgba(255, 255, 255, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: #fff;
     display: flex;
     align-items: center;
     justify-content: center;
+    cursor: pointer;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    transition: all 0.25s;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.ais-btn-rotate:active {
+    transform: rotate(180deg) scale(0.9);
+    background: rgba(255, 255, 255, 0.28);
+}
+
+.icon-rotate {
+    width: 22px;
+    height: 22px;
+}
+
+/* Devam Etme Şeridi */
+.ais-proceed-bar {
+    margin-top: 20px;
+    width: 100%;
+    max-width: 440px;
+    align-self: center;
+    display: flex;
+    justify-content: center;
+}
+
+.ais-btn-proceed {
+    width: 100%;
+    background: #6C63FF;
+    color: white;
+    border: none;
+    padding: 15px 24px;
+    border-radius: 30px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 8px 24px rgba(108, 99, 255, 0.45);
+    transition: all 0.25s ease;
+    text-align: center;
+}
+
+.ais-btn-proceed:active {
+    transform: scale(0.98);
+    background: #524AE0;
+    box-shadow: 0 4px 12px rgba(108, 99, 255, 0.3);
+}
+
+/* Animasyonlar */
+@keyframes fadeInPulse {
+    0%, 100% { opacity: 0.9; }
+    50% { opacity: 0.65; }
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateY(20px) scale(0.95);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0) scale(1);
+        opacity: 1;
+    }
 }

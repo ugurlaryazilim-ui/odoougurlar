@@ -80,11 +80,38 @@ export class CaptureScreen extends Component {
         const video = this.videoRef.el;
         const canvas = this.canvasRef.el;
 
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+        const videoWidth = video.videoWidth;
+        const videoHeight = video.videoHeight;
+        const elementWidth = video.clientWidth || window.innerWidth;
+        const elementHeight = video.clientHeight || window.innerHeight;
+
+        const elementAspectRatio = elementWidth / elementHeight;
+        const streamAspectRatio = videoWidth / videoHeight;
+
+        let sourceX = 0;
+        let sourceY = 0;
+        let sourceWidth = videoWidth;
+        let sourceHeight = videoHeight;
+
+        if (streamAspectRatio > elementAspectRatio) {
+            // Stream is wider than element (e.g. 4:3 video inside 9:16 screen)
+            sourceWidth = videoHeight * elementAspectRatio;
+            sourceX = (videoWidth - sourceWidth) / 2;
+        } else if (streamAspectRatio < elementAspectRatio) {
+            // Stream is taller than element
+            sourceHeight = videoWidth / elementAspectRatio;
+            sourceY = (videoHeight - sourceHeight) / 2;
+        }
+
+        canvas.width = sourceWidth;
+        canvas.height = sourceHeight;
 
         const ctx = canvas.getContext("2d");
-        ctx.drawImage(video, 0, 0);
+        ctx.drawImage(
+            video,
+            sourceX, sourceY, sourceWidth, sourceHeight,
+            0, 0, sourceWidth, sourceHeight
+        );
 
         // Base64 olarak al
         const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
