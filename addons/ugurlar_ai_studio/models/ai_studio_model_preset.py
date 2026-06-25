@@ -502,7 +502,7 @@ class AiStudioModelPreset(models.Model):
                 front_fal_url = self._upload_to_fal(front_data, api_key)
 
                 if front_fal_url:
-                    _logger.info('nano-banana-pro/edit ile tutarli arka gorsel')
+                    _logger.info('nano-banana-2/edit ile tutarli arka gorsel')
                     back_prompt = (
                         f"RAW photo, photorealistic, real human being, NOT illustration, NOT cartoon. "
                         f"OUTPUT EXACTLY ONE IMAGE. "
@@ -517,7 +517,7 @@ class AiStudioModelPreset(models.Model):
                     )
 
                     back_result = self._fal_api_call(
-                        'fal-ai/nano-banana-pro/edit',
+                        'fal-ai/nano-banana-2/edit',
                         {
                             'prompt': back_prompt,
                             'image_urls': [front_fal_url],
@@ -557,7 +557,7 @@ class AiStudioModelPreset(models.Model):
                 _logger.info('fal.ai ile manken oluşturuluyor (yan): preset_id=%s', preset_id)
                 side_data = False
                 if front_fal_url:
-                    _logger.info('nano-banana-pro/edit ile tutarli yan gorsel')
+                    _logger.info('nano-banana-2/edit ile tutarli yan gorsel')
                     side_prompt = (
                         f"RAW photo, photorealistic, real human being, NOT illustration, NOT cartoon. "
                         f"OUTPUT EXACTLY ONE IMAGE. "
@@ -571,7 +571,7 @@ class AiStudioModelPreset(models.Model):
 
                     try:
                         side_result = self._fal_api_call(
-                            'fal-ai/nano-banana-pro/edit',
+                            'fal-ai/nano-banana-2/edit',
                             {
                                 'prompt': side_prompt,
                                 'image_urls': [front_fal_url],
@@ -620,10 +620,10 @@ class AiStudioModelPreset(models.Model):
             except Exception:
                 _logger.error('Durum güncelleme de başarısız oldu')
 
-    # ─── Kıyafet Giydirme (nano-banana-pro/edit) ────────────────────
+    # ─── Kıyafet Giydirme (nano-banana-2/edit) ────────────────────
     @staticmethod
     def fal_tryon(garment_image_url, mannequin_image_url, prompt, api_key):
-        """SaaS tarzı kıyafet giydirme — nano-banana-pro/edit (SDK)."""
+        """SaaS tarzı kıyafet giydirme — nano-banana-2/edit (SDK)."""
         import os
         os.environ['FAL_KEY'] = api_key
 
@@ -640,9 +640,9 @@ class AiStudioModelPreset(models.Model):
             "Professional e-commerce fashion photography, white studio background."
         )
 
-        _logger.info('nano-banana-pro/edit kıyafet giydirme çağrısı (SDK)')
+        _logger.info('nano-banana-2/edit kıyafet giydirme çağrısı (SDK)')
         result = fal_client.subscribe(
-            'fal-ai/nano-banana-pro/edit',
+            'fal-ai/nano-banana-2/edit',
             arguments={
                 'prompt': full_prompt,
                 'image_urls': [garment_image_url, mannequin_image_url],

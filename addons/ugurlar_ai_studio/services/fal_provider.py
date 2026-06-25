@@ -34,7 +34,7 @@ class FalProvider(AIProviderBase):
         'bg_remove': 'fal-ai/birefnet',
         'flux_schnell': 'fal-ai/flux/schnell',
         'flux_pro': 'fal-ai/flux-pro/v1.1',
-        'nano_banana': 'fal-ai/nano-banana-pro/edit',
+        'nano_banana': 'fal-ai/nano-banana-2/edit',
         'any_llm': 'fal-ai/any-llm',
     }
 
@@ -44,7 +44,7 @@ class FalProvider(AIProviderBase):
         'fal-ai/birefnet': 0.002,
         'fal-ai/flux/schnell': 0.003,
         'fal-ai/flux-pro/v1.1': 0.05,
-        'fal-ai/nano-banana-pro/edit': 0.04,
+        'fal-ai/nano-banana-2/edit': 0.04,
         'fal-ai/any-llm': 0.001,
     }
 
