@@ -121,7 +121,7 @@
         <field name="name">ai.studio.model.library.search</field>
         <field name="model">ai.studio.model.library</field>
         <field name="arch" type="xml">
-            <search string="Manken Ara">
+            <search>
                 <field name="name"/>
                 <field name="gender"/>
                 <field name="body_type"/>
