@@ -637,6 +637,38 @@ class AiStudioSession(models.Model):
                         'ugurlar_ai_studio.num_samples', '2'
                     ))
 
+                    # Build prompt if provider is fal
+                    prompt_text = ""
+                    if provider_type == 'fal':
+                        try:
+                            # 1. Get global prompt locks
+                            all_locks = env['ai.studio.prompt.template'].search([
+                                ('scope', '=', 'global'),
+                                ('active', '=', True),
+                            ])
+                            prompt_locks = [l.prompt_text for l in all_locks]
+                            
+                            # 2. Get garment analysis
+                            if 'analysis' not in locals():
+                                from ..services.garment_analyzer import analyze_garment
+                                analysis = analyze_garment(api_key, garment_url)
+                                
+                            # 3. Build preset data
+                            preset_data = {
+                                'gender': preset.gender or 'female',
+                                'body_type': preset.body_type or 'standard',
+                                'target_audience': preset.target_audience or '',
+                            }
+                            
+                            # 4. Generate prompt using garment_analyzer
+                            from ..services.garment_analyzer import build_generation_prompt
+                            built_prompt = build_generation_prompt(
+                                analysis, preset_data, prompt_locks, session.extra_prompt or ''
+                            )
+                            prompt_text = built_prompt.get('positive', '')
+                        except Exception as pe:
+                            _logger.warning('Failed to build prompt for virtual try-on: %s', pe)
+
                     tryon_result = provider.virtual_tryon(
                         model_image_url=model_url,
                         garment_image_url=garment_url,
@@ -646,6 +678,7 @@ class AiStudioSession(models.Model):
                         num_samples=num_samples,
                         garment_photo_type='auto',
                         output_format='jpeg',
+                        prompt=prompt_text,
                     )
 
                     elapsed = time.time() - start_time
@@ -956,6 +989,37 @@ class AiStudioSession(models.Model):
                             'one_piece': 'one-piece',
                         }.get(cat, 'tops')
 
+                # Build prompt if provider is fal
+                prompt_text = ""
+                if provider_type == 'fal':
+                    try:
+                        # 1. Get global prompt locks
+                        all_locks = env['ai.studio.prompt.template'].search([
+                            ('scope', '=', 'global'),
+                            ('active', '=', True),
+                        ])
+                        prompt_locks = [l.prompt_text for l in all_locks]
+                        
+                        # 2. Get garment analysis
+                        from ..services.garment_analyzer import analyze_garment
+                        analysis = analyze_garment(api_key, garment_url)
+                            
+                        # 3. Build preset data
+                        preset_data = {
+                            'gender': preset.gender or 'female',
+                            'body_type': preset.body_type or 'standard',
+                            'target_audience': preset.target_audience or '',
+                        }
+                        
+                        # 4. Generate prompt using garment_analyzer
+                        from ..services.garment_analyzer import build_generation_prompt
+                        built_prompt = build_generation_prompt(
+                            analysis, preset_data, prompt_locks, session.extra_prompt or ''
+                        )
+                        prompt_text = built_prompt.get('positive', '')
+                    except Exception as pe:
+                        _logger.warning('Failed to build retry prompt: %s', pe)
+
                 tryon_result = provider.virtual_tryon(
                     model_image_url=model_url,
                     garment_image_url=garment_url,
@@ -964,6 +1028,7 @@ class AiStudioSession(models.Model):
                     model_name=tryon_model,
                     garment_photo_type='auto',
                     output_format='jpeg',
+                    prompt=prompt_text,
                 )
 
                 output_url = tryon_result.get('image_url', '')

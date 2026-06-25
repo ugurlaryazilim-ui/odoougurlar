@@ -66,42 +66,64 @@ class FalProvider(AIProviderBase):
 
     def virtual_tryon(self, model_image_url, garment_image_url,
                       category='tops', mode='balanced', **kwargs):
-        # Manken uzerine giydirme - FASHN v1.6.
+        # Manken uzerine giydirme.
         self._check_client()
 
-        endpoint = kwargs.get('endpoint', self.ENDPOINTS['tryon_fashn'])
-        fal_category = {
-            'tops': 'tops',
-            'bottoms': 'bottoms',
-            'one_piece': 'one-piece',
-            'one-piece': 'one-piece',
-            'shoes': 'tops',
-            'bags': 'tops',
-            'accessories': 'tops',
-        }.get(category, 'tops')
+        # default to nano-banana-2/edit
+        endpoint = kwargs.get('endpoint', self.ENDPOINTS['nano_banana'])
+        prompt = kwargs.get('prompt', '')
 
-        result = fal_client.subscribe(
-            endpoint,
-            arguments={
+        if 'nano-banana' in endpoint:
+            # nano-banana-2/edit formatı
+            arguments = {
+                'prompt': prompt,
+                'image_urls': [garment_image_url, model_image_url],
+                'num_images': kwargs.get('num_samples', 1),
+                'aspect_ratio': '3:4',
+                'output_format': 'png',
+                'safety_tolerance': '4',
+                'resolution': '2K',
+                'limit_generations': True,
+            }
+        else:
+            # FASHN v1.6 veya Kolors formatı
+            fal_category = {
+                'tops': 'tops',
+                'bottoms': 'bottoms',
+                'one_piece': 'one-piece',
+                'one-piece': 'one-piece',
+                'shoes': 'tops',
+                'bags': 'tops',
+                'accessories': 'tops',
+            }.get(category, 'tops')
+
+            arguments = {
                 'model_image': model_image_url,
                 'garment_image': garment_image_url,
                 'category': fal_category,
                 'mode': mode,
                 'garment_photo_type': kwargs.get('garment_photo_type', 'flat-lay'),
-            },
+            }
+
+        result = fal_client.subscribe(
+            endpoint,
+            arguments=arguments,
             client_timeout=180,
         )
 
-        image_url = ''
+        image_urls = []
         if 'images' in result and result['images']:
-            image_url = result['images'][0].get('url', '')
+            image_urls = [img.get('url', '') for img in result['images']]
         elif 'image' in result and result['image']:
-            image_url = result['image'].get('url', '')
+            image_urls = [result['image'].get('url', '')]
+
+        image_url = image_urls[0] if image_urls else ''
         request_id = result.get('request_id', '')
 
         return {
+            'image_urls': image_urls,
             'image_url': image_url,
-            'cost': self.get_estimated_cost(endpoint),
+            'cost': self.get_estimated_cost(endpoint) * len(image_urls) if 'nano-banana' in endpoint else self.get_estimated_cost(endpoint),
             'request_id': request_id,
         }
 
