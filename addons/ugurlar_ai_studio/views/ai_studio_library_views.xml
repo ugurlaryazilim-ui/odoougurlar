@@ -168,16 +168,14 @@
                 <separator/>
 
                 <!-- Gruplama -->
-                <group expand="0" string="Grupla">
-                    <filter string="Cinsiyet" name="group_gender"
-                            context="{'group_by': 'gender'}"/>
-                    <filter string="Vücut Tipi" name="group_body_type"
-                            context="{'group_by': 'body_type'}"/>
-                    <filter string="Ten Rengi" name="group_skin_tone"
-                            context="{'group_by': 'skin_tone'}"/>
-                    <filter string="Kaynak" name="group_source"
-                            context="{'group_by': 'source'}"/>
-                </group>
+                <filter string="Cinsiyet" name="group_gender"
+                        context="{'group_by': 'gender'}"/>
+                <filter string="Vücut Tipi" name="group_body_type"
+                        context="{'group_by': 'body_type'}"/>
+                <filter string="Ten Rengi" name="group_skin_tone"
+                        context="{'group_by': 'skin_tone'}"/>
+                <filter string="Kaynak" name="group_source"
+                        context="{'group_by': 'source'}"/>
             </search>
         </field>
     </record>
