@@ -42,6 +42,15 @@
                                 </div>
                             </div>
                         </setting>
+                        <setting string="Gemini API Anahtarı"
+                                 help="Kıyafet analizi için kullanılacak Google Gemini API anahtarı. Boş bırakılırsa fal.ai (Proxy) kullanılır.">
+                            <div class="content-group">
+                                <div class="row mt16">
+                                    <label for="ai_studio_gemini_api_key" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="ai_studio_gemini_api_key" class="col-4" password="True"/>
+                                </div>
+                            </div>
+                        </setting>
                     </block>
 
                     <block title="Try-On Model Ayarlari" name="tryon_settings">

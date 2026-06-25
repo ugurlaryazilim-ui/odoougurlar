@@ -488,6 +488,12 @@ class AiStudioSession(models.Model):
             provider_type = env['ir.config_parameter'].sudo().get_param(
                 'ugurlar_ai_studio.default_provider', 'fashn'
             )
+            fal_api_key = env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.fal_api_key', ''
+            )
+            gemini_api_key = env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.gemini_api_key', ''
+            )
 
         try:
             provider = self._create_provider(api_key, provider_type)
@@ -603,7 +609,7 @@ class AiStudioSession(models.Model):
                         if cat == 'auto':
                             try:
                                 from ..services.garment_analyzer import analyze_garment, map_to_fashn_category
-                                analysis = analyze_garment(api_key, garment_url)
+                                analysis = analyze_garment(fal_api_key, garment_url, gemini_api_key=gemini_api_key)
                                 analyzed_cat = map_to_fashn_category(analysis)
                                 category_to_send = {
                                     'tops': 'tops',
@@ -651,7 +657,7 @@ class AiStudioSession(models.Model):
                             # 2. Get garment analysis
                             if 'analysis' not in locals():
                                 from ..services.garment_analyzer import analyze_garment
-                                analysis = analyze_garment(api_key, garment_url)
+                                analysis = analyze_garment(fal_api_key, garment_url, gemini_api_key=gemini_api_key)
                                 
                             # 3. Build preset data
                             preset_data = {
@@ -859,6 +865,12 @@ class AiStudioSession(models.Model):
             provider_type = env['ir.config_parameter'].sudo().get_param(
                 'ugurlar_ai_studio.default_provider', 'fashn'
             )
+            fal_api_key = env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.fal_api_key', ''
+            )
+            gemini_api_key = env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.gemini_api_key', ''
+            )
             session = env['ai.studio.session'].browse(session_id)
             gen = env['ai.studio.generation'].browse(gen_id)
 
@@ -1002,7 +1014,7 @@ class AiStudioSession(models.Model):
                         
                         # 2. Get garment analysis
                         from ..services.garment_analyzer import analyze_garment
-                        analysis = analyze_garment(api_key, garment_url)
+                        analysis = analyze_garment(fal_api_key, garment_url, gemini_api_key=gemini_api_key)
                             
                         # 3. Build preset data
                         preset_data = {

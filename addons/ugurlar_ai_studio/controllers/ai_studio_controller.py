@@ -379,17 +379,24 @@ class AiStudioController(http.Controller):
             api_key = request.env['ir.config_parameter'].sudo().get_param(
                 'ugurlar_ai_studio.fal_api_key', ''
             )
-            if not api_key:
-                return {'error': 'fal.ai API anahtari tanimlanmamis. Ayarlar > AI Studio'}
-
-            # Base64 gorseli fal.ai'ya yukle
-            from ..services.fal_provider import FalProvider
-            provider = FalProvider(api_key)
-            image_url = provider.upload_image(image_data)
+            gemini_api_key = request.env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.gemini_api_key', ''
+            )
+            if not api_key and not gemini_api_key:
+                return {'error': 'fal.ai veya Gemini API anahtarı tanımlanmamış. Ayarlar > AI Studio'}
 
             # Analiz yap
             from ..services.garment_analyzer import analyze_garment as do_analyze
-            analysis = do_analyze(api_key, image_url)
+            
+            if gemini_api_key:
+                # Direct Gemini supports base64/data URI/raw string directly
+                analysis = do_analyze(api_key, image_data, gemini_api_key=gemini_api_key)
+            else:
+                # Base64 gorseli fal.ai'ya yukle
+                from ..services.fal_provider import FalProvider
+                provider = FalProvider(api_key)
+                image_url = provider.upload_image(image_data)
+                analysis = do_analyze(api_key, image_url)
 
             return {'success': True, 'analysis': analysis}
         except Exception as e:

@@ -19,23 +19,64 @@ except ImportError:
     requests = None
 
 
-def analyze_garment(api_key, image_url):
+def _prepare_gemini_image(image_url):
+    """Gorseli Gemini inlineData formatina hazirlar.
+
+    Returns:
+        tuple: (mime_type, base64_data)
+    """
+    if not image_url:
+        return None, None
+
+    import base64
+    # Case 1: Data URI
+    if image_url.startswith('data:'):
+        try:
+            mime_part, base64_part = image_url.split(';base64,', 1)
+            mime_type = mime_part.replace('data:', '')
+            return mime_type, base64_part
+        except Exception:
+            pass
+
+    # Case 2: Public URL / Local URL
+    if image_url.startswith('http://') or image_url.startswith('https://'):
+        try:
+            if not requests:
+                _logger.warning('requests kütüphanesi yüklü değil, görsel indirilemedi')
+                return None, None
+            resp = requests.get(image_url, timeout=30)
+            resp.raise_for_status()
+            mime_type = resp.headers.get('Content-Type', 'image/jpeg')
+            base64_data = base64.b64encode(resp.content).decode('utf-8')
+            return mime_type, base64_data
+        except Exception as e:
+            _logger.error('Failed to download image for Gemini: %s', e)
+            return None, None
+
+    # Case 3: Raw base64 string
+    try:
+        base64.b64decode(image_url)
+        return 'image/jpeg', image_url
+    except Exception:
+        pass
+
+    return None, None
+
+
+def analyze_garment(api_key, image_url, gemini_api_key=None):
     """Kiyafet gorseli analiz et — tur, renk, kumas, detaylar.
 
+    Gemini API anahtarı verilmişse doğrudan Google Gemini API kullanılır.
+    Aksi halde fal.ai proxy/any-llm kullanılır.
+
     Args:
-        api_key: fal.ai API anahtari
-        image_url: Analiz edilecek gorsel URL'si
+        api_key: fal.ai API anahtari (fallback/any-llm için)
+        image_url: Analiz edilecek gorsel URL'si veya base64 verisi
+        gemini_api_key: Google Gemini API anahtarı (varsa doğrudan kullanım için)
 
     Returns:
         dict: Analiz sonuclari
     """
-    if not fal_client:
-        _logger.warning('fal_client kurulu degil, analiz yapilamadi')
-        return _default_analysis()
-
-    import os
-    os.environ['FAL_KEY'] = api_key
-
     prompt = """You are a senior Fashion Merchandiser analyzing a product image.
 
 Analyze the garment and return a JSON with these fields:
@@ -62,6 +103,72 @@ Analyze the garment and return a JSON with these fields:
 }
 
 Return ONLY valid JSON, no markdown."""
+
+    if gemini_api_key:
+        _logger.info('Google Gemini API kullanılarak doğrudan kiyafet analizi yapılıyor...')
+        mime_type, base64_data = _prepare_gemini_image(image_url)
+        if mime_type and base64_data:
+            model = "gemini-2.5-flash"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_api_key}"
+            
+            payload = {
+                "contents": [{
+                    "parts": [
+                        {"text": prompt},
+                        {
+                            "inlineData": {
+                                "mimeType": mime_type,
+                                "data": base64_data
+                            }
+                        }
+                    ]
+                }],
+                "generationConfig": {
+                    "responseMimeType": "application/json"
+                }
+            }
+            
+            try:
+                if not requests:
+                    raise RuntimeError("requests paketi kurulu değil.")
+                
+                headers = {'Content-Type': 'application/json'}
+                resp = requests.post(url, json=payload, headers=headers, timeout=45)
+                resp.raise_for_status()
+                res_data = resp.json()
+                
+                candidates = res_data.get('candidates', [])
+                if candidates:
+                    text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '')
+                    if text:
+                        text = text.strip()
+                        # Clean markdown formatting if present
+                        if text.startswith('```json'):
+                            text = text[7:]
+                        if text.endswith('```'):
+                            text = text[:-3]
+                        text = text.strip()
+                        return json.loads(text)
+            except Exception as e:
+                _logger.exception('Direct Gemini API hatası, fal.ai fallback denenecek: %s', e)
+        else:
+            _logger.warning('Görsel Gemini API için hazırlanamadı, fal.ai fallback denenecek')
+
+    # Fallback to fal.ai if gemini fails or isn't provided
+    if api_key:
+        return _analyze_via_fal(api_key, image_url, prompt)
+
+    return _default_analysis()
+
+
+def _analyze_via_fal(api_key, image_url, prompt):
+    """fal.ai any-llm kullanarak kiyafet analizi yap."""
+    if not fal_client:
+        _logger.warning('fal_client kurulu degil, analiz yapilamadi')
+        return _default_analysis()
+
+    import os
+    os.environ['FAL_KEY'] = api_key
 
     try:
         result = fal_client.subscribe(
@@ -94,7 +201,7 @@ Return ONLY valid JSON, no markdown."""
             return json.loads(json_match)
 
     except Exception as e:
-        _logger.exception('Kiyafet analizi hatasi: %s', e)
+        _logger.exception('fal.ai kiyafet analizi hatasi: %s', e)
 
     return _default_analysis()
 

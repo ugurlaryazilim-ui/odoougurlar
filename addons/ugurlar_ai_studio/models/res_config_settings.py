@@ -25,6 +25,11 @@ class ResConfigSettings(models.TransientModel):
         config_parameter='ugurlar_ai_studio.fashn_api_key',
         help='FASHN dashboard\'tan alınan API key (fa-XXXX formatında)',
     )
+    ai_studio_gemini_api_key = fields.Char(
+        string='Gemini API Anahtarı',
+        config_parameter='ugurlar_ai_studio.gemini_api_key',
+        help='Google Gemini API anahtarı. Boş bırakılırsa fal.ai (Proxy/any-llm) kullanılır.',
+    )
 
     # --- Model Secimi ---
     ai_studio_tryon_model = fields.Selection([
