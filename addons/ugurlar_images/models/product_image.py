@@ -8,33 +8,19 @@ _logger = logging.getLogger(__name__)
 
 class ProductImage(models.Model):
     """Ürünlere birden fazla alternatif görsel ekleme desteği."""
-    _name = 'product.image'
-    _description = 'Ürün Görseli'
-    _inherit = ['image.mixin']
-    _order = 'sequence, id'
-    _rec_name = 'name'
+    _inherit = 'product.image'
 
-    name = fields.Char(string='Açıklama', required=True)
-    sequence = fields.Integer(string='Sıra', default=10)
-    image_1920 = fields.Image(string='Görsel', max_width=1920, max_height=1920, required=True)
-    product_tmpl_id = fields.Many2one(
-        'product.template',
-        string='Ürün Şablonu',
-        index=True,
-        ondelete='cascade',
-    )
-    product_variant_id = fields.Many2one(
-        'product.product',
-        string='Ürün Varyantı',
-        index=True,
-        ondelete='cascade',
-    )
-
-    # Odoo 19: models.Constraint (eski _sql_constraints kaldırıldı)
-    _unique_variant_name = models.Constraint(
-        'UNIQUE(product_variant_id, name)',
-        'Bu varyant için bu isimde sadece bir görsel olabilir!',
-    )
+    @api.constrains('product_variant_id', 'name')
+    def _check_unique_variant_name(self):
+        for image in self:
+            if image.product_variant_id and image.name:
+                duplicates = self.search_count([
+                    ('product_variant_id', '=', image.product_variant_id.id),
+                    ('name', '=', image.name),
+                    ('id', '!=', image.id),
+                ])
+                if duplicates > 0:
+                    raise ValidationError(_('Bu varyant için bu isimde sadece bir görsel olabilir!'))
 
     def _compute_can_image_1024_be_zoomed(self):
         """
@@ -44,10 +30,7 @@ class ProductImage(models.Model):
         from odoo.tools.image import is_image_size_above
         for image in self.with_context(prefetch_fields=False):
             try:
-                if 'image_1920' in image._fields and 'image_1024' in image._fields:
-                    image.can_image_1024_be_zoomed = image.image_1920 and is_image_size_above(image.image_1920, image.image_1024)
-                else:
-                    image.can_image_1024_be_zoomed = False
+                image.can_image_1024_be_zoomed = image.image_1920 and is_image_size_above(image.image_1920, image.image_1024)
             except Exception as e:
                 _logger.warning('Zoom recompute error for image %s: %s', image.id, e)
                 image.can_image_1024_be_zoomed = False

@@ -20,7 +20,7 @@
     """,
     'author': 'Uğurlar Yazılım',
     'website': 'https://ugurlar.com',
-    'depends': ['base_setup', 'product'],
+    'depends': ['base_setup', 'product', 'website_sale'],
     'data': [
         'security/ir.model.access.csv',
         'views/image_settings_views.xml',
