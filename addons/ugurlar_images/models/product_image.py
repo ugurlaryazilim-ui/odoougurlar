@@ -25,15 +25,10 @@ class ProductImage(models.Model):
     def _compute_can_image_1024_be_zoomed(self):
         """
         Görsel boyut kontrolü.
-        MemoryError hatasını önlemek için prefetch kapatılarak teker teker işlenir.
+        MemoryError hatasını önlemek için doğrudan True set edilir.
         """
-        from odoo.tools.image import is_image_size_above
-        for image in self.with_context(prefetch_fields=False):
-            try:
-                image.can_image_1024_be_zoomed = image.image_1920 and is_image_size_above(image.image_1920, image.image_1024)
-            except Exception as e:
-                _logger.warning('Zoom recompute error for image %s: %s', image.id, e)
-                image.can_image_1024_be_zoomed = False
+        for image in self:
+            image.can_image_1024_be_zoomed = True
 
 
 class ProductProductImageExtend(models.Model):
