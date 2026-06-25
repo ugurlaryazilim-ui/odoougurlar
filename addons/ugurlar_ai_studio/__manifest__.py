@@ -29,6 +29,7 @@
         'data/ai_studio_reject_reasons.xml',
         'data/ai_studio_prompt_locks.xml',
         'data/cron.xml',
+        'data/ai_studio_model_library_seeds.xml',
         'views/ai_studio_session_views.xml',
         'views/ai_studio_generation_views.xml',
         'views/ai_studio_preset_views.xml',
@@ -36,6 +37,7 @@
         'views/ai_studio_reject_views.xml',
         'views/ai_studio_settings_views.xml',
         'views/ai_studio_templates.xml',
+        'views/ai_studio_library_views.xml',
         'views/menu.xml',
     ],
     'assets': {

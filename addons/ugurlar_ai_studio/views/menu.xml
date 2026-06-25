@@ -124,19 +124,26 @@
               action="action_ai_studio_preset"
               sequence="1"/>
 
+    <!-- Manken Kutuphanesi -->
+    <menuitem id="menu_ai_studio_library"
+              name="Manken Kütüphanesi"
+              parent="menu_ai_studio_config"
+              action="action_ai_studio_library"
+              sequence="2"/>
+
     <!-- Prompt Sablonlari -->
     <menuitem id="menu_ai_studio_prompts"
               name="Prompt Şablonları"
               parent="menu_ai_studio_config"
               action="action_ai_studio_prompt"
-              sequence="2"/>
+              sequence="3"/>
 
     <!-- Red Sebepleri -->
     <menuitem id="menu_ai_studio_reject_reasons"
               name="Red Sebepleri"
               parent="menu_ai_studio_config"
               action="action_ai_studio_reject"
-              sequence="3"/>
+              sequence="4"/>
 
     <!-- Genel Ayarlar — res.config.settings sayfasi -->
     <menuitem id="menu_ai_studio_settings"

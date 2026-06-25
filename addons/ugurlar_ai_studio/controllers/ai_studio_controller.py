@@ -512,8 +512,10 @@ class AiStudioController(http.Controller):
                     'cost': result.get('cost', 0.075),
                 }
 
-            return {'error': 'AI gorsel uretilemedi.'}
+            return {'error': 'AI görsel üretilemedi.'}
         except Exception as e:
+            from ..services.fal_error_handler import parse_fal_error
+            parsed = parse_fal_error(e)
             _logger.exception('generate_image hatasi: %s', e)
-            return {'error': str(e)}
+            return {'error': parsed['message']}
 

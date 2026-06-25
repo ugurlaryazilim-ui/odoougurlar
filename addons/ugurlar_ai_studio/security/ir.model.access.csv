@@ -14,3 +14,5 @@ access_ai_studio_prompt_template_operator,ai.studio.prompt.template operator,mod
 access_ai_studio_prompt_template_manager,ai.studio.prompt.template manager,model_ai_studio_prompt_template,ugurlar_ai_studio.group_ai_studio_manager,1,1,1,1
 access_ai_studio_reject_reason_operator,ai.studio.reject.reason operator,model_ai_studio_reject_reason,ugurlar_ai_studio.group_ai_studio_operator,1,0,0,0
 access_ai_studio_reject_reason_manager,ai.studio.reject.reason manager,model_ai_studio_reject_reason,ugurlar_ai_studio.group_ai_studio_manager,1,1,1,1
+access_ai_studio_model_library_operator,ai.studio.model.library operator,model_ai_studio_model_library,ugurlar_ai_studio.group_ai_studio_operator,1,0,0,0
+access_ai_studio_model_library_manager,ai.studio.model.library manager,model_ai_studio_model_library,ugurlar_ai_studio.group_ai_studio_manager,1,1,1,1

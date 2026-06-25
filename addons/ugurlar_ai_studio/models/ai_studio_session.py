@@ -236,47 +236,107 @@ class AiStudioSession(models.Model):
             return image_base64
 
     def _remove_hanger_hook(self, image_base64):
-        """Görseldeki askı kancasını (en üstteki ince çıkıntıyı) temizler."""
+        """Gorseldeki aski kancasini ve etiketleri temizler.
+
+        Yontem:
+        1. Ust %20'lik alani tara
+        2. Dar cikintilari (aski kancasi) tespit et
+        3. OpenCV inpainting ile temizle
+        4. Alternatif: piksel bazli temizleme (OpenCV yoksa)
+        """
         if not image_base64:
             return False
         try:
             import io
             import base64
             from PIL import Image
-            
-            # Base64 decode
+
             img_data = base64.b64decode(image_base64)
             img = Image.open(io.BytesIO(img_data))
-            
-            # RGBA moduna çevir (şeffaflık için)
+
+            # RGBA moduna cevir
             if img.mode != 'RGBA':
                 img = img.convert('RGBA')
-                
+
             w, h = img.size
-            pixels = img.load()
-            
-            # Satır satır yukarıdan aşağıya tara
-            for y in range(int(h * 0.25)): # İlk %25'lik alanı tara
-                non_transparent_count = 0
-                for x in range(w):
-                    r, g, b, a = pixels[x, y]
-                    if a > 30: # 30'dan büyükse yarı-şeffaf veya doludur
-                        non_transparent_count += 1
-                
-                # Eğer satırdaki dolu piksel sayısı resim genişliğinin %10'undan az ise kanca kabul et ve şeffaflaştır
-                if non_transparent_count > 0 and non_transparent_count < (w * 0.10):
+
+            try:
+                import cv2
+                import numpy as np
+
+                # PIL -> numpy (BGRA)
+                img_array = np.array(img)
+                alpha = img_array[:, :, 3]
+
+                # Ust %20 alanin maske'sini olustur
+                top_region = int(h * 0.20)
+                mask = np.zeros((h, w), dtype=np.uint8)
+
+                # Alpha kanalinda opak olan yerleri bul
+                _, binary = cv2.threshold(alpha[:top_region], 30, 255, cv2.THRESH_BINARY)
+
+                # Kontur analizi — dar cikintilari bul
+                contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+                for cnt in contours:
+                    x, y, cw, ch = cv2.boundingRect(cnt)
+                    area = cv2.contourArea(cnt)
+
+                    # Aski kancasi ozellikleri:
+                    # - Dar (genislik < resim genisliginin %15'i)
+                    # - Uzun/ince (yukseklik/genislik orani > 1.5)
+                    # - Kucuk alan
+                    is_narrow = cw < (w * 0.15)
+                    is_tall_and_thin = ch > cw * 1.5 if cw > 0 else False
+                    is_small_area = area < (w * h * 0.02)
+
+                    if is_narrow and (is_tall_and_thin or is_small_area):
+                        # Bu bir aski kancasi — maskeye ekle
+                        cv2.drawContours(mask[:top_region], [cnt], -1, 255, cv2.FILLED)
+                        # Etrafina biraz tampon ekle
+                        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+                        mask[:top_region] = cv2.dilate(mask[:top_region], kernel, iterations=2)
+
+                # Maske'de temizlenecek alan varsa
+                if np.any(mask > 0):
+                    # RGB kanallarini al (inpainting icin)
+                    rgb = cv2.cvtColor(img_array[:, :, :3], cv2.COLOR_RGBA2BGR)
+                    # Inpaint ile temizle
+                    inpainted = cv2.inpaint(rgb, mask, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
+                    # Maskelenen alanlarin alpha'sini sifirla (seffaf yap)
+                    img_array[:, :, 3][mask > 0] = 0
+
+                    result_img = Image.fromarray(img_array)
+                    buffered = io.BytesIO()
+                    result_img.save(buffered, format='PNG')
+                    _logger.info('Aski kancasi temizlendi (OpenCV inpainting)')
+                    return base64.b64encode(buffered.getvalue())
+                else:
+                    # Temizlenecek alan yok
+                    return image_base64
+
+            except ImportError:
+                # OpenCV yoksa eski yontem (piksel bazli)
+                pixels = img.load()
+                for y in range(int(h * 0.25)):
+                    non_transparent_count = 0
                     for x in range(w):
-                        pixels[x, y] = (0, 0, 0, 0)
-                elif non_transparent_count >= (w * 0.10):
-                    # Geniş bir alana ulaştık (omuz/yaka), temizlemeyi durdur
-                    break
-                    
-            # Tekrar base64'e dönüştür
-            buffered = io.BytesIO()
-            img.save(buffered, format='PNG')
-            return base64.b64encode(buffered.getvalue())
+                        r, g, b, a = pixels[x, y]
+                        if a > 30:
+                            non_transparent_count += 1
+
+                    if non_transparent_count > 0 and non_transparent_count < (w * 0.10):
+                        for x in range(w):
+                            pixels[x, y] = (0, 0, 0, 0)
+                    elif non_transparent_count >= (w * 0.10):
+                        break
+
+                buffered = io.BytesIO()
+                img.save(buffered, format='PNG')
+                return base64.b64encode(buffered.getvalue())
+
         except Exception as e:
-            _logger.error("Askı kancası temizleme hatası: %s", e)
+            _logger.error("Aski kancasi temizleme hatasi: %s", e)
             return image_base64
 
     # --- Durum Geçişleri ---
@@ -296,14 +356,28 @@ class AiStudioSession(models.Model):
         if not self.photo_ids:
             raise UserError(_('Fotoğraf yok. Önce fotoğraf çekin.'))
 
-        api_key = self.env['ir.config_parameter'].sudo().get_param(
-            'ugurlar_ai_studio.fal_api_key'
+        # Provider secimi ve API key kontrolu
+        provider_type = self.env['ir.config_parameter'].sudo().get_param(
+            'ugurlar_ai_studio.default_provider', 'fashn'
         )
-        if not api_key:
-            raise UserError(_(
-                'fal.ai API anahtarı ayarlanmamış. '
-                'Ayarlar → AI Stüdyo menüsünden girin.'
-            ))
+        if provider_type == 'fashn':
+            api_key = self.env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.fashn_api_key'
+            )
+            if not api_key:
+                raise UserError(_(
+                    'FASHN API anahtarı ayarlanmamış. '
+                    'Ayarlar → AI Stüdyo menüsünden girin.'
+                ))
+        else:
+            api_key = self.env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.fal_api_key'
+            )
+            if not api_key:
+                raise UserError(_(
+                    'fal.ai API anahtarı ayarlanmamış. '
+                    'Ayarlar → AI Stüdyo menüsünden girin.'
+                ))
 
         # Ön yüz fotoğrafını doğrula
         photos_by_type = {p.photo_type: p for p in self.photo_ids}
@@ -324,7 +398,7 @@ class AiStudioSession(models.Model):
             'photo_type': 'front',
             'original_image': front_photo.image_original,
             'state': 'pending',
-            'provider': 'fal',
+            'provider': provider_type,
         })
 
         # 2. Arka Görsel (varsa)
@@ -336,7 +410,7 @@ class AiStudioSession(models.Model):
                 'photo_type': 'back',
                 'original_image': back_photo.image_original,
                 'state': 'pending',
-                'provider': 'fal',
+                'provider': provider_type,
             })
 
         # 3. Yan Görsel (varsa side_photo, yoksa front_photo kullanılır)
@@ -347,7 +421,7 @@ class AiStudioSession(models.Model):
             'photo_type': 'side',
             'original_image': (side_photo or front_photo).image_original,
             'state': 'pending',
-            'provider': 'fal',
+            'provider': provider_type,
         })
 
         # 4. Detay Görsel (varsa detail_photo, yoksa front_photo kullanılır)
@@ -358,8 +432,23 @@ class AiStudioSession(models.Model):
             'photo_type': 'detail',
             'original_image': (detail_photo or front_photo).image_original,
             'state': 'pending',
-            'provider': 'fal',
+            'provider': provider_type,
         })
+
+        # Eşzamanlı istek limiti kontrolü
+        concurrent_limit = int(self.env['ir.config_parameter'].sudo().get_param(
+            'ugurlar_ai_studio.concurrent_limit', '2'
+        ))
+        active_processing = self.search_count([
+            ('state', '=', 'processing'),
+            ('id', '!=', self.id),
+        ])
+        if active_processing >= concurrent_limit:
+            _logger.warning(
+                'Eşzamanlı AI işlem limiti (%d) aşıldı. '
+                'Aktif: %d. İşlem yine de başlatılıyor (kuyrukta bekleyecek).',
+                concurrent_limit, active_processing,
+            )
 
         # Arka planda AI işlemeyi başlat
         thread = threading.Thread(
@@ -380,22 +469,36 @@ class AiStudioSession(models.Model):
             },
         }
 
+    @staticmethod
+    def _create_provider(api_key, provider_type='fashn'):
+        """Ayardaki secime gore provider olustur."""
+        if provider_type == 'fashn':
+            from ..services.fashn_provider import FashnProvider
+            return FashnProvider(api_key)
+        else:
+            from ..services.fal_provider import FalProvider
+            return FalProvider(api_key)
+
     def _process_ai_thread(self, session_id, api_key):
         """Thread içinde tüm generation'ları işle."""
         time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
-        import os
-        os.environ['FAL_KEY'] = api_key
+
+        with self.pool.cursor() as cr:
+            env = api.Environment(cr, self.env.uid, {})
+            provider_type = env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.default_provider', 'fashn'
+            )
 
         try:
-            import fal_client
-        except ImportError:
-            _logger.error('fal-client kurulu değil. pip install fal-client')
+            provider = self._create_provider(api_key, provider_type)
+        except ImportError as ie:
+            _logger.error('AI provider kurulu degil: %s', ie)
             with self.pool.cursor() as cr:
                 env = api.Environment(cr, self.env.uid, {})
                 session = env['ai.studio.session'].browse(session_id)
                 session.write({'state': 'draft'})
                 session.message_post(
-                    body=_('Hata: fal-client Python paketi kurulu değil.')
+                    body=_('Hata: AI provider Python paketi kurulu değil. (%s)') % str(ie)
                 )
             return
 
@@ -427,39 +530,47 @@ class AiStudioSession(models.Model):
                     start_time = time.time()
                     source_image = gen.original_image
 
-                    # Arka plan kaldırma ve askı temizleme
-                    if auto_bg and source_image:
+                    # ═══ GÖRSEL ÖN İŞLEME PIPELINE ═══
+                    from ..services.garment_preprocessor import (
+                        preprocess_garment_image,
+                        convert_birefnet_output_to_rgb,
+                    )
+
+                    # Adım 1: Ürün görselini ön işle (beyaz denge, pozlama, resize, vb.)
+                    preprocessed = preprocess_garment_image(
+                        source_image,
+                        target_long_edge=864,
+                    )
+                    processed_b64 = preprocessed['image_base64']
+                    _logger.info(
+                        'Ön işleme tamamlandı (gen=%s): %sx%s → %sx%s, adımlar=%s',
+                        gen.id,
+                        preprocessed['original_size'][0], preprocessed['original_size'][1],
+                        preprocessed['final_size'][0], preprocessed['final_size'][1],
+                        ', '.join(preprocessed['steps_applied']) or 'yok',
+                    )
+
+                    # Adım 2: Arka plan kaldırma + askı temizleme
+                    if auto_bg and processed_b64:
                         try:
-                            garment_url = fal_client.upload(
-                                base64.b64decode(source_image),
-                                'image/jpeg',
-                            )
-                            bg_result = fal_client.subscribe(
-                                'fal-ai/birefnet',
-                                arguments={'image_url': garment_url},
-                            )
-                            garment_url = bg_result['image']['url']
-                            
-                            # Askı temizleme işlemi (arka plan kaldırılmış görsel üzerinde)
-                            import requests
-                            bg_removed_data = requests.get(garment_url, timeout=60).content
-                            bg_removed_b64 = base64.b64encode(bg_removed_data)
-                            cleaned_b64 = session._remove_hanger_hook(bg_removed_b64)
-                            garment_url = fal_client.upload(
-                                base64.b64decode(cleaned_b64),
-                                'image/png',
-                            )
+                            bg_removed_b64 = provider.remove_background(processed_b64)
+
+                            # RGBA → RGB dönüşümü (BiRefNet/FASHN bg-remove)
+                            try:
+                                bg_removed_data = base64.b64decode(bg_removed_b64)
+                                rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
+                                rgb_b64 = base64.b64encode(rgb_data)
+                            except Exception:
+                                rgb_b64 = bg_removed_b64
+
+                            # Askı temizleme işlemi
+                            cleaned_b64 = session._remove_hanger_hook(rgb_b64)
+                            garment_url = provider.upload_image(cleaned_b64)
                         except Exception as e:
-                            _logger.warning('BG remove veya askı temizleme başarısız, orijinal kullanılıyor: %s', e)
-                            garment_url = fal_client.upload(
-                                base64.b64decode(source_image),
-                                'image/jpeg',
-                            )
+                            _logger.warning('BG remove başarısız, ön işlenmiş görsel kullanılıyor: %s', e)
+                            garment_url = provider.upload_image(processed_b64)
                     else:
-                        garment_url = fal_client.upload(
-                            base64.b64decode(source_image),
-                            'image/jpeg',
-                        )
+                        garment_url = provider.upload_image(processed_b64)
 
                     # Manken resmini yükle
                     model_image_field = 'model_image_front'
@@ -475,71 +586,137 @@ class AiStudioSession(models.Model):
                     if not model_image_data:
                         raise UserError(_('Preset manken resmi eksik.'))
 
-                    model_url = fal_client.upload(
-                        base64.b64decode(model_image_data),
-                        'image/jpeg',
-                    )
+                    model_url = provider.upload_image(model_image_data)
 
-                    # Kategori belirleme
+                    # Kategori belirleme — otomatik tespit veya manuel
                     cat = session.category
-                    if cat == 'auto':
-                        cat = preset.garment_type or 'tops'
-                    fal_category = {
-                        'tops': 'tops',
-                        'bottoms': 'bottoms',
-                        'one_piece': 'one-piece',
-                    }.get(cat, 'tops')
+                    if provider_type == 'fashn':
+                        if cat == 'auto':
+                            category_to_send = 'auto'
+                        else:
+                            category_to_send = {
+                                'tops': 'tops',
+                                'bottoms': 'bottoms',
+                                'one_piece': 'one-pieces',
+                            }.get(cat, 'tops')
+                    else:
+                        if cat == 'auto':
+                            try:
+                                from ..services.garment_analyzer import analyze_garment, map_to_fashn_category
+                                analysis = analyze_garment(api_key, garment_url)
+                                analyzed_cat = map_to_fashn_category(analysis)
+                                category_to_send = {
+                                    'tops': 'tops',
+                                    'bottoms': 'bottoms',
+                                    'full-body': 'one-piece',
+                                }.get(analyzed_cat, 'tops')
+                                _logger.info(
+                                    'Otomatik kategori tespiti (fal.ai): %s → %s (gen=%s)',
+                                    analysis.get('garmentType', '?'), category_to_send, gen.id,
+                                )
+                            except Exception as e:
+                                _logger.warning('Otomatik tespit başarısız, preset kullanılıyor: %s', e)
+                                cat_fallback = preset.garment_type or 'tops'
+                                category_to_send = {
+                                    'tops': 'tops',
+                                    'bottoms': 'bottoms',
+                                    'one_piece': 'one-piece',
+                                }.get(cat_fallback, 'tops')
+                        else:
+                            category_to_send = {
+                                'tops': 'tops',
+                                'bottoms': 'bottoms',
+                                'one_piece': 'one-piece',
+                            }.get(cat, 'tops')
 
-                    # Endpoint belirleme
-                    endpoint = env['ir.config_parameter'].sudo().get_param(
-                        'ugurlar_ai_studio.default_endpoint',
-                        'fal-ai/fashn/tryon/v1.6',
+                    # Try-on model ve uretim sayisi ayarlari
+                    tryon_model = env['ir.config_parameter'].sudo().get_param(
+                        'ugurlar_ai_studio.tryon_model', 'tryon-v1.6'
                     )
+                    num_samples = int(env['ir.config_parameter'].sudo().get_param(
+                        'ugurlar_ai_studio.num_samples', '2'
+                    ))
 
-                    # Virtual try-on çağrısı
-                    result = fal_client.subscribe(
-                        endpoint,
-                        arguments={
-                            'model_image': model_url,
-                            'garment_image': garment_url,
-                            'category': fal_category,
-                            'mode': session.quality_mode or 'balanced',
-                            'garment_photo_type': 'flat-lay',
-                        },
+                    tryon_result = provider.virtual_tryon(
+                        model_image_url=model_url,
+                        garment_image_url=garment_url,
+                        category=category_to_send,
+                        mode=session.quality_mode or 'balanced',
+                        model_name=tryon_model,
+                        num_samples=num_samples,
+                        garment_photo_type='auto',
+                        output_format='jpeg',
                     )
 
                     elapsed = time.time() - start_time
 
-                    # Sonucu indir ve kaydet
+                    # Sonuclari indir ve en iyisini sec
                     import requests
-                    output_url = ''
-                    if 'images' in result and result['images']:
-                        output_url = result['images'][0].get('url', '')
-                    elif 'image' in result and result['image']:
-                        output_url = result['image'].get('url', '')
+                    image_urls = tryon_result.get('image_urls', [])
+                    if not image_urls and tryon_result.get('image_url'):
+                        image_urls = [tryon_result['image_url']]
 
-                    if output_url:
-                        img_data = requests.get(output_url, timeout=60).content
-                        gen.write({
-                            'generated_image': base64.b64encode(img_data),
-                            'state': 'done',
-                            'fal_endpoint': endpoint,
-                            'generation_time_seconds': elapsed,
-                            'cost': 0.075,  # FASHN tahmini maliyet
-                        })
+                    if image_urls:
+                        best_data = None
+                        best_size = 0
+
+                        for img_url in image_urls:
+                            if not img_url:
+                                continue
+                            # data URI ise decode et, URL ise indir
+                            if img_url.startswith('data:'):
+                                raw = img_url.split(';base64,', 1)[1]
+                                img_data = base64.b64decode(raw)
+                            else:
+                                img_data = requests.get(img_url, timeout=60).content
+                            if len(img_data) > best_size:
+                                best_size = len(img_data)
+                                best_data = img_data
+
+                        if best_data:
+                            _logger.info(
+                                '%d sample uretildi, en iyi secildi: %.1fKB (gen=%s)',
+                                len(image_urls), best_size / 1024, gen.id,
+                            )
+                            gen_b64 = base64.b64encode(best_data)
+                            gen.write({
+                                'generated_image': gen_b64,
+                                'state': 'done',
+                                'fal_endpoint': '%s/%s' % (provider_type, tryon_model),
+                                'generation_time_seconds': elapsed,
+                                'cost': tryon_result.get('cost', 0.05),
+                            })
+
+                            # Kalite kontrol — renk doğruluğu loglama
+                            try:
+                                from ..services.quality_checker import compute_quality_score
+                                qc = compute_quality_score(source_image, gen_b64)
+                                _logger.info(
+                                    'Kalite kontrolu (gen=%s): skor=%.1f, %s',
+                                    gen.id, qc['score'], qc['details'],
+                                )
+                            except Exception as qe:
+                                _logger.debug('Kalite kontrol atlandi: %s', qe)
+                        else:
+                            gen.write({
+                                'state': 'failed',
+                                'error_message': 'API sonuç döndürmedi.',
+                            })
                     else:
                         gen.write({
                             'state': 'failed',
-                            'error_message': 'API sonuç URL döndürmedi.',
+                            'error_message': 'API sonuç döndürmedi.',
                         })
 
                     cr.commit()
 
                 except Exception as e:
-                    _logger.error('AI üretim hatası (gen=%s): %s', gen.id, e)
+                    from ..services.fal_error_handler import parse_fal_error, format_fal_error_for_log
+                    parsed = parse_fal_error(e)
+                    _logger.error('AI üretim hatası: %s', format_fal_error_for_log(e, f'gen={gen.id}'))
                     gen.write({
                         'state': 'failed',
-                        'error_message': str(e)[:500],
+                        'error_message': parsed['message'][:500],
                     })
                     cr.commit()
 
@@ -586,24 +763,14 @@ class AiStudioSession(models.Model):
                         # Fallback: Eğer başarılı try-on görseli bulunamadıysa ama orijinal detay varsa, arka plan temizleyip kaydet
                         if gen.source_photo_id and gen.source_photo_id.image_original:
                             source_image = gen.source_photo_id.image_original
-                            garment_url = fal_client.upload(
-                                base64.b64decode(source_image),
-                                'image/jpeg',
-                            )
-                            bg_result = fal_client.subscribe(
-                                'fal-ai/birefnet',
-                                arguments={'image_url': garment_url},
-                            )
-                            garment_url = bg_result['image']['url']
-                            import requests
-                            img_data = requests.get(garment_url, timeout=60).content
+                            bg_removed_b64 = provider.remove_background(source_image)
                             elapsed = time.time() - start_time
                             gen.write({
-                                'generated_image': base64.b64encode(img_data),
+                                'generated_image': bg_removed_b64,
                                 'state': 'done',
-                                'fal_endpoint': 'fal-ai/birefnet',
+                                'fal_endpoint': '%s/bg-remove' % provider_type,
                                 'generation_time_seconds': elapsed,
-                                'cost': 0.002,
+                                'cost': 0.01,
                             })
                         else:
                             raise Exception("Kırpılacak başarılı giydirilmiş manken görseli bulunamadı.")
@@ -611,10 +778,12 @@ class AiStudioSession(models.Model):
                     cr.commit()
 
                 except Exception as e:
-                    _logger.error('AI detay üretim hatası (gen=%s): %s', gen.id, e)
+                    from ..services.fal_error_handler import parse_fal_error, format_fal_error_for_log
+                    parsed = parse_fal_error(e)
+                    _logger.error('AI detay üretim hatası: %s', format_fal_error_for_log(e, f'gen={gen.id}'))
                     gen.write({
                         'state': 'failed',
-                        'error_message': str(e)[:500],
+                        'error_message': parsed['message'][:500],
                     })
                     cr.commit()
 
@@ -627,11 +796,19 @@ class AiStudioSession(models.Model):
 
     def _process_single_generation(self, generation):
         """Tek bir generation'ı yeniden işle (retry için)."""
-        api_key = self.env['ir.config_parameter'].sudo().get_param(
-            'ugurlar_ai_studio.fal_api_key'
+        provider_type = self.env['ir.config_parameter'].sudo().get_param(
+            'ugurlar_ai_studio.default_provider', 'fashn'
         )
+        if provider_type == 'fashn':
+            api_key = self.env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.fashn_api_key'
+            )
+        else:
+            api_key = self.env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.fal_api_key'
+            )
         if not api_key:
-            raise UserError(_('fal.ai API anahtarı ayarlanmamış.'))
+            raise UserError(_('AI API anahtarı ayarlanmamış.'))
 
         thread = threading.Thread(
             target=self._retry_generation_thread,
@@ -643,22 +820,24 @@ class AiStudioSession(models.Model):
     def _retry_generation_thread(self, session_id, gen_id, api_key):
         """Tek generation retry thread'i."""
         time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
-        import os
-        os.environ['FAL_KEY'] = api_key
 
         with self.pool.cursor() as cr:
             env = api.Environment(cr, self.env.uid, {})
+            provider_type = env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.default_provider', 'fashn'
+            )
             session = env['ai.studio.session'].browse(session_id)
             gen = env['ai.studio.generation'].browse(gen_id)
 
             # Aynı işlem mantığını uygula (basitleştirilmiş)
             try:
-                import fal_client
+                provider = self._create_provider(api_key, provider_type)
 
                 gen.write({'state': 'processing'})
                 cr.commit()
 
                 source_image = gen.original_image
+                preset = session.model_preset_id
 
                 # Detay ise kırpma işlemini yap
                 if gen.photo_type == 'detail':
@@ -691,20 +870,13 @@ class AiStudioSession(models.Model):
                         # Fallback: başarılı try-on bulunamazsa background remove yap
                         if gen.source_photo_id and gen.source_photo_id.image_original:
                             try:
-                                garment_url = fal_client.upload(
-                                    base64.b64decode(gen.source_photo_id.image_original), 'image/jpeg'
+                                bg_removed_b64 = provider.remove_background(
+                                    gen.source_photo_id.image_original
                                 )
-                                bg_result = fal_client.subscribe(
-                                    'fal-ai/birefnet',
-                                    arguments={'image_url': garment_url},
-                                )
-                                garment_url = bg_result['image']['url']
-                                import requests
-                                img_data = requests.get(garment_url, timeout=60).content
                                 gen.write({
-                                    'generated_image': base64.b64encode(img_data),
+                                    'generated_image': bg_removed_b64,
                                     'state': 'done',
-                                    'fal_endpoint': 'fal-ai/birefnet',
+                                    'fal_endpoint': '%s/bg-remove' % provider_type,
                                     'error_message': False,
                                 })
                             except Exception as e:
@@ -718,39 +890,30 @@ class AiStudioSession(models.Model):
                     'ugurlar_ai_studio.auto_bg_remove', 'True'
                 ) == 'True'
 
-                # Arka plan kaldırma ve askı temizleme
-                if auto_bg and source_image:
+                # Arka plan kaldırma ve askı temizleme (ön işleme pipeline ile)
+                from ..services.garment_preprocessor import (
+                    preprocess_garment_image,
+                    convert_birefnet_output_to_rgb,
+                )
+                preprocessed = preprocess_garment_image(source_image, target_long_edge=864)
+                processed_b64 = preprocessed['image_base64']
+
+                if auto_bg and processed_b64:
                     try:
-                        garment_url = fal_client.upload(
-                            base64.b64decode(source_image),
-                            'image/jpeg',
-                        )
-                        bg_result = fal_client.subscribe(
-                            'fal-ai/birefnet',
-                            arguments={'image_url': garment_url},
-                        )
-                        garment_url = bg_result['image']['url']
-                        
-                        # Askı temizleme işlemi
-                        import requests
-                        bg_removed_data = requests.get(garment_url, timeout=60).content
-                        bg_removed_b64 = base64.b64encode(bg_removed_data)
-                        cleaned_b64 = session._remove_hanger_hook(bg_removed_b64)
-                        garment_url = fal_client.upload(
-                            base64.b64decode(cleaned_b64),
-                            'image/png',
-                        )
+                        bg_removed_b64 = provider.remove_background(processed_b64)
+                        try:
+                            bg_removed_data = base64.b64decode(bg_removed_b64)
+                            rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
+                            rgb_b64 = base64.b64encode(rgb_data)
+                        except Exception:
+                            rgb_b64 = bg_removed_b64
+                        cleaned_b64 = session._remove_hanger_hook(rgb_b64)
+                        garment_url = provider.upload_image(cleaned_b64)
                     except Exception as e:
-                        _logger.warning('Retry BG remove veya askı temizleme başarısız, orijinal kullanılıyor: %s', e)
-                        garment_url = fal_client.upload(
-                            base64.b64decode(source_image),
-                            'image/jpeg',
-                        )
+                        _logger.warning('Retry BG remove başarısız, ön işlenmiş kullanılıyor: %s', e)
+                        garment_url = provider.upload_image(processed_b64)
                 else:
-                    garment_url = fal_client.upload(
-                        base64.b64decode(source_image),
-                        'image/jpeg',
-                    )
+                    garment_url = provider.upload_image(processed_b64)
 
                 preset = session.model_preset_id
                 model_image_field = 'model_image_front'
@@ -762,44 +925,56 @@ class AiStudioSession(models.Model):
                 if not model_image:
                     raise Exception('Preset manken resmi eksik.')
 
-                model_url = fal_client.upload(
-                    base64.b64decode(model_image), 'image/jpeg'
-                )
+                model_url = provider.upload_image(model_image)
 
-                endpoint = env['ir.config_parameter'].sudo().get_param(
-                    'ugurlar_ai_studio.default_endpoint',
-                    'fal-ai/fashn/tryon/v1.6',
+                tryon_model = env['ir.config_parameter'].sudo().get_param(
+                    'ugurlar_ai_studio.tryon_model', 'tryon-v1.6'
                 )
 
                 cat = session.category
-                if cat == 'auto':
-                    cat = preset.garment_type or 'tops'
-                fal_category = {
-                    'tops': 'tops',
-                    'bottoms': 'bottoms',
-                    'one_piece': 'one-piece',
-                }.get(cat, 'tops')
+                if provider_type == 'fashn':
+                    if cat == 'auto':
+                        category_to_send = 'auto'
+                    else:
+                        category_to_send = {
+                            'tops': 'tops',
+                            'bottoms': 'bottoms',
+                            'one_piece': 'one-pieces',
+                        }.get(cat, 'tops')
+                else:
+                    if cat == 'auto':
+                        cat_fallback = preset.garment_type or 'tops'
+                        category_to_send = {
+                            'tops': 'tops',
+                            'bottoms': 'bottoms',
+                            'one_piece': 'one-piece',
+                        }.get(cat_fallback, 'tops')
+                    else:
+                        category_to_send = {
+                            'tops': 'tops',
+                            'bottoms': 'bottoms',
+                            'one_piece': 'one-piece',
+                        }.get(cat, 'tops')
 
-                result = fal_client.subscribe(
-                    endpoint,
-                    arguments={
-                        'model_image': model_url,
-                        'garment_image': garment_url,
-                        'category': fal_category,
-                        'mode': session.quality_mode or 'balanced',
-                        'garment_photo_type': 'flat-lay',
-                    },
+                tryon_result = provider.virtual_tryon(
+                    model_image_url=model_url,
+                    garment_image_url=garment_url,
+                    category=category_to_send,
+                    mode=session.quality_mode or 'balanced',
+                    model_name=tryon_model,
+                    garment_photo_type='auto',
+                    output_format='jpeg',
                 )
 
-                import requests
-                output_url = ''
-                if 'images' in result and result['images']:
-                    output_url = result['images'][0].get('url', '')
-                elif 'image' in result and result['image']:
-                    output_url = result['image'].get('url', '')
+                output_url = tryon_result.get('image_url', '')
 
                 if output_url:
-                    img_data = requests.get(output_url, timeout=60).content
+                    if output_url.startswith('data:'):
+                        raw_b64 = output_url.split(';base64,', 1)[1]
+                        img_data = base64.b64decode(raw_b64)
+                    else:
+                        import requests
+                        img_data = requests.get(output_url, timeout=60).content
                     gen.write({
                         'generated_image': base64.b64encode(img_data),
                         'state': 'done',
@@ -808,10 +983,12 @@ class AiStudioSession(models.Model):
                 cr.commit()
 
             except Exception as e:
-                _logger.error('Retry hatası (gen=%s): %s', gen_id, e)
+                from ..services.fal_error_handler import parse_fal_error, format_fal_error_for_log
+                parsed = parse_fal_error(e)
+                _logger.error('Retry hatası: %s', format_fal_error_for_log(e, f'gen={gen_id}'))
                 gen.write({
                     'state': 'failed',
-                    'error_message': str(e)[:500],
+                    'error_message': parsed['message'][:500],
                 })
                 cr.commit()
 
@@ -862,7 +1039,6 @@ class AiStudioSession(models.Model):
                     gen._fields['photo_type'].selection
                 ).get(gen.photo_type, 'Görsel')
                 self.env['product.image'].create({
-                    'product_variant_id': prod.id,
                     'product_tmpl_id': prod.product_tmpl_id.id,
                     'name': f'{type_label} - AI ({gen.revision_number})',
                     'image_1920': gen.generated_image,

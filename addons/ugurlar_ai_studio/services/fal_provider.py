@@ -1,4 +1,8 @@
-"""fal.ai provider implementation."""
+# fal.ai provider implementation.
+#
+# fal_client SDK kullanir - kuyruk destekli, otomatik retry,
+# timeout yonetimi ve yapisal hata ayristirma entegrasyonu ile.
+
 import base64
 import logging
 
@@ -11,19 +15,37 @@ try:
 except ImportError:
     fal_client = None
     _logger.warning(
-        'fal-client kurulu değil. AI özellikleri çalışmayacak. '
+        'fal-client kurulu degil. AI ozellikleri calismayacak. '
         'Kurulum: pip install fal-client'
     )
 
 
 class FalProvider(AIProviderBase):
-    """fal.ai FASHN v1.6 implementasyonu."""
+    # fal.ai FASHN v1.6 implementasyonu.
+    #
+    # Tum API cagrilari fal_client.subscribe() ile yapilir:
+    # - Kuyruk destekli (otomatik retry, 10 kez)
+    # - client_timeout ile zaman asimi kontrolu
+    # - on_queue_update ile ilerleme takibi
 
     ENDPOINTS = {
         'tryon_fashn': 'fal-ai/fashn/tryon/v1.6',
         'tryon_kolors': 'fal-ai/kling/v1-5/kolors-virtual-try-on',
         'bg_remove': 'fal-ai/birefnet',
         'flux_schnell': 'fal-ai/flux/schnell',
+        'flux_pro': 'fal-ai/flux-pro/v1.1',
+        'nano_banana': 'fal-ai/nano-banana-pro/edit',
+        'any_llm': 'fal-ai/any-llm',
+    }
+
+    # Endpoint basina tahmini maliyet (USD)
+    ESTIMATED_COSTS = {
+        'fal-ai/fashn/tryon/v1.6': 0.075,
+        'fal-ai/birefnet': 0.002,
+        'fal-ai/flux/schnell': 0.003,
+        'fal-ai/flux-pro/v1.1': 0.05,
+        'fal-ai/nano-banana-pro/edit': 0.04,
+        'fal-ai/any-llm': 0.001,
     }
 
     def __init__(self, api_key):
@@ -34,12 +56,17 @@ class FalProvider(AIProviderBase):
     def _check_client(self):
         if fal_client is None:
             raise ImportError(
-                'fal-client paketi kurulu değil. '
+                'fal-client paketi kurulu degil. '
                 'Kurulum: pip install fal-client'
             )
 
+    def get_estimated_cost(self, endpoint):
+        # Endpoint icin tahmini maliyeti dondur (USD).
+        return self.ESTIMATED_COSTS.get(endpoint, 0.01)
+
     def virtual_tryon(self, model_image_url, garment_image_url,
                       category='tops', mode='balanced', **kwargs):
+        # Manken uzerine giydirme - FASHN v1.6.
         self._check_client()
 
         endpoint = kwargs.get('endpoint', self.ENDPOINTS['tryon_fashn'])
@@ -47,6 +74,7 @@ class FalProvider(AIProviderBase):
             'tops': 'tops',
             'bottoms': 'bottoms',
             'one_piece': 'one-piece',
+            'one-piece': 'one-piece',
             'shoes': 'tops',
             'bags': 'tops',
             'accessories': 'tops',
@@ -61,6 +89,7 @@ class FalProvider(AIProviderBase):
                 'mode': mode,
                 'garment_photo_type': kwargs.get('garment_photo_type', 'flat-lay'),
             },
+            client_timeout=180,
         )
 
         image_url = ''
@@ -72,17 +101,19 @@ class FalProvider(AIProviderBase):
 
         return {
             'image_url': image_url,
-            'cost': 0.075,
+            'cost': self.get_estimated_cost(endpoint),
             'request_id': request_id,
         }
 
     def remove_background(self, image_base64):
+        # Arka plan kaldirma - birefnet.
         self._check_client()
 
         image_url = self.upload_image(image_base64)
         result = fal_client.subscribe(
             self.ENDPOINTS['bg_remove'],
             arguments={'image_url': image_url},
+            client_timeout=60,
         )
         output_url = result.get('image', {}).get('url', '')
         if output_url:
@@ -92,6 +123,7 @@ class FalProvider(AIProviderBase):
         return image_base64
 
     def generate_mannequin(self, prompt, **kwargs):
+        # AI ile manken fotografi olustur - FLUX schnell.
         self._check_client()
 
         width = kwargs.get('width', 864)
@@ -104,6 +136,7 @@ class FalProvider(AIProviderBase):
                 'image_size': {'width': width, 'height': height},
                 'num_images': 1,
             },
+            client_timeout=120,
         )
 
         image_url = result.get('images', [{}])[0].get('url', '')
@@ -114,6 +147,11 @@ class FalProvider(AIProviderBase):
         return None
 
     def upload_image(self, image_base64, content_type='image/jpeg'):
+        # Gorseli fal CDN'e yukle - otomatik retry ve fallback ile.
         self._check_client()
+        if isinstance(image_base64, bytes):
+            image_base64 = image_base64.decode('ascii')
+        if image_base64.startswith('data:'):
+            image_base64 = image_base64.split(';base64,', 1)[1]
         image_bytes = base64.b64decode(image_base64)
         return fal_client.upload(image_bytes, content_type)

@@ -81,6 +81,13 @@ class AiStudioModelPreset(models.Model):
         help='Bu preset kullanıldığında otomatik eklenen prompt',
     )
     active = fields.Boolean(string='Aktif', default=True)
+
+    library_mannequin_id = fields.Many2one(
+        'ai.studio.model.library',
+        string='Kutuphane Mankeni',
+        help='Kutuphaneden secilen manken',
+    )
+
     preview_image = fields.Image(
         string='Önizleme',
         max_width=512, max_height=512,
@@ -131,20 +138,76 @@ class AiStudioModelPreset(models.Model):
             else:
                 preset.approval_rate = 0.0
 
+    @api.onchange('library_mannequin_id')
+    def _onchange_library_mannequin_id(self):
+        """Kutuphane mankeni secildiginde gorselleri preset'e kopyala."""
+        if self.library_mannequin_id:
+            mannequin = self.library_mannequin_id
+            if mannequin.image_front:
+                self.model_image_front = mannequin.image_front
+            if mannequin.image_back:
+                self.model_image_back = mannequin.image_back
+            if mannequin.image_side:
+                self.model_image_side = mannequin.image_side
+
+    def action_save_to_library(self):
+        """Mevcut preset'in manken gorsellerini kutupahneye kaydet."""
+        self.ensure_one()
+        if not self.model_image_front:
+            raise UserError(_('Kutupahneye kaydetmek icin en az on gorsel gereklidir.'))
+
+        library_vals = {
+            'name': _('%s - Kutuphane Kopyasi') % self.name,
+            'gender': self.gender if self.gender != 'unisex' else 'female',
+            'body_type': self.body_type or 'standard',
+            'source': 'ai_generated' if self.mannequin_generation_state == 'done' else 'uploaded',
+            'image_front': self.model_image_front,
+            'image_back': self.model_image_back or False,
+            'image_side': self.model_image_side or False,
+            'notes': _('"%s" presetinden kaydedildi.') % self.name,
+        }
+
+        library_entry = self.env['ai.studio.model.library'].create(library_vals)
+        self.library_mannequin_id = library_entry.id
+
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Kütüphaneye Kaydedildi'),
+                'message': _('Manken görselleri "%s" olarak kütüphaneye kaydedildi.') % library_entry.name,
+                'type': 'success',
+                'sticky': False,
+            },
+        }
+
     def action_generate_mannequin(self):
         """AI ile manken fotoğrafı oluştur (ön ve arka)."""
         self.ensure_one()
         if not self.mannequin_prompt:
             raise UserError(_('Lütfen manken oluşturma promptu girin.'))
 
-        api_key = self.env['ir.config_parameter'].sudo().get_param(
-            'ugurlar_ai_studio.fal_api_key'
+        provider_type = self.env['ir.config_parameter'].sudo().get_param(
+            'ugurlar_ai_studio.default_provider', 'fashn'
         )
-        if not api_key:
-            raise UserError(_(
-                'fal.ai API anahtarı ayarlanmamış.\n'
-                'Yapılandırma → Genel Ayarlar → AI Studio bölümünden girin.'
-            ))
+        if provider_type == 'fashn':
+            api_key = self.env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.fashn_api_key'
+            )
+            if not api_key:
+                raise UserError(_(
+                    'FASHN API anahtarı ayarlanmamış.\n'
+                    'Ayarlar → AI Stüdyo menüsünden girin.'
+                ))
+        else:
+            api_key = self.env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.fal_api_key'
+            )
+            if not api_key:
+                raise UserError(_(
+                    'fal.ai API anahtarı ayarlanmamış.\n'
+                    'Ayarlar → AI Stüdyo menüsünden girin.'
+                ))
 
         self.mannequin_generation_state = 'generating'
 
@@ -152,7 +215,7 @@ class AiStudioModelPreset(models.Model):
         thread = threading.Thread(
             target=self._generate_mannequin_thread,
             args=(self.id, self.mannequin_prompt, api_key,
-                  self.gender, self.body_type, self.background_type),
+                  self.gender, self.body_type, self.background_type, provider_type),
         )
         thread.daemon = True
         thread.start()
@@ -176,19 +239,12 @@ class AiStudioModelPreset(models.Model):
 
     # 1. Photorealism
     REALISM_LOCK = (
-        "PHOTOREALISM MANDATE — This must look like an unretouched RAW "
-        "photograph taken with a Hasselblad X2D. "
-        "FACE: visible pores on nose/cheeks/forehead, subtle undereye texture, "
-        "natural lip dryness lines, real skin translucency. "
-        "Slight facial asymmetry is MANDATORY — no perfectly symmetrical faces. "
-        "EYES: Wet corneal reflection, visible iris fibres, natural eyelid crease. "
-        "HAIR: Individually resolved strands with natural flyaways at crown and temples, "
-        "gravity-affected density variation. NOT a smooth CG hair shader. "
-        "SKIN: Subsurface scattering on ears/fingertips, vellus hair on cheeks and jawline, "
-        "natural tonal variation. NO porcelain/waxy/airbrushed/plastic skin. "
-        "EXPRESSION: Neutral editorial expression with authentic micro-tension. "
-        "NOT a blank AI stare. "
-        "CAMERA: Natural sensor grain, medium-format RAW optic emulation."
+        "RAW photograph, photorealistic, shot on Hasselblad X2D 100C, "
+        "real human being, NOT illustration, NOT cartoon, NOT 3D render, NOT anime, NOT drawing, NOT digital art, "
+        "visible skin pores, natural skin texture with subsurface scattering, "
+        "real facial asymmetry, wet corneal reflections, individual hair strands with flyaways, "
+        "natural makeup, authentic editorial expression. "
+        "CAMERA: 85mm f/1.8 lens, shallow depth of field, natural sensor grain."
     )
 
     # 2. Studio Environment
@@ -242,44 +298,40 @@ class AiStudioModelPreset(models.Model):
 
     # 7. Negative Prompt
     NEGATIVE_LOCK = (
-        "NEGATIVE: extra arms, extra legs, extra fingers, duplicated face, "
-        "double head, ghosting limbs, warped anatomy, deformed body, "
-        "mannequin, doll, plastic/waxy/porcelain skin, CGI look, "
+        "NEGATIVE: illustration, cartoon, anime, 3D render, digital painting, CGI, "
+        "vector art, sketch, drawing, oil painting, watercolor, comic book style, "
+        "extra arms, extra legs, extra fingers, duplicated face, double head, "
+        "warped anatomy, deformed body, mannequin, doll, plastic skin, waxy skin, "
         "beauty filter, airbrushed, over-smooth, blurry, low quality, "
-        "collage, split screen, multi-panel, grid layout, montage, "
-        "interior room, furniture, flat-lay, hanger, product-only shot, "
-        "underwear look, nude model, "
-        "SMILING, HAPPY, LAUGHING, ROBOTIC, STIFF."
+        "collage, split screen, multi-panel, grid layout, "
+        "underwear look, nude model, hanger, flat-lay, product-only shot."
     )
 
     # 8. Premium Capture
     CAPTURE_LOCK = (
-        "Ultra premium capture lock: emulate top-tier medium-format RAW capture. "
-        "Preserve nuanced tonal roll-off, highlight retention, rich but natural blacks. "
-        "Keep eyes, lashes, brows, lips, skin micro-relief tack-sharp at focal plane. "
-        "No fake HDR halos, no clarity overdrive, no sharpening artifacts."
+        "Ultra premium fashion photography, shot in professional studio, "
+        "soft diffused key light, subtle fill light, clean white background. "
+        "8K resolution, sharp focus on subject, photographic realism."
     )
 
     @staticmethod
     def _fal_api_call(endpoint, payload, api_key, timeout=120):
-        """fal.ai SYNC REST API çağrısı."""
-        import requests as req
+        """fal.ai API çağrısı — fal_client SDK ile kuyruk destekli."""
+        import os
+        os.environ['FAL_KEY'] = api_key
 
-        url = f'https://fal.run/{endpoint}'
-        headers = {
-            'Authorization': f'Key {api_key}',
-            'Content-Type': 'application/json',
-        }
+        try:
+            import fal_client
+        except ImportError:
+            raise Exception('fal-client paketi kurulu değil. pip install fal-client')
 
-        _logger.info('fal.ai API çağrısı: %s', endpoint)
-        resp = req.post(url, json=payload, headers=headers, timeout=timeout)
-
-        if resp.status_code != 200:
-            error_text = resp.text[:500]
-            _logger.error('fal.ai hata %s: %s', resp.status_code, error_text)
-            raise Exception(f'fal.ai API hatası ({resp.status_code}): {error_text}')
-
-        return resp.json()
+        _logger.info('fal.ai API çağrısı (SDK): %s', endpoint)
+        result = fal_client.subscribe(
+            endpoint,
+            arguments=payload,
+            client_timeout=timeout,
+        )
+        return result
 
     @staticmethod
     def _download_image_b64(url):
@@ -291,66 +343,51 @@ class AiStudioModelPreset(models.Model):
 
     @staticmethod
     def _upload_to_fal(image_b64_bytes, api_key):
-        """Base64 görsel datayı fal.ai storage'a yükle, URL döndür."""
-        import requests as req
+        """Base64 görsel datayı fal.ai CDN'e yükle, URL döndür.
 
-        # Base64 bytes -> raw bytes
-        raw_data = base64.b64decode(image_b64_bytes)
+        fal_client.upload() kullanır — otomatik retry,
+        multipart upload ve CDN fallback desteği.
+        """
+        import os
+        os.environ['FAL_KEY'] = api_key
 
-        url = 'https://fal.run/fal-ai/any-llm'  # dummy — we use storage
-        # fal.ai REST storage upload
-        upload_url = 'https://rest.alpha.fal.ai/storage/upload/initiate'
-        headers = {
-            'Authorization': f'Key {api_key}',
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-        }
-
-        # Initiate upload
-        init_resp = req.post(upload_url, json={
-            'content_type': 'image/png',
-            'file_name': 'mannequin.png',
-        }, headers=headers, timeout=30)
-
-        if init_resp.status_code != 200:
-            _logger.warning('fal storage upload başarısız: %s', init_resp.text[:300])
+        try:
+            import fal_client
+        except ImportError:
+            _logger.warning('fal_client kurulu değil, upload yapılamadı')
             return None
 
-        init_data = init_resp.json()
-        put_url = init_data.get('upload_url')
-        file_url = init_data.get('file_url')
-
-        if put_url:
-            # Upload raw data
-            req.put(put_url, data=raw_data, headers={
-                'Content-Type': 'image/png',
-            }, timeout=60)
-
-        return file_url
+        try:
+            raw_data = base64.b64decode(image_b64_bytes)
+            url = fal_client.upload(raw_data, 'image/png')
+            return url
+        except Exception as e:
+            _logger.warning('fal CDN upload başarısız: %s', e)
+            return None
 
     def _build_full_prompt(self, base_prompt, view='front'):
         """Tüm lock'ları birleştirerek tam prompt oluştur."""
-        view_desc = (
-            'front view, facing camera directly'
-            if view == 'front'
-            else 'back view, facing away from camera, showing full back'
-        )
+        if view == 'front':
+            view_desc = 'front view, facing camera directly'
+        elif view == 'back':
+            view_desc = 'back view, facing away from camera, showing full back'
+        else:
+            view_desc = 'side profile view, standing profile at 90 degree angle'
 
         return (
-            f"{base_prompt}, {view_desc}, full body shot from head to feet, "
-            f"standing pose, fashion model photography, e-commerce catalog style. "
+            f"RAW photo, photorealistic, real human being, {base_prompt}, {view_desc}, "
+            f"full body shot from head to feet, standing pose, high-end fashion model photography. "
             f"{self.REALISM_LOCK} "
             f"{self.STUDIO_LOCK} "
             f"{self.ANATOMY_LOCK} "
             f"{self.ANTI_NUDE_LOCK} "
             f"{self.POSTURE_LOCK} "
-            f"{self.IDENTITY_LOCK} "
             f"{self.CAPTURE_LOCK} "
             f"{self.NEGATIVE_LOCK}"
         )
 
     def _generate_mannequin_thread(self, preset_id, prompt, api_key,
-                                    gender, body_type, bg_type):
+                                    gender, body_type, bg_type, provider_type='fashn'):
         """Thread içinde AI manken oluştur — SaaS tarzı consistency ile."""
         time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
         try:
@@ -407,73 +444,42 @@ class AiStudioModelPreset(models.Model):
                 f"{outfit_hints_back.get(garment_type, outfit_hints_back['tops'])}"
             )
 
-            # ═══ ÖNDEN MANKEN ═══
-            _logger.info('Manken oluşturuluyor (ön): preset_id=%s', preset_id)
-            front_full_prompt = self._build_full_prompt(enhanced_prompt_front, view='front')
-
-            front_result = self._fal_api_call(
-                'fal-ai/flux-pro/v1.1',
-                {
-                    'prompt': front_full_prompt,
-                    'image_size': {'width': 768, 'height': 1152},
-                    'num_images': 1,
-                    'safety_tolerance': 5,
-                    'output_format': 'png',
-                },
-                api_key,
-                timeout=120,
+            enhanced_prompt_side = (
+                f"{prompt}, {gender_hints.get(gender, 'young adult')}, "
+                f"{body_hints.get(body_type, 'standard build')}, "
+                f"{outfit_hints_front.get(garment_type, outfit_hints_front['tops'])}"
             )
 
-            front_images = front_result.get('images', [])
-            if not front_images:
-                raise Exception('fal.ai ön görsel boş döndü')
-
-            front_url = front_images[0]['url']
-            front_data = self._download_image_b64(front_url)
-
-            # ═══ ARKADAN MANKEN ═══
-            _logger.info('Manken oluşturuluyor (arka): preset_id=%s', preset_id)
-
-            # Ön görseli fal storage'a yükle
-            front_fal_url = self._upload_to_fal(front_data, api_key)
-
-            if front_fal_url:
-                _logger.info('nano-banana-pro/edit ile tutarlı arka görsel')
-                back_prompt = (
-                    f"OUTPUT EXACTLY ONE IMAGE. "
-                    f"Show the EXACT SAME person from the reference image, "
-                    f"but from the BACK VIEW — facing away from camera. "
-                    f"SAME person, SAME trousers, SAME hair, SAME body. "
-                    f"The top she is wearing is a crop top / sports bra that is completely open in the back, "
-                    f"leaving her entire back bare and exposed, showing her skin. "
-                    f"Only the camera angle changes to show the back. "
-                    f"{self.IDENTITY_LOCK} {self.ANTI_NUDE_LOCK} "
-                    f"{self.ANATOMY_LOCK} {self.STUDIO_LOCK}"
-                )
-
-                back_result = self._fal_api_call(
-                    'fal-ai/nano-banana-pro/edit',
-                    {
-                        'prompt': back_prompt,
-                        'image_urls': [front_fal_url],
-                        'num_images': 1,
-                        'aspect_ratio': '3:4',
-                        'output_format': 'png',
-                        'safety_tolerance': '5',
-                        'resolution': '2K',
-                        'limit_generations': True,
-                    },
-                    api_key,
-                    timeout=180,
-                )
-            else:
-                _logger.info('Fallback: text-to-image ile arka görsel')
+            if provider_type == 'fashn':
+                from ..services.fashn_provider import FashnProvider
+                provider = FashnProvider(api_key)
+                
+                # FASHN model-create ile ön, arka ve yan manken oluştur
+                _logger.info('FASHN ile manken oluşturuluyor (ön): preset_id=%s', preset_id)
+                front_full_prompt = self._build_full_prompt(enhanced_prompt_front, view='front')
+                front_data = provider.generate_mannequin(front_full_prompt)
+                if not front_data:
+                    raise Exception('FASHN ön görsel boş döndü')
+                    
+                _logger.info('FASHN ile manken oluşturuluyor (arka): preset_id=%s', preset_id)
                 back_full_prompt = self._build_full_prompt(enhanced_prompt_back, view='back')
-                back_result = self._fal_api_call(
+                back_data = provider.generate_mannequin(back_full_prompt)
+                if not back_data:
+                    raise Exception('FASHN arka görsel boş döndü')
+                    
+                _logger.info('FASHN ile manken oluşturuluyor (yan): preset_id=%s', preset_id)
+                side_full_prompt = self._build_full_prompt(enhanced_prompt_side, view='side')
+                side_data = provider.generate_mannequin(side_full_prompt)
+            else:
+                # fal.ai premium consistency flow
+                _logger.info('fal.ai ile manken oluşturuluyor (ön): preset_id=%s', preset_id)
+                front_full_prompt = self._build_full_prompt(enhanced_prompt_front, view='front')
+
+                front_result = self._fal_api_call(
                     'fal-ai/flux-pro/v1.1',
                     {
-                        'prompt': back_full_prompt,
-                        'image_size': {'width': 768, 'height': 1152},
+                        'prompt': front_full_prompt,
+                        'image_size': {'width': 864, 'height': 1296},
                         'num_images': 1,
                         'safety_tolerance': 5,
                         'output_format': 'png',
@@ -482,32 +488,38 @@ class AiStudioModelPreset(models.Model):
                     timeout=120,
                 )
 
-            back_images = back_result.get('images', [])
-            if not back_images:
-                raise Exception('fal.ai arka görsel boş döndü')
+                front_images = front_result.get('images', [])
+                if not front_images:
+                    raise Exception('fal.ai ön görsel boş döndü')
 
-            back_data = self._download_image_b64(back_images[0]['url'])
+                front_url = front_images[0]['url']
+                front_data = self._download_image_b64(front_url)
 
-            # ═══ YANDAN MANKEN ═══
-            _logger.info('Manken oluşturuluyor (yan): preset_id=%s', preset_id)
-            side_data = False
-            if front_fal_url:
-                _logger.info('nano-banana-pro/edit ile tutarlı yan görsel')
-                side_prompt = (
-                    f"OUTPUT EXACTLY ONE IMAGE. "
-                    f"Show the EXACT SAME person from the reference image, "
-                    f"but from the SIDE PROFILE VIEW — standing profile. "
-                    f"SAME person, SAME clothes, SAME hair, SAME body. "
-                    f"Only the camera angle changes to show the side profile. "
-                    f"{self.IDENTITY_LOCK} {self.ANTI_NUDE_LOCK} "
-                    f"{self.ANATOMY_LOCK} {self.STUDIO_LOCK}"
-                )
+                # ═══ ARKADAN MANKEN ═══
+                _logger.info('fal.ai ile manken oluşturuluyor (arka): preset_id=%s', preset_id)
 
-                try:
-                    side_result = self._fal_api_call(
+                # Ön görseli fal storage'a yükle
+                front_fal_url = self._upload_to_fal(front_data, api_key)
+
+                if front_fal_url:
+                    _logger.info('nano-banana-pro/edit ile tutarli arka gorsel')
+                    back_prompt = (
+                        f"RAW photo, photorealistic, real human being, NOT illustration, NOT cartoon. "
+                        f"OUTPUT EXACTLY ONE IMAGE. "
+                        f"Show the EXACT SAME person from the reference image, "
+                        f"but from the BACK VIEW — facing away from camera. "
+                        f"SAME person, SAME trousers, SAME hair, SAME body, SAME skin tone. "
+                        f"The top she is wearing is a crop top / sports bra that is open in the back, "
+                        f"leaving her back bare and exposed, showing her skin. "
+                        f"Only the camera angle changes to show the back. "
+                        f"Professional studio fashion photography, white background. "
+                        f"{self.IDENTITY_LOCK} {self.ANATOMY_LOCK}"
+                    )
+
+                    back_result = self._fal_api_call(
                         'fal-ai/nano-banana-pro/edit',
                         {
-                            'prompt': side_prompt,
+                            'prompt': back_prompt,
                             'image_urls': [front_fal_url],
                             'num_images': 1,
                             'aspect_ratio': '3:4',
@@ -519,11 +531,65 @@ class AiStudioModelPreset(models.Model):
                         api_key,
                         timeout=180,
                     )
-                    side_images = side_result.get('images', [])
-                    if side_images:
-                        side_data = self._download_image_b64(side_images[0]['url'])
-                except Exception as e:
-                    _logger.warning('Yandan manken oluşturulamadı, es geçiliyor: %s', e)
+                else:
+                    _logger.info('Fallback: text-to-image ile arka görsel')
+                    back_full_prompt = self._build_full_prompt(enhanced_prompt_back, view='back')
+                    back_result = self._fal_api_call(
+                        'fal-ai/flux-pro/v1.1',
+                        {
+                            'prompt': back_full_prompt,
+                            'image_size': {'width': 768, 'height': 1152},
+                            'num_images': 1,
+                            'safety_tolerance': 5,
+                            'output_format': 'png',
+                        },
+                        api_key,
+                        timeout=120,
+                    )
+
+                back_images = back_result.get('images', [])
+                if not back_images:
+                    raise Exception('fal.ai arka görsel boş döndü')
+
+                back_data = self._download_image_b64(back_images[0]['url'])
+
+                # ═══ YANDAN MANKEN ═══
+                _logger.info('fal.ai ile manken oluşturuluyor (yan): preset_id=%s', preset_id)
+                side_data = False
+                if front_fal_url:
+                    _logger.info('nano-banana-pro/edit ile tutarli yan gorsel')
+                    side_prompt = (
+                        f"RAW photo, photorealistic, real human being, NOT illustration, NOT cartoon. "
+                        f"OUTPUT EXACTLY ONE IMAGE. "
+                        f"Show the EXACT SAME person from the reference image, "
+                        f"but from the SIDE PROFILE VIEW — standing profile, 90 degree angle. "
+                        f"SAME person, SAME clothes, SAME hair, SAME body, SAME skin tone. "
+                        f"Only the camera angle changes to show the side profile. "
+                        f"Professional studio fashion photography, white background. "
+                        f"{self.IDENTITY_LOCK} {self.ANATOMY_LOCK}"
+                    )
+
+                    try:
+                        side_result = self._fal_api_call(
+                            'fal-ai/nano-banana-pro/edit',
+                            {
+                                'prompt': side_prompt,
+                                'image_urls': [front_fal_url],
+                                'num_images': 1,
+                                'aspect_ratio': '3:4',
+                                'output_format': 'png',
+                                'safety_tolerance': '5',
+                                'resolution': '2K',
+                                'limit_generations': True,
+                            },
+                            api_key,
+                            timeout=180,
+                        )
+                        side_images = side_result.get('images', [])
+                        if side_images:
+                            side_data = self._download_image_b64(side_images[0]['url'])
+                    except Exception as e:
+                        _logger.warning('Yandan manken oluşturulamadı, es geçiliyor: %s', e)
 
             # ═══ ÖNİZLEME: Ön görselin küçük kopyası ═══
             preview_data = front_data  # Aynı veri, Odoo otomatik resize eder
@@ -543,7 +609,9 @@ class AiStudioModelPreset(models.Model):
             _logger.info('Manken oluşturma tamamlandı: preset_id=%s', preset_id)
 
         except Exception as e:
-            _logger.error('Manken oluşturma hatası: %s', e, exc_info=True)
+            from ..services.fal_error_handler import parse_fal_error, format_fal_error_for_log
+            parsed = parse_fal_error(e)
+            _logger.error('Manken oluşturma hatası: %s', format_fal_error_for_log(e, f'preset={preset_id}'))
             try:
                 with self.pool.cursor() as cr:
                     env = api.Environment(cr, self.env.uid, {})
@@ -555,8 +623,14 @@ class AiStudioModelPreset(models.Model):
     # ─── Kıyafet Giydirme (nano-banana-pro/edit) ────────────────────
     @staticmethod
     def fal_tryon(garment_image_url, mannequin_image_url, prompt, api_key):
-        """SaaS tarzı kıyafet giydirme — nano-banana-pro/edit."""
-        import requests as req
+        """SaaS tarzı kıyafet giydirme — nano-banana-pro/edit (SDK)."""
+        import os
+        os.environ['FAL_KEY'] = api_key
+
+        try:
+            import fal_client
+        except ImportError:
+            raise Exception('fal-client paketi kurulu değil.')
 
         full_prompt = (
             f"OUTPUT EXACTLY ONE IMAGE. {prompt} "
@@ -566,29 +640,21 @@ class AiStudioModelPreset(models.Model):
             "Professional e-commerce fashion photography, white studio background."
         )
 
-        url = 'https://fal.run/fal-ai/nano-banana-pro/edit'
-        headers = {
-            'Authorization': f'Key {api_key}',
-            'Content-Type': 'application/json',
-        }
-        payload = {
-            'prompt': full_prompt,
-            'image_urls': [garment_image_url, mannequin_image_url],
-            'num_images': 1,
-            'aspect_ratio': '3:4',
-            'output_format': 'png',
-            'safety_tolerance': '4',
-            'resolution': '2K',
-            'limit_generations': True,
-        }
-
-        _logger.info('nano-banana-pro/edit kıyafet giydirme çağrısı')
-        resp = req.post(url, json=payload, headers=headers, timeout=180)
-
-        if resp.status_code != 200:
-            error_text = resp.text[:500]
-            raise Exception(f'nano-banana API hatası ({resp.status_code}): {error_text}')
-
-        return resp.json()
+        _logger.info('nano-banana-pro/edit kıyafet giydirme çağrısı (SDK)')
+        result = fal_client.subscribe(
+            'fal-ai/nano-banana-pro/edit',
+            arguments={
+                'prompt': full_prompt,
+                'image_urls': [garment_image_url, mannequin_image_url],
+                'num_images': 1,
+                'aspect_ratio': '3:4',
+                'output_format': 'png',
+                'safety_tolerance': '4',
+                'resolution': '2K',
+                'limit_generations': True,
+            },
+            client_timeout=180,
+        )
+        return result
 
 

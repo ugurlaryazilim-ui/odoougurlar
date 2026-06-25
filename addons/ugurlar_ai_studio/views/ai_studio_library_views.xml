@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+
+    <!-- ============================================================ -->
+    <!-- Kanban View (Primary) — Kart gorunumu, resim onizleme        -->
+    <!-- ============================================================ -->
+    <record id="view_ai_studio_library_kanban" model="ir.ui.view">
+        <field name="name">ai.studio.model.library.kanban</field>
+        <field name="model">ai.studio.model.library</field>
+        <field name="arch" type="xml">
+            <kanban string="Manken Kütüphanesi" class="o_kanban_mobile">
+                <field name="id"/>
+                <field name="name"/>
+                <field name="gender"/>
+                <field name="body_type"/>
+                <field name="skin_tone"/>
+                <field name="image_front"/>
+                <field name="source"/>
+                <field name="usage_count"/>
+                <templates>
+                    <t t-name="card">
+                        <div class="o_kanban_image">
+                            <field name="image_front" widget="image"
+                                   options="{'preview_image': 'image_front', 'size': [150, 200]}"/>
+                        </div>
+                        <div class="oe_kanban_details">
+                            <strong><field name="name"/></strong>
+                            <div class="o_kanban_tags_section mt-1">
+                                <span t-if="record.gender.raw_value == 'female'"
+                                      class="badge rounded-pill text-bg-danger me-1">Kadın</span>
+                                <span t-if="record.gender.raw_value == 'male'"
+                                      class="badge rounded-pill text-bg-primary me-1">Erkek</span>
+                                <span t-if="record.gender.raw_value == 'child'"
+                                      class="badge rounded-pill text-bg-warning me-1">Çocuk</span>
+                            </div>
+                            <div class="mt-1">
+                                <span class="badge rounded-pill text-bg-secondary me-1">
+                                    <field name="body_type"/>
+                                </span>
+                                <span class="badge rounded-pill text-bg-light me-1">
+                                    <field name="skin_tone"/>
+                                </span>
+                            </div>
+                            <div class="mt-1 text-muted">
+                                <i class="fa fa-bar-chart"/> <field name="usage_count"/> kullanım
+                            </div>
+                        </div>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!-- List View                                                     -->
+    <!-- ============================================================ -->
+    <record id="view_ai_studio_library_list" model="ir.ui.view">
+        <field name="name">ai.studio.model.library.list</field>
+        <field name="model">ai.studio.model.library</field>
+        <field name="arch" type="xml">
+            <list string="Manken Kütüphanesi">
+                <field name="sequence" widget="handle"/>
+                <field name="name"/>
+                <field name="gender"/>
+                <field name="body_type"/>
+                <field name="skin_tone"/>
+                <field name="age_group"/>
+                <field name="source" widget="badge"
+                       decoration-info="source == 'ai_generated'"
+                       decoration-success="source == 'stock'"
+                       decoration-warning="source == 'uploaded'"/>
+                <field name="pose_type"/>
+                <field name="usage_count"/>
+                <field name="active"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!-- Form View                                                     -->
+    <!-- ============================================================ -->
+    <record id="view_ai_studio_library_form" model="ir.ui.view">
+        <field name="name">ai.studio.model.library.form</field>
+        <field name="model">ai.studio.model.library</field>
+        <field name="arch" type="xml">
+            <form string="Manken Kütüphanesi">
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="name" placeholder="Manken adı..."/></h1>
+                    </div>
+                    <group>
+                        <group string="Görseller">
+                            <field name="image_front" widget="image" class="oe_avatar"/>
+                            <field name="image_back" widget="image" class="oe_avatar"/>
+                            <field name="image_side" widget="image" class="oe_avatar"/>
+                        </group>
+                        <group string="Özellikler">
+                            <field name="gender"/>
+                            <field name="body_type"/>
+                            <field name="skin_tone"/>
+                            <field name="age_group"/>
+                            <field name="pose_type"/>
+                            <field name="source"/>
+                            <field name="active"/>
+                            <field name="usage_count" readonly="1"/>
+                        </group>
+                    </group>
+                    <group string="Notlar">
+                        <field name="notes" nolabel="1"
+                               placeholder="Bu manken hakkında notlar..."/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!-- Search View                                                   -->
+    <!-- ============================================================ -->
+    <record id="view_ai_studio_library_search" model="ir.ui.view">
+        <field name="name">ai.studio.model.library.search</field>
+        <field name="model">ai.studio.model.library</field>
+        <field name="arch" type="xml">
+            <search string="Manken Ara">
+                <field name="name"/>
+                <field name="gender"/>
+                <field name="body_type"/>
+                <field name="skin_tone"/>
+
+                <separator/>
+
+                <!-- Cinsiyet Filtreleri -->
+                <filter string="Kadın" name="filter_female"
+                        domain="[('gender', '=', 'female')]"/>
+                <filter string="Erkek" name="filter_male"
+                        domain="[('gender', '=', 'male')]"/>
+                <filter string="Çocuk" name="filter_child"
+                        domain="[('gender', '=', 'child')]"/>
+
+                <separator/>
+
+                <!-- Vucut Tipi Filtreleri -->
+                <filter string="Standart" name="filter_standard"
+                        domain="[('body_type', '=', 'standard')]"/>
+                <filter string="Büyük Beden" name="filter_plus_size"
+                        domain="[('body_type', '=', 'plus_size')]"/>
+                <filter string="Küçük Beden" name="filter_petite"
+                        domain="[('body_type', '=', 'petite')]"/>
+
+                <separator/>
+
+                <!-- Ten Rengi Filtreleri -->
+                <filter string="Açık Ten" name="filter_light"
+                        domain="[('skin_tone', '=', 'light')]"/>
+                <filter string="Orta Ten" name="filter_medium"
+                        domain="[('skin_tone', '=', 'medium')]"/>
+                <filter string="Zeytin Ten" name="filter_olive"
+                        domain="[('skin_tone', '=', 'olive')]"/>
+                <filter string="Koyu Ten" name="filter_dark"
+                        domain="[('skin_tone', '=', 'dark')]"/>
+
+                <separator/>
+
+                <!-- Aktiflik -->
+                <filter string="Aktif" name="filter_active"
+                        domain="[('active', '=', True)]"/>
+
+                <separator/>
+
+                <!-- Gruplama -->
+                <group expand="0" string="Grupla">
+                    <filter string="Cinsiyet" name="group_gender"
+                            context="{'group_by': 'gender'}"/>
+                    <filter string="Vücut Tipi" name="group_body_type"
+                            context="{'group_by': 'body_type'}"/>
+                    <filter string="Ten Rengi" name="group_skin_tone"
+                            context="{'group_by': 'skin_tone'}"/>
+                    <filter string="Kaynak" name="group_source"
+                            context="{'group_by': 'source'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!-- Action                                                        -->
+    <!-- ============================================================ -->
+    <record id="action_ai_studio_library" model="ir.actions.act_window">
+        <field name="name">Manken Kütüphanesi</field>
+        <field name="res_model">ai.studio.model.library</field>
+        <field name="view_mode">kanban,list,form</field>
+        <field name="search_view_id" ref="view_ai_studio_library_search"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                İlk mankeninizi kütüphaneye ekleyin!
+            </p>
+            <p>
+                Manken kütüphanesi, sık kullanılan manken görsellerini
+                cinsiyet, vücut tipi ve ten rengine göre organize eder.
+            </p>
+        </field>
+    </record>
+
+</odoo>

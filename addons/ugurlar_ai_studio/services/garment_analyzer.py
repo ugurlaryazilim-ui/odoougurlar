@@ -72,6 +72,7 @@ Return ONLY valid JSON, no markdown."""
                 'image_url': image_url,
                 'max_tokens': 4096,
             },
+            client_timeout=60,
         )
 
         output = result.get('output', '') if isinstance(result, dict) else ''
@@ -192,3 +193,76 @@ def _default_analysis():
         'seoTitle': '',
         'seoDescription': '',
     }
+
+
+# =========================================================================
+# FASHN API Category Mapping
+# =========================================================================
+
+# Kiyafet turunun FASHN API category parametresine donusumu
+_FASHN_CATEGORY_MAP = {
+    # clothingCategory -> FASHN category
+    'tops': 'tops',
+    'bottoms': 'bottoms',
+    'dress': 'full-body',
+    'outerwear': 'tops',
+    'knitwear': 'tops',
+    'one_piece': 'full-body',
+    'full-body': 'full-body',
+}
+
+# Detayli garmentType -> FASHN category mapping (fallback)
+_GARMENT_TYPE_MAP = {
+    # Ust giyim
+    't-shirt': 'tops', 'tisort': 'tops', 'gomlek': 'tops',
+    'bluz': 'tops', 'kazak': 'tops', 'hirka': 'tops',
+    'ceket': 'tops', 'mont': 'tops', 'yelek': 'tops',
+    'sweatshirt': 'tops', 'hoodie': 'tops', 'polo': 'tops',
+    'atlet': 'tops', 'tank top': 'tops', 'crop top': 'tops',
+    'shirt': 'tops', 'blouse': 'tops', 'jacket': 'tops',
+    'coat': 'tops', 'sweater': 'tops', 'cardigan': 'tops',
+    'vest': 'tops', 'top': 'tops',
+    # Alt giyim
+    'pantolon': 'bottoms', 'sort': 'bottoms', 'etek': 'bottoms',
+    'jean': 'bottoms', 'denim': 'bottoms', 'tayt': 'bottoms',
+    'esofman alti': 'bottoms',
+    'pants': 'bottoms', 'trousers': 'bottoms', 'shorts': 'bottoms',
+    'skirt': 'bottoms', 'jeans': 'bottoms', 'leggings': 'bottoms',
+    # Tam vucut
+    'elbise': 'full-body', 'tulum': 'full-body', 'overall': 'full-body',
+    'dress': 'full-body', 'jumpsuit': 'full-body', 'romper': 'full-body',
+    'gown': 'full-body', 'abiye': 'full-body',
+}
+
+
+def map_to_fashn_category(analysis):
+    """Kiyafet analizinden FASHN API category parametresini belirle.
+
+    Oncelik sirasi:
+    1. clothingCategory (genel kategori) — en guvenilir
+    2. garmentType (detayli tur) — fallback
+    3. 'tops' — son care
+
+    Args:
+        analysis: dict — analyze_garment() ciktisi
+
+    Returns:
+        str: FASHN category ('tops', 'bottoms', 'full-body')
+    """
+    # 1. clothingCategory ile eslestir
+    clothing_cat = (analysis.get('clothingCategory') or '').lower().strip()
+    if clothing_cat in _FASHN_CATEGORY_MAP:
+        result = _FASHN_CATEGORY_MAP[clothing_cat]
+        _logger.info('FASHN category (clothingCategory): %s -> %s', clothing_cat, result)
+        return result
+
+    # 2. garmentType ile eslestir
+    garment_type = (analysis.get('garmentType') or '').lower().strip()
+    for key, cat in _GARMENT_TYPE_MAP.items():
+        if key in garment_type:
+            _logger.info('FASHN category (garmentType): %s -> %s', garment_type, cat)
+            return cat
+
+    # 3. Varsayilan
+    _logger.info('FASHN category: varsayilan tops kullaniliyor')
+    return 'tops'

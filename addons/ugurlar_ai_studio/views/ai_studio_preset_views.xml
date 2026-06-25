@@ -32,6 +32,9 @@
                             class="btn-primary"
                             invisible="mannequin_generation_state == 'generating'"
                             confirm="fal.ai ile manken fotoğrafı oluşturulsun mu? (API ücreti uygulanır)"/>
+                    <button name="action_save_to_library"
+                            string="📚 Kütüphaneye Kaydet" type="object"
+                            class="btn-secondary"/>
                     <field name="mannequin_generation_state" widget="statusbar"
                            statusbar_visible="idle,generating,done"/>
                 </header>
@@ -53,6 +56,7 @@
                             <field name="target_audience"/>
                             <field name="age_range"/>
                             <field name="background_type"/>
+                            <field name="library_mannequin_id"/>
                             <field name="active"/>
                         </group>
                     </group>

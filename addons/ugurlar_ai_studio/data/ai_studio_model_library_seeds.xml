@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo noupdate="1">
+
+    <!-- Kadin - Standart - Acik Ten -->
+    <record id="library_mannequin_female_standard_light" model="ai.studio.model.library">
+        <field name="name">Kadın - Standart - Açık Ten</field>
+        <field name="gender">female</field>
+        <field name="body_type">standard</field>
+        <field name="skin_tone">light</field>
+        <field name="age_group">young_adult</field>
+        <field name="pose_type">straight</field>
+        <field name="source">stock</field>
+        <field name="active">False</field>
+        <field name="notes">Hazır manken şablonu. Görselleri yükledikten sonra aktifleştirin.</field>
+        <field name="sequence">10</field>
+    </record>
+
+    <!-- Kadin - Standart - Orta Ten -->
+    <record id="library_mannequin_female_standard_medium" model="ai.studio.model.library">
+        <field name="name">Kadın - Standart - Orta Ten</field>
+        <field name="gender">female</field>
+        <field name="body_type">standard</field>
+        <field name="skin_tone">medium</field>
+        <field name="age_group">adult</field>
+        <field name="pose_type">contrapposto</field>
+        <field name="source">stock</field>
+        <field name="active">False</field>
+        <field name="notes">Hazır manken şablonu. Görselleri yükledikten sonra aktifleştirin.</field>
+        <field name="sequence">20</field>
+    </record>
+
+    <!-- Kadin - Standart - Koyu Ten -->
+    <record id="library_mannequin_female_standard_dark" model="ai.studio.model.library">
+        <field name="name">Kadın - Standart - Koyu Ten</field>
+        <field name="gender">female</field>
+        <field name="body_type">standard</field>
+        <field name="skin_tone">dark</field>
+        <field name="age_group">young_adult</field>
+        <field name="pose_type">straight</field>
+        <field name="source">stock</field>
+        <field name="active">False</field>
+        <field name="notes">Hazır manken şablonu. Görselleri yükledikten sonra aktifleştirin.</field>
+        <field name="sequence">30</field>
+    </record>
+
+    <!-- Kadin - Buyuk Beden - Orta Ten -->
+    <record id="library_mannequin_female_plus_medium" model="ai.studio.model.library">
+        <field name="name">Kadın - Büyük Beden - Orta Ten</field>
+        <field name="gender">female</field>
+        <field name="body_type">plus_size</field>
+        <field name="skin_tone">medium</field>
+        <field name="age_group">adult</field>
+        <field name="pose_type">contrapposto</field>
+        <field name="source">stock</field>
+        <field name="active">False</field>
+        <field name="notes">Hazır manken şablonu. Görselleri yükledikten sonra aktifleştirin.</field>
+        <field name="sequence">40</field>
+    </record>
+
+    <!-- Erkek - Standart - Orta Ten -->
+    <record id="library_mannequin_male_standard_medium" model="ai.studio.model.library">
+        <field name="name">Erkek - Standart - Orta Ten</field>
+        <field name="gender">male</field>
+        <field name="body_type">standard</field>
+        <field name="skin_tone">medium</field>
+        <field name="age_group">adult</field>
+        <field name="pose_type">straight</field>
+        <field name="source">stock</field>
+        <field name="active">False</field>
+        <field name="notes">Hazır manken şablonu. Görselleri yükledikten sonra aktifleştirin.</field>
+        <field name="sequence">50</field>
+    </record>
+
+    <!-- Erkek - Standart - Koyu Ten -->
+    <record id="library_mannequin_male_standard_dark" model="ai.studio.model.library">
+        <field name="name">Erkek - Standart - Koyu Ten</field>
+        <field name="gender">male</field>
+        <field name="body_type">standard</field>
+        <field name="skin_tone">dark</field>
+        <field name="age_group">young_adult</field>
+        <field name="pose_type">straight</field>
+        <field name="source">stock</field>
+        <field name="active">False</field>
+        <field name="notes">Hazır manken şablonu. Görselleri yükledikten sonra aktifleştirin.</field>
+        <field name="sequence">60</field>
+    </record>
+
+</odoo>

@@ -12,16 +12,9 @@
                      data-key="ugurlar_ai_studio"
                      groups="base.group_system">
 
-                    <block title="fal.ai API Ayarlari" name="fal_api_settings">
-                        <setting string="API Anahtari" help="fal.ai API key">
-                            <div class="content-group">
-                                <div class="row mt16">
-                                    <label for="ai_studio_fal_api_key" class="col-3 col-lg-3 o_light_label"/>
-                                    <field name="ai_studio_fal_api_key" class="col-4" password="True"/>
-                                </div>
-                            </div>
-                        </setting>
-                        <setting string="Varsayilan AI Saglayici">
+                    <block title="AI Saglayici Secimi" name="provider_settings">
+                        <setting string="AI Saglayici"
+                                 help="Kullanilacak AI saglayiciyi secin">
                             <div class="content-group">
                                 <div class="row mt16">
                                     <label for="ai_studio_default_provider" class="col-3 col-lg-3 o_light_label"/>
@@ -29,17 +22,38 @@
                                 </div>
                             </div>
                         </setting>
-                        <setting string="Varsayilan Endpoint" help="fal.ai model endpoint ID">
+                        <setting string="fal.ai API Anahtari"
+                                 help="fal.ai kullanilacaksa API key girin"
+                                 invisible="ai_studio_default_provider != 'fal'">
                             <div class="content-group">
                                 <div class="row mt16">
-                                    <label for="ai_studio_default_endpoint" class="col-3 col-lg-3 o_light_label"/>
-                                    <field name="ai_studio_default_endpoint" class="col-4"/>
+                                    <label for="ai_studio_fal_api_key" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="ai_studio_fal_api_key" class="col-4" password="True"/>
+                                </div>
+                            </div>
+                        </setting>
+                        <setting string="FASHN API Anahtari"
+                                 help="FASHN direkt API kullanilacaksa key girin (fa-XXXX)"
+                                 invisible="ai_studio_default_provider != 'fashn'">
+                            <div class="content-group">
+                                <div class="row mt16">
+                                    <label for="ai_studio_fashn_api_key" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="ai_studio_fashn_api_key" class="col-4" password="True"/>
                                 </div>
                             </div>
                         </setting>
                     </block>
 
-                    <block title="Uretim Ayarlari" name="generation_settings">
+                    <block title="Try-On Model Ayarlari" name="tryon_settings">
+                        <setting string="Try-On Modeli"
+                                 help="FASHN try-on modeli secimi">
+                            <div class="content-group">
+                                <div class="row mt16">
+                                    <label for="ai_studio_tryon_model" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="ai_studio_tryon_model" class="col-4"/>
+                                </div>
+                            </div>
+                        </setting>
                         <setting string="Varsayilan Kalite Modu">
                             <div class="content-group">
                                 <div class="row mt16">
@@ -48,10 +62,22 @@
                                 </div>
                             </div>
                         </setting>
+                        <setting string="Uretim Sayisi (num_samples)"
+                                 help="Her istek icin kac gorsel uretilsin (1-4)">
+                            <div class="content-group">
+                                <div class="row mt16">
+                                    <label for="ai_studio_num_samples" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="ai_studio_num_samples" class="col-4"/>
+                                </div>
+                            </div>
+                        </setting>
                         <setting string="Otomatik Arka Plan Kaldirma"
                                  help="Fotograflari AI ya gondermeden once arka plani otomatik kaldir">
                             <field name="ai_studio_auto_bg_remove"/>
                         </setting>
+                    </block>
+
+                    <block title="Operasyonel Ayarlar" name="operational_settings">
                         <setting string="Maksimum Revizyon Sayisi"
                                  help="Supervizoer onayi gerektirmeden yapilabilecek revize sayisi">
                             <div class="content-group">
