@@ -157,40 +157,35 @@ class DebugImagesController(http.Controller):
     @http.route('/debug/inspect_image_field', type='http', auth='public', csrf=False, methods=['GET'])
     def inspect_image_field(self, **kwargs):
         try:
-            model = request.env['product.image']
-            f = model._fields['image_128']
+            import os
+            odoo_path = "/usr/lib/python3/dist-packages/odoo"
             
-            # Let's check some records:
-            images = model.sudo().search([('image_1920', '!=', False)], limit=5)
-            recs = []
-            for img in images:
-                # Trigger computation of image_128
-                img_128 = img.image_128
-                recs.append({
-                    'id': img.id,
-                    'name': img.name,
-                    'has_1920': bool(img.image_1920),
-                    'len_1920': len(img.image_1920) if img.image_1920 else 0,
-                    'has_128': bool(img_128),
-                    'len_128': len(img_128) if img_128 else 0,
-                })
+            found = []
+            for root, dirs, files in os.walk(odoo_path):
+                for f in files:
+                    if f.endswith('.py'):
+                        path = os.path.join(root, f)
+                        try:
+                            with open(path, 'r', encoding='utf-8') as file:
+                                content = file.read()
+                                if 'class ImageMixin' in content or ('models.AbstractModel' in content and 'image_128 = ' in content):
+                                    found.append(path)
+                        except Exception:
+                            pass
             
-            result = {
-                'field_type': str(type(f)),
-                'compute': str(f.compute),
-                'depends': str(f.depends),
-                'store': f.store,
-                'related': f.related,
-                'records': recs,
-            }
+            content = "No files found."
+            if found:
+                with open(found[0], 'r', encoding='utf-8') as file:
+                    content = f"=== File: {found[0]} ===\n" + file.read()
+                    
             return request.make_response(
-                json.dumps(result, indent=4, default=str),
-                headers=[('Content-Type', 'application/json')]
+                content,
+                headers=[('Content-Type', 'text/plain; charset=utf-8')]
             )
         except Exception as e:
             return request.make_response(
-                json.dumps({'status': 'error', 'message': str(e)}),
-                headers=[('Content-Type', 'application/json')]
+                str(e),
+                headers=[('Content-Type', 'text/plain; charset=utf-8')]
             )
 
     @http.route('/debug/inspect_product', type='http', auth='public', csrf=False, methods=['GET'])
