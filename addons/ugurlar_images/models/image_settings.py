@@ -118,72 +118,64 @@ class ResConfigSettings(models.TransientModel):
         }
 
     def _run_background_fix(self, db_name, db_registry):
-        """Arka planda çalışacak onarım ve boyutlandırma işlemi (bellek optimizasyonlu)."""
+        """Arka planda çalışacak onarım ve boyutlandırma işlemi (sonsuz döngü ve hata korumalı)."""
         with db_registry.cursor() as cr:
             env = api.Environment(cr, 1, {}) # uid=1 (sistem yöneticisi)
             ICP = env['ir.config_parameter'].sudo()
             try:
-                # 1. Şablon ID'si boş olanları düzelt (Limitli arama ile bellek şişmesini önle)
-                linked_count = 0
-                while True:
-                    images_to_link = env['product.image'].sudo().search([
-                        ('product_tmpl_id', '=', False),
-                        ('product_variant_id', '!=', False)
-                    ], limit=500)
-                    if not images_to_link:
-                        break
-                    
-                    for img in images_to_link:
-                        if img.product_variant_id and img.product_variant_id.product_tmpl_id:
-                            img.write({
-                                'product_tmpl_id': img.product_variant_id.product_tmpl_id.id
-                            })
-                            linked_count += 1
-                    
-                    cr.commit()
-                    env.invalidate_all() # Önbelleği temizle
+                # 1. Şablon ID'si boş olanları düzelt (Sonsuz döngü koruması için tek seferde limitli sorgu)
+                images_to_link = env['product.image'].sudo().search([
+                    ('product_tmpl_id', '=', False),
+                    ('product_variant_id', '!=', False)
+                ], limit=2000)
                 
-                # 2. Resim boyutları boş olanları batch'ler (100'erli) halinde yeniden hesaplat
-                # Toplam kaç tane işlem bekleyen resim olduğunu bul
-                total_to_process = env['product.image'].sudo().search_count([
+                linked_count = 0
+                for img in images_to_link:
+                    if img.product_variant_id and img.product_variant_id.product_tmpl_id:
+                        img.write({
+                            'product_tmpl_id': img.product_variant_id.product_tmpl_id.id
+                        })
+                        linked_count += 1
+                
+                cr.commit()
+                env.invalidate_all()
+                
+                # 2. Resim boyutları boş olanların ID listesini al (Sonsuz döngüyü önlemek için statik liste)
+                images_to_recompute_ids = env['product.image'].sudo().search([
                     ('image_1920', '!=', False),
                     ('image_128', '=', False)
-                ])
+                ]).ids
                 
-                ICP.set_param('ugurlar_images.fix_images_progress', f'0 / {total_to_process}')
+                total_to_process = len(images_to_recompute_ids)
+                ICP.set_param('ugurlar_images.fix_images_progress', f'0 / {total_to_process} (Başlatılıyor...)')
                 cr.commit()
                 
                 processed = 0
                 batch_size = 100
-                while True:
-                    batch = env['product.image'].sudo().search([
-                        ('image_1920', '!=', False),
-                        ('image_128', '=', False)
-                    ], limit=batch_size)
+                
+                for i in range(0, total_to_process, batch_size):
+                    batch_ids = images_to_recompute_ids[i:i+batch_size]
+                    batch = env['product.image'].sudo().browse(batch_ids)
                     
-                    if not batch:
-                        break
-                    
-                    env.add_to_compute(env['product.image']._fields['image_128'], batch)
-                    env.add_to_compute(env['product.image']._fields['image_256'], batch)
-                    env.add_to_compute(env['product.image']._fields['image_512'], batch)
-                    env.add_to_compute(env['product.image']._fields['image_1024'], batch)
-                    batch._recompute_recordset()
+                    try:
+                        env.add_to_compute(env['product.image']._fields['image_128'], batch)
+                        env.add_to_compute(env['product.image']._fields['image_256'], batch)
+                        env.add_to_compute(env['product.image']._fields['image_512'], batch)
+                        env.add_to_compute(env['product.image']._fields['image_1024'], batch)
+                        batch._recompute_recordset()
+                    except Exception as batch_error:
+                        _logger.error("Görsel boyutlandırma batch hatası (ID'ler: %s): %s", batch_ids, batch_error)
+                        # Hatalı batch olsa bile loglayıp devam et, böylece tüm süreç kilitlenmez
                     
                     processed += len(batch)
-                    
-                    # Dinamik olarak kalan sayısını sorgula
-                    remaining = env['product.image'].sudo().search_count([
-                        ('image_1920', '!=', False),
-                        ('image_128', '=', False)
-                    ])
+                    remaining = total_to_process - processed
                     
                     ICP.set_param(
                         'ugurlar_images.fix_images_progress',
-                        f'İşlenen: {processed} | Kalan: {remaining} | Başlangıçta Kalan: {total_to_process} ({linked_count} şablon bağlantısı onarıldı)'
+                        f'İşlenen: {processed} | Kalan: {remaining} | Toplam: {total_to_process} ({linked_count} şablon bağlantısı onarıldı)'
                     )
                     cr.commit()
-                    env.invalidate_all() # Önbelleği tamamen temizle (Hafıza şişmesini önler)
+                    env.invalidate_all() # Önbelleği temizle (Bellek taşmasını önler)
                 
                 ICP.set_param('ugurlar_images.fix_images_status', 'done')
                 ICP.set_param('ugurlar_images.fix_images_progress', f'Tamamlandı! Toplam {processed} görsel boyutlandırıldı ve {linked_count} şablon bağlantısı onarıldı.')
