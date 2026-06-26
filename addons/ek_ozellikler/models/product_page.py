@@ -12,16 +12,10 @@ class ProductTemplateSkuBarcode(models.Model):
     """
     _inherit = 'product.template'
 
-    def _get_combination_info(
-        self, combination, product_id=False, add_qty=1,
-        parent_combination=False, only_template=False,
-    ):
+    def _get_combination_info(self, *args, **kwargs):
         """Extend combination info with SKU and barcode for dynamic updates."""
-        res = super()._get_combination_info(
-            combination, product_id=product_id, add_qty=add_qty,
-            parent_combination=parent_combination,
-            only_template=only_template,
-        )
+        res = super()._get_combination_info(*args, **kwargs)
+        only_template = kwargs.get('only_template', False)
         # Belirli bir variant varsa SKU ve barkod bilgisini ekle
         if not only_template and res.get('product_id'):
             variant = self.env['product.product'].sudo().browse(
