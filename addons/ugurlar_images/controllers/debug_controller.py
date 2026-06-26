@@ -85,6 +85,40 @@ class DebugImagesController(http.Controller):
                 headers=[('Content-Type', 'text/plain; charset=utf-8')]
             )
 
+    @http.route('/debug/acl', type='http', auth='public', csrf=False, methods=['GET'])
+    def debug_acl(self, **kwargs):
+        try:
+            accesses = request.env['ir.model.access'].sudo().search([
+                ('model_id.model', '=', 'product.image')
+            ])
+            
+            data = []
+            for a in accesses:
+                data.append({
+                    'id': a.id,
+                    'name': a.name,
+                    'group': a.group_id.name if a.group_id else 'Public/All',
+                    'group_external_id': a.group_id.get_external_id()[a.group_id.id] if a.group_id else False,
+                    'perm_read': a.perm_read,
+                    'perm_write': a.perm_write,
+                    'perm_create': a.perm_create,
+                    'perm_unlink': a.perm_unlink,
+                })
+            
+            result = {
+                'status': 'success',
+                'acl': data
+            }
+            return request.make_response(
+                json.dumps(result, indent=4, default=str),
+                headers=[('Content-Type', 'application/json')]
+            )
+        except Exception as e:
+            return request.make_response(
+                json.dumps({'status': 'error', 'message': str(e)}),
+                headers=[('Content-Type', 'application/json')]
+            )
+
     @http.route('/debug/rules', type='http', auth='public', csrf=False, methods=['GET'])
     def debug_rules(self, **kwargs):
         try:
