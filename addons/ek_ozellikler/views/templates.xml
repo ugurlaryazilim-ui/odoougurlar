@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <data>
+
+        <!-- ============================================================
+             SKU & Barkod — Ürün Detay Sayfası (Fiyatın Altı)
+             ============================================================ -->
+        <template id="product_sku_barcode"
+                  inherit_id="website_sale.product"
+                  name="SKU ve Barkod Gösterimi"
+                  priority="99">
+
+            <xpath expr="//div[hasclass('product_price')]" position="after">
+                <t t-set="show_sku"
+                   t-value="request.env['ir.config_parameter'].sudo().get_param('ek_ozellikler.show_sku') == 'True'"/>
+                <t t-set="show_barcode"
+                   t-value="request.env['ir.config_parameter'].sudo().get_param('ek_ozellikler.show_barcode') == 'True'"/>
+
+                <div t-if="show_sku or show_barcode"
+                     id="product_sku_barcode_section"
+                     class="mb-2"
+                     style="font-size: 0.85rem; color: #666;">
+
+                    <div t-if="show_sku" class="d-flex align-items-center gap-1 mb-1">
+                        <span class="fw-bold" style="color: #555;">SKU:</span>
+                        <span id="variant_sku_value"
+                              class="text-dark"
+                              t-out="combination_info.get('default_code', '') if combination_info else ''"/>
+                    </div>
+
+                    <div t-if="show_barcode" class="d-flex align-items-center gap-1">
+                        <span class="fw-bold" style="color: #555;">Barkod:</span>
+                        <span id="variant_barcode_value"
+                              class="text-dark"
+                              t-out="combination_info.get('barcode', '') if combination_info else ''"/>
+                    </div>
+
+                </div>
+            </xpath>
+
+        </template>
+
+    </data>
+</odoo>

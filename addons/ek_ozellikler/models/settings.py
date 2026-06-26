@@ -11,7 +11,13 @@ class ResConfigSettings(models.TransientModel):
     # ------------------------------------------------------------------
     #  Ek Özellikler — Ayarlar
     # ------------------------------------------------------------------
-    module_ek_ozellikler = fields.Boolean(
-        string='Ek Özellikler',
-        default=True,
+    show_sku_on_product_page = fields.Boolean(
+        string='SKU Ürün Sayfasında Göster',
+        config_parameter='ek_ozellikler.show_sku',
+        help='E-ticaret ürün detay sayfasında SKU (İç Referans) bilgisini gösterir.',
+    )
+    show_barcode_on_product_page = fields.Boolean(
+        string='Barkod Ürün Sayfasında Göster',
+        config_parameter='ek_ozellikler.show_barcode',
+        help='E-ticaret ürün detay sayfasında barkod bilgisini gösterir.',
     )

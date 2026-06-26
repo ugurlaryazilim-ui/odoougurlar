@@ -18,19 +18,20 @@
                             <setting string="Toplu e-Ticaret Yayınlama"
                                      help="Ürün listesinden seçili ürünleri tek tıkla e-ticarete yayınlayın. Aksiyonlar menüsünden '🛒 e-Ticarete Bağla' seçeneğini kullanın.">
                                 <div class="mt8 text-muted">
-                                    <p><strong>Nasıl kullanılır:</strong></p>
-                                    <ol>
-                                        <li>Stok → Ürünler listesine gidin</li>
-                                        <li>Yayınlamak istediğiniz ürünleri seçin</li>
-                                        <li>Aksiyonlar → 🛒 e-Ticarete Bağla tıklayın</li>
-                                    </ol>
-                                    <p><strong>Otomatik yapılanlar:</strong></p>
-                                    <ul>
-                                        <li>✅ Yayınlandı işareti aktif edilir</li>
-                                        <li>📁 Dahili kategoriler → e-Ticaret kategorilerine eşlenir</li>
-                                        <li>⚠️ Görselsiz ürünler atlanır</li>
-                                    </ul>
+                                    <strong>Kullanım:</strong> Stok → Ürünler → Seç → Aksiyonlar → 🛒 e-Ticarete Bağla
                                 </div>
+                            </setting>
+                        </block>
+
+                        <block title="Ürün Sayfası Görünümü" name="product_page_display">
+                            <setting string="SKU (İç Referans) Göster"
+                                     help="E-ticaret ürün detay sayfasında SKU bilgisini fiyatın altında gösterir. Renk/beden değişince dinamik güncellenir.">
+                                <field name="show_sku_on_product_page"/>
+                            </setting>
+
+                            <setting string="Barkod Göster"
+                                     help="E-ticaret ürün detay sayfasında barkod bilgisini fiyatın altında gösterir. Renk/beden değişince dinamik güncellenir.">
+                                <field name="show_barcode_on_product_page"/>
                             </setting>
                         </block>
 
