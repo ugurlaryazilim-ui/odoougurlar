@@ -65,21 +65,21 @@ class ImageFixJob(models.Model):
         return result
 
     # ------------------------------------------------------------------
-    #  Cron Metodu — Odoo 19 Resmi Pattern
+    #  Cron Metodu — Raw SQL (ORM bypass)
     # ------------------------------------------------------------------
     @api.model
     def _cron_fix_images(self):
         """
-        Zamanlanmış görev: görsel düzeltme işlemini batch halinde çalıştırır.
+        Zamanlanmış görev: görsel düzeltme.
 
-        Odoo 19 API'leri:
-          • _commit_progress(n, remaining=r) → commit + ilerleme raporla
-          • try_lock_for_update() → çakışma önleme (opsiyonel)
-          • Savepoint → per-record hata izolasyonu
+        ORM tamamen bypass ediliyor (sunucu çökmesini önlemek için):
+          • Raw SQL ile image_1920 okuma
+          • image_process() ile thumbnail üretme
+          • Raw SQL ile geri yazma
+          • cr.commit() ile her görselden sonra kayıt
         """
         job = self.search([('state', '=', 'running')], limit=1)
         if not job:
-            _logger.info("Görsel düzeltme: Aktif iş bulunamadı, cron durduruluyor.")
             return
 
         try:
@@ -87,22 +87,20 @@ class ImageFixJob(models.Model):
             if not job.links_done:
                 job._fix_template_links()
 
-            # ── Aşama 2: Cursor-based thumbnail boyutlandırma ──
-            job._fix_thumbnails()
+            # ── Aşama 2: Raw SQL thumbnail üretme ──
+            job._fix_thumbnails_raw()
 
         except Exception as e:
-            _logger.exception("Görsel düzeltme cron genel hatası: %s", e)
-            # Hatayı logla ama state'i 'running' bırak —
-            # bir sonraki cron turunda kaldığı yerden devam eder
+            _logger.exception("Görsel düzeltme cron hatası: %s", e)
             try:
-                job.write({
-                    'progress_text': f'Geçici hata (yeniden denenecek): {str(e)[:200]}',
-                    'error_log': (job.error_log or '') + f'\n[HATA] {e}',
-                })
-            except Exception:
-                pass  # Write da başarısız olursa sessizce geç
-            try:
-                self.env['ir.cron']._commit_progress(0)
+                self.env.cr.rollback()
+                job_id = job.id
+                self.env.cr.execute("""
+                    UPDATE image_fix_job
+                    SET progress_text = %s
+                    WHERE id = %s
+                """, (f'Hata (yeniden denenecek): {str(e)[:200]}', job_id))
+                self.env.cr.commit()
             except Exception:
                 pass
 
@@ -110,13 +108,10 @@ class ImageFixJob(models.Model):
         """
         Aşama 1: product_tmpl_id boş olan product.image kayıtlarını
         tek SQL sorgusuyla toplu düzelt.
-
-        Performans: 10.000+ kayıt < 1 saniye (ORM döngüsü dakikalar sürer).
         """
         self.ensure_one()
         _logger.info("Görsel düzeltme Aşama 1: Şablon bağlantıları SQL ile düzeltiliyor...")
 
-        # Raw SQL öncesi ORM cache'i DB'ye yaz
         self.env['product.image'].flush_model(['product_tmpl_id', 'product_variant_id'])
 
         self.env.cr.execute("""
@@ -129,7 +124,6 @@ class ImageFixJob(models.Model):
         """)
         fixed_count = self.env.cr.rowcount
 
-        # Raw SQL sonrası ORM cache'i geçersiz kıl
         self.env['product.image'].invalidate_model(['product_tmpl_id'])
 
         self.write({
@@ -137,39 +131,47 @@ class ImageFixJob(models.Model):
             'total_fixed_links': fixed_count,
             'progress_text': f'{fixed_count} şablon bağlantısı onarıldı. Thumbnail işlemi başlıyor...',
         })
-        self.env['ir.cron']._commit_progress(fixed_count)
+        self.env.cr.commit()
         _logger.info("Görsel düzeltme Aşama 1: %d şablon bağlantısı onarıldı.", fixed_count)
 
-    def _fix_thumbnails(self):
+    def _fix_thumbnails_raw(self):
         """
-        Aşama 2: image_128 boş olan görsellerin thumbnail'lerini oluştur.
+        Aşama 2: ORM'yi tamamen bypass ederek raw SQL + image_process ile
+        thumbnail üretme.
 
-        Kritik: Her görsel resize'ı CPU yoğun (~3-4 saniye).
-        Odoo worker zaman limiti 120 saniye.
-        Bu yüzden her görselden sonra _commit_progress() ile:
-          1. Transaction commit edilir
-          2. Kalan süre kontrol edilir — süre dolduysa durur
-          3. Bir sonraki cron turunda kaldığı yerden devam eder
+        Neden ORM bypass?
+          • _recompute_recordset() tüm image field'larını + tracking'i tetikler
+          • ORM cache invalidation ek yük getirir
+          • Tüm bunlar worker zaman limitini (120s) aşırıyordu
+
+        Bu metod:
+          1. Raw SQL ile sadece id + image_1920 okur
+          2. image_process() ile boyutlandırır (Pillow, hafif)
+          3. Raw SQL ile geri yazar
+          4. Her görselden sonra commit + zaman kontrolü
+          5. Max 20 saniye — worker limitinin çok altında
         """
         self.ensure_one()
         import time
+        from odoo.tools import image as image_tools
+
         start_time = time.time()
-        MAX_SECONDS = 50  # Worker limiti 120s — 50s'de dur, güvenlik payı
+        MAX_SECONDS = 20  # Worker limiti 120s, biz 20s'de duruyoruz
+        BATCH_SIZE = 10
 
-        thumb_fields = ['image_128', 'image_256', 'image_512', 'image_1024']
-        ProductImage = self.env['product.image'].sudo()
+        cr = self.env.cr
 
-        domain = [
-            ('id', '>', self.last_processed_id),
-            ('image_1920', '!=', False),
-            ('image_128', '=', False),
-        ]
-
-        # Toplam kalanı bir kere sor (her turda sorma — gereksiz yük)
-        total_remaining = ProductImage.search_count(domain)
+        # ── Kalan kayıt sayısını kontrol et ──
+        cr.execute("""
+            SELECT COUNT(*) FROM product_image
+            WHERE id > %s
+              AND image_1920 IS NOT NULL
+              AND image_128 IS NULL
+        """, (self.last_processed_id,))
+        total_remaining = cr.fetchone()[0]
 
         if total_remaining == 0:
-            # ── Tüm işlem tamamlandı ──
+            # ── Tamamlandı ──
             self.write({
                 'state': 'done',
                 'progress_text': (
@@ -182,70 +184,121 @@ class ImageFixJob(models.Model):
                 raise_if_not_found=False,
             )
             if cron:
-                self.env.cr.execute(
+                cr.execute(
                     "UPDATE ir_cron SET active = FALSE WHERE id = %s",
                     (cron.id,)
                 )
-            self.env['ir.cron']._commit_progress(0, remaining=0)
-            _logger.info("Görsel düzeltme tamamlandı! Toplam: %d bağlantı, %d thumbnail",
-                         self.total_fixed_links, self.total_fixed_thumbs)
+            cr.commit()
+            self.env.invalidate_all()
+            _logger.info(
+                "Görsel düzeltme tamamlandı! %d bağlantı, %d thumbnail",
+                self.total_fixed_links, self.total_fixed_thumbs,
+            )
             return
 
-        # ── Görselleri TEK TEK işle, her birinden sonra commit + zaman kontrolü ──
-        batch = ProductImage.search(domain, limit=30, order='id ASC')
-        processed = 0
+        # ── Sadece ID'leri çek (image_1920'yi henüz yükleme) ──
+        cr.execute("""
+            SELECT id FROM product_image
+            WHERE id > %s
+              AND image_1920 IS NOT NULL
+              AND image_128 IS NULL
+            ORDER BY id ASC
+            LIMIT %s
+        """, (self.last_processed_id, BATCH_SIZE))
+        image_ids = [row[0] for row in cr.fetchall()]
 
-        for img in batch:
-            # Zaman kontrolü — 50 saniyeyi aşarsa dur
-            elapsed = time.time() - start_time
-            if elapsed > MAX_SECONDS:
+        if not image_ids:
+            return
+
+        processed = 0
+        job_id = self.id
+
+        for img_id in image_ids:
+            # ── Zaman kontrolü ──
+            if time.time() - start_time > MAX_SECONDS:
                 _logger.info(
-                    "Görsel düzeltme: Zaman sınırı (%.0fs/50s). %d işlendi, sonraki turda devam.",
-                    elapsed, processed,
+                    "Görsel düzeltme: Zaman limiti (%.0fs). %d işlendi.",
+                    time.time() - start_time, processed,
                 )
                 break
 
-            self.env.cr.execute("SAVEPOINT img_thumb")
             try:
-                for fname in thumb_fields:
-                    self.env.add_to_compute(
-                        ProductImage._fields[fname], img,
-                    )
-                img._recompute_recordset()
-                self.env.cr.execute("RELEASE SAVEPOINT img_thumb")
+                # Her görseli AYRI AYRI oku (belleği şişirme)
+                cr.execute(
+                    "SELECT image_1920 FROM product_image WHERE id = %s",
+                    (img_id,),
+                )
+                row = cr.fetchone()
+                if not row or not row[0]:
+                    # Boş görsel — atla, ID'yi ilerlet
+                    cr.execute("""
+                        UPDATE image_fix_job
+                        SET last_processed_id = %s
+                        WHERE id = %s
+                    """, (img_id, job_id))
+                    cr.commit()
+                    continue
+
+                raw_data = bytes(row[0])
+
+                # image_process ile boyutlandır
+                img_128 = image_tools.image_process(raw_data, size=(128, 128))
+                img_256 = image_tools.image_process(raw_data, size=(256, 256))
+                img_512 = image_tools.image_process(raw_data, size=(512, 512))
+                img_1024 = image_tools.image_process(raw_data, size=(1024, 1024))
+
+                # Belleği serbest bırak
+                del raw_data
+
+                # Raw SQL ile geri yaz
+                cr.execute("""
+                    UPDATE product_image
+                    SET image_128 = %s, image_256 = %s,
+                        image_512 = %s, image_1024 = %s
+                    WHERE id = %s
+                """, (img_128, img_256, img_512, img_1024, img_id))
+
+                del img_128, img_256, img_512, img_1024
+
                 processed += 1
 
-                # Her görselden sonra ilerlemeyi kaydet
-                self.write({
-                    'last_processed_id': img.id,
-                    'total_fixed_thumbs': self.total_fixed_thumbs + processed,
-                    'progress_text': (
-                        f'{self.total_fixed_thumbs + processed} thumbnail tamamlandı. '
-                        f'Kalan: ~{total_remaining - processed}'
-                    ),
-                })
-
-                # Commit + zaman kontrolü
-                should_continue = self.env['ir.cron']._commit_progress(
-                    1, remaining=max(0, total_remaining - processed),
-                )
-                if not should_continue:
-                    _logger.info("Görsel düzeltme: _commit_progress zaman aşımı, %d işlendi.", processed)
-                    break
-
             except Exception as e:
-                self.env.cr.execute("ROLLBACK TO SAVEPOINT img_thumb")
-                _logger.warning("Thumbnail hatası id=%s: %s", img.id, e)
-                # Hatalı görseli atla: last_processed_id'yi ilerlet
-                self.write({'last_processed_id': img.id})
-                try:
-                    self.env['ir.cron']._commit_progress(0)
-                except Exception:
-                    pass
+                _logger.warning("Thumbnail hatası id=%s: %s", img_id, e)
+                cr.rollback()
 
+            # ── Her görselden sonra ilerlemeyi kaydet ve commit ──
+            try:
+                cr.execute("""
+                    UPDATE image_fix_job
+                    SET last_processed_id = %s,
+                        total_fixed_thumbs = %s,
+                        progress_text = %s
+                    WHERE id = %s
+                """, (
+                    img_id,
+                    self.total_fixed_thumbs + processed,
+                    f'{self.total_fixed_thumbs + processed} thumbnail tamamlandı. '
+                    f'Kalan: ~{max(0, total_remaining - processed)}',
+                    job_id,
+                ))
+                # ir.config_parameter'ı da güncelle (Settings UI için)
+                cr.execute("""
+                    UPDATE ir_config_parameter
+                    SET value = %s
+                    WHERE key = 'ugurlar_images.fix_images_progress'
+                """, (
+                    f'{self.total_fixed_thumbs + processed} thumbnail tamamlandı. '
+                    f'Kalan: ~{max(0, total_remaining - processed)}',
+                ))
+                cr.commit()
+            except Exception:
+                pass
+
+        self.env.invalidate_all()
         _logger.info(
-            "Görsel düzeltme batch sonu: %d işlendi (%.0fs), kalan: ~%d",
-            processed, time.time() - start_time, max(0, total_remaining - processed),
+            "Görsel düzeltme: %d işlendi (%.0fs), kalan: ~%d",
+            processed, time.time() - start_time,
+            max(0, total_remaining - processed),
         )
 
     # ------------------------------------------------------------------
