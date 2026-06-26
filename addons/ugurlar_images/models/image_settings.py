@@ -82,7 +82,7 @@ class ResConfigSettings(models.TransientModel):
     )
 
     # -----------------------------------------------------------------
-    #  Veri Düzeltme & Teşhis İlerleme Durumu
+    #  Veri Düzeltme — image.fix.job modelinden okunan alanlar
     # -----------------------------------------------------------------
     fix_images_status = fields.Selection([
         ('idle', 'Beklemede'),
@@ -117,108 +117,18 @@ class ResConfigSettings(models.TransientModel):
             },
         }
 
-    @api.model
-    def _cron_fix_existing_images(self):
-        """Cron job to process image fixes in safe chunks, running up to 45 seconds per invocation."""
-        import time
-        start_time = time.time()
-        
-        ICP = self.env['ir.config_parameter'].sudo()
-        status = ICP.get_param('ugurlar_images.fix_images_status', 'idle')
-        
-        if status != 'running':
-            return
-            
-        # 1. Şablon ID'si boş olanları düzelt (Tek seferde en fazla 2000 adet)
-        images_to_link = self.env['product.image'].sudo().search([
-            ('product_tmpl_id', '=', False),
-            ('product_variant_id', '!=', False)
-        ], limit=2000)
-        
-        linked_count = 0
-        if images_to_link:
-            for img in images_to_link:
-                if img.product_variant_id and img.product_variant_id.product_tmpl_id:
-                    img.write({
-                        'product_tmpl_id': img.product_variant_id.product_tmpl_id.id
-                    })
-                    linked_count += 1
-            self.env.cr.commit()
-            self.env.invalidate_all()
-            
-        # 2. Resim boyutları boş olanları 100'erli paketler halinde döngüde işle
-        # Her döngüde geçen süreyi kontrol et, 45 saniyeyi geçerse dur ki cron timeout'a girmesin!
-        processed = 0
-        batch_size = 100
-        
-        # Toplam kalan sayısını al
-        total_remaining = self.env['product.image'].sudo().search_count([
-            ('image_1920', '!=', False),
-            ('image_128', '=', False)
-        ])
-        
-        if total_remaining == 0:
-            # İşlenecek resim kalmadı!
-            ICP.set_param('ugurlar_images.fix_images_status', 'done')
-            ICP.set_param('ugurlar_images.fix_images_progress', 'Tamamlandı! Tüm görseller başarıyla boyutlandırıldı.')
-            cron = self.env.ref('ugurlar_images.ir_cron_fix_existing_images', raise_if_not_found=False)
-            if cron:
-                cron.write({'active': False})
-            self.env.cr.commit()
-            return
-            
-        while True:
-            # Geçen süreyi kontrol et (max 45 saniye)
-            if time.time() - start_time > 45:
-                _logger.info("Cron zaman sınırı (45s) aşıldı. Mevcut tur sonlandırılıyor. Bir sonraki cron turunda devam edecek.")
-                break
-                
-            batch = self.env['product.image'].sudo().search([
-                ('image_1920', '!=', False),
-                ('image_128', '=', False)
-            ], limit=batch_size)
-            
-            if not batch:
-                break
-                
-            try:
-                self.env.add_to_compute(self.env['product.image']._fields['image_128'], batch)
-                self.env.add_to_compute(self.env['product.image']._fields['image_256'], batch)
-                self.env.add_to_compute(self.env['product.image']._fields['image_512'], batch)
-                self.env.add_to_compute(self.env['product.image']._fields['image_1024'], batch)
-                batch._recompute_recordset()
-            except Exception as batch_error:
-                _logger.error("Cron görsel boyutlandırma batch hatası: %s", batch_error)
-                
-            processed += len(batch)
-            self.env.cr.commit()
-            self.env.invalidate_all()
-            
-        # Kalanı sorgula
-        new_total_remaining = self.env['product.image'].sudo().search_count([
-            ('image_1920', '!=', False),
-            ('image_128', '=', False)
-        ])
-        
-        if new_total_remaining == 0:
-            ICP.set_param('ugurlar_images.fix_images_status', 'done')
-            ICP.set_param('ugurlar_images.fix_images_progress', f'Tamamlandı! Toplam {processed} görsel boyutlandırıldı ve {linked_count} şablon bağlantısı onarıldı.')
-            cron = self.env.ref('ugurlar_images.ir_cron_fix_existing_images', raise_if_not_found=False)
-            if cron:
-                cron.write({'active': False})
-        else:
-            ICP.set_param(
-                'ugurlar_images.fix_images_progress',
-                f'Arka planda devam ediyor... Kalan Görsel Sayısı: {new_total_remaining} ({linked_count} şablon bağlantısı onarıldı)'
-            )
-            
-        self.env.cr.commit()
-
+    # -----------------------------------------------------------------
+    #  Görsel Düzeltme Aksiyonları — image.fix.job modeline yönlendirir
+    # -----------------------------------------------------------------
     def action_fix_existing_images(self):
-        """Mevcut hatalı product.image kayıtlarını düzeltir ve boş thumbnail resimlerini cron görevini aktif ederek onarır."""
+        """
+        Mevcut hatalı product.image kayıtlarını düzeltmek için
+        image.fix.job modeli üzerinde yeni bir iş oluşturur ve
+        zamanlanmış görevi (cron) aktif eder.
+        """
         ICP = self.env['ir.config_parameter'].sudo()
         status = ICP.get_param('ugurlar_images.fix_images_status', 'idle')
-        
+
         if status == 'running':
             return {
                 'type': 'ir.actions.client',
@@ -230,24 +140,22 @@ class ResConfigSettings(models.TransientModel):
                     'sticky': False,
                 },
             }
-            
+
+        # image.fix.job üzerinde yeni iş oluştur ve cron'u aktif et
+        self.env['image.fix.job'].sudo().start_fix()
+
+        # Settings UI'da durum göstergelerini güncelle
         ICP.set_param('ugurlar_images.fix_images_status', 'running')
-        ICP.set_param('ugurlar_images.fix_images_progress', 'Zamanlanmış görev kuyruğuna ekleniyor...')
-        
-        # Cron görevini bul ve tetikle
-        cron = self.env.ref('ugurlar_images.ir_cron_fix_existing_images', raise_if_not_found=False)
-        if cron:
-            cron.write({
-                'active': True,
-                'nextcall': fields.Datetime.now()
-            })
-            
+        ICP.set_param('ugurlar_images.fix_images_progress',
+                       'Zamanlanmış görev kuyruğuna eklendi, arka planda başlıyor...')
+
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
                 'title': 'İşlem Başlatıldı',
-                'message': 'Düzeltme işlemi arka plan Zamanlanmış Görev (Cron) kuyruğuna eklendi. İlerlemeyi bu sayfayı yenileyerek takip edebilirsiniz.',
+                'message': ('Düzeltme işlemi arka plan Zamanlanmış Görev (Cron) kuyruğuna eklendi. '
+                            'İlerlemeyi bu sayfayı yenileyerek takip edebilirsiniz.'),
                 'type': 'success',
                 'sticky': False,
             },
@@ -255,15 +163,14 @@ class ResConfigSettings(models.TransientModel):
 
     def action_reset_fix_status(self):
         """Sıkışmış veya durmuş düzeltme işleminin durumunu sıfırlar ve zamanlanmış görevi pasif yapar."""
+        # image.fix.job üzerinde sıfırla
+        self.env['image.fix.job'].sudo().reset_fix()
+
+        # Settings UI'da durum göstergelerini sıfırla
         ICP = self.env['ir.config_parameter'].sudo()
         ICP.set_param('ugurlar_images.fix_images_status', 'idle')
         ICP.set_param('ugurlar_images.fix_images_progress', 'Sıfırlandı, yeniden başlatılabilir.')
-        
-        # Cron görevini pasifleştir
-        cron = self.env.ref('ugurlar_images.ir_cron_fix_existing_images', raise_if_not_found=False)
-        if cron:
-            cron.write({'active': False})
-            
+
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
@@ -274,4 +181,3 @@ class ResConfigSettings(models.TransientModel):
                 'sticky': False,
             },
         }
-

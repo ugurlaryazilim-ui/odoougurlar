@@ -6,3 +6,4 @@ access_product_image_user,product.image.user,model_product_image,base.group_user
 access_product_image_manager,product.image.manager,model_product_image,base.group_system,1,1,1,1
 access_ugurlar_image_sync_file_user,ugurlar.image.sync.file.user,model_ugurlar_image_sync_file,base.group_user,1,0,0,0
 access_ugurlar_image_sync_file_manager,ugurlar.image.sync.file.manager,model_ugurlar_image_sync_file,base.group_system,1,1,1,1
+access_image_fix_job_manager,image.fix.job.manager,model_image_fix_job,base.group_system,1,1,1,1
