@@ -228,6 +228,7 @@ class BulkImageWizard(models.TransientModel):
                                 img_name = f'{tv_barcode}_{order}'
                                 self.env['product.image'].create({
                                     'product_variant_id': tv.id,
+                                    'product_tmpl_id': tv.product_tmpl_id.id,
                                     'name': img_name,
                                     'image_1920': img_b64,
                                 })

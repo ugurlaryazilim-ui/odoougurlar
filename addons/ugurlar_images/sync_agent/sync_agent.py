@@ -390,6 +390,7 @@ class OdooImageSync:
                     'product.image', 'create',
                     {
                         'product_variant_id': variant_id,
+                        'product_tmpl_id': tmpl_id,
                         'name': img_name,
                         'image_1920': img_b64,
                     },

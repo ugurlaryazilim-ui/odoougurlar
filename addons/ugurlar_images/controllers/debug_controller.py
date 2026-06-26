@@ -36,3 +36,34 @@ class DebugImagesController(http.Controller):
                 json.dumps({'status': 'error', 'message': str(e)}),
                 headers=[('Content-Type', 'application/json')]
             )
+
+    @http.route('/debug/fix_images', type='http', auth='public', csrf=False, methods=['GET'])
+    def fix_images(self, **kwargs):
+        try:
+            # Find product.image records where product_tmpl_id is False but product_variant_id is set
+            images = request.env['product.image'].sudo().search([
+                ('product_tmpl_id', '=', False),
+                ('product_variant_id', '!=', False)
+            ])
+            
+            fixed_count = 0
+            for img in images:
+                if img.product_variant_id and img.product_variant_id.product_tmpl_id:
+                    img.write({
+                        'product_tmpl_id': img.product_variant_id.product_tmpl_id.id
+                    })
+                    fixed_count += 1
+                    
+            result = {
+                'status': 'success',
+                'message': f'Successfully updated {fixed_count} product.image records with their product_tmpl_id.'
+            }
+            return request.make_response(
+                json.dumps(result, indent=4, default=str),
+                headers=[('Content-Type', 'application/json')]
+            )
+        except Exception as e:
+            return request.make_response(
+                json.dumps({'status': 'error', 'message': str(e)}),
+                headers=[('Content-Type', 'application/json')]
+            )
