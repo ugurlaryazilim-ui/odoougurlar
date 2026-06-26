@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <data>
+
+        <!-- ============================================================
+             Ek Özellikler — Ayarlar Sayfası
+             ============================================================ -->
+        <record id="res_config_settings_view_form" model="ir.ui.view">
+            <field name="name">res.config.settings.view.form.inherit.ek_ozellikler</field>
+            <field name="model">res.config.settings</field>
+            <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+            <field name="priority">90</field>
+            <field name="arch" type="xml">
+                <xpath expr="//form" position="inside">
+                    <app data-string="Ek Özellikler" string="Ek Özellikler" groups="base.group_system">
+
+                        <block title="e-Ticaret Araçları" name="ecommerce_tools">
+                            <setting string="Toplu e-Ticaret Yayınlama"
+                                     help="Ürün listesinden seçili ürünleri tek tıkla e-ticarete yayınlayın. Aksiyonlar menüsünden '🛒 e-Ticarete Bağla' seçeneğini kullanın.">
+                                <div class="mt8 text-muted">
+                                    <p><strong>Nasıl kullanılır:</strong></p>
+                                    <ol>
+                                        <li>Stok → Ürünler listesine gidin</li>
+                                        <li>Yayınlamak istediğiniz ürünleri seçin</li>
+                                        <li>Aksiyonlar → 🛒 e-Ticarete Bağla tıklayın</li>
+                                    </ol>
+                                    <p><strong>Otomatik yapılanlar:</strong></p>
+                                    <ul>
+                                        <li>✅ Yayınlandı işareti aktif edilir</li>
+                                        <li>📁 Dahili kategoriler → e-Ticaret kategorilerine eşlenir</li>
+                                        <li>⚠️ Görselsiz ürünler atlanır</li>
+                                    </ul>
+                                </div>
+                            </setting>
+                        </block>
+
+                    </app>
+                </xpath>
+            </field>
+        </record>
+
+    </data>
+</odoo>

@@ -1,6 +1,6 @@
 {
     'name': 'Uğurlar Ek Özellikler',
-    'version': '19.0.1.0.0',
+    'version': '19.0.1.1.0',
     'category': 'Sales/Sales',
     'summary': 'E-ticaret yayınlama, kategori eşleme ve ek araçlar',
     'description': """
@@ -23,6 +23,7 @@
     'data': [
         'security/ir.model.access.csv',
         'data/server_actions.xml',
+        'views/settings_views.xml',
     ],
     'installable': True,
     'application': False,
