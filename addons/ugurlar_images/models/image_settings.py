@@ -98,3 +98,29 @@ class ResConfigSettings(models.TransientModel):
             },
         }
 
+    def action_fix_existing_images(self):
+        """Mevcut hatalı (product_tmpl_id'si boş) product.image kayıtlarını düzeltir."""
+        images = self.env['product.image'].sudo().search([
+            ('product_tmpl_id', '=', False),
+            ('product_variant_id', '!=', False)
+        ])
+        
+        fixed_count = 0
+        for img in images:
+            if img.product_variant_id and img.product_variant_id.product_tmpl_id:
+                img.write({
+                    'product_tmpl_id': img.product_variant_id.product_tmpl_id.id
+                })
+                fixed_count += 1
+                
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Düzeltme Tamamlandı',
+                'message': f'Toplam {fixed_count} adet ek görsel kaydına ürün şablon bilgisi başarıyla eklendi.',
+                'type': 'success',
+                'sticky': True,
+            },
+        }
+

@@ -61,6 +61,19 @@
                         </setting>
                     </block>
 
+                    <!-- Tanılama ve Veri Düzeltme -->
+                    <block title="Tanılama ve Veri Düzeltme" name="diagnostics_settings">
+                        <setting string="Mevcut Görselleri Düzelt"
+                                 help="Daha önce yüklenmiş olan ve e-ticarette gri kutu olarak görünen ek görsellerin Şablon ID (product_tmpl_id) bilgilerini onarır.">
+                            <div class="mt-2">
+                                <button name="action_fix_existing_images"
+                                        type="object"
+                                        string="Görsel Şablon Bağlantılarını Düzelt"
+                                        class="btn-primary"/>
+                            </div>
+                        </setting>
+                    </block>
+
                 </app>
             </xpath>
         </field>
