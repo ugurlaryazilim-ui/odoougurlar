@@ -7,35 +7,24 @@ class DebugImagesController(http.Controller):
     @http.route('/debug/images', type='http', auth='public', csrf=False, methods=['GET'])
     def debug_images(self, **kwargs):
         try:
-            # Query columns of product_image
-            request.env.cr.execute("""
-                SELECT column_name, data_type 
-                FROM information_schema.columns 
-                WHERE table_name = 'product_image'
-            """)
-            columns = [{'column_name': r[0], 'data_type': r[1]} for r in request.env.cr.fetchall()]
-
-            # Also query some records from product_image (excluding binary data fields for now)
-            request.env.cr.execute("""
-                SELECT id, name, product_tmpl_id, product_variant_id
-                FROM product_image
-                ORDER BY id DESC
-                LIMIT 50
-            """)
-            rows = request.env.cr.fetchall()
+            # Use Odoo ORM to query product.image records
+            images = request.env['product.image'].sudo().search([], limit=100)
             
             data = []
-            for r in rows:
+            for img in images:
                 data.append({
-                    'id': r[0],
-                    'name': r[1],
-                    'product_tmpl_id': r[2],
-                    'product_variant_id': r[3]
+                    'id': img.id,
+                    'name': img.name,
+                    'product_tmpl_id': img.product_tmpl_id.id if img.product_tmpl_id else False,
+                    'product_tmpl_name': img.product_tmpl_id.name if img.product_tmpl_id else False,
+                    'product_variant_id': img.product_variant_id.id if img.product_variant_id else False,
+                    'product_variant_barcode': img.product_variant_id.barcode if img.product_variant_id else False,
+                    'has_image_1920': bool(img.image_1920),
+                    'can_image_1024_be_zoomed': img.can_image_1024_be_zoomed,
                 })
             
             result = {
                 'status': 'success',
-                'columns': columns,
                 'images': data
             }
             return request.make_response(
