@@ -19,42 +19,93 @@ class ProductTemplate(models.Model):
         Aksiyonlar dropdown'undan çağrılır (binding_model_id).
 
         Kurallar:
-          • Görseli olmayan ürünler atlanır
-          • Zaten yayınlı olanlar tekrar yazılmaz (sadece kategori kontrol)
+          • Görseli olmayan ürünler atlanır (SQL ile kontrol — bellek güvenli)
+          • Zaten yayınlı olanlar tekrar yazılmaz
           • Dahili kategori → e-ticaret kategorisi eşlenir (mükerrer oluşturmaz)
+          • Toplu write ile performanslı çalışır
         """
-        published = 0
-        skipped_no_image = 0
-        already_published = 0
+        if not self:
+            return
+
+        # ── Görseli olan ürün ID'lerini SQL ile bul (MemoryError önleme) ──
+        # image_1920 attachment olarak saklanıyor, binary yüklemeden kontrol
+        cr = self.env.cr
+        cr.execute("""
+            SELECT DISTINCT res_id
+            FROM ir_attachment
+            WHERE res_model = 'product.template'
+              AND res_field = 'image_1920'
+              AND res_id IN %s
+        """, (tuple(self.ids),))
+        ids_with_image = {row[0] for row in cr.fetchall()}
+
+        # Attachment'ta bulunamadıysa, tabloda direkt saklananları da kontrol et
+        if len(ids_with_image) < len(self):
+            remaining_ids = tuple(set(self.ids) - ids_with_image)
+            if remaining_ids:
+                cr.execute("""
+                    SELECT id FROM product_template
+                    WHERE id IN %s
+                      AND image_1920 IS NOT NULL
+                """, (remaining_ids,))
+                ids_with_image.update(row[0] for row in cr.fetchall())
+
+        # ── Filtreleme ──
+        templates_with_image = self.browse(
+            [t_id for t_id in self.ids if t_id in ids_with_image]
+        )
+        skipped_no_image = len(self) - len(templates_with_image)
+
+        if not templates_with_image:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'e-Ticaret Yayınlama',
+                    'message': f'⚠️ Seçili {len(self)} üründe görsel bulunamadı.',
+                    'type': 'warning',
+                    'sticky': False,
+                },
+            }
+
+        # ── Toplu yayınlama ──
+        to_publish = templates_with_image.filtered(lambda t: not t.is_published)
+        already_published = len(templates_with_image) - len(to_publish)
+        if to_publish:
+            to_publish.write({'is_published': True})
+        published = len(to_publish)
+
+        # ── Kategori eşleme ──
         categories_created = 0
-        category_cache = {}  # {categ_id: (public_categ, created)}
+        category_cache = {}  # {internal_categ_id: public_categ}
 
-        for tmpl in self:
-            # ── Görseli yoksa atla ──
-            if not tmpl.image_1920:
-                skipped_no_image += 1
-                continue
-
-            # ── Yayınla ──
-            if not tmpl.is_published:
-                tmpl.is_published = True
-                published += 1
-            else:
-                already_published += 1
-
-            # ── Dahili kategori → e-Ticaret kategorisi eşle ──
+        # Kategorilere göre grupla (toplu işlem)
+        categ_to_tmpls = {}
+        for tmpl in templates_with_image:
             if tmpl.categ_id and tmpl.categ_id.id:
-                categ = tmpl.categ_id
-                if categ.id not in category_cache:
-                    public_categ, created = self._get_or_create_public_category(categ)
-                    category_cache[categ.id] = (public_categ, created)
-                    if created:
-                        categories_created += 1
-                else:
-                    public_categ, _ = category_cache[categ.id]
+                categ_to_tmpls.setdefault(tmpl.categ_id, self.env['product.template'])
+                categ_to_tmpls[tmpl.categ_id] |= tmpl
 
-                if public_categ and public_categ not in tmpl.public_categ_ids:
-                    tmpl.public_categ_ids = [(4, public_categ.id)]
+        for internal_categ, tmpls in categ_to_tmpls.items():
+            if internal_categ.id not in category_cache:
+                public_categ, created = self._get_or_create_public_category(
+                    internal_categ
+                )
+                category_cache[internal_categ.id] = public_categ
+                if created:
+                    categories_created += 1
+            else:
+                public_categ = category_cache[internal_categ.id]
+
+            if public_categ:
+                # Henüz bu kategoriye bağlı olmayanları filtrele
+                to_assign = tmpls.filtered(
+                    lambda t, pc=public_categ: pc not in t.public_categ_ids
+                )
+                if to_assign:
+                    to_assign.write({
+                        'public_categ_ids': [(4, public_categ.id)],
+                    })
 
         _logger.info(
             "e-Ticaret yayınlama: %d yayınlandı, %d zaten yayında, "
@@ -79,7 +130,7 @@ class ProductTemplate(models.Model):
             'params': {
                 'title': 'e-Ticaret Yayınlama',
                 'message': '\n'.join(message_parts) or 'İşlenecek ürün bulunamadı.',
-                'type': 'success' if published else 'warning',
+                'type': 'success' if published else 'info',
                 'sticky': False,
             },
         }
@@ -112,6 +163,12 @@ class ProductTemplate(models.Model):
             chain.append(current)
             current = current.parent_id
         chain.reverse()  # Kökten yaprağa sırala
+
+        # Kök "All" veya "Tümü" kategorisini atla (varsa)
+        if len(chain) > 1 and not chain[0].parent_id and chain[0].name in (
+            'All', 'Tümü', 'Tüm Ürünler',
+        ):
+            chain = chain[1:]
 
         parent_public_id = False
         public_categ = None
