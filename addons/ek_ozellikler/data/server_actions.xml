@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <data>
+
+        <!-- ============================================================
+             e-Ticarete Bağla — Ürün listesinde Aksiyonlar dropdown'unda
+             ============================================================ -->
+        <record id="action_publish_ecommerce" model="ir.actions.server">
+            <field name="name">🛒 e-Ticarete Bağla</field>
+            <field name="model_id" ref="product.model_product_template"/>
+            <field name="binding_model_id" ref="product.model_product_template"/>
+            <field name="binding_view_types">list,form</field>
+            <field name="state">code</field>
+            <field name="code">
+if records:
+    action = records.action_publish_ecommerce()
+            </field>
+        </record>
+
+    </data>
+</odoo>
