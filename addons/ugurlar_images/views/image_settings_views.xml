@@ -71,6 +71,11 @@
                                         string="Görsel Şablon Bağlantılarını Düzelt"
                                         class="btn-primary"
                                         invisible="fix_images_status == 'running'"/>
+                                <button name="action_reset_fix_status"
+                                        type="object"
+                                        string="Düzeltmeyi Sıfırla"
+                                        class="btn-secondary"
+                                        invisible="fix_images_status != 'running'"/>
                             </div>
                             <div class="content-group mt-2">
                                 <div class="row">

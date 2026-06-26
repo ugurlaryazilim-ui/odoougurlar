@@ -234,3 +234,19 @@ class ResConfigSettings(models.TransientModel):
             },
         }
 
+    def action_reset_fix_status(self):
+        """Sıkışmış veya durmuş düzeltme işleminin durumunu sıfırlar."""
+        ICP = self.env['ir.config_parameter'].sudo()
+        ICP.set_param('ugurlar_images.fix_images_status', 'idle')
+        ICP.set_param('ugurlar_images.fix_images_progress', 'Sıfırlandı, yeniden başlatılabilir.')
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Durum Sıfırlandı',
+                'message': 'Düzeltme durumu sıfırlandı. Yeniden başlatabilirsiniz.',
+                'type': 'success',
+                'sticky': False,
+            },
+        }
+
