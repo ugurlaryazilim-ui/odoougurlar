@@ -81,6 +81,25 @@ class ResConfigSettings(models.TransientModel):
              r'Ağ paylaşımı için UNC yol kullanın: \\sunucu\paylasim\klasor',
     )
 
+    # -----------------------------------------------------------------
+    #  Veri Düzeltme & Teşhis İlerleme Durumu
+    # -----------------------------------------------------------------
+    fix_images_status = fields.Selection([
+        ('idle', 'Beklemede'),
+        ('running', 'Çalışıyor'),
+        ('done', 'Tamamlandı'),
+        ('error', 'Hata Oluştu'),
+    ],
+        string='Düzeltme Durumu',
+        config_parameter='ugurlar_images.fix_images_status',
+        default='idle',
+    )
+    fix_images_progress = fields.Char(
+        string='İlerleme',
+        config_parameter='ugurlar_images.fix_images_progress',
+        default='0 / 0',
+    )
+
     def action_generate_api_key(self):
         """Sync Agent için rastgele bir API anahtarı üretir."""
         key = secrets.token_urlsafe(32)
@@ -98,48 +117,99 @@ class ResConfigSettings(models.TransientModel):
             },
         }
 
+    def _run_background_fix(self, db_name, db_registry):
+        """Arka planda çalışacak onarım ve boyutlandırma işlemi."""
+        with db_registry.cursor() as cr:
+            env = api.Environment(cr, 1, {}) # uid=1 (sistem yöneticisi)
+            ICP = env['ir.config_parameter'].sudo()
+            try:
+                # 1. Şablon ID'si boş olanları düzelt
+                images_to_link = env['product.image'].sudo().search([
+                    ('product_tmpl_id', '=', False),
+                    ('product_variant_id', '!=', False)
+                ])
+                
+                linked_count = 0
+                for img in images_to_link:
+                    if img.product_variant_id and img.product_variant_id.product_tmpl_id:
+                        img.write({
+                            'product_tmpl_id': img.product_variant_id.product_tmpl_id.id
+                        })
+                        linked_count += 1
+                
+                cr.commit()
+                
+                # 2. Resim boyutları boş olanları batch'ler halinde yeniden hesaplat
+                images_to_recompute = env['product.image'].sudo().search([
+                    ('image_1920', '!=', False),
+                    ('image_128', '=', False)
+                ])
+                
+                total_count = len(images_to_recompute)
+                ICP.set_param('ugurlar_images.fix_images_progress', f'0 / {total_count}')
+                cr.commit()
+                
+                processed = 0
+                batch_size = 500
+                if total_count > 0:
+                    for i in range(0, total_count, batch_size):
+                        batch = images_to_recompute[i:i+batch_size]
+                        env.add_to_compute(env['product.image']._fields['image_128'], batch)
+                        env.add_to_compute(env['product.image']._fields['image_256'], batch)
+                        env.add_to_compute(env['product.image']._fields['image_512'], batch)
+                        env.add_to_compute(env['product.image']._fields['image_1024'], batch)
+                        batch._recompute_recordset()
+                        
+                        processed += len(batch)
+                        ICP.set_param('ugurlar_images.fix_images_progress', f'{processed} / {total_count} processed ({linked_count} template links fixed)')
+                        cr.commit() # Veritabanına yaz ve RAM'i temizle
+                
+                ICP.set_param('ugurlar_images.fix_images_status', 'done')
+                ICP.set_param('ugurlar_images.fix_images_progress', f'Tamamlandı! Toplam {processed} görsel boyutlandırıldı ve {linked_count} şablon bağlantısı onarıldı.')
+                cr.commit()
+                
+            except Exception as e:
+                _logger.error("Arka plan görsel düzeltme hatası: %s", e)
+                ICP.set_param('ugurlar_images.fix_images_status', 'error')
+                ICP.set_param('ugurlar_images.fix_images_progress', f'Hata: {str(e)}')
+                cr.commit()
+
     def action_fix_existing_images(self):
-        """Mevcut hatalı (product_tmpl_id'si boş) product.image kayıtlarını düzeltir ve boş thumbnail resimlerini yeniden hesaplar."""
-        # 1. Şablon ID'si boş olanları düzelt
-        images_to_link = self.env['product.image'].sudo().search([
-            ('product_tmpl_id', '=', False),
-            ('product_variant_id', '!=', False)
-        ])
+        """Mevcut hatalı product.image kayıtlarını düzeltir ve boş thumbnail resimlerini asenkron thread olarak onarır."""
+        ICP = self.env['ir.config_parameter'].sudo()
+        status = ICP.get_param('ugurlar_images.fix_images_status', 'idle')
         
-        linked_count = 0
-        for img in images_to_link:
-            if img.product_variant_id and img.product_variant_id.product_tmpl_id:
-                img.write({
-                    'product_tmpl_id': img.product_variant_id.product_tmpl_id.id
-                })
-                linked_count += 1
-                
-        # 2. Resim boyutları boş olanları batch'ler halinde yeniden hesaplat (MemoryError'ü önlemek için)
-        images_to_recompute = self.env['product.image'].sudo().search([
-            ('image_1920', '!=', False),
-            ('image_128', '=', False)
-        ])
+        if status == 'running':
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'İşlem Devam Ediyor',
+                    'message': 'Görsel düzeltme işlemi zaten arka planda çalışmaktadır.',
+                    'type': 'warning',
+                    'sticky': False,
+                },
+            }
+            
+        ICP.set_param('ugurlar_images.fix_images_status', 'running')
+        ICP.set_param('ugurlar_images.fix_images_progress', 'Hazırlanıyor...')
         
-        recomputed_count = len(images_to_recompute)
-        if recomputed_count > 0:
-            batch_size = 500
-            for i in range(0, recomputed_count, batch_size):
-                batch = images_to_recompute[i:i+batch_size]
-                self.env.add_to_compute(self.env['product.image']._fields['image_128'], batch)
-                self.env.add_to_compute(self.env['product.image']._fields['image_256'], batch)
-                self.env.add_to_compute(self.env['product.image']._fields['image_512'], batch)
-                self.env.add_to_compute(self.env['product.image']._fields['image_1024'], batch)
-                batch._recompute_recordset()
-                self.env.cr.commit() # Veritabanına kaydet ve RAM'i boşalt
-                
+        # Thread başlat
+        db_name = self.env.cr.dbname
+        db_registry = self.env.registry
+        import threading
+        thread = threading.Thread(target=self._run_background_fix, args=(db_name, db_registry))
+        thread.daemon = True
+        thread.start()
+        
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
-                'title': 'Düzeltme ve Yeniden Hesaplama Tamamlandı',
-                'message': f'Şablon bağlantısı eklenen: {linked_count} adet. Yeniden boyutlandırılan ek görsel: {recomputed_count} adet.',
+                'title': 'İşlem Başlatıldı',
+                'message': 'Düzeltme işlemi arka planda başlatıldı. İlerlemeyi bu sayfayı yenileyerek takip edebilirsiniz.',
                 'type': 'success',
-                'sticky': True,
+                'sticky': False,
             },
         }
 

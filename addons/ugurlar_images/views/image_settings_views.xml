@@ -69,7 +69,18 @@
                                 <button name="action_fix_existing_images"
                                         type="object"
                                         string="Görsel Şablon Bağlantılarını Düzelt"
-                                        class="btn-primary"/>
+                                        class="btn-primary"
+                                        invisible="fix_images_status == 'running'"/>
+                            </div>
+                            <div class="content-group mt-2">
+                                <div class="row">
+                                    <label for="fix_images_status" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="fix_images_status" readonly="1" class="col-6"/>
+                                </div>
+                                <div class="row mt8" invisible="fix_images_status == 'idle'">
+                                    <label for="fix_images_progress" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="fix_images_progress" readonly="1" class="col-6"/>
+                                </div>
                             </div>
                         </setting>
                     </block>
