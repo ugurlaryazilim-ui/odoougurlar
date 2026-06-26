@@ -23,6 +23,7 @@
     'depends': ['base_setup', 'product', 'website_sale'],
     'data': [
         'security/ir.model.access.csv',
+        'data/ir_cron.xml',
         'views/image_settings_views.xml',
         'views/product_image_views.xml',
         'views/bulk_image_wizard_views.xml',
