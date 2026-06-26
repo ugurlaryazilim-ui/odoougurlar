@@ -111,7 +111,13 @@ class ResConfigSettings(models.TransientModel):
             'tag': 'display_notification',
             'params': {
                 'title': 'API Anahtarı Oluşturuldu',
-                'message': f'Yeni anahta    @api.model
+                'message': f'Yeni anahtar: {key}',
+                'type': 'success',
+                'sticky': True,
+            },
+        }
+
+    @api.model
     def _cron_fix_existing_images(self):
         """Cron job to process image fixes in safe chunks, running up to 45 seconds per invocation."""
         import time
