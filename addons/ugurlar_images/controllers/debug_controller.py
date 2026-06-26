@@ -154,6 +154,45 @@ class DebugImagesController(http.Controller):
                 headers=[('Content-Type', 'application/json')]
             )
 
+    @http.route('/debug/inspect_image_field', type='http', auth='public', csrf=False, methods=['GET'])
+    def inspect_image_field(self, **kwargs):
+        try:
+            model = request.env['product.image']
+            f = model._fields['image_128']
+            
+            # Let's check some records:
+            images = model.sudo().search([('image_1920', '!=', False)], limit=5)
+            recs = []
+            for img in images:
+                # Trigger computation of image_128
+                img_128 = img.image_128
+                recs.append({
+                    'id': img.id,
+                    'name': img.name,
+                    'has_1920': bool(img.image_1920),
+                    'len_1920': len(img.image_1920) if img.image_1920 else 0,
+                    'has_128': bool(img_128),
+                    'len_128': len(img_128) if img_128 else 0,
+                })
+            
+            result = {
+                'field_type': str(type(f)),
+                'compute': str(f.compute),
+                'depends': str(f.depends),
+                'store': f.store,
+                'related': f.related,
+                'records': recs,
+            }
+            return request.make_response(
+                json.dumps(result, indent=4, default=str),
+                headers=[('Content-Type', 'application/json')]
+            )
+        except Exception as e:
+            return request.make_response(
+                json.dumps({'status': 'error', 'message': str(e)}),
+                headers=[('Content-Type', 'application/json')]
+            )
+
     @http.route('/debug/inspect_product', type='http', auth='public', csrf=False, methods=['GET'])
     def inspect_product(self, tmpl_id=32449, **kwargs):
         try:
