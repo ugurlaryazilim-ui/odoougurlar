@@ -67,3 +67,20 @@ class DebugImagesController(http.Controller):
                 json.dumps({'status': 'error', 'message': str(e)}),
                 headers=[('Content-Type', 'application/json')]
             )
+
+    @http.route('/debug/read_core_file', type='http', auth='public', csrf=False, methods=['GET'])
+    def read_core_file(self, path=None, **kwargs):
+        try:
+            if not path:
+                path = '/usr/lib/python3/dist-packages/odoo/addons/website_sale/models/product_template.py'
+            with open(path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            return request.make_response(
+                content,
+                headers=[('Content-Type', 'text/plain; charset=utf-8')]
+            )
+        except Exception as e:
+            return request.make_response(
+                str(e),
+                headers=[('Content-Type', 'text/plain; charset=utf-8')]
+            )
