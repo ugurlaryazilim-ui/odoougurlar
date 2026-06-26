@@ -88,16 +88,23 @@ class ProductProductImageExtend(models.Model):
 
     def _get_images(self):
         """
-        Varyant bazlı resim çekme.
-        Sadece bu varyantın rengine ait olan resimleri gösterir ve beden bazlı tekrarları eler.
+        Varyant bazlı resim çekme — beden tekrarını kesin olarak önler.
+
+        Strateji:
+          1. Genel resimler (product_variant_id boş) → her zaman göster
+          2. Aynı renkteki varyantlardan sadece BİRİNİN resimlerini göster
+             (öncelik: mevcut varyant > ilk bulunan varyant)
+          3. Renksiz ürünlerde sadece kendi varyant resimlerini göster
+
+        Bu sayede 3 resim × 4 beden = 12 resim yerine sadece 3 resim gösterilir.
         """
         self.ensure_one()
-        
-        # Rengi bul (Türkçe ve İngilizce özellikleri destekler)
+
+        # ── Renk özelliğini bul ──
         color_attribute = self.env['product.attribute'].sudo().search([
             '|', ('name', 'ilike', 'Renk'), ('name', 'ilike', 'Color')
         ], limit=1)
-        
+
         selected_color_value = False
         if color_attribute:
             color_val = self.product_template_attribute_value_ids.filtered(
@@ -105,52 +112,120 @@ class ProductProductImageExtend(models.Model):
             )
             if color_val:
                 selected_color_value = color_val.product_attribute_value_id.name
-                
-        # Tüm template extra resimlerini al
+
+        # ── Tüm template extra resimlerini al ──
         all_extra_images = self.product_tmpl_id.product_template_image_ids
-        
-        filtered_images = []
-        seen_names = set()
-        
-        for img in all_extra_images:
-            is_valid = False
-            if not img.product_variant_id:
-                # Genel resim (her varyanta uygun)
-                is_valid = True
-            elif selected_color_value:
-                # Varyantın rengini kontrol et
-                img_color_val = img.product_variant_id.product_template_attribute_value_ids.filtered(
-                    lambda v: v.attribute_id.id == color_attribute.id
-                )
-                if img_color_val and img_color_val.product_attribute_value_id.name == selected_color_value:
-                    is_valid = True
+
+        # Genel resimler (hiçbir varyanta bağlı olmayan)
+        generic_images = list(all_extra_images.filtered(
+            lambda img: not img.product_variant_id
+        ))
+
+        if not selected_color_value:
+            # Renksiz ürün → sadece kendi varyant resimlerini göster
+            my_images = list(all_extra_images.filtered(
+                lambda img: img.product_variant_id.id == self.id
+            ))
+            return [self] + generic_images + my_images
+
+        # ── Aynı renkteki varyant ID'lerini bul ──
+        same_color_variant_ids = set()
+        for variant in self.product_tmpl_id.product_variant_ids:
+            for ptav in variant.product_template_attribute_value_ids:
+                if (ptav.attribute_id.id == color_attribute.id
+                        and ptav.product_attribute_value_id.name == selected_color_value):
+                    same_color_variant_ids.add(variant.id)
+                    break
+
+        # ── Bu renkteki varyant resimlerini al ──
+        color_images = all_extra_images.filtered(
+            lambda img: img.product_variant_id.id in same_color_variant_ids
+        )
+
+        # ── Sadece BİR varyantın resimlerini seç (beden tekrarını önle) ──
+        # Öncelik: mevcut varyant → yoksa ilk bulunan varyant
+        representative_id = None
+        if color_images:
+            my_images = color_images.filtered(
+                lambda img: img.product_variant_id.id == self.id
+            )
+            if my_images:
+                representative_id = self.id
             else:
-                # Renksiz bir ürün ise, sadece kendi varyantı ise göster
-                if img.product_variant_id.id == self.id:
-                    is_valid = True
-                    
-            if is_valid:
-                # Resim adına göre tekilleştirme (Beden bazlı tekrarları önlemek için)
-                img_name = img.name or ''
-                if img_name not in seen_names:
-                    seen_names.add(img_name)
-                    filtered_images.append(img)
-                    
-        return [self] + filtered_images
+                representative_id = color_images[0].product_variant_id.id
+
+        if representative_id:
+            selected_images = list(color_images.filtered(
+                lambda img: img.product_variant_id.id == representative_id
+            ))
+        else:
+            selected_images = []
+
+        return [self] + generic_images + selected_images
 
 
 class ProductTemplateImageExtend(models.Model):
     _inherit = 'product.template'
 
     def _get_images(self):
-        """Şablon bazlı resim çekme. Resim adına göre tekilleştirme uygular."""
+        """
+        Şablon bazlı resim çekme — renk başına tek varyant resimleri gösterir.
+
+        Beden tekrarını önlemek için her renk grubu için sadece
+        ilk bulunan varyantın resimlerini gösterir.
+        """
         self.ensure_one()
         all_extra_images = self.product_template_image_ids
-        filtered_images = []
-        seen_names = set()
-        for img in all_extra_images:
-            img_name = img.name or ''
-            if img_name not in seen_names:
-                seen_names.add(img_name)
-                filtered_images.append(img)
-        return [self] + filtered_images
+
+        # Genel resimler (varyanta bağlı olmayan)
+        generic_images = list(all_extra_images.filtered(
+            lambda img: not img.product_variant_id
+        ))
+
+        # Renk özelliğini bul
+        color_attribute = self.env['product.attribute'].sudo().search([
+            '|', ('name', 'ilike', 'Renk'), ('name', 'ilike', 'Color')
+        ], limit=1)
+
+        variant_images = all_extra_images.filtered(
+            lambda img: img.product_variant_id
+        )
+
+        if not color_attribute or not variant_images:
+            # Renk özelliği yok veya varyant resimleri yok
+            # Her varyant ID'si için sadece ilkini al
+            seen_variant_ids = set()
+            deduped = []
+            for img in variant_images:
+                vid = img.product_variant_id.id
+                if vid not in seen_variant_ids:
+                    seen_variant_ids.add(vid)
+                    # Bu varyantın tüm resimlerini al
+                    deduped.extend(list(variant_images.filtered(
+                        lambda i, v=vid: i.product_variant_id.id == v
+                    )))
+                    break  # Sadece ilk varyant yeterli
+            return [self] + generic_images + deduped
+
+        # ── Renk bazlı gruplama: her renk için sadece 1 varyantın resimlerini al ──
+        seen_colors = set()
+        color_deduped = []
+
+        for img in variant_images:
+            # Bu resmin varyantının rengini bul
+            img_color_val = img.product_variant_id.product_template_attribute_value_ids.filtered(
+                lambda v: v.attribute_id.id == color_attribute.id
+            )
+            color_name = (img_color_val.product_attribute_value_id.name
+                          if img_color_val else '__no_color__')
+
+            if color_name not in seen_colors:
+                seen_colors.add(color_name)
+                # Bu renk + varyant ID'si için tüm resimleri al
+                this_variant_id = img.product_variant_id.id
+                color_deduped.extend(list(variant_images.filtered(
+                    lambda i, v=this_variant_id: i.product_variant_id.id == v
+                )))
+
+        return [self] + generic_images + color_deduped
+
