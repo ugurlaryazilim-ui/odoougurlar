@@ -157,29 +157,12 @@ class DebugImagesController(http.Controller):
     @http.route('/debug/inspect_image_field', type='http', auth='public', csrf=False, methods=['GET'])
     def inspect_image_field(self, **kwargs):
         try:
-            import os
-            odoo_path = "/usr/lib/python3/dist-packages/odoo"
-            
-            found = []
-            for root, dirs, files in os.walk(odoo_path):
-                for f in files:
-                    if f.endswith('.py'):
-                        path = os.path.join(root, f)
-                        try:
-                            with open(path, 'r', encoding='utf-8') as file:
-                                content = file.read()
-                                if 'class ImageMixin' in content or ('models.AbstractModel' in content and 'image_128 = ' in content):
-                                    found.append(path)
-                        except Exception:
-                            pass
-            
-            content = "No files found."
-            if found:
-                with open(found[0], 'r', encoding='utf-8') as file:
-                    content = f"=== File: {found[0]} ===\n" + file.read()
-                    
+            import inspect
+            from odoo import fields
+            image_class = fields.Image
+            source = inspect.getsource(image_class)
             return request.make_response(
-                content,
+                source[:8000],
                 headers=[('Content-Type', 'text/plain; charset=utf-8')]
             )
         except Exception as e:
