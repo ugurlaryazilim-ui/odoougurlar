@@ -99,26 +99,45 @@ class ResConfigSettings(models.TransientModel):
         }
 
     def action_fix_existing_images(self):
-        """Mevcut hatalı (product_tmpl_id'si boş) product.image kayıtlarını düzeltir."""
-        images = self.env['product.image'].sudo().search([
+        """Mevcut hatalı (product_tmpl_id'si boş) product.image kayıtlarını düzeltir ve boş thumbnail resimlerini yeniden hesaplar."""
+        # 1. Şablon ID'si boş olanları düzelt
+        images_to_link = self.env['product.image'].sudo().search([
             ('product_tmpl_id', '=', False),
             ('product_variant_id', '!=', False)
         ])
         
-        fixed_count = 0
-        for img in images:
+        linked_count = 0
+        for img in images_to_link:
             if img.product_variant_id and img.product_variant_id.product_tmpl_id:
                 img.write({
                     'product_tmpl_id': img.product_variant_id.product_tmpl_id.id
                 })
-                fixed_count += 1
+                linked_count += 1
+                
+        # 2. Resim boyutları boş olanları batch'ler halinde yeniden hesaplat (MemoryError'ü önlemek için)
+        images_to_recompute = self.env['product.image'].sudo().search([
+            ('image_1920', '!=', False),
+            ('image_128', '=', False)
+        ])
+        
+        recomputed_count = len(images_to_recompute)
+        if recomputed_count > 0:
+            batch_size = 500
+            for i in range(0, recomputed_count, batch_size):
+                batch = images_to_recompute[i:i+batch_size]
+                self.env.add_to_compute(self.env['product.image']._fields['image_128'], batch)
+                self.env.add_to_compute(self.env['product.image']._fields['image_256'], batch)
+                self.env.add_to_compute(self.env['product.image']._fields['image_512'], batch)
+                self.env.add_to_compute(self.env['product.image']._fields['image_1024'], batch)
+                batch._recompute_recordset()
+                self.env.cr.commit() # Veritabanına kaydet ve RAM'i boşalt
                 
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
-                'title': 'Düzeltme Tamamlandı',
-                'message': f'Toplam {fixed_count} adet ek görsel kaydına ürün şablon bilgisi başarıyla eklendi.',
+                'title': 'Düzeltme ve Yeniden Hesaplama Tamamlandı',
+                'message': f'Şablon bağlantısı eklenen: {linked_count} adet. Yeniden boyutlandırılan ek görsel: {recomputed_count} adet.',
                 'type': 'success',
                 'sticky': True,
             },
