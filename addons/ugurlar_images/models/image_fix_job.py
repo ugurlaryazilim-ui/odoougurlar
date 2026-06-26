@@ -151,24 +151,37 @@ class ImageFixJob(models.Model):
         )
 
         if total_remaining == 0:
-            # ── Tamamlandı ──
-            self.write({
-                'state': 'done',
-                'progress_text': (
-                    f'Tamamlandı! {self.total_fixed_links} bağlantı + '
-                    f'{self.total_fixed_thumbs} thumbnail onarıldı.'
-                ),
-            })
+            # ── Tamamlandı — raw SQL ile güncelle (ORM cr.commit sonrası sorun yaratabilir) ──
+            cr = self.env.cr
+            done_text = (
+                f'Tamamlandı! {self.total_fixed_links} bağlantı + '
+                f'{self.total_fixed_thumbs} thumbnail onarıldı.'
+            )
+            cr.execute("""
+                UPDATE image_fix_job
+                SET state = 'done', progress_text = %s
+                WHERE id = %s
+            """, (done_text, self.id))
+            cr.execute("""
+                UPDATE ir_config_parameter
+                SET value = 'done'
+                WHERE key = 'ugurlar_images.fix_images_status'
+            """)
+            cr.execute("""
+                UPDATE ir_config_parameter
+                SET value = %s
+                WHERE key = 'ugurlar_images.fix_images_progress'
+            """, (done_text,))
             cron = self.env.ref(
                 'ugurlar_images.ir_cron_fix_existing_images',
                 raise_if_not_found=False,
             )
             if cron:
-                self.env.cr.execute(
+                cr.execute(
                     "UPDATE ir_cron SET active = FALSE WHERE id = %s",
                     (cron.id,)
                 )
-            self.env.cr.commit()
+            cr.commit()
             self.env.invalidate_all()
             _logger.info(
                 "Görsel düzeltme TAMAMLANDI! %d bağlantı, %d thumbnail",
