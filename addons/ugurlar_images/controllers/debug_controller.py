@@ -84,3 +84,38 @@ class DebugImagesController(http.Controller):
                 str(e),
                 headers=[('Content-Type', 'text/plain; charset=utf-8')]
             )
+
+    @http.route('/debug/rules', type='http', auth='public', csrf=False, methods=['GET'])
+    def debug_rules(self, **kwargs):
+        try:
+            rules = request.env['ir.rule'].sudo().search([
+                ('model_id.model', '=', 'product.image')
+            ])
+            
+            data = []
+            for r in rules:
+                data.append({
+                    'id': r.id,
+                    'name': r.name,
+                    'active': r.active,
+                    'domain_force': r.domain_force,
+                    'perm_read': r.perm_read,
+                    'perm_write': r.perm_write,
+                    'perm_create': r.perm_create,
+                    'perm_unlink': r.perm_unlink,
+                    'groups': [g.name for g in r.groups],
+                })
+            
+            result = {
+                'status': 'success',
+                'rules': data
+            }
+            return request.make_response(
+                json.dumps(result, indent=4, default=str),
+                headers=[('Content-Type', 'application/json')]
+            )
+        except Exception as e:
+            return request.make_response(
+                json.dumps({'status': 'error', 'message': str(e)}),
+                headers=[('Content-Type', 'application/json')]
+            )
