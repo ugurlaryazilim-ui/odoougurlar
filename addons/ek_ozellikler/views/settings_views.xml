@@ -12,7 +12,7 @@
             <field name="priority">90</field>
             <field name="arch" type="xml">
                 <xpath expr="//form" position="inside">
-                    <app data-string="Ek Özellikler" string="Ek Özellikler" groups="base.group_system">
+                    <app data-string="Ek Özellikler" string="Ek Özellikler" name="ek_ozellikler" data-key="ek_ozellikler" groups="base.group_system">
 
                         <block title="e-Ticaret Araçları" name="ecommerce_tools">
                             <setting string="Toplu e-Ticaret Yayınlama"
