@@ -151,7 +151,10 @@ class ImageFixJob(models.Model):
         )
 
         if total_remaining == 0:
-            # ── Tamamlandı — raw SQL ile güncelle (ORM cr.commit sonrası sorun yaratabilir) ──
+            # ── Tamamlandı ──
+            # NOT: cron'u buradan deaktif ETMİYORUZ!
+            # Odoo cron kaydını FOR UPDATE ile kilitler, UPDATE deadlock yaratır.
+            # Cron çalışmaya devam eder ama iş bulamaz → anında return eder.
             cr = self.env.cr
             done_text = (
                 f'Tamamlandı! {self.total_fixed_links} bağlantı + '
@@ -172,15 +175,6 @@ class ImageFixJob(models.Model):
                 SET value = %s
                 WHERE key = 'ugurlar_images.fix_images_progress'
             """, (done_text,))
-            cron = self.env.ref(
-                'ugurlar_images.ir_cron_fix_existing_images',
-                raise_if_not_found=False,
-            )
-            if cron:
-                cr.execute(
-                    "UPDATE ir_cron SET active = FALSE WHERE id = %s",
-                    (cron.id,)
-                )
             cr.commit()
             self.env.invalidate_all()
             _logger.info(
