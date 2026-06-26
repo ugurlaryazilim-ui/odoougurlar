@@ -1,6 +1,6 @@
 {
     'name': 'Uğurlar Ek Özellikler',
-    'version': '19.0.1.2.0',
+    'version': '19.0.1.3.0',
     'category': 'Sales/Sales',
     'summary': 'E-ticaret yayınlama, kategori eşleme, SKU/barkod gösterimi ve ek araçlar',
     'description': """
@@ -27,7 +27,6 @@
         'security/ir.model.access.csv',
         'data/server_actions.xml',
         'views/settings_views.xml',
-        'views/templates.xml',
     ],
     'assets': {
         'web.assets_frontend': [
