@@ -118,51 +118,72 @@ class ResConfigSettings(models.TransientModel):
         }
 
     def _run_background_fix(self, db_name, db_registry):
-        """Arka planda çalışacak onarım ve boyutlandırma işlemi."""
+        """Arka planda çalışacak onarım ve boyutlandırma işlemi (bellek optimizasyonlu)."""
         with db_registry.cursor() as cr:
             env = api.Environment(cr, 1, {}) # uid=1 (sistem yöneticisi)
             ICP = env['ir.config_parameter'].sudo()
             try:
-                # 1. Şablon ID'si boş olanları düzelt
-                images_to_link = env['product.image'].sudo().search([
-                    ('product_tmpl_id', '=', False),
-                    ('product_variant_id', '!=', False)
-                ])
-                
+                # 1. Şablon ID'si boş olanları düzelt (Limitli arama ile bellek şişmesini önle)
                 linked_count = 0
-                for img in images_to_link:
-                    if img.product_variant_id and img.product_variant_id.product_tmpl_id:
-                        img.write({
-                            'product_tmpl_id': img.product_variant_id.product_tmpl_id.id
-                        })
-                        linked_count += 1
+                while True:
+                    images_to_link = env['product.image'].sudo().search([
+                        ('product_tmpl_id', '=', False),
+                        ('product_variant_id', '!=', False)
+                    ], limit=500)
+                    if not images_to_link:
+                        break
+                    
+                    for img in images_to_link:
+                        if img.product_variant_id and img.product_variant_id.product_tmpl_id:
+                            img.write({
+                                'product_tmpl_id': img.product_variant_id.product_tmpl_id.id
+                            })
+                            linked_count += 1
+                    
+                    cr.commit()
+                    env.invalidate_all() # Önbelleği temizle
                 
-                cr.commit()
-                
-                # 2. Resim boyutları boş olanları batch'ler halinde yeniden hesaplat
-                images_to_recompute = env['product.image'].sudo().search([
+                # 2. Resim boyutları boş olanları batch'ler (100'erli) halinde yeniden hesaplat
+                # Toplam kaç tane işlem bekleyen resim olduğunu bul
+                total_to_process = env['product.image'].sudo().search_count([
                     ('image_1920', '!=', False),
                     ('image_128', '=', False)
                 ])
                 
-                total_count = len(images_to_recompute)
-                ICP.set_param('ugurlar_images.fix_images_progress', f'0 / {total_count}')
+                ICP.set_param('ugurlar_images.fix_images_progress', f'0 / {total_to_process}')
                 cr.commit()
                 
                 processed = 0
-                batch_size = 500
-                if total_count > 0:
-                    for i in range(0, total_count, batch_size):
-                        batch = images_to_recompute[i:i+batch_size]
-                        env.add_to_compute(env['product.image']._fields['image_128'], batch)
-                        env.add_to_compute(env['product.image']._fields['image_256'], batch)
-                        env.add_to_compute(env['product.image']._fields['image_512'], batch)
-                        env.add_to_compute(env['product.image']._fields['image_1024'], batch)
-                        batch._recompute_recordset()
-                        
-                        processed += len(batch)
-                        ICP.set_param('ugurlar_images.fix_images_progress', f'{processed} / {total_count} processed ({linked_count} template links fixed)')
-                        cr.commit() # Veritabanına yaz ve RAM'i temizle
+                batch_size = 100
+                while True:
+                    batch = env['product.image'].sudo().search([
+                        ('image_1920', '!=', False),
+                        ('image_128', '=', False)
+                    ], limit=batch_size)
+                    
+                    if not batch:
+                        break
+                    
+                    env.add_to_compute(env['product.image']._fields['image_128'], batch)
+                    env.add_to_compute(env['product.image']._fields['image_256'], batch)
+                    env.add_to_compute(env['product.image']._fields['image_512'], batch)
+                    env.add_to_compute(env['product.image']._fields['image_1024'], batch)
+                    batch._recompute_recordset()
+                    
+                    processed += len(batch)
+                    
+                    # Dinamik olarak kalan sayısını sorgula
+                    remaining = env['product.image'].sudo().search_count([
+                        ('image_1920', '!=', False),
+                        ('image_128', '=', False)
+                    ])
+                    
+                    ICP.set_param(
+                        'ugurlar_images.fix_images_progress',
+                        f'İşlenen: {processed} | Kalan: {remaining} | Başlangıçta Kalan: {total_to_process} ({linked_count} şablon bağlantısı onarıldı)'
+                    )
+                    cr.commit()
+                    env.invalidate_all() # Önbelleği tamamen temizle (Hafıza şişmesini önler)
                 
                 ICP.set_param('ugurlar_images.fix_images_status', 'done')
                 ICP.set_param('ugurlar_images.fix_images_progress', f'Tamamlandı! Toplam {processed} görsel boyutlandırıldı ve {linked_count} şablon bağlantısı onarıldı.')

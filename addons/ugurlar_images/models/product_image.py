@@ -85,3 +85,72 @@ class ProductProductImageExtend(models.Model):
                 # Çoklu varyant, kendi resmi yok → BOŞ göster
                 # (template resminin farklı renklere sızmasını engelle)
                 product.image_1920 = False
+
+    def _get_images(self):
+        """
+        Varyant bazlı resim çekme.
+        Sadece bu varyantın rengine ait olan resimleri gösterir ve beden bazlı tekrarları eler.
+        """
+        self.ensure_one()
+        
+        # Rengi bul (Türkçe ve İngilizce özellikleri destekler)
+        color_attribute = self.env['product.attribute'].sudo().search([
+            '|', ('name', 'ilike', 'Renk'), ('name', 'ilike', 'Color')
+        ], limit=1)
+        
+        selected_color_value = False
+        if color_attribute:
+            color_val = self.product_template_attribute_value_ids.filtered(
+                lambda v: v.attribute_id.id == color_attribute.id
+            )
+            if color_val:
+                selected_color_value = color_val.product_attribute_value_id.name
+                
+        # Tüm template extra resimlerini al
+        all_extra_images = self.product_tmpl_id.product_template_image_ids
+        
+        filtered_images = []
+        seen_names = set()
+        
+        for img in all_extra_images:
+            is_valid = False
+            if not img.product_variant_id:
+                # Genel resim (her varyanta uygun)
+                is_valid = True
+            elif selected_color_value:
+                # Varyantın rengini kontrol et
+                img_color_val = img.product_variant_id.product_template_attribute_value_ids.filtered(
+                    lambda v: v.attribute_id.id == color_attribute.id
+                )
+                if img_color_val and img_color_val.product_attribute_value_id.name == selected_color_value:
+                    is_valid = True
+            else:
+                # Renksiz bir ürün ise, sadece kendi varyantı ise göster
+                if img.product_variant_id.id == self.id:
+                    is_valid = True
+                    
+            if is_valid:
+                # Resim adına göre tekilleştirme (Beden bazlı tekrarları önlemek için)
+                img_name = img.name or ''
+                if img_name not in seen_names:
+                    seen_names.add(img_name)
+                    filtered_images.append(img)
+                    
+        return [self] + filtered_images
+
+
+class ProductTemplateImageExtend(models.Model):
+    _inherit = 'product.template'
+
+    def _get_images(self):
+        """Şablon bazlı resim çekme. Resim adına göre tekilleştirme uygular."""
+        self.ensure_one()
+        all_extra_images = self.product_template_image_ids
+        filtered_images = []
+        seen_names = set()
+        for img in all_extra_images:
+            img_name = img.name or ''
+            if img_name not in seen_names:
+                seen_names.add(img_name)
+                filtered_images.append(img)
+        return [self] + filtered_images
