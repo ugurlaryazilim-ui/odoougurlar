@@ -92,12 +92,19 @@ class ImageFixJob(models.Model):
 
         except Exception as e:
             _logger.exception("Görsel düzeltme cron genel hatası: %s", e)
-            job.write({
-                'state': 'error',
-                'progress_text': f'Hata oluştu: {str(e)[:200]}',
-                'error_log': (job.error_log or '') + f'\n[GENEL HATA] {e}',
-            })
-            self.env['ir.cron']._commit_progress(0, remaining=0)
+            # Hatayı logla ama state'i 'running' bırak —
+            # bir sonraki cron turunda kaldığı yerden devam eder
+            try:
+                job.write({
+                    'progress_text': f'Geçici hata (yeniden denenecek): {str(e)[:200]}',
+                    'error_log': (job.error_log or '') + f'\n[HATA] {e}',
+                })
+            except Exception:
+                pass  # Write da başarısız olursa sessizce geç
+            try:
+                self.env['ir.cron']._commit_progress(0)
+            except Exception:
+                pass
 
     def _fix_template_links(self):
         """
@@ -168,7 +175,12 @@ class ImageFixJob(models.Model):
                 raise_if_not_found=False,
             )
             if cron:
-                cron.active = False
+                # Odoo 19: cron kendi kendini ORM ile deaktif edemez,
+                # raw SQL ile bypass ediyoruz
+                self.env.cr.execute(
+                    "UPDATE ir_cron SET active = FALSE WHERE id = %s",
+                    (cron.id,)
+                )
             self.env['ir.cron']._commit_progress(0, remaining=0)
             _logger.info("Görsel düzeltme tamamlandı! Toplam: %d bağlantı, %d thumbnail",
                          self.total_fixed_links, self.total_fixed_thumbs)
