@@ -206,8 +206,161 @@ def _analyze_via_fal(api_key, image_url, prompt):
     return _default_analysis()
 
 
+def analyze_outfit_consistency(image_data, api_key=None, gemini_api_key=None):
+    """Front try-on sonucundaki TUM kıyafet detaylarını analiz et.
+
+    Cross-view tutarlılık için: front sonucundaki pantolon, ayakkabı,
+    saç stili gibi detayları çıkarır, back/side promptlarına enjekte edilir.
+
+    Args:
+        image_data: Front try-on sonucu (base64 veya URL)
+        api_key: fal.ai API anahtarı (fallback)
+        gemini_api_key: Gemini API anahtarı
+
+    Returns:
+        dict: {
+            'bottomsDescription': str — alt giyim detayı,
+            'shoesDescription': str — ayakkabı detayı,
+            'hairDescription': str — saç stili,
+            'accessoriesDescription': str — aksesuar detayı,
+            'skinTone': str — ten rengi,
+            'fullOutfitPrompt': str — tüm tutarlılık talimatı,
+        }
+    """
+    prompt = """You are analyzing a fashion model photograph for OUTFIT CONSISTENCY.
+Your job is to describe EVERYTHING the model is wearing and their appearance,
+EXCEPT for the main top garment (which will be changed in other views).
+
+Analyze and return JSON:
+{
+  "bottomsType": "string — pants/jeans/skirt/shorts type (e.g., 'slim-fit white trousers', 'dark blue skinny jeans')",
+  "bottomsColor": "string — exact color (e.g., 'white', 'dark navy blue', 'black')",
+  "shoesType": "string — shoe type (e.g., 'white low-top sneakers', 'black ankle boots', 'beige heels')",
+  "shoesColor": "string — shoe color",
+  "hairStyle": "string — hair description (e.g., 'long wavy blonde hair', 'short brown bob')",
+  "hairColor": "string — hair color",
+  "skinTone": "string — skin tone (e.g., 'fair/light', 'medium', 'olive', 'dark')",
+  "accessories": "string — any visible accessories (watch, necklace, earrings, belt) or 'none'",
+  "modelBuild": "string — body build (e.g., 'slim', 'athletic', 'curvy', 'standard')",
+  "backgroundDescription": "string — background (e.g., 'clean white studio', 'light grey')"
+}
+
+Return ONLY valid JSON, no markdown. Be VERY specific about colors and styles."""
+
+    try:
+        if gemini_api_key:
+            mime_type, base64_data = _prepare_gemini_image(image_data)
+            if mime_type and base64_data:
+                model = "gemini-2.5-flash"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_api_key}"
+
+                payload = {
+                    "contents": [{
+                        "parts": [
+                            {"text": prompt},
+                            {
+                                "inlineData": {
+                                    "mimeType": mime_type,
+                                    "data": base64_data
+                                }
+                            }
+                        ]
+                    }],
+                    "generationConfig": {
+                        "responseMimeType": "application/json"
+                    }
+                }
+
+                if requests:
+                    headers = {'Content-Type': 'application/json'}
+                    resp = requests.post(url, json=payload, headers=headers, timeout=30)
+                    resp.raise_for_status()
+                    res_data = resp.json()
+                    candidates = res_data.get('candidates', [])
+                    if candidates:
+                        text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '')
+                        if text:
+                            text = text.strip()
+                            if text.startswith('```json'):
+                                text = text[7:]
+                            if text.endswith('```'):
+                                text = text[:-3]
+                            outfit_data = json.loads(text.strip())
+                            # fullOutfitPrompt oluştur
+                            outfit_data['fullOutfitPrompt'] = _build_consistency_prompt(outfit_data)
+                            _logger.info(
+                                'Outfit tutarlılık analizi: %s %s, %s %s, saç=%s',
+                                outfit_data.get('bottomsColor', '?'),
+                                outfit_data.get('bottomsType', '?'),
+                                outfit_data.get('shoesColor', '?'),
+                                outfit_data.get('shoesType', '?'),
+                                outfit_data.get('hairStyle', '?'),
+                            )
+                            return outfit_data
+
+        # Fallback: fal.ai
+        if api_key:
+            result = _analyze_via_fal(api_key, image_data, prompt)
+            if result and result != _default_analysis():
+                result['fullOutfitPrompt'] = _build_consistency_prompt(result)
+                return result
+
+    except Exception as e:
+        _logger.warning('Outfit tutarlılık analizi başarısız: %s', e)
+
+    return {
+        'fullOutfitPrompt': '',
+        'bottomsType': '', 'bottomsColor': '',
+        'shoesType': '', 'shoesColor': '',
+        'hairStyle': '', 'hairColor': '',
+        'skinTone': '', 'accessories': '',
+    }
+
+
+def _build_consistency_prompt(outfit_data):
+    """Outfit verilerinden tutarlılık prompt cümlesi oluştur."""
+    parts = []
+
+    bottoms = outfit_data.get('bottomsType', '')
+    bottoms_color = outfit_data.get('bottomsColor', '')
+    if bottoms and bottoms_color:
+        parts.append(f"{bottoms_color} {bottoms}")
+    elif bottoms:
+        parts.append(bottoms)
+
+    shoes = outfit_data.get('shoesType', '')
+    shoes_color = outfit_data.get('shoesColor', '')
+    if shoes and shoes_color:
+        parts.append(f"{shoes_color} {shoes}")
+    elif shoes:
+        parts.append(shoes)
+
+    hair = outfit_data.get('hairStyle', '')
+    if hair:
+        parts.append(f"hair: {hair}")
+
+    skin = outfit_data.get('skinTone', '')
+    if skin:
+        parts.append(f"skin tone: {skin}")
+
+    accessories = outfit_data.get('accessories', '')
+    if accessories and accessories.lower() != 'none':
+        parts.append(f"accessories: {accessories}")
+
+    if not parts:
+        return ''
+
+    return (
+        "CROSS-VIEW OUTFIT CONSISTENCY — CRITICAL: "
+        "The model MUST wear the EXACT SAME outfit as the front view: "
+        + ", ".join(parts) + ". "
+        "Do NOT change the pants/bottoms color, shoe type, hair style, or any accessory. "
+        "Every view must look like the SAME photoshoot session. "
+    )
+
+
 def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
-                            photo_type='front'):
+                            photo_type='front', outfit_consistency=None):
     """Analiz sonuclarina gore AI gorsel uretim promptu olustur.
 
     Her photo_type icin ozellestirilmis prompt uretir:
@@ -270,6 +423,13 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
             "same position, same colors, same proportions. "
             "Do NOT alter or remove any part of the design. "
         )
+
+    # ═══ CROSS-VIEW OUTFIT TUTARLILIĞI ═══
+    # Front view referans — back/side/detail için ön yüz kıyafet bilgisi enjekte et
+    if outfit_consistency and photo_type != 'front':
+        consistency_prompt = outfit_consistency.get('fullOutfitPrompt', '')
+        if consistency_prompt:
+            base_prompt += consistency_prompt
 
     # Preset bilgileri
     if preset:

@@ -560,6 +560,9 @@ class AiStudioSession(models.Model):
                 + generations.filtered(lambda g: g.photo_type in ('back', 'side'))
                 + generations.filtered(lambda g: g.photo_type == 'detail')
             )
+
+            # Cross-view tutarlılık verisi — front sonrası doldurulur
+            outfit_consistency = None
             for gen in ordered_gens:
                 try:
                     gen.write({'state': 'processing'})
@@ -757,6 +760,7 @@ class AiStudioSession(models.Model):
                             analysis_data, preset_data, prompt_locks,
                             session.extra_prompt or '',
                             photo_type=photo_type,  # ← VIEW-SPESİFİK
+                            outfit_consistency=outfit_consistency,  # ← TUTARLILIK
                         )
                         prompt_text = built_prompt.get('positive', '')
                         _logger.info(
@@ -805,6 +809,26 @@ class AiStudioSession(models.Model):
                             'generation_time_seconds': elapsed,
                             'cost': tryon_result.get('cost', 0.05),
                         })
+
+                        # ═══ FRONT SONRASI OUTFIT TUTARLILIK ANALİZİ ═══
+                        if photo_type == 'front' and outfit_consistency is None:
+                            try:
+                                from ..services.garment_analyzer import analyze_outfit_consistency
+                                outfit_consistency = analyze_outfit_consistency(
+                                    gen_b64,
+                                    api_key=fal_api_key,
+                                    gemini_api_key=gemini_api_key,
+                                )
+                                consistency_prompt = outfit_consistency.get('fullOutfitPrompt', '')
+                                if consistency_prompt:
+                                    _logger.info(
+                                        'Outfit tutarlılık analizi tamamlandı: %s',
+                                        consistency_prompt[:120],
+                                    )
+                                else:
+                                    _logger.info('Outfit tutarlılık analizi: veri çıkarılamadı')
+                            except Exception as oe:
+                                _logger.warning('Outfit tutarlılık analizi başarısız: %s', oe)
 
                         # ═══ KALİTE KONTROL — SKORU KAYDET ═══
                         try:
