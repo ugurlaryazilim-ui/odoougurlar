@@ -765,10 +765,24 @@ class AiStudioSession(models.Model):
                 cr.commit()
 
     def _process_ai_thread(self, session_id, api_key):
-        """Thread içinde tüm generation'ları işle."""
+        """Thread içinde tüm generation'ları işle (wrapper)."""
         try:
-            time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
+            self._process_ai_thread_body(session_id, api_key)
+        except Exception as thread_err:
+            _logger.exception("AI Thread: Beklenmeyen kritik hata olustu: %s", thread_err)
+            try:
+                with self.pool.cursor() as cr:
+                    env = api.Environment(cr, self.env.uid, {})
+                    session = env['ai.studio.session'].browse(session_id)
+                    session.write({'state': 'failed'})
+                    session.message_post(body=_('Kritik Sistem Hatası: %s') % str(thread_err))
+                    cr.commit()
+            except Exception:
+                pass
 
+    def _process_ai_thread_body(self, session_id, api_key):
+        """Thread içinde tüm generation'ları işle (body)."""
+        time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
         with self.pool.cursor() as cr:
             env = api.Environment(cr, self.env.uid, {})
             provider_type = env['ir.config_parameter'].sudo().get_param(
@@ -1275,17 +1289,6 @@ class AiStudioSession(models.Model):
                 body=_('AI üretimi tamamlandı. %d görsel onay bekliyor.') % len(session.generation_ids),
             )
             cr.commit()
-        except Exception as thread_err:
-            _logger.exception("AI Thread: Beklenmeyen kritik hata olustu: %s", thread_err)
-            try:
-                with self.pool.cursor() as cr:
-                    env = api.Environment(cr, self.env.uid, {})
-                    session = env['ai.studio.session'].browse(session_id)
-                    session.write({'state': 'failed'})
-                    session.message_post(body=_('Kritik Sistem Hatası: %s') % str(thread_err))
-                    cr.commit()
-            except Exception:
-                pass
 
     def _process_single_generation(self, generation):
         """Tek bir generation'ı yeniden işle (retry için)."""
@@ -1311,10 +1314,26 @@ class AiStudioSession(models.Model):
         thread.start()
 
     def _retry_generation_thread(self, session_id, gen_id, api_key):
-        """Tek generation retry thread'i — view-spesifik prompt ve kalite skorlaması ile."""
+        """Tek generation retry thread'i (wrapper)."""
         try:
-            time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
+            self._retry_generation_thread_body(session_id, gen_id, api_key)
+        except Exception as thread_err:
+            _logger.exception("AI Retry Thread: Beklenmeyen kritik hata olustu: %s", thread_err)
+            try:
+                with self.pool.cursor() as cr:
+                    env = api.Environment(cr, self.env.uid, {})
+                    gen = env['ai.studio.generation'].browse(gen_id)
+                    gen.write({
+                        'state': 'failed',
+                        'error_message': _('Kritik Sistem Hatası: %s') % str(thread_err),
+                    })
+                    cr.commit()
+            except Exception:
+                pass
 
+    def _retry_generation_thread_body(self, session_id, gen_id, api_key):
+        """Tek generation retry thread'i (body)."""
+        time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
         with self.pool.cursor() as cr:
             env = api.Environment(cr, self.env.uid, {})
             provider_type = env['ir.config_parameter'].sudo().get_param(
@@ -1678,19 +1697,6 @@ class AiStudioSession(models.Model):
                     'error_message': parsed['message'][:500],
                 })
                 cr.commit()
-        except Exception as thread_err:
-            _logger.exception("AI Retry Thread: Beklenmeyen kritik hata olustu: %s", thread_err)
-            try:
-                with self.pool.cursor() as cr:
-                    env = api.Environment(cr, self.env.uid, {})
-                    gen = env['ai.studio.generation'].browse(gen_id)
-                    gen.write({
-                        'state': 'failed',
-                        'error_message': _('Kritik Sistem Hatası: %s') % str(thread_err),
-                    })
-                    cr.commit()
-            except Exception:
-                pass
 
     def action_mark_done(self):
         """Onaylanmış görselleri ürüne kaydet ve oturumu tamamla."""
