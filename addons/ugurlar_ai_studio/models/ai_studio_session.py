@@ -782,6 +782,7 @@ class AiStudioSession(models.Model):
 
     def _process_ai_thread_body(self, session_id, api_key, uid):
         """Thread içinde tüm generation'ları işle (body)."""
+        _logger.info("AI Thread starting for session %s with uid %s", session_id, uid)
         time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
         with self.pool.cursor() as cr:
             env = api.Environment(cr, uid, {})
@@ -1333,6 +1334,7 @@ class AiStudioSession(models.Model):
 
     def _retry_generation_thread_body(self, session_id, gen_id, api_key, uid):
         """Tek generation retry thread'i (body)."""
+        _logger.info("AI Retry Thread starting for session %s, gen %s with uid %s", session_id, gen_id, uid)
         time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
         with self.pool.cursor() as cr:
             env = api.Environment(cr, uid, {})

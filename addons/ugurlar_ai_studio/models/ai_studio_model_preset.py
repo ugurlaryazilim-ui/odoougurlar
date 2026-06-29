@@ -389,6 +389,7 @@ class AiStudioModelPreset(models.Model):
     def _generate_mannequin_thread(self, preset_id, prompt, api_key,
                                     gender, body_type, bg_type, provider_type, uid):
         """Thread içinde AI manken oluştur — SaaS tarzı consistency ile."""
+        _logger.info("Mannequin Thread starting for preset %s with uid %s", preset_id, uid)
         time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
         try:
             # Gender/body hints
