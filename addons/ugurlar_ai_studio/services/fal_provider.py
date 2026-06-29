@@ -118,8 +118,8 @@ class FalProvider(AIProviderBase):
             }.get(category, 'tops')
 
             arguments = {
-                'model_image': model_image_url,
-                'garment_image': garment_image_url,
+                'human_image_url': model_image_url,
+                'garment_image_url': garment_image_url,
                 'category': fal_category,
                 'mode': mode,
                 'garment_photo_type': kwargs.get('garment_photo_type', 'flat-lay'),
