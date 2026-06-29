@@ -852,7 +852,16 @@ class AiStudioSession(models.Model):
                 + generations.filtered(lambda g: g.photo_type == 'detail')
             )
 
+            front_failed = False
             for gen in ordered_gens:
+                if front_failed:
+                    gen.write({
+                        'state': 'failed',
+                        'error_message': _('Ön yüz üretimi başarısız olduğu için bu işlem iptal edildi.'),
+                    })
+                    cr.commit()
+                    continue
+
                 try:
                     gen.write({'state': 'processing'})
                     cr.commit()
@@ -1192,6 +1201,8 @@ class AiStudioSession(models.Model):
                             'state': 'failed',
                             'error_message': 'API sonuç döndürmedi.',
                         })
+                        if photo_type == 'front':
+                            front_failed = True
 
                     cr.commit()
 
@@ -1203,6 +1214,8 @@ class AiStudioSession(models.Model):
                         'state': 'failed',
                         'error_message': parsed['message'][:500],
                     })
+                    if photo_type == 'front':
+                        front_failed = True
                     cr.commit()
 
             # ═══ TÜM ÜRETİMLER TAMAMLANDI ═══
