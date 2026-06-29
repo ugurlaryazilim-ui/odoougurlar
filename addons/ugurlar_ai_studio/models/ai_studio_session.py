@@ -1096,7 +1096,6 @@ class AiStudioSession(models.Model):
                                         arguments_to_send['seed'] = int(front_seed)
 
                                     # Rate Limit / Concurrency Limit Retry Mekanizması
-                                    import time
                                     max_retries = 3
                                     backoff_factor = 4
                                     edit_result = None
@@ -1206,7 +1205,7 @@ class AiStudioSession(models.Model):
                                             arguments_to_send['seed'] = int(front_seed)
 
                                         # Rate Limit / Concurrency Limit Retry Mekanizması
-                                        import time
+                                        # import time
                                         max_retries = 3
                                         backoff_factor = 4
                                         edit_result = None
@@ -1630,7 +1629,7 @@ class AiStudioSession(models.Model):
                                         arguments_to_send['seed'] = int(front_seed)
 
                                     # Rate Limit / Concurrency Limit Retry Mekanizması
-                                    import time
+                                    # import time
                                     max_retries = 3
                                     backoff_factor = 4
                                     edit_result = None
