@@ -563,6 +563,7 @@ class AiStudioSession(models.Model):
 
             # Cross-view tutarlılık verisi — front sonrası doldurulur
             outfit_consistency = None
+            front_result_b64 = None  # Front try-on sonucu — back/side post-processing referansı
             for gen in ordered_gens:
                 try:
                     gen.write({'state': 'processing'})
@@ -810,25 +811,114 @@ class AiStudioSession(models.Model):
                             'cost': tryon_result.get('cost', 0.05),
                         })
 
-                        # ═══ FRONT SONRASI OUTFIT TUTARLILIK ANALİZİ ═══
-                        if photo_type == 'front' and outfit_consistency is None:
-                            try:
-                                from ..services.garment_analyzer import analyze_outfit_consistency
-                                outfit_consistency = analyze_outfit_consistency(
-                                    gen_b64,
-                                    api_key=fal_api_key,
-                                    gemini_api_key=gemini_api_key,
-                                )
-                                consistency_prompt = outfit_consistency.get('fullOutfitPrompt', '')
-                                if consistency_prompt:
-                                    _logger.info(
-                                        'Outfit tutarlılık analizi tamamlandı: %s',
-                                        consistency_prompt[:120],
+                        # ═══ FRONT SONRASI: REFERANS CACHE + OUTFIT ANALİZİ ═══
+                        if photo_type == 'front':
+                            front_result_b64 = gen_b64  # Back/side post-processing için cache
+
+                            if outfit_consistency is None:
+                                try:
+                                    from ..services.garment_analyzer import analyze_outfit_consistency
+                                    outfit_consistency = analyze_outfit_consistency(
+                                        gen_b64,
+                                        api_key=fal_api_key,
+                                        gemini_api_key=gemini_api_key,
                                     )
-                                else:
-                                    _logger.info('Outfit tutarlılık analizi: veri çıkarılamadı')
-                            except Exception as oe:
-                                _logger.warning('Outfit tutarlılık analizi başarısız: %s', oe)
+                                    consistency_prompt = outfit_consistency.get('fullOutfitPrompt', '')
+                                    if consistency_prompt:
+                                        _logger.info(
+                                            'Outfit tutarlılık analizi tamamlandı: %s',
+                                            consistency_prompt[:120],
+                                        )
+                                    else:
+                                        _logger.info('Outfit tutarlılık analizi: veri çıkarılamadı')
+                                except Exception as oe:
+                                    _logger.warning('Outfit tutarlılık analizi başarısız: %s', oe)
+
+                        # ═══ BACK/SIDE POST-PROCESSING: OUTFIT TUTARLILIĞI ═══
+                        # FASHN, model_image'den pantolonu korur — prompt ile değiştirilemez
+                        # Bu yüzden front try-on sonucunu referans alarak edit yapıyoruz
+                        if photo_type in ('back', 'side') and front_result_b64 and outfit_consistency:
+                            consistency_prompt = outfit_consistency.get('fullOutfitPrompt', '')
+                            if consistency_prompt:
+                                try:
+                                    _logger.info(
+                                        'Post-processing outfit tutarlılığı başlatılıyor (gen=%s, tip=%s)',
+                                        gen.id, photo_type,
+                                    )
+                                    # Front sonucunu fal storage'a yükle
+                                    front_ref_url = provider.upload_image(front_result_b64)
+                                    # Mevcut try-on sonucunu fal storage'a yükle
+                                    current_url = provider.upload_image(gen_b64)
+
+                                    bottoms_desc = outfit_consistency.get('bottomsColor', '') + ' ' + outfit_consistency.get('bottomsType', '')
+                                    shoes_desc = outfit_consistency.get('shoesColor', '') + ' ' + outfit_consistency.get('shoesType', '')
+                                    hair_desc = outfit_consistency.get('hairStyle', '')
+
+                                    view_label = 'BACK VIEW' if photo_type == 'back' else 'SIDE/THREE-QUARTER VIEW'
+
+                                    edit_prompt = (
+                                        f"RAW photo, photorealistic, professional fashion photography. "
+                                        f"OUTPUT EXACTLY ONE IMAGE. "
+                                        f"This is a {view_label} of a fashion model. "
+                                        f"Keep the UPPER GARMENT (top/shirt/blouse) EXACTLY as it is — "
+                                        f"do NOT change the top garment at all. "
+                                        f"CHANGE ONLY the pants/bottoms and shoes to EXACTLY match "
+                                        f"the reference image: {bottoms_desc.strip()}, {shoes_desc.strip()}. "
+                                        f"The model has {hair_desc}. "
+                                        f"Same person, same pose angle, same background. "
+                                        f"Only the lower body clothing changes to match the reference. "
+                                        f"Professional studio white background, even lighting. "
+                                    )
+
+                                    import os
+                                    os.environ['FAL_KEY'] = fal_api_key
+
+                                    try:
+                                        import fal_client
+                                    except ImportError:
+                                        fal_client = None
+
+                                    if fal_client:
+                                        edit_result = fal_client.subscribe(
+                                            'fal-ai/nano-banana-2/edit',
+                                            arguments={
+                                                'prompt': edit_prompt,
+                                                'image_urls': [current_url, front_ref_url],
+                                                'num_images': 1,
+                                                'aspect_ratio': '3:4',
+                                                'output_format': 'jpeg',
+                                                'safety_tolerance': '5',
+                                            },
+                                            with_logs=False,
+                                            timeout=120,
+                                        )
+                                        edit_images = edit_result.get('images', [])
+                                        if edit_images:
+                                            edit_url = edit_images[0].get('url', '')
+                                            if edit_url:
+                                                edit_data = req_lib.get(edit_url, timeout=60).content
+                                                edited_b64 = base64.b64encode(edit_data)
+                                                gen.write({
+                                                    'generated_image': edited_b64,
+                                                    'fal_endpoint': '%s/%s+consistency' % (provider_type, tryon_model),
+                                                    'cost': tryon_result.get('cost', 0.05) + 0.03,
+                                                })
+                                                gen_b64 = edited_b64  # kalite kontrol için güncelle
+                                                _logger.info(
+                                                    'Post-processing outfit tutarlılığı tamamlandı (gen=%s, tip=%s)',
+                                                    gen.id, photo_type,
+                                                )
+                                        else:
+                                            _logger.warning('Post-processing edit sonuç döndürmedi')
+                                    else:
+                                        _logger.warning('fal_client kurulu değil, post-processing atlanıyor')
+
+                                except Exception as pp_e:
+                                    _logger.warning(
+                                        'Post-processing outfit tutarlılığı başarısız (gen=%s): %s',
+                                        gen.id, pp_e,
+                                    )
+                                    # Orijinal try-on sonucu korunur — silmiyoruz
 
                         # ═══ KALİTE KONTROL — SKORU KAYDET ═══
                         try:
