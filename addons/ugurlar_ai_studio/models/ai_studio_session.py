@@ -580,7 +580,7 @@ class AiStudioSession(models.Model):
                 model_url = provider.upload_image(model_image_data)
                 garment_url = provider.upload_image(processed_b64)
 
-                tryon_model = 'tryon-v1.6' if provider_type == 'fal' else 'tryon-v1.6'
+                tryon_model = 'nano-banana-2/edit' if provider_type == 'fal' else 'tryon-v1.6'
                 tryon_resolution = '1K'
                 if provider_type == 'fashn':
                     tryon_model = preset.fashn_model_side if photo_type == 'side' else (preset.fashn_model_back if photo_type == 'back' else preset.fashn_model_front)
