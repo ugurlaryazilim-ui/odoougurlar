@@ -91,6 +91,7 @@ class AiStudioGeneration(models.Model):
     generation_time_seconds = fields.Float(string='Üretim Süresi (sn)')
     provider = fields.Selection([
         ('fal', 'fal.ai'),
+        ('fashn', 'FASHN'),
         ('replicate', 'Replicate'),
         ('custom', 'Özel'),
     ], string='AI Sağlayıcı', default='fal')
@@ -101,6 +102,17 @@ class AiStudioGeneration(models.Model):
         'res.currency',
         string='Para Birimi',
         default=lambda self: self.env.ref('base.USD', raise_if_not_found=False),
+    )
+
+    # --- Kalite ---
+    quality_score = fields.Float(
+        string='Kalite Puanı',
+        digits=(5, 1),
+        help='AI çıktısının otomatik kalite değerlendirmesi (0-100)',
+    )
+    quality_details = fields.Text(
+        string='Kalite Detayları',
+        help='Renk doğruluğu, çözünürlük vb. detaylı kalite bilgileri',
     )
 
     def action_approve(self):

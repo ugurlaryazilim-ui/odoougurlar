@@ -36,7 +36,7 @@ class ResConfigSettings(models.TransientModel):
         ('tryon-v1.6', 'Try-On v1.6 (Hızlı, 1 kredi)'),
         ('tryon-max', 'Try-On Max (Premium, 2-5 kredi)'),
     ], string='Try-On Modeli',
-        default='tryon-v1.6',
+        default='tryon-max',
         config_parameter='ugurlar_ai_studio.tryon_model',
         help='FASHN try-on modeli. Max daha kaliteli ama daha pahalı.',
     )
@@ -47,14 +47,23 @@ class ResConfigSettings(models.TransientModel):
         ('balanced', 'Dengeli'),
         ('quality', 'Kaliteli'),
     ], string='Varsayılan Kalite Modu',
-        default='balanced',
+        default='quality',
         config_parameter='ugurlar_ai_studio.quality_mode',
     )
     ai_studio_num_samples = fields.Integer(
         string='Üretim Sayısı (num_samples)',
-        default=2,
+        default=1,
         config_parameter='ugurlar_ai_studio.num_samples',
         help='Her istek için kaç görsel üretilsin (1-4). Fazlası maliyet artırır.',
+    )
+    ai_studio_tryon_resolution = fields.Selection([
+        ('1K', '1K (Hızlı, düşük maliyet)'),
+        ('2K', '2K (Dengeli)'),
+        ('4K', '4K (Maksimum kalite)'),
+    ], string='Try-On Çözünürlük',
+        default='2K',
+        config_parameter='ugurlar_ai_studio.tryon_resolution',
+        help='tryon-max çözünürlük ayarı. 4K en iyi kalite ama daha pahalı.',
     )
     ai_studio_auto_bg_remove = fields.Boolean(
         string='Otomatik Arka Plan Kaldırma',

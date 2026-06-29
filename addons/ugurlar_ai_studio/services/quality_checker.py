@@ -185,9 +185,10 @@ def compute_quality_score(original_b64, generated_b64):
     """Genel kalite skoru hesaplar.
 
     Bilesenler:
-    - Renk dogrulugu (%60 agirlik)
-    - Gorsel boyut (%20 agirlik)
-    - Format/gecerlilik (%20 agirlik)
+    - Renk dogrulugu (%40 agirlik)
+    - SSIM yapisal benzerlik (%25 agirlik)
+    - Bulaniklik tespiti (%15 agirlik)
+    - Gorsel boyut + format (%20 agirlik)
 
     Args:
         original_b64: str — orijinal urun gorseli (base64)
@@ -197,48 +198,83 @@ def compute_quality_score(original_b64, generated_b64):
         dict: {
             'score': float (0-100),
             'color_accuracy': dict — check_color_accuracy sonucu,
+            'ssim_score': float (0-1, 1=ayni),
+            'blur_score': float (Laplacian variance, yuksek=keskin),
             'is_acceptable': bool,
             'details': str,
         }
     """
-    score = 100.0
+    score = 0.0
     details_parts = []
+    ssim_val = -1.0
+    blur_val = -1.0
 
-    # 1. Renk dogrulugu (%60)
+    # 1. Renk dogrulugu (%40)
     color_result = check_color_accuracy(original_b64, generated_b64)
     if color_result['delta_e'] >= 0:
         color_score = max(0, 100 - (color_result['delta_e'] * 3))
-        score = score * 0.4 + color_score * 0.6
+        score += color_score * 0.40
         details_parts.append(
-            'Renk: %s (Delta-E: %.1f)' % (color_result['rating'], color_result['delta_e'])
+            'Renk: %s (Delta-E: %.1f, puan: %.0f)' % (
+                color_result['rating'], color_result['delta_e'], color_score
+            )
         )
     else:
+        score += 50 * 0.40  # Bilinmiyor — orta skor
         details_parts.append('Renk kontrolu yapilamadi')
 
-    # 2. Gorsel boyut kontrolu (%20)
+    # 2. SSIM Yapisal Benzerlik (%25)
+    try:
+        ssim_val = _compute_ssim(original_b64, generated_b64)
+        if ssim_val >= 0:
+            # SSIM 0-1 arasi, 0.3+ iyi (try-on icin tam eslesme beklenmez)
+            ssim_score = min(100, ssim_val * 200)  # 0.5 = 100 puan
+            score += ssim_score * 0.25
+            details_parts.append('SSIM: %.3f (puan: %.0f)' % (ssim_val, ssim_score))
+        else:
+            score += 50 * 0.25
+    except Exception:
+        score += 50 * 0.25
+        details_parts.append('SSIM hesaplanamadi')
+
+    # 3. Bulaniklik Tespiti — Laplacian Variance (%15)
+    try:
+        blur_val = _compute_blur_score(generated_b64)
+        if blur_val >= 0:
+            # Laplacian variance: <50 = bulanik, 100+ = keskin, 200+ = cok keskin
+            if blur_val >= 100:
+                blur_score = 100
+            elif blur_val >= 50:
+                blur_score = 50 + (blur_val - 50)
+            else:
+                blur_score = max(0, blur_val)
+            score += blur_score * 0.15
+            details_parts.append('Keskinlik: %.0f (puan: %.0f)' % (blur_val, blur_score))
+        else:
+            score += 50 * 0.15
+    except Exception:
+        score += 50 * 0.15
+
+    # 4. Gorsel boyut + format (%20)
     try:
         gen_bytes = base64.b64decode(generated_b64)
         size_kb = len(gen_bytes) / 1024
-        if size_kb < 20:
-            score -= 20
-            details_parts.append('Cikti cok kucuk (%.1fKB)' % size_kb)
-        elif size_kb > 50:
-            details_parts.append('Cikti boyutu iyi (%.1fKB)' % size_kb)
-    except Exception:
-        score -= 10
-
-    # 3. Format gecerliligi (%20)
-    try:
-        gen_bytes = base64.b64decode(generated_b64)
         pil_img = Image.open(io.BytesIO(gen_bytes))
         w, h = pil_img.size
+
+        size_format_score = 100
+        if size_kb < 20:
+            size_format_score -= 40
+            details_parts.append('Cikti cok kucuk (%.1fKB)' % size_kb)
         if w < 200 or h < 200:
-            score -= 20
+            size_format_score -= 40
             details_parts.append('Cozunurluk cok dusuk (%dx%d)' % (w, h))
         else:
-            details_parts.append('Boyut: %dx%d' % (w, h))
+            details_parts.append('Boyut: %dx%d (%.1fKB)' % (w, h, size_kb))
+
+        score += max(0, size_format_score) * 0.20
     except Exception:
-        score -= 20
+        score += 30 * 0.20
         details_parts.append('Gorsel acilamadi')
 
     final_score = max(0, min(100, score))
@@ -246,6 +282,90 @@ def compute_quality_score(original_b64, generated_b64):
     return {
         'score': round(final_score, 1),
         'color_accuracy': color_result,
+        'ssim_score': round(ssim_val, 4) if ssim_val >= 0 else -1,
+        'blur_score': round(blur_val, 1) if blur_val >= 0 else -1,
         'is_acceptable': final_score >= 50,
         'details': ' | '.join(details_parts),
     }
+
+
+def _compute_ssim(original_b64, generated_b64):
+    """SSIM (Structural Similarity Index) hesapla.
+
+    Iki gorsel arasindaki yapisal benzerligi olcer.
+    Virtual try-on icin dusuk SSIM beklenir (farkli arka plan/vucut),
+    ama kiyafet bolgesi yuksek olmali.
+
+    Returns:
+        float: 0-1 arasi SSIM degeri, veya -1 (hesaplanamadiysa)
+    """
+    if cv2 is None or Image is None:
+        return -1.0
+
+    try:
+        orig_bytes = base64.b64decode(original_b64)
+        gen_bytes = base64.b64decode(generated_b64)
+
+        orig_img = Image.open(io.BytesIO(orig_bytes)).convert('RGB')
+        gen_img = Image.open(io.BytesIO(gen_bytes)).convert('RGB')
+
+        # Ayni boyuta getir (kucuk, hizli hesaplama)
+        target_size = (256, 256)
+        orig_resized = orig_img.resize(target_size, Image.LANCZOS)
+        gen_resized = gen_img.resize(target_size, Image.LANCZOS)
+
+        orig_gray = cv2.cvtColor(np.array(orig_resized), cv2.COLOR_RGB2GRAY)
+        gen_gray = cv2.cvtColor(np.array(gen_resized), cv2.COLOR_RGB2GRAY)
+
+        # Mean SSIM hesapla (pencere bazli)
+        C1 = (0.01 * 255) ** 2
+        C2 = (0.03 * 255) ** 2
+
+        orig_f = orig_gray.astype(np.float64)
+        gen_f = gen_gray.astype(np.float64)
+
+        mu1 = cv2.GaussianBlur(orig_f, (11, 11), 1.5)
+        mu2 = cv2.GaussianBlur(gen_f, (11, 11), 1.5)
+
+        mu1_sq = mu1 ** 2
+        mu2_sq = mu2 ** 2
+        mu1_mu2 = mu1 * mu2
+
+        sigma1_sq = cv2.GaussianBlur(orig_f ** 2, (11, 11), 1.5) - mu1_sq
+        sigma2_sq = cv2.GaussianBlur(gen_f ** 2, (11, 11), 1.5) - mu2_sq
+        sigma12 = cv2.GaussianBlur(orig_f * gen_f, (11, 11), 1.5) - mu1_mu2
+
+        ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / \
+                   ((mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2))
+
+        return float(np.mean(ssim_map))
+
+    except Exception as e:
+        _logger.debug('SSIM hesaplama hatasi: %s', e)
+        return -1.0
+
+
+def _compute_blur_score(image_b64):
+    """Laplacian Variance ile bulaniklik skoru hesapla.
+
+    Yuksek deger = keskin gorsel, dusuk deger = bulanik gorsel.
+
+    Returns:
+        float: Laplacian variance degeri, veya -1
+    """
+    if cv2 is None or Image is None:
+        return -1.0
+
+    try:
+        gen_bytes = base64.b64decode(image_b64)
+        pil_img = Image.open(io.BytesIO(gen_bytes)).convert('RGB')
+
+        # Olcekle (hiz icin)
+        pil_img = pil_img.resize((512, 512), Image.LANCZOS)
+        gray = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2GRAY)
+        laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+        return float(laplacian.var())
+
+    except Exception as e:
+        _logger.debug('Bulaniklik tespiti hatasi: %s', e)
+        return -1.0

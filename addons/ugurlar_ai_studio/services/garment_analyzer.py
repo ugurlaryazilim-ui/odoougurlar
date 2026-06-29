@@ -206,14 +206,22 @@ def _analyze_via_fal(api_key, image_url, prompt):
     return _default_analysis()
 
 
-def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt=''):
+def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
+                            photo_type='front'):
     """Analiz sonuclarina gore AI gorsel uretim promptu olustur.
+
+    Her photo_type icin ozellestirilmis prompt uretir:
+    - front: Modelin one bakis, tam vucut, on yuzu gorunen cekimi
+    - back: Modelin arkaya donuk, arkasi gorunen cekimi
+    - side: 3/4 aci, profil gorunen cekimi
+    - detail: Yakin cekim, kumas/dikus/detay gorunen cekimi
 
     Args:
         analysis: Kiyafet analiz sonuclari (dict)
         preset: Manken preset bilgileri (dict)
         prompt_locks: Aktif prompt lock listesi (list of str)
         extra_prompt: Ek kullanici promptu
+        photo_type: str — 'front', 'back', 'side', 'detail'
 
     Returns:
         dict: {'positive': str, 'negative': str}
@@ -227,18 +235,41 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt=''):
     collar = analysis.get('collarType', '')
     sleeve = analysis.get('sleeveType', '')
 
-    # Ana prompt
-    base_prompt = (
-        f"Professional e-commerce fashion photography. "
-        f"A model wearing a {color} {fabric} {garment_type}. "
-        f"Style: {style}, Fit: {fit}. "
-        f"Pattern: {pattern}. "
+    # ═══ VIEW-SPESIFIK BAZ PROMPT ═══
+    view_base = _VIEW_PROMPT_TEMPLATES.get(photo_type, _VIEW_PROMPT_TEMPLATES['front'])
+    base_prompt = view_base.format(
+        garment_type=garment_type,
+        color=color,
+        fabric=fabric,
+        pattern=pattern,
+        style=style,
+        fit=fit,
     )
 
     if collar:
         base_prompt += f"Collar: {collar}. "
     if sleeve:
         base_prompt += f"Sleeves: {sleeve}. "
+
+    # ═══ BASKI / GRAFIK KORUMA TALIMATLARI ═══
+    has_graphic = analysis.get('hasGraphic', False)
+    graphic_desc = analysis.get('graphicDescription', '')
+    if has_graphic and graphic_desc:
+        base_prompt += (
+            f"CRITICAL GARMENT DETAIL PRESERVATION: "
+            f"This garment has a graphic print/design described as: "
+            f"'{graphic_desc}'. "
+            f"The print MUST be preserved EXACTLY as shown in the input image — "
+            f"same position, same colors, same proportions. "
+            f"Do NOT alter, simplify, remove, or reinterpret ANY part of the design. "
+        )
+    elif has_graphic:
+        base_prompt += (
+            "CRITICAL: This garment has a graphic print/design. "
+            "Preserve the print EXACTLY as shown in the input — "
+            "same position, same colors, same proportions. "
+            "Do NOT alter or remove any part of the design. "
+        )
 
     # Preset bilgileri
     if preset:
@@ -259,22 +290,101 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt=''):
     if extra_prompt:
         base_prompt += f" ADDITIONAL USER DIRECTIVE: {extra_prompt}"
 
-    # Negatif prompt
-    negative = (
-        "extra arms, extra legs, extra fingers, duplicated face, double head, "
-        "ghosting limbs, warped anatomy, deformed body, mannequin, doll, "
-        "plastic/waxy/porcelain skin, CGI look, beauty filter, airbrushed, "
-        "blurry, low quality, collage, split screen, multi-panel, "
-        "studio equipment, softbox, light stand, flash head, "
-        "altered garment design, changed collar, wrong garment color, "
-        "wrong fabric texture, wrong button style, "
-        "bare midriff, bare chest, nude model"
+    # View-spesifik negatif prompt
+    negative = _VIEW_NEGATIVE_PROMPTS.get(photo_type, _VIEW_NEGATIVE_PROMPTS['front'])
+
+    _logger.info(
+        'Prompt olusturuldu (photo_type=%s, hasGraphic=%s): %d karakter',
+        photo_type, has_graphic, len(base_prompt),
     )
 
     return {
         'positive': base_prompt,
         'negative': negative,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# VIEW-SPESIFIK PROMPT SABLONLARI
+# ═══════════════════════════════════════════════════════════════════════════
+
+_VIEW_PROMPT_TEMPLATES = {
+    'front': (
+        "Professional e-commerce FRONT VIEW fashion photography. "
+        "Full-body shot of a model facing directly toward the camera. "
+        "The FRONT of the {color} {fabric} {garment_type} is fully visible. "
+        "Clean white/light studio background. Even, shadow-free lighting. "
+        "Style: {style}, Fit: {fit}. Pattern: {pattern}. "
+        "Natural standing pose with arms relaxed at sides. "
+        "Sharp focus on garment details, fabric texture, and construction. "
+    ),
+    'back': (
+        "Professional e-commerce BACK VIEW fashion photography. "
+        "Full-body shot of a model facing AWAY from the camera, showing their back. "
+        "The BACK of the {color} {fabric} {garment_type} is fully visible. "
+        "Clean white/light studio background. Even, shadow-free lighting. "
+        "Style: {style}, Fit: {fit}. Pattern: {pattern}. "
+        "Natural standing pose showing the rear construction and fit. "
+        "Sharp focus on back details, seams, and garment shape. "
+    ),
+    'side': (
+        "Professional e-commerce SIDE/THREE-QUARTER VIEW fashion photography. "
+        "Full-body shot of a model turned approximately 45 degrees, showing profile. "
+        "The SIDE PROFILE of the {color} {fabric} {garment_type} is visible. "
+        "Clean white/light studio background. Even, shadow-free lighting. "
+        "Style: {style}, Fit: {fit}. Pattern: {pattern}. "
+        "Natural three-quarter pose showing garment drape and silhouette. "
+        "Sharp focus on garment side profile and fit on body. "
+    ),
+    'detail': (
+        "Professional CLOSE-UP DETAIL fashion photography. "
+        "Macro shot showing the fine details of the {color} {fabric} {garment_type}. "
+        "Focus on fabric texture, stitching quality, button/zipper details, and material. "
+        "Pattern: {pattern}. "
+        "Extreme sharp focus, studio macro lighting. "
+        "Show the craftsmanship and material quality. "
+    ),
+}
+
+_VIEW_NEGATIVE_PROMPTS = {
+    'front': (
+        "extra arms, extra legs, extra fingers, duplicated face, double head, "
+        "ghosting limbs, warped anatomy, deformed body, mannequin, doll, "
+        "plastic/waxy/porcelain skin, CGI look, beauty filter, airbrushed, "
+        "blurry, low quality, collage, split screen, multi-panel, "
+        "studio equipment, softbox, light stand, flash head, "
+        "altered garment design, changed collar, wrong garment color, "
+        "wrong fabric texture, wrong button style, modified print, "
+        "different pattern, altered graphic, changed logo, "
+        "bare midriff, bare chest, nude model, "
+        "back view, rear view, side view, profile view"
+    ),
+    'back': (
+        "extra arms, extra legs, extra fingers, duplicated face, double head, "
+        "ghosting limbs, warped anatomy, deformed body, mannequin, doll, "
+        "plastic/waxy/porcelain skin, CGI look, beauty filter, airbrushed, "
+        "blurry, low quality, collage, split screen, multi-panel, "
+        "studio equipment, softbox, light stand, flash head, "
+        "altered garment design, wrong garment color, wrong fabric texture, "
+        "front view, facing camera, face visible, "
+        "bare midriff, bare chest, nude model"
+    ),
+    'side': (
+        "extra arms, extra legs, extra fingers, duplicated face, double head, "
+        "ghosting limbs, warped anatomy, deformed body, mannequin, doll, "
+        "plastic/waxy/porcelain skin, CGI look, beauty filter, airbrushed, "
+        "blurry, low quality, collage, split screen, multi-panel, "
+        "studio equipment, softbox, light stand, flash head, "
+        "altered garment design, wrong garment color, wrong fabric texture, "
+        "bare midriff, bare chest, nude model"
+    ),
+    'detail': (
+        "full body shot, wide angle, person visible, face visible, "
+        "blurry, low quality, out of focus, "
+        "altered garment design, wrong garment color, wrong fabric texture, "
+        "modified print, different pattern, altered graphic"
+    ),
+}
 
 
 def _default_analysis():

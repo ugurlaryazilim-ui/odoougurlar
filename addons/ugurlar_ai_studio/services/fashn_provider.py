@@ -66,7 +66,7 @@ class FashnProvider(AIProviderBase):
     # Model basina tahmini maliyet (USD / kredi)
     ESTIMATED_COSTS = {
         'tryon-v1.6': 0.05,
-        'tryon-max': 0.10,
+        'tryon-max': 0.15,
         'background-remove': 0.01,
         'model-create': 0.05,
     }
@@ -114,14 +114,19 @@ class FashnProvider(AIProviderBase):
 
         # v1.6 vs max icin farkli input yapisi
         if model_name == 'tryon-max':
+            resolution = kwargs.get('resolution', '2K')
             inputs = {
                 'model_image': model_image_url,
                 'product_image': garment_image_url,  # tryon-max: product_image!
                 'num_images': num_samples,
                 'output_format': output_format,
+                'resolution': resolution,
             }
+            # generation_mode: quality modunda en iyi baskı/logo koruma sağlanır
             if mode == 'quality':
                 inputs['generation_mode'] = 'quality'
+            elif mode == 'performance':
+                inputs['generation_mode'] = 'fast'
             else:
                 inputs['generation_mode'] = 'balanced'
         else:

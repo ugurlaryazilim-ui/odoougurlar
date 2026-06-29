@@ -523,18 +523,45 @@ class AiStudioSession(models.Model):
                 'ugurlar_ai_studio.auto_bg_remove', 'True'
             ) == 'True'
 
-            # Try-on (giydirme) ve Detay üretimlerini ayır
-            tryon_gens = generations.filtered(lambda g: g.photo_type in ('front', 'back', 'side'))
-            detail_gens = generations.filtered(lambda g: g.photo_type == 'detail')
+            # ═══ AYARLARI YUKLE ═══
+            tryon_model = env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.tryon_model', 'tryon-max'
+            )
+            tryon_resolution = env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.tryon_resolution', '2K'
+            )
 
-            # 1. Önce try-on üretimlerini gerçekleştir
-            for gen in tryon_gens:
+            # ═══ KIYAFET ANALIZINI CACHE'LE (tek API cagrisi) ═══
+            cached_analysis = None
+            try:
+                front_gen = generations.filtered(lambda g: g.photo_type == 'front')
+                if front_gen and front_gen[0].original_image:
+                    from ..services.garment_preprocessor import preprocess_garment_image
+                    _pre = preprocess_garment_image(front_gen[0].original_image, target_long_edge=864)
+                    _pre_url = provider.upload_image(_pre['image_base64'])
+
+                    from ..services.garment_analyzer import analyze_garment
+                    cached_analysis = analyze_garment(
+                        fal_api_key, _pre_url, gemini_api_key=gemini_api_key
+                    )
+                    _logger.info(
+                        'Kıyafet analizi tamamlandı: %s %s, hasGraphic=%s',
+                        cached_analysis.get('garmentType', '?'),
+                        cached_analysis.get('primaryColor', '?'),
+                        cached_analysis.get('hasGraphic', False),
+                    )
+            except Exception as ae:
+                _logger.warning('Kıyafet analizi başarısız, varsayılan kullanılacak: %s', ae)
+
+            # ═══ TÜM GENERATION'LARI İŞLE (front/back/side/detail) ═══
+            for gen in generations:
                 try:
                     gen.write({'state': 'processing'})
                     cr.commit()
 
                     start_time = time.time()
                     source_image = gen.original_image
+                    photo_type = gen.photo_type or 'front'
 
                     # ═══ GÖRSEL ÖN İŞLEME PIPELINE ═══
                     from ..services.garment_preprocessor import (
@@ -542,34 +569,71 @@ class AiStudioSession(models.Model):
                         convert_birefnet_output_to_rgb,
                     )
 
-                    # Adım 1: Ürün görselini ön işle (beyaz denge, pozlama, resize, vb.)
                     preprocessed = preprocess_garment_image(
                         source_image,
                         target_long_edge=864,
                     )
                     processed_b64 = preprocessed['image_base64']
                     _logger.info(
-                        'Ön işleme tamamlandı (gen=%s): %sx%s → %sx%s, adımlar=%s',
-                        gen.id,
+                        'Ön işleme tamamlandı (gen=%s, tip=%s): %sx%s → %sx%s',
+                        gen.id, photo_type,
                         preprocessed['original_size'][0], preprocessed['original_size'][1],
                         preprocessed['final_size'][0], preprocessed['final_size'][1],
-                        ', '.join(preprocessed['steps_applied']) or 'yok',
                     )
 
-                    # Adım 2: Arka plan kaldırma + askı temizleme
+                    # ═══ DETAY FOTOĞRAFI: Özel İşlem ═══
+                    if photo_type == 'detail':
+                        # Detay fotoğrafı var — arka plan kaldır ve kaydet
+                        if auto_bg and processed_b64:
+                            try:
+                                bg_removed_b64 = provider.remove_background(processed_b64)
+                                try:
+                                    bg_removed_data = base64.b64decode(bg_removed_b64)
+                                    rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
+                                    detail_b64 = base64.b64encode(rgb_data)
+                                except Exception:
+                                    detail_b64 = bg_removed_b64
+                            except Exception as e:
+                                _logger.warning('Detay BG remove başarısız: %s', e)
+                                detail_b64 = processed_b64
+                        else:
+                            detail_b64 = processed_b64
+
+                        elapsed = time.time() - start_time
+                        gen.write({
+                            'generated_image': detail_b64,
+                            'state': 'done',
+                            'fal_endpoint': '%s/bg-remove-detail' % provider_type,
+                            'generation_time_seconds': elapsed,
+                            'cost': 0.01,
+                        })
+
+                        # Kalite kontrol
+                        try:
+                            from ..services.quality_checker import compute_quality_score
+                            qc = compute_quality_score(source_image, detail_b64)
+                            gen.write({
+                                'quality_score': qc['score'],
+                                'quality_details': qc['details'],
+                            })
+                        except Exception:
+                            pass
+
+                        cr.commit()
+                        continue  # Detay tamamlandı, sonraki generation'a geç
+
+                    # ═══ TRY-ON İŞLEMİ (front/back/side) ═══
+
+                    # Arka plan kaldırma + askı temizleme
                     if auto_bg and processed_b64:
                         try:
                             bg_removed_b64 = provider.remove_background(processed_b64)
-
-                            # RGBA → RGB dönüşümü (BiRefNet/FASHN bg-remove)
                             try:
                                 bg_removed_data = base64.b64decode(bg_removed_b64)
                                 rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
                                 rgb_b64 = base64.b64encode(rgb_data)
                             except Exception:
                                 rgb_b64 = bg_removed_b64
-
-                            # Askı temizleme işlemi
                             cleaned_b64 = session._remove_hanger_hook(rgb_b64)
                             garment_url = provider.upload_image(cleaned_b64)
                         except Exception as e:
@@ -578,13 +642,13 @@ class AiStudioSession(models.Model):
                     else:
                         garment_url = provider.upload_image(processed_b64)
 
-                    # Manken resmini yükle
+                    # Manken resmini yükle — view tipine göre
                     model_image_field = 'model_image_front'
-                    if gen.photo_type == 'back':
+                    if photo_type == 'back':
                         model_image_field = 'model_image_back'
-                    elif gen.photo_type == 'side':
+                    elif photo_type == 'side':
                         model_image_field = 'model_image_side'
-                    
+
                     model_image_data = getattr(preset, model_image_field)
                     if not model_image_data:
                         model_image_data = preset.model_image_front
@@ -594,7 +658,7 @@ class AiStudioSession(models.Model):
 
                     model_url = provider.upload_image(model_image_data)
 
-                    # Kategori belirleme — otomatik tespit veya manuel
+                    # ═══ KATEGORİ BELİRLEME ═══
                     cat = session.category
                     if provider_type == 'fashn':
                         if cat == 'auto':
@@ -608,20 +672,22 @@ class AiStudioSession(models.Model):
                     else:
                         if cat == 'auto':
                             try:
-                                from ..services.garment_analyzer import analyze_garment, map_to_fashn_category
-                                analysis = analyze_garment(fal_api_key, garment_url, gemini_api_key=gemini_api_key)
-                                analyzed_cat = map_to_fashn_category(analysis)
+                                from ..services.garment_analyzer import map_to_fashn_category
+                                if cached_analysis:
+                                    analyzed_cat = map_to_fashn_category(cached_analysis)
+                                else:
+                                    from ..services.garment_analyzer import analyze_garment
+                                    cached_analysis = analyze_garment(
+                                        fal_api_key, garment_url, gemini_api_key=gemini_api_key
+                                    )
+                                    analyzed_cat = map_to_fashn_category(cached_analysis)
                                 category_to_send = {
                                     'tops': 'tops',
                                     'bottoms': 'bottoms',
                                     'full-body': 'one-piece',
                                 }.get(analyzed_cat, 'tops')
-                                _logger.info(
-                                    'Otomatik kategori tespiti (fal.ai): %s → %s (gen=%s)',
-                                    analysis.get('garmentType', '?'), category_to_send, gen.id,
-                                )
                             except Exception as e:
-                                _logger.warning('Otomatik tespit başarısız, preset kullanılıyor: %s', e)
+                                _logger.warning('Otomatik tespit başarısız: %s', e)
                                 cat_fallback = preset.garment_type or 'tops'
                                 category_to_send = {
                                     'tops': 'tops',
@@ -635,112 +701,90 @@ class AiStudioSession(models.Model):
                                 'one_piece': 'one-piece',
                             }.get(cat, 'tops')
 
-                    # Try-on model ve uretim sayisi ayarlari
-                    tryon_model = env['ir.config_parameter'].sudo().get_param(
-                        'ugurlar_ai_studio.tryon_model', 'tryon-v1.6'
-                    )
-                    num_samples = int(env['ir.config_parameter'].sudo().get_param(
-                        'ugurlar_ai_studio.num_samples', '2'
-                    ))
-
-                    # Build prompt if provider is fal
+                    # ═══ VIEW-SPESİFİK PROMPT OLUŞTURMA ═══
                     prompt_text = ""
-                    if provider_type == 'fal':
-                        try:
-                            # 1. Get global prompt locks
-                            all_locks = env['ai.studio.prompt.template'].search([
-                                ('scope', '=', 'global'),
-                                ('active', '=', True),
-                            ])
-                            prompt_locks = [l.prompt_text for l in all_locks]
-                            
-                            # 2. Get garment analysis
-                            if 'analysis' not in locals():
-                                from ..services.garment_analyzer import analyze_garment
-                                analysis = analyze_garment(fal_api_key, garment_url, gemini_api_key=gemini_api_key)
-                                
-                            # 3. Build preset data
-                            preset_data = {
-                                'gender': preset.gender or 'female',
-                                'body_type': preset.body_type or 'standard',
-                                'target_audience': preset.target_audience or '',
-                            }
-                            
-                            # 4. Generate prompt using garment_analyzer
-                            from ..services.garment_analyzer import build_generation_prompt
-                            built_prompt = build_generation_prompt(
-                                analysis, preset_data, prompt_locks, session.extra_prompt or ''
-                            )
-                            prompt_text = built_prompt.get('positive', '')
-                        except Exception as pe:
-                            _logger.warning('Failed to build prompt for virtual try-on: %s', pe)
+                    try:
+                        all_locks = env['ai.studio.prompt.template'].search([
+                            ('scope', '=', 'global'),
+                            ('active', '=', True),
+                        ])
+                        prompt_locks = [l.prompt_text for l in all_locks]
 
+                        analysis_data = cached_analysis or {}
+                        preset_data = {
+                            'gender': preset.gender or 'female',
+                            'body_type': preset.body_type or 'standard',
+                            'target_audience': preset.target_audience or '',
+                        }
+
+                        from ..services.garment_analyzer import build_generation_prompt
+                        built_prompt = build_generation_prompt(
+                            analysis_data, preset_data, prompt_locks,
+                            session.extra_prompt or '',
+                            photo_type=photo_type,  # ← VIEW-SPESİFİK
+                        )
+                        prompt_text = built_prompt.get('positive', '')
+                        _logger.info(
+                            'View-spesifik prompt oluşturuldu (gen=%s, tip=%s): %d karakter',
+                            gen.id, photo_type, len(prompt_text),
+                        )
+                    except Exception as pe:
+                        _logger.warning('Prompt oluşturma başarısız: %s', pe)
+
+                    # ═══ TRY-ON API ÇAĞRISI ═══
                     tryon_result = provider.virtual_tryon(
                         model_image_url=model_url,
                         garment_image_url=garment_url,
                         category=category_to_send,
-                        mode=session.quality_mode or 'balanced',
+                        mode=session.quality_mode or 'quality',
                         model_name=tryon_model,
-                        num_samples=num_samples,
+                        num_samples=1,  # ← TEK YÜKSEK KALİTELİ ÇIKTI
                         garment_photo_type='auto',
                         output_format='jpeg',
                         prompt=prompt_text,
+                        resolution=tryon_resolution,  # ← ÇÖZÜNÜRLÜK
+                        photo_type=photo_type,  # ← VIEW TİPİ
                     )
 
                     elapsed = time.time() - start_time
 
-                    # Sonuclari indir ve en iyisini sec
-                    import requests
-                    image_urls = tryon_result.get('image_urls', [])
-                    if not image_urls and tryon_result.get('image_url'):
-                        image_urls = [tryon_result['image_url']]
+                    # ═══ SONUCU İNDİR ═══
+                    import requests as req_lib
+                    output_url = tryon_result.get('image_url', '')
+                    if not output_url:
+                        image_urls = tryon_result.get('image_urls', [])
+                        output_url = image_urls[0] if image_urls else ''
 
-                    if image_urls:
-                        best_data = None
-                        best_size = 0
-
-                        for img_url in image_urls:
-                            if not img_url:
-                                continue
-                            # data URI ise decode et, URL ise indir
-                            if img_url.startswith('data:'):
-                                raw = img_url.split(';base64,', 1)[1]
-                                img_data = base64.b64decode(raw)
-                            else:
-                                img_data = requests.get(img_url, timeout=60).content
-                            if len(img_data) > best_size:
-                                best_size = len(img_data)
-                                best_data = img_data
-
-                        if best_data:
-                            _logger.info(
-                                '%d sample uretildi, en iyi secildi: %.1fKB (gen=%s)',
-                                len(image_urls), best_size / 1024, gen.id,
-                            )
-                            gen_b64 = base64.b64encode(best_data)
-                            gen.write({
-                                'generated_image': gen_b64,
-                                'state': 'done',
-                                'fal_endpoint': '%s/%s' % (provider_type, tryon_model),
-                                'generation_time_seconds': elapsed,
-                                'cost': tryon_result.get('cost', 0.05),
-                            })
-
-                            # Kalite kontrol — renk doğruluğu loglama
-                            try:
-                                from ..services.quality_checker import compute_quality_score
-                                qc = compute_quality_score(source_image, gen_b64)
-                                _logger.info(
-                                    'Kalite kontrolu (gen=%s): skor=%.1f, %s',
-                                    gen.id, qc['score'], qc['details'],
-                                )
-                            except Exception as qe:
-                                _logger.debug('Kalite kontrol atlandi: %s', qe)
+                    if output_url:
+                        if output_url.startswith('data:'):
+                            raw = output_url.split(';base64,', 1)[1]
+                            img_data = base64.b64decode(raw)
                         else:
+                            img_data = req_lib.get(output_url, timeout=60).content
+
+                        gen_b64 = base64.b64encode(img_data)
+                        gen.write({
+                            'generated_image': gen_b64,
+                            'state': 'done',
+                            'fal_endpoint': '%s/%s' % (provider_type, tryon_model),
+                            'generation_time_seconds': elapsed,
+                            'cost': tryon_result.get('cost', 0.05),
+                        })
+
+                        # ═══ KALİTE KONTROL — SKORU KAYDET ═══
+                        try:
+                            from ..services.quality_checker import compute_quality_score
+                            qc = compute_quality_score(source_image, gen_b64)
                             gen.write({
-                                'state': 'failed',
-                                'error_message': 'API sonuç döndürmedi.',
+                                'quality_score': qc['score'],
+                                'quality_details': qc['details'],
                             })
+                            _logger.info(
+                                'Kalite kontrolü (gen=%s, tip=%s): skor=%.1f, %s',
+                                gen.id, photo_type, qc['score'], qc['details'],
+                            )
+                        except Exception as qe:
+                            _logger.debug('Kalite kontrol atlandı: %s', qe)
                     else:
                         gen.write({
                             'state': 'failed',
@@ -752,81 +796,14 @@ class AiStudioSession(models.Model):
                 except Exception as e:
                     from ..services.fal_error_handler import parse_fal_error, format_fal_error_for_log
                     parsed = parse_fal_error(e)
-                    _logger.error('AI üretim hatası: %s', format_fal_error_for_log(e, f'gen={gen.id}'))
+                    _logger.error('AI üretim hatası (tip=%s): %s', photo_type, format_fal_error_for_log(e, f'gen={gen.id}'))
                     gen.write({
                         'state': 'failed',
                         'error_message': parsed['message'][:500],
                     })
                     cr.commit()
 
-            # 2. Sonra detay üretimlerini (kırpma işlemi ile) gerçekleştir
-            for gen in detail_gens:
-                try:
-                    gen.write({'state': 'processing'})
-                    cr.commit()
-
-                    start_time = time.time()
-
-                    # Hangi görselden kırpılacağını belirle (Ön veya Arka)
-                    target_type = 'front'
-                    if gen.source_photo_id and gen.source_photo_id.photo_type == 'detail':
-                        if gen.source_photo_id.detail_placement == 'back':
-                            target_type = 'back'
-
-                    # İlgili tamamlanmış giydirme görselini bul
-                    target_gen = session.generation_ids.filtered(
-                        lambda g: g.photo_type == target_type and g.state == 'done' and g.generated_image
-                    )
-
-                    # Arka giydirme bulunamadıysa öne geri dön
-                    if not target_gen and target_type == 'back':
-                        target_gen = session.generation_ids.filtered(
-                            lambda g: g.photo_type == 'front' and g.state == 'done' and g.generated_image
-                        )
-
-                    if target_gen:
-                        # Görseli kırp
-                        cropped_image = session._crop_image_detail(
-                            target_gen[0].generated_image,
-                            category=preset.garment_type or 'tops'
-                        )
-                        elapsed = time.time() - start_time
-                        gen.write({
-                            'generated_image': cropped_image,
-                            'state': 'done',
-                            'fal_endpoint': 'local-crop',
-                            'generation_time_seconds': elapsed,
-                            'cost': 0.0,  # Lokal kırpma ücretsizdir
-                        })
-                    else:
-                        # Fallback: Eğer başarılı try-on görseli bulunamadıysa ama orijinal detay varsa, arka plan temizleyip kaydet
-                        if gen.source_photo_id and gen.source_photo_id.image_original:
-                            source_image = gen.source_photo_id.image_original
-                            bg_removed_b64 = provider.remove_background(source_image)
-                            elapsed = time.time() - start_time
-                            gen.write({
-                                'generated_image': bg_removed_b64,
-                                'state': 'done',
-                                'fal_endpoint': '%s/bg-remove' % provider_type,
-                                'generation_time_seconds': elapsed,
-                                'cost': 0.01,
-                            })
-                        else:
-                            raise Exception("Kırpılacak başarılı giydirilmiş manken görseli bulunamadı.")
-
-                    cr.commit()
-
-                except Exception as e:
-                    from ..services.fal_error_handler import parse_fal_error, format_fal_error_for_log
-                    parsed = parse_fal_error(e)
-                    _logger.error('AI detay üretim hatası: %s', format_fal_error_for_log(e, f'gen={gen.id}'))
-                    gen.write({
-                        'state': 'failed',
-                        'error_message': parsed['message'][:500],
-                    })
-                    cr.commit()
-
-            # Tüm üretimler tamamlandı
+            # ═══ TÜM ÜRETİMLER TAMAMLANDI ═══
             session.write({'state': 'review'})
             session.message_post(
                 body=_('AI üretimi tamamlandı. %d görsel onay bekliyor.') % len(session.generation_ids),
@@ -857,7 +834,7 @@ class AiStudioSession(models.Model):
         thread.start()
 
     def _retry_generation_thread(self, session_id, gen_id, api_key):
-        """Tek generation retry thread'i."""
+        """Tek generation retry thread'i — view-spesifik prompt ve kalite skorlaması ile."""
         time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
 
         with self.pool.cursor() as cr:
@@ -871,10 +848,17 @@ class AiStudioSession(models.Model):
             gemini_api_key = env['ir.config_parameter'].sudo().get_param(
                 'ugurlar_ai_studio.gemini_api_key', ''
             )
+            tryon_model = env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.tryon_model', 'tryon-max'
+            )
+            tryon_resolution = env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.tryon_resolution', '2K'
+            )
+
             session = env['ai.studio.session'].browse(session_id)
             gen = env['ai.studio.generation'].browse(gen_id)
+            photo_type = gen.photo_type or 'front'
 
-            # Aynı işlem mantığını uygula (basitleştirilmiş)
             try:
                 provider = self._create_provider(api_key, provider_type)
 
@@ -884,58 +868,47 @@ class AiStudioSession(models.Model):
                 source_image = gen.original_image
                 preset = session.model_preset_id
 
-                # Detay ise kırpma işlemini yap
-                if gen.photo_type == 'detail':
-                    target_type = 'front'
-                    if gen.source_photo_id and gen.source_photo_id.photo_type == 'detail':
-                        if gen.source_photo_id.detail_placement == 'back':
-                            target_type = 'back'
-
-                    target_gen = session.generation_ids.filtered(
-                        lambda g: g.photo_type == target_type and g.state == 'done' and g.generated_image
+                # ═══ DETAY İŞLEMİ ═══
+                if photo_type == 'detail':
+                    from ..services.garment_preprocessor import (
+                        preprocess_garment_image,
+                        convert_birefnet_output_to_rgb,
                     )
-                    
-                    if not target_gen and target_type == 'back':
-                        target_gen = session.generation_ids.filtered(
-                            lambda g: g.photo_type == 'front' and g.state == 'done' and g.generated_image
-                        )
+                    preprocessed = preprocess_garment_image(source_image, target_long_edge=864)
+                    processed_b64 = preprocessed['image_base64']
 
-                    if target_gen:
-                        cropped_image = session._crop_image_detail(
-                            target_gen[0].generated_image,
-                            category=preset.garment_type or 'tops'
-                        )
-                        gen.write({
-                            'generated_image': cropped_image,
-                            'state': 'done',
-                            'fal_endpoint': 'local-crop',
-                            'error_message': False,
-                        })
-                    else:
-                        # Fallback: başarılı try-on bulunamazsa background remove yap
-                        if gen.source_photo_id and gen.source_photo_id.image_original:
+                    auto_bg = env['ir.config_parameter'].sudo().get_param(
+                        'ugurlar_ai_studio.auto_bg_remove', 'True'
+                    ) == 'True'
+
+                    if auto_bg and processed_b64:
+                        try:
+                            bg_removed_b64 = provider.remove_background(processed_b64)
                             try:
-                                bg_removed_b64 = provider.remove_background(
-                                    gen.source_photo_id.image_original
-                                )
-                                gen.write({
-                                    'generated_image': bg_removed_b64,
-                                    'state': 'done',
-                                    'fal_endpoint': '%s/bg-remove' % provider_type,
-                                    'error_message': False,
-                                })
-                            except Exception as e:
-                                raise Exception(f"Kırpılacak görsel bulunamadı ve fallback arka plan kaldırma başarısız oldu: {e}")
-                        else:
-                            raise Exception("Kırpılacak başarılı giydirilmiş manken görseli bulunamadı.")
+                                bg_removed_data = base64.b64decode(bg_removed_b64)
+                                rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
+                                detail_b64 = base64.b64encode(rgb_data)
+                            except Exception:
+                                detail_b64 = bg_removed_b64
+                        except Exception:
+                            detail_b64 = processed_b64
+                    else:
+                        detail_b64 = processed_b64
+
+                    gen.write({
+                        'generated_image': detail_b64,
+                        'state': 'done',
+                        'fal_endpoint': '%s/bg-remove-detail' % provider_type,
+                        'error_message': False,
+                    })
                     cr.commit()
                     return
 
+                # ═══ TRY-ON RETRY İŞLEMİ ═══
                 auto_bg = env['ir.config_parameter'].sudo().get_param(
                     'ugurlar_ai_studio.auto_bg_remove', 'True'
                 ) == 'True'
 
-                # Arka plan kaldırma ve askı temizleme (ön işleme pipeline ile)
                 from ..services.garment_preprocessor import (
                     preprocess_garment_image,
                     convert_birefnet_output_to_rgb,
@@ -955,26 +928,21 @@ class AiStudioSession(models.Model):
                         cleaned_b64 = session._remove_hanger_hook(rgb_b64)
                         garment_url = provider.upload_image(cleaned_b64)
                     except Exception as e:
-                        _logger.warning('Retry BG remove başarısız, ön işlenmiş kullanılıyor: %s', e)
+                        _logger.warning('Retry BG remove başarısız: %s', e)
                         garment_url = provider.upload_image(processed_b64)
                 else:
                     garment_url = provider.upload_image(processed_b64)
 
-                preset = session.model_preset_id
                 model_image_field = 'model_image_front'
-                if gen.photo_type == 'back':
+                if photo_type == 'back':
                     model_image_field = 'model_image_back'
-                elif gen.photo_type == 'side':
+                elif photo_type == 'side':
                     model_image_field = 'model_image_side'
                 model_image = getattr(preset, model_image_field, False) or preset.model_image_front
                 if not model_image:
                     raise Exception('Preset manken resmi eksik.')
 
                 model_url = provider.upload_image(model_image)
-
-                tryon_model = env['ir.config_parameter'].sudo().get_param(
-                    'ugurlar_ai_studio.tryon_model', 'tryon-v1.6'
-                )
 
                 cat = session.category
                 if provider_type == 'fashn':
@@ -1001,49 +969,51 @@ class AiStudioSession(models.Model):
                             'one_piece': 'one-piece',
                         }.get(cat, 'tops')
 
-                # Build prompt if provider is fal
+                # ═══ VIEW-SPESİFİK PROMPT ═══
                 prompt_text = ""
-                if provider_type == 'fal':
-                    try:
-                        # 1. Get global prompt locks
-                        all_locks = env['ai.studio.prompt.template'].search([
-                            ('scope', '=', 'global'),
-                            ('active', '=', True),
-                        ])
-                        prompt_locks = [l.prompt_text for l in all_locks]
-                        
-                        # 2. Get garment analysis
-                        from ..services.garment_analyzer import analyze_garment
-                        analysis = analyze_garment(fal_api_key, garment_url, gemini_api_key=gemini_api_key)
-                            
-                        # 3. Build preset data
-                        preset_data = {
-                            'gender': preset.gender or 'female',
-                            'body_type': preset.body_type or 'standard',
-                            'target_audience': preset.target_audience or '',
-                        }
-                        
-                        # 4. Generate prompt using garment_analyzer
-                        from ..services.garment_analyzer import build_generation_prompt
-                        built_prompt = build_generation_prompt(
-                            analysis, preset_data, prompt_locks, session.extra_prompt or ''
-                        )
-                        prompt_text = built_prompt.get('positive', '')
-                    except Exception as pe:
-                        _logger.warning('Failed to build retry prompt: %s', pe)
+                try:
+                    all_locks = env['ai.studio.prompt.template'].search([
+                        ('scope', '=', 'global'),
+                        ('active', '=', True),
+                    ])
+                    prompt_locks = [l.prompt_text for l in all_locks]
+
+                    from ..services.garment_analyzer import analyze_garment, build_generation_prompt
+                    analysis = analyze_garment(fal_api_key, garment_url, gemini_api_key=gemini_api_key)
+
+                    preset_data = {
+                        'gender': preset.gender or 'female',
+                        'body_type': preset.body_type or 'standard',
+                        'target_audience': preset.target_audience or '',
+                    }
+
+                    built_prompt = build_generation_prompt(
+                        analysis, preset_data, prompt_locks,
+                        session.extra_prompt or '',
+                        photo_type=photo_type,
+                    )
+                    prompt_text = built_prompt.get('positive', '')
+                except Exception as pe:
+                    _logger.warning('Failed to build retry prompt: %s', pe)
 
                 tryon_result = provider.virtual_tryon(
                     model_image_url=model_url,
                     garment_image_url=garment_url,
                     category=category_to_send,
-                    mode=session.quality_mode or 'balanced',
+                    mode=session.quality_mode or 'quality',
                     model_name=tryon_model,
+                    num_samples=1,
                     garment_photo_type='auto',
                     output_format='jpeg',
                     prompt=prompt_text,
+                    resolution=tryon_resolution,
+                    photo_type=photo_type,
                 )
 
                 output_url = tryon_result.get('image_url', '')
+                if not output_url:
+                    image_urls = tryon_result.get('image_urls', [])
+                    output_url = image_urls[0] if image_urls else ''
 
                 if output_url:
                     if output_url.startswith('data:'):
@@ -1052,11 +1022,25 @@ class AiStudioSession(models.Model):
                     else:
                         import requests
                         img_data = requests.get(output_url, timeout=60).content
+
+                    gen_b64 = base64.b64encode(img_data)
                     gen.write({
-                        'generated_image': base64.b64encode(img_data),
+                        'generated_image': gen_b64,
                         'state': 'done',
                         'error_message': False,
                     })
+
+                    # Kalite kontrol
+                    try:
+                        from ..services.quality_checker import compute_quality_score
+                        qc = compute_quality_score(source_image, gen_b64)
+                        gen.write({
+                            'quality_score': qc['score'],
+                            'quality_details': qc['details'],
+                        })
+                    except Exception:
+                        pass
+
                 cr.commit()
 
             except Exception as e:

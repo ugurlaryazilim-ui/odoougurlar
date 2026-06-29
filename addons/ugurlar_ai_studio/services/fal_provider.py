@@ -75,14 +75,25 @@ class FalProvider(AIProviderBase):
 
         if 'nano-banana' in endpoint:
             # nano-banana-2/edit formatı
+            # View-spesifik prompt bilgisini ekle
+            photo_type = kwargs.get('photo_type', 'front')
+            enhanced_prompt = prompt
+            if photo_type and photo_type != 'front' and prompt:
+                view_hints = {
+                    'back': 'IMPORTANT: Show the BACK view of the model, facing away from camera. ',
+                    'side': 'IMPORTANT: Show the SIDE view of the model, turned 45 degrees. ',
+                    'detail': 'IMPORTANT: Close-up detail shot showing fabric texture and details. ',
+                }
+                enhanced_prompt = view_hints.get(photo_type, '') + prompt
+
             arguments = {
-                'prompt': prompt,
+                'prompt': enhanced_prompt,
                 'image_urls': [garment_image_url, model_image_url],
                 'num_images': kwargs.get('num_samples', 1),
                 'aspect_ratio': '3:4',
                 'output_format': 'png',
                 'safety_tolerance': '4',
-                'resolution': '2K',
+                'resolution': kwargs.get('resolution', '2K'),
                 'limit_generations': True,
             }
         else:
