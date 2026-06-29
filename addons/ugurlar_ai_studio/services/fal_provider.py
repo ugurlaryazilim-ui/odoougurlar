@@ -73,7 +73,9 @@ class FalProvider(AIProviderBase):
         model_name = kwargs.get('model_name') or 'tryon-v1.6'
         endpoint = kwargs.get('endpoint')
         if not endpoint:
-            if 'max' in model_name:
+            if 'nano-banana' in model_name:
+                endpoint = self.ENDPOINTS['nano_banana']
+            elif 'max' in model_name:
                 endpoint = 'fal-ai/fashn/tryon-max'
             elif 'v1.6' in model_name or 'v1-6' in model_name:
                 endpoint = self.ENDPOINTS['tryon_fashn']

@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import base64
 import threading
 import time
@@ -285,7 +285,7 @@ class AiStudioSession(models.Model):
         4. Alternatif: piksel bazli temizleme (OpenCV yoksa)
         """
         if not image_base64:
-            return image_base64
+            return False
         try:
             import io
             import base64
@@ -612,7 +612,6 @@ class AiStudioSession(models.Model):
                         session.extra_prompt or '',
                         photo_type=photo_type,
                         outfit_consistency=outfit_consistency,
-                        provider_type=provider_type,
                     )
                     prompt_text = built_prompt.get('positive', '')
                 except Exception as pe:
@@ -969,25 +968,9 @@ class AiStudioSession(models.Model):
 
                     # Upload images
                     model_url = provider.upload_image(model_image_data)
-                    # Arka plan kaldırma ve askı temizleme
-                    if auto_bg and processed_b64:
-                        try:
-                            bg_removed_b64 = provider.remove_background(processed_b64)
-                            try:
-                                bg_removed_data = base64.b64decode(bg_removed_b64)
-                                rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
-                                rgb_b64 = base64.b64encode(rgb_data)
-                            except Exception:
-                                rgb_b64 = bg_removed_b64
-                            cleaned_b64 = session._remove_hanger_hook(rgb_b64)
-                            garment_url = provider.upload_image(cleaned_b64)
-                        except Exception as e:
-                            _logger.warning('Main BG remove başarısız: %s', e)
-                            garment_url = provider.upload_image(processed_b64)
-                    else:
-                        garment_url = provider.upload_image(processed_b64)
+                    garment_url = provider.upload_image(processed_b64)
 
-                    tryon_model = 'nano-banana-2/edit' if provider_type == 'fal' else 'tryon-v1.6'
+                    tryon_model = 'tryon-v1.6' if provider_type == 'fal' else 'tryon-v1.6'
                     tryon_resolution = '1K'
                     if provider_type == 'fashn':
                         tryon_model = getattr(preset, f'fashn_model_{photo_type}', False) or preset.fashn_model_front or 'tryon-v1.6'
@@ -1018,7 +1001,6 @@ class AiStudioSession(models.Model):
                             session.extra_prompt or '',
                             photo_type=photo_type,
                             outfit_consistency=outfit_consistency,
-                            provider_type=provider_type,
                         )
                         prompt_text = built_prompt.get('positive', '')
                     except Exception as pe:
@@ -1550,16 +1532,10 @@ class AiStudioSession(models.Model):
                         session.extra_prompt or '',
                         photo_type=photo_type,
                         outfit_consistency=outfit_consistency,
-                        provider_type=provider_type,
                     )
                     prompt_text = built_prompt.get('positive', '')
                 except Exception as pe:
                     _logger.warning('Failed to build retry prompt: %s', pe)
-
-                if provider_type == 'fal':
-                    tryon_model = 'nano-banana-2/edit'
-                elif provider_type == 'fashn':
-                    tryon_model = getattr(preset, f'fashn_model_{photo_type}', False) or preset.fashn_model_front or 'tryon-v1.6'
 
                 tryon_result = provider.virtual_tryon(
                     model_image_url=model_url,

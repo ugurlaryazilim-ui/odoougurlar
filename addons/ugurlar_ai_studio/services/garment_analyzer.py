@@ -362,12 +362,12 @@ def _build_consistency_prompt(outfit_data):
 
 
 def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
-                            photo_type='front', outfit_consistency=None):
+                            photo_type='front', outfit_consistency=None, provider_type='fashn'):
     """Analiz sonuclarina gore AI gorsel uretim promptu olustur.
     
     FASHN ve virtual try-on modellerinde kiyafetin rengi, deseni veya baski grafik
-    detaylari prompta yazilmamalidir. Yazilmasi durumunda model kiyafete eklemeler
-    veya degisiklikler yapar. Prompt sadece mankeni ve sahneyi tarif etmelidir.
+    detaylari prompta yazilmamalidir. Ancak 'fal' (nano-banana-2/edit vb.) gibi
+    genel inpainting modellerinde bu detaylar gereklidir.
 
     Args:
         analysis: Kiyafet analiz sonuclari (dict)
@@ -376,21 +376,68 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         extra_prompt: Ek kullanici promptu
         photo_type: str — 'front', 'back', 'side', 'detail'
         outfit_consistency: dict — outfit tutarlilik verileri
+        provider_type: str — 'fashn', 'fal', vb.
 
     Returns:
         dict: {'positive': str, 'negative': str}
     """
-    # Sablonu generic kelimelerle formatla (kiyafet detaylari prompta gitmesin)
     view_base = _VIEW_PROMPT_TEMPLATES.get(photo_type, _VIEW_PROMPT_TEMPLATES['front'])
-    base_prompt = view_base.format(
-        garment_type="garment",
-        color="",
-        fabric="",
-        pattern="plain",
-        style="casual",
-        fit="standard fit",
-    )
-    
+
+    if provider_type == 'fashn':
+        # Sablonu generic kelimelerle formatla (kiyafet detaylari prompta gitmesin)
+        base_prompt = view_base.format(
+            garment_type="garment",
+            color="",
+            fabric="",
+            pattern="plain",
+            style="casual",
+            fit="standard fit",
+        )
+    else:
+        # fal vb. modeller icin tam detayli prompt
+        garment_type = analysis.get('garmentType', 'garment')
+        color = analysis.get('primaryColor', '')
+        fabric = analysis.get('fabricType', '')
+        pattern = analysis.get('pattern', 'Duz')
+        style = analysis.get('style', 'Casual')
+        fit = analysis.get('fitDetails', 'Regular Fit')
+        collar = analysis.get('collarType', '')
+        sleeve = analysis.get('sleeveType', '')
+
+        base_prompt = view_base.format(
+            garment_type=garment_type,
+            color=color,
+            fabric=fabric,
+            pattern=pattern,
+            style=style,
+            fit=fit,
+        )
+
+        if collar:
+            base_prompt += f"Collar: {collar}. "
+        if sleeve:
+            base_prompt += f"Sleeves: {sleeve}. "
+
+        # ═══ BASKI / GRAFIK KORUMA TALIMATLARI ═══
+        has_graphic = analysis.get('hasGraphic', False)
+        graphic_desc = analysis.get('graphicDescription', '')
+        if has_graphic and graphic_desc:
+            base_prompt += (
+                f"CRITICAL GARMENT DETAIL PRESERVATION: "
+                f"This garment has a graphic print/design described as: "
+                f"'{graphic_desc}'. "
+                f"The print MUST be preserved EXACTLY as shown in the input image — "
+                f"same position, same colors, same proportions. "
+                f"Do NOT alter, simplify, remove, or reinterpret ANY part of the design. "
+            )
+        elif has_graphic:
+            base_prompt += (
+                "CRITICAL: This garment has a graphic print/design. "
+                "Preserve the print EXACTLY as shown in the input — "
+                "same position, same colors, same proportions. "
+                "Do NOT alter or remove any part of the design. "
+            )
+
     # Cift bosluklari temizle
     base_prompt = " ".join(base_prompt.split()) + " "
 
@@ -422,8 +469,8 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     negative = _VIEW_NEGATIVE_PROMPTS.get(photo_type, _VIEW_NEGATIVE_PROMPTS['front'])
 
     _logger.info(
-        'Prompt olusturuldu (photo_type=%s, FASHN uyumlu): %d karakter',
-        photo_type, len(base_prompt),
+        'Prompt olusturuldu (photo_type=%s, provider=%s): %d karakter',
+        photo_type, provider_type, len(base_prompt),
     )
 
     return {
