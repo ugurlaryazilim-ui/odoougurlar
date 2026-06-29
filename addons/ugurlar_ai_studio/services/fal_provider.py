@@ -129,11 +129,36 @@ class FalProvider(AIProviderBase):
             if 'seed' in kwargs and kwargs['seed']:
                 arguments['seed'] = int(kwargs['seed'])
 
-        result = fal_client.subscribe(
-            endpoint,
-            arguments=arguments,
-            client_timeout=300,
-        )
+        # Rate Limit / Concurrency Limit Retry Mekanizması
+        import time
+        max_retries = 3
+        backoff_factor = 4
+        result = None
+        for attempt in range(max_retries):
+            try:
+                result = fal_client.subscribe(
+                    endpoint,
+                    arguments=arguments,
+                    client_timeout=300,
+                )
+                break
+            except Exception as e:
+                error_str = str(e).lower()
+                is_rate_limit = (
+                    'rate' in error_str or
+                    'limit' in error_str or
+                    '429' in error_str or
+                    'concurrent' in error_str
+                )
+                if is_rate_limit and attempt < max_retries - 1:
+                    sleep_time = backoff_factor * (2 ** attempt)
+                    _logger.warning(
+                        "fal.ai Rate Limit asildi. %d saniye beklenip tekrar denenecek (Deneme %d/%d). Hata: %s",
+                        sleep_time, attempt + 1, max_retries, e
+                    )
+                    time.sleep(sleep_time)
+                else:
+                    raise
 
         image_urls = []
         if 'images' in result and result['images']:

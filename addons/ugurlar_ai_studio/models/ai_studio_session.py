@@ -1079,11 +1079,36 @@ class AiStudioSession(models.Model):
                                     if front_seed:
                                         arguments_to_send['seed'] = int(front_seed)
 
-                                    edit_result = fal_client.subscribe(
-                                        'fal-ai/flux/schnell/image-to-image',
-                                        arguments=arguments_to_send,
-                                        client_timeout=300,
-                                    )
+                                    # Rate Limit / Concurrency Limit Retry Mekanizması
+                                    import time
+                                    max_retries = 3
+                                    backoff_factor = 4
+                                    edit_result = None
+                                    for attempt in range(max_retries):
+                                        try:
+                                            edit_result = fal_client.subscribe(
+                                                'fal-ai/flux/schnell/image-to-image',
+                                                arguments=arguments_to_send,
+                                                client_timeout=300,
+                                            )
+                                            break
+                                        except Exception as e:
+                                            error_str = str(e).lower()
+                                            is_rate_limit = (
+                                                'rate' in error_str or
+                                                'limit' in error_str or
+                                                '429' in error_str or
+                                                'concurrent' in error_str
+                                            )
+                                            if is_rate_limit and attempt < max_retries - 1:
+                                                sleep_time = backoff_factor * (2 ** attempt)
+                                                _logger.warning(
+                                                    "Front post-process Rate Limit asildi. %d saniye beklenip tekrar denenecek (Deneme %d/%d). Hata: %s",
+                                                    sleep_time, attempt + 1, max_retries, e
+                                                )
+                                                time.sleep(sleep_time)
+                                            else:
+                                                raise
                                     edit_images = edit_result.get('images', [])
                                     if edit_images:
                                         edit_url = edit_images[0].get('url', '')
@@ -1164,11 +1189,36 @@ class AiStudioSession(models.Model):
                                         if front_seed:
                                             arguments_to_send['seed'] = int(front_seed)
 
-                                        edit_result = fal_client.subscribe(
-                                            'fal-ai/flux/schnell/image-to-image',
-                                            arguments=arguments_to_send,
-                                            client_timeout=300,
-                                        )
+                                        # Rate Limit / Concurrency Limit Retry Mekanizması
+                                        import time
+                                        max_retries = 3
+                                        backoff_factor = 4
+                                        edit_result = None
+                                        for attempt in range(max_retries):
+                                            try:
+                                                edit_result = fal_client.subscribe(
+                                                    'fal-ai/flux/schnell/image-to-image',
+                                                    arguments=arguments_to_send,
+                                                    client_timeout=300,
+                                                )
+                                                break
+                                            except Exception as e:
+                                                error_str = str(e).lower()
+                                                is_rate_limit = (
+                                                    'rate' in error_str or
+                                                    'limit' in error_str or
+                                                    '429' in error_str or
+                                                    'concurrent' in error_str
+                                                )
+                                                if is_rate_limit and attempt < max_retries - 1:
+                                                    sleep_time = backoff_factor * (2 ** attempt)
+                                                    _logger.warning(
+                                                        "Back/Side post-process Rate Limit asildi. %d saniye beklenip tekrar denenecek (Deneme %d/%d). Hata: %s",
+                                                        sleep_time, attempt + 1, max_retries, e
+                                                    )
+                                                    time.sleep(sleep_time)
+                                                else:
+                                                    raise
                                         edit_images = edit_result.get('images', [])
                                         if edit_images:
                                             edit_url = edit_images[0].get('url', '')
@@ -1545,11 +1595,36 @@ class AiStudioSession(models.Model):
                                     if front_seed:
                                         arguments_to_send['seed'] = int(front_seed)
 
-                                    edit_result = fal_client.subscribe(
-                                        'fal-ai/flux/schnell/image-to-image',
-                                        arguments=arguments_to_send,
-                                        client_timeout=300,
-                                    )
+                                    # Rate Limit / Concurrency Limit Retry Mekanizması
+                                    import time
+                                    max_retries = 3
+                                    backoff_factor = 4
+                                    edit_result = None
+                                    for attempt in range(max_retries):
+                                        try:
+                                            edit_result = fal_client.subscribe(
+                                                'fal-ai/flux/schnell/image-to-image',
+                                                arguments=arguments_to_send,
+                                                client_timeout=300,
+                                            )
+                                            break
+                                        except Exception as e:
+                                            error_str = str(e).lower()
+                                            is_rate_limit = (
+                                                'rate' in error_str or
+                                                'limit' in error_str or
+                                                '429' in error_str or
+                                                'concurrent' in error_str
+                                            )
+                                            if is_rate_limit and attempt < max_retries - 1:
+                                                sleep_time = backoff_factor * (2 ** attempt)
+                                                _logger.warning(
+                                                    "Retry post-process Rate Limit asildi. %d saniye beklenip tekrar denenecek (Deneme %d/%d). Hata: %s",
+                                                    sleep_time, attempt + 1, max_retries, e
+                                                )
+                                                time.sleep(sleep_time)
+                                            else:
+                                                raise
                                     edit_images = edit_result.get('images', [])
                                     if edit_images:
                                         edit_url = edit_images[0].get('url', '')
