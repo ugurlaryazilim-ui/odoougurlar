@@ -304,7 +304,8 @@ class AiStudioModelPreset(models.Model):
         "warped anatomy, deformed body, mannequin, doll, plastic skin, waxy skin, "
         "beauty filter, airbrushed, over-smooth, blurry, low quality, "
         "collage, split screen, multi-panel, grid layout, "
-        "underwear look, nude model, hanger, flat-lay, product-only shot."
+        "underwear look, nude model, hanger, flat-lay, product-only shot, "
+        "dress, gown, skirt, robe, one-shoulder dress, sleeveless dress, loose clothing, asymmetrical straps."
     )
 
     # 8. Premium Capture
@@ -407,21 +408,21 @@ class AiStudioModelPreset(models.Model):
 
             # Ürün tipine göre kıyafet belirleme (Tam giyinik profesyonel model)
             outfit_hints_front = {
-                'tops': 'wearing a tight form-fitting solid-colored crop top, matching beige cotton trousers, and clean white sneakers',
-                'bottoms': 'wearing a tight form-fitting solid-colored crop top, matching beige cotton trousers, and clean white sneakers',
-                'one_piece': 'wearing a tight form-fitting solid-colored crop top, matching beige cotton trousers, and clean white sneakers',
-                'shoes': 'wearing a tight form-fitting solid-colored crop top, matching beige cotton trousers, and clean white sneakers',
-                'bags': 'wearing a tight form-fitting solid-colored crop top, matching beige cotton trousers, and clean white sneakers',
-                'accessories': 'wearing a tight form-fitting solid-colored crop top, matching beige cotton trousers, and clean white sneakers',
+                'tops': 'wearing a simple tight form-fitting solid-colored short-sleeve T-shirt, matching blue denim jeans, and clean white sneakers',
+                'bottoms': 'wearing a simple tight form-fitting solid-colored short-sleeve T-shirt, matching blue denim jeans, and clean white sneakers',
+                'one_piece': 'wearing a simple tight form-fitting solid-colored short-sleeve T-shirt, matching blue denim jeans, and clean white sneakers',
+                'shoes': 'wearing a simple tight form-fitting solid-colored short-sleeve T-shirt, matching blue denim jeans, and clean white sneakers',
+                'bags': 'wearing a simple tight form-fitting solid-colored short-sleeve T-shirt, matching blue denim jeans, and clean white sneakers',
+                'accessories': 'wearing a simple tight form-fitting solid-colored short-sleeve T-shirt, matching blue denim jeans, and clean white sneakers',
             }
 
             outfit_hints_back = {
-                'tops': 'wearing a tight solid-colored sports bra that leaves the entire back completely bare and exposed, matching beige cotton trousers, and clean white sneakers',
-                'bottoms': 'wearing a tight solid-colored sports bra that leaves the entire back completely bare and exposed, matching beige cotton trousers, and clean white sneakers',
-                'one_piece': 'wearing a tight solid-colored sports bra that leaves the entire back completely bare and exposed, matching beige cotton trousers, and clean white sneakers',
-                'shoes': 'wearing a tight solid-colored sports bra that leaves the entire back completely bare and exposed, matching beige cotton trousers, and clean white sneakers',
-                'bags': 'wearing a tight solid-colored sports bra that leaves the entire back completely bare and exposed, matching beige cotton trousers, and clean white sneakers',
-                'accessories': 'wearing a tight solid-colored sports bra that leaves the entire back completely bare and exposed, matching beige cotton trousers, and clean white sneakers',
+                'tops': 'wearing a simple tight form-fitting solid-colored short-sleeve T-shirt seen from behind, matching blue denim jeans, and clean white sneakers',
+                'bottoms': 'wearing a simple tight form-fitting solid-colored short-sleeve T-shirt seen from behind, matching blue denim jeans, and clean white sneakers',
+                'one_piece': 'wearing a simple tight form-fitting solid-colored short-sleeve T-shirt seen from behind, matching blue denim jeans, and clean white sneakers',
+                'shoes': 'wearing a simple tight form-fitting solid-colored short-sleeve T-shirt seen from behind, matching blue denim jeans, and clean white sneakers',
+                'bags': 'wearing a simple tight form-fitting solid-colored short-sleeve T-shirt seen from behind, matching blue denim jeans, and clean white sneakers',
+                'accessories': 'wearing a simple tight form-fitting solid-colored short-sleeve T-shirt seen from behind, matching blue denim jeans, and clean white sneakers',
             }
 
             garment_type = 'tops'
