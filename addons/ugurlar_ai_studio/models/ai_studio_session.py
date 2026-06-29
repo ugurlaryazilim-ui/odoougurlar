@@ -235,6 +235,46 @@ class AiStudioSession(models.Model):
             _logger.error("Kırpma hatası: %s", e)
             return image_base64
 
+    def _generate_inpainting_mask(self, image_base64, garment_type='tops'):
+        """Base64 resmin boyutunda inpainting maskesi üretir.
+        
+        Tops: Belden aşağısını (pants/shoes) inpaint et. (y > h * 0.44)
+        Bottoms: Belden yukarısını (tops/face) inpaint et. (y < h * 0.44)
+        Full-body/Dress: Sadece ayakları (shoes) inpaint et. (y > h * 0.82)
+        """
+        if not image_base64:
+            return False
+        try:
+            import io
+            import base64
+            from PIL import Image, ImageDraw
+            
+            img_data = base64.b64decode(image_base64)
+            img = Image.open(io.BytesIO(img_data))
+            w, h = img.size
+            
+            # Siyah maske oluştur (0 = edit yok)
+            mask = Image.new("L", (w, h), 0)
+            draw = ImageDraw.Draw(mask)
+            
+            category = garment_type or 'tops'
+            if category == 'tops':
+                # Üst giyim: alt kısmı boya (white = edit et)
+                draw.rectangle([0, int(h * 0.44), w, h], fill=255)
+            elif category == 'bottoms':
+                # Alt giyim: üst kısmı boya
+                draw.rectangle([0, 0, w, int(h * 0.44)], fill=255)
+            else:
+                # Full-body/elbise: sadece ayakkabı bölgesini boya
+                draw.rectangle([0, int(h * 0.82), w, h], fill=255)
+                
+            buffered = io.BytesIO()
+            mask.save(buffered, format="PNG")
+            return base64.b64encode(buffered.getvalue())
+        except Exception as e:
+            _logger.error("Maske üretme hatası: %s", e)
+            return False
+
     def _remove_hanger_hook(self, image_base64):
         """Gorseldeki aski kancasini ve etiketleri temizler.
 
@@ -653,22 +693,30 @@ class AiStudioSession(models.Model):
                                     fal_client = None
 
                                 if fal_client:
+                                    # Maske üret ve fal.ai'a yükle
+                                    mask_b64 = session._generate_inpainting_mask(gen_b64, garment_type=preset.garment_type or 'tops')
+                                    mask_url = provider.upload_image(mask_b64) if mask_b64 else None
+
+                                    arguments_to_send = {
+                                        'prompt': edit_prompt,
+                                        'image_url': current_url,
+                                        'strength': 0.82,  # Maskeli alan için yüksek inpainting gücü
+                                        'ip_adapters': [
+                                            {
+                                                'image_url': front_ref_url,
+                                                'conditioning_scale': 0.85,
+                                            }
+                                        ],
+                                        'num_images': 1,
+                                        'aspect_ratio': '3:4',
+                                        'enable_safety_checker': True,
+                                    }
+                                    if mask_url:
+                                        arguments_to_send['mask_url'] = mask_url
+
                                     edit_result = fal_client.subscribe(
                                         'fal-ai/flux/schnell/image-to-image',
-                                        arguments={
-                                            'prompt': edit_prompt,
-                                            'image_url': current_url,
-                                            'strength': 0.28,
-                                            'ip_adapters': [
-                                                {
-                                                    'image_url': front_ref_url,
-                                                    'conditioning_scale': 0.85,
-                                                }
-                                            ],
-                                            'num_images': 1,
-                                            'aspect_ratio': '3:4',
-                                            'enable_safety_checker': True,
-                                        },
+                                        arguments=arguments_to_send,
                                         client_timeout=300,
                                     )
                                     edit_images = edit_result.get('images', [])
@@ -924,16 +972,24 @@ class AiStudioSession(models.Model):
                                 fal_client = None
                                 
                             if fal_client:
+                                # Maske üret ve fal.ai'a yükle
+                                mask_b64 = session._generate_inpainting_mask(gen_b64, garment_type=preset.garment_type or 'tops')
+                                mask_url = provider.upload_image(mask_b64) if mask_b64 else None
+
+                                arguments_to_send = {
+                                    'prompt': edit_prompt,
+                                    'image_url': current_url,
+                                    'strength': 0.82,  # Maskeli alan için yüksek inpainting gücü
+                                    'num_images': 1,
+                                    'aspect_ratio': '3:4',
+                                    'enable_safety_checker': True,
+                                }
+                                if mask_url:
+                                    arguments_to_send['mask_url'] = mask_url
+
                                 edit_result = fal_client.subscribe(
                                     'fal-ai/flux/schnell/image-to-image',
-                                    arguments={
-                                        'prompt': edit_prompt,
-                                        'image_url': current_url,
-                                        'strength': 0.38,
-                                        'num_images': 1,
-                                        'aspect_ratio': '3:4',
-                                        'enable_safety_checker': True,
-                                    },
+                                    arguments=arguments_to_send,
                                     client_timeout=300,
                                 )
                                 edit_images = edit_result.get('images', [])
