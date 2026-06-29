@@ -89,6 +89,7 @@ class AiStudioGeneration(models.Model):
     fal_request_id = fields.Char(string='fal.ai İstek ID')
     fal_endpoint = fields.Char(string='Kullanılan Endpoint')
     generation_time_seconds = fields.Float(string='Üretim Süresi (sn)')
+    seed = fields.Integer(string='AI Seed', help='Üretimde kullanılan seed değeri')
     provider = fields.Selection([
         ('fal', 'fal.ai'),
         ('fashn', 'FASHN'),

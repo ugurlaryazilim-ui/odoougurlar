@@ -141,6 +141,10 @@ class FashnProvider(AIProviderBase):
                 'output_format': output_format,
             }
 
+        # Seed parametresi ekleme
+        if 'seed' in kwargs and kwargs['seed']:
+            inputs['seed'] = int(kwargs['seed'])
+
         _logger.info(
             'FASHN %s cagriliyor: category=%s, mode=%s, samples=%d',
             model_name, category, mode, num_samples,
@@ -168,6 +172,7 @@ class FashnProvider(AIProviderBase):
 
         credits_used = getattr(result, 'credits_used', None) or 0
         cost = credits_used * 0.05 if credits_used else self.get_estimated_cost(model_name) * num_samples
+        seed_val = getattr(result, 'seed', None) or (result.output.get('seed') if isinstance(result.output, dict) else None)
 
         _logger.info(
             'FASHN %s tamamlandi: %d gorsel, %.1f sn, %.3f kredi',
@@ -180,6 +185,7 @@ class FashnProvider(AIProviderBase):
             'cost': cost,
             'request_id': getattr(result, 'id', ''),
             'credits_used': credits_used,
+            'seed': seed_val,
         }
 
     def remove_background(self, image_base64):

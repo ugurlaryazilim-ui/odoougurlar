@@ -115,6 +115,8 @@ class FalProvider(AIProviderBase):
                 'mode': mode,
                 'garment_photo_type': kwargs.get('garment_photo_type', 'flat-lay'),
             }
+            if 'seed' in kwargs and kwargs['seed']:
+                arguments['seed'] = int(kwargs['seed'])
 
         result = fal_client.subscribe(
             endpoint,
@@ -130,12 +132,20 @@ class FalProvider(AIProviderBase):
 
         image_url = image_urls[0] if image_urls else ''
         request_id = result.get('request_id', '')
+        
+        # fal.ai base response'dan veya result dict'ten seed oku
+        seed_val = None
+        if isinstance(result, dict):
+            seed_val = result.get('seed')
+        else:
+            seed_val = getattr(result, 'seed', None)
 
         return {
             'image_urls': image_urls,
             'image_url': image_url,
             'cost': self.get_estimated_cost(endpoint) * len(image_urls) if 'nano-banana' in endpoint else self.get_estimated_cost(endpoint),
             'request_id': request_id,
+            'seed': seed_val,
         }
 
     def remove_background(self, image_base64):

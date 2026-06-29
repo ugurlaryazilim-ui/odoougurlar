@@ -564,6 +564,7 @@ class AiStudioSession(models.Model):
             # Cross-view tutarlılık verisi — front sonrası doldurulur
             outfit_consistency = None
             front_result_b64 = None  # Front try-on sonucu — back/side post-processing referansı
+            front_seed = None  # Front try-on seed'i — back/side FASHN çağrısı için referans
             for gen in ordered_gens:
                 try:
                     gen.write({'state': 'processing'})
@@ -784,6 +785,7 @@ class AiStudioSession(models.Model):
                         prompt=prompt_text,
                         resolution=tryon_resolution,  # ← ÇÖZÜNÜRLÜK
                         photo_type=photo_type,  # ← VIEW TİPİ
+                        seed=front_seed,  # ← ÖN YÜZ SEED'İNİ ZORLA
                     )
 
                     elapsed = time.time() - start_time
@@ -803,17 +805,22 @@ class AiStudioSession(models.Model):
                             img_data = req_lib.get(output_url, timeout=60).content
 
                         gen_b64 = base64.b64encode(img_data)
+                        gen_seed = tryon_result.get('seed') or False
+                        
                         gen.write({
                             'generated_image': gen_b64,
                             'state': 'done',
                             'fal_endpoint': '%s/%s' % (provider_type, tryon_model),
                             'generation_time_seconds': elapsed,
                             'cost': tryon_result.get('cost', 0.05),
+                            'seed': gen_seed,
                         })
 
                         # ═══ FRONT SONRASI: REFERANS CACHE + OUTFIT ANALİZİ ═══
                         if photo_type == 'front':
                             front_result_b64 = gen_b64  # Back/side post-processing için cache
+                            if gen_seed:
+                                front_seed = gen_seed  # Diğer görsellere seed paslamak için kaydet
 
                             if outfit_consistency is None:
                                 try:
@@ -1137,12 +1144,14 @@ class AiStudioSession(models.Model):
                 # ═══ CROSS-VIEW TUTARLILIK VERİSİ VE BAZ CACHE (Retry İçin) ═══
                 outfit_consistency = None
                 front_result_b64 = None
+                front_seed = None
 
                 if photo_type in ('back', 'side', 'detail'):
                     # Session içindeki tamamlanmış front kaydını bul
                     front_gen = session.generation_ids.filtered(lambda g: g.photo_type == 'front' and g.state == 'done')
                     if front_gen and front_gen[0].generated_image:
                         front_result_b64 = front_gen[0].generated_image
+                        front_seed = front_gen[0].seed or False
                         try:
                             from ..services.garment_analyzer import analyze_outfit_consistency
                             outfit_consistency = analyze_outfit_consistency(
@@ -1193,6 +1202,7 @@ class AiStudioSession(models.Model):
                     prompt=prompt_text,
                     resolution=tryon_resolution,
                     photo_type=photo_type,
+                    seed=front_seed,  # ← ÖN YÜZ SEED'İNİ ZORLA
                 )
 
                 output_url = tryon_result.get('image_url', '')
@@ -1209,10 +1219,13 @@ class AiStudioSession(models.Model):
                         img_data = requests.get(output_url, timeout=60).content
 
                     gen_b64 = base64.b64encode(img_data)
+                    gen_seed = tryon_result.get('seed') or False
+                    
                     gen.write({
                         'generated_image': gen_b64,
                         'state': 'done',
                         'error_message': False,
+                        'seed': gen_seed,
                     })
 
                     # ═══ RETRY BACK/SIDE POST-PROCESSING: OUTFIT TUTARLILIĞI ═══
