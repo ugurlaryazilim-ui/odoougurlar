@@ -364,12 +364,10 @@ def _build_consistency_prompt(outfit_data):
 def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
                             photo_type='front', outfit_consistency=None):
     """Analiz sonuclarina gore AI gorsel uretim promptu olustur.
-
-    Her photo_type icin ozellestirilmis prompt uretir:
-    - front: Modelin one bakis, tam vucut, on yuzu gorunen cekimi
-    - back: Modelin arkaya donuk, arkasi gorunen cekimi
-    - side: 3/4 aci, profil gorunen cekimi
-    - detail: Yakin cekim, kumas/dikus/detay gorunen cekimi
+    
+    FASHN ve virtual try-on modellerinde kiyafetin rengi, deseni veya baski grafik
+    detaylari prompta yazilmamalidir. Yazilmasi durumunda model kiyafete eklemeler
+    veya degisiklikler yapar. Prompt sadece mankeni ve sahneyi tarif etmelidir.
 
     Args:
         analysis: Kiyafet analiz sonuclari (dict)
@@ -377,74 +375,42 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         prompt_locks: Aktif prompt lock listesi (list of str)
         extra_prompt: Ek kullanici promptu
         photo_type: str — 'front', 'back', 'side', 'detail'
+        outfit_consistency: dict — outfit tutarlilik verileri
 
     Returns:
         dict: {'positive': str, 'negative': str}
     """
-    garment_type = analysis.get('garmentType', 'garment')
-    color = analysis.get('primaryColor', '')
-    fabric = analysis.get('fabricType', '')
-    pattern = analysis.get('pattern', 'Duz')
-    style = analysis.get('style', 'Casual')
-    fit = analysis.get('fitDetails', 'Regular Fit')
-    collar = analysis.get('collarType', '')
-    sleeve = analysis.get('sleeveType', '')
-
-    # ═══ VIEW-SPESIFIK BAZ PROMPT ═══
+    # Sablonu generic kelimelerle formatla (kiyafet detaylari prompta gitmesin)
     view_base = _VIEW_PROMPT_TEMPLATES.get(photo_type, _VIEW_PROMPT_TEMPLATES['front'])
     base_prompt = view_base.format(
-        garment_type=garment_type,
-        color=color,
-        fabric=fabric,
-        pattern=pattern,
-        style=style,
-        fit=fit,
+        garment_type="garment",
+        color="",
+        fabric="",
+        pattern="plain",
+        style="casual",
+        fit="standard fit",
     )
-
-    if collar:
-        base_prompt += f"Collar: {collar}. "
-    if sleeve:
-        base_prompt += f"Sleeves: {sleeve}. "
-
-    # ═══ BASKI / GRAFIK KORUMA TALIMATLARI ═══
-    has_graphic = analysis.get('hasGraphic', False)
-    graphic_desc = analysis.get('graphicDescription', '')
-    if has_graphic and graphic_desc:
-        base_prompt += (
-            f"CRITICAL GARMENT DETAIL PRESERVATION: "
-            f"This garment has a graphic print/design described as: "
-            f"'{graphic_desc}'. "
-            f"The print MUST be preserved EXACTLY as shown in the input image — "
-            f"same position, same colors, same proportions. "
-            f"Do NOT alter, simplify, remove, or reinterpret ANY part of the design. "
-        )
-    elif has_graphic:
-        base_prompt += (
-            "CRITICAL: This garment has a graphic print/design. "
-            "Preserve the print EXACTLY as shown in the input — "
-            "same position, same colors, same proportions. "
-            "Do NOT alter or remove any part of the design. "
-        )
+    
+    # Cift bosluklari temizle
+    base_prompt = " ".join(base_prompt.split()) + " "
 
     # ═══ CROSS-VIEW OUTFIT TUTARLILIĞI ═══
-    # Front view referans — back/side/detail için ön yüz kıyafet bilgisi enjekte et
+    # Front haric diger acilarda alt kombin (pantolon, ayakkabi) tutarlilik talimatini ekle
     if outfit_consistency and photo_type != 'front':
         consistency_prompt = outfit_consistency.get('fullOutfitPrompt', '')
         if consistency_prompt:
             base_prompt += consistency_prompt
 
-    # Preset bilgileri
+    # Preset bilgileri (manken tipi, cinsiyeti)
     if preset:
         gender = preset.get('gender', 'female')
         body = preset.get('body_type', 'average')
         audience = preset.get('target_audience', '')
-        base_prompt += (
-            f"Model: {gender}, {body} body type. "
-        )
+        base_prompt += f"Model: {gender}, {body} body type. "
         if audience:
             base_prompt += f"Target audience: {audience}. "
 
-    # Prompt lock'lari ekle
+    # Kalite ve kilit promptlar
     for lock in prompt_locks:
         base_prompt += f" {lock}"
 
@@ -452,12 +418,12 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     if extra_prompt:
         base_prompt += f" ADDITIONAL USER DIRECTIVE: {extra_prompt}"
 
-    # View-spesifik negatif prompt
+    # Negatif prompt
     negative = _VIEW_NEGATIVE_PROMPTS.get(photo_type, _VIEW_NEGATIVE_PROMPTS['front'])
 
     _logger.info(
-        'Prompt olusturuldu (photo_type=%s, hasGraphic=%s): %d karakter',
-        photo_type, has_graphic, len(base_prompt),
+        'Prompt olusturuldu (photo_type=%s, FASHN uyumlu): %d karakter',
+        photo_type, len(base_prompt),
     )
 
     return {

@@ -141,7 +141,10 @@ class FashnProvider(AIProviderBase):
                 'output_format': output_format,
             }
 
-        # Seed parametresi ekleme
+        # Prompt ve Seed parametreleri ekleme
+        prompt = kwargs.get('prompt', '')
+        if prompt:
+            inputs['prompt'] = prompt
         if 'seed' in kwargs and kwargs['seed']:
             inputs['seed'] = int(kwargs['seed'])
 

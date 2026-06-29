@@ -69,8 +69,17 @@ class FalProvider(AIProviderBase):
         # Manken uzerine giydirme.
         self._check_client()
 
-        # default to nano-banana-2/edit
-        endpoint = kwargs.get('endpoint', self.ENDPOINTS['nano_banana'])
+        # default endpoint mapping based on model_name
+        model_name = kwargs.get('model_name') or 'tryon-v1.6'
+        endpoint = kwargs.get('endpoint')
+        if not endpoint:
+            if 'max' in model_name:
+                endpoint = 'fal-ai/fashn/tryon-max'
+            elif 'v1.6' in model_name or 'v1-6' in model_name:
+                endpoint = self.ENDPOINTS['tryon_fashn']
+            else:
+                endpoint = self.ENDPOINTS['tryon_fashn']  # Default to FASHN v1.6 for best quality
+
         prompt = kwargs.get('prompt', '')
 
         if 'nano-banana' in endpoint:
@@ -115,6 +124,8 @@ class FalProvider(AIProviderBase):
                 'mode': mode,
                 'garment_photo_type': kwargs.get('garment_photo_type', 'flat-lay'),
             }
+            if prompt:
+                arguments['prompt'] = prompt
             if 'seed' in kwargs and kwargs['seed']:
                 arguments['seed'] = int(kwargs['seed'])
 

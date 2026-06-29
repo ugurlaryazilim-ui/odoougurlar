@@ -1067,6 +1067,8 @@ class AiStudioSession(models.Model):
                                     }
                                     if mask_url:
                                         arguments_to_send['mask_url'] = mask_url
+                                    if front_seed:
+                                        arguments_to_send['seed'] = int(front_seed)
 
                                     edit_result = fal_client.subscribe(
                                         'fal-ai/flux/schnell/image-to-image',
@@ -1150,6 +1152,8 @@ class AiStudioSession(models.Model):
                                         }
                                         if mask_url:
                                             arguments_to_send['mask_url'] = mask_url
+                                        if front_seed:
+                                            arguments_to_send['seed'] = int(front_seed)
 
                                         edit_result = fal_client.subscribe(
                                             'fal-ai/flux/schnell/image-to-image',
@@ -1506,22 +1510,31 @@ class AiStudioSession(models.Model):
                                     fal_client = None
 
                                 if fal_client:
+                                    mask_b64 = session._generate_inpainting_mask(gen_b64, garment_type=preset.garment_type or 'tops')
+                                    mask_url = provider.upload_image(mask_b64) if mask_b64 else None
+
+                                    arguments_to_send = {
+                                        'prompt': edit_prompt,
+                                        'image_url': current_url,
+                                        'strength': 0.82,
+                                        'ip_adapters': [
+                                            {
+                                                'image_url': front_ref_url,
+                                                'conditioning_scale': 0.85,
+                                            }
+                                        ],
+                                        'num_images': 1,
+                                        'aspect_ratio': '3:4',
+                                        'enable_safety_checker': True,
+                                    }
+                                    if mask_url:
+                                        arguments_to_send['mask_url'] = mask_url
+                                    if front_seed:
+                                        arguments_to_send['seed'] = int(front_seed)
+
                                     edit_result = fal_client.subscribe(
                                         'fal-ai/flux/schnell/image-to-image',
-                                        arguments={
-                                            'prompt': edit_prompt,
-                                            'image_url': current_url,
-                                            'strength': 0.28,
-                                            'ip_adapters': [
-                                                {
-                                                    'image_url': front_ref_url,
-                                                    'conditioning_scale': 0.85,
-                                                }
-                                            ],
-                                            'num_images': 1,
-                                            'aspect_ratio': '3:4',
-                                            'enable_safety_checker': True,
-                                        },
+                                        arguments=arguments_to_send,
                                         client_timeout=300,
                                     )
                                     edit_images = edit_result.get('images', [])
