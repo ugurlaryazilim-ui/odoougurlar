@@ -553,8 +553,14 @@ class AiStudioSession(models.Model):
             except Exception as ae:
                 _logger.warning('Kıyafet analizi başarısız, varsayılan kullanılacak: %s', ae)
 
-            # ═══ TÜM GENERATION'LARI İŞLE (front/back/side/detail) ═══
-            for gen in generations:
+            # ═══ TÜM GENERATION'LARI İŞLE ═══
+            # Sıralama: front → back/side → detail (detay, front sonucundan kırpılır)
+            ordered_gens = (
+                generations.filtered(lambda g: g.photo_type == 'front')
+                + generations.filtered(lambda g: g.photo_type in ('back', 'side'))
+                + generations.filtered(lambda g: g.photo_type == 'detail')
+            )
+            for gen in ordered_gens:
                 try:
                     gen.write({'state': 'processing'})
                     cr.commit()
@@ -581,31 +587,60 @@ class AiStudioSession(models.Model):
                         preprocessed['final_size'][0], preprocessed['final_size'][1],
                     )
 
-                    # ═══ DETAY FOTOĞRAFI: Özel İşlem ═══
+                    # ═══ DETAY FOTOĞRAFI: Manken Üzerinden Kırpma ═══
                     if photo_type == 'detail':
-                        # Detay fotoğrafı var — arka plan kaldır ve kaydet
-                        if auto_bg and processed_b64:
-                            try:
-                                bg_removed_b64 = provider.remove_background(processed_b64)
-                                try:
-                                    bg_removed_data = base64.b64decode(bg_removed_b64)
-                                    rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
-                                    detail_b64 = base64.b64encode(rgb_data)
-                                except Exception:
-                                    detail_b64 = bg_removed_b64
-                            except Exception as e:
-                                _logger.warning('Detay BG remove başarısız: %s', e)
-                                detail_b64 = processed_b64
+                        # Önce tamamlanmış front try-on sonucunu bul
+                        target_type = 'front'
+                        if gen.source_photo_id and gen.source_photo_id.photo_type == 'detail':
+                            if gen.source_photo_id.detail_placement == 'back':
+                                target_type = 'back'
+
+                        target_gen = session.generation_ids.filtered(
+                            lambda g: g.photo_type == target_type and g.state == 'done' and g.generated_image
+                        )
+                        if not target_gen and target_type == 'back':
+                            target_gen = session.generation_ids.filtered(
+                                lambda g: g.photo_type == 'front' and g.state == 'done' and g.generated_image
+                            )
+
+                        if target_gen:
+                            # Manken üzerindeki giydirme sonucundan detay kırp
+                            detail_b64 = session._crop_image_detail(
+                                target_gen[0].generated_image,
+                                category=preset.garment_type or 'tops'
+                            )
+                            _logger.info(
+                                'Detay kırpıldı (gen=%s): %s try-on sonucundan',
+                                gen.id, target_type,
+                            )
                         else:
-                            detail_b64 = processed_b64
+                            # Fallback: front try-on yoksa orijinal fotoğrafı BG remove ile kullan
+                            _logger.warning(
+                                'Detay kırpma fallback: try-on sonucu bulunamadı, BG remove uygulanıyor (gen=%s)',
+                                gen.id,
+                            )
+                            if auto_bg and processed_b64:
+                                try:
+                                    bg_removed_b64 = provider.remove_background(processed_b64)
+                                    try:
+                                        bg_removed_data = base64.b64decode(bg_removed_b64)
+                                        rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
+                                        detail_b64 = base64.b64encode(rgb_data)
+                                    except Exception:
+                                        detail_b64 = bg_removed_b64
+                                except Exception as e:
+                                    _logger.warning('Detay BG remove başarısız: %s', e)
+                                    detail_b64 = processed_b64
+                            else:
+                                detail_b64 = processed_b64
 
                         elapsed = time.time() - start_time
                         gen.write({
                             'generated_image': detail_b64,
                             'state': 'done',
-                            'fal_endpoint': '%s/bg-remove-detail' % provider_type,
+                            'fal_endpoint': 'detail-crop' if target_gen else ('%s/bg-remove-detail' % provider_type),
                             'generation_time_seconds': elapsed,
-                            'cost': 0.01,
+                            'cost': 0.0 if target_gen else 0.01,
                         })
 
                         # Kalite kontrol
@@ -868,37 +903,58 @@ class AiStudioSession(models.Model):
                 source_image = gen.original_image
                 preset = session.model_preset_id
 
-                # ═══ DETAY İŞLEMİ ═══
+                # ═══ DETAY İŞLEMİ — Manken Üzerinden Kırpma ═══
                 if photo_type == 'detail':
-                    from ..services.garment_preprocessor import (
-                        preprocess_garment_image,
-                        convert_birefnet_output_to_rgb,
+                    # Tamamlanmış front try-on sonucunu bul
+                    target_type = 'front'
+                    if gen.source_photo_id and gen.source_photo_id.photo_type == 'detail':
+                        if gen.source_photo_id.detail_placement == 'back':
+                            target_type = 'back'
+
+                    target_gen = session.generation_ids.filtered(
+                        lambda g: g.photo_type == target_type and g.state == 'done' and g.generated_image
                     )
-                    preprocessed = preprocess_garment_image(source_image, target_long_edge=864)
-                    processed_b64 = preprocessed['image_base64']
+                    if not target_gen and target_type == 'back':
+                        target_gen = session.generation_ids.filtered(
+                            lambda g: g.photo_type == 'front' and g.state == 'done' and g.generated_image
+                        )
 
-                    auto_bg = env['ir.config_parameter'].sudo().get_param(
-                        'ugurlar_ai_studio.auto_bg_remove', 'True'
-                    ) == 'True'
-
-                    if auto_bg and processed_b64:
-                        try:
-                            bg_removed_b64 = provider.remove_background(processed_b64)
-                            try:
-                                bg_removed_data = base64.b64decode(bg_removed_b64)
-                                rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
-                                detail_b64 = base64.b64encode(rgb_data)
-                            except Exception:
-                                detail_b64 = bg_removed_b64
-                        except Exception:
-                            detail_b64 = processed_b64
+                    if target_gen:
+                        detail_b64 = session._crop_image_detail(
+                            target_gen[0].generated_image,
+                            category=preset.garment_type or 'tops'
+                        )
                     else:
-                        detail_b64 = processed_b64
+                        # Fallback: BG remove
+                        from ..services.garment_preprocessor import (
+                            preprocess_garment_image,
+                            convert_birefnet_output_to_rgb,
+                        )
+                        preprocessed = preprocess_garment_image(source_image, target_long_edge=864)
+                        processed_b64 = preprocessed['image_base64']
+
+                        auto_bg = env['ir.config_parameter'].sudo().get_param(
+                            'ugurlar_ai_studio.auto_bg_remove', 'True'
+                        ) == 'True'
+
+                        if auto_bg and processed_b64:
+                            try:
+                                bg_removed_b64 = provider.remove_background(processed_b64)
+                                try:
+                                    bg_removed_data = base64.b64decode(bg_removed_b64)
+                                    rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
+                                    detail_b64 = base64.b64encode(rgb_data)
+                                except Exception:
+                                    detail_b64 = bg_removed_b64
+                            except Exception:
+                                detail_b64 = processed_b64
+                        else:
+                            detail_b64 = processed_b64
 
                     gen.write({
                         'generated_image': detail_b64,
                         'state': 'done',
-                        'fal_endpoint': '%s/bg-remove-detail' % provider_type,
+                        'fal_endpoint': 'detail-crop' if target_gen else ('%s/bg-remove-detail' % provider_type),
                         'error_message': False,
                     })
                     cr.commit()

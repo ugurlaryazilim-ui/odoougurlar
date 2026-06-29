@@ -315,7 +315,11 @@ _VIEW_PROMPT_TEMPLATES = {
         "The FRONT of the {color} {fabric} {garment_type} is fully visible. "
         "Clean white/light studio background. Even, shadow-free lighting. "
         "Style: {style}, Fit: {fit}. Pattern: {pattern}. "
-        "Natural standing pose with arms relaxed at sides. "
+        "PROFESSIONAL MODEL POSE: Confident, dynamic fashion pose — "
+        "one hand on hip or slightly touching the thigh, weight shifted to one leg, "
+        "slight body angle creating an S-curve silhouette. "
+        "Natural relaxed shoulders, chin slightly lifted. "
+        "NOT a stiff mannequin pose — the model should look alive and editorial. "
         "Sharp focus on garment details, fabric texture, and construction. "
     ),
     'back': (
@@ -324,7 +328,11 @@ _VIEW_PROMPT_TEMPLATES = {
         "The BACK of the {color} {fabric} {garment_type} is fully visible. "
         "Clean white/light studio background. Even, shadow-free lighting. "
         "Style: {style}, Fit: {fit}. Pattern: {pattern}. "
-        "Natural standing pose showing the rear construction and fit. "
+        "PROFESSIONAL MODEL POSE: Elegant back pose — "
+        "slight contrapposto stance with weight on one leg, "
+        "one hand resting naturally on hip or at side with slight bend, "
+        "head turned very slightly to show jawline profile. "
+        "NOT a rigid straight standing pose — the model should convey movement and elegance. "
         "Sharp focus on back details, seams, and garment shape. "
     ),
     'side': (
@@ -333,16 +341,19 @@ _VIEW_PROMPT_TEMPLATES = {
         "The SIDE PROFILE of the {color} {fabric} {garment_type} is visible. "
         "Clean white/light studio background. Even, shadow-free lighting. "
         "Style: {style}, Fit: {fit}. Pattern: {pattern}. "
-        "Natural three-quarter pose showing garment drape and silhouette. "
+        "PROFESSIONAL MODEL POSE: Elegant three-quarter fashion pose — "
+        "contrapposto stance, one hand on hip, "
+        "body slightly twisted to create dynamic silhouette, "
+        "walking stride or mid-step look for editorial feel. "
         "Sharp focus on garment side profile and fit on body. "
     ),
     'detail': (
-        "Professional CLOSE-UP DETAIL fashion photography. "
-        "Macro shot showing the fine details of the {color} {fabric} {garment_type}. "
+        "Professional CLOSE-UP DETAIL shot of a {color} {fabric} {garment_type} "
+        "WORN ON A MODEL. Tight crop on the chest/torso area showing the garment up close. "
         "Focus on fabric texture, stitching quality, button/zipper details, and material. "
         "Pattern: {pattern}. "
         "Extreme sharp focus, studio macro lighting. "
-        "Show the craftsmanship and material quality. "
+        "Show the craftsmanship and material quality AS WORN on a real person. "
     ),
 }
 
@@ -356,6 +367,8 @@ _VIEW_NEGATIVE_PROMPTS = {
         "altered garment design, changed collar, wrong garment color, "
         "wrong fabric texture, wrong button style, modified print, "
         "different pattern, altered graphic, changed logo, "
+        "stiff pose, rigid standing, arms straight at sides, amateur pose, "
+        "military stance, passport photo pose, "
         "bare midriff, bare chest, nude model, "
         "back view, rear view, side view, profile view"
     ),
@@ -366,6 +379,8 @@ _VIEW_NEGATIVE_PROMPTS = {
         "blurry, low quality, collage, split screen, multi-panel, "
         "studio equipment, softbox, light stand, flash head, "
         "altered garment design, wrong garment color, wrong fabric texture, "
+        "stiff pose, rigid standing, arms straight at sides, amateur pose, "
+        "military stance, "
         "front view, facing camera, face visible, "
         "bare midriff, bare chest, nude model"
     ),
@@ -376,13 +391,15 @@ _VIEW_NEGATIVE_PROMPTS = {
         "blurry, low quality, collage, split screen, multi-panel, "
         "studio equipment, softbox, light stand, flash head, "
         "altered garment design, wrong garment color, wrong fabric texture, "
+        "stiff pose, rigid standing, amateur pose, "
         "bare midriff, bare chest, nude model"
     ),
     'detail': (
-        "full body shot, wide angle, person visible, face visible, "
+        "full body shot, wide angle, "
         "blurry, low quality, out of focus, "
         "altered garment design, wrong garment color, wrong fabric texture, "
-        "modified print, different pattern, altered graphic"
+        "modified print, different pattern, altered graphic, "
+        "flat-lay photo, hanger, product-only shot without model"
     ),
 }
 
