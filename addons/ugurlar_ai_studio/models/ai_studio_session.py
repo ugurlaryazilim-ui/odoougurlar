@@ -870,7 +870,7 @@ class AiStudioSession(models.Model):
 
                                     if fal_client:
                                         edit_result = fal_client.subscribe(
-                                            'fal-ai/flux/dev/image-to-image',
+                                            'fal-ai/flux/schnell/image-to-image',
                                             arguments={
                                                 'prompt': edit_prompt,
                                                 'image_url': current_url,
@@ -885,7 +885,7 @@ class AiStudioSession(models.Model):
                                                 'aspect_ratio': '3:4',
                                                 'enable_safety_checker': True,
                                             },
-                                            client_timeout=120,
+                                            client_timeout=300,
                                         )
                                         edit_images = edit_result.get('images', [])
                                         if edit_images:
@@ -1247,22 +1247,22 @@ class AiStudioSession(models.Model):
 
                                 if fal_client:
                                     edit_result = fal_client.subscribe(
-                                        'fal-ai/flux/dev/image-to-image',
+                                        'fal-ai/flux/schnell/image-to-image',
                                         arguments={
                                             'prompt': edit_prompt,
                                             'image_url': current_url,
-                                            'strength': 0.28,  # Low strength keeps 72% of the original FASHN upper garment structure/pose
+                                            'strength': 0.28,
                                             'ip_adapters': [
                                                 {
                                                     'image_url': front_ref_url,
-                                                    'conditioning_scale': 0.85,  # Strong influence of front view pants/shoes style/colors
+                                                    'conditioning_scale': 0.85,
                                                 }
                                             ],
                                             'num_images': 1,
                                             'aspect_ratio': '3:4',
                                             'enable_safety_checker': True,
                                         },
-                                        client_timeout=120,
+                                        client_timeout=300,
                                     )
                                     edit_images = edit_result.get('images', [])
                                     if edit_images:

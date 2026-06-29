@@ -119,7 +119,7 @@ class FalProvider(AIProviderBase):
         result = fal_client.subscribe(
             endpoint,
             arguments=arguments,
-            client_timeout=180,
+            client_timeout=300,
         )
 
         image_urls = []
