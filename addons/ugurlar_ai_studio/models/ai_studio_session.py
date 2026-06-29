@@ -854,20 +854,17 @@ class AiStudioSession(models.Model):
                                     shoes_desc = outfit_consistency.get('shoesColor', '') + ' ' + outfit_consistency.get('shoesType', '')
                                     hair_desc = outfit_consistency.get('hairStyle', '')
 
-                                    view_label = 'BACK VIEW' if photo_type == 'back' else 'SIDE/THREE-QUARTER VIEW'
+                                    view_label = 'back' if photo_type == 'back' else 'side profile'
 
                                     edit_prompt = (
-                                        f"RAW photo, photorealistic, professional fashion photography. "
+                                        f"RAW photo, photorealistic, professional fashion photography, white background. "
                                         f"OUTPUT EXACTLY ONE IMAGE. "
-                                        f"This is a {view_label} of a fashion model. "
-                                        f"Keep the UPPER GARMENT (top/shirt/blouse) EXACTLY as it is — "
-                                        f"do NOT change the top garment at all. "
-                                        f"CHANGE ONLY the pants/bottoms and shoes to EXACTLY match "
-                                        f"the reference image: {bottoms_desc.strip()}, {shoes_desc.strip()}. "
-                                        f"The model has {hair_desc}. "
-                                        f"Same person, same pose angle, same background. "
-                                        f"Only the lower body clothing changes to match the reference. "
-                                        f"Professional studio white background, even lighting. "
+                                        f"Image 1 is a {view_label} view of a model wearing a top garment. "
+                                        f"In image 1, KEEP the upper garment (top/shirt/blouse) and the pose and background EXACTLY as they are. Do NOT change the top garment of image 1 in any way. "
+                                        f"CHANGE ONLY the pants/bottoms and shoes of the model in image 1 to EXACTLY match "
+                                        f"the pants/bottoms and shoes from image 2 (which are {bottoms_desc.strip()} and {shoes_desc.strip()}). "
+                                        f"Make sure the model's hair matches image 2: {hair_desc.strip()}. "
+                                        f"The final output must show the model from image 1 but wearing the bottoms and shoes of image 2."
                                     )
 
                                     import os
@@ -888,9 +885,10 @@ class AiStudioSession(models.Model):
                                                 'aspect_ratio': '3:4',
                                                 'output_format': 'jpeg',
                                                 'safety_tolerance': '5',
+                                                'resolution': '2K',
+                                                'limit_generations': True,
                                             },
-                                            with_logs=False,
-                                            timeout=120,
+                                            client_timeout=120,
                                         )
                                         edit_images = edit_result.get('images', [])
                                         if edit_images:
@@ -1139,6 +1137,25 @@ class AiStudioSession(models.Model):
                             'one_piece': 'one-piece',
                         }.get(cat, 'tops')
 
+                # ═══ CROSS-VIEW TUTARLILIK VERİSİ VE BAZ CACHE (Retry İçin) ═══
+                outfit_consistency = None
+                front_result_b64 = None
+
+                if photo_type in ('back', 'side', 'detail'):
+                    # Session içindeki tamamlanmış front kaydını bul
+                    front_gen = session.generation_ids.filtered(lambda g: g.photo_type == 'front' and g.state == 'done')
+                    if front_gen and front_gen[0].generated_image:
+                        front_result_b64 = front_gen[0].generated_image
+                        try:
+                            from ..services.garment_analyzer import analyze_outfit_consistency
+                            outfit_consistency = analyze_outfit_consistency(
+                                front_result_b64,
+                                api_key=fal_api_key,
+                                gemini_api_key=gemini_api_key,
+                            )
+                        except Exception as oe:
+                            _logger.warning('Retry outfit tutarlılık analizi başarısız: %s', oe)
+
                 # ═══ VIEW-SPESİFİK PROMPT ═══
                 prompt_text = ""
                 try:
@@ -1161,6 +1178,7 @@ class AiStudioSession(models.Model):
                         analysis, preset_data, prompt_locks,
                         session.extra_prompt or '',
                         photo_type=photo_type,
+                        outfit_consistency=outfit_consistency,
                     )
                     prompt_text = built_prompt.get('positive', '')
                 except Exception as pe:
@@ -1199,6 +1217,76 @@ class AiStudioSession(models.Model):
                         'state': 'done',
                         'error_message': False,
                     })
+
+                    # ═══ RETRY BACK/SIDE POST-PROCESSING: OUTFIT TUTARLILIĞI ═══
+                    if photo_type in ('back', 'side') and front_result_b64 and outfit_consistency:
+                        consistency_prompt = outfit_consistency.get('fullOutfitPrompt', '')
+                        if consistency_prompt:
+                            try:
+                                _logger.info(
+                                    'Retry post-processing outfit tutarlılığı başlatılıyor (gen=%s, tip=%s)',
+                                    gen.id, photo_type,
+                                )
+                                front_ref_url = provider.upload_image(front_result_b64)
+                                current_url = provider.upload_image(gen_b64)
+
+                                bottoms_desc = outfit_consistency.get('bottomsColor', '') + ' ' + outfit_consistency.get('bottomsType', '')
+                                shoes_desc = outfit_consistency.get('shoesColor', '') + ' ' + outfit_consistency.get('shoesType', '')
+                                hair_desc = outfit_consistency.get('hairStyle', '')
+
+                                view_label = 'back' if photo_type == 'back' else 'side profile'
+
+                                edit_prompt = (
+                                    f"RAW photo, photorealistic, professional fashion photography, white background. "
+                                    f"OUTPUT EXACTLY ONE IMAGE. "
+                                    f"Image 1 is a {view_label} view of a model wearing a top garment. "
+                                    f"In image 1, KEEP the upper garment (top/shirt/blouse) and the pose and background EXACTLY as they are. Do NOT change the top garment of image 1 in any way. "
+                                    f"CHANGE ONLY the pants/bottoms and shoes of the model in image 1 to EXACTLY match "
+                                    f"the pants/bottoms and shoes from image 2 (which are {bottoms_desc.strip()} and {shoes_desc.strip()}). "
+                                    f"Make sure the model's hair matches image 2: {hair_desc.strip()}. "
+                                    f"The final output must show the model from image 1 but wearing the bottoms and shoes of image 2."
+                                )
+
+                                import os
+                                os.environ['FAL_KEY'] = fal_api_key
+
+                                try:
+                                    import fal_client
+                                except ImportError:
+                                    fal_client = None
+
+                                if fal_client:
+                                    edit_result = fal_client.subscribe(
+                                        'fal-ai/nano-banana-2/edit',
+                                        arguments={
+                                            'prompt': edit_prompt,
+                                            'image_urls': [current_url, front_ref_url],
+                                            'num_images': 1,
+                                            'aspect_ratio': '3:4',
+                                            'output_format': 'jpeg',
+                                            'safety_tolerance': '5',
+                                            'resolution': '2K',
+                                            'limit_generations': True,
+                                        },
+                                        client_timeout=120,
+                                    )
+                                    edit_images = edit_result.get('images', [])
+                                    if edit_images:
+                                        edit_url = edit_images[0].get('url', '')
+                                        if edit_url:
+                                            import requests as req_lib
+                                            edit_data = req_lib.get(edit_url, timeout=60).content
+                                            edited_b64 = base64.b64encode(edit_data)
+                                            gen.write({
+                                                'generated_image': edited_b64,
+                                            })
+                                            gen_b64 = edited_b64
+                                            _logger.info(
+                                                'Retry post-processing outfit tutarlılığı tamamlandı (gen=%s, tip=%s)',
+                                                gen.id, photo_type,
+                                            )
+                            except Exception as pp_e:
+                                _logger.warning('Retry post-processing outfit tutarlılığı başarısız: %s', pp_e)
 
                     # Kalite kontrol
                     try:
