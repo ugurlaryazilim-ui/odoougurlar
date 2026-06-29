@@ -826,7 +826,7 @@ class AiStudioSession(models.Model):
                     _pre_url = provider.upload_image(_pre['image_base64'])
 
                     from ..services.garment_analyzer import analyze_garment
-cached_analysis = analyze_garment(
+                    cached_analysis = analyze_garment(
                         fal_api_key, _pre_url, gemini_api_key=gemini_api_key
                     )
                     _logger.info(
