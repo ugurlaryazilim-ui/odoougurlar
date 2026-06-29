@@ -816,11 +816,69 @@ class AiStudioSession(models.Model):
                             'seed': gen_seed,
                         })
 
-                        # ═══ FRONT SONRASI: REFERANS CACHE + OUTFIT ANALİZİ ═══
+                        # ═══ FRONT SONRASI: REFERANS CACHE + KOMBİN GİYDİRME + OUTFIT ANALİZİ ═══
                         if photo_type == 'front':
-                            front_result_b64 = gen_b64  # Back/side post-processing için cache
                             if gen_seed:
                                 front_seed = gen_seed  # Diğer görsellere seed paslamak için kaydet
+
+                            # Ürüne en uygun alt giyim ve ayakkabı kombinini al
+                            rec_bottoms = (cached_analysis or {}).get('recommendedBottoms', 'dark blue skinny jeans')
+                            rec_shoes = (cached_analysis or {}).get('recommendedShoes', 'white sneakers')
+
+                            try:
+                                _logger.info(
+                                    'Front post-processing (ürüne en uygun kombin giydirme) başlatılıyor (gen=%s)',
+                                    gen.id,
+                                )
+                                current_url = provider.upload_image(gen_b64)
+                                
+                                # Front için sadece prompt ile kombin giydir (IP-Adapter yok, kendisi referans)
+                                edit_prompt = (
+                                    f"RAW photo, photorealistic, professional fashion photography, studio lighting, white background. "
+                                    f"A model wearing a top garment. Change ONLY the bottoms and shoes of the model "
+                                    f"to wear: {rec_bottoms} and {rec_shoes}. "
+                                    f"KEEP the upper garment and pose and face exactly as they are. "
+                                    f"Only the lower body style changes to match the styling advice."
+                                )
+                                
+                                import os
+                                os.environ['FAL_KEY'] = fal_api_key
+                                
+                                try:
+                                    import fal_client
+                                except ImportError:
+                                    fal_client = None
+                                    
+                                if fal_client:
+                                    edit_result = fal_client.subscribe(
+                                        'fal-ai/flux/schnell/image-to-image',
+                                        arguments={
+                                            'prompt': edit_prompt,
+                                            'image_url': current_url,
+                                            'strength': 0.38,  # Tişörtü ve pozu korumak için düşük denoising
+                                            'num_images': 1,
+                                            'aspect_ratio': '3:4',
+                                            'enable_safety_checker': True,
+                                        },
+                                        client_timeout=300,
+                                    )
+                                    edit_images = edit_result.get('images', [])
+                                    if edit_images:
+                                        edit_url = edit_images[0].get('url', '')
+                                        if edit_url:
+                                            edit_data = req_lib.get(edit_url, timeout=60).content
+                                            edited_b64 = base64.b64encode(edit_data)
+                                            gen.write({
+                                                'generated_image': edited_b64,
+                                            })
+                                            gen_b64 = edited_b64  # referans cache'ini güncelle
+                                            _logger.info('Front post-processing (kombin giydirme) tamamlandı.')
+                                    else:
+                                        _logger.warning('Front post-processing edit sonuç döndürmedi')
+                            except Exception as front_pp_e:
+                                _logger.warning('Front post-processing kombin giydirme başarısız: %s', front_pp_e)
+
+                            front_result_b64 = gen_b64  # Artık kombini güncellenmiş front görseli referans
 
                             if outfit_consistency is None:
                                 try:

@@ -99,7 +99,9 @@ Analyze the garment and return a JSON with these fields:
   "garmentLength": "string — mini/midi/maxi/standard",
   "hemline": "string — hem description",
   "seoTitle": "string — SEO optimized Turkish title",
-  "seoDescription": "string — SEO optimized Turkish description (50-100 words)"
+  "seoDescription": "string — SEO optimized Turkish description (50-100 words)",
+  "recommendedBottoms": "string — Describe in English the most matching pants/trousers/jeans style and color to build a stylish outfit with this product (e.g. 'dark blue slim-fit denim jeans', 'beige tailored cotton trousers', 'black cargo pants')",
+  "recommendedShoes": "string — Describe in English the most matching shoes style and color for this outfit (e.g. 'clean white minimalist leather sneakers', 'brown leather loafers', 'black high-top boots')"
 }
 
 Return ONLY valid JSON, no markdown."""
@@ -586,6 +588,8 @@ def _default_analysis():
         'hemline': '',
         'seoTitle': '',
         'seoDescription': '',
+        'recommendedBottoms': 'dark blue skinny jeans',
+        'recommendedShoes': 'white sneakers',
     }
 
 
