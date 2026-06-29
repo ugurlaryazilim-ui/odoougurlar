@@ -842,7 +842,7 @@ class AiStudioSession(models.Model):
                             if consistency_prompt:
                                 try:
                                     _logger.info(
-                                        'Post-processing outfit tutarlılığı başlatılıyor (gen=%s, tip=%s)',
+                                        'Post-processing outfit tutarlılığı (flux-img2img+ipadapter) başlatılıyor (gen=%s, tip=%s)',
                                         gen.id, photo_type,
                                     )
                                     # Front sonucunu fal storage'a yükle
@@ -852,19 +852,12 @@ class AiStudioSession(models.Model):
 
                                     bottoms_desc = outfit_consistency.get('bottomsColor', '') + ' ' + outfit_consistency.get('bottomsType', '')
                                     shoes_desc = outfit_consistency.get('shoesColor', '') + ' ' + outfit_consistency.get('shoesType', '')
-                                    hair_desc = outfit_consistency.get('hairStyle', '')
-
-                                    view_label = 'back' if photo_type == 'back' else 'side profile'
 
                                     edit_prompt = (
-                                        f"RAW photo, photorealistic, professional fashion photography, white background. "
-                                        f"OUTPUT EXACTLY ONE IMAGE. "
-                                        f"Image 1 is a {view_label} view of a model wearing a top garment. "
-                                        f"In image 1, KEEP the upper garment (top/shirt/blouse) and the pose and background EXACTLY as they are. Do NOT change the top garment of image 1 in any way. "
-                                        f"CHANGE ONLY the pants/bottoms and shoes of the model in image 1 to EXACTLY match "
-                                        f"the pants/bottoms and shoes from image 2 (which are {bottoms_desc.strip()} and {shoes_desc.strip()}). "
-                                        f"Make sure the model's hair matches image 2: {hair_desc.strip()}. "
-                                        f"The final output must show the model from image 1 but wearing the bottoms and shoes of image 2."
+                                        f"RAW photo, photorealistic, professional fashion photography, studio lighting, white background. "
+                                        f"A model wearing a top garment, matching the outfit from the reference image. "
+                                        f"The model must wear the exact same {bottoms_desc.strip()} and the exact same {shoes_desc.strip()} "
+                                        f"as shown in the reference image. Perfect color tone matching, high detail, 8k resolution."
                                     )
 
                                     import os
@@ -877,16 +870,20 @@ class AiStudioSession(models.Model):
 
                                     if fal_client:
                                         edit_result = fal_client.subscribe(
-                                            'fal-ai/nano-banana-2/edit',
+                                            'fal-ai/flux/dev/image-to-image',
                                             arguments={
                                                 'prompt': edit_prompt,
-                                                'image_urls': [current_url, front_ref_url],
+                                                'image_url': current_url,
+                                                'strength': 0.28,  # Low strength keeps 72% of the original FASHN upper garment structure/pose
+                                                'ip_adapters': [
+                                                    {
+                                                        'image_url': front_ref_url,
+                                                        'conditioning_scale': 0.85,  # Strong influence of front view pants/shoes style/colors
+                                                    }
+                                                ],
                                                 'num_images': 1,
                                                 'aspect_ratio': '3:4',
-                                                'output_format': 'jpeg',
-                                                'safety_tolerance': '5',
-                                                'resolution': '2K',
-                                                'limit_generations': True,
+                                                'enable_safety_checker': True,
                                             },
                                             client_timeout=120,
                                         )
@@ -1224,7 +1221,7 @@ class AiStudioSession(models.Model):
                         if consistency_prompt:
                             try:
                                 _logger.info(
-                                    'Retry post-processing outfit tutarlılığı başlatılıyor (gen=%s, tip=%s)',
+                                    'Retry post-processing outfit tutarlılığı (flux-img2img+ipadapter) başlatılıyor (gen=%s, tip=%s)',
                                     gen.id, photo_type,
                                 )
                                 front_ref_url = provider.upload_image(front_result_b64)
@@ -1232,19 +1229,12 @@ class AiStudioSession(models.Model):
 
                                 bottoms_desc = outfit_consistency.get('bottomsColor', '') + ' ' + outfit_consistency.get('bottomsType', '')
                                 shoes_desc = outfit_consistency.get('shoesColor', '') + ' ' + outfit_consistency.get('shoesType', '')
-                                hair_desc = outfit_consistency.get('hairStyle', '')
-
-                                view_label = 'back' if photo_type == 'back' else 'side profile'
 
                                 edit_prompt = (
-                                    f"RAW photo, photorealistic, professional fashion photography, white background. "
-                                    f"OUTPUT EXACTLY ONE IMAGE. "
-                                    f"Image 1 is a {view_label} view of a model wearing a top garment. "
-                                    f"In image 1, KEEP the upper garment (top/shirt/blouse) and the pose and background EXACTLY as they are. Do NOT change the top garment of image 1 in any way. "
-                                    f"CHANGE ONLY the pants/bottoms and shoes of the model in image 1 to EXACTLY match "
-                                    f"the pants/bottoms and shoes from image 2 (which are {bottoms_desc.strip()} and {shoes_desc.strip()}). "
-                                    f"Make sure the model's hair matches image 2: {hair_desc.strip()}. "
-                                    f"The final output must show the model from image 1 but wearing the bottoms and shoes of image 2."
+                                    f"RAW photo, photorealistic, professional fashion photography, studio lighting, white background. "
+                                    f"A model wearing a top garment, matching the outfit from the reference image. "
+                                    f"The model must wear the exact same {bottoms_desc.strip()} and the exact same {shoes_desc.strip()} "
+                                    f"as shown in the reference image. Perfect color tone matching, high detail, 8k resolution."
                                 )
 
                                 import os
@@ -1257,16 +1247,20 @@ class AiStudioSession(models.Model):
 
                                 if fal_client:
                                     edit_result = fal_client.subscribe(
-                                        'fal-ai/nano-banana-2/edit',
+                                        'fal-ai/flux/dev/image-to-image',
                                         arguments={
                                             'prompt': edit_prompt,
-                                            'image_urls': [current_url, front_ref_url],
+                                            'image_url': current_url,
+                                            'strength': 0.28,  # Low strength keeps 72% of the original FASHN upper garment structure/pose
+                                            'ip_adapters': [
+                                                {
+                                                    'image_url': front_ref_url,
+                                                    'conditioning_scale': 0.85,  # Strong influence of front view pants/shoes style/colors
+                                                }
+                                            ],
                                             'num_images': 1,
                                             'aspect_ratio': '3:4',
-                                            'output_format': 'jpeg',
-                                            'safety_tolerance': '5',
-                                            'resolution': '2K',
-                                            'limit_generations': True,
+                                            'enable_safety_checker': True,
                                         },
                                         client_timeout=120,
                                     )
