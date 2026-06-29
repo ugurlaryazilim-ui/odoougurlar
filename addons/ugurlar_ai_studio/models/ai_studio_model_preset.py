@@ -215,7 +215,7 @@ class AiStudioModelPreset(models.Model):
         thread = threading.Thread(
             target=self._generate_mannequin_thread,
             args=(self.id, self.mannequin_prompt, api_key,
-                  self.gender, self.body_type, self.background_type, provider_type),
+                  self.gender, self.body_type, self.background_type, provider_type, self.env.uid),
         )
         thread.daemon = True
         thread.start()
@@ -387,7 +387,7 @@ class AiStudioModelPreset(models.Model):
         )
 
     def _generate_mannequin_thread(self, preset_id, prompt, api_key,
-                                    gender, body_type, bg_type, provider_type='fashn'):
+                                    gender, body_type, bg_type, provider_type, uid):
         """Thread içinde AI manken oluştur — SaaS tarzı consistency ile."""
         time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
         try:
@@ -426,7 +426,7 @@ class AiStudioModelPreset(models.Model):
             garment_type = 'tops'
             try:
                 with self.pool.cursor() as cr:
-                    env = api.Environment(cr, self.env.uid, {})
+                    env = api.Environment(cr, uid, {})
                     p = env['ai.studio.model.preset'].browse(preset_id)
                     garment_type = p.garment_type or 'tops'
             except Exception:
@@ -596,7 +596,7 @@ class AiStudioModelPreset(models.Model):
 
             # ═══ DB'ye kaydet ═══
             with self.pool.cursor() as cr:
-                env = api.Environment(cr, self.env.uid, {})
+                env = api.Environment(cr, uid, {})
                 preset = env['ai.studio.model.preset'].browse(preset_id)
                 preset.write({
                     'model_image_front': front_data,
@@ -605,6 +605,7 @@ class AiStudioModelPreset(models.Model):
                     'preview_image': preview_data,
                     'mannequin_generation_state': 'done',
                 })
+                cr.commit()
 
             _logger.info('Manken oluşturma tamamlandı: preset_id=%s', preset_id)
 
@@ -614,9 +615,10 @@ class AiStudioModelPreset(models.Model):
             _logger.error('Manken oluşturma hatası: %s', format_fal_error_for_log(e, f'preset={preset_id}'))
             try:
                 with self.pool.cursor() as cr:
-                    env = api.Environment(cr, self.env.uid, {})
+                    env = api.Environment(cr, uid, {})
                     preset = env['ai.studio.model.preset'].browse(preset_id)
                     preset.write({'mannequin_generation_state': 'failed'})
+                    cr.commit()
             except Exception:
                 _logger.error('Durum güncelleme de başarısız oldu')
 

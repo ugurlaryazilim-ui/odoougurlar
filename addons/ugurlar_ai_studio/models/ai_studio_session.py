@@ -493,7 +493,7 @@ class AiStudioSession(models.Model):
         # Arka planda AI işlemeyi başlat
         thread = threading.Thread(
             target=self._process_ai_thread,
-            args=(self.id, api_key),
+            args=(self.id, api_key, self.env.uid),
         )
         thread.daemon = True
         thread.start()
@@ -764,15 +764,15 @@ class AiStudioSession(models.Model):
                 })
                 cr.commit()
 
-    def _process_ai_thread(self, session_id, api_key):
+    def _process_ai_thread(self, session_id, api_key, uid):
         """Thread içinde tüm generation'ları işle (wrapper)."""
         try:
-            self._process_ai_thread_body(session_id, api_key)
+            self._process_ai_thread_body(session_id, api_key, uid)
         except Exception as thread_err:
             _logger.exception("AI Thread: Beklenmeyen kritik hata olustu: %s", thread_err)
             try:
                 with self.pool.cursor() as cr:
-                    env = api.Environment(cr, self.env.uid, {})
+                    env = api.Environment(cr, uid, {})
                     session = env['ai.studio.session'].browse(session_id)
                     session.write({'state': 'failed'})
                     session.message_post(body=_('Kritik Sistem Hatası: %s') % str(thread_err))
@@ -780,11 +780,11 @@ class AiStudioSession(models.Model):
             except Exception:
                 pass
 
-    def _process_ai_thread_body(self, session_id, api_key):
+    def _process_ai_thread_body(self, session_id, api_key, uid):
         """Thread içinde tüm generation'ları işle (body)."""
         time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
         with self.pool.cursor() as cr:
-            env = api.Environment(cr, self.env.uid, {})
+            env = api.Environment(cr, uid, {})
             provider_type = env['ir.config_parameter'].sudo().get_param(
                 'ugurlar_ai_studio.default_provider', 'fashn'
             )
@@ -800,7 +800,7 @@ class AiStudioSession(models.Model):
         except ImportError as ie:
             _logger.error('AI provider kurulu degil: %s', ie)
             with self.pool.cursor() as cr:
-                env = api.Environment(cr, self.env.uid, {})
+                env = api.Environment(cr, uid, {})
                 session = env['ai.studio.session'].browse(session_id)
                 session.write({'state': 'draft'})
                 session.message_post(
@@ -809,7 +809,7 @@ class AiStudioSession(models.Model):
             return
 
         with self.pool.cursor() as cr:
-            env = api.Environment(cr, self.env.uid, {})
+            env = api.Environment(cr, uid, {})
             session = env['ai.studio.session'].browse(session_id)
             session.write({'state': 'processing'})
             cr.commit()
@@ -1308,20 +1308,20 @@ class AiStudioSession(models.Model):
 
         thread = threading.Thread(
             target=self._retry_generation_thread,
-            args=(self.id, generation.id, api_key),
+            args=(self.id, generation.id, api_key, self.env.uid),
         )
         thread.daemon = True
         thread.start()
 
-    def _retry_generation_thread(self, session_id, gen_id, api_key):
+    def _retry_generation_thread(self, session_id, gen_id, api_key, uid):
         """Tek generation retry thread'i (wrapper)."""
         try:
-            self._retry_generation_thread_body(session_id, gen_id, api_key)
+            self._retry_generation_thread_body(session_id, gen_id, api_key, uid)
         except Exception as thread_err:
             _logger.exception("AI Retry Thread: Beklenmeyen kritik hata olustu: %s", thread_err)
             try:
                 with self.pool.cursor() as cr:
-                    env = api.Environment(cr, self.env.uid, {})
+                    env = api.Environment(cr, uid, {})
                     gen = env['ai.studio.generation'].browse(gen_id)
                     gen.write({
                         'state': 'failed',
@@ -1331,11 +1331,11 @@ class AiStudioSession(models.Model):
             except Exception:
                 pass
 
-    def _retry_generation_thread_body(self, session_id, gen_id, api_key):
+    def _retry_generation_thread_body(self, session_id, gen_id, api_key, uid):
         """Tek generation retry thread'i (body)."""
         time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
         with self.pool.cursor() as cr:
-            env = api.Environment(cr, self.env.uid, {})
+            env = api.Environment(cr, uid, {})
             provider_type = env['ir.config_parameter'].sudo().get_param(
                 'ugurlar_ai_studio.default_provider', 'fashn'
             )
