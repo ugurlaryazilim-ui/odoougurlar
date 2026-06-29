@@ -859,7 +859,8 @@ class AiStudioSession(models.Model):
             # Cross-view tutarlılık verisi — front sonrası doldurulur
             outfit_consistency = None
             front_result_b64 = None  # Front try-on sonucu — back/side post-processing referansı
-            front_seed = None  # Front try-on seed'i — back/side FASHN çağrısı için referans
+            import random
+            front_seed = random.randint(100000, 99999999)  # Front try-on seed'i — back/side çağrıları için referans
 
             # Sıralama: front → back → side → detail
             ordered_gens = (
@@ -1509,7 +1510,8 @@ class AiStudioSession(models.Model):
                 # ═══ CROSS-VIEW TUTARLILIK VERİSİ VE BAZ CACHE (Retry İçin) ═══
                 outfit_consistency = None
                 front_result_b64 = None
-                front_seed = None
+                import random
+                front_seed = random.randint(100000, 99999999)
 
                 if photo_type in ('back', 'side', 'detail'):
                     # Session içindeki tamamlanmış front kaydını bul

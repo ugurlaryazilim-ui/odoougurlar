@@ -107,6 +107,8 @@ class FalProvider(AIProviderBase):
                 'resolution': kwargs.get('resolution', '2K'),
                 'limit_generations': True,
             }
+            if 'seed' in kwargs and kwargs['seed']:
+                arguments['seed'] = int(kwargs['seed'])
         else:
             # FASHN v1.6 veya Kolors formatı
             fal_category = {
