@@ -968,7 +968,23 @@ class AiStudioSession(models.Model):
 
                     # Upload images
                     model_url = provider.upload_image(model_image_data)
-                    garment_url = provider.upload_image(processed_b64)
+                    # Arka plan kaldırma ve askı temizleme
+                    if auto_bg and processed_b64:
+                        try:
+                            bg_removed_b64 = provider.remove_background(processed_b64)
+                            try:
+                                bg_removed_data = base64.b64decode(bg_removed_b64)
+                                rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
+                                rgb_b64 = base64.b64encode(rgb_data)
+                            except Exception:
+                                rgb_b64 = bg_removed_b64
+                            cleaned_b64 = session._remove_hanger_hook(rgb_b64)
+                            garment_url = provider.upload_image(cleaned_b64)
+                        except Exception as e:
+                            _logger.warning('Main BG remove başarısız: %s', e)
+                            garment_url = provider.upload_image(processed_b64)
+                    else:
+                        garment_url = provider.upload_image(processed_b64)
 
                     tryon_model = 'tryon-v1.6' if provider_type == 'fal' else 'tryon-v1.6'
                     tryon_resolution = '1K'
