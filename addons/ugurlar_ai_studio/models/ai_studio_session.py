@@ -276,12 +276,13 @@ class AiStudioSession(models.Model):
             return False
 
     def _remove_hanger_hook(self, image_base64):
-        """Gorseldeki aski kancasini, etiketleri ve alt aski ayaklarini temizler.
+        """Gorseldeki aski kancasini ve etiketleri temizler.
 
-        Saf PIL (Pillow) kullanarak, ek kütüphane gerektirmeden çalışır.
-        Yöntem:
-        1. Üstten aşağıya tarama: İnce çıkıntıları (askı kancası) temizler, ürüne gelince durur.
-        2. Alttan yukarıya tarama: İnce metal ayakları temizler, ürün eteğine gelince durur.
+        Yontem:
+        1. Ust %20'lik alani tara
+        2. Dar cikintilari (aski kancasi) tespit et
+        3. OpenCV inpainting ile temizle
+        4. Alternatif: piksel bazli temizleme (OpenCV yoksa)
         """
         if not image_base64:
             return image_base64
@@ -293,79 +294,89 @@ class AiStudioSession(models.Model):
             img_data = base64.b64decode(image_base64)
             img = Image.open(io.BytesIO(img_data))
 
+            # RGBA moduna cevir
             if img.mode != 'RGBA':
                 img = img.convert('RGBA')
 
             w, h = img.size
-            pixels = img.load()
 
-            # 1. Üstten Aşağıya Temizleme (Askı Kancası)
-            for y in range(int(h * 0.30)):
-                segments = []
-                in_segment = False
-                start_x = 0
-                for x in range(w):
-                    r, g, b, a = pixels[x, y]
-                    is_opaque = a > 20
-                    if is_opaque and not in_segment:
-                        in_segment = True
-                        start_x = x
-                    elif not is_opaque and in_segment:
-                        in_segment = False
-                        segments.append((start_x, x - 1))
-                if in_segment:
-                    segments.append((start_x, w - 1))
+            try:
+                import cv2
+                import numpy as np
 
-                if not segments:
-                    continue
+                # PIL -> numpy (BGRA)
+                img_array = np.array(img)
+                alpha = img_array[:, :, 3]
 
-                # Geniş segment (ürün başlangıcı) kontrolü - Genişlik %8'den büyükse dur
-                has_wide_segment = any((end - start + 1) >= (w * 0.08) for start, end in segments)
-                if has_wide_segment:
-                    break
+                # Ust %20 alanin maske'sini olustur
+                top_region = int(h * 0.20)
+                mask = np.zeros((h, w), dtype=np.uint8)
 
-                # Askı parçasını temizle (şeffaf yap)
-                for start, end in segments:
-                    for x in range(start, end + 1):
-                        pixels[x, y] = (0, 0, 0, 0)
+                # Alpha kanalinda opak olan yerleri bul
+                _, binary = cv2.threshold(alpha[:top_region], 30, 255, cv2.THRESH_BINARY)
 
-            # 2. Alttan Yukarıya Temizleme (Askı Ayakları)
-            for y in range(h - 1, h - int(h * 0.35), -1):
-                segments = []
-                in_segment = False
-                start_x = 0
-                for x in range(w):
-                    r, g, b, a = pixels[x, y]
-                    is_opaque = a > 20
-                    if is_opaque and not in_segment:
-                        in_segment = True
-                        start_x = x
-                    elif not is_opaque and in_segment:
-                        in_segment = False
-                        segments.append((start_x, x - 1))
-                if in_segment:
-                    segments.append((start_x, w - 1))
+                # Kontur analizi — dar cikintilari bul
+                contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-                if not segments:
-                    continue
+                for cnt in contours:
+                    x, y, cw, ch = cv2.boundingRect(cnt)
+                    area = cv2.contourArea(cnt)
 
-                # Geniş segment (ürün eteği) kontrolü - Genişlik %8'den büyükse dur
-                has_wide_segment = any((end - start + 1) >= (w * 0.08) for start, end in segments)
-                if has_wide_segment:
-                    break
+                    # Aski kancasi ozellikleri:
+                    # - Dar (genislik < resim genisliginin %15'i)
+                    # - Uzun/ince (yukseklik/genislik orani > 1.5)
+                    # - Kucuk alan
+                    is_narrow = cw < (w * 0.15)
+                    is_tall_and_thin = ch > cw * 1.5 if cw > 0 else False
+                    is_small_area = area < (w * h * 0.02)
 
-                # Metal ayakları temizle (şeffaf yap)
-                for start, end in segments:
-                    for x in range(start, end + 1):
-                        pixels[x, y] = (0, 0, 0, 0)
+                    if is_narrow and (is_tall_and_thin or is_small_area):
+                        # Bu bir aski kancasi — maskeye ekle
+                        cv2.drawContours(mask[:top_region], [cnt], -1, 255, cv2.FILLED)
+                        # Etrafina biraz tampon ekle
+                        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+                        mask[:top_region] = cv2.dilate(mask[:top_region], kernel, iterations=2)
 
-            buffered = io.BytesIO()
-            img.save(buffered, format='PNG')
-            _logger.info('Askı kancası ve ayakları temizlendi (Segment Analizi)')
-            return base64.b64encode(buffered.getvalue())
+                # Maske'de temizlenecek alan varsa
+                if np.any(mask > 0):
+                    # RGB kanallarini al (inpainting icin)
+                    rgb = cv2.cvtColor(img_array[:, :, :3], cv2.COLOR_RGBA2BGR)
+                    # Inpaint ile temizle
+                    inpainted = cv2.inpaint(rgb, mask, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
+                    # Maskelenen alanlarin alpha'sini sifirla (seffaf yap)
+                    img_array[:, :, 3][mask > 0] = 0
+
+                    result_img = Image.fromarray(img_array)
+                    buffered = io.BytesIO()
+                    result_img.save(buffered, format='PNG')
+                    _logger.info('Aski kancasi temizlendi (OpenCV inpainting)')
+                    return base64.b64encode(buffered.getvalue())
+                else:
+                    # Temizlenecek alan yok
+                    return image_base64
+
+            except ImportError:
+                # OpenCV yoksa eski yontem (piksel bazli)
+                pixels = img.load()
+                for y in range(int(h * 0.25)):
+                    non_transparent_count = 0
+                    for x in range(w):
+                        r, g, b, a = pixels[x, y]
+                        if a > 30:
+                            non_transparent_count += 1
+
+                    if non_transparent_count > 0 and non_transparent_count < (w * 0.10):
+                        for x in range(w):
+                            pixels[x, y] = (0, 0, 0, 0)
+                    elif non_transparent_count >= (w * 0.10):
+                        break
+
+                buffered = io.BytesIO()
+                img.save(buffered, format='PNG')
+                return base64.b64encode(buffered.getvalue())
 
         except Exception as e:
-            _logger.error("Askı temizleme hatası: %s", e)
+            _logger.error("Aski kancasi temizleme hatasi: %s", e)
             return image_base64
 
     # --- Durum Geçişleri ---
