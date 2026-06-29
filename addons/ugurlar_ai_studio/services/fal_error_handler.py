@@ -33,6 +33,7 @@ FAL_ERROR_MESSAGES = {
     'less_than': 'Deger maksimum sinirin ustunde.',
     'multiple_of': 'Deger belirtilen katin kati olmali.',
     'invalid_parameters': 'Girdi parametreleri veya görsel formatı geçersiz. Lütfen ayarları kontrol edin.',
+    'body_pose_detection_error': 'Manken görselinde insan vücut duruşu/pozu tespit edilemedi. Lütfen manken şablonundaki (Model Preset) model görselini kontrol edin. Net, tam veya yarım boy bir insan fotoğrafı olmalıdır.',
     # Altyapi hatalari (request-errors.md)
     'TIMEOUT': 'Sunucu zaman asimi. Tekrar deneyin.',
     'RATE_LIMITED': 'Istek hiz limiti asildi. Biraz bekleyip tekrar deneyin.',
@@ -97,7 +98,9 @@ def parse_fal_error(exception):
 
     # 2. HTTP durum kodu tabanli eslestirme
     if error_type == 'unknown':
-        if '422' in error_str:
+        if 'failed to detect body pose' in error_str.lower():
+            error_type = 'body_pose_detection_error'
+        elif '422' in error_str:
             if 'content' in error_str.lower() and 'policy' in error_str.lower():
                 error_type = 'content_policy_violation'
             elif 'too large' in error_str.lower():
