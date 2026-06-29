@@ -479,6 +479,243 @@ class AiStudioSession(models.Model):
             from ..services.fal_provider import FalProvider
             return FalProvider(api_key)
 
+    def _process_single_generation_worker(self, session_id, gen_id, api_key, front_result_b64, outfit_consistency, front_seed, cached_analysis_data=None):
+        """Worker thread for processing a single generation (used for parallelizing back and side views)."""
+        _logger.info('Worker thread baslatildi (gen_id=%s)', gen_id)
+        
+        with self.pool.cursor() as cr:
+            env = api.Environment(cr, self.env.uid, {})
+            session = env['ai.studio.session'].browse(session_id)
+            gen = env['ai.studio.generation'].browse(gen_id)
+            preset = session.model_preset_id
+            
+            provider_type = env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.default_provider', 'fashn'
+            )
+            fal_api_key = env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.fal_api_key', ''
+            )
+            gemini_api_key = env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.gemini_api_key', ''
+            )
+            
+            try:
+                provider = self._create_provider(api_key, provider_type)
+            except Exception as e:
+                _logger.error('Worker AI provider olusturma hatasi: %s', e)
+                return
+
+            try:
+                gen.write({'state': 'processing'})
+                cr.commit()
+
+                start_time = time.time()
+                source_image = gen.original_image
+                photo_type = gen.photo_type or 'front'
+
+                # ═══ GÖRSEL ÖN İŞLEME PIPELINE ═══
+                from ..services.garment_preprocessor import (
+                    preprocess_garment_image,
+                    convert_birefnet_output_to_rgb,
+                )
+
+                preprocessed = preprocess_garment_image(
+                    source_image,
+                    target_long_edge=864,
+                )
+                processed_b64 = preprocessed['image_base64']
+
+                # ═══ APILER İÇİN URL VE FORMAT AYARLARI ═══
+                model_image_field = 'model_image_front'
+                if photo_type == 'back':
+                    model_image_field = 'model_image_back'
+                elif photo_type == 'side':
+                    model_image_field = 'model_image_side'
+
+                model_image_data = getattr(preset, model_image_field)
+                if not model_image_data:
+                    model_image_data = preset.model_image_front
+
+                # Upload images
+                model_url = provider.upload_image(model_image_data)
+                garment_url = provider.upload_image(processed_b64)
+
+                tryon_model = 'tryon-v1.6' if provider_type == 'fal' else 'tryon-v1.6'
+                tryon_resolution = '1K'
+                if provider_type == 'fashn':
+                    tryon_model = preset.fashn_model_side if photo_type == 'side' else (preset.fashn_model_back if photo_type == 'back' else preset.fashn_model_front)
+                    if not tryon_model:
+                        tryon_model = 'tryon-v1.6'
+                    tryon_resolution = '2K' if 'max' in tryon_model else '1K'
+
+                # category mapping
+                from ..services.garment_analyzer import map_to_fashn_category
+                category_to_send = map_to_fashn_category(cached_analysis_data or {})
+
+                # ═══ VIEW-SPESİFİK PROMPT ═══
+                prompt_text = ""
+                try:
+                    all_locks = env['ai.studio.prompt.template'].search([
+                        ('scope', '=', 'global'),
+                        ('active', '=', True),
+                    ])
+                    prompt_locks = [l.prompt_text for l in all_locks]
+
+                    from ..services.garment_analyzer import build_generation_prompt
+                    built_prompt = build_generation_prompt(
+                        cached_analysis_data or {}, {
+                            'gender': preset.gender or 'female',
+                            'body_type': preset.body_type or 'standard',
+                            'target_audience': preset.target_audience or '',
+                        },
+                        prompt_locks,
+                        session.extra_prompt or '',
+                        photo_type=photo_type,
+                        outfit_consistency=outfit_consistency,
+                    )
+                    prompt_text = built_prompt.get('positive', '')
+                except Exception as pe:
+                    _logger.warning('Worker: Prompt olusturma basarisiz (gen=%s): %s', gen.id, pe)
+
+                # ═══ TRY-ON API ÇAĞRISI ═══
+                tryon_result = provider.virtual_tryon(
+                    model_image_url=model_url,
+                    garment_image_url=garment_url,
+                    category=category_to_send,
+                    mode=session.quality_mode or 'quality',
+                    model_name=tryon_model,
+                    num_samples=1,
+                    garment_photo_type='auto',
+                    output_format='jpeg',
+                    prompt=prompt_text,
+                    resolution=tryon_resolution,
+                    photo_type=photo_type,
+                    seed=front_seed,
+                )
+
+                elapsed = time.time() - start_time
+
+                # ═══ SONUCU İNDİR ═══
+                import requests as req_lib
+                import base64
+                output_url = tryon_result.get('image_url', '')
+                if not output_url:
+                    image_urls = tryon_result.get('image_urls', [])
+                    output_url = image_urls[0] if image_urls else ''
+
+                if output_url:
+                    if output_url.startswith('data:'):
+                        raw = output_url.split(';base64,', 1)[1]
+                        img_data = base64.b64decode(raw)
+                    else:
+                        img_data = req_lib.get(output_url, timeout=60).content
+
+                    gen_b64 = base64.b64encode(img_data)
+                    gen_seed = tryon_result.get('seed') or False
+
+                    gen.write({
+                        'generated_image': gen_b64,
+                        'state': 'done',
+                        'fal_endpoint': '%s/%s' % (provider_type, tryon_model),
+                        'generation_time_seconds': elapsed,
+                        'cost': tryon_result.get('cost', 0.05),
+                        'seed': gen_seed,
+                    })
+
+                    # ═══ BACK/SIDE POST-PROCESSING: OUTFIT TUTARLILIĞI ═══
+                    if front_result_b64 and outfit_consistency:
+                        consistency_prompt = outfit_consistency.get('fullOutfitPrompt', '')
+                        if consistency_prompt:
+                            try:
+                                _logger.info(
+                                    'Worker: Post-processing outfit tutarliligi (flux-img2img+ipadapter) baslatiliyor (gen=%s, tip=%s)',
+                                    gen.id, photo_type,
+                                )
+                                front_ref_url = provider.upload_image(front_result_b64)
+                                current_url = provider.upload_image(gen_b64)
+
+                                bottoms_desc = outfit_consistency.get('bottomsColor', '') + ' ' + outfit_consistency.get('bottomsType', '')
+                                shoes_desc = outfit_consistency.get('shoesColor', '') + ' ' + outfit_consistency.get('shoesType', '')
+
+                                edit_prompt = (
+                                    f"RAW photo, photorealistic, professional fashion photography, studio lighting, white background. "
+                                    f"A model wearing a top garment, matching the outfit from the reference image. "
+                                    f"The model must wear the exact same {bottoms_desc.strip()} and the exact same {shoes_desc.strip()} "
+                                    f"as shown in the reference image. Perfect color tone matching, high detail, 8k resolution."
+                                )
+
+                                import os
+                                os.environ['FAL_KEY'] = fal_api_key
+
+                                try:
+                                    import fal_client
+                                except ImportError:
+                                    fal_client = None
+
+                                if fal_client:
+                                    edit_result = fal_client.subscribe(
+                                        'fal-ai/flux/schnell/image-to-image',
+                                        arguments={
+                                            'prompt': edit_prompt,
+                                            'image_url': current_url,
+                                            'strength': 0.28,
+                                            'ip_adapters': [
+                                                {
+                                                    'image_url': front_ref_url,
+                                                    'conditioning_scale': 0.85,
+                                                }
+                                            ],
+                                            'num_images': 1,
+                                            'aspect_ratio': '3:4',
+                                            'enable_safety_checker': True,
+                                        },
+                                        client_timeout=300,
+                                    )
+                                    edit_images = edit_result.get('images', [])
+                                    if edit_images:
+                                        edit_url = edit_images[0].get('url', '')
+                                        if edit_url:
+                                            edit_data = req_lib.get(edit_url, timeout=60).content
+                                            edited_b64 = base64.b64encode(edit_data)
+                                            gen.write({
+                                                'generated_image': edited_b64,
+                                                'fal_endpoint': '%s/%s+consistency' % (provider_type, tryon_model),
+                                                'cost': tryon_result.get('cost', 0.05) + 0.03,
+                                            })
+                                            gen_b64 = edited_b64
+                                            _logger.info('Worker: Post-processing outfit tutarliligi tamamlandi (gen=%s)', gen.id)
+                            except Exception as pp_e:
+                                _logger.warning('Worker: Post-processing outfit tutarliligi basarisiz (gen=%s): %s', gen.id, pp_e)
+
+                    # ═══ KALİTE KONTROL ═══
+                    try:
+                        from ..services.quality_checker import compute_quality_score
+                        qc = compute_quality_score(source_image, gen_b64)
+                        gen.write({
+                            'quality_score': qc['score'],
+                            'quality_details': qc['details'],
+                        })
+                    except Exception as qe:
+                        _logger.debug('Worker: Kalite kontrol hatasi: %s', qe)
+
+                else:
+                    gen.write({
+                        'state': 'failed',
+                        'error_message': 'API sonuç döndürmedi.',
+                    })
+
+                cr.commit()
+
+            except Exception as e:
+                from ..services.fal_error_handler import parse_fal_error
+                parsed = parse_fal_error(e)
+                _logger.error('Worker: AI üretim hatası (gen=%s): %s', gen_id, e)
+                gen.write({
+                    'state': 'failed',
+                    'error_message': parsed['message'][:500],
+                })
+                cr.commit()
+
     def _process_ai_thread(self, session_id, api_key):
         """Thread içinde tüm generation'ları işle."""
         time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
@@ -554,194 +791,41 @@ class AiStudioSession(models.Model):
                 _logger.warning('Kıyafet analizi başarısız, varsayılan kullanılacak: %s', ae)
 
             # ═══ TÜM GENERATION'LARI İŞLE ═══
-            # Sıralama: front → back/side → detail (detay, front sonucundan kırpılır)
-            ordered_gens = (
-                generations.filtered(lambda g: g.photo_type == 'front')
-                + generations.filtered(lambda g: g.photo_type in ('back', 'side'))
-                + generations.filtered(lambda g: g.photo_type == 'detail')
-            )
-
             # Cross-view tutarlılık verisi — front sonrası doldurulur
             outfit_consistency = None
             front_result_b64 = None  # Front try-on sonucu — back/side post-processing referansı
             front_seed = None  # Front try-on seed'i — back/side FASHN çağrısı için referans
-            for gen in ordered_gens:
+
+            # ═══ STAGE 1: FRONT VIEW GENERATION (Sequential) ═══
+            front_gens = generations.filtered(lambda g: g.photo_type == 'front')
+            for gen in front_gens:
                 try:
                     gen.write({'state': 'processing'})
                     cr.commit()
 
                     start_time = time.time()
                     source_image = gen.original_image
-                    photo_type = gen.photo_type or 'front'
+                    photo_type = 'front'
 
-                    # ═══ GÖRSEL ÖN İŞLEME PIPELINE ═══
-                    from ..services.garment_preprocessor import (
-                        preprocess_garment_image,
-                        convert_birefnet_output_to_rgb,
-                    )
-
-                    preprocessed = preprocess_garment_image(
-                        source_image,
-                        target_long_edge=864,
-                    )
+                    from ..services.garment_preprocessor import preprocess_garment_image
+                    preprocessed = preprocess_garment_image(source_image, target_long_edge=864)
                     processed_b64 = preprocessed['image_base64']
-                    _logger.info(
-                        'Ön işleme tamamlandı (gen=%s, tip=%s): %sx%s → %sx%s',
-                        gen.id, photo_type,
-                        preprocessed['original_size'][0], preprocessed['original_size'][1],
-                        preprocessed['final_size'][0], preprocessed['final_size'][1],
-                    )
 
-                    # ═══ DETAY FOTOĞRAFI: Manken Üzerinden Kırpma ═══
-                    if photo_type == 'detail':
-                        # Önce tamamlanmış front try-on sonucunu bul
-                        target_type = 'front'
-                        if gen.source_photo_id and gen.source_photo_id.photo_type == 'detail':
-                            if gen.source_photo_id.detail_placement == 'back':
-                                target_type = 'back'
-
-                        target_gen = session.generation_ids.filtered(
-                            lambda g: g.photo_type == target_type and g.state == 'done' and g.generated_image
-                        )
-                        if not target_gen and target_type == 'back':
-                            target_gen = session.generation_ids.filtered(
-                                lambda g: g.photo_type == 'front' and g.state == 'done' and g.generated_image
-                            )
-
-                        if target_gen:
-                            # Manken üzerindeki giydirme sonucundan detay kırp
-                            detail_b64 = session._crop_image_detail(
-                                target_gen[0].generated_image,
-                                category=preset.garment_type or 'tops'
-                            )
-                            _logger.info(
-                                'Detay kırpıldı (gen=%s): %s try-on sonucundan',
-                                gen.id, target_type,
-                            )
-                        else:
-                            # Fallback: front try-on yoksa orijinal fotoğrafı BG remove ile kullan
-                            _logger.warning(
-                                'Detay kırpma fallback: try-on sonucu bulunamadı, BG remove uygulanıyor (gen=%s)',
-                                gen.id,
-                            )
-                            if auto_bg and processed_b64:
-                                try:
-                                    bg_removed_b64 = provider.remove_background(processed_b64)
-                                    try:
-                                        bg_removed_data = base64.b64decode(bg_removed_b64)
-                                        rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
-                                        detail_b64 = base64.b64encode(rgb_data)
-                                    except Exception:
-                                        detail_b64 = bg_removed_b64
-                                except Exception as e:
-                                    _logger.warning('Detay BG remove başarısız: %s', e)
-                                    detail_b64 = processed_b64
-                            else:
-                                detail_b64 = processed_b64
-
-                        elapsed = time.time() - start_time
-                        gen.write({
-                            'generated_image': detail_b64,
-                            'state': 'done',
-                            'fal_endpoint': 'detail-crop' if target_gen else ('%s/bg-remove-detail' % provider_type),
-                            'generation_time_seconds': elapsed,
-                            'cost': 0.0 if target_gen else 0.01,
-                        })
-
-                        # Kalite kontrol
-                        try:
-                            from ..services.quality_checker import compute_quality_score
-                            qc = compute_quality_score(source_image, detail_b64)
-                            gen.write({
-                                'quality_score': qc['score'],
-                                'quality_details': qc['details'],
-                            })
-                        except Exception:
-                            pass
-
-                        cr.commit()
-                        continue  # Detay tamamlandı, sonraki generation'a geç
-
-                    # ═══ TRY-ON İŞLEMİ (front/back/side) ═══
-
-                    # Arka plan kaldırma + askı temizleme
-                    if auto_bg and processed_b64:
-                        try:
-                            bg_removed_b64 = provider.remove_background(processed_b64)
-                            try:
-                                bg_removed_data = base64.b64decode(bg_removed_b64)
-                                rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
-                                rgb_b64 = base64.b64encode(rgb_data)
-                            except Exception:
-                                rgb_b64 = bg_removed_b64
-                            cleaned_b64 = session._remove_hanger_hook(rgb_b64)
-                            garment_url = provider.upload_image(cleaned_b64)
-                        except Exception as e:
-                            _logger.warning('BG remove başarısız, ön işlenmiş görsel kullanılıyor: %s', e)
-                            garment_url = provider.upload_image(processed_b64)
-                    else:
-                        garment_url = provider.upload_image(processed_b64)
-
-                    # Manken resmini yükle — view tipine göre
-                    model_image_field = 'model_image_front'
-                    if photo_type == 'back':
-                        model_image_field = 'model_image_back'
-                    elif photo_type == 'side':
-                        model_image_field = 'model_image_side'
-
-                    model_image_data = getattr(preset, model_image_field)
-                    if not model_image_data:
-                        model_image_data = preset.model_image_front
-
-                    if not model_image_data:
-                        raise UserError(_('Preset manken resmi eksik.'))
-
+                    # APILER İÇİN URL VE FORMAT AYARLARI
+                    model_image_data = preset.model_image_front
                     model_url = provider.upload_image(model_image_data)
+                    garment_url = provider.upload_image(processed_b64)
 
-                    # ═══ KATEGORİ BELİRLEME ═══
-                    cat = session.category
+                    tryon_model = 'tryon-v1.6' if provider_type == 'fal' else 'tryon-v1.6'
+                    tryon_resolution = '1K'
                     if provider_type == 'fashn':
-                        if cat == 'auto':
-                            category_to_send = 'auto'
-                        else:
-                            category_to_send = {
-                                'tops': 'tops',
-                                'bottoms': 'bottoms',
-                                'one_piece': 'one-pieces',
-                            }.get(cat, 'tops')
-                    else:
-                        if cat == 'auto':
-                            try:
-                                from ..services.garment_analyzer import map_to_fashn_category
-                                if cached_analysis:
-                                    analyzed_cat = map_to_fashn_category(cached_analysis)
-                                else:
-                                    from ..services.garment_analyzer import analyze_garment
-                                    cached_analysis = analyze_garment(
-                                        fal_api_key, garment_url, gemini_api_key=gemini_api_key
-                                    )
-                                    analyzed_cat = map_to_fashn_category(cached_analysis)
-                                category_to_send = {
-                                    'tops': 'tops',
-                                    'bottoms': 'bottoms',
-                                    'full-body': 'one-piece',
-                                }.get(analyzed_cat, 'tops')
-                            except Exception as e:
-                                _logger.warning('Otomatik tespit başarısız: %s', e)
-                                cat_fallback = preset.garment_type or 'tops'
-                                category_to_send = {
-                                    'tops': 'tops',
-                                    'bottoms': 'bottoms',
-                                    'one_piece': 'one-piece',
-                                }.get(cat_fallback, 'tops')
-                        else:
-                            category_to_send = {
-                                'tops': 'tops',
-                                'bottoms': 'bottoms',
-                                'one_piece': 'one-piece',
-                            }.get(cat, 'tops')
+                        tryon_model = preset.fashn_model_front or 'tryon-v1.6'
+                        tryon_resolution = '2K' if 'max' in tryon_model else '1K'
 
-                    # ═══ VIEW-SPESİFİK PROMPT OLUŞTURMA ═══
+                    from ..services.garment_analyzer import map_to_fashn_category
+                    category_to_send = map_to_fashn_category(cached_analysis)
+
+                    # VIEW-SPESİFİK PROMPT OLUŞTURMA
                     prompt_text = ""
                     try:
                         all_locks = env['ai.studio.prompt.template'].search([
@@ -761,36 +845,32 @@ class AiStudioSession(models.Model):
                         built_prompt = build_generation_prompt(
                             analysis_data, preset_data, prompt_locks,
                             session.extra_prompt or '',
-                            photo_type=photo_type,  # ← VIEW-SPESİFİK
-                            outfit_consistency=outfit_consistency,  # ← TUTARLILIK
+                            photo_type=photo_type,
+                            outfit_consistency=outfit_consistency,
                         )
                         prompt_text = built_prompt.get('positive', '')
-                        _logger.info(
-                            'View-spesifik prompt oluşturuldu (gen=%s, tip=%s): %d karakter',
-                            gen.id, photo_type, len(prompt_text),
-                        )
                     except Exception as pe:
                         _logger.warning('Prompt oluşturma başarısız: %s', pe)
 
-                    # ═══ TRY-ON API ÇAĞRISI ═══
+                    # TRY-ON API ÇAĞRISI
                     tryon_result = provider.virtual_tryon(
                         model_image_url=model_url,
                         garment_image_url=garment_url,
                         category=category_to_send,
                         mode=session.quality_mode or 'quality',
                         model_name=tryon_model,
-                        num_samples=1,  # ← TEK YÜKSEK KALİTELİ ÇIKTI
+                        num_samples=1,
                         garment_photo_type='auto',
                         output_format='jpeg',
                         prompt=prompt_text,
-                        resolution=tryon_resolution,  # ← ÇÖZÜNÜRLÜK
-                        photo_type=photo_type,  # ← VIEW TİPİ
-                        seed=front_seed,  # ← ÖN YÜZ SEED'İNİ ZORLA
+                        resolution=tryon_resolution,
+                        photo_type=photo_type,
+                        seed=front_seed,
                     )
 
                     elapsed = time.time() - start_time
 
-                    # ═══ SONUCU İNDİR ═══
+                    # SONUCU İNDİR
                     import requests as req_lib
                     output_url = tryon_result.get('image_url', '')
                     if not output_url:
@@ -816,171 +896,74 @@ class AiStudioSession(models.Model):
                             'seed': gen_seed,
                         })
 
-                        # ═══ FRONT SONRASI: REFERANS CACHE + KOMBİN GİYDİRME + OUTFIT ANALİZİ ═══
-                        if photo_type == 'front':
-                            if gen_seed:
-                                front_seed = gen_seed  # Diğer görsellere seed paslamak için kaydet
+                        # FRONT SONRASI: REFERANS CACHE + KOMBİN GİYDİRME + OUTFIT ANALİZİ
+                        if gen_seed:
+                            front_seed = gen_seed
 
-                            # Ürüne en uygun alt giyim ve ayakkabı kombinini al
-                            rec_bottoms = (cached_analysis or {}).get('recommendedBottoms', 'dark blue skinny jeans')
-                            rec_shoes = (cached_analysis or {}).get('recommendedShoes', 'white sneakers')
+                        rec_bottoms = (cached_analysis or {}).get('recommendedBottoms', 'dark blue skinny jeans')
+                        rec_shoes = (cached_analysis or {}).get('recommendedShoes', 'white sneakers')
 
+                        try:
+                            _logger.info('Front post-processing (ürüne en uygun kombin giydirme) başlatılıyor (gen=%s)', gen.id)
+                            current_url = provider.upload_image(gen_b64)
+                            
+                            edit_prompt = (
+                                f"RAW photo, photorealistic, professional fashion photography, studio lighting, white background. "
+                                f"A model wearing a top garment. Change ONLY the bottoms and shoes of the model "
+                                f"to wear: {rec_bottoms} and {rec_shoes}. "
+                                f"KEEP the upper garment and pose and face exactly as they are. "
+                                f"Only the lower body style changes to match the styling advice."
+                            )
+                            
+                            import os
+                            os.environ['FAL_KEY'] = fal_api_key
+                            
                             try:
-                                _logger.info(
-                                    'Front post-processing (ürüne en uygun kombin giydirme) başlatılıyor (gen=%s)',
-                                    gen.id,
+                                import fal_client
+                            except ImportError:
+                                fal_client = None
+                                
+                            if fal_client:
+                                edit_result = fal_client.subscribe(
+                                    'fal-ai/flux/schnell/image-to-image',
+                                    arguments={
+                                        'prompt': edit_prompt,
+                                        'image_url': current_url,
+                                        'strength': 0.38,
+                                        'num_images': 1,
+                                        'aspect_ratio': '3:4',
+                                        'enable_safety_checker': True,
+                                    },
+                                    client_timeout=300,
                                 )
-                                current_url = provider.upload_image(gen_b64)
-                                
-                                # Front için sadece prompt ile kombin giydir (IP-Adapter yok, kendisi referans)
-                                edit_prompt = (
-                                    f"RAW photo, photorealistic, professional fashion photography, studio lighting, white background. "
-                                    f"A model wearing a top garment. Change ONLY the bottoms and shoes of the model "
-                                    f"to wear: {rec_bottoms} and {rec_shoes}. "
-                                    f"KEEP the upper garment and pose and face exactly as they are. "
-                                    f"Only the lower body style changes to match the styling advice."
+                                edit_images = edit_result.get('images', [])
+                                if edit_images:
+                                    edit_url = edit_images[0].get('url', '')
+                                    if edit_url:
+                                        edit_data = req_lib.get(edit_url, timeout=60).content
+                                        edited_b64 = base64.b64encode(edit_data)
+                                        gen.write({
+                                            'generated_image': edited_b64,
+                                        })
+                                        gen_b64 = edited_b64
+                                        _logger.info('Front post-processing (kombin giydirme) tamamlandı.')
+                        except Exception as front_pp_e:
+                            _logger.warning('Front post-processing kombin giydirme başarısız: %s', front_pp_e)
+
+                        front_result_b64 = gen_b64
+
+                        if outfit_consistency is None:
+                            try:
+                                from ..services.garment_analyzer import analyze_outfit_consistency
+                                outfit_consistency = analyze_outfit_consistency(
+                                    gen_b64,
+                                    api_key=fal_api_key,
+                                    gemini_api_key=gemini_api_key,
                                 )
-                                
-                                import os
-                                os.environ['FAL_KEY'] = fal_api_key
-                                
-                                try:
-                                    import fal_client
-                                except ImportError:
-                                    fal_client = None
-                                    
-                                if fal_client:
-                                    edit_result = fal_client.subscribe(
-                                        'fal-ai/flux/schnell/image-to-image',
-                                        arguments={
-                                            'prompt': edit_prompt,
-                                            'image_url': current_url,
-                                            'strength': 0.38,  # Tişörtü ve pozu korumak için düşük denoising
-                                            'num_images': 1,
-                                            'aspect_ratio': '3:4',
-                                            'enable_safety_checker': True,
-                                        },
-                                        client_timeout=300,
-                                    )
-                                    edit_images = edit_result.get('images', [])
-                                    if edit_images:
-                                        edit_url = edit_images[0].get('url', '')
-                                        if edit_url:
-                                            edit_data = req_lib.get(edit_url, timeout=60).content
-                                            edited_b64 = base64.b64encode(edit_data)
-                                            gen.write({
-                                                'generated_image': edited_b64,
-                                            })
-                                            gen_b64 = edited_b64  # referans cache'ini güncelle
-                                            _logger.info('Front post-processing (kombin giydirme) tamamlandı.')
-                                    else:
-                                        _logger.warning('Front post-processing edit sonuç döndürmedi')
-                            except Exception as front_pp_e:
-                                _logger.warning('Front post-processing kombin giydirme başarısız: %s', front_pp_e)
+                            except Exception as oe:
+                                _logger.warning('Outfit tutarlılık analizi başarısız: %s', oe)
 
-                            front_result_b64 = gen_b64  # Artık kombini güncellenmiş front görseli referans
-
-                            if outfit_consistency is None:
-                                try:
-                                    from ..services.garment_analyzer import analyze_outfit_consistency
-                                    outfit_consistency = analyze_outfit_consistency(
-                                        gen_b64,
-                                        api_key=fal_api_key,
-                                        gemini_api_key=gemini_api_key,
-                                    )
-                                    consistency_prompt = outfit_consistency.get('fullOutfitPrompt', '')
-                                    if consistency_prompt:
-                                        _logger.info(
-                                            'Outfit tutarlılık analizi tamamlandı: %s',
-                                            consistency_prompt[:120],
-                                        )
-                                    else:
-                                        _logger.info('Outfit tutarlılık analizi: veri çıkarılamadı')
-                                except Exception as oe:
-                                    _logger.warning('Outfit tutarlılık analizi başarısız: %s', oe)
-
-                        # ═══ BACK/SIDE POST-PROCESSING: OUTFIT TUTARLILIĞI ═══
-                        # FASHN, model_image'den pantolonu korur — prompt ile değiştirilemez
-                        # Bu yüzden front try-on sonucunu referans alarak edit yapıyoruz
-                        if photo_type in ('back', 'side') and front_result_b64 and outfit_consistency:
-                            consistency_prompt = outfit_consistency.get('fullOutfitPrompt', '')
-                            if consistency_prompt:
-                                try:
-                                    _logger.info(
-                                        'Post-processing outfit tutarlılığı (flux-img2img+ipadapter) başlatılıyor (gen=%s, tip=%s)',
-                                        gen.id, photo_type,
-                                    )
-                                    # Front sonucunu fal storage'a yükle
-                                    front_ref_url = provider.upload_image(front_result_b64)
-                                    # Mevcut try-on sonucunu fal storage'a yükle
-                                    current_url = provider.upload_image(gen_b64)
-
-                                    bottoms_desc = outfit_consistency.get('bottomsColor', '') + ' ' + outfit_consistency.get('bottomsType', '')
-                                    shoes_desc = outfit_consistency.get('shoesColor', '') + ' ' + outfit_consistency.get('shoesType', '')
-
-                                    edit_prompt = (
-                                        f"RAW photo, photorealistic, professional fashion photography, studio lighting, white background. "
-                                        f"A model wearing a top garment, matching the outfit from the reference image. "
-                                        f"The model must wear the exact same {bottoms_desc.strip()} and the exact same {shoes_desc.strip()} "
-                                        f"as shown in the reference image. Perfect color tone matching, high detail, 8k resolution."
-                                    )
-
-                                    import os
-                                    os.environ['FAL_KEY'] = fal_api_key
-
-                                    try:
-                                        import fal_client
-                                    except ImportError:
-                                        fal_client = None
-
-                                    if fal_client:
-                                        edit_result = fal_client.subscribe(
-                                            'fal-ai/flux/schnell/image-to-image',
-                                            arguments={
-                                                'prompt': edit_prompt,
-                                                'image_url': current_url,
-                                                'strength': 0.28,  # Low strength keeps 72% of the original FASHN upper garment structure/pose
-                                                'ip_adapters': [
-                                                    {
-                                                        'image_url': front_ref_url,
-                                                        'conditioning_scale': 0.85,  # Strong influence of front view pants/shoes style/colors
-                                                    }
-                                                ],
-                                                'num_images': 1,
-                                                'aspect_ratio': '3:4',
-                                                'enable_safety_checker': True,
-                                            },
-                                            client_timeout=300,
-                                        )
-                                        edit_images = edit_result.get('images', [])
-                                        if edit_images:
-                                            edit_url = edit_images[0].get('url', '')
-                                            if edit_url:
-                                                edit_data = req_lib.get(edit_url, timeout=60).content
-                                                edited_b64 = base64.b64encode(edit_data)
-                                                gen.write({
-                                                    'generated_image': edited_b64,
-                                                    'fal_endpoint': '%s/%s+consistency' % (provider_type, tryon_model),
-                                                    'cost': tryon_result.get('cost', 0.05) + 0.03,
-                                                })
-                                                gen_b64 = edited_b64  # kalite kontrol için güncelle
-                                                _logger.info(
-                                                    'Post-processing outfit tutarlılığı tamamlandı (gen=%s, tip=%s)',
-                                                    gen.id, photo_type,
-                                                )
-                                        else:
-                                            _logger.warning('Post-processing edit sonuç döndürmedi')
-                                    else:
-                                        _logger.warning('fal_client kurulu değil, post-processing atlanıyor')
-
-                                except Exception as pp_e:
-                                    _logger.warning(
-                                        'Post-processing outfit tutarlılığı başarısız (gen=%s): %s',
-                                        gen.id, pp_e,
-                                    )
-                                    # Orijinal try-on sonucu korunur — silmiyoruz
-
-                        # ═══ KALİTE KONTROL — SKORU KAYDET ═══
+                        # KALİTE KONTROL
                         try:
                             from ..services.quality_checker import compute_quality_score
                             qc = compute_quality_score(source_image, gen_b64)
@@ -988,12 +971,9 @@ class AiStudioSession(models.Model):
                                 'quality_score': qc['score'],
                                 'quality_details': qc['details'],
                             })
-                            _logger.info(
-                                'Kalite kontrolü (gen=%s, tip=%s): skor=%.1f, %s',
-                                gen.id, photo_type, qc['score'], qc['details'],
-                            )
                         except Exception as qe:
                             _logger.debug('Kalite kontrol atlandı: %s', qe)
+
                     else:
                         gen.write({
                             'state': 'failed',
@@ -1003,9 +983,114 @@ class AiStudioSession(models.Model):
                     cr.commit()
 
                 except Exception as e:
-                    from ..services.fal_error_handler import parse_fal_error, format_fal_error_for_log
+                    from ..services.fal_error_handler import parse_fal_error
                     parsed = parse_fal_error(e)
-                    _logger.error('AI üretim hatası (tip=%s): %s', photo_type, format_fal_error_for_log(e, f'gen={gen.id}'))
+                    _logger.error('AI üretim hatası (front): %s', e)
+                    gen.write({
+                        'state': 'failed',
+                        'error_message': parsed['message'][:500],
+                    })
+                    cr.commit()
+
+            # ═══ STAGE 2: BACK & SIDE VIEW GENERATIONS (Parallel Threads) ═══
+            back_side_gens = generations.filtered(lambda g: g.photo_type in ('back', 'side'))
+            if back_side_gens:
+                _logger.info('Back/Side görselleri paralel olarak başlatılıyor (adet=%d)', len(back_side_gens))
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=len(back_side_gens)) as executor:
+                    futures = [
+                        executor.submit(
+                            self._process_single_generation_worker,
+                            session.id,
+                            gen.id,
+                            api_key,
+                            front_result_b64,
+                            outfit_consistency,
+                            front_seed,
+                            cached_analysis
+                        )
+                        for gen in back_side_gens
+                    ]
+                    for future in futures:
+                        try:
+                            future.result()
+                        except Exception as fe:
+                            _logger.error('Paralel back/side worker hatası: %s', fe)
+
+            # ═══ STAGE 3: DETAIL CROP GENERATION (Sequential) ═══
+            detail_gens = generations.filtered(lambda g: g.photo_type == 'detail')
+            for gen in detail_gens:
+                try:
+                    gen.write({'state': 'processing'})
+                    cr.commit()
+
+                    start_time = time.time()
+                    source_image = gen.original_image
+                    photo_type = 'detail'
+
+                    from ..services.garment_preprocessor import preprocess_garment_image, convert_birefnet_output_to_rgb
+                    preprocessed = preprocess_garment_image(source_image, target_long_edge=864)
+                    processed_b64 = preprocessed['image_base64']
+
+                    target_type = 'front'
+                    if gen.source_photo_id and gen.source_photo_id.photo_type == 'detail':
+                        if gen.source_photo_id.detail_placement == 'back':
+                            target_type = 'back'
+
+                    target_gen = session.generation_ids.filtered(
+                        lambda g: g.photo_type == target_type and g.state == 'done' and g.generated_image
+                    )
+                    if not target_gen and target_type == 'back':
+                        target_gen = session.generation_ids.filtered(
+                            lambda g: g.photo_type == 'front' and g.state == 'done' and g.generated_image
+                        )
+
+                    if target_gen:
+                        detail_b64 = session._crop_image_detail(
+                            target_gen[0].generated_image,
+                            category=preset.garment_type or 'tops'
+                        )
+                        _logger.info('Detay kırpıldı (gen=%s) %s try-on sonucundan', gen.id, target_type)
+                    else:
+                        _logger.warning('Detay kırpma fallback: try-on sonucu bulunamadı (gen=%s)', gen.id)
+                        if auto_bg and processed_b64:
+                            try:
+                                bg_removed_b64 = provider.remove_background(processed_b64)
+                                bg_removed_data = base64.b64decode(bg_removed_b64)
+                                rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
+                                detail_b64 = base64.b64encode(rgb_data)
+                            except Exception as e:
+                                _logger.warning('Detay BG remove başarısız: %s', e)
+                                detail_b64 = processed_b64
+                        else:
+                            detail_b64 = processed_b64
+
+                    elapsed = time.time() - start_time
+                    gen.write({
+                        'generated_image': detail_b64,
+                        'state': 'done',
+                        'fal_endpoint': 'custom/crop',
+                        'generation_time_seconds': elapsed,
+                        'cost': 0.0,
+                    })
+
+                    # KALİTE KONTROL
+                    try:
+                        from ..services.quality_checker import compute_quality_score
+                        qc = compute_quality_score(source_image, detail_b64)
+                        gen.write({
+                            'quality_score': qc['score'],
+                            'quality_details': qc['details'],
+                        })
+                    except Exception as qe:
+                        _logger.debug('Kalite kontrol hatası: %s', qe)
+
+                    cr.commit()
+
+                except Exception as e:
+                    from ..services.fal_error_handler import parse_fal_error
+                    parsed = parse_fal_error(e)
+                    _logger.error('AI üretim hatası (detail): %s', e)
                     gen.write({
                         'state': 'failed',
                         'error_message': parsed['message'][:500],
