@@ -32,6 +32,7 @@ FAL_ERROR_MESSAGES = {
     'greater_than': 'Deger minimum sinirin altinda.',
     'less_than': 'Deger maksimum sinirin ustunde.',
     'multiple_of': 'Deger belirtilen katin kati olmali.',
+    'invalid_parameters': 'Girdi parametreleri veya görsel formatı geçersiz. Lütfen ayarları kontrol edin.',
     # Altyapi hatalari (request-errors.md)
     'TIMEOUT': 'Sunucu zaman asimi. Tekrar deneyin.',
     'RATE_LIMITED': 'Istek hiz limiti asildi. Biraz bekleyip tekrar deneyin.',
@@ -103,9 +104,11 @@ def parse_fal_error(exception):
                 error_type = 'image_too_large'
             elif 'too small' in error_str.lower():
                 error_type = 'image_too_small'
+            else:
+                error_type = 'invalid_parameters'
         elif '504' in error_str or 'timeout' in error_str.lower():
             error_type = 'generation_timeout'
-        elif '429' in error_str or 'rate' in error_str.lower():
+        elif '429' in error_str:
             error_type = 'RATE_LIMITED'
         elif '500' in error_str or '503' in error_str:
             error_type = 'internal_server_error'
