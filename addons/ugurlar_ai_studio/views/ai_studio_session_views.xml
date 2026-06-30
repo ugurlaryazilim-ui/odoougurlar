@@ -26,7 +26,7 @@
                     <button name="action_photos_ready" string="Fotograflar Hazir"
                             type="object" class="btn-primary"
                             invisible="state != 'draft'"/>
-                    <button name="action_process_photos" string="AI islemeyi Baslat"
+                    <button name="action_start_processing" string="AI islemeyi Baslat"
                             type="object" class="btn-primary"
                             invisible="state != 'photos_ready'"
                             confirm="AI isleme baslatilsin mi?"/>
