@@ -88,18 +88,31 @@ class FalProvider(AIProviderBase):
             # nano-banana-2/edit formatı
             # View-spesifik prompt bilgisini ekle
             photo_type = kwargs.get('photo_type', 'front')
+            front_output_url = kwargs.get('front_output_url')
+            
+            image_urls_list = [garment_image_url, model_image_url]
+            if front_output_url and photo_type in ('back', 'side'):
+                image_urls_list.append(front_output_url)
+                
             enhanced_prompt = prompt
             if photo_type and photo_type != 'front' and prompt:
-                view_hints = {
-                    'back': 'IMPORTANT: Show the BACK view of the model, facing away from camera. ',
-                    'side': 'IMPORTANT: Show the SIDE view of the model, turned 45 degrees. ',
-                    'detail': 'IMPORTANT: Close-up detail shot showing fabric texture and details. ',
-                }
+                if front_output_url:
+                    view_hints = {
+                        'back': 'IMPORTANT: Show the BACK view of the model, facing away from camera. The THIRD reference image is the FRONT generated view of this model; you MUST use the THIRD image as the absolute source of truth for the model identity, hairstyle, skin, and ALL other outfit parts (like top, bottom, shoes). Do NOT change the model or the rest of the outfit from the THIRD reference image. ONLY rotate the camera to show the back view, and apply the new garment. ',
+                        'side': 'IMPORTANT: Show the SIDE view of the model, turned 45 degrees. The THIRD reference image is the FRONT generated view of this model; you MUST use the THIRD image as the absolute source of truth for the model identity, hairstyle, skin, and ALL other outfit parts (like top, bottom, shoes). Do NOT change the model or the rest of the outfit from the THIRD reference image. ONLY rotate the camera to show the side view, and apply the new garment. ',
+                        'detail': 'IMPORTANT: Close-up detail shot showing fabric texture and details. ',
+                    }
+                else:
+                    view_hints = {
+                        'back': 'IMPORTANT: Show the BACK view of the model, facing away from camera. ',
+                        'side': 'IMPORTANT: Show the SIDE view of the model, turned 45 degrees. ',
+                        'detail': 'IMPORTANT: Close-up detail shot showing fabric texture and details. ',
+                    }
                 enhanced_prompt = view_hints.get(photo_type, '') + prompt
 
             arguments = {
                 'prompt': enhanced_prompt,
-                'image_urls': [garment_image_url, model_image_url],
+                'image_urls': image_urls_list,
                 'num_images': kwargs.get('num_samples', 1),
                 'aspect_ratio': '3:4',
                 'output_format': 'png',
@@ -107,6 +120,8 @@ class FalProvider(AIProviderBase):
                 'resolution': kwargs.get('resolution', '2K'),
                 'limit_generations': True,
             }
+            if 'negative_prompt' in kwargs and kwargs['negative_prompt']:
+                arguments['negative_prompt'] = kwargs['negative_prompt']
             if 'seed' in kwargs and kwargs['seed']:
                 arguments['seed'] = int(kwargs['seed'])
         else:
@@ -130,6 +145,8 @@ class FalProvider(AIProviderBase):
             }
             if prompt:
                 arguments['prompt'] = prompt
+            if 'negative_prompt' in kwargs and kwargs['negative_prompt']:
+                arguments['negative_prompt'] = kwargs['negative_prompt']
             if 'seed' in kwargs and kwargs['seed']:
                 arguments['seed'] = int(kwargs['seed'])
 

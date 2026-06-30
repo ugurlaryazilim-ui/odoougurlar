@@ -594,6 +594,12 @@ class AiStudioSession(models.Model):
                 # Upload images
                 model_url = provider.upload_image(model_image_data)
                 garment_url = provider.upload_image(processed_b64)
+                front_output_url = None
+                if front_result_b64:
+                    try:
+                        front_output_url = provider.upload_image(front_result_b64)
+                    except Exception:
+                        pass
 
                 tryon_model = 'nano-banana-2/edit' if provider_type == 'fal' else 'tryon-v1.6'
                 tryon_resolution = '1K'
@@ -646,6 +652,7 @@ class AiStudioSession(models.Model):
                     output_format='jpeg',
                     prompt=prompt_text,
                     negative_prompt=negative_prompt_text,
+                    front_output_url=front_output_url,
                     resolution=tryon_resolution,
                     photo_type=photo_type,
                     seed=front_seed,
@@ -987,6 +994,12 @@ class AiStudioSession(models.Model):
 
                     # Upload images
                     model_url = provider.upload_image(model_image_data)
+                    front_output_url = None
+                    if front_result_b64:
+                        try:
+                            front_output_url = provider.upload_image(front_result_b64)
+                        except Exception:
+                            pass
                     # Arka plan kaldırma ve askı temizleme
                     if auto_bg and processed_b64:
                         try:
@@ -1055,6 +1068,7 @@ class AiStudioSession(models.Model):
                         output_format='jpeg',
                         prompt=prompt_text,
                         negative_prompt=negative_prompt_text,
+                        front_output_url=front_output_url,
                         resolution=tryon_resolution,
                         photo_type=photo_type,
                         seed=front_seed,
@@ -1533,6 +1547,7 @@ class AiStudioSession(models.Model):
                 # ═══ CROSS-VIEW TUTARLILIK VERİSİ VE BAZ CACHE (Retry İçin) ═══
                 outfit_consistency = None
                 front_result_b64 = None
+                front_output_url = None
                 import random
                 front_seed = random.randint(100000, 99999999)
 
@@ -1542,6 +1557,10 @@ class AiStudioSession(models.Model):
                     if front_gen and front_gen[0].generated_image:
                         front_result_b64 = front_gen[0].generated_image
                         front_seed = front_gen[0].seed or False
+                        try:
+                            front_output_url = provider.upload_image(front_result_b64)
+                        except Exception:
+                            pass
                         try:
                             from ..services.garment_analyzer import analyze_outfit_consistency
                             outfit_consistency = analyze_outfit_consistency(
@@ -1598,6 +1617,7 @@ class AiStudioSession(models.Model):
                     output_format='jpeg',
                     prompt=prompt_text,
                     negative_prompt=negative_prompt_text,
+                    front_output_url=front_output_url,
                     resolution=tryon_resolution,
                     photo_type=photo_type,
                     seed=front_seed,  # ← ÖN YÜZ SEED'İNİ ZORLA
