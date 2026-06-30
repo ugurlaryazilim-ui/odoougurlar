@@ -470,6 +470,17 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
             "or store price tags attached to the garment. Do not generate them. "
         )
 
+        # ═══ E-TİCARET PROFESYONEL STYLING & AKSESUAR ═══
+        if photo_type in ['front', 'side', 'back']:
+            base_prompt += (
+                "STYLE INSTRUCTION: Elevate the model's look for a high-end luxury e-commerce aesthetic. "
+                "Decorate the model with elegant, perfectly matching accessories such as a stylish handbag, "
+                "a luxury watch, and elegant earrings or a necklace. The accessories MUST complement the outfit perfectly "
+                "and add a premium feel to the overall look. "
+                "CRITICAL: The accessories (especially the handbag) MUST NOT cover, hide, or obstruct the garment. "
+                "Keep the handbag held low or to the side so the entire garment remains clearly visible. "
+            )
+
     # Cift bosluklari temizle
     base_prompt = " ".join(base_prompt.split()) + " "
 

@@ -235,7 +235,7 @@ class AiStudioController(http.Controller):
             if not session.exists():
                 return {'error': 'Oturum bulunamadi.'}
 
-            session.action_mark_done()
+            session.action_mark_done_async()
             return {'success': True}
         except psycopg2.Error as e:
             if getattr(e, 'pgcode', '') in ('40001', '25P02'):

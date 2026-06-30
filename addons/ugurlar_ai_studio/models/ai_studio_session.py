@@ -1840,6 +1840,56 @@ class AiStudioSession(models.Model):
             body=_('%d onaylı görsel ürüne kaydedildi.') % len(approved),
         )
 
+    def action_mark_done_async(self):
+        """Asenkron olarak ürüne kaydetme işlemini başlatır."""
+        self.ensure_one()
+        approved = self.generation_ids.filtered(
+            lambda g: g.is_approved and g.state == 'done'
+        )
+        if not approved:
+            raise UserError(_('En az bir görsel onaylanmalı.'))
+            
+        # Önceden başarılı diyoruz ki kullanıcı ekranda beklemesin
+        # Hata olursa oturum sayfasına failed olarak düşer.
+        import threading
+        thread = threading.Thread(
+            target=self._save_to_product_thread,
+            args=(self.id, self.env.uid),
+        )
+        thread.daemon = True
+        thread.start()
+        
+    def _save_to_product_thread(self, session_id, uid):
+        """Arka planda asenkron olarak görselleri ürüne kaydeder."""
+        import odoo
+        from odoo import api
+        with api.Environment.manage():
+            with odoo.registry(self.env.cr.dbname).cursor() as cr:
+                env = api.Environment(cr, uid, self.env.context)
+                session = env['ai.studio.session'].browse(session_id)
+                try:
+                    approved = session.generation_ids.filtered(
+                        lambda g: g.is_approved and g.state == 'done'
+                    )
+                    if not approved:
+                        return
+                    session._save_to_product(approved)
+                    session.reviewer_id = env.user
+                    session.state = 'done'
+                    session.message_post(
+                        body=_('Arka planda %d onaylı görsel ürüne başarıyla kaydedildi.') % len(approved),
+                    )
+                    cr.commit()
+                except Exception as e:
+                    cr.rollback()
+                    _logger.exception("Arka planda ürüne kaydetme hatası (session=%s): %s", session_id, e)
+                    # Hata mesajını sisteme yansıt ve statüyü failed yap
+                    session.state = 'photos_ready' # Yeniden denemeye fırsat ver
+                    session.message_post(
+                        body=_('Arka planda ürüne kaydederken hata oluştu. Lütfen tekrar deneyin. Hata: %s') % str(e)[:200],
+                    )
+                    cr.commit()
+
     def _save_to_product(self, approved_generations):
         """Onaylanmış görselleri ürün kartına aktar.
 
