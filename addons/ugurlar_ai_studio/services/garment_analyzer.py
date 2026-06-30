@@ -78,6 +78,7 @@ def analyze_garment(api_key, image_url, gemini_api_key=None):
         dict: Analiz sonuclari
     """
     prompt = """You are a senior Fashion Merchandiser analyzing a product image.
+Ignore any hangers, clips, hands, or mannequins holding the garment. Focus ONLY on the garment's actual design.
 
 Analyze the garment and return a JSON with these fields:
 {
@@ -417,6 +418,17 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
             base_prompt += f"Collar: {collar}. "
         if sleeve:
             base_prompt += f"Sleeves: {sleeve}. "
+            
+            # Strapless / Sleeveless icin Anti-Halusinasyon Kilidi
+            sleeve_lower = sleeve.lower()
+            if any(k in sleeve_lower for k in ['strapless', 'askisiz', 'askısız', 'no sleeve', 'sleeveless', 'kolsuz', 'kol yok', 'tube']):
+                base_prompt += (
+                    "CRITICAL GARMENT STRUCTURE LOCK: This garment is STRICTLY STRAPLESS / TUBE TOP. "
+                    "The model MUST have completely BARE shoulders and BARE upper arms. "
+                    "DO NOT generate ANY straps, sleeves, arm bands, or shoulder fabric. "
+                    "Any fabric on the shoulders or arms is a hallucination and a FAILURE. "
+                    "Ignore any hanger strings in the input image. "
+                )
 
         # ═══ BASKI / GRAFIK KORUMA TALIMATLARI ═══
         has_graphic = analysis.get('hasGraphic', False)
