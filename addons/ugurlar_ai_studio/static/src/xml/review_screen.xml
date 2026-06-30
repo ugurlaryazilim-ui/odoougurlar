@@ -121,8 +121,15 @@
             <!-- Tamamla Butonu -->
             <t t-if="approvedCount > 0">
                 <div class="ais-bottom-bar">
-                    <button class="ais-btn-primary ais-btn-large" t-on-click="completeSession">
-                        ✅ Tamamla ve Ürüne Kaydet (<t t-out="approvedCount"/> görsel)
+                    <button class="ais-btn-primary ais-btn-large" 
+                            t-on-click="completeSession"
+                            t-att-disabled="state.isSaving">
+                        <t t-if="state.isSaving">
+                            ⏳ Kaydediliyor...
+                        </t>
+                        <t t-else="">
+                            ✅ Tamamla ve Ürüne Kaydet (<t t-out="approvedCount"/> görsel)
+                        </t>
                     </button>
                 </div>
             </t>

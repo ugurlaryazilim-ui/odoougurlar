@@ -27,6 +27,7 @@ export class ReviewScreen extends Component {
             compareMode: "side", // side, slider, overlay
             sliderPosition: 50,
             isPrimary: false,
+            isSaving: false,
         });
     }
 
@@ -118,6 +119,12 @@ export class ReviewScreen extends Component {
 
     // --- Tamamla ---
     async completeSession() {
-        await this.props.onCompleteSession();
+        if (this.state.isSaving) return;
+        this.state.isSaving = true;
+        try {
+            await this.props.onCompleteSession();
+        } finally {
+            this.state.isSaving = false;
+        }
     }
 }

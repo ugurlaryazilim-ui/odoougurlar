@@ -4,6 +4,7 @@ import { Component, useState, onWillStart } from "@odoo/owl";
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { _t } from "@web/core/l10n/translation";
+import { ConfirmationDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
 
 import { ScanScreen } from "./screens/scan_screen";
 import { CaptureScreen } from "./screens/capture_screen";
@@ -34,6 +35,7 @@ export class AiStudioAction extends Component {
         this.orm = useService("orm");
         this.notification = useService("notification");
         this.actionService = useService("action");
+        this.dialog = useService("dialog");
 
         this.state = useState({
             currentScreen: "scan",
@@ -99,9 +101,17 @@ export class AiStudioAction extends Component {
 
     onProductFound(productInfo) {
         if (productInfo.has_image) {
-            if (!confirm(`Bu ürünün (${productInfo.name}) halihazırda bir ana görseli var!\n\nYine de yeni bir AI çekimi başlatmak istediğinize emin misiniz?`)) {
-                return;
-            }
+            this.dialog.add(ConfirmationDialog, {
+                title: _t("Görsel Zaten Mevcut"),
+                body: `Bu ürünün (${productInfo.name}) halihazırda bir ana görseli var!\n\nYine de yeni bir AI çekimi başlatmak istediğinize emin misiniz?`,
+                confirm: () => {
+                    this.state.productInfo = productInfo;
+                    this.state.productId = productInfo.id;
+                    this.navigateTo("capture");
+                },
+                cancel: () => {},
+            });
+            return;
         }
         this.state.productInfo = productInfo;
         this.state.productId = productInfo.id;

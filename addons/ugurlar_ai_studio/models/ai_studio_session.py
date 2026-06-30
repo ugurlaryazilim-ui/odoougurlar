@@ -1797,6 +1797,13 @@ class AiStudioSession(models.Model):
 
         try:
             with self.env.cr.savepoint():
+                # Kilit al: Aynı anda birden fazla oturum aynı ürünü güncellemeye çalışırsa beklet
+                # Bu sayede InFailedSqlTransaction (current transaction is aborted) hatası önlenir.
+                self.env.cr.execute(
+                    "SELECT id FROM product_template WHERE id = %s FOR NO KEY UPDATE",
+                    [tmpl.id]
+                )
+
                 # 1. MEVCUT AI GÖRSELLERİNİ TEMİZLE (Template bazında TEK SEFER)
                 existing_ai_images = self.env['product.image'].search([
                     ('product_tmpl_id', '=', tmpl.id),
