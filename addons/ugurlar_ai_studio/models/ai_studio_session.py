@@ -1841,12 +1841,13 @@ class AiStudioSession(models.Model):
         import threading
         dbname = self.env.cr.dbname
         thread = threading.Thread(
-            target=self._save_to_product_thread,
+            target=self.env['ai.studio.session']._save_to_product_thread,
             args=(self.id, self.env.uid, dbname),
         )
         thread.daemon = True
         thread.start()
         
+    @api.model
     def _save_to_product_thread(self, session_id, uid, dbname):
         """Arka planda asenkron olarak görselleri ürüne kaydeder."""
         import time
@@ -1857,7 +1858,7 @@ class AiStudioSession(models.Model):
         time.sleep(1.0)
         
         try:
-            with self.pool.cursor() as cr:
+            with odoo.registry(dbname).cursor() as cr:
                 env = api.Environment(cr, uid, {})
                 session = env['ai.studio.session'].browse(session_id)
                 try:
