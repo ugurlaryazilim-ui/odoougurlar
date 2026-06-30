@@ -145,6 +145,11 @@ class FashnProvider(AIProviderBase):
         prompt = kwargs.get('prompt', '')
         if prompt:
             inputs['prompt'] = prompt
+            
+        negative_prompt = kwargs.get('negative_prompt', '')
+        if negative_prompt:
+            inputs['negative_prompt'] = negative_prompt
+            
         if 'seed' in kwargs and kwargs['seed']:
             inputs['seed'] = int(kwargs['seed'])
 

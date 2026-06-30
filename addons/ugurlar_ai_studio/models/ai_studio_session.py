@@ -630,6 +630,7 @@ class AiStudioSession(models.Model):
                         provider_type=provider_type,
                     )
                     prompt_text = built_prompt.get('positive', '')
+                    negative_prompt_text = built_prompt.get('negative', '')
                 except Exception as pe:
                     _logger.warning('Worker: Prompt olusturma basarisiz (gen=%s): %s', gen.id, pe)
 
@@ -644,6 +645,7 @@ class AiStudioSession(models.Model):
                     garment_photo_type='auto',
                     output_format='jpeg',
                     prompt=prompt_text,
+                    negative_prompt=negative_prompt_text,
                     resolution=tryon_resolution,
                     photo_type=photo_type,
                     seed=front_seed,
@@ -1037,6 +1039,7 @@ class AiStudioSession(models.Model):
                             provider_type=provider_type,
                         )
                         prompt_text = built_prompt.get('positive', '')
+                        negative_prompt_text = built_prompt.get('negative', '')
                     except Exception as pe:
                         _logger.warning('Prompt oluşturma başarısız: %s', pe)
 
@@ -1051,6 +1054,7 @@ class AiStudioSession(models.Model):
                         garment_photo_type='auto',
                         output_format='jpeg',
                         prompt=prompt_text,
+                        negative_prompt=negative_prompt_text,
                         resolution=tryon_resolution,
                         photo_type=photo_type,
                         seed=front_seed,
@@ -1574,6 +1578,7 @@ class AiStudioSession(models.Model):
                         provider_type=provider_type,
                     )
                     prompt_text = built_prompt.get('positive', '')
+                    negative_prompt_text = built_prompt.get('negative', '')
                 except Exception as pe:
                     _logger.warning('Failed to build retry prompt: %s', pe)
 
@@ -1592,6 +1597,7 @@ class AiStudioSession(models.Model):
                     garment_photo_type='auto',
                     output_format='jpeg',
                     prompt=prompt_text,
+                    negative_prompt=negative_prompt_text,
                     resolution=tryon_resolution,
                     photo_type=photo_type,
                     seed=front_seed,  # ← ÖN YÜZ SEED'İNİ ZORLA
@@ -1753,8 +1759,14 @@ class AiStudioSession(models.Model):
         if not approved:
             raise UserError(_('En az bir görsel onaylanmalı.'))
 
+        import psycopg2
         try:
             self._save_to_product(approved)
+        except psycopg2.Error as e:
+            if getattr(e, 'pgcode', '') in ('40001', '25P02'):
+                raise
+            _logger.error('Ürüne kaydetme veritabanı hatası: %s', e)
+            raise UserError(_('Veritabanı hatası: %s') % str(e)[:200])
         except Exception as e:
             _logger.error('Ürüne kaydetme hatası: %s', e)
             raise UserError(_(
@@ -1795,52 +1807,37 @@ class AiStudioSession(models.Model):
         others = approved_generations - primary
         tmpl = product.product_tmpl_id
 
-        try:
-            with self.env.cr.savepoint():
-                # Kilit al: Aynı anda birden fazla oturum aynı ürünü güncellemeye çalışırsa beklet
-                # Bu sayede InFailedSqlTransaction (current transaction is aborted) hatası önlenir.
-                self.env.cr.execute(
-                    "SELECT id FROM product_template WHERE id = %s FOR NO KEY UPDATE",
-                    [tmpl.id]
-                )
+        # 1. MEVCUT AI GÖRSELLERİNİ TEMİZLE (Template bazında TEK SEFER)
+        existing_ai_images = self.env['product.image'].search([
+            ('product_tmpl_id', '=', tmpl.id),
+            ('name', 'like', '% - AI (%'),
+        ])
+        if existing_ai_images:
+            existing_ai_images.unlink()
+        
+        # 2. ANA RESMİ TEMPLATE'E ATA (Ürünler listesinde görünsün diye)
+        tmpl.image_1920 = primary.generated_image
 
-                # 1. MEVCUT AI GÖRSELLERİNİ TEMİZLE (Template bazında TEK SEFER)
-                existing_ai_images = self.env['product.image'].search([
-                    ('product_tmpl_id', '=', tmpl.id),
-                    ('name', 'like', '% - AI (%'),
-                ])
-                if existing_ai_images:
-                    existing_ai_images.unlink()
-                
-                # 2. ANA RESMİ TEMPLATE'E ATA (Ürünler listesinde görünsün diye)
-                tmpl.image_1920 = primary.generated_image
-
-                # 3. VARYANTLARA ÖZEL ATAMALAR VE EKSTRA RESİMLER
-                for prod in products:
-                    # Varyanta özel ana resim
-                    if hasattr(prod, 'image_variant_1920'):
-                        prod.image_variant_1920 = primary.generated_image
-                    
-                    # Alternatif resimleri bu varyanta özel oluştur
-                    sequence = 10
-                    for gen in others:
-                        type_label = dict(
-                            gen._fields['photo_type'].selection
-                        ).get(gen.photo_type, 'Görsel')
-                        self.env['product.image'].create({
-                            'product_tmpl_id': tmpl.id,
-                            'product_variant_id': prod.id,
-                            'name': f'{type_label} - AI ({gen.revision_number})',
-                            'image_1920': gen.generated_image,
-                            'sequence': sequence,
-                        })
-                        sequence += 10
-        except Exception as e:
-            _logger.error('Görseller kaydedilemedi: %s', e)
-            raise UserError(_(
-                'Görseller ürüne kaydedilemedi. Hata: %s\n'
-                'Lütfen tekrar deneyin veya yöneticinize başvurun.'
-            ) % str(e)[:200])
+        # 3. VARYANTLARA ÖZEL ATAMALAR VE EKSTRA RESİMLER
+        for prod in products:
+            # Varyanta özel ana resim
+            if hasattr(prod, 'image_variant_1920'):
+                prod.image_variant_1920 = primary.generated_image
+            
+            # Alternatif resimleri bu varyanta özel oluştur
+            sequence = 10
+            for gen in others:
+                type_label = dict(
+                    gen._fields['photo_type'].selection
+                ).get(gen.photo_type, 'Görsel')
+                self.env['product.image'].create({
+                    'product_tmpl_id': tmpl.id,
+                    'product_variant_id': prod.id,
+                    'name': f'{type_label} - AI ({gen.revision_number})',
+                    'image_1920': gen.generated_image,
+                    'sequence': sequence,
+                })
+                sequence += 10
 
     def action_cancel(self):
         """Oturumu iptal et."""

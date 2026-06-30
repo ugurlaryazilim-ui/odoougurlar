@@ -229,6 +229,7 @@ class AiStudioController(http.Controller):
     @http.route('/ai_studio/complete_session', type='json', auth='user', methods=['POST'])
     def complete_session(self, session_id):
         """Oturumu tamamla ve gorselleri urune kaydet."""
+        import psycopg2
         try:
             session = request.env['ai.studio.session'].browse(int(session_id))
             if not session.exists():
@@ -236,6 +237,11 @@ class AiStudioController(http.Controller):
 
             session.action_mark_done()
             return {'success': True}
+        except psycopg2.Error as e:
+            if getattr(e, 'pgcode', '') in ('40001', '25P02'):
+                raise
+            _logger.exception('complete_session veritabanı hatası: %s', e)
+            return {'success': False, 'error': str(e)}
         except Exception as e:
             _logger.exception('complete_session hatasi: %s', e)
             return {'success': False, 'error': str(e)}
