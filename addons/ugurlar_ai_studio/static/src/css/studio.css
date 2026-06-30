@@ -468,7 +468,7 @@
 /* --- Bottom Bar --- */
 .ais-bottom-bar {
     padding: 16px;
-    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px));
     background: transparent;
     margin-top: 20px;
     text-align: center;
@@ -728,7 +728,8 @@
     .ais-bottom-bar {
         max-width: 100%;
         padding: 12px;
-        padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+        padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px));
+        margin-top: 20px;
     }
 
     /* Modal */
