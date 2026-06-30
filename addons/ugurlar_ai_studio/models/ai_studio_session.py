@@ -1853,6 +1853,10 @@ class AiStudioSession(models.Model):
         import time
         import odoo
         from odoo import api
+        import logging
+        _logger = logging.getLogger(__name__)
+        
+        _logger.warning("AI_STUDIO_THREAD_START: session_id=%s, uid=%s, dbname=%s", session_id, uid, dbname)
         
         # Ana thread'in commit yapıp kilitleri bırakması için kısa bir bekleme
         time.sleep(1.0)
@@ -1861,10 +1865,12 @@ class AiStudioSession(models.Model):
             with odoo.registry(dbname).cursor() as cr:
                 env = api.Environment(cr, uid, {})
                 session = env['ai.studio.session'].browse(session_id)
+                _logger.warning("AI_STUDIO_THREAD_DB_CONNECTED: session state=%s", session.state)
                 try:
                     approved = session.generation_ids.filtered(
                         lambda g: g.is_approved and g.state == 'done'
                     )
+                    _logger.warning("AI_STUDIO_THREAD_APPROVED_COUNT: %d", len(approved))
                     if not approved:
                         return
                     session._save_to_product(approved)
@@ -1874,6 +1880,7 @@ class AiStudioSession(models.Model):
                         body=_('Arka planda %d onaylı görsel ürüne başarıyla kaydedildi.') % len(approved),
                     )
                     cr.commit()
+                    _logger.warning("AI_STUDIO_THREAD_SUCCESS: Saved %d images", len(approved))
                 except Exception as e:
                     cr.rollback()
                     import logging
@@ -1911,6 +1918,10 @@ class AiStudioSession(models.Model):
             # Primary seçilmemişse ilk onaylananı primary yap
             primary = approved_generations[0]
             primary.is_primary = True
+
+        import logging
+        _logger = logging.getLogger(__name__)
+        _logger.warning("AI_STUDIO_PRIMARY_IMAGE_SIZE: %s", len(primary.generated_image) if primary.generated_image else 0)
 
         others = approved_generations - primary
         tmpl = product.product_tmpl_id
