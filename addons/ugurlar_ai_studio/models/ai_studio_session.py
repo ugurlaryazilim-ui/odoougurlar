@@ -1918,6 +1918,19 @@ class AiStudioSession(models.Model):
         # Bu sayede InFailedSqlTransaction (current transaction is aborted) hatasını kökünden çözer!
         self.env.cr.execute("SELECT id FROM product_template WHERE id = %s FOR NO KEY UPDATE", (tmpl.id,))
 
+        import logging
+        _logger = logging.getLogger(__name__)
+
+        def _check_tx(step_name):
+            try:
+                self.env.cr.execute("SELECT 1")
+                _logger.info("TX CHECK %s: OK", step_name)
+            except Exception as e:
+                _logger.error("TX CHECK %s: FAILED - %s", step_name, e)
+                raise e
+
+        _check_tx("After Lock")
+
         # 1. MEVCUT AI GÖRSELLERİNİ TEMİZLE (Template bazında TEK SEFER)
         existing_ai_images = self.env['product.image'].search([
             ('product_tmpl_id', '=', tmpl.id),
@@ -1925,15 +1938,31 @@ class AiStudioSession(models.Model):
         ])
         if existing_ai_images:
             existing_ai_images.unlink()
+            
+        _check_tx("After Unlink")
         
         # 2. ANA RESMİ TEMPLATE'E ATA (Ürünler listesinde görünsün diye)
-        tmpl.image_1920 = primary.generated_image
+        try:
+            tmpl.image_1920 = primary.generated_image
+            tmpl.flush_recordset()
+        except Exception as e:
+            _logger.error("Template Write ERROR: %s", e)
+            raise e
+            
+        _check_tx("After Template Write")
 
         # 3. VARYANTLARA ÖZEL ATAMALAR VE EKSTRA RESİMLER
         for prod in products:
             # Varyanta özel ana resim
             if hasattr(prod, 'image_variant_1920'):
-                prod.image_variant_1920 = primary.generated_image
+                try:
+                    prod.image_variant_1920 = primary.generated_image
+                    prod.flush_recordset()
+                except Exception as e:
+                    _logger.error("Variant Write ERROR: %s", e)
+                    raise e
+            
+            _check_tx("After Variant Write")
             
             # Alternatif resimleri bu varyanta özel oluştur
             sequence = 10
@@ -1941,14 +1970,23 @@ class AiStudioSession(models.Model):
                 type_label = dict(
                     gen._fields['photo_type'].selection
                 ).get(gen.photo_type, 'Görsel')
-                self.env['product.image'].create({
-                    'product_tmpl_id': tmpl.id,
-                    'product_variant_id': prod.id,
-                    'name': f'{type_label} - AI ({gen.revision_number})',
-                    'image_1920': gen.generated_image,
-                    'sequence': sequence,
-                })
+                
+                try:
+                    self.env['product.image'].create({
+                        'product_tmpl_id': tmpl.id,
+                        'product_variant_id': prod.id,
+                        'name': f'{type_label} - AI ({gen.revision_number})',
+                        'image_1920': gen.generated_image,
+                        'sequence': sequence,
+                    })
+                    self.env['product.image'].flush_model()
+                except Exception as e:
+                    _logger.error("Product Image Create ERROR: %s", e)
+                    raise e
+                    
                 sequence += 10
+                
+        _check_tx("After Everything")
 
     def action_cancel(self):
         """Oturumu iptal et."""
