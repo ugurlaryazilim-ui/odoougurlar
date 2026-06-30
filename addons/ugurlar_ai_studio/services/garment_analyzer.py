@@ -210,7 +210,7 @@ def _analyze_via_fal(api_key, image_url, prompt):
     return _default_analysis()
 
 
-def analyze_outfit_consistency(image_data, api_key=None, gemini_api_key=None):
+def analyze_outfit_consistency(image_data, api_key=None, gemini_api_key=None, category='tops'):
     """Front try-on sonucundaki TUM kıyafet detaylarını analiz et.
 
     Cross-view tutarlılık için: front sonucundaki pantolon, ayakkabı,
@@ -220,25 +220,28 @@ def analyze_outfit_consistency(image_data, api_key=None, gemini_api_key=None):
         image_data: Front try-on sonucu (base64 veya URL)
         api_key: fal.ai API anahtarı (fallback)
         gemini_api_key: Gemini API anahtarı
+        category: Değiştirilen kıyafetin kategorisi ('tops', 'bottoms', 'one-piece')
 
     Returns:
-        dict: {
-            'bottomsDescription': str — alt giyim detayı,
-            'shoesDescription': str — ayakkabı detayı,
-            'hairDescription': str — saç stili,
-            'accessoriesDescription': str — aksesuar detayı,
-            'skinTone': str — ten rengi,
-            'fullOutfitPrompt': str — tüm tutarlılık talimatı,
-        }
+        dict: Çıkarılan analiz ve 'fullOutfitPrompt'
     """
-    prompt = """You are analyzing a fashion model photograph for OUTFIT CONSISTENCY.
+    if category == 'bottoms':
+        except_clause = "EXCEPT for the main BOTTOM garment (pants/jeans/skirt) which will be changed in other views."
+    elif category == 'one-piece' or category == 'one_piece':
+        except_clause = "EXCEPT for the main ONE-PIECE garment (dress/jumpsuit) which will be changed in other views."
+    else:
+        except_clause = "EXCEPT for the main TOP garment (shirt/t-shirt/jacket) which will be changed in other views."
+
+    prompt = f"""You are analyzing a fashion model photograph for OUTFIT CONSISTENCY.
 Your job is to describe EVERYTHING the model is wearing and their appearance,
-EXCEPT for the main top garment (which will be changed in other views).
+{except_clause}
 
 Analyze and return JSON:
-{
-  "bottomsType": "string — pants/jeans/skirt/shorts type (e.g., 'slim-fit white trousers', 'dark blue skinny jeans')",
-  "bottomsColor": "string — exact color (e.g., 'white', 'dark navy blue', 'black')",
+{{
+  "topsType": "string — top garment type (e.g., 'white cotton t-shirt', 'black hoodie'). Leave empty if analyzing a one-piece or if it's the target top.",
+  "topsColor": "string — top garment exact color",
+  "bottomsType": "string — pants/jeans/skirt/shorts type (e.g., 'slim-fit white trousers', 'dark blue skinny jeans'). Leave empty if it's the target bottom.",
+  "bottomsColor": "string — bottom garment exact color",
   "shoesType": "string — shoe type (e.g., 'white low-top sneakers', 'black ankle boots', 'beige heels')",
   "shoesColor": "string — shoe color",
   "hairStyle": "string — hair description (e.g., 'long wavy blonde hair', 'short brown bob')",
@@ -247,7 +250,7 @@ Analyze and return JSON:
   "accessories": "string — any visible accessories (watch, necklace, earrings, belt) or 'none'",
   "modelBuild": "string — body build (e.g., 'slim', 'athletic', 'curvy', 'standard')",
   "backgroundDescription": "string — background (e.g., 'clean white studio', 'light grey')"
-}
+}}
 
 Return ONLY valid JSON, no markdown. Be VERY specific about colors and styles."""
 
@@ -325,6 +328,13 @@ def _build_consistency_prompt(outfit_data):
     """Outfit verilerinden tutarlılık prompt cümlesi oluştur."""
     parts = []
 
+    tops = outfit_data.get('topsType', '')
+    tops_color = outfit_data.get('topsColor', '')
+    if tops and tops_color:
+        parts.append(f"{tops_color} {tops}")
+    elif tops:
+        parts.append(tops)
+
     bottoms = outfit_data.get('bottomsType', '')
     bottoms_color = outfit_data.get('bottomsColor', '')
     if bottoms and bottoms_color:
@@ -358,7 +368,7 @@ def _build_consistency_prompt(outfit_data):
         "CROSS-VIEW OUTFIT CONSISTENCY — CRITICAL: "
         "The model MUST wear the EXACT SAME outfit as the front view: "
         + ", ".join(parts) + ". "
-        "Do NOT change the pants/bottoms color, shoe type, hair style, or any accessory. "
+        "Do NOT change ANY of these listed items (top, bottoms, shoes, hair, accessories). "
         "Every view must look like the SAME photoshoot session. "
     )
 

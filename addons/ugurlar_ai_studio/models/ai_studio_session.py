@@ -1211,7 +1211,6 @@ class AiStudioSession(models.Model):
                                             gen.write({
                                                 'generated_image': edited_b64,
                                             })
-                                            gen_b64 = edited_b64
                                             _logger.info('Front post-processing (kombin giydirme) tamamlandı.')
                             except Exception as front_pp_e:
                                 _logger.warning('Front post-processing kombin giydirme başarısız: %s', front_pp_e)
@@ -1225,6 +1224,7 @@ class AiStudioSession(models.Model):
                                         gen_b64,
                                         api_key=fal_api_key,
                                         gemini_api_key=gemini_api_key,
+                                        category=category_to_send,
                                     )
                                 except Exception as oe:
                                     _logger.warning('Outfit tutarlılık analizi başarısız: %s', oe)
@@ -1606,6 +1606,7 @@ class AiStudioSession(models.Model):
                                 front_result_b64,
                                 api_key=fal_api_key,
                                 gemini_api_key=gemini_api_key,
+                                category=category_to_send,
                             )
                         except Exception as oe:
                             _logger.warning('Retry outfit tutarlılık analizi başarısız: %s', oe)

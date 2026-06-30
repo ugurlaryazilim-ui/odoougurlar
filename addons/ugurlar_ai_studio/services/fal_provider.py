@@ -126,7 +126,7 @@ class FalProvider(AIProviderBase):
                 'prompt': enhanced_prompt,
                 'image_urls': image_urls_list,
                 'num_images': kwargs.get('num_samples', 1),
-                'aspect_ratio': '3:4',
+                'aspect_ratio': '9:16',
                 'output_format': 'png',
                 'safety_tolerance': '4',
                 'resolution': kwargs.get('resolution', '2K'),
