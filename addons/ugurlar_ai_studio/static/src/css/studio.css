@@ -467,17 +467,10 @@
 
 /* --- Bottom Bar --- */
 .ais-bottom-bar {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
     padding: 16px;
-    background: var(--ais-card-bg);
-    border-top: 1px solid var(--ais-border);
-    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.08);
-    z-index: 100;
-    max-width: 768px;
-    margin: 0 auto;
+    background: transparent;
+    margin-top: 20px;
+    text-align: center;
 }
 
 /* --- Info Box --- */
@@ -637,7 +630,6 @@
 /* Ekran guvenli alan (notch/home bar) */
 .ais-screen {
     padding: 12px;
-    padding-bottom: env(safe-area-inset-bottom, 100px);
 }
 
 /* Odoo control panel gizle — SADECE AI Studio icinde (kendi header'imiz var) */
@@ -655,7 +647,6 @@
 
     .ais-screen {
         padding: 10px;
-        padding-bottom: 90px;
     }
 
     .ais-title {

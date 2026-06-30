@@ -70,5 +70,22 @@
         </field>
     </record>
 
+    <record id="view_generation_reject_form" model="ir.ui.view">
+        <field name="name">ai.studio.generation.reject.form</field>
+        <field name="model">ai.studio.generation</field>
+        <field name="arch" type="xml">
+            <form string="Reddet ve Revize Et">
+                <group>
+                    <field name="reject_reason_id" required="1"/>
+                    <field name="revision_prompt" placeholder="Yapay zekaya bu versiyon için ek bir talimat vermek isterseniz yazın... (Örn: Ceketin düğmelerini kapat)"/>
+                </group>
+                <footer>
+                    <button name="action_confirm_reject" string="Reddet ve Yeni Üret" type="object" class="btn-danger"/>
+                    <button string="İptal" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
 </odoo>
 

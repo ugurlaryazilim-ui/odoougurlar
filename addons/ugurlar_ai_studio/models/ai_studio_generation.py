@@ -128,6 +128,15 @@ class AiStudioGeneration(models.Model):
                     'ver': gen.revision_number,
                 },
             )
+            # UI'daki "İşlenmiş Fotoğraf" alanına yansıt:
+            if gen.source_photo_id and not self.env.context.get('is_review_popup'):
+                gen.source_photo_id.image_processed = gen.generated_image
+
+        if self.env.context.get('is_review_popup'):
+            # İlk onaylamadan sonra sıradakine geç (Tinder style!)
+            if self.source_photo_id:
+                self.source_photo_id.image_processed = self.generated_image
+            return self.action_next_generation()
 
     def action_reject(self):
         """Red dialog'u aç — revize için."""
@@ -165,6 +174,66 @@ class AiStudioGeneration(models.Model):
         ])
         siblings.write({'is_primary': False})
         self.is_primary = True
+
+    def action_next_generation(self):
+        """İnceleme popup'ında bir sonraki onay bekleyen görsele geçer."""
+        self.ensure_one()
+        next_gen = self.search([
+            ('session_id', '=', self.session_id.id),
+            ('state', '=', 'done'),
+            ('is_approved', '=', False),
+            ('id', '!=', self.id)
+        ], limit=1)
+        
+        if next_gen:
+            return {
+                'name': _('Görselleri İncele'),
+                'type': 'ir.actions.act_window',
+                'res_model': 'ai.studio.generation',
+                'res_id': next_gen.id,
+                'view_mode': 'form',
+                'target': 'new',
+                'context': self.env.context,
+            }
+        else:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': _('Bitti'),
+                    'message': _('Onaylanacak başka görsel kalmadı. "Tamamla ve Kaydet" diyebilirsiniz.'),
+                    'type': 'success',
+                    'sticky': False,
+                }
+            }
+
+    def action_confirm_reject(self):
+        """Reddet ve yeni versiyon oluştur (Popup içinden)."""
+        self.ensure_one()
+        if not self.reject_reason_id:
+            raise UserError(_('Lütfen bir red sebebi seçin.'))
+            
+        # Mevcut olanı reddedilmiş işaretle
+        self.is_approved = False
+        self.state = 'done'
+        self.session_id.message_post(body=_("%s görseli reddedildi, yeni versiyon üretilecek.") % self.photo_type)
+        
+        # Yeni versiyon oluştur
+        new_gen = self.copy({
+            'state': 'pending',
+            'is_approved': False,
+            'generated_image': False,
+            'revision_number': self.revision_number + 1,
+            'parent_generation_id': self.id,
+            'error_message': False,
+            'fal_request_id': False,
+            'cost': 0.0,
+            'quality_score': 0.0,
+        })
+        self.session_id._process_single_generation(new_gen)
+        
+        if self.env.context.get('is_review_popup'):
+            return self.action_next_generation()
 
     def action_retry(self):
         """Başarısız üretimi tekrar dene."""

@@ -11,6 +11,7 @@
                 <field name="state" widget="badge"/>
                 <field name="user_id" widget="many2one_avatar_user"/>
                 <field name="create_date"/>
+                <button name="action_review_generations" type="object" string="İncele" class="btn-primary" invisible="state != 'review'"/>
             </list>
         </field>
     </record>
@@ -25,12 +26,15 @@
                     <button name="action_photos_ready" string="Fotograflar Hazir"
                             type="object" class="btn-primary"
                             invisible="state != 'draft'"/>
-                    <button name="action_start_processing" string="AI Islemeyi Baslat"
+                    <button name="action_process_photos" string="AI islemeyi Baslat"
                             type="object" class="btn-primary"
                             invisible="state != 'photos_ready'"
                             confirm="AI isleme baslatilsin mi?"/>
-                    <button name="action_mark_done" string="Tamamla ve Kaydet"
+                    <button name="action_review_generations" string="Gorselleri Incele"
                             type="object" class="btn-primary"
+                            invisible="state != 'review'"/>
+                    <button name="action_mark_done" string="Tamamla ve Kaydet"
+                            type="object" class="btn-secondary"
                             invisible="state != 'review'"/>
                     <button name="action_cancel" string="Iptal"
                             type="object"
