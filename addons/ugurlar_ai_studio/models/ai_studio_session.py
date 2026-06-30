@@ -47,6 +47,7 @@ class AiStudioSession(models.Model):
     apply_to_siblings = fields.Boolean(
         string='Tüm Bedenlere Uygula',
         help='Aynı kesimin tüm beden varyantlarına uygula',
+        default=True,
     )
     sibling_product_ids = fields.Many2many(
         'product.product',
@@ -1781,8 +1782,17 @@ class AiStudioSession(models.Model):
             raise UserError(_('Oturuma bağlı ürün bulunamadı.'))
 
         products = product
-        if self.apply_to_siblings and self.sibling_product_ids:
-            products |= self.sibling_product_ids
+        if self.apply_to_siblings:
+            _logger.info('apply_to_siblings IS TRUE for session %s', self.id)
+            if self.sibling_product_ids:
+                _logger.info('Found sibling products: %s', self.sibling_product_ids.ids)
+                products |= self.sibling_product_ids
+            else:
+                _logger.info('No sibling products found for session %s', self.id)
+        else:
+            _logger.info('apply_to_siblings IS FALSE for session %s', self.id)
+
+        _logger.info('Will save images to products: %s', products.ids)
 
         # Ana resmi bul — tek kayıt garanti
         primary = approved_generations.filtered('is_primary')[:1]
@@ -1850,8 +1860,8 @@ class AiStudioSession(models.Model):
                         sequence += 10
                 except Exception as e:
                     _logger.warning(
-                        'Alternatif resim kaydedilemedi (gen=%s, prod=%s): %s',
-                        gen.id, prod.id, e,
+                        'Alternatif resim kaydedilemedi (gen=%s, type=%s, prod=%s): %s',
+                        gen.id, gen.photo_type, prod.id, e,
                     )
                     # Devam et — diğer görselleri kaydetmeye çalış
 
