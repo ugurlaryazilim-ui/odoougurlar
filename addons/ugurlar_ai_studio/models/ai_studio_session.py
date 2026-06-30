@@ -62,6 +62,7 @@ class AiStudioSession(models.Model):
         ('preprocessing', 'Ön İşlem'),
         ('processing', 'AI İşliyor'),
         ('review', 'Onay Bekliyor'),
+        ('saving', 'Ürüne Kaydediliyor'),
         ('done', 'Tamamlandı'),
         ('cancelled', 'İptal'),
     ], string='Durum', default='draft', tracking=True, index=True)
@@ -1828,7 +1829,7 @@ class AiStudioSession(models.Model):
         }
 
     def action_mark_done_async(self):
-        """Asenkron olarak ürüne kaydetme işlemini başlatır."""
+        """Asenkron olarak ürüne kaydetme işlemini cron ile başlatır."""
         self.ensure_one()
         approved = self.generation_ids.filtered(
             lambda g: g.is_approved and g.state == 'done'
@@ -1836,65 +1837,52 @@ class AiStudioSession(models.Model):
         if not approved:
             raise UserError(_('En az bir görsel onaylanmalı.'))
             
-        # Önceden başarılı diyoruz ki kullanıcı ekranda beklemesin
-        # Hata olursa oturum sayfasına failed olarak düşer.
-        import threading
-        dbname = self.env.cr.dbname
-        thread = threading.Thread(
-            target=self.env['ai.studio.session']._save_to_product_thread,
-            args=(self.id, self.env.uid, dbname),
-        )
-        thread.daemon = True
-        thread.start()
+        self.state = 'saving'
         
+        # Odoo'nun cron sistemini tetikle ki güvenli bir environment'te asenkron işlesin
+        cron = self.env.ref('ugurlar_ai_studio.cron_save_sessions', raise_if_not_found=False)
+        if cron:
+            cron._trigger()
+        else:
+            import logging
+            logging.getLogger(__name__).error("cron_save_sessions bulunamadı! Lütfen modülü güncelleyin.")
+
     @api.model
-    def _save_to_product_thread(self, session_id, uid, dbname):
-        """Arka planda asenkron olarak görselleri ürüne kaydeder."""
-        import time
-        import odoo
-        from odoo import api
+    def _cron_process_saving_sessions(self):
+        """'saving' (Ürüne Kaydediliyor) durumundaki tüm oturumları işler. Cron ile çağrılır."""
         import logging
         _logger = logging.getLogger(__name__)
         
-        _logger.warning("AI_STUDIO_THREAD_START: session_id=%s, uid=%s, dbname=%s", session_id, uid, dbname)
-        
-        # Ana thread'in commit yapıp kilitleri bırakması için kısa bir bekleme
-        time.sleep(1.0)
-        
-        try:
-            with odoo.registry(dbname).cursor() as cr:
-                env = api.Environment(cr, uid, {})
-                session = env['ai.studio.session'].browse(session_id)
-                _logger.warning("AI_STUDIO_THREAD_DB_CONNECTED: session state=%s", session.state)
-                try:
-                    approved = session.generation_ids.filtered(
-                        lambda g: g.is_approved and g.state == 'done'
-                    )
-                    _logger.warning("AI_STUDIO_THREAD_APPROVED_COUNT: %d", len(approved))
-                    if not approved:
-                        return
-                    session._save_to_product(approved)
-                    session.reviewer_id = env.user
-                    session.state = 'done'
-                    session.message_post(
-                        body=_('Arka planda %d onaylı görsel ürüne başarıyla kaydedildi.') % len(approved),
-                    )
-                    cr.commit()
-                    _logger.warning("AI_STUDIO_THREAD_SUCCESS: Saved %d images", len(approved))
-                except Exception as e:
-                    cr.rollback()
-                    import logging
-                    _logger = logging.getLogger(__name__)
-                    _logger.exception("Arka planda ürüne kaydetme hatası (session=%s): %s", session_id, e)
-                    # Hata mesajını sisteme yansıt ve statüyü failed yap
-                    session.state = 'photos_ready' # Yeniden denemeye fırsat ver
-                    session.message_post(
-                        body=_('Arka planda ürüne kaydederken hata oluştu. Lütfen tekrar deneyin. Hata: %s') % str(e)[:200],
-                    )
-                    cr.commit()
-        except Exception as main_e:
-            import logging
-            logging.getLogger(__name__).exception("Arka plan thread başlatılamadı: %s", main_e)
+        sessions = self.search([('state', '=', 'saving')])
+        for session in sessions:
+            _logger.info("CRON: %s numaralı oturum ürünlere kaydediliyor...", session.id)
+            try:
+                approved = session.generation_ids.filtered(
+                    lambda g: g.is_approved and g.state == 'done'
+                )
+                if not approved:
+                    session.state = 'photos_ready'
+                    session.message_post(body=_('Hiç onaylı görsel bulunamadı, taslağa döndürüldü.'))
+                    continue
+                
+                # Resimleri ürüne ekle
+                session._save_to_product(approved)
+                
+                session.reviewer_id = self.env.user
+                session.state = 'done'
+                session.message_post(
+                    body=_('Arka planda %d onaylı görsel ürüne başarıyla kaydedildi.') % len(approved),
+                )
+                self.env.cr.commit()
+                _logger.info("CRON: %s numaralı oturum BAŞARIYLA kaydedildi.", session.id)
+            except Exception as e:
+                self.env.cr.rollback()
+                _logger.exception("CRON Hatası (session=%s): %s", session.id, e)
+                session.state = 'photos_ready'
+                session.message_post(
+                    body=_('Arka planda ürüne kaydederken hata oluştu. Lütfen tekrar deneyin. Hata: %s') % str(e)[:200],
+                )
+                self.env.cr.commit()
     def _save_to_product(self, approved_generations):
         """Onaylanmış görselleri ürün kartına aktar.
 
