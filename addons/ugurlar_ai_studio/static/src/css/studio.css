@@ -468,6 +468,7 @@
 /* --- Bottom Bar --- */
 .ais-bottom-bar {
     padding: 16px;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
     background: transparent;
     margin-top: 20px;
     text-align: center;
@@ -621,9 +622,9 @@
 .ais-app {
     position: relative;
     width: 100%;
-    max-width: 100%;
-    min-height: calc(100vh - 46px);
+    height: 100%;
     overflow-x: hidden;
+    overflow-y: auto;
     -webkit-overflow-scrolling: touch;
 }
 
