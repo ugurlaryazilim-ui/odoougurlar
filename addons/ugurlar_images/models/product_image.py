@@ -32,15 +32,12 @@ class ProductImage(models.Model):
         """
         if not ProductImage._logged_debug:
             ProductImage._logged_debug = True
-            try:
-                self.env.cr.execute("SELECT id, name, product_tmpl_id, product_variant_id, length(image_1920) FROM product_image")
-                results = self.env.cr.fetchall()
-                _logger.info("📸 DATABASE IMAGE COUNT: %d", len(results))
-                for row in results[:150]:
-                    _logger.info("📸 DB IMAGE: id=%s, name=%s, tmpl_id=%s, variant_id=%s, size=%s",
-                                 row[0], row[1], row[2], row[3], row[4])
-            except Exception as e:
-                _logger.error("Error running database image query: %s", e)
+            # HATALI KOD (İşlemi kilitler):
+            # Odoo'da image_1920 veritabanı kolonu olmayabilir (attachment'ta tutulur). 
+            # Raw SQL exception fırlattığında ve savepoint olmadığında tüm transaction iptal olur!
+            # Bu yüzden bu log satırını kapattık.
+            _logger.info("📸 DATABASE IMAGE COUNT CHECK DISABLED TO PREVENT TRANSACTION ABORT")
+                
         for image in self:
             image.can_image_1024_be_zoomed = True
 
