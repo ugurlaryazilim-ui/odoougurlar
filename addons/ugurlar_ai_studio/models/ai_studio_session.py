@@ -164,12 +164,26 @@ class AiStudioSession(models.Model):
 
     @api.depends('product_id')
     def _compute_siblings(self):
-        """Aynı template'in diğer varyantlarını bul."""
+        """Aynı template'in diğer varyantlarını bul (Sadece aynı renk olanlar)."""
         for session in self:
             if session.product_id and session.product_id.product_tmpl_id:
                 tmpl = session.product_id.product_tmpl_id
-                siblings = tmpl.product_variant_ids - session.product_id
-                session.sibling_product_ids = siblings
+                all_siblings = tmpl.product_variant_ids - session.product_id
+                
+                # Varyantın renk özelliklerini bul
+                color_ptavs = session.product_id.product_template_attribute_value_ids.filtered(
+                    lambda v: v.attribute_id.display_type == 'color' or 'renk' in v.attribute_id.name.lower() or 'color' in v.attribute_id.name.lower()
+                )
+                
+                valid_siblings = all_siblings
+                if color_ptavs:
+                    # Renk özelliği varsa, sadece aynı renge sahip varyantları filtrele
+                    for color_ptav in color_ptavs:
+                        valid_siblings = valid_siblings.filtered(
+                            lambda s: color_ptav in s.product_template_attribute_value_ids
+                        )
+                
+                session.sibling_product_ids = valid_siblings
             else:
                 session.sibling_product_ids = False
 
@@ -1828,6 +1842,7 @@ class AiStudioSession(models.Model):
                         ).get(gen.photo_type, 'Görsel')
                         self.env['product.image'].create({
                             'product_tmpl_id': prod.product_tmpl_id.id,
+                            'product_variant_id': prod.id,
                             'name': f'{type_label} - AI ({gen.revision_number})',
                             'image_1920': gen.generated_image,
                             'sequence': sequence,
