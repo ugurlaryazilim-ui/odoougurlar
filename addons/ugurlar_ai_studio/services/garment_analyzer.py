@@ -79,6 +79,7 @@ def analyze_garment(api_key, image_url, gemini_api_key=None):
     """
     prompt = """You are a senior Fashion Merchandiser analyzing a product image.
 Ignore any hangers, clips, hands, or mannequins holding the garment. Focus ONLY on the garment's actual design.
+CRITICAL: If there are any plastic security tags, anti-theft alarms, or store price tags visible on the garment, completely IGNORE them. Do not describe them or treat them as part of the garment's design.
 
 Analyze the garment and return a JSON with these fields:
 {
@@ -450,6 +451,25 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
                 "Do NOT alter or remove any part of the design. "
             )
 
+        # ═══ DONANIM VE DETAY KORUMA (ALARM YOK SAYMA) ═══
+        closure = analysis.get('closureType', '')
+        if closure and str(closure).lower() not in ['yok', 'none', 'null', 'false', '']:
+            base_prompt += (
+                f"CRITICAL HARDWARE PRESERVATION: The garment has {closure} details. "
+                "You MUST exactly preserve all visible buttons, zippers, snaps, rivets, and hardware "
+                "from the original image. Do not alter their size, shape, color, or placement. "
+            )
+        else:
+            base_prompt += (
+                "CRITICAL HARDWARE PRESERVATION: You MUST exactly preserve any visible buttons, "
+                "zippers, snaps, rivets, or hardware from the original image. Do not alter their "
+                "size, shape, color, or placement. "
+            )
+        base_prompt += (
+            "CRITICAL: IGNORE and REMOVE any plastic security tags, anti-theft alarms, "
+            "or store price tags attached to the garment. Do not generate them. "
+        )
+
     # Cift bosluklari temizle
     base_prompt = " ".join(base_prompt.split()) + " "
 
@@ -554,6 +574,8 @@ _VIEW_NEGATIVE_PROMPTS = {
         "altered garment design, changed collar, wrong garment color, "
         "wrong fabric texture, wrong button style, modified print, "
         "different pattern, altered graphic, changed logo, "
+        "security tag, anti-theft alarm, plastic tag, price tag, store label, hanger clip, "
+        "altered buttons, missing buttons, changed zipper, modified hardware, "
         "stiff pose, rigid standing, arms straight at sides, amateur pose, "
         "military stance, passport photo pose, "
         "bare midriff, bare chest, nude model, "
@@ -566,6 +588,8 @@ _VIEW_NEGATIVE_PROMPTS = {
         "blurry, low quality, collage, split screen, multi-panel, "
         "studio equipment, softbox, light stand, flash head, "
         "altered garment design, wrong garment color, wrong fabric texture, "
+        "security tag, anti-theft alarm, plastic tag, price tag, store label, hanger clip, "
+        "altered buttons, missing buttons, changed zipper, modified hardware, "
         "stiff pose, rigid standing, arms straight at sides, amateur pose, "
         "military stance, "
         "front view, facing camera, face visible, "
@@ -578,6 +602,8 @@ _VIEW_NEGATIVE_PROMPTS = {
         "blurry, low quality, collage, split screen, multi-panel, "
         "studio equipment, softbox, light stand, flash head, "
         "altered garment design, wrong garment color, wrong fabric texture, "
+        "security tag, anti-theft alarm, plastic tag, price tag, store label, hanger clip, "
+        "altered buttons, missing buttons, changed zipper, modified hardware, "
         "stiff pose, rigid standing, amateur pose, "
         "bare midriff, bare chest, nude model"
     ),
@@ -586,6 +612,8 @@ _VIEW_NEGATIVE_PROMPTS = {
         "blurry, low quality, out of focus, "
         "altered garment design, wrong garment color, wrong fabric texture, "
         "modified print, different pattern, altered graphic, "
+        "security tag, anti-theft alarm, plastic tag, price tag, store label, hanger clip, "
+        "altered buttons, missing buttons, changed zipper, modified hardware, "
         "flat-lay photo, hanger, product-only shot without model"
     ),
 }
