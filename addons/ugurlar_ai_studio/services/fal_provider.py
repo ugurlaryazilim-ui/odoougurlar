@@ -118,6 +118,14 @@ class FalProvider(AIProviderBase):
                 for i in range(len(detail_urls)):
                     idx = detail_start_idx + i
                     dynamic_prompt += f"The {idx}th reference image is a MACRO DETAIL shot of the garment (showing fabric texture, buttons, or specific patterns). You MUST accurately apply this exact texture and detail to the garment. DO NOT hallucinate details. "
+                
+                # CRITICAL: Prevent the AI from hallucinating a macro shot as the main output
+                dynamic_prompt += (
+                    "CRITICAL: The final output MUST BE a FULL BODY photograph of the human model wearing the garment. "
+                    "DO NOT generate a macro shot. DO NOT generate a close-up of the detail. "
+                    "The macro detail image is strictly for texture and button reference only. "
+                    "The model (mannequin) must remain fully visible in the shot. "
+                )
                     
             if dynamic_prompt:
                 enhanced_prompt = dynamic_prompt + "\n" + enhanced_prompt
@@ -126,7 +134,7 @@ class FalProvider(AIProviderBase):
                 'prompt': enhanced_prompt,
                 'image_urls': image_urls_list,
                 'num_images': kwargs.get('num_samples', 1),
-                'aspect_ratio': '9:16',
+                'aspect_ratio': '2:3',
                 'output_format': 'png',
                 'safety_tolerance': '4',
                 'resolution': kwargs.get('resolution', '2K'),
