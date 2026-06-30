@@ -554,6 +554,71 @@ class OdooImageSync:
     # ANA İŞLEM DÖNGÜSÜ
     # ═══════════════════════════════════════════════════════════════
 
+    def download_ai_exports(self):
+        """AI Studio'da onaylanan görselleri Odoo'dan indirip klasöre kaydeder."""
+        if not self.uid: return
+        
+        try:
+            # Sadece dışarı aktarılmamış, onaylı ve oturumu tamamlanmış olanları getir
+            exports = self._execute('ai.studio.generation', 'search_read', 
+                [('is_approved', '=', True), ('is_exported_to_local', '=', False), ('session_id.state', '=', 'done')],
+                ['id', 'generated_image', 'photo_type', 'session_id']
+            )
+            
+            if not exports:
+                return
+
+            watch = self.config['watch_folder']
+            for exp in exports:
+                if not exp.get('generated_image'):
+                    self._execute('ai.studio.generation', 'write', [exp['id']], {'is_exported_to_local': True})
+                    continue
+
+                session = self._execute('ai.studio.session', 'read', [exp['session_id'][0]], ['product_id'])[0]
+                if not session.get('product_id'):
+                    self._execute('ai.studio.generation', 'write', [exp['id']], {'is_exported_to_local': True})
+                    continue
+
+                product = self._execute('product.product', 'read', [session['product_id'][0]], ['barcode'])[0]
+                barcode = product.get('barcode')
+                if not barcode:
+                    self._execute('ai.studio.generation', 'write', [exp['id']], {'is_exported_to_local': True})
+                    continue
+                
+                # İsimlendirme mantığı: photo_type'a göre index
+                mapping = {'front': '1', 'back': '2', 'side': '3', 'detail': '4'}
+                idx = mapping.get(exp['photo_type'], '5')
+                
+                filename = f"{barcode}_{idx}.jpg"
+                filepath = os.path.join(watch, filename)
+                
+                # Base64 çöz ve kaydet
+                img_data = base64.b64decode(exp['generated_image'])
+                with open(filepath, 'wb') as f:
+                    f.write(img_data)
+                
+                # Dosya stat bilgilerini al (cache'e yazmak için)
+                stat = os.stat(filepath)
+                file_size = stat.st_size
+                file_mtime = stat.st_mtime
+                
+                # Sync Agent bu dosyayı bir daha işleyip diğer renklere YAYMASIN diye SQLite'a 'done' olarak ekle!
+                self._db.execute(
+                    '''INSERT OR REPLACE INTO processed_files
+                       (filename, file_size, file_mtime, barcode, state)
+                       VALUES (?, ?, ?, ?, 'done')''',
+                    (filename, file_size, file_mtime, barcode)
+                )
+                self._db.commit()
+                
+                _logger.info("🤖 AI Görseli indirildi ve klasöre kaydedildi (Agent yok sayacak): %s", filename)
+                
+                # Odoo'ya indirildiğini bildir
+                self._execute('ai.studio.generation', 'write', [exp['id']], {'is_exported_to_local': True})
+                
+        except Exception as e:
+            _logger.error("AI görsel indirme hatası: %s", e)
+
     def process_folder(self):
         """Klasördeki tüm görselleri tarar ve işler.
         
@@ -764,6 +829,7 @@ def main():
     try:
         while True:
             try:
+                agent.download_ai_exports()
                 agent.process_folder()
             except KeyboardInterrupt:
                 raise

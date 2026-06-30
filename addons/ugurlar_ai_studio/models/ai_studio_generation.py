@@ -58,6 +58,7 @@ class AiStudioGeneration(models.Model):
 
     # --- Onay ---
     is_approved = fields.Boolean(string='Onaylandı', default=False)
+    is_exported_to_local = fields.Boolean(string='Klasöre Aktarıldı', default=False, index=True)
     is_primary = fields.Boolean(
         string='Ana Resim',
         default=False,
