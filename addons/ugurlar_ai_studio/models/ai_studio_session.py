@@ -1812,34 +1812,20 @@ class AiStudioSession(models.Model):
                 cr.commit()
 
     def action_mark_done(self):
-        """Onaylanmış görselleri ürüne kaydet ve oturumu tamamla."""
+        """Onaylanmış görselleri ürüne kaydet ve oturumu tamamla (Asenkron)."""
         self.ensure_one()
-        approved = self.generation_ids.filtered(
-            lambda g: g.is_approved and g.state == 'done'
-        )
-        if not approved:
-            raise UserError(_('En az bir görsel onaylanmalı.'))
-
-        import psycopg2
-        try:
-            self._save_to_product(approved)
-        except psycopg2.Error as e:
-            if getattr(e, 'pgcode', '') in ('40001', '25P02'):
-                raise
-            _logger.error('Ürüne kaydetme veritabanı hatası: %s', e)
-            raise UserError(_('Veritabanı hatası: %s') % str(e)[:200])
-        except Exception as e:
-            _logger.error('Ürüne kaydetme hatası: %s', e)
-            raise UserError(_(
-                'Görseller ürüne kaydedilemedi: %s\n'
-                'Lütfen tekrar deneyin veya yöneticinize başvurun.'
-            ) % str(e)[:200])
-
-        self.reviewer_id = self.env.user
-        self.state = 'done'
-        self.message_post(
-            body=_('%d onaylı görsel ürüne kaydedildi.') % len(approved),
-        )
+        self.action_mark_done_async()
+        
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Bilgi'),
+                'message': _('Görseller arka planda ürüne kaydediliyor...'),
+                'type': 'success',
+                'sticky': False,
+            }
+        }
 
     def action_mark_done_async(self):
         """Asenkron olarak ürüne kaydetme işlemini başlatır."""
