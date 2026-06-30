@@ -1853,44 +1853,55 @@ class AiStudioSession(models.Model):
         # Önceden başarılı diyoruz ki kullanıcı ekranda beklemesin
         # Hata olursa oturum sayfasına failed olarak düşer.
         import threading
+        dbname = self.env.cr.dbname
         thread = threading.Thread(
             target=self._save_to_product_thread,
-            args=(self.id, self.env.uid),
+            args=(self.id, self.env.uid, dbname),
         )
         thread.daemon = True
         thread.start()
         
-    def _save_to_product_thread(self, session_id, uid):
+    def _save_to_product_thread(self, session_id, uid, dbname):
         """Arka planda asenkron olarak görselleri ürüne kaydeder."""
+        import time
         import odoo
         from odoo import api
-        with api.Environment.manage():
-            with odoo.registry(self.env.cr.dbname).cursor() as cr:
-                env = api.Environment(cr, uid, self.env.context)
-                session = env['ai.studio.session'].browse(session_id)
-                try:
-                    approved = session.generation_ids.filtered(
-                        lambda g: g.is_approved and g.state == 'done'
-                    )
-                    if not approved:
-                        return
-                    session._save_to_product(approved)
-                    session.reviewer_id = env.user
-                    session.state = 'done'
-                    session.message_post(
-                        body=_('Arka planda %d onaylı görsel ürüne başarıyla kaydedildi.') % len(approved),
-                    )
-                    cr.commit()
-                except Exception as e:
-                    cr.rollback()
-                    _logger.exception("Arka planda ürüne kaydetme hatası (session=%s): %s", session_id, e)
-                    # Hata mesajını sisteme yansıt ve statüyü failed yap
-                    session.state = 'photos_ready' # Yeniden denemeye fırsat ver
-                    session.message_post(
-                        body=_('Arka planda ürüne kaydederken hata oluştu. Lütfen tekrar deneyin. Hata: %s') % str(e)[:200],
-                    )
-                    cr.commit()
-
+        
+        # Ana thread'in commit yapıp kilitleri bırakması için kısa bir bekleme
+        time.sleep(1.0)
+        
+        try:
+            with api.Environment.manage():
+                with odoo.registry(dbname).cursor() as cr:
+                    env = api.Environment(cr, uid, {})
+                    session = env['ai.studio.session'].browse(session_id)
+                    try:
+                        approved = session.generation_ids.filtered(
+                            lambda g: g.is_approved and g.state == 'done'
+                        )
+                        if not approved:
+                            return
+                        session._save_to_product(approved)
+                        session.reviewer_id = env.user
+                        session.state = 'done'
+                        session.message_post(
+                            body=_('Arka planda %d onaylı görsel ürüne başarıyla kaydedildi.') % len(approved),
+                        )
+                        cr.commit()
+                    except Exception as e:
+                        cr.rollback()
+                        import logging
+                        _logger = logging.getLogger(__name__)
+                        _logger.exception("Arka planda ürüne kaydetme hatası (session=%s): %s", session_id, e)
+                        # Hata mesajını sisteme yansıt ve statüyü failed yap
+                        session.state = 'photos_ready' # Yeniden denemeye fırsat ver
+                        session.message_post(
+                            body=_('Arka planda ürüne kaydederken hata oluştu. Lütfen tekrar deneyin. Hata: %s') % str(e)[:200],
+                        )
+                        cr.commit()
+        except Exception as main_e:
+            import logging
+            logging.getLogger(__name__).exception("Arka plan thread başlatılamadı: %s", main_e)
     def _save_to_product(self, approved_generations):
         """Onaylanmış görselleri ürün kartına aktar.
 
