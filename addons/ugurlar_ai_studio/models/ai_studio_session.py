@@ -600,6 +600,18 @@ class AiStudioSession(models.Model):
                         front_output_url = provider.upload_image(front_result_b64)
                     except Exception:
                         pass
+                        
+                detail_urls = []
+                detail_photos = env['ai.studio.photo'].search([
+                    ('session_id', '=', session_id),
+                    ('photo_type', '=', 'detail')
+                ])
+                for dp in detail_photos:
+                    try:
+                        dp_url = provider.upload_image(dp.image_original)
+                        detail_urls.append(dp_url)
+                    except Exception:
+                        pass
 
                 tryon_model = 'nano-banana-2/edit' if provider_type == 'fal' else 'tryon-v1.6'
                 tryon_resolution = '1K'
@@ -653,6 +665,7 @@ class AiStudioSession(models.Model):
                     prompt=prompt_text,
                     negative_prompt=negative_prompt_text,
                     front_output_url=front_output_url,
+                    detail_urls=detail_urls,
                     resolution=tryon_resolution,
                     photo_type=photo_type,
                     seed=front_seed,
@@ -1000,6 +1013,18 @@ class AiStudioSession(models.Model):
                             front_output_url = provider.upload_image(front_result_b64)
                         except Exception:
                             pass
+                            
+                    detail_urls = []
+                    detail_photos = env['ai.studio.photo'].search([
+                        ('session_id', '=', session.id),
+                        ('photo_type', '=', 'detail')
+                    ])
+                    for dp in detail_photos:
+                        try:
+                            dp_url = provider.upload_image(dp.image_original)
+                            detail_urls.append(dp_url)
+                        except Exception:
+                            pass
                     # Arka plan kaldırma ve askı temizleme
                     if auto_bg and processed_b64:
                         try:
@@ -1069,6 +1094,7 @@ class AiStudioSession(models.Model):
                         prompt=prompt_text,
                         negative_prompt=negative_prompt_text,
                         front_output_url=front_output_url,
+                        detail_urls=detail_urls,
                         resolution=tryon_resolution,
                         photo_type=photo_type,
                         seed=front_seed,
@@ -1561,6 +1587,19 @@ class AiStudioSession(models.Model):
                             front_output_url = provider.upload_image(front_result_b64)
                         except Exception:
                             pass
+                            
+                        detail_urls = []
+                        detail_photos = env['ai.studio.photo'].search([
+                            ('session_id', '=', session.id),
+                            ('photo_type', '=', 'detail')
+                        ])
+                        for dp in detail_photos:
+                            try:
+                                dp_url = provider.upload_image(dp.image_original)
+                                detail_urls.append(dp_url)
+                            except Exception:
+                                pass
+                                
                         try:
                             from ..services.garment_analyzer import analyze_outfit_consistency
                             outfit_consistency = analyze_outfit_consistency(
@@ -1618,6 +1657,7 @@ class AiStudioSession(models.Model):
                     prompt=prompt_text,
                     negative_prompt=negative_prompt_text,
                     front_output_url=front_output_url,
+                    detail_urls=detail_urls,
                     resolution=tryon_resolution,
                     photo_type=photo_type,
                     seed=front_seed,  # ← ÖN YÜZ SEED'İNİ ZORLA

@@ -89,26 +89,38 @@ class FalProvider(AIProviderBase):
             # View-spesifik prompt bilgisini ekle
             photo_type = kwargs.get('photo_type', 'front')
             front_output_url = kwargs.get('front_output_url')
+            detail_urls = kwargs.get('detail_urls') or []
             
             image_urls_list = [garment_image_url, model_image_url]
             if front_output_url and photo_type in ('back', 'side'):
                 image_urls_list.append(front_output_url)
                 
+            for du in detail_urls:
+                image_urls_list.append(du)
+                
             enhanced_prompt = prompt
-            if photo_type and photo_type != 'front' and prompt:
-                if front_output_url:
-                    view_hints = {
-                        'back': 'IMPORTANT: Show the BACK view of the model, facing away from camera. The THIRD reference image is the FRONT generated view of this model; you MUST use the THIRD image as the absolute source of truth for the model identity, hairstyle, skin, and ALL other outfit parts (like top, bottom, shoes). Do NOT change the model or the rest of the outfit from the THIRD reference image. ONLY rotate the camera to show the back view, and apply the new garment. ',
-                        'side': 'IMPORTANT: Show the SIDE view of the model, turned 45 degrees. The THIRD reference image is the FRONT generated view of this model; you MUST use the THIRD image as the absolute source of truth for the model identity, hairstyle, skin, and ALL other outfit parts (like top, bottom, shoes). Do NOT change the model or the rest of the outfit from the THIRD reference image. ONLY rotate the camera to show the side view, and apply the new garment. ',
-                        'detail': 'IMPORTANT: Close-up detail shot showing fabric texture and details. ',
-                    }
-                else:
-                    view_hints = {
-                        'back': 'IMPORTANT: Show the BACK view of the model, facing away from camera. ',
-                        'side': 'IMPORTANT: Show the SIDE view of the model, turned 45 degrees. ',
-                        'detail': 'IMPORTANT: Close-up detail shot showing fabric texture and details. ',
-                    }
-                enhanced_prompt = view_hints.get(photo_type, '') + prompt
+            
+            # Base View Hints
+            view_hints = {
+                'back': 'IMPORTANT: Show the BACK view of the model, facing away from camera. ',
+                'side': 'IMPORTANT: Show the SIDE view of the model, turned 45 degrees. ',
+                'detail': 'IMPORTANT: Close-up detail shot showing fabric texture and details. ',
+            }
+            base_hint = view_hints.get(photo_type, '') if photo_type and photo_type != 'front' else ''
+            dynamic_prompt = base_hint
+            
+            detail_start_idx = 3
+            if front_output_url and photo_type in ('back', 'side'):
+                dynamic_prompt += "The THIRD reference image is the FRONT generated view of this model; you MUST use the THIRD image as the absolute source of truth for the model identity, hairstyle, skin, and ALL other outfit parts (like top, bottom, shoes). Do NOT change the model or the rest of the outfit from the THIRD reference image. ONLY rotate the camera to show the view, and apply the new garment. "
+                detail_start_idx = 4
+                
+            if detail_urls:
+                for i in range(len(detail_urls)):
+                    idx = detail_start_idx + i
+                    dynamic_prompt += f"The {idx}th reference image is a MACRO DETAIL shot of the garment (showing fabric texture, buttons, or specific patterns). You MUST accurately apply this exact texture and detail to the garment. DO NOT hallucinate details. "
+                    
+            if dynamic_prompt:
+                enhanced_prompt = dynamic_prompt + "\n" + enhanced_prompt
 
             arguments = {
                 'prompt': enhanced_prompt,
