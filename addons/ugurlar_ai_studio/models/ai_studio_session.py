@@ -1185,11 +1185,15 @@ class AiStudioSession(models.Model):
                                     bottoms_desc = outfit_consistency.get('bottomsColor', '') + ' ' + outfit_consistency.get('bottomsType', '')
                                     shoes_desc = outfit_consistency.get('shoesColor', '') + ' ' + outfit_consistency.get('shoesType', '')
 
+                                    top_color = (cached_analysis or {}).get('primaryColor', '')
+                                    top_type = (cached_analysis or {}).get('garmentType', 'garment')
+                                    top_desc = f"{top_color} {top_type}".strip()
+
                                     edit_prompt = (
                                         f"RAW photo, photorealistic, professional fashion photography, studio lighting, white background. "
-                                        f"A model wearing a top garment, matching the outfit from the reference image. "
+                                        f"A model wearing a {top_desc}, matching the outfit from the reference image. "
                                         f"The model must wear the exact same {bottoms_desc.strip()} and the exact same {shoes_desc.strip()} "
-                                        f"as shown in the reference image. Perfect color tone matching, high detail, 8k resolution."
+                                        f"as shown in the reference image. The {top_desc} MUST REMAIN {top_color}. Perfect color tone matching, high detail, 8k resolution."
                                     )
 
                                     import os
