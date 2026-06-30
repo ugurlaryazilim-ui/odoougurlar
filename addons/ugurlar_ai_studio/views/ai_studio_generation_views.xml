@@ -33,6 +33,9 @@
                     <button name="action_reject" string="❌ Reddet" type="object"
                             class="btn-danger"
                             invisible="state != 'done' or is_approved"/>
+                    <button name="action_mark_session_done" string="Tamamla ve Kaydet" type="object"
+                            class="btn-primary"
+                            invisible="not is_approved"/>
                     <button name="action_set_primary" string="⭐ Ana Resim Yap" type="object"
                             invisible="not is_approved or is_primary"/>
                     <button name="action_retry" string="🔄 Tekrar Dene" type="object"

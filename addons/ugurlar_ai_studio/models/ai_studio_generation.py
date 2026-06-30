@@ -200,10 +200,11 @@ class AiStudioGeneration(models.Model):
                 'type': 'ir.actions.client',
                 'tag': 'display_notification',
                 'params': {
-                    'title': _('Bitti'),
-                    'message': _('Onaylanacak başka görsel kalmadı. "Tamamla ve Kaydet" diyebilirsiniz.'),
+                    'title': _('Tebrikler!'),
+                    'message': _('Onaylanacak başka görsel kalmadı. Lütfen ana ekrandan "Tamamla ve Kaydet" diyerek işlemleri bitirin.'),
                     'type': 'success',
                     'sticky': False,
+                    'next': {'type': 'ir.actions.act_window_close'},
                 }
             }
 
@@ -234,6 +235,13 @@ class AiStudioGeneration(models.Model):
         
         if self.env.context.get('is_review_popup'):
             return self.action_next_generation()
+
+    def action_mark_session_done(self):
+        """Bu popup içinden tüm oturumu Tamamla ve Kaydet yapmak için."""
+        self.ensure_one()
+        if self.session_id:
+            # Action döndürüyoruz ki sayfayı komple kapatsın ve listeye dönsün
+            return self.session_id.action_mark_done()
 
     def action_retry(self):
         """Başarısız üretimi tekrar dene."""
