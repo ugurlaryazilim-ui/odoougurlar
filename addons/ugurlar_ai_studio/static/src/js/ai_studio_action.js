@@ -98,6 +98,11 @@ export class AiStudioAction extends Component {
     }
 
     onProductFound(productInfo) {
+        if (productInfo.has_image) {
+            if (!confirm(`Bu ürünün (${productInfo.name}) halihazırda bir ana görseli var!\n\nYine de yeni bir AI çekimi başlatmak istediğinize emin misiniz?`)) {
+                return;
+            }
+        }
         this.state.productInfo = productInfo;
         this.state.productId = productInfo.id;
         this.navigateTo("capture");

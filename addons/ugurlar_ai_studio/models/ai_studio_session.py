@@ -1782,17 +1782,8 @@ class AiStudioSession(models.Model):
             raise UserError(_('Oturuma bağlı ürün bulunamadı.'))
 
         products = product
-        if self.apply_to_siblings:
-            _logger.info('apply_to_siblings IS TRUE for session %s', self.id)
-            if self.sibling_product_ids:
-                _logger.info('Found sibling products: %s', self.sibling_product_ids.ids)
-                products |= self.sibling_product_ids
-            else:
-                _logger.info('No sibling products found for session %s', self.id)
-        else:
-            _logger.info('apply_to_siblings IS FALSE for session %s', self.id)
-
-        _logger.info('Will save images to products: %s', products.ids)
+        if self.apply_to_siblings and self.sibling_product_ids:
+            products |= self.sibling_product_ids
 
         # Ana resmi bul — tek kayıt garanti
         primary = approved_generations.filtered('is_primary')[:1]
@@ -1802,68 +1793,47 @@ class AiStudioSession(models.Model):
             primary.is_primary = True
 
         others = approved_generations - primary
+        tmpl = product.product_tmpl_id
 
-        for prod in products:
-            # ═══ ANA RESMİ ATA ═══
-            try:
-                with self.env.cr.savepoint():
-                    # Önce product.product variant resmi, sonra template fallback
+        try:
+            with self.env.cr.savepoint():
+                # 1. MEVCUT AI GÖRSELLERİNİ TEMİZLE (Template bazında TEK SEFER)
+                existing_ai_images = self.env['product.image'].search([
+                    ('product_tmpl_id', '=', tmpl.id),
+                    ('name', 'like', '% - AI (%'),
+                ])
+                if existing_ai_images:
+                    existing_ai_images.unlink()
+                
+                # 2. ANA RESMİ TEMPLATE'E ATA (Ürünler listesinde görünsün diye)
+                tmpl.image_1920 = primary.generated_image
+
+                # 3. VARYANTLARA ÖZEL ATAMALAR VE EKSTRA RESİMLER
+                for prod in products:
+                    # Varyanta özel ana resim
                     if hasattr(prod, 'image_variant_1920'):
                         prod.image_variant_1920 = primary.generated_image
-                    else:
-                        prod.image_1920 = primary.generated_image
-            except Exception as e:
-                _logger.warning(
-                    'Ana resim ataması başarısız (prod=%s), template üzerinden deneniyor: %s',
-                    prod.id, e,
-                )
-                try:
-                    with self.env.cr.savepoint():
-                        prod.product_tmpl_id.image_1920 = primary.generated_image
-                except Exception as e2:
-                    _logger.error('Template resmi de atanamadı: %s', e2)
-                    raise UserError(_(
-                        'Ürün ana resmi kaydedilemedi. Hata: %s'
-                    ) % str(e2)[:200])
-
-            # ═══ MEVCUT AI GÖRSELLERİNİ TEMİZLE (duplikasyonu önle) ═══
-            try:
-                with self.env.cr.savepoint():
-                    existing_ai_images = self.env['product.image'].search([
-                        ('product_tmpl_id', '=', prod.product_tmpl_id.id),
-                        ('name', 'like', '% - AI (%'),
-                    ])
-                    if existing_ai_images:
-                        existing_ai_images.unlink()
-                        _logger.info(
-                            'Mevcut %d AI görseli temizlendi (prod=%s)',
-                            len(existing_ai_images), prod.id,
-                        )
-            except Exception as e:
-                _logger.warning('Eski AI görselleri temizlenemedi: %s', e)
-
-            # ═══ ALTERNATİF RESİMLERİ OLUŞTUR ═══
-            sequence = 10
-            for gen in others:
-                try:
-                    with self.env.cr.savepoint():
+                    
+                    # Alternatif resimleri bu varyanta özel oluştur
+                    sequence = 10
+                    for gen in others:
                         type_label = dict(
                             gen._fields['photo_type'].selection
                         ).get(gen.photo_type, 'Görsel')
                         self.env['product.image'].create({
-                            'product_tmpl_id': prod.product_tmpl_id.id,
+                            'product_tmpl_id': tmpl.id,
                             'product_variant_id': prod.id,
                             'name': f'{type_label} - AI ({gen.revision_number})',
                             'image_1920': gen.generated_image,
                             'sequence': sequence,
                         })
                         sequence += 10
-                except Exception as e:
-                    _logger.warning(
-                        'Alternatif resim kaydedilemedi (gen=%s, type=%s, prod=%s): %s',
-                        gen.id, gen.photo_type, prod.id, e,
-                    )
-                    # Devam et — diğer görselleri kaydetmeye çalış
+        except Exception as e:
+            _logger.error('Görseller kaydedilemedi: %s', e)
+            raise UserError(_(
+                'Görseller ürüne kaydedilemedi. Hata: %s\n'
+                'Lütfen tekrar deneyin veya yöneticinize başvurun.'
+            ) % str(e)[:200])
 
     def action_cancel(self):
         """Oturumu iptal et."""
