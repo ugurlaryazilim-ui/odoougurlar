@@ -1782,18 +1782,20 @@ class AiStudioSession(models.Model):
         for prod in products:
             # ═══ ANA RESMİ ATA ═══
             try:
-                # Önce product.product variant resmi, sonra template fallback
-                if hasattr(prod, 'image_variant_1920'):
-                    prod.image_variant_1920 = primary.generated_image
-                else:
-                    prod.image_1920 = primary.generated_image
+                with self.env.cr.savepoint():
+                    # Önce product.product variant resmi, sonra template fallback
+                    if hasattr(prod, 'image_variant_1920'):
+                        prod.image_variant_1920 = primary.generated_image
+                    else:
+                        prod.image_1920 = primary.generated_image
             except Exception as e:
                 _logger.warning(
                     'Ana resim ataması başarısız (prod=%s), template üzerinden deneniyor: %s',
                     prod.id, e,
                 )
                 try:
-                    prod.product_tmpl_id.image_1920 = primary.generated_image
+                    with self.env.cr.savepoint():
+                        prod.product_tmpl_id.image_1920 = primary.generated_image
                 except Exception as e2:
                     _logger.error('Template resmi de atanamadı: %s', e2)
                     raise UserError(_(
@@ -1802,16 +1804,17 @@ class AiStudioSession(models.Model):
 
             # ═══ MEVCUT AI GÖRSELLERİNİ TEMİZLE (duplikasyonu önle) ═══
             try:
-                existing_ai_images = self.env['product.image'].search([
-                    ('product_tmpl_id', '=', prod.product_tmpl_id.id),
-                    ('name', 'like', '% - AI (%'),
-                ])
-                if existing_ai_images:
-                    existing_ai_images.unlink()
-                    _logger.info(
-                        'Mevcut %d AI görseli temizlendi (prod=%s)',
-                        len(existing_ai_images), prod.id,
-                    )
+                with self.env.cr.savepoint():
+                    existing_ai_images = self.env['product.image'].search([
+                        ('product_tmpl_id', '=', prod.product_tmpl_id.id),
+                        ('name', 'like', '% - AI (%'),
+                    ])
+                    if existing_ai_images:
+                        existing_ai_images.unlink()
+                        _logger.info(
+                            'Mevcut %d AI görseli temizlendi (prod=%s)',
+                            len(existing_ai_images), prod.id,
+                        )
             except Exception as e:
                 _logger.warning('Eski AI görselleri temizlenemedi: %s', e)
 
@@ -1819,16 +1822,17 @@ class AiStudioSession(models.Model):
             sequence = 10
             for gen in others:
                 try:
-                    type_label = dict(
-                        gen._fields['photo_type'].selection
-                    ).get(gen.photo_type, 'Görsel')
-                    self.env['product.image'].create({
-                        'product_tmpl_id': prod.product_tmpl_id.id,
-                        'name': f'{type_label} - AI ({gen.revision_number})',
-                        'image_1920': gen.generated_image,
-                        'sequence': sequence,
-                    })
-                    sequence += 10
+                    with self.env.cr.savepoint():
+                        type_label = dict(
+                            gen._fields['photo_type'].selection
+                        ).get(gen.photo_type, 'Görsel')
+                        self.env['product.image'].create({
+                            'product_tmpl_id': prod.product_tmpl_id.id,
+                            'name': f'{type_label} - AI ({gen.revision_number})',
+                            'image_1920': gen.generated_image,
+                            'sequence': sequence,
+                        })
+                        sequence += 10
                 except Exception as e:
                     _logger.warning(
                         'Alternatif resim kaydedilemedi (gen=%s, prod=%s): %s',
