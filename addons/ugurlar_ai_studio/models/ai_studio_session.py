@@ -108,7 +108,7 @@ class AiStudioSession(models.Model):
     def action_review_generations(self):
         """Onay bekleyen görselleri incelemek için popup açar."""
         self.ensure_one()
-        generations = self.generation_ids.filtered(lambda g: g.state == 'done' and not g.is_approved)
+        generations = self.generation_ids.filtered(lambda g: g.state == 'done' and not g.is_approved and not g.reject_reason_id)
         if not generations:
             return {
                 'type': 'ir.actions.client',

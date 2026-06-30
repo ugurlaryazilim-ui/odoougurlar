@@ -182,6 +182,7 @@ class AiStudioGeneration(models.Model):
             ('session_id', '=', self.session_id.id),
             ('state', '=', 'done'),
             ('is_approved', '=', False),
+            ('reject_reason_id', '=', False),
             ('id', '!=', self.id)
         ], limit=1)
         
