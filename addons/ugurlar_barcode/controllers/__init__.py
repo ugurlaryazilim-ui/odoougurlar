@@ -7,3 +7,4 @@ from . import label_api
 from . import operations_api
 from . import batch_api
 from . import packing_api
+from . import discount_api

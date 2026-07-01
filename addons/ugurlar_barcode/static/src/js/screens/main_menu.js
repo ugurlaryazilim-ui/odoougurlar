@@ -46,6 +46,7 @@ export class MainMenu extends Component {
     setup() {
         this.allCards = [
             { key: 'stock_search', icon: 'fa-search', title: 'Ürün Stok Arama', desc: 'Barkod, kod veya isim ile ara', color: 'search', disabled: false },
+            { key: 'sales_discount', icon: 'fa-tags', title: 'Fiyat ve İndirim Gör', desc: 'Sepet oluştur ve kampanyaları sorgula', color: 'discount', disabled: false },
             { key: 'shelf_search', icon: 'fa-map-marker', title: 'Ürün Raf Arama', desc: 'Ürün hangi rafta?', color: 'shelf', disabled: false },
             { key: 'shelf_control', icon: 'fa-th', title: 'Raf Kontrol', desc: 'Raftaki ürünleri listele', color: 'control', disabled: false },
             { key: 'putaway', icon: 'fa-arrow-down', title: 'Raflama', desc: 'Ürün rafla / kaldır', color: 'putaway', disabled: false },

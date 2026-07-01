@@ -5,6 +5,7 @@ import { registry } from "@web/core/registry";
 import { BarcodeScanner } from "./barcode_scanner";
 import { MainMenu } from "./screens/main_menu";
 import { StockSearch } from "./screens/stock_search";
+import { SalesDiscount } from "./screens/sales_discount";
 import { ShelfSearch } from "./screens/shelf_search";
 import { ShelfControl } from "./screens/shelf_control";
 import { PutawayScreen } from "./screens/putaway";
@@ -27,7 +28,7 @@ import { loadTtsConfig } from "./sound_utils";
 
 // Geçerli ekran isimleri
 const VALID_SCREENS = new Set([
-    'main', 'stock_search', 'shelf_search', 'shelf_control',
+    'main', 'stock_search', 'sales_discount', 'shelf_search', 'shelf_control',
     'putaway', 'shelf_transfer', 'shelf_move_all', 'shelf_validate', 'bulk_putaway', 'shelf_clear_all', 'picking', 'batch_picking', 'counting', 'movements',
     'labels', 'label_designer', 'bulk', 'performance', 'packing', 'cargo_label_designer',
 ]);
@@ -37,7 +38,7 @@ const STORAGE_KEY = 'ugurlar_barcode_screen';
 
 class BarcodeApp extends Component {
     static components = {
-        MainMenu, StockSearch, ShelfSearch, ShelfControl,
+        MainMenu, StockSearch, SalesDiscount, ShelfSearch, ShelfControl,
         PutawayScreen, ShelfTransferScreen, ShelfMoveAll, ShelfValidateScreen, BulkPutawayScreen, ShelfClearAllScreen, PickingScreen, BatchPickingScreen, CountingScreen,
         MovementsScreen, LabelScreen, LabelDesigner, BulkScreen, PerformanceScreen, PackingScreen, CargoLabelDesigner,
     };
@@ -172,6 +173,9 @@ BarcodeApp.template = owl.xml`
         </t>
         <t t-if="state.screen === 'stock_search'">
             <StockSearch navigate.bind="navigate" scanner="scanner"/>
+        </t>
+        <t t-if="state.screen === 'sales_discount'">
+            <SalesDiscount navigate.bind="navigate" scanner="scanner"/>
         </t>
         <t t-if="state.screen === 'shelf_search'">
             <ShelfSearch navigate.bind="navigate" scanner="scanner"/>
