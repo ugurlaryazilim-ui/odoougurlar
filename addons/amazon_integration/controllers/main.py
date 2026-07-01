@@ -115,3 +115,68 @@ class AmazonAuthController(http.Controller):
                 'status_message': 'Sunucu Hatası',
                 'error_message': f"Refresh Token alınırken bir hata oluştu: {str(e)}"
             })
+
+    @http.route('/amazon-privacy-policy', type='http', auth='public', website=True)
+    def amazon_privacy_policy(self, **kw):
+        """
+        Amazon Data Protection Policy (DPP) compliant Privacy Policy page.
+        This page is publicly accessible and can be provided to Amazon Developer Registration.
+        """
+        html_content = """
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Amazon Integration Privacy Policy - Ugurlar Grup</title>
+            <style>
+                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 40px 20px; background-color: #f9f9f9; }
+                .container { background-color: #fff; padding: 40px; border-radius: 8px; box-shadow: 0 2px 15px rgba(0,0,0,0.05); }
+                h1 { color: #232f3e; border-bottom: 2px solid #ff9900; padding-bottom: 10px; margin-bottom: 30px; }
+                h2 { color: #232f3e; margin-top: 30px; font-size: 1.3em; }
+                p { margin-bottom: 15px; }
+                ul { margin-bottom: 20px; padding-left: 20px; }
+                li { margin-bottom: 8px; }
+                .footer { margin-top: 50px; font-size: 0.9em; color: #777; border-top: 1px solid #eee; padding-top: 20px; text-align: center; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>Privacy and Data Handling Policy</h1>
+                <p><strong>Last Updated:</strong> July 2026</p>
+                <p><strong>Company:</strong> Ugurlar Grup</p>
+                
+                <p>This Privacy and Data Handling Policy explains how Ugurlar Grup ("we", "us", "our") collects, processes, stores, shares, and disposes of Amazon Information, including Personally Identifiable Information (PII) obtained through the Amazon Selling Partner API (SP-API).</p>
+
+                <h2>1. Data Collection and Usage</h2>
+                <p>We collect Amazon Information strictly for internal operational purposes to fulfill our Merchant Fulfilled Network (MFN) orders. The data collected includes order details, shipping addresses, phone numbers, and customer names (PII). We use this information <strong>exclusively</strong> for:</p>
+                <ul>
+                    <li>Generating shipping labels and fulfilling orders directly to the consumer.</li>
+                    <li>Generating and uploading legally required tax invoices.</li>
+                    <li>Managing inventory and order tracking within our self-hosted ERP system.</li>
+                </ul>
+
+                <h2>2. Data Sharing</h2>
+                <p>We do not share, sell, or rent Amazon Information or PII to any external third parties, marketing agencies, or unauthorized affiliates. All Amazon data remains strictly within our private, closed-loop Odoo ERP system and is only accessible by authorized internal personnel on a need-to-know basis.</p>
+
+                <h2>3. Data Storage and Security (Encryption at Rest)</h2>
+                <p>All Amazon Information, including PII, is encrypted at rest using industry-standard AES-256 encryption. Our databases are hosted in a secure, private subnet with restricted access. Encryption keys are managed securely and independently from the database server.</p>
+
+                <h2>4. Data Retention and Disposal</h2>
+                <p>In strict compliance with the Amazon Data Protection Policy, we retain Personally Identifiable Information (PII) for no longer than <strong>30 days</strong> after order delivery, unless required by law for tax purposes (in which case it is cryptographically anonymized or masked). After the fulfillment lifecycle is complete, all PII is permanently deleted from our primary databases and encrypted backups.</p>
+
+                <h2>5. Incident Response</h2>
+                <p>We maintain a comprehensive Incident Response Plan. In the event of a suspected or actual security breach involving Amazon Information, we will isolate the affected systems and notify Amazon at security@amazon.com within 24 hours of detection.</p>
+
+                <h2>6. Contact Information</h2>
+                <p>If you have any questions or concerns regarding this Privacy Policy or our data handling practices, please contact our Incident Management Point of Contact (IMPOC):</p>
+                <p><strong>Email:</strong> eticarettr@ugurlargrup.com</p>
+                
+                <div class="footer">
+                    &copy; 2026 Ugurlar Grup. All rights reserved. This policy is designed to comply with Amazon Services API Data Protection Policy.
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        return http.Response(html_content, status=200, mimetype='text/html')
