@@ -30,9 +30,10 @@ class AmazonStore(models.Model):
     marketplace_id = fields.Char('Marketplace ID', required=True, default='A33AVAJ2PDY3EV')
     
     # API Credentials — groups ile korunmuş
+    spapi_app_id = fields.Char('SP-API App ID', groups='base.group_system', help='Developer Console üzerindeki App ID. OAuth yetkilendirmesi için gereklidir.')
     lwa_client_id = fields.Char('LWA Client ID', required=True, groups='base.group_system')
     lwa_client_secret = fields.Char('LWA Client Secret', required=True, groups='base.group_system')
-    refresh_token = fields.Char('Refresh Token', required=True, groups='base.group_system')
+    refresh_token = fields.Char('Refresh Token', groups='base.group_system')
     
     aws_access_key = fields.Char('AWS Access Key', groups='base.group_system',
                                  help="Zorunlu değil, sadece özel IAM Role olan eski uygulamalarda.")
@@ -78,6 +79,27 @@ class AmazonStore(models.Model):
             }
         }
         return endpoints.get(self.region, {}).get(self.environment)
+
+    def action_authorize_amazon(self):
+        """Kullanıcıyı Amazon'un OAuth onay sayfasına yönlendirir."""
+        self.ensure_one()
+        if not self.spapi_app_id:
+            raise UserError(_("Amazon ile yetkilendirme yapabilmek için 'SP-API App ID' bilgisini girmelisiniz."))
+        
+        # Bölgeye göre yetkilendirme linkini belirle
+        auth_urls = {
+            'eu': 'https://sellercentral-europe.amazon.com',
+            'na': 'https://sellercentral.amazon.com',
+            'fe': 'https://sellercentraljapan.amazon.com' # veya sellercentral.amazon.co.jp, genel kullanım FE için japan'dır
+        }
+        base_url = auth_urls.get(self.region, 'https://sellercentral.amazon.com')
+        
+        # State parametresi olarak kendi mağaza ID'mizi veriyoruz ki Amazon bizi geri gönderdiğinde hangi mağaza için token aldığımızı bilelim.
+        return {
+            'type': 'ir.actions.act_url',
+            'url': f"{base_url}/apps/authorize/consent?application_id={self.spapi_app_id}&state={self.id}&version=beta",
+            'target': 'self'
+        }
 
     def generate_access_token(self):
         """LWA üzerinden refresh token ile yeni bir Access Token alır."""

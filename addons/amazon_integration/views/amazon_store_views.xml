@@ -47,8 +47,16 @@
                         <notebook>
                             <page string="API Bağlantı Ayarları (Login With Amazon / SP-API)" name="api_settings">
                                 <group>
-                                    <field name="lwa_client_id" password="True"/>
-                                    <field name="lwa_client_secret" password="True"/>
+                                    <group>
+                                        <field name="spapi_app_id"/>
+                                        <field name="lwa_client_id" password="True"/>
+                                        <field name="lwa_client_secret" password="True"/>
+                                    </group>
+                                    <group>
+                                        <button name="action_authorize_amazon" type="object" string="Amazon ile Yetkilendir (Oauth2)" class="btn-warning" icon="fa-amazon"/>
+                                    </group>
+                                </group>
+                                <group>
                                     <field name="refresh_token" password="True"/>
                                 </group>
                                 <div class="text-muted" style="margin-top: 10px;">
