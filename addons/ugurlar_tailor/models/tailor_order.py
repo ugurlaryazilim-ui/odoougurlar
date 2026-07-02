@@ -53,6 +53,7 @@ class UgurlarTailorOrder(models.Model):
     notes = fields.Text(string='Notlar')
     completed_at = fields.Datetime(string='Tamamlanma Tarihi', readonly=True)
     delivered_at = fields.Datetime(string='Teslim Tarihi', readonly=True)
+    create_date = fields.Datetime(string='Tarih', readonly=True)
 
     @api.depends('line_ids.price')
     def _compute_total_price(self):
