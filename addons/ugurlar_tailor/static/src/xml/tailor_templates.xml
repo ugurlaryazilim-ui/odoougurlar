@@ -130,7 +130,7 @@
                             <div t-if="state.itemSelections[item.barcode]?.tailor_id" class="tailor-item-services tailor-fade-in">
                                 <label>Hizmetler:</label>
                                 <div class="tailor-service-grid">
-                                    <t t-foreach="state.services" t-as="svc" t-key="svc.id">
+                                    <t t-foreach="this.getTailorServices(state.itemSelections[item.barcode]?.tailor_id)" t-as="svc" t-key="svc.id">
                                         <label class="tailor-service-check">
                                             <input type="checkbox"
                                                    t-on-change="() =&gt; this.onServiceToggle(item.barcode, svc.id)"

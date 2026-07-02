@@ -112,6 +112,7 @@ export class TailorNewOrder extends Component {
     onTailorChange(barcode, ev) {
         const tailorId = parseInt(ev.target.value) || null;
         this.state.itemSelections[barcode].tailor_id = tailorId;
+        this.state.itemSelections[barcode].service_ids = [];
     }
 
     onServiceToggle(barcode, serviceId) {
@@ -138,6 +139,14 @@ export class TailorNewOrder extends Component {
         }
         const svc = this.state.services.find((s) => s.id === serviceId);
         return svc ? svc.price : 0;
+    }
+
+    getTailorServices(tailorId) {
+        if (!tailorId) return [];
+        const tailor = this.state.tailors.find((t) => t.id === tailorId);
+        if (!tailor || !tailor.prices || tailor.prices.length === 0) return [];
+        const serviceIds = tailor.prices.map((p) => p.service_id);
+        return this.state.services.filter((s) => serviceIds.includes(s.id));
     }
 
     getItemTotal(barcode) {
