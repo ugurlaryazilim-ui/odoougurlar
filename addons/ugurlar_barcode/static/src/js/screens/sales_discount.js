@@ -26,29 +26,31 @@ export class SalesDiscount extends Component {
                                t-att-value="state.customerCode"
                                t-on-input="onCustomerInput"
                                t-on-keydown="(ev) => ev.key === 'Enter' and this.calculateDiscounts()"/>
-                    </div>
-                    <div class="ub-customer-dropdown" t-if="state.showCustomerDropdown">
-                        <t t-if="state.customerSearchLoading">
-                            <div class="ub-customer-dropdown-item text-muted">
-                                <i class="fa fa-spinner fa-spin"></i> Nebim'de Aranıyor...
-                            </div>
-                        </t>
-                        <t t-elif="state.customerSearchError">
-                            <div class="ub-customer-dropdown-item text-danger">
-                                <i class="fa fa-exclamation-circle"></i> <t t-esc="state.customerSearchError"/>
-                            </div>
-                        </t>
-                        <t t-elif="state.customerSearchResults.length > 0">
-                            <t t-foreach="state.customerSearchResults" t-as="cust" t-key="cust.id">
-                                <div class="ub-customer-dropdown-item" t-on-click="() => this.selectCustomer(cust)">
-                                    <span class="ub-cd-name"><t t-esc="cust.name"/></span>
-                                    <span class="ub-cd-phone"><t t-esc="cust.phone || cust.customer_code"/></span>
+                        
+                        <!-- Dropdown MUST be inside ub-input-group for position: absolute to work relative to the input! -->
+                        <div class="ub-customer-dropdown" t-if="state.showCustomerDropdown">
+                            <t t-if="state.customerSearchLoading">
+                                <div class="ub-customer-dropdown-item text-muted">
+                                    <i class="fa fa-spinner fa-spin"></i> Nebim'de Aranıyor...
                                 </div>
                             </t>
-                        </t>
-                        <t t-else="">
-                            <div class="ub-customer-dropdown-item text-muted">Sonuç bulunamadı.</div>
-                        </t>
+                            <t t-elif="state.customerSearchError">
+                                <div class="ub-customer-dropdown-item text-danger">
+                                    <i class="fa fa-exclamation-circle"></i> <t t-esc="state.customerSearchError"/>
+                                </div>
+                            </t>
+                            <t t-elif="state.customerSearchResults.length > 0">
+                                <t t-foreach="state.customerSearchResults" t-as="cust" t-key="cust.id">
+                                    <div class="ub-customer-dropdown-item" t-on-click="() => this.selectCustomer(cust)">
+                                        <span class="ub-cd-name"><t t-esc="cust.name"/></span>
+                                        <span class="ub-cd-phone"><t t-esc="cust.phone || cust.customer_code"/></span>
+                                    </div>
+                                </t>
+                            </t>
+                            <t t-else="">
+                                <div class="ub-customer-dropdown-item text-muted">Sonuç bulunamadı.</div>
+                            </t>
+                        </div>
                     </div>
                 </div>
                 
