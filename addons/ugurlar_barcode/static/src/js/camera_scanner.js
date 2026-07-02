@@ -304,9 +304,6 @@ async function _startHtml5QrcodeScanner(statusEl, onScanResult, cleanup, headerT
     const html5QrCode = new Html5Qrcode('ub-cam-reader');
     statusEl.textContent = headerText || 'Barkodu kameraya gösterin...';
 
-    // iOS için en iyi arka kamerayı seç
-    const bestCameraId = await getBestBackCameraId();
-
     // Kamera ayarları
     const config = {
         fps: 8,
@@ -314,19 +311,15 @@ async function _startHtml5QrcodeScanner(statusEl, onScanResult, cleanup, headerT
         // aspectRatio kaldırıldı — iOS'ta sorun çıkarıyor
     };
 
-    // Kamera kaynağı: deviceId veya facingMode
-    const cameraIdOrConfig = bestCameraId || { facingMode: { exact: 'environment' } };
+    // ─── STRATEJI ─────────────────────────────────────
+    // iOS'ta getCameras() izin almadan çalışmaz.
+    // Bu yüzden önce facingMode ile başlatıyoruz (izin alıyor),
+    // sonra arka planda daha iyi kamerayı bulup geçiş yapıyoruz.
 
-    try {
-        await html5QrCode.start(
-            cameraIdOrConfig,
-            config,
-            (decodedText) => onScanResult(decodedText),
-            () => {} // hata — sessiz devam
-        );
-    } catch (err1) {
-        console.warn('Kamera başlatma denemesi 1 başarısız, fallback deneniyor:', err1);
-        // Fallback: facingMode ideal ile dene
+    let started = false;
+
+    // Deneme 1: facingMode: 'environment' (en güvenli)
+    if (!started) {
         try {
             await html5QrCode.start(
                 { facingMode: 'environment' },
@@ -334,12 +327,92 @@ async function _startHtml5QrcodeScanner(statusEl, onScanResult, cleanup, headerT
                 (decodedText) => onScanResult(decodedText),
                 () => {}
             );
+            started = true;
+        } catch (err1) {
+            console.warn('facingMode environment başarısız:', err1);
+        }
+    }
+
+    // Deneme 2: facingMode: { exact: 'environment' }
+    if (!started) {
+        try {
+            await html5QrCode.start(
+                { facingMode: { exact: 'environment' } },
+                config,
+                (decodedText) => onScanResult(decodedText),
+                () => {}
+            );
+            started = true;
         } catch (err2) {
-            console.error('Kamera başlatma tamamen başarısız:', err2);
-            statusEl.textContent = 'Kamera başlatılamadı: ' + (err2.message || err2);
+            console.warn('facingMode exact environment başarısız:', err2);
+        }
+    }
+
+    // Deneme 3: Kamera listesinden seç (izin artık alınmış olmalı)
+    if (!started) {
+        try {
+            const bestCameraId = await getBestBackCameraId();
+            if (bestCameraId) {
+                await html5QrCode.start(
+                    bestCameraId,
+                    config,
+                    (decodedText) => onScanResult(decodedText),
+                    () => {}
+                );
+                started = true;
+            }
+        } catch (err3) {
+            console.warn('getCameras fallback başarısız:', err3);
+        }
+    }
+
+    // Deneme 4: Herhangi bir kamera (son çare)
+    if (!started) {
+        try {
+            await html5QrCode.start(
+                { facingMode: 'user' },
+                config,
+                (decodedText) => onScanResult(decodedText),
+                () => {}
+            );
+            started = true;
+        } catch (err4) {
+            console.error('Kamera başlatma tamamen başarısız:', err4);
+            statusEl.textContent = 'Kamera başlatılamadı: ' + (err4.message || err4);
             if (cleanup) setTimeout(cleanup, 3000);
         }
     }
 
+    // İzin artık alındı — arka planda daha iyi kameraya geçmeyi dene
+    if (started && isIOS()) {
+        setTimeout(async () => {
+            try {
+                const bestId = await getBestBackCameraId();
+                if (bestId) {
+                    // Mevcut kameranın ID'sini al
+                    const runningCameraId = html5QrCode.getRunningTrackCameraCapabilities &&
+                        html5QrCode.getRunningTrackSettings &&
+                        html5QrCode.getRunningTrackSettings().deviceId;
+                    
+                    // Eğer farklı bir kamera bulduysak, geçiş yap
+                    if (runningCameraId && runningCameraId !== bestId) {
+                        await html5QrCode.stop();
+                        await html5QrCode.start(
+                            bestId,
+                            config,
+                            (decodedText) => onScanResult(decodedText),
+                            () => {}
+                        );
+                        console.info('iOS: Ana arka kameraya geçildi:', bestId);
+                    }
+                }
+            } catch (e) {
+                // Geçiş başarısız — mevcut kamerada devam et
+                console.warn('iOS kamera geçişi başarısız (sorun yok, mevcut devam ediyor):', e);
+            }
+        }, 1500);
+    }
+
     return html5QrCode;
 }
+
