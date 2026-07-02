@@ -171,6 +171,18 @@
     color: #212529;
 }
 
+.ub-upsell-warning {
+    margin-top: 8px;
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeeba;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    width: 100%;
+}
+
 /* Empty State */
 .ub-empty-state {
     display: flex;

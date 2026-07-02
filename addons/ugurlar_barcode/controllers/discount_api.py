@@ -85,6 +85,7 @@ class DiscountApiController(BarcodeApiBase):
             discount_amount = float(row.get('DiscountAmount', 0.0))
             final_total = float(row.get('FinalLineTotal', 0.0))
             campaign_name = row.get('CampaignName', '')
+            upsell_message = row.get('UpsellMessage', '')
 
             # Odoo ürünü varsa bilgilerini zenginleştir
             odoo_prod = product_map.get(barcode)
@@ -99,6 +100,7 @@ class DiscountApiController(BarcodeApiBase):
                 'discount_amount': discount_amount,
                 'final_price': final_total,
                 'campaign_name': campaign_name,
+                'upsell_message': upsell_message,
                 'image_url': image_url
             })
 

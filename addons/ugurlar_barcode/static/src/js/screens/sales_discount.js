@@ -107,6 +107,11 @@ export class SalesDiscount extends Component {
                                     <t t-esc="formatPrice(item.final_price)"/>
                                 </div>
                             </div>
+                            
+                            <!-- Upsell Warning -->
+                            <div class="ub-upsell-warning" t-if="item.upsell_message">
+                                <i class="fa fa-info-circle"></i> <t t-esc="item.upsell_message"/>
+                            </div>
                         </div>
                     </div>
                 </t>
@@ -295,7 +300,8 @@ export class SalesDiscount extends Component {
                 retail_price: 0,
                 discount_amount: 0,
                 final_price: 0,
-                campaign_name: ''
+                campaign_name: '',
+                upsell_message: ''
             });
         }
         
@@ -355,7 +361,8 @@ export class SalesDiscount extends Component {
                         retail_price: line.retail_price,
                         discount_amount: line.discount_amount,
                         final_price: line.final_price,
-                        campaign_name: line.campaign_name
+                        campaign_name: line.campaign_name,
+                        upsell_message: line.upsell_message
                     });
                 }
                 this.state.basket = newBasket;
