@@ -3,6 +3,7 @@
 import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 import { vibrate, vibrateError, speak } from "../sound_utils";
+import { openCameraScanner } from "../camera_scanner";
 
 export class ShelfSearch extends Component {
     static template = xml`
@@ -193,112 +194,10 @@ export class ShelfSearch extends Component {
     }
 
     async startCameraScan() {
-        const useNative = 'BarcodeDetector' in window;
-        // iOS/Safari fallback: html5-qrcode CDN yükle
-        if (!useNative && !window.Html5Qrcode) {
-            try {
-                await new Promise((resolve, reject) => {
-                    const s = document.createElement('script');
-                    s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
-                    s.onload = resolve;
-                    s.onerror = () => reject(new Error('Kütüphane yüklenemedi'));
-                    document.head.appendChild(s);
-                });
-            } catch (e) {
-                alert('Barkod tarayıcı yüklenemedi. Lütfen barkodu manuel girin.');
-                return;
-            }
-        }
-
-        const overlay = document.createElement('div');
-        overlay.className = 'ub-camera-overlay';
-        overlay.innerHTML = `
-            <div class="ub-camera-header">
-                <span>Barkodu kameraya gösterin...</span>
-                <button class="ub-camera-close-btn" id="ub-cam-close">✕ Kapat</button>
-            </div>
-            ${useNative ? '<video id="ub-cam-video" autoplay playsinline muted></video>' : '<div id="ub-cam-reader" style="width:100%;"></div>'}
-            <div class="ub-camera-target"></div>
-            <div class="ub-camera-status" id="ub-cam-status">Kamera başlatılıyor...</div>
-        `;
-        document.body.appendChild(overlay);
-
-        const statusEl = document.getElementById('ub-cam-status');
-        let stream = null;
-        let animFrame = null;
-        let html5QrCode = null;
-        let scanning = true;
-
-        const cleanup = () => {
-            scanning = false;
-            if (animFrame) cancelAnimationFrame(animFrame);
-            if (stream) stream.getTracks().forEach(t => t.stop());
-            if (html5QrCode) { try { html5QrCode.stop(); } catch(e) {} }
-            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-        };
-
-        const onScanSuccess = (barcode) => {
-            if (navigator.vibrate) navigator.vibrate(200);
-            cleanup();
+        openCameraScanner((barcode) => {
             this.state.inputValue = barcode;
             this.doSearch(barcode);
-        };
-
-        document.getElementById('ub-cam-close').onclick = cleanup;
-        overlay.onclick = (e) => { if (e.target === overlay) cleanup(); };
-
-        if (useNative) {
-            // ─── Chrome/Android: Native BarcodeDetector ─────
-            const video = document.getElementById('ub-cam-video');
-            navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-            }).then(s => {
-                stream = s;
-                video.srcObject = stream;
-                statusEl.textContent = 'Barkodu kameraya gösterin...';
-
-                const detector = new BarcodeDetector({
-                    formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'itf', 'qr_code']
-                });
-
-                const scanFrame = async () => {
-                    if (!scanning || video.readyState < 2) {
-                        animFrame = requestAnimationFrame(scanFrame);
-                        return;
-                    }
-                    try {
-                        const barcodes = await detector.detect(video);
-                        if (barcodes.length > 0) {
-                            onScanSuccess(barcodes[0].rawValue);
-                            return;
-                        }
-                    } catch (e) {}
-                    animFrame = requestAnimationFrame(scanFrame);
-                };
-                video.onloadedmetadata = () => scanFrame();
-            }).catch(err => {
-                statusEl.textContent = 'Kamera erişimi reddedildi: ' + err.message;
-                setTimeout(cleanup, 3000);
-            });
-        } else {
-            // ─── iOS/Safari: html5-qrcode fallback ─────
-            try {
-                html5QrCode = new Html5Qrcode('ub-cam-reader');
-                statusEl.textContent = 'Barkodu kameraya gösterin...';
-                html5QrCode.start(
-                    { facingMode: 'environment' },
-                    { fps: 10, qrbox: { width: 280, height: 120 }, aspectRatio: 1.777 },
-                    (decodedText) => onScanSuccess(decodedText),
-                    () => {}
-                ).catch(err => {
-                    statusEl.textContent = 'Kamera başlatılamadı: ' + err;
-                    setTimeout(cleanup, 3000);
-                });
-            } catch (err) {
-                statusEl.textContent = 'Tarayıcı hatası: ' + err.message;
-                setTimeout(cleanup, 3000);
-            }
-        }
+        });
     }
 
     async doSearch(barcode) {

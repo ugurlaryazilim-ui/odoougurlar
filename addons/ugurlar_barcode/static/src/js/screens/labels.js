@@ -2,6 +2,7 @@
 
 import { Component, useState, xml, markup, onWillUnmount } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
+import { openContinuousCameraScanner } from "../camera_scanner";
 
 export class LabelScreen extends Component {
     static template = xml`
@@ -238,138 +239,55 @@ export class LabelScreen extends Component {
 
     // ─── KAMERA İLE BARKOD OKUTMA (iOS + Android) ─────
     async startCameraScan() {
-        const useNative = 'BarcodeDetector' in window;
-        // iOS/Safari fallback: html5-qrcode CDN yükle
-        if (!useNative && !window.Html5Qrcode) {
-            try {
-                await new Promise((resolve, reject) => {
-                    const s = document.createElement('script');
-                    s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
-                    s.onload = resolve;
-                    s.onerror = () => reject(new Error('Kütüphane yüklenemedi'));
-                    document.head.appendChild(s);
-                });
-            } catch (e) {
-                alert('Barkod tarayıcı yüklenemedi. Lütfen barkodu manuel girin.');
-                return;
-            }
-        }
-
-        const overlay = document.createElement('div');
-        overlay.className = 'ub-camera-overlay';
-        overlay.innerHTML = `
-            <div class="ub-camera-header">
-                <span>Seri Barkod Okutma</span>
-                <button class="ub-camera-close-btn" id="ub-cam-close">✕ Kapat</button>
-            </div>
-            ${useNative ? '<video id="ub-cam-video" autoplay playsinline muted></video>' : '<div id="ub-cam-reader" style="width:100%;"></div>'}
-            <div class="ub-camera-target"></div>
-            <div class="ub-camera-status" id="ub-cam-status">Kamera başlatılıyor...</div>
-            <div class="ub-scan-counter" id="ub-scan-counter" style="position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.7); color:#fff; padding:8px 20px; border-radius:20px; font-size:14px; font-weight:bold; z-index:100002; display:none;">
-                <i class="fa fa-check-circle" style="color:#4CAF50;"></i> <span id="ub-scan-count">0</span> barkod eklendi
-            </div>
-            <div class="ub-scan-flash" id="ub-scan-flash" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(76,175,80,0.3); z-index:100001; pointer-events:none; opacity:0; transition:opacity 0.15s;"></div>
-        `;
-        document.body.appendChild(overlay);
-
-        const statusEl = document.getElementById('ub-cam-status');
-        const counterEl = document.getElementById('ub-scan-counter');
-        const countSpan = document.getElementById('ub-scan-count');
-        const flashEl = document.getElementById('ub-scan-flash');
-        let stream = null;
-        let animFrame = null;
-        let html5QrCode = null;
-        let scanning = true;
         let scanCount = 0;
-        let lastScannedCode = '';
-        let cooldownUntil = 0;
+        const counterEl_ref = { el: null };
+        const flashEl_ref = { el: null };
+        const statusEl_ref = { el: null };
 
-        const cleanup = () => {
-            scanning = false;
-            if (animFrame) cancelAnimationFrame(animFrame);
-            if (stream) stream.getTracks().forEach(t => t.stop());
-            if (html5QrCode) { try { html5QrCode.stop(); } catch(e) {} }
-            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-        };
-
-        const onScanSuccess = (barcode) => {
-            const now = Date.now();
-            if (now < cooldownUntil) return;
-            if (barcode === lastScannedCode && now - cooldownUntil < 500) return;
-            lastScannedCode = barcode;
-            cooldownUntil = now + 1500;
-
-            if (navigator.vibrate) navigator.vibrate(150);
-            flashEl.style.opacity = '1';
-            setTimeout(() => { flashEl.style.opacity = '0'; }, 200);
-
-            this._addBc(barcode);
-            scanCount++;
-            countSpan.textContent = scanCount;
-            counterEl.style.display = 'block';
-            statusEl.textContent = `✓ ${barcode} eklendi — Sonraki barkodu gösterin...`;
-            statusEl.style.color = '#4CAF50';
-            setTimeout(() => {
-                if (scanning) {
-                    statusEl.textContent = 'Barkodları sırayla kameraya gösterin...';
-                    statusEl.style.color = '';
+        openContinuousCameraScanner(
+            (barcode) => {
+                // Flash efekti
+                if (flashEl_ref.el) {
+                    flashEl_ref.el.style.opacity = '1';
+                    setTimeout(() => { flashEl_ref.el.style.opacity = '0'; }, 200);
                 }
-            }, 1200);
-        };
 
-        document.getElementById('ub-cam-close').onclick = cleanup;
+                this._addBc(barcode);
+                scanCount++;
 
-        if (useNative) {
-            // ─── Chrome/Android: Native BarcodeDetector ─────
-            const video = document.getElementById('ub-cam-video');
-            navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-            }).then(s => {
-                stream = s;
-                video.srcObject = stream;
-                statusEl.textContent = 'Barkodları sırayla kameraya gösterin...';
-
-                const detector = new BarcodeDetector({
-                    formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'itf', 'qr_code']
-                });
-
-                const scanFrame = async () => {
-                    if (!scanning || video.readyState < 2) {
-                        animFrame = requestAnimationFrame(scanFrame);
-                        return;
-                    }
-                    try {
-                        const now = Date.now();
-                        if (now < cooldownUntil) { animFrame = requestAnimationFrame(scanFrame); return; }
-                        const barcodes = await detector.detect(video);
-                        if (barcodes.length > 0) onScanSuccess(barcodes[0].rawValue);
-                    } catch (e) {}
-                    animFrame = requestAnimationFrame(scanFrame);
-                };
-                video.onloadedmetadata = () => scanFrame();
-            }).catch(err => {
-                statusEl.textContent = 'Kamera erişimi reddedildi: ' + err.message;
-                setTimeout(cleanup, 3000);
-            });
-        } else {
-            // ─── iOS/Safari: html5-qrcode fallback ─────
-            try {
-                html5QrCode = new Html5Qrcode('ub-cam-reader');
-                statusEl.textContent = 'Barkodları sırayla kameraya gösterin...';
-                html5QrCode.start(
-                    { facingMode: 'environment' },
-                    { fps: 10, qrbox: { width: 280, height: 120 }, aspectRatio: 1.777 },
-                    (decodedText) => onScanSuccess(decodedText),
-                    () => {} // hata — sessiz devam
-                ).catch(err => {
-                    statusEl.textContent = 'Kamera başlatılamadı: ' + err;
-                    setTimeout(cleanup, 3000);
-                });
-            } catch (err) {
-                statusEl.textContent = 'Tarayıcı hatası: ' + err.message;
-                setTimeout(cleanup, 3000);
+                if (counterEl_ref.el) {
+                    counterEl_ref.el.querySelector('#ub-scan-count').textContent = scanCount;
+                    counterEl_ref.el.style.display = 'block';
+                }
+                if (statusEl_ref.el) {
+                    statusEl_ref.el.textContent = `\u2713 ${barcode} eklendi \u2014 Sonraki barkodu g\u00f6sterin...`;
+                    statusEl_ref.el.style.color = '#4CAF50';
+                    setTimeout(() => {
+                        if (statusEl_ref.el) {
+                            statusEl_ref.el.textContent = 'Barkodlar\u0131 s\u0131rayla kameraya g\u00f6sterin...';
+                            statusEl_ref.el.style.color = '';
+                        }
+                    }, 1200);
+                }
+            },
+            {
+                headerText: 'Seri Barkod Okutma',
+                cooldownMs: 1500,
+                extraHtml: `
+                    <div class="ub-scan-counter" id="ub-scan-counter" style="position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.7); color:#fff; padding:8px 20px; border-radius:20px; font-size:14px; font-weight:bold; z-index:100002; display:none;">
+                        <i class="fa fa-check-circle" style="color:#4CAF50;"></i> <span id="ub-scan-count">0</span> barkod eklendi
+                    </div>
+                    <div class="ub-scan-flash" id="ub-scan-flash" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(76,175,80,0.3); z-index:100001; pointer-events:none; opacity:0; transition:opacity 0.15s;"></div>
+                `
             }
-        }
+        );
+
+        // DOM referanslarını al (overlay oluştuktan sonra)
+        setTimeout(() => {
+            counterEl_ref.el = document.getElementById('ub-scan-counter');
+            flashEl_ref.el = document.getElementById('ub-scan-flash');
+            statusEl_ref.el = document.getElementById('ub-cam-status');
+        }, 100);
     }
 
     removeBarcode(index) { this.state.barcodes.splice(index, 1); }

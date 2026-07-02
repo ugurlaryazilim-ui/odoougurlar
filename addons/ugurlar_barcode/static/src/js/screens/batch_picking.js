@@ -3,6 +3,7 @@
 import { Component, useState, xml, onMounted, onWillUnmount } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 import { speak, vibrate, vibrateError } from "../sound_utils";
+import { openCameraScanner } from "../camera_scanner";
 
 export class BatchPickingScreen extends Component {
     static template = xml`
@@ -867,60 +868,9 @@ export class BatchPickingScreen extends Component {
     }
 
     startCameraScan() {
-        if (!('BarcodeDetector' in window)) {
-            alert('Bu tarayıcı kamera ile barkod okumayı desteklemiyor.\nChrome (Android) veya Edge kullanın.');
-            return;
-        }
-        const overlay = document.createElement('div');
-        overlay.className = 'ub-camera-overlay';
-        overlay.innerHTML = `
-            <div class="ub-camera-header">
-                <span>Barkodu kameraya gösterin...</span>
-                <button class="ub-camera-close-btn" id="ub-cam-close">✕</button>
-            </div>
-            <video id="ub-cam-video" autoplay playsinline muted></video>
-            <div class="ub-camera-target"></div>
-            <div class="ub-camera-status" id="ub-cam-status">Kamera başlatılıyor...</div>
-        `;
-        document.body.appendChild(overlay);
-        const video = document.getElementById('ub-cam-video');
-        const statusEl = document.getElementById('ub-cam-status');
-        let stream = null, animFrame = null, scanning = true;
-        const cleanup = () => {
-            scanning = false;
-            if (animFrame) cancelAnimationFrame(animFrame);
-            if (stream) stream.getTracks().forEach(t => t.stop());
-            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-        };
-        document.getElementById('ub-cam-close').onclick = cleanup;
-        overlay.onclick = (e) => { if (e.target === overlay) cleanup(); };
-        navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-        }).then(s => {
-            stream = s;
-            video.srcObject = stream;
-            statusEl.textContent = 'Barkodu kameraya gösterin...';
-            const detector = new BarcodeDetector({
-                formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'itf', 'qr_code']
-            });
-            const scanFrame = async () => {
-                if (!scanning || video.readyState < 2) { animFrame = requestAnimationFrame(scanFrame); return; }
-                try {
-                    const barcodes = await detector.detect(video);
-                    if (barcodes.length > 0) {
-                        if (navigator.vibrate) navigator.vibrate(200);
-                        cleanup();
-                        this.state.scanInput = barcodes[0].rawValue;
-                        this.onScan();
-                        return;
-                    }
-                } catch (e) {}
-                animFrame = requestAnimationFrame(scanFrame);
-            };
-            video.onloadedmetadata = () => scanFrame();
-        }).catch(err => {
-            statusEl.textContent = 'Kamera erişimi reddedildi: ' + err.message;
-            setTimeout(cleanup, 3000);
+        openCameraScanner((barcode) => {
+            this.state.scanInput = barcode;
+            this.onScan();
         });
     }
 
