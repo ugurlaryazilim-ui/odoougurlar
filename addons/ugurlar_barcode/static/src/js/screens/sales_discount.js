@@ -95,6 +95,14 @@ export class SalesDiscount extends Component {
                                 <span class="ub-dc-price" t-if="item.retail_price">x <t t-esc="formatPrice(item.retail_price)"/></span>
                             </div>
 
+                            <div class="ub-dc-variant-info" t-if="item.stock_qty != null or item.color_name or item.size_name">
+                                <span t-if="item.stock_qty != null"><i class="fa fa-cube"></i> Stok: <t t-esc="item.stock_qty"/> Adet</span>
+                                <span class="ub-dc-vi-sep" t-if="item.stock_qty != null and (item.color_name or item.size_name)"> | </span>
+                                <span t-if="item.color_name"><i class="fa fa-paint-brush"></i> Renk: <t t-esc="item.color_name"/></span>
+                                <span class="ub-dc-vi-sep" t-if="item.color_name and item.size_name"> | </span>
+                                <span t-if="item.size_name"><i class="fa fa-arrows-alt"></i> Beden: <t t-esc="item.size_name"/></span>
+                            </div>
+
                             <div class="ub-dc-campaign" t-if="item.campaign_name">
                                 <i class="fa fa-star"></i> Kampanya: <t t-esc="item.campaign_name"/>
                             </div>
@@ -301,7 +309,10 @@ export class SalesDiscount extends Component {
                 discount_amount: 0,
                 final_price: 0,
                 campaign_name: '',
-                upsell_message: ''
+                upsell_message: '',
+                color_name: '',
+                size_name: '',
+                stock_qty: null
             });
         }
         
@@ -367,7 +378,10 @@ export class SalesDiscount extends Component {
                         discount_amount: line.discount_amount,
                         final_price: line.final_price,
                         campaign_name: line.campaign_name,
-                        upsell_message: line.upsell_message
+                        upsell_message: line.upsell_message,
+                        color_name: line.color_name,
+                        size_name: line.size_name,
+                        stock_qty: line.stock_qty
                     });
                 }
                 this.state.basket = newBasket;

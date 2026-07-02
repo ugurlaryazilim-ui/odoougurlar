@@ -86,6 +86,8 @@ class DiscountApiController(BarcodeApiBase):
             final_total = float(row.get('FinalLineTotal', 0.0))
             campaign_name = row.get('CampaignName', '')
             upsell_message = row.get('UpsellMessage', '')
+            color_name = row.get('ColorName', '')
+            size_name = row.get('SizeName', '')
 
             # Odoo ürünü varsa bilgilerini zenginleştir
             odoo_prod = product_map.get(barcode)
@@ -95,6 +97,7 @@ class DiscountApiController(BarcodeApiBase):
 
             image_url = f'/web/image/product.product/{odoo_prod.id}/image_128' if odoo_prod else ''
             product_name = odoo_prod.display_name if odoo_prod else barcode
+            stock_qty = odoo_prod.qty_available if odoo_prod else 0.0
 
             formatted_lines.append({
                 'barcode': barcode,
@@ -106,7 +109,10 @@ class DiscountApiController(BarcodeApiBase):
                 'campaign_name': campaign_name,
                 'upsell_message': upsell_message,
                 'image_url': image_url,
-                'not_found': not_found
+                'not_found': not_found,
+                'color_name': color_name,
+                'size_name': size_name,
+                'stock_qty': stock_qty
             })
 
             total_retail += (retail_price * qty)

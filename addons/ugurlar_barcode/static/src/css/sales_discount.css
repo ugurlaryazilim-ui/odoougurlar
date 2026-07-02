@@ -183,6 +183,21 @@
     width: 100%;
 }
 
+.ub-dc-variant-info {
+    font-size: 13px;
+    color: #6c757d;
+    margin-top: 4px;
+    background: #f8f9fa;
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: inline-block;
+}
+
+.ub-dc-vi-sep {
+    color: #dee2e6;
+    margin: 0 4px;
+}
+
 /* Empty State */
 .ub-empty-state {
     display: flex;
