@@ -85,6 +85,21 @@
                                     <field name="nebim_sp_warehouse" placeholder="sp_GetWarehouseInfo_Hamurlabs"/>
                                 </div>
                             </setting>
+                            <setting string="Müşteri Ara SP" help="Müşteri listesini getiren prosedür (Barkod Okutma)">
+                                <div class="content-group">
+                                    <field name="nebim_sp_search_customer" placeholder="sp_Odoougurlar_SearchCustomer"/>
+                                </div>
+                            </setting>
+                            <setting string="Matris Raporu SP" help="Renk ve beden matris raporunu getiren prosedür (Barkod Okutma)">
+                                <div class="content-group">
+                                    <field name="nebim_sp_product_matrix" placeholder="sp_Odoougurlar_GetProductMatrix"/>
+                                </div>
+                            </setting>
+                            <setting string="Sepet İndirimleri SP" help="Fiyat ve indirimleri getiren prosedür (Barkod Okutma)">
+                                <div class="content-group">
+                                    <field name="nebim_sp_basket_discount" placeholder="sp_Odoougurlar_GetBasketDiscounts"/>
+                                </div>
+                            </setting>
                         </block>
                         <block title="Nebim Gönderim Ayarları" name="nebim_dispatch">
                             <setting string="Cari İşle" help="Açık olduğunda pazaryeri siparişlerinden Nebim'e cari (müşteri kartı) gönderilir">

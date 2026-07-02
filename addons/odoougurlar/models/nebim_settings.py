@@ -97,6 +97,24 @@ class ResConfigSettings(models.TransientModel):
         default='sp_GetWarehouseInfo_Hamurlabs',
         help='Depo bilgilerini getiren stored procedure adı',
     )
+    nebim_sp_basket_discount = fields.Char(
+        string='Sepet İndirimleri SP',
+        config_parameter='odoougurlar.nebim_sp_basket_discount',
+        default='sp_Odoougurlar_GetBasketDiscounts',
+        help='Fiyat ve indirimleri getiren stored procedure adı (Barkod Okutma)',
+    )
+    nebim_sp_search_customer = fields.Char(
+        string='Müşteri Ara SP',
+        config_parameter='odoougurlar.nebim_sp_search_customer',
+        default='sp_Odoougurlar_SearchCustomer',
+        help='Müşteri listesini getiren stored procedure adı (Barkod Okutma)',
+    )
+    nebim_sp_product_matrix = fields.Char(
+        string='Matris Raporu SP',
+        config_parameter='odoougurlar.nebim_sp_product_matrix',
+        default='sp_Odoougurlar_GetProductMatrix',
+        help='Renk ve beden matris raporunu getiren stored procedure adı (Barkod Okutma)',
+    )
 
     # -----------------------------------------------------------------
     #  Nebim Gönderim Ayarları (Cari / Sipariş / Fatura)

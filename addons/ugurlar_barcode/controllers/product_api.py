@@ -255,7 +255,8 @@ class ProductApiController(BarcodeApiBase):
         NebimConnector = request.env['odoougurlar.nebim.connector'].sudo()
         try:
             proc_params = [{'Name': 'Barcode', 'Value': barcode}]
-            results = NebimConnector.run_proc('sp_Odoougurlar_GetProductMatrix', params=proc_params)
+            sp_name = request.env['ir.config_parameter'].sudo().get_param('odoougurlar.nebim_sp_product_matrix', 'sp_Odoougurlar_GetProductMatrix')
+            results = NebimConnector.run_proc(sp_name, params=proc_params)
             
             # Eğer SP Exception verdiyse veya bağlanamadıysa
             if isinstance(results, dict) and results.get('ExceptionMessage'):

@@ -46,7 +46,8 @@ class DiscountApiController(BarcodeApiBase):
             
             # SP çağrısı
             # Not: SP ismi sabit veya ayarlardan çekilebilir. Burada sabit bırakıldı.
-            results = NebimConnector.run_proc('sp_Odoougurlar_GetBasketDiscounts', params=proc_params)
+            sp_name = request.env['ir.config_parameter'].sudo().get_param('odoougurlar.nebim_sp_basket_discount', 'sp_Odoougurlar_GetBasketDiscounts')
+            results = NebimConnector.run_proc(sp_name, params=proc_params)
             
             # Nebim'den dönen results genelde dict listesidir. Eğer boşsa, sepet hesaplanamadı demektir.
             if not results:
@@ -138,7 +139,8 @@ class DiscountApiController(BarcodeApiBase):
         NebimConnector = request.env['odoougurlar.nebim.connector'].sudo()
         try:
             proc_params = [{'Name': 'SearchText', 'Value': query}]
-            results = NebimConnector.run_proc('sp_Odoougurlar_SearchCustomer', params=proc_params)
+            sp_name = request.env['ir.config_parameter'].sudo().get_param('odoougurlar.nebim_sp_search_customer', 'sp_Odoougurlar_SearchCustomer')
+            results = NebimConnector.run_proc(sp_name, params=proc_params)
             
             customers = []
             if results and isinstance(results, list):
