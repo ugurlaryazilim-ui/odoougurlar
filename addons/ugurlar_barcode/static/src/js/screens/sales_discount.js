@@ -24,8 +24,21 @@ export class SalesDiscount extends Component {
                                class="form-control"
                                placeholder="Müşteri Kartı / Telefon"
                                t-att-value="state.customerCode"
-                               t-on-change="onCustomerChange"
+                               t-on-input="onCustomerInput"
                                t-on-keydown="(ev) => ev.key === 'Enter' and this.calculateDiscounts()"/>
+                    </div>
+                    <div class="ub-customer-dropdown" t-if="state.showCustomerDropdown">
+                        <t t-if="state.customerSearchResults.length > 0">
+                            <t t-foreach="state.customerSearchResults" t-as="cust" t-key="cust.id">
+                                <div class="ub-customer-dropdown-item" t-on-click="() => this.selectCustomer(cust)">
+                                    <span class="ub-cd-name"><t t-esc="cust.name"/></span>
+                                    <span class="ub-cd-phone"><t t-esc="cust.phone || cust.customer_code"/></span>
+                                </div>
+                            </t>
+                        </t>
+                        <t t-else="">
+                            <div class="ub-customer-dropdown-item text-muted">Sonuç bulunamadı.</div>
+                        </t>
                     </div>
                 </div>
                 
@@ -83,7 +96,7 @@ export class SalesDiscount extends Component {
                             </div>
 
                             <div class="ub-dc-campaign" t-if="item.campaign_name">
-                                <i class="fa fa-star"></i> <t t-esc="item.campaign_name"/>
+                                <i class="fa fa-star"></i> Kampanya: <t t-esc="item.campaign_name"/>
                             </div>
                             
                             <div class="ub-dc-totals">
@@ -110,10 +123,21 @@ export class SalesDiscount extends Component {
                     <span>Ara Toplam</span>
                     <span><t t-esc="formatPrice(state.summary.total_retail)"/></span>
                 </div>
-                <div class="ub-ds-row ub-ds-discount" t-if="state.summary.total_discount > 0">
-                    <span>Toplam İndirim</span>
-                    <span>-<t t-esc="formatPrice(state.summary.total_discount)"/></span>
-                </div>
+                <t t-if="state.summary.total_discount > 0">
+                    <t t-foreach="campaignTotals" t-as="camp" t-key="camp.name">
+                        <div class="ub-ds-row ub-ds-discount">
+                            <span><t t-esc="camp.name"/></span>
+                            <span>-<t t-esc="formatPrice(camp.amount)"/></span>
+                        </div>
+                    </t>
+                    <div class="ub-ds-row ub-ds-discount" style="border-top: 1px dashed #dc3545; padding-top: 5px; margin-top: 5px; font-weight: bold;">
+                        <span>Genel Toplam İndirim</span>
+                        <div>
+                            <span>-<t t-esc="formatPrice(state.summary.total_discount)"/></span>
+                            <span class="ub-ds-savings-badge">%<t t-esc="savingsPercentage"/> Kazanç!</span>
+                        </div>
+                    </div>
+                </t>
                 <div class="ub-ds-row ub-ds-grand">
                     <span>Ödenecek Tutar</span>
                     <span><t t-esc="formatPrice(state.summary.total_final)"/></span>
@@ -134,17 +158,34 @@ export class SalesDiscount extends Component {
         this.barcodeInputRef = useRef('barcodeInput');
         this.uidCounter = 1;
 
+        // localStorage'dan yükle
+        const savedState = localStorage.getItem('ub_discount_state');
+        let initialBasket = [];
+        let initialSummary = { total_retail: 0.0, total_discount: 0.0, total_final: 0.0 };
+        let initialCustomerCode = '';
+
+        if (savedState) {
+            try {
+                const parsed = JSON.parse(savedState);
+                initialBasket = parsed.basket || [];
+                initialSummary = parsed.summary || initialSummary;
+                initialCustomerCode = parsed.customerCode || '';
+                // En büyük uid'yi bul
+                if (initialBasket.length > 0) {
+                    this.uidCounter = Math.max(...initialBasket.map(i => i.uid || 0)) + 1;
+                }
+            } catch (e) {}
+        }
+
         this.state = useState({
             barcodeValue: '',
-            customerCode: '',
+            customerCode: initialCustomerCode,
             loading: false,
             error: null,
-            basket: [], // { uid, barcode, quantity, name, image_url, retail_price, discount_amount, final_price, campaign_name }
-            summary: {
-                total_retail: 0.0,
-                total_discount: 0.0,
-                total_final: 0.0
-            }
+            basket: initialBasket, 
+            summary: initialSummary,
+            showCustomerDropdown: false,
+            customerSearchResults: []
         });
 
         // Fiziksel barkod okuyucu dinleyicisi
@@ -161,6 +202,31 @@ export class SalesDiscount extends Component {
         });
     }
 
+    get campaignTotals() {
+        const totals = {};
+        for (let item of this.state.basket) {
+            if (item.campaign_name && item.discount_amount > 0) {
+                totals[item.campaign_name] = (totals[item.campaign_name] || 0) + item.discount_amount;
+            }
+        }
+        return Object.entries(totals).map(([name, amount]) => ({ name, amount }));
+    }
+
+    get savingsPercentage() {
+        if (this.state.summary.total_retail > 0) {
+            return Math.round((this.state.summary.total_discount / this.state.summary.total_retail) * 100);
+        }
+        return 0;
+    }
+
+    saveState() {
+        localStorage.setItem('ub_discount_state', JSON.stringify({
+            basket: this.state.basket,
+            summary: this.state.summary,
+            customerCode: this.state.customerCode
+        }));
+    }
+
     formatPrice(price) {
         if (price == null || isNaN(price)) return '₺0,00';
         return '₺' + Number(price).toLocaleString('tr-TR', {
@@ -169,8 +235,30 @@ export class SalesDiscount extends Component {
         });
     }
 
-    onCustomerChange(ev) {
-        this.state.customerCode = ev.target.value.trim();
+    async onCustomerInput(ev) {
+        const val = ev.target.value;
+        this.state.customerCode = val;
+        this.saveState();
+        
+        if (val.trim().length >= 3) {
+            try {
+                const res = await BarcodeService.call('/ugurlar_barcode/api/search_customer', { query: val.trim() });
+                if (res && res.customers) {
+                    this.state.customerSearchResults = res.customers;
+                    this.state.showCustomerDropdown = true;
+                }
+            } catch (e) {
+                console.warn("Customer search failed", e);
+            }
+        } else {
+            this.state.showCustomerDropdown = false;
+        }
+    }
+
+    selectCustomer(customer) {
+        this.state.customerCode = customer.customer_code || customer.phone || customer.name;
+        this.state.showCustomerDropdown = false;
+        this.saveState();
         if (this.state.basket.length > 0) {
             this.calculateDiscounts();
         }
@@ -220,10 +308,12 @@ export class SalesDiscount extends Component {
 
     removeItem(uid) {
         this.state.basket = this.state.basket.filter(i => i.uid !== uid);
+        this.saveState();
         if (this.state.basket.length > 0) {
             this.calculateDiscounts();
         } else {
             this.state.summary = { total_retail: 0, total_discount: 0, total_final: 0 };
+            this.saveState();
         }
     }
 
@@ -231,6 +321,7 @@ export class SalesDiscount extends Component {
         this.state.basket = [];
         this.state.summary = { total_retail: 0, total_discount: 0, total_final: 0 };
         this.state.error = null;
+        this.saveState();
         if (this.barcodeInputRef.el) this.barcodeInputRef.el.focus();
     }
 
@@ -269,6 +360,7 @@ export class SalesDiscount extends Component {
                 }
                 this.state.basket = newBasket;
                 this.state.summary = result.summary;
+                this.saveState();
                 AudioFeedback.playSuccess();
             }
         } catch (e) {

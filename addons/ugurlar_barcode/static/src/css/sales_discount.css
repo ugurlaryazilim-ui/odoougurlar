@@ -2,7 +2,9 @@
 
 .ub-discount-screen {
     background-color: #f5f6f8;
-    padding-bottom: 120px; /* Leave space for bottom summary */
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
 }
 
 .ub-discount-inputs {
@@ -27,7 +29,7 @@
     border: 1px solid #ced4da;
     border-radius: 8px;
     padding: 0 10px;
-    overflow: hidden;
+    position: relative; /* For dropdown positioning */
 }
 
 .ub-input-group i {
@@ -62,6 +64,7 @@
 /* List */
 .ub-discount-list {
     padding: 0 15px 15px 15px;
+    flex-grow: 1; /* Pushes summary to bottom if list is short */
 }
 
 .ub-discount-card {
@@ -186,14 +189,11 @@
 
 /* Summary Footer */
 .ub-discount-summary {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
     background: #fff;
     padding: 15px;
-    box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
-    z-index: 100;
+    border-top: 1px solid #e0e0e0;
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+    margin-top: auto;
 }
 
 .ub-ds-row {
@@ -217,4 +217,59 @@
     padding-top: 8px;
     margin-top: 5px;
     margin-bottom: 5px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.ub-ds-savings-badge {
+    background: #28a745;
+    color: white;
+    font-size: 12px;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-weight: bold;
+    margin-left: 10px;
+}
+
+/* Autocomplete Dropdown */
+.ub-customer-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: #fff;
+    border: 1px solid #ced4da;
+    border-radius: 0 0 8px 8px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    z-index: 1000;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.ub-customer-dropdown-item {
+    padding: 10px 15px;
+    border-bottom: 1px solid #f8f9fa;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+}
+
+.ub-customer-dropdown-item:last-child {
+    border-bottom: none;
+}
+
+.ub-customer-dropdown-item:hover {
+    background: #f8f9fa;
+}
+
+.ub-cd-name {
+    font-weight: 600;
+    color: #333;
+    font-size: 14px;
+}
+
+.ub-cd-phone {
+    font-size: 12px;
+    color: #6c757d;
 }

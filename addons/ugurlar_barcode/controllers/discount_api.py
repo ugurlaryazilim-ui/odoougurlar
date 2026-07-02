@@ -115,3 +115,27 @@ class DiscountApiController(BarcodeApiBase):
                 'total_final': total_final
             }
         }
+
+    @http.route('/ugurlar_barcode/api/search_customer', type='json', auth='user')
+    def search_customer(self, query):
+        """Müşteri arama endpoint'i. İsim veya cep telefonu ile arar."""
+        if not query or len(query) < 3:
+            return {'customers': []}
+            
+        Partner = request.env['res.partner'].sudo()
+        domain = ['|', ('name', 'ilike', query), ('mobile', 'ilike', query)]
+        # Müşterileri bul, ref veya barcode (Nebim CustomerCode için) dön
+        partners = Partner.search(domain, limit=10)
+        
+        customers = []
+        for p in partners:
+            customer_code = p.ref or p.barcode or ''
+            customers.append({
+                'id': p.id,
+                'name': p.name,
+                'phone': p.mobile or p.phone or '',
+                'customer_code': customer_code
+            })
+            
+        return {'customers': customers}
+
