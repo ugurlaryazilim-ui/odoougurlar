@@ -46,7 +46,7 @@ export class InventoryMatrix extends Component {
             <t t-if="state.product">
                 <!-- Ürün Kartı -->
                 <div class="ub-matrix-product-card">
-                    <div class="ub-mp-image">
+                    <div class="ub-mp-image" t-on-click="() => this.state.lightboxImage = state.product.image_url">
                         <img t-att-src="state.product.image_url" alt="Ürün"/>
                     </div>
                     <div class="ub-mp-details">
@@ -121,6 +121,12 @@ export class InventoryMatrix extends Component {
                 <h4>Matris Raporu</h4>
                 <p>Renk ve beden kırılımlı stok tablosunu görmek için bir barkod okutun.</p>
             </div>
+
+            <!-- Lightbox Overlay -->
+            <div t-if="state.lightboxImage" class="ub-lightbox" t-on-click="() => this.state.lightboxImage = null">
+                <button class="ub-lightbox-close"><i class="fa fa-times"></i></button>
+                <img t-att-src="state.lightboxImage" />
+            </div>
         </div>
     `;
 
@@ -135,6 +141,7 @@ export class InventoryMatrix extends Component {
             loading: false,
             error: null,
             product: null,
+            lightboxImage: null,
             sizes: [],
             warehouses: [],
             grandTotals: {},

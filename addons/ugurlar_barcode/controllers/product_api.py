@@ -228,9 +228,19 @@ class ProductApiController(BarcodeApiBase):
         
         # 1. Odoo'dan temel ürün bilgilerini al (Resim, Ad için)
         Product = request.env['product.product'].sudo()
+        Template = request.env['product.template'].sudo()
         product = Product.search([('barcode', '=', barcode)], limit=1)
         if not product:
+            product = Product.search([('nebim_barcode', 'ilike', barcode)], limit=1)
+        if not product:
             product = Product.search([('default_code', '=', barcode)], limit=1)
+        if not product:
+            # Maybe it's a template code
+            tmpl = Template.search([('nebim_code', '=', barcode)], limit=1)
+            if not tmpl:
+                tmpl = Template.search([('default_code', '=', barcode)], limit=1)
+            if tmpl and tmpl.product_variant_ids:
+                product = tmpl.product_variant_ids[0]
             
         product_info = {}
         if product:
