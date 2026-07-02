@@ -253,16 +253,22 @@ export class SalesDiscount extends Component {
         this.state.customerCode = val;
         this.saveState();
         
+        if (this._searchTimeout) {
+            clearTimeout(this._searchTimeout);
+        }
+        
         if (val.trim().length >= 3) {
-            try {
-                const res = await BarcodeService.call('/ugurlar_barcode/api/search_customer', { query: val.trim() });
-                if (res && res.customers) {
-                    this.state.customerSearchResults = res.customers;
-                    this.state.showCustomerDropdown = true;
+            this._searchTimeout = setTimeout(async () => {
+                try {
+                    const res = await BarcodeService.call('/ugurlar_barcode/api/search_customer', { query: val.trim() });
+                    if (res && res.customers) {
+                        this.state.customerSearchResults = res.customers;
+                        this.state.showCustomerDropdown = true;
+                    }
+                } catch (e) {
+                    console.warn("Customer search failed", e);
                 }
-            } catch (e) {
-                console.warn("Customer search failed", e);
-            }
+            }, 500); // 500ms gecikme (debounce)
         } else {
             this.state.showCustomerDropdown = false;
         }
