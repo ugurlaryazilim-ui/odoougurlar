@@ -89,7 +89,7 @@ export class SalesDiscount extends Component {
             <div class="ub-discount-list" t-if="state.basket.length > 0">
                 <t t-foreach="state.basket" t-as="item" t-key="item.uid">
                     <div class="ub-discount-card">
-                        <div class="ub-dc-image">
+                        <div class="ub-dc-image" t-att-style="item.image_url ? 'cursor:pointer;' : ''" t-on-click="() => { if(item.image_url) this.state.lightboxImage = item.image_url.replace('image_128', 'image_1920'); }">
                             <img t-if="item.image_url" t-att-src="item.image_url" alt="Ürün" />
                             <i t-else="" class="fa fa-box fa-3x text-muted"></i>
                         </div>
@@ -171,6 +171,12 @@ export class SalesDiscount extends Component {
                     <i class="fa fa-refresh"></i> Sepeti Temizle
                 </button>
             </div>
+
+            <!-- Lightbox Overlay -->
+            <div t-if="state.lightboxImage" class="ub-lightbox" t-on-click="() => this.state.lightboxImage = null">
+                <button class="ub-lightbox-close"><i class="fa fa-times"></i></button>
+                <img t-att-src="state.lightboxImage" />
+            </div>
         </div>
     `;
 
@@ -212,7 +218,8 @@ export class SalesDiscount extends Component {
             showCustomerDropdown: false,
             customerSearchLoading: false,
             customerSearchError: null,
-            customerSearchResults: []
+            customerSearchResults: [],
+            lightboxImage: null
         });
 
         // Fiziksel barkod okuyucu dinleyicisi
