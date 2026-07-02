@@ -59,6 +59,7 @@ export class MainMenu extends Component {
             { key: 'batch_picking', icon: 'fa-list-ol', title: 'Rota Toplama', desc: 'Toplama listesi ile raf raf topla', color: 'batch-picking', disabled: false },
             { key: 'packing', icon: 'fa-gift', title: 'Paketleme & Fatura', desc: 'Rota ile eşleştir ve faturala', color: 'packing', disabled: false },
             { key: 'counting', icon: 'fa-calculator', title: 'Sayım', desc: 'Raf sayımı yap', color: 'counting', disabled: false },
+            { key: 'inventory_matrix', icon: 'fa-table', title: 'Ürün Envanter Raporu', desc: 'Renk/Beden bazlı stok matrisi', color: 'matrix', disabled: false },
             // Faz 5
             { key: 'movements', icon: 'fa-exchange', title: 'Stok Hareketleri', desc: 'Giriş/çıkış/transfer raporu', color: 'movements', disabled: false },
             { key: 'labels', icon: 'fa-print', title: 'Etiket Yazdır', desc: 'Barkod etiketi oluştur', color: 'labels', disabled: false },

@@ -1,0 +1,179 @@
+/* Inventory Matrix Screen Styles */
+
+.ub-matrix-screen {
+    background-color: #f5f6f8;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.ub-matrix-search {
+    padding: 15px;
+    background: #fff;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.ub-matrix-input-group {
+    display: flex;
+    align-items: center;
+    background: #f8f9fa;
+    border: 1px solid #ced4da;
+    border-radius: 8px;
+    padding: 0 10px;
+}
+
+.ub-matrix-input-group i {
+    color: #6c757d;
+    margin-right: 10px;
+}
+
+.ub-matrix-input-group input {
+    border: none;
+    background: transparent;
+    padding: 12px 0;
+    box-shadow: none;
+    flex-grow: 1;
+}
+
+.ub-matrix-input-group input:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+/* Product Info Card */
+.ub-matrix-product-card {
+    display: flex;
+    padding: 15px;
+    background: #fff;
+    margin: 10px 15px;
+    border-radius: 10px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    align-items: center;
+}
+
+.ub-mp-image {
+    width: 60px;
+    height: 60px;
+    border-radius: 8px;
+    background: #f8f9fa;
+    margin-right: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.ub-mp-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.ub-mp-details {
+    flex-grow: 1;
+}
+
+.ub-mp-name {
+    font-weight: 600;
+    font-size: 14px;
+    color: #333;
+    margin-bottom: 4px;
+    line-height: 1.3;
+}
+
+.ub-mp-code {
+    font-size: 12px;
+    color: #6c757d;
+}
+
+/* Matrix Table Wrapper */
+.ub-matrix-wrapper {
+    margin: 0 15px 15px 15px;
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    overflow-x: auto; /* Responsive horizontal scroll */
+    padding-bottom: 5px; /* Scrollbar clearance */
+}
+
+.ub-matrix-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.ub-matrix-table th,
+.ub-matrix-table td {
+    border: 1px solid #e9ecef;
+    padding: 10px;
+    text-align: center;
+}
+
+/* Header styling */
+.ub-matrix-table th {
+    background-color: #f8f9fa;
+    color: #495057;
+    font-weight: 600;
+}
+
+/* Group Headers (Warehouse & Color) */
+.ub-matrix-th-group {
+    text-align: left !important;
+    background-color: #e9ecef !important;
+    color: #343a40;
+    position: sticky;
+    left: 0;
+    z-index: 2;
+}
+
+/* Left sticky column for Warehouse/Color to keep context while scrolling */
+.ub-matrix-row-title {
+    text-align: left !important;
+    font-weight: 500;
+    position: sticky;
+    left: 0;
+    background-color: #fff;
+    z-index: 1;
+    box-shadow: inset -1px 0 0 #e9ecef;
+}
+
+.ub-matrix-qty {
+    font-weight: 500;
+    color: #212529;
+}
+
+.ub-matrix-qty-zero {
+    color: #ced4da;
+    font-weight: normal;
+}
+
+.ub-matrix-total {
+    font-weight: 700;
+    color: #007bff;
+    background-color: #f8f9fa;
+}
+
+/* Nested Rows indication */
+.ub-matrix-row-indent {
+    padding-left: 20px !important;
+    font-size: 12px;
+    color: #495057;
+}
+
+/* Empty State */
+.ub-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 50px 20px;
+    text-align: center;
+    color: #6c757d;
+}
+
+.ub-empty-state h4 {
+    margin: 15px 0 5px 0;
+    font-weight: 600;
+}

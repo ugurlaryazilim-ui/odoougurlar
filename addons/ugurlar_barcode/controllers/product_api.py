@@ -217,3 +217,60 @@ class ProductApiController(BarcodeApiBase):
             'show_variants': show_variants,
             'search_type': search_type,
         }
+
+    @http.route('/ugurlar_barcode/api/inventory_matrix', type='json', auth='user')
+    def inventory_matrix(self, barcode=''):
+        """Ürün Stok Matrisi (Depo, Renk, Beden bazında) - Nebim'den Çeker."""
+        if not barcode:
+            return {'error': 'Barkod giriniz'}
+            
+        barcode = str(barcode).strip()
+        
+        # 1. Odoo'dan temel ürün bilgilerini al (Resim, Ad için)
+        Product = request.env['product.product'].sudo()
+        product = Product.search([('barcode', '=', barcode)], limit=1)
+        if not product:
+            product = Product.search([('default_code', '=', barcode)], limit=1)
+            
+        product_info = {}
+        if product:
+            product_info = {
+                'id': product.id,
+                'name': product.product_tmpl_id.name,
+                'code': product.product_tmpl_id.default_code or '',
+                'image_url': f'/web/image/product.product/{product.id}/image_128',
+            }
+            
+        # 2. Nebim V3 SQL SP'yi çağır
+        NebimConnector = request.env['odoougurlar.nebim.connector'].sudo()
+        try:
+            proc_params = [{'Name': 'Barcode', 'Value': barcode}]
+            results = NebimConnector.run_proc('sp_Odoougurlar_GetProductMatrix', params=proc_params)
+            
+            # Eğer SP Exception verdiyse veya bağlanamadıysa
+            if isinstance(results, dict) and results.get('ExceptionMessage'):
+                return {'error': f"Nebim Hatası: {results.get('ExceptionMessage')}"}
+                
+            matrix_data = []
+            if results and isinstance(results, list):
+                for row in results:
+                    if isinstance(row, dict):
+                        # SQL'den gelen kolonlar: WarehouseCode, WarehouseName, ColorCode, ColorName, SizeCode, SizeName, Qty
+                        matrix_data.append({
+                            'warehouse_code': row.get('WarehouseCode', ''),
+                            'warehouse_name': row.get('WarehouseName', '') or row.get('WarehouseCode', ''),
+                            'color_code': row.get('ColorCode', ''),
+                            'color_name': row.get('ColorName', '') or row.get('ColorCode', ''),
+                            'size_name': row.get('SizeName', '') or row.get('SizeCode', ''),
+                            'qty': float(row.get('Qty', 0.0))
+                        })
+                        
+            return {
+                'success': True,
+                'product': product_info,
+                'matrix_data': matrix_data
+            }
+            
+        except Exception as e:
+            _logger.error('Nebim V3 Ürün Envanter Matrisi Hatası: %s', str(e))
+            return {'error': f'Matris sorgulanırken hata oluştu: {str(e)}'}

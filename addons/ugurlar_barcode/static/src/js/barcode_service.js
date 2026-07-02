@@ -92,6 +92,10 @@ export const BarcodeService = {
     async calculateDiscounts(basket, customer_code) {
         return await rpc('/ugurlar_barcode/api/calculate_discounts', { basket, customer_code });
     },
+    // Ürün Stok Matrisi (Renk/Beden)
+    async inventoryMatrix(barcode) {
+        return await rpc('/ugurlar_barcode/api/inventory_matrix', { barcode });
+    },
     // Genel RPC çağrısı
     async call(url, params = {}) {
         return await rpc(url, params);
