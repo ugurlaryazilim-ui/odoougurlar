@@ -24,13 +24,14 @@ import { ShelfClearAllScreen } from "./screens/shelf_clear_all";
 import { PackingScreen } from "./screens/packing";
 import { BatchPickingScreen } from "./screens/batch_picking";
 import { CargoLabelDesigner } from "./screens/cargo_label_designer";
+import { InventoryMatrix } from "./screens/inventory_matrix";
 import { loadTtsConfig } from "./sound_utils";
 
 // Geçerli ekran isimleri
 const VALID_SCREENS = new Set([
     'main', 'stock_search', 'sales_discount', 'shelf_search', 'shelf_control',
     'putaway', 'shelf_transfer', 'shelf_move_all', 'shelf_validate', 'bulk_putaway', 'shelf_clear_all', 'picking', 'batch_picking', 'counting', 'movements',
-    'labels', 'label_designer', 'bulk', 'performance', 'packing', 'cargo_label_designer',
+    'labels', 'label_designer', 'bulk', 'performance', 'packing', 'cargo_label_designer', 'inventory_matrix',
 ]);
 
 // Storage key — sessionStorage ile yedekle
@@ -40,7 +41,7 @@ class BarcodeApp extends Component {
     static components = {
         MainMenu, StockSearch, SalesDiscount, ShelfSearch, ShelfControl,
         PutawayScreen, ShelfTransferScreen, ShelfMoveAll, ShelfValidateScreen, BulkPutawayScreen, ShelfClearAllScreen, PickingScreen, BatchPickingScreen, CountingScreen,
-        MovementsScreen, LabelScreen, LabelDesigner, BulkScreen, PerformanceScreen, PackingScreen, CargoLabelDesigner,
+        MovementsScreen, LabelScreen, LabelDesigner, BulkScreen, PerformanceScreen, PackingScreen, CargoLabelDesigner, InventoryMatrix,
     };
 
     setup() {
@@ -230,6 +231,9 @@ BarcodeApp.template = owl.xml`
         </t>
         <t t-if="state.screen === 'cargo_label_designer'">
             <CargoLabelDesigner navigate.bind="navigate" scanner="scanner"/>
+        </t>
+        <t t-if="state.screen === 'inventory_matrix'">
+            <InventoryMatrix navigate.bind="navigate" scanner="scanner"/>
         </t>
     </div>
 `;
