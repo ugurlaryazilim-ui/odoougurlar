@@ -1,38 +1,45 @@
 /** @odoo-module **/
 
-import { Component, useState, xml } from "@odoo/owl";
+import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
 import { useService } from "@web/core/utils/hooks";
 import { BarcodeService } from "../barcode_service";
+import { vibrate, vibrateError, speak } from "../sound_utils";
 
 export class InventoryMatrix extends Component {
     static template = xml`
         <div class="ub-screen ub-matrix-screen">
-            <!-- Header -->
-            <div class="ub-header">
-                <button class="ub-back-btn" t-on-click="() => this.props.navigate('main_menu')">
-                    <i class="fa fa-angle-left"></i>
+            <!-- Header (Standard) -->
+            <div class="ub-screen-header">
+                <button class="btn ub-btn-back" t-on-click="() => this.props.navigate('main')">
+                    <i class="fa fa-arrow-left"></i>
                 </button>
-                <h1 class="ub-title">Ürün Envanter Raporu</h1>
-                <div class="ub-user">
-                    <i class="fa fa-user-circle"></i>
-                </div>
+                <h2 class="ub-screen-title">
+                    <i class="fa fa-table"></i> Ürün Envanter Raporu
+                </h2>
             </div>
 
-            <!-- Arama Kutusu -->
-            <div class="ub-matrix-search">
-                <div class="ub-matrix-input-group">
-                    <i class="fa fa-barcode"></i>
-                    <input type="text"
-                           class="form-control"
-                           placeholder="Barkod okutun veya yazın..."
-                           t-att-value="state.barcodeValue"
-                           t-on-input="(ev) => this.state.barcodeValue = ev.target.value"
-                           t-on-keydown="(ev) => ev.key === 'Enter' and this.searchBarcode()"/>
-                    <button class="btn btn-sm btn-primary" t-on-click="searchBarcode" t-att-disabled="state.loading">
-                        <i class="fa fa-search" t-if="!state.loading"></i>
-                        <i class="fa fa-spinner fa-spin" t-if="state.loading"></i>
-                    </button>
+            <!-- Arama Kutusu (Standard) -->
+            <div class="ub-search-form">
+                <div class="ub-search-field">
+                    <label class="ub-field-label">Barkod</label>
+                    <div class="ub-barcode-input-group">
+                        <input type="text"
+                               class="form-control ub-barcode-input"
+                               placeholder="Barkod okutun veya yazın..."
+                               t-on-keydown="(ev) => this.onKeyDown(ev, 'barcode')"
+                               t-att-value="state.barcodeValue"
+                               t-on-input="(ev) => this.onFieldInput(ev, 'barcode')"
+                               t-ref="barcodeInput"/>
+                        <button class="ub-scan-icon-btn" t-on-click="startCameraScan" title="Kamera ile tara">
+                            <i class="fa fa-barcode"></i>
+                        </button>
+                    </div>
                 </div>
+                <button class="btn btn-primary ub-search-submit-btn" t-on-click="onSearch" t-att-disabled="state.loading">
+                    <i class="fa fa-search" t-if="!state.loading"></i>
+                    <i class="fa fa-spinner fa-spin" t-if="state.loading"></i>
+                    Arama
+                </button>
                 <div class="text-danger mt-2" t-if="state.error" t-esc="state.error"></div>
             </div>
 
@@ -117,10 +124,11 @@ export class InventoryMatrix extends Component {
         </div>
     `;
 
-    static props = { navigate: Function };
+    static props = { navigate: Function, scanner: Object };
 
     setup() {
         this.notification = useService("notification");
+        this.barcodeInputRef = useRef('barcodeInput');
         
         this.state = useState({
             barcodeValue: '',
@@ -132,29 +140,198 @@ export class InventoryMatrix extends Component {
             grandTotals: {},
             grandTotalQty: 0
         });
+
+        this._unsubscribe = this.props.scanner.onScan(barcode => {
+            this.state.barcodeValue = barcode;
+            this.doSearch(barcode);
+        });
+
+        onMounted(() => {
+            if (this.barcodeInputRef.el) this.barcodeInputRef.el.focus();
+        });
+
+        onWillUnmount(() => {
+            if (this._unsubscribe) this._unsubscribe();
+            if (this._scanTimer) clearTimeout(this._scanTimer);
+        });
     }
 
-    async searchBarcode() {
-        const val = this.state.barcodeValue.trim();
-        if (!val) return;
+    onFieldInput(ev, field) {
+        const val = ev.target.value;
+        if (field === 'barcode') {
+            this.state.barcodeValue = val;
+            this._detectBarcodeScan(val);
+        }
+    }
 
+    _detectBarcodeScan(val) {
+        const now = Date.now();
+        if (this._lastInputTime && (now - this._lastInputTime) < 80) {
+            this._rapidCount = (this._rapidCount || 0) + 1;
+        } else {
+            this._rapidCount = 0;
+        }
+        this._lastInputTime = now;
+
+        if (this._scanTimer) clearTimeout(this._scanTimer);
+
+        if (this._rapidCount >= 6 && val.trim().length >= 8) {
+            this._scanTimer = setTimeout(() => {
+                if (this.state.barcodeValue.trim().length >= 8) {
+                    this.doSearch(this.state.barcodeValue.trim());
+                }
+            }, 300);
+        }
+    }
+
+    onKeyDown(ev, searchType) {
+        if (ev.key === 'Enter') {
+            ev.preventDefault();
+            const value = ev.target.value.trim();
+            if (value) {
+                this.doSearch(value);
+            }
+        }
+    }
+
+    onSearch() {
+        if (this.state.barcodeValue.trim()) {
+            this.doSearch(this.state.barcodeValue.trim());
+        }
+    }
+
+    async startCameraScan() {
+        const useNative = 'BarcodeDetector' in window;
+        if (!useNative && !window.Html5Qrcode) {
+            try {
+                await new Promise((resolve, reject) => {
+                    const s = document.createElement('script');
+                    s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
+                    s.onload = resolve;
+                    s.onerror = () => reject(new Error('Kütüphane yüklenemedi'));
+                    document.head.appendChild(s);
+                });
+            } catch (e) {
+                alert('Barkod tarayıcı yüklenemedi. Lütfen barkodu manuel girin.');
+                return;
+            }
+        }
+
+        const overlay = document.createElement('div');
+        overlay.className = 'ub-camera-overlay';
+        overlay.innerHTML = `
+            <div class="ub-camera-header">
+                <span>Barkod Okutma</span>
+                <button class="ub-camera-close-btn" id="ub-cam-close">✕ Kapat</button>
+            </div>
+            ${useNative ? '<video id="ub-cam-video" autoplay playsinline muted></video>' : '<div id="ub-cam-reader" style="width:100%;"></div>'}
+            <div class="ub-camera-target"></div>
+            <div class="ub-camera-status" id="ub-cam-status">Kamera başlatılıyor...</div>
+        `;
+        document.body.appendChild(overlay);
+
+        const statusEl = document.getElementById('ub-cam-status');
+        let stream = null;
+        let animFrame = null;
+        let html5QrCode = null;
+        let scanning = true;
+
+        const cleanup = () => {
+            scanning = false;
+            if (animFrame) cancelAnimationFrame(animFrame);
+            if (stream) stream.getTracks().forEach(t => t.stop());
+            if (html5QrCode) { try { html5QrCode.stop(); } catch(e) {} }
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        };
+
+        const onScanSuccess = (barcode) => {
+            if (navigator.vibrate) navigator.vibrate(200);
+            cleanup();
+            this.state.barcodeValue = barcode;
+            this.doSearch(barcode);
+        };
+
+        document.getElementById('ub-cam-close').onclick = cleanup;
+        overlay.onclick = (e) => { if (e.target === overlay) cleanup(); };
+
+        if (useNative) {
+            const video = document.getElementById('ub-cam-video');
+            navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+            }).then(s => {
+                stream = s;
+                video.srcObject = stream;
+                statusEl.textContent = 'Barkodu kameraya gösterin...';
+
+                const detector = new BarcodeDetector({
+                    formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'itf', 'qr_code']
+                });
+
+                const scanFrame = async () => {
+                    if (!scanning || video.readyState < 2) {
+                        animFrame = requestAnimationFrame(scanFrame);
+                        return;
+                    }
+                    try {
+                        const barcodes = await detector.detect(video);
+                        if (barcodes.length > 0) {
+                            onScanSuccess(barcodes[0].rawValue);
+                            return;
+                        }
+                    } catch (e) {}
+                    animFrame = requestAnimationFrame(scanFrame);
+                };
+                video.onloadedmetadata = () => scanFrame();
+            }).catch(err => {
+                statusEl.textContent = 'Kamera erişimi reddedildi: ' + err.message;
+                setTimeout(cleanup, 3000);
+            });
+        } else {
+            try {
+                html5QrCode = new Html5Qrcode('ub-cam-reader');
+                statusEl.textContent = 'Barkodu kameraya gösterin...';
+                html5QrCode.start(
+                    { facingMode: 'environment' },
+                    { fps: 10, qrbox: { width: 280, height: 120 }, aspectRatio: 1.777 },
+                    (decodedText) => onScanSuccess(decodedText),
+                    () => {}
+                ).catch(err => {
+                    statusEl.textContent = 'Kamera başlatılamadı: ' + err;
+                    setTimeout(cleanup, 3000);
+                });
+            } catch (err) {
+                statusEl.textContent = 'Tarayıcı hatası: ' + err.message;
+                setTimeout(cleanup, 3000);
+            }
+        }
+    }
+
+    async doSearch(barcode) {
         this.state.loading = true;
         this.state.error = null;
         this.state.product = null;
         
         try {
-            const res = await BarcodeService.inventoryMatrix(val);
+            const res = await BarcodeService.inventoryMatrix(barcode);
             
             if (res.error) {
                 this.state.error = res.error;
+                vibrateError();
+                speak('stock_search_not_found'); // Resuming existing TTS
             } else if (res.success) {
                 this.state.product = res.product;
                 this.processMatrixData(res.matrix_data || []);
+                vibrate();
+                speak('stock_search_success');
             }
         } catch (error) {
-            this.state.error = "Bağlantı hatası: " + error.message;
+            this.state.error = "Bağlantı hatası: " + (error.message || error);
+            vibrateError();
+            speak('stock_search_error');
         } finally {
             this.state.loading = false;
+            this.state.barcodeValue = ''; // Clear for next scan
+            if (this.barcodeInputRef.el) { this.barcodeInputRef.el.focus(); }
         }
     }
 
