@@ -89,6 +89,10 @@ class DiscountApiController(BarcodeApiBase):
 
             # Odoo ürünü varsa bilgilerini zenginleştir
             odoo_prod = product_map.get(barcode)
+            
+            # Ürün Odoo'da yoksa ve SQL'de de perakende fiyatı dönmediyse "Bulunamadı" say
+            not_found = not odoo_prod and retail_price == 0.0
+
             image_url = f'/web/image/product.product/{odoo_prod.id}/image_128' if odoo_prod else ''
             product_name = odoo_prod.display_name if odoo_prod else barcode
 
@@ -101,7 +105,8 @@ class DiscountApiController(BarcodeApiBase):
                 'final_price': final_total,
                 'campaign_name': campaign_name,
                 'upsell_message': upsell_message,
-                'image_url': image_url
+                'image_url': image_url,
+                'not_found': not_found
             })
 
             total_retail += (retail_price * qty)

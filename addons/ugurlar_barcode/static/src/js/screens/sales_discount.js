@@ -350,8 +350,13 @@ export class SalesDiscount extends Component {
                 // Sepeti gelen sonuca göre güncelle (isim, fiyatlar, resim)
                 // Gelen liste ile sepeti eşleştir
                 const newBasket = [];
+                let notFoundItems = [];
                 for (let i = 0; i < result.lines.length; i++) {
                     const line = result.lines[i];
+                    if (line.not_found) {
+                        notFoundItems.push(line.barcode);
+                        continue; // Sepete ekleme
+                    }
                     newBasket.push({
                         uid: this.uidCounter++,
                         barcode: line.barcode,
@@ -368,7 +373,13 @@ export class SalesDiscount extends Component {
                 this.state.basket = newBasket;
                 this.state.summary = result.summary;
                 this.saveState();
-                AudioFeedback.playSuccess();
+                
+                if (notFoundItems.length > 0) {
+                    this.state.error = 'Ürün Bulunamadı: ' + notFoundItems.join(', ');
+                    AudioFeedback.playError();
+                } else {
+                    AudioFeedback.playSuccess();
+                }
             }
         } catch (e) {
             this.state.error = 'Bağlantı Hatası: ' + (e.message || e);
