@@ -46,7 +46,7 @@ export class InventoryMatrix extends Component {
             <t t-if="state.product">
                 <!-- Ürün Kartı -->
                 <div class="ub-matrix-product-card">
-                    <div class="ub-mp-image" t-on-click="() => this.state.lightboxImage = state.product.image_url">
+                    <div class="ub-mp-image" t-on-click="() => this.state.lightboxImage = state.product.image_url.replace('image_128', 'image_1920')">
                         <img t-att-src="state.product.image_url" alt="Ürün"/>
                     </div>
                     <div class="ub-mp-details">
