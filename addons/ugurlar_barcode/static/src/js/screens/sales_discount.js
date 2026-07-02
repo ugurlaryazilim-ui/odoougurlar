@@ -28,7 +28,17 @@ export class SalesDiscount extends Component {
                                t-on-keydown="(ev) => ev.key === 'Enter' and this.calculateDiscounts()"/>
                     </div>
                     <div class="ub-customer-dropdown" t-if="state.showCustomerDropdown">
-                        <t t-if="state.customerSearchResults.length > 0">
+                        <t t-if="state.customerSearchLoading">
+                            <div class="ub-customer-dropdown-item text-muted">
+                                <i class="fa fa-spinner fa-spin"></i> Nebim'de Aranıyor...
+                            </div>
+                        </t>
+                        <t t-elif="state.customerSearchError">
+                            <div class="ub-customer-dropdown-item text-danger">
+                                <i class="fa fa-exclamation-circle"></i> <t t-esc="state.customerSearchError"/>
+                            </div>
+                        </t>
+                        <t t-elif="state.customerSearchResults.length > 0">
                             <t t-foreach="state.customerSearchResults" t-as="cust" t-key="cust.id">
                                 <div class="ub-customer-dropdown-item" t-on-click="() => this.selectCustomer(cust)">
                                     <span class="ub-cd-name"><t t-esc="cust.name"/></span>
@@ -198,6 +208,8 @@ export class SalesDiscount extends Component {
             basket: initialBasket, 
             summary: initialSummary,
             showCustomerDropdown: false,
+            customerSearchLoading: false,
+            customerSearchError: null,
             customerSearchResults: []
         });
 
@@ -258,14 +270,25 @@ export class SalesDiscount extends Component {
         }
         
         if (val.trim().length >= 3) {
+            this.state.showCustomerDropdown = true;
+            this.state.customerSearchLoading = true;
+            this.state.customerSearchError = null;
+            
             this._searchTimeout = setTimeout(async () => {
                 try {
                     const res = await BarcodeService.call('/ugurlar_barcode/api/search_customer', { query: val.trim() });
-                    if (res && res.customers) {
+                    this.state.customerSearchLoading = false;
+                    
+                    if (res && res.error) {
+                        this.state.customerSearchError = res.error;
+                    } else if (res && res.customers) {
                         this.state.customerSearchResults = res.customers;
-                        this.state.showCustomerDropdown = true;
+                    } else {
+                        this.state.customerSearchError = "Geçersiz yanıt alındı.";
                     }
                 } catch (e) {
+                    this.state.customerSearchLoading = false;
+                    this.state.customerSearchError = "Bağlantı veya Sunucu Hatası!";
                     console.warn("Customer search failed", e);
                 }
             }, 500); // 500ms gecikme (debounce)
