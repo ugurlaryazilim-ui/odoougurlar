@@ -85,51 +85,123 @@ function openInSafari() {
     window.open(window.location.href, '_blank');
 }
 
-// ─── iOS-Optimized getUserMedia ──────────────────────────
-async function getCamera() {
-    const iosDevice = isIOS();
-    
-    // İlk deneme: environment + düşük çözünürlük
-    const attempts = [
-        {
-            video: {
-                facingMode: { ideal: 'environment' },
-                width: { ideal: 1280 },
-                height: { ideal: 720 }
-            },
-            audio: false
-        },
-        {
-            video: {
-                facingMode: 'environment',
-                width: { ideal: 640 },
-                height: { ideal: 480 }
-            },
-            audio: false
-        },
-        {
-            video: {
-                facingMode: 'environment'
-            },
-            audio: false
-        },
-        {
-            video: true,
-            audio: false
-        }
-    ];
+// ─── Ana Arka Kamerayı Bul ────────────────────────────────
+// iPhone'da birden fazla arka kamera var: Wide, Ultra Wide, Telephoto, Macro
+// Bu fonksiyon ana "Wide" kamerayı seçer.
+async function findMainBackCameraId() {
+    try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(d => d.kind === 'videoinput');
+        
+        if (videoDevices.length === 0) return null;
+        
+        console.info('Bulunan kameralar:', videoDevices.map(d => d.label || d.deviceId).join(', '));
+        
+        // 1. Tam olarak "Back Camera" etiketli (Apple'ın ana arka kamerası)
+        const mainBack = videoDevices.find(d => 
+            d.label === 'Back Camera' || /^back camera$/i.test(d.label)
+        );
+        if (mainBack) { console.info('Ana kamera bulundu:', mainBack.label); return mainBack.deviceId; }
+        
+        // 2. "back" içerip "ultra"/"wide"/"telephoto"/"macro" İÇERMEYEN
+        const filtered = videoDevices.find(d => 
+            /back/i.test(d.label) && 
+            !/ultra|wide|telephoto|tele|macro/i.test(d.label)
+        );
+        if (filtered) { console.info('Filtrelenmiş kamera:', filtered.label); return filtered.deviceId; }
+        
+        // 3. "back" veya "rear" içeren herhangi biri (ilk bulunan)
+        const anyBack = videoDevices.find(d => /back|rear|arka/i.test(d.label));
+        if (anyBack) { console.info('Arka kamera:', anyBack.label); return anyBack.deviceId; }
+        
+        // 4. Label boşsa (izin verilmemişse) → son kamera genelde arka kameradır
+        return videoDevices[videoDevices.length - 1].deviceId;
+    } catch(e) {
+        console.warn('Kamera listesi alınamadı:', e);
+        return null;
+    }
+}
 
-    for (const constraints of attempts) {
+// ─── Kamera Aç (iPhone Ana Kamera Öncelikli) ────────────
+async function getCamera() {
+    // ADIM 1: Önce facingMode ile izin al + stream başlat
+    let stream = null;
+    const initialConstraints = [
+        { video: { facingMode: 'environment' }, audio: false },
+        { video: true, audio: false }
+    ];
+    
+    for (const c of initialConstraints) {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia(constraints);
-            console.info('Kamera açıldı:', JSON.stringify(constraints.video));
-            return stream;
+            stream = await navigator.mediaDevices.getUserMedia(c);
+            console.info('İlk kamera açıldı:', JSON.stringify(c.video));
+            break;
         } catch(e) {
-            console.warn('Kamera denemesi başarısız:', e.name, e.message);
+            console.warn('İlk kamera denemesi:', e.name, e.message);
         }
     }
     
-    return null;
+    if (!stream) return null;
+    
+    // ADIM 2: İzin alındı — şimdi ana arka kamerayı bul ve yüksek çözünürlükle geç
+    try {
+        const mainCameraId = await findMainBackCameraId();
+        
+        if (mainCameraId) {
+            // Mevcut stream'in kamerasını kontrol et
+            const currentTrack = stream.getVideoTracks()[0];
+            const currentSettings = currentTrack.getSettings();
+            
+            // Farklı bir kameraysa VEYA çözünürlük düşükse → geçiş yap
+            if (currentSettings.deviceId !== mainCameraId || 
+                (currentSettings.width && currentSettings.width < 1280)) {
+                
+                // Eski stream'i kapat
+                stream.getTracks().forEach(t => t.stop());
+                
+                // Ana kamerayı yüksek çözünürlükle aç
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        deviceId: { exact: mainCameraId },
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 }
+                    },
+                    audio: false
+                });
+                console.info('Ana kameraya geçildi, çözünürlük:', 
+                    stream.getVideoTracks()[0].getSettings().width + 'x' + 
+                    stream.getVideoTracks()[0].getSettings().height);
+            }
+        }
+    } catch(e) {
+        // Geçiş başarısız — mevcut stream ile devam et (sorun yok)
+        console.warn('Kamera geçişi başarısız, mevcut kamerada devam:', e.message);
+    }
+    
+    // ADIM 3: Mevcut stream'in çözünürlüğünü yükseltmeyi dene
+    try {
+        const track = stream.getVideoTracks()[0];
+        const capabilities = track.getCapabilities ? track.getCapabilities() : null;
+        if (capabilities && capabilities.width && capabilities.width.max >= 1920) {
+            await track.applyConstraints({
+                width: { ideal: 1920 },
+                height: { ideal: 1080 }
+            });
+            console.info('Çözünürlük yükseltildi:', 
+                track.getSettings().width + 'x' + track.getSettings().height);
+        }
+        
+        // Sürekli otomatik odaklama (barkod için önemli)
+        if (capabilities && capabilities.focusMode && 
+            capabilities.focusMode.includes('continuous')) {
+            await track.applyConstraints({ focusMode: 'continuous' });
+            console.info('Sürekli odaklama aktif');
+        }
+    } catch(e) {
+        console.warn('Constraint ayarlanamadı:', e.message);
+    }
+    
+    return stream;
 }
 
 // ─── BARKOD FORMATLARI ───────────────────────────────────
@@ -384,23 +456,23 @@ function _scanWithCanvasDecode(video, statusEl, onResult, isScanning) {
         decoding = true;
         
         try {
-            // Video frame'i canvas'a çiz
+            // Video frame'i canvas'a çiz — TAM FRAME (crop yok)
             const vw = video.videoWidth;
             const vh = video.videoHeight;
             
-            // Sadece ortadaki bölgeyi crop et (performans için)
-            const cropW = Math.min(vw, 800);
-            const cropH = Math.min(vh, 500);
-            const cropX = Math.max(0, (vw - cropW) / 2);
-            const cropY = Math.max(0, (vh - cropH) / 2);
+            if (vw === 0 || vh === 0) {
+                decoding = false;
+                if (isScanning()) setTimeout(scanFrame, 300);
+                return;
+            }
             
-            canvas.width = cropW;
-            canvas.height = cropH;
-            ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+            canvas.width = vw;
+            canvas.height = vh;
+            ctx.drawImage(video, 0, 0, vw, vh);
             
-            // Canvas → Blob → File → scanFile
+            // Canvas → Blob → File → scanFile (yüksek kalite)
             const blob = await new Promise(resolve => 
-                canvas.toBlob(resolve, 'image/jpeg', 0.75)
+                canvas.toBlob(resolve, 'image/jpeg', 0.92)
             );
             
             if (blob && isScanning()) {
@@ -423,7 +495,7 @@ function _scanWithCanvasDecode(video, statusEl, onResult, isScanning) {
         }
         
         decoding = false;
-        if (isScanning()) setTimeout(scanFrame, 250); // ~4 FPS
+        if (isScanning()) setTimeout(scanFrame, 200); // ~5 FPS
     };
     
     if (video.readyState >= 2) {
