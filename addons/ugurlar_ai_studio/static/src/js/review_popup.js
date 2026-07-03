@@ -102,15 +102,17 @@ async function openReviewPopup(sessionId) {
                     <div class="ais-rp-comparison">
                         <div class="ais-rp-panel">
                             <div class="ais-rp-panel-label">ORJİNAL</div>
-                            <div class="ais-rp-img-wrap">
+                            <div class="ais-rp-img-wrap ais-rp-zoomable" data-zoom-src="${item.original_url}">
                                 <img src="${item.original_url}" class="ais-rp-img" alt="Orijinal"/>
+                                <div class="ais-rp-zoom-lens"></div>
                             </div>
                         </div>
                         <div class="ais-rp-vs">VS</div>
                         <div class="ais-rp-panel">
                             <div class="ais-rp-panel-label ais-rp-ai-label">AI SONUÇ</div>
-                            <div class="ais-rp-img-wrap">
+                            <div class="ais-rp-img-wrap ais-rp-zoomable" data-zoom-src="${item.generated_url}">
                                 <img src="${item.generated_url}" class="ais-rp-img" alt="AI Sonucu"/>
+                                <div class="ais-rp-zoom-lens"></div>
                             </div>
                         </div>
                     </div>
@@ -198,6 +200,55 @@ async function openReviewPopup(sessionId) {
             el.addEventListener('click', () => {
                 selectedReasonId = parseInt(el.dataset.reasonId);
                 render();
+            });
+        });
+
+        // Zoom: Mouse takipli büyüteç efekti
+        overlay.querySelectorAll('.ais-rp-zoomable').forEach(wrap => {
+            const img = wrap.querySelector('.ais-rp-img');
+            const lens = wrap.querySelector('.ais-rp-zoom-lens');
+            const zoomSrc = wrap.dataset.zoomSrc;
+            const ZOOM = 2.5;
+
+            if (!img || !lens) return;
+
+            wrap.addEventListener('mouseenter', () => {
+                lens.style.backgroundImage = `url(${zoomSrc})`;
+                lens.style.display = 'block';
+            });
+
+            wrap.addEventListener('mouseleave', () => {
+                lens.style.display = 'none';
+            });
+
+            wrap.addEventListener('mousemove', (e) => {
+                const rect = img.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                // Resmin dışındaysa gizle
+                if (x < 0 || y < 0 || x > rect.width || y > rect.height) {
+                    lens.style.display = 'none';
+                    return;
+                }
+
+                const lensW = 180;
+                const lensH = 180;
+
+                // Lens pozisyonu
+                lens.style.left = (x - lensW / 2) + 'px';
+                lens.style.top = (y - lensH / 2) + 'px';
+                lens.style.width = lensW + 'px';
+                lens.style.height = lensH + 'px';
+
+                // Background size ve position
+                const bgW = rect.width * ZOOM;
+                const bgH = rect.height * ZOOM;
+                const bgX = -(x * ZOOM - lensW / 2);
+                const bgY = -(y * ZOOM - lensH / 2);
+
+                lens.style.backgroundSize = bgW + 'px ' + bgH + 'px';
+                lens.style.backgroundPosition = bgX + 'px ' + bgY + 'px';
             });
         });
     }
