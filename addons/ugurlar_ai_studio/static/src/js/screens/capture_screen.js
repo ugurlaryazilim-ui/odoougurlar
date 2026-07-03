@@ -41,12 +41,21 @@ export class CaptureScreen extends Component {
         try {
             const constraints = {
                 video: {
-                    facingMode: this.state.facingMode,
-                    width: { ideal: 1920 },
-                    height: { ideal: 1440 },
+                    facingMode: { ideal: this.state.facingMode },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
                 },
             };
-            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            let stream;
+            try {
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+            } catch(e1) {
+                // iOS fallback — simpler constraints
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' },
+                    audio: false
+                });
+            }
             this.state.stream = stream;
             this.state.cameraActive = true;
             this.state.cameraError = null;

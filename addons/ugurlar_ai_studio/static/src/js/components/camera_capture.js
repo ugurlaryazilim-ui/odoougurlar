@@ -19,13 +19,22 @@ export class CameraCapture extends Component {
 
     async start() {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    facingMode: this.props.facingMode || "environment",
-                    width: { ideal: 1920 },
-                    height: { ideal: 1440 },
-                },
-            });
+            let stream;
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: { ideal: this.props.facingMode || "environment" },
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
+                    },
+                });
+            } catch(e1) {
+                // iOS fallback
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' },
+                    audio: false
+                });
+            }
             if (this.videoRef.el) {
                 this.videoRef.el.srcObject = stream;
             }
