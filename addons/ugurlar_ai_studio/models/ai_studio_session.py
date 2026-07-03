@@ -1061,6 +1061,9 @@ class AiStudioSession(models.Model):
                     # ═══ DETAY FOTOĞRAFI ═══
                     if photo_type == 'detail':
                         garment_cat = session._detect_garment_type()
+                        _logger.info('DETAY TİP TESPİT: ürün=%s → algılanan=%s (preset=%s)',
+                                     session.product_id.display_name, garment_cat,
+                                     preset.garment_type if preset else 'yok')
                         
                         # Ayakkabı/Çanta/Aksesuar → doğrudan ürün fotoğrafından kırp
                         # (Manken try-on sonucunda bu ürünler görünmez)
@@ -1597,6 +1600,9 @@ class AiStudioSession(models.Model):
                 # ═══ DETAY İŞLEMİ ═══
                 if photo_type == 'detail':
                     garment_cat = session._detect_garment_type()
+                    _logger.info('DETAY TİP TESPİT (retry): ürün=%s → algılanan=%s (preset=%s)',
+                                 session.product_id.display_name, garment_cat,
+                                 preset.garment_type if preset else 'yok')
                     
                     from ..services.garment_preprocessor import (
                         preprocess_garment_image,
