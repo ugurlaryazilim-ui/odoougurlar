@@ -106,31 +106,15 @@ class AiStudioSession(models.Model):
     )
 
     def action_review_generations(self):
-        """Onay bekleyen görselleri incelemek için popup açar."""
+        """Profesyonel inceleme popup'ini acar."""
         self.ensure_one()
-        generations = self.generation_ids.filtered(lambda g: g.state == 'done' and not g.is_approved and not g.reject_reason_id)
-        if not generations:
-            return {
-                'type': 'ir.actions.client',
-                'tag': 'display_notification',
-                'params': {
-                    'title': _('Bilgi'),
-                    'message': _('Onay bekleyen görsel kalmadı. "Tamamla ve Kaydet" butonuna basabilirsiniz.'),
-                    'type': 'success',
-                    'sticky': False,
-                }
-            }
-        
         return {
-            'name': _('Görselleri İncele'),
-            'type': 'ir.actions.act_window',
-            'res_model': 'ai.studio.generation',
-            'res_id': generations[0].id,
-            'view_mode': 'form',
+            'type': 'ir.actions.client',
+            'tag': 'ugurlar_ai_studio.review_popup',
+            'params': {
+                'session_id': self.id,
+            },
             'target': 'new',
-            'context': {
-                'is_review_popup': True,
-            }
         }
 
     # -------------------------------------------------------------------------

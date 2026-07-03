@@ -63,6 +63,8 @@
             'ugurlar_ai_studio/static/src/xml/review_screen.xml',
             'ugurlar_ai_studio/static/src/xml/batch_review.xml',
             'ugurlar_ai_studio/static/src/xml/history_screen.xml',
+            'ugurlar_ai_studio/static/src/js/review_popup.js',
+            'ugurlar_ai_studio/static/src/css/review_popup.css',
         ],
     },
     'installable': True,

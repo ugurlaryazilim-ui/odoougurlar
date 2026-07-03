@@ -246,6 +246,59 @@ class AiStudioController(http.Controller):
             _logger.exception('complete_session hatasi: %s', e)
             return {'success': False, 'error': str(e)}
 
+    @http.route('/ai_studio/review_data', type='json', auth='user', methods=['POST'])
+    def get_review_data(self, session_id):
+        """Oturumun tum generation verilerini inceleme popup'i icin dondurur."""
+        try:
+            session = request.env['ai.studio.session'].browse(int(session_id))
+            if not session.exists():
+                return {'error': 'Oturum bulunamadi.'}
+
+            # Sadece son versiyon (reject_reason_id yok veya approved) generation'lari al
+            generations = session.generation_ids.filtered(
+                lambda g: g.state == 'done' and not g.reject_reason_id
+            ).sorted(key=lambda g: (
+                {'front': 0, 'back': 1, 'side': 2, 'detail': 3}.get(g.photo_type, 9),
+                g.revision_number
+            ))
+
+            items = []
+            for gen in generations:
+                items.append({
+                    'id': gen.id,
+                    'photo_type': gen.photo_type,
+                    'photo_type_label': dict(gen._fields['photo_type'].selection).get(gen.photo_type, gen.photo_type),
+                    'state': gen.state,
+                    'is_approved': gen.is_approved,
+                    'is_primary': gen.is_primary,
+                    'revision_number': gen.revision_number,
+                    'original_url': '/web/image/ai.studio.generation/%d/original_image' % gen.id,
+                    'generated_url': '/web/image/ai.studio.generation/%d/generated_image' % gen.id,
+                })
+
+            # Red sebepleri
+            reasons = request.env['ai.studio.reject.reason'].search([])
+            reason_list = [{'id': r.id, 'name': r.name} for r in reasons]
+
+            # Sonraki review session
+            next_session = request.env['ai.studio.session'].search([
+                ('state', '=', 'review'),
+                ('id', '!=', session.id),
+            ], limit=1, order='id asc')
+
+            return {
+                'session_id': session.id,
+                'session_name': session.name,
+                'product_name': session.product_id.display_name if session.product_id else '',
+                'items': items,
+                'reject_reasons': reason_list,
+                'next_session_id': next_session.id if next_session else False,
+                'session_state': session.state,
+            }
+        except Exception as e:
+            _logger.exception('review_data hatasi: %s', e)
+            return {'error': str(e)}
+
     @http.route('/ai_studio/get_presets', type='json', auth='user', methods=['POST'])
     def get_presets(self, garment_type=None):
         """Aktif manken presetlerini getir."""
