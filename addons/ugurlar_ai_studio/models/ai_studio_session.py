@@ -239,46 +239,58 @@ class AiStudioSession(models.Model):
         
         # 1. Elle seçilmiş kategori varsa onu kullan
         if self.category and self.category != 'auto':
+            _logger.info('_detect_garment_type: Elle seçilmiş kategori=%s', self.category)
             return self.category
         
         # 2. Ürün bilgilerinden otomatik algıla
         product = self.product_id
         if not product:
-            return self.model_preset_id.garment_type if self.model_preset_id else 'tops'
+            fallback = self.model_preset_id.garment_type if self.model_preset_id else 'tops'
+            _logger.info('_detect_garment_type: Ürün yok, fallback=%s', fallback)
+            return fallback
         
         # Ürün adı + kategori adı + attribute değerlerini topla
         check_texts = []
         
-        # Ürün adı
-        if product.display_name:
-            check_texts.append(product.display_name.lower())
-        
-        # Template kategori adı (categ_id)
+        # Ürün adı (stored field - thread-safe)
         tmpl = product.product_tmpl_id
+        if tmpl and tmpl.name:
+            check_texts.append(str(tmpl.name).lower())
+        
+        # Default code (stored field - thread-safe)
+        if product.default_code:
+            check_texts.append(product.default_code.lower())
+        
+        # Template kategori adı (categ_id - stored relation)
         if tmpl and tmpl.categ_id and tmpl.categ_id.name:
-            check_texts.append(tmpl.categ_id.name.lower())
+            check_texts.append(str(tmpl.categ_id.name).lower())
             # Üst kategorileri de kontrol et
             parent = tmpl.categ_id.parent_id
             while parent:
                 if parent.name:
-                    check_texts.append(parent.name.lower())
+                    check_texts.append(str(parent.name).lower())
                 parent = parent.parent_id
         
         # Template attribute'ları (Reyon, Ürün Grubu)
         if tmpl:
-            for line in tmpl.attribute_line_ids:
-                attr_name = line.attribute_id.name or ''
-                if attr_name in ('Reyon', 'Ürün Grubu'):
-                    for val in line.value_ids:
-                        if val.name:
-                            check_texts.append(val.name.lower())
+            try:
+                for line in tmpl.attribute_line_ids:
+                    attr_name = line.attribute_id.name or ''
+                    if attr_name in ('Reyon', 'Ürün Grubu'):
+                        for val in line.value_ids:
+                            if val.name:
+                                check_texts.append(str(val.name).lower())
+            except Exception as e:
+                _logger.warning('_detect_garment_type: Attribute okuma hatası: %s', e)
         
         combined = ' '.join(check_texts)
+        _logger.info('_detect_garment_type: Kontrol metni: "%s"', combined[:200])
         
         # Anahtar kelime eşleştirme
         BAGS_KW = ['çanta', 'canta', 'bag', 'bags', 'clutch', 'el çantası', 'sırt çantası', 'valiz', 'portföy']
         SHOES_KW = ['ayakkabı', 'ayakkabi', 'shoe', 'shoes', 'bot', 'çizme', 'cizme', 'terlik', 
-                     'sandalet', 'sneaker', 'spor ayakkabı', 'topuklu', 'loafer', 'babet', 'slip-on']
+                     'sandalet', 'sneaker', 'spor ayakkabı', 'topuklu', 'loafer', 'babet', 'slip-on',
+                     'slipper', 'mule', 'stiletto']
         ACCESSORIES_KW = ['aksesuar', 'accessory', 'accessories', 'kemer', 'belt', 'şal', 'sal', 
                           'fular', 'atkı', 'atki', 'bere', 'şapka', 'sapka', 'gözlük', 'gozluk',
                           'saat', 'watch', 'bileklik', 'kolye', 'küpe', 'kupe', 'yüzük', 'yuzuk',
@@ -289,22 +301,29 @@ class AiStudioSession(models.Model):
         
         for kw in BAGS_KW:
             if kw in combined:
+                _logger.info('_detect_garment_type: "%s" bulundu → bags', kw)
                 return 'bags'
         for kw in SHOES_KW:
             if kw in combined:
+                _logger.info('_detect_garment_type: "%s" bulundu → shoes', kw)
                 return 'shoes'
         for kw in ACCESSORIES_KW:
             if kw in combined:
+                _logger.info('_detect_garment_type: "%s" bulundu → accessories', kw)
                 return 'accessories'
         for kw in ONE_PIECE_KW:
             if kw in combined:
+                _logger.info('_detect_garment_type: "%s" bulundu → one_piece', kw)
                 return 'one_piece'
         for kw in BOTTOMS_KW:
             if kw in combined:
+                _logger.info('_detect_garment_type: "%s" bulundu → bottoms', kw)
                 return 'bottoms'
         
         # 3. Fallback: preset veya tops
-        return self.model_preset_id.garment_type if self.model_preset_id else 'tops'
+        fallback = self.model_preset_id.garment_type if self.model_preset_id else 'tops'
+        _logger.info('_detect_garment_type: Eşleşme yok, fallback=%s', fallback)
+        return fallback
 
     def _crop_image_detail(self, image_base64, category='tops'):
         """Base64 formatındaki resmi Pillow ile kırpar ve base64 döner.
