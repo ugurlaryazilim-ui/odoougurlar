@@ -227,6 +227,85 @@ class AiStudioSession(models.Model):
             session.photo_count = len(session.photo_ids)
             session.generation_count = len(session.generation_ids)
 
+    def _detect_garment_type(self):
+        """Ürünün gerçek tipini otomatik algılar.
+        
+        Öncelik sırası:
+        1. session.category elle seçildiyse (auto değilse) → onu kullan
+        2. Ürün adı, kategori, Reyon/Ürün Grubu attribute'larından tespit et
+        3. Hiçbiri bulunamazsa preset.garment_type veya 'tops' fallback
+        """
+        self.ensure_one()
+        
+        # 1. Elle seçilmiş kategori varsa onu kullan
+        if self.category and self.category != 'auto':
+            return self.category
+        
+        # 2. Ürün bilgilerinden otomatik algıla
+        product = self.product_id
+        if not product:
+            return self.model_preset_id.garment_type if self.model_preset_id else 'tops'
+        
+        # Ürün adı + kategori adı + attribute değerlerini topla
+        check_texts = []
+        
+        # Ürün adı
+        if product.display_name:
+            check_texts.append(product.display_name.lower())
+        
+        # Template kategori adı (categ_id)
+        tmpl = product.product_tmpl_id
+        if tmpl and tmpl.categ_id and tmpl.categ_id.name:
+            check_texts.append(tmpl.categ_id.name.lower())
+            # Üst kategorileri de kontrol et
+            parent = tmpl.categ_id.parent_id
+            while parent:
+                if parent.name:
+                    check_texts.append(parent.name.lower())
+                parent = parent.parent_id
+        
+        # Template attribute'ları (Reyon, Ürün Grubu)
+        if tmpl:
+            for line in tmpl.attribute_line_ids:
+                attr_name = line.attribute_id.name or ''
+                if attr_name in ('Reyon', 'Ürün Grubu'):
+                    for val in line.value_ids:
+                        if val.name:
+                            check_texts.append(val.name.lower())
+        
+        combined = ' '.join(check_texts)
+        
+        # Anahtar kelime eşleştirme
+        BAGS_KW = ['çanta', 'canta', 'bag', 'bags', 'clutch', 'el çantası', 'sırt çantası', 'valiz', 'portföy']
+        SHOES_KW = ['ayakkabı', 'ayakkabi', 'shoe', 'shoes', 'bot', 'çizme', 'cizme', 'terlik', 
+                     'sandalet', 'sneaker', 'spor ayakkabı', 'topuklu', 'loafer', 'babet', 'slip-on']
+        ACCESSORIES_KW = ['aksesuar', 'accessory', 'accessories', 'kemer', 'belt', 'şal', 'sal', 
+                          'fular', 'atkı', 'atki', 'bere', 'şapka', 'sapka', 'gözlük', 'gozluk',
+                          'saat', 'watch', 'bileklik', 'kolye', 'küpe', 'kupe', 'yüzük', 'yuzuk',
+                          'cüzdan', 'cuzdan', 'eldiven']
+        BOTTOMS_KW = ['pantolon', 'jean', 'jeans', 'şort', 'sort', 'etek', 'tayt', 'eşofman altı',
+                      'alt giyim', 'bermuda', 'capri', 'jogger']
+        ONE_PIECE_KW = ['elbise', 'dress', 'tulum', 'jumpsuit', 'overall', 'abiye', 'tek parça']
+        
+        for kw in BAGS_KW:
+            if kw in combined:
+                return 'bags'
+        for kw in SHOES_KW:
+            if kw in combined:
+                return 'shoes'
+        for kw in ACCESSORIES_KW:
+            if kw in combined:
+                return 'accessories'
+        for kw in ONE_PIECE_KW:
+            if kw in combined:
+                return 'one_piece'
+        for kw in BOTTOMS_KW:
+            if kw in combined:
+                return 'bottoms'
+        
+        # 3. Fallback: preset veya tops
+        return self.model_preset_id.garment_type if self.model_preset_id else 'tops'
+
     def _crop_image_detail(self, image_base64, category='tops'):
         """Base64 formatındaki resmi Pillow ile kırpar ve base64 döner.
         
@@ -981,7 +1060,7 @@ class AiStudioSession(models.Model):
 
                     # ═══ DETAY FOTOĞRAFI ═══
                     if photo_type == 'detail':
-                        garment_cat = preset.garment_type or 'tops'
+                        garment_cat = session._detect_garment_type()
                         
                         # Ayakkabı/Çanta/Aksesuar → doğrudan ürün fotoğrafından kırp
                         # (Manken try-on sonucunda bu ürünler görünmez)
@@ -1517,7 +1596,7 @@ class AiStudioSession(models.Model):
 
                 # ═══ DETAY İŞLEMİ ═══
                 if photo_type == 'detail':
-                    garment_cat = preset.garment_type or 'tops'
+                    garment_cat = session._detect_garment_type()
                     
                     from ..services.garment_preprocessor import (
                         preprocess_garment_image,
