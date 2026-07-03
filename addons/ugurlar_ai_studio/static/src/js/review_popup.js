@@ -120,10 +120,13 @@ async function openReviewPopup(sessionId) {
                 <div class="ais-rp-footer">
                     <div class="ais-rp-actions">
                         ${item.is_approved ? `
-                            <div class="ais-rp-approved-badge">✅ Bu görsel onaylandı</div>
+                            <div class="ais-rp-approved-badge">✅ Bu görsel onaylandı ${item.is_primary ? '⭐' : ''}</div>
                         ` : `
                             <button class="ais-rp-btn ais-rp-btn-reject" id="ais-rp-reject">
                                 ❌ Reddet
+                            </button>
+                            <button class="ais-rp-btn ais-rp-btn-star ${item.is_primary ? 'active' : ''}" id="ais-rp-star">
+                                ⭐ Ana Görsel
                             </button>
                             <button class="ais-rp-btn ais-rp-btn-approve" id="ais-rp-approve">
                                 ✅ Onayla
@@ -173,6 +176,12 @@ async function openReviewPopup(sessionId) {
         // Event handlers
         document.getElementById('ais-rp-close')?.addEventListener('click', close);
         document.getElementById('ais-rp-approve')?.addEventListener('click', approve);
+        document.getElementById('ais-rp-star')?.addEventListener('click', () => {
+            // Önce tüm item'ların primary'sini kaldır, sonra bu item'ı primary yap
+            items.forEach(it => it.is_primary = false);
+            items[currentIndex].is_primary = true;
+            render();
+        });
         document.getElementById('ais-rp-reject')?.addEventListener('click', () => {
             showRejectModal = true;
             selectedReasonId = rejectReasons.length > 0 ? rejectReasons[0].id : null;
@@ -241,7 +250,7 @@ async function openReviewPopup(sessionId) {
         try {
             await _jsonRpc('/ai_studio/approve_generation', {
                 generation_id: item.id,
-                is_primary: currentIndex === 0, // İlk görsel ana resim
+                is_primary: item.is_primary,
             });
             item.is_approved = true;
 

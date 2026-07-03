@@ -350,6 +350,26 @@
     background: #c82333;
 }
 
+.ais-rp-btn-star {
+    background: #fff;
+    color: #6c757d;
+    border: 1px solid #dee2e6;
+    padding: 10px 18px;
+}
+
+.ais-rp-btn-star:hover:not(:disabled) {
+    background: #fff8e1;
+    border-color: #ffc107;
+    color: #856404;
+}
+
+.ais-rp-btn-star.active {
+    background: #fff3cd;
+    border-color: #ffc107;
+    color: #856404;
+    box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.25);
+}
+
 .ais-rp-btn-nav {
     background: #f1f3f5;
     color: #495057;
