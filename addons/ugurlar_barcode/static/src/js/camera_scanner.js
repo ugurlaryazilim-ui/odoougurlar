@@ -85,120 +85,71 @@ function openInSafari() {
     window.open(window.location.href, '_blank');
 }
 
-// ─── Ana Arka Kamerayı Bul ────────────────────────────────
-// iPhone'da birden fazla arka kamera var: Wide, Ultra Wide, Telephoto, Macro
-// Bu fonksiyon ana "Wide" kamerayı seçer.
-async function findMainBackCameraId() {
-    try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(d => d.kind === 'videoinput');
-        
-        if (videoDevices.length === 0) return null;
-        
-        console.info('Bulunan kameralar:', videoDevices.map(d => d.label || d.deviceId).join(', '));
-        
-        // 1. Tam olarak "Back Camera" etiketli (Apple'ın ana arka kamerası)
-        const mainBack = videoDevices.find(d => 
-            d.label === 'Back Camera' || /^back camera$/i.test(d.label)
-        );
-        if (mainBack) { console.info('Ana kamera bulundu:', mainBack.label); return mainBack.deviceId; }
-        
-        // 2. "back" içerip "ultra"/"wide"/"telephoto"/"macro" İÇERMEYEN
-        const filtered = videoDevices.find(d => 
-            /back/i.test(d.label) && 
-            !/ultra|wide|telephoto|tele|macro/i.test(d.label)
-        );
-        if (filtered) { console.info('Filtrelenmiş kamera:', filtered.label); return filtered.deviceId; }
-        
-        // 3. "back" veya "rear" içeren herhangi biri (ilk bulunan)
-        const anyBack = videoDevices.find(d => /back|rear|arka/i.test(d.label));
-        if (anyBack) { console.info('Arka kamera:', anyBack.label); return anyBack.deviceId; }
-        
-        // 4. Label boşsa (izin verilmemişse) → son kamera genelde arka kameradır
-        return videoDevices[videoDevices.length - 1].deviceId;
-    } catch(e) {
-        console.warn('Kamera listesi alınamadı:', e);
-        return null;
-    }
-}
-
-// ─── Kamera Aç (iPhone Ana Kamera Öncelikli) ────────────
+// ─── Kamera Aç (Güvenli — stream asla kapatılmaz) ──────
+// iOS'ta kamerayı açıp kapatıp yeniden açmak ÇALIŞMIYOR.
+// Bu yüzden kamerayı BİR KEZ açıp, mevcut stream üzerinde
+// applyConstraints ile kaliteyi artırıyoruz.
 async function getCamera() {
-    // ADIM 1: Önce facingMode ile izin al + stream başlat
     let stream = null;
-    const initialConstraints = [
-        { video: { facingMode: 'environment' }, audio: false },
-        { video: true, audio: false }
-    ];
     
-    for (const c of initialConstraints) {
+    // Kamerayı aç — en basit constraint ile
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment' },
+            audio: false
+        });
+    } catch(e1) {
+        console.warn('facingMode environment başarısız:', e1.message);
         try {
-            stream = await navigator.mediaDevices.getUserMedia(c);
-            console.info('İlk kamera açıldı:', JSON.stringify(c.video));
-            break;
-        } catch(e) {
-            console.warn('İlk kamera denemesi:', e.name, e.message);
-        }
-    }
-    
-    if (!stream) return null;
-    
-    // ADIM 2: İzin alındı — şimdi ana arka kamerayı bul ve yüksek çözünürlükle geç
-    try {
-        const mainCameraId = await findMainBackCameraId();
-        
-        if (mainCameraId) {
-            // Mevcut stream'in kamerasını kontrol et
-            const currentTrack = stream.getVideoTracks()[0];
-            const currentSettings = currentTrack.getSettings();
-            
-            // Farklı bir kameraysa VEYA çözünürlük düşükse → geçiş yap
-            if (currentSettings.deviceId !== mainCameraId || 
-                (currentSettings.width && currentSettings.width < 1280)) {
-                
-                // Eski stream'i kapat
-                stream.getTracks().forEach(t => t.stop());
-                
-                // Ana kamerayı yüksek çözünürlükle aç
-                stream = await navigator.mediaDevices.getUserMedia({
-                    video: {
-                        deviceId: { exact: mainCameraId },
-                        width: { ideal: 1920 },
-                        height: { ideal: 1080 }
-                    },
-                    audio: false
-                });
-                console.info('Ana kameraya geçildi, çözünürlük:', 
-                    stream.getVideoTracks()[0].getSettings().width + 'x' + 
-                    stream.getVideoTracks()[0].getSettings().height);
-            }
-        }
-    } catch(e) {
-        // Geçiş başarısız — mevcut stream ile devam et (sorun yok)
-        console.warn('Kamera geçişi başarısız, mevcut kamerada devam:', e.message);
-    }
-    
-    // ADIM 3: Mevcut stream'in çözünürlüğünü yükseltmeyi dene
-    try {
-        const track = stream.getVideoTracks()[0];
-        const capabilities = track.getCapabilities ? track.getCapabilities() : null;
-        if (capabilities && capabilities.width && capabilities.width.max >= 1920) {
-            await track.applyConstraints({
-                width: { ideal: 1920 },
-                height: { ideal: 1080 }
+            stream = await navigator.mediaDevices.getUserMedia({
+                video: true, audio: false
             });
-            console.info('Çözünürlük yükseltildi:', 
-                track.getSettings().width + 'x' + track.getSettings().height);
+        } catch(e2) {
+            console.error('Kamera hiç açılamadı:', e2.message);
+            return null;
         }
-        
-        // Sürekli otomatik odaklama (barkod için önemli)
+    }
+    
+    // Kamera açıldı — şimdi mevcut track üzerinde kaliteyi artır
+    // STREAM KAPATILMIYOR, sadece mevcut track iyileştiriliyor
+    const track = stream.getVideoTracks()[0];
+    if (!track) return stream;
+    
+    const settings = track.getSettings();
+    console.info('Kamera açıldı:', settings.width + 'x' + settings.height, 
+        'label:', track.label);
+    
+    // Çözünürlüğü yükselt (mevcut track üzerinde)
+    try {
+        await track.applyConstraints({
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+        });
+        const newSettings = track.getSettings();
+        console.info('Çözünürlük güncellendi:', newSettings.width + 'x' + newSettings.height);
+    } catch(e) {
+        // 1920 çalışmazsa 1280 dene
+        try {
+            await track.applyConstraints({
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            });
+        } catch(e2) {
+            // Constraint uygulanamadı — mevcut kalitede devam
+            console.warn('Çözünürlük değiştirilemedi, mevcut:', settings.width + 'x' + settings.height);
+        }
+    }
+    
+    // Sürekli otomatik odaklama (varsa)
+    try {
+        const capabilities = track.getCapabilities ? track.getCapabilities() : null;
         if (capabilities && capabilities.focusMode && 
             capabilities.focusMode.includes('continuous')) {
             await track.applyConstraints({ focusMode: 'continuous' });
             console.info('Sürekli odaklama aktif');
         }
     } catch(e) {
-        console.warn('Constraint ayarlanamadı:', e.message);
+        // focusMode uygulanamadı — sorun yok
     }
     
     return stream;
