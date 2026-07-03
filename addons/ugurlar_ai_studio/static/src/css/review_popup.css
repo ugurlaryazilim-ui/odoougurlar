@@ -254,23 +254,17 @@
     transition: opacity 0.2s;
 }
 
-/* ─── Zoom Lens ───────────────────────────────────────── */
-.ais-rp-zoom-lens {
-    display: none;
-    position: absolute;
-    width: 180px;
-    height: 180px;
-    border-radius: 50%;
-    border: 3px solid #7c3aed;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25), inset 0 0 0 1px rgba(255, 255, 255, 0.3);
-    pointer-events: none;
-    z-index: 10;
-    background-repeat: no-repeat;
-    transition: none;
+/* ─── Zoom (Container-based) ──────────────────────────── */
+/* Mouse ile resmin üzerine gelince container'ın kendisi 
+   büyütülmüş resmi background olarak gösterir */
+.ais-rp-zoomable {
+    cursor: crosshair;
+    overflow: hidden;
 }
 
-.ais-rp-zoomable:hover .ais-rp-img {
-    opacity: 0.7;
+.ais-rp-zoomable .ais-rp-img {
+    transition: opacity 0.15s ease;
+    pointer-events: none;
 }
 
 .ais-rp-vs {
@@ -555,12 +549,8 @@
         margin-left: 0;
     }
 
-    /* Mobilde zoom lens kapat */
-    .ais-rp-zoom-lens {
-        display: none !important;
-    }
-
-    .ais-rp-zoomable:hover .ais-rp-img {
-        opacity: 1;
+    /* Mobilde zoom kapat */
+    .ais-rp-zoomable {
+        cursor: default;
     }
 }
