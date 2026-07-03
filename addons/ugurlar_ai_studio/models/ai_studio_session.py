@@ -1773,6 +1773,7 @@ class AiStudioSession(models.Model):
                 if photo_type in ('back', 'side', 'detail'):
                     # Session içindeki tamamlanmış front kaydını bul
                     front_gen = session.generation_ids.filtered(lambda g: g.photo_type == 'front' and g.state == 'done')
+                    detail_urls = []
                     if front_gen and front_gen[0].generated_image:
                         front_result_b64 = front_gen[0].generated_image
                         front_seed = front_gen[0].seed or False
