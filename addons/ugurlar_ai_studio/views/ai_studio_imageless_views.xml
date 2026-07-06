@@ -93,13 +93,11 @@
                 <separator/>
 
                 <!-- Group By -->
-                <group expand="0" string="Grupla">
-                    <filter string="Marka" name="group_brand" context="{'group_by': 'brand_name'}"/>
-                    <filter string="Sezon" name="group_season" context="{'group_by': 'season_name'}"/>
-                    <filter string="Cinsiyet" name="group_gender" context="{'group_by': 'gender_name'}"/>
-                    <filter string="Renk" name="group_color" context="{'group_by': 'color_name'}"/>
-                    <filter string="Kategori" name="group_category" context="{'group_by': 'category_name'}"/>
-                </group>
+                <filter string="Marka" name="group_brand" context="{'group_by': 'brand_name'}"/>
+                <filter string="Sezon" name="group_season" context="{'group_by': 'season_name'}"/>
+                <filter string="Cinsiyet" name="group_gender" context="{'group_by': 'gender_name'}"/>
+                <filter string="Renk" name="group_color" context="{'group_by': 'color_name'}"/>
+                <filter string="Kategori" name="group_category" context="{'group_by': 'category_name'}"/>
             </search>
         </field>
     </record>
