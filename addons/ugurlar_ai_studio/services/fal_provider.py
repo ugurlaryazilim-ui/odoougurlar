@@ -117,7 +117,17 @@ class FalProvider(AIProviderBase):
             if detail_urls:
                 for i in range(len(detail_urls)):
                     idx = detail_start_idx + i
-                    dynamic_prompt += f"The {idx}th reference image is a MACRO DETAIL shot of the garment (showing fabric texture, buttons, or specific patterns). You MUST accurately apply this exact texture and detail to the garment. DO NOT hallucinate details. "
+                    
+                    # Sayı sonlarına uygun ek getirme (1st, 2nd, 3rd, 4th, vb.)
+                    suffix = "th"
+                    if idx % 10 == 1 and idx % 100 != 11:
+                        suffix = "st"
+                    elif idx % 10 == 2 and idx % 100 != 12:
+                        suffix = "nd"
+                    elif idx % 10 == 3 and idx % 100 != 13:
+                        suffix = "rd"
+                        
+                    dynamic_prompt += f"The {idx}{suffix} reference image is a MACRO DETAIL shot of the garment (showing fabric texture, buttons, or specific patterns). You MUST accurately apply this exact texture and detail to the garment. DO NOT hallucinate details. "
                 
                 # CRITICAL: Prevent the AI from hallucinating a macro shot as the main output
                 dynamic_prompt += (
