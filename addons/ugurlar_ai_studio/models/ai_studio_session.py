@@ -2289,27 +2289,27 @@ class AiStudioSession(models.Model):
                         if reviewer_group:
                             reviewers = self.env['res.users'].search([('groups_id', 'in', reviewer_group.id)])
                             for reviewer in reviewers:
-                            # _get('ai.studio.session').id Odoo 19'da veya belirli contextlerde hata verebiliyor.
-                            # Bunun yerine model adını string veya _get_id olarak veriyoruz.
-                            try:
-                                res_model_id = self.env['ir.model']._get_id('ai.studio.session')
-                            except Exception:
-                                res_model = self.env['ir.model'].search([('model', '=', 'ai.studio.session')], limit=1)
-                                res_model_id = res_model.id if res_model else False
-
-                            if res_model_id:
+                                # _get('ai.studio.session').id Odoo 19'da veya belirli contextlerde hata verebiliyor.
+                                # Bunun yerine model adını string veya _get_id olarak veriyoruz.
                                 try:
-                                    self.env['mail.activity'].create({
-                                        'res_id': record.id,
-                                        'res_model_id': res_model_id,
-                                        'activity_type_id': activity_type.id,
-                                        'summary': _('Çekim Onayı Bekliyor'),
-                                        'note': _('%s için AI üretimleri tamamlandı. Onayınız bekleniyor.') % record.name,
-                                        'user_id': reviewer.id,
-                                    })
-                                except Exception as e:
-                                    import logging
-                                    logging.getLogger(__name__).warning("Aktivite oluşturulamadı: %s", e)
+                                    res_model_id = self.env['ir.model']._get_id('ai.studio.session')
+                                except Exception:
+                                    res_model = self.env['ir.model'].search([('model', '=', 'ai.studio.session')], limit=1)
+                                    res_model_id = res_model.id if res_model else False
+
+                                if res_model_id:
+                                    try:
+                                        self.env['mail.activity'].create({
+                                            'res_id': record.id,
+                                            'res_model_id': res_model_id,
+                                            'activity_type_id': activity_type.id,
+                                            'summary': _('Çekim Onayı Bekliyor'),
+                                            'note': _('%s için AI üretimleri tamamlandı. Onayınız bekleniyor.') % record.name,
+                                            'user_id': reviewer.id,
+                                        })
+                                    except Exception as e:
+                                        import logging
+                                        logging.getLogger(__name__).warning("Aktivite oluşturulamadı: %s", e)
                 elif record.state in ['done', 'cancelled']:
                     # Onaylandı veya iptal edildiyse, bu kayıttaki TODO'ları kapat/sil
                     activities = self.env['mail.activity'].search([
