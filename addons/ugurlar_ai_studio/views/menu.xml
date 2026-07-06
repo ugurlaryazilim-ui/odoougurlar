@@ -161,6 +161,13 @@
               action="action_ai_studio_library"
               sequence="2"/>
 
+    <!-- Sahneler / Konseptler -->
+    <menuitem id="menu_ai_studio_scenes"
+              name="Sahneler / Konseptler"
+              parent="menu_ai_studio_config"
+              action="action_ai_studio_scene"
+              sequence="3"/>
+
     <!-- Prompt Sablonlari -->
     <menuitem id="menu_ai_studio_prompts"
               name="Prompt Şablonları"

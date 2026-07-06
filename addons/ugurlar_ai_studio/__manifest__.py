@@ -38,6 +38,7 @@
         'views/ai_studio_preset_views.xml',
         'views/ai_studio_prompt_views.xml',
         'views/ai_studio_reject_views.xml',
+        'views/ai_studio_scene_views.xml',
         'views/ai_studio_settings_views.xml',
         'views/ai_studio_templates.xml',
         'views/ai_studio_library_views.xml',

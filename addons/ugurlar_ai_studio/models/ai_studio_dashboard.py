@@ -75,28 +75,39 @@ class AiStudioLeaderboard(models.Model):
             self.create(leaderboard_records)
 
     @api.model
-    def get_dashboard_data(self):
+    def get_dashboard_data(self, period='this_month'):
         """OWL Dashboard için gerekli olan anlık verileri döndürür."""
         today = fields.Date.today()
         first_day_this_month = today.replace(day=1)
         
+        # Dönem filtrelemesi
+        domain = []
+        if period == 'this_month':
+            domain = [('create_date', '>=', first_day_this_month)]
+        elif period == 'last_month':
+            last_day_last_month = first_day_this_month - timedelta(days=1)
+            first_day_last_month = last_day_last_month.replace(day=1)
+            domain = [('create_date', '>=', first_day_last_month), ('create_date', '<=', last_day_last_month)]
+        elif period == 'this_year':
+            first_day_this_year = today.replace(month=1, day=1)
+            domain = [('create_date', '>=', first_day_this_year)]
+        # all için boş bırakıyoruz
+        
         Session = self.env['ai.studio.session']
         
-        # 1. Genel İstatistikler (Bu Ay)
-        this_month_domain = [('create_date', '>=', first_day_this_month)]
-        
-        total_sessions = Session.search_count(this_month_domain)
-        approved_sessions = Session.search_count(this_month_domain + [('state', '=', 'done')])
-        rejected_sessions = Session.search_count(this_month_domain + [('state', '=', 'cancelled')])
+        # 1. Genel İstatistikler
+        total_sessions = Session.search_count(domain)
+        approved_sessions = Session.search_count(domain + [('state', '=', 'done')])
+        rejected_sessions = Session.search_count(domain + [('state', '=', 'cancelled')])
         
         # Revizyonları da sayalım
-        all_done_sessions = Session.search(this_month_domain + [('state', '=', 'done')])
+        all_done_sessions = Session.search(domain + [('state', '=', 'done')])
         total_revisions = sum(all_done_sessions.mapped('revision_count'))
         
         rejected_sessions += total_revisions
         
-        # 2. Operatör Leaderboard (Bu Ayın Anlık Sıralaması)
-        sessions = Session.search(this_month_domain + [('state', 'in', ['done', 'cancelled'])])
+        # 2. Operatör Leaderboard
+        sessions = Session.search(domain + [('state', 'in', ['done', 'cancelled'])])
 
         user_stats = {}
         for sess in sessions:
@@ -148,6 +159,53 @@ class AiStudioLeaderboard(models.Model):
                 'title': r.title,
             })
 
+        # 4. Red Nedenleri İstatistikleri
+        Generation = self.env['ai.studio.generation']
+        
+        # Domain based on create_date for generations
+        gen_domain = [('state', '=', 'done'), ('is_approved', '=', False), ('reject_reason_id', '!=', False)]
+        if period == 'this_month':
+            gen_domain.append(('create_date', '>=', first_day_this_month))
+        elif period == 'last_month':
+            gen_domain.append(('create_date', '>=', first_day_last_month))
+            gen_domain.append(('create_date', '<=', last_day_last_month))
+        elif period == 'this_year':
+            first_day_this_year = today.replace(month=1, day=1)
+            gen_domain.append(('create_date', '>=', first_day_this_year))
+            
+        rejected_gens = Generation.read_group(
+            gen_domain,
+            ['reject_reason_id'],
+            ['reject_reason_id']
+        )
+        
+        reject_reasons = []
+        for rg in rejected_gens:
+            if rg.get('reject_reason_id'):
+                reject_reasons.append({
+                    'id': rg['reject_reason_id'][0],
+                    'name': rg['reject_reason_id'][1],
+                    'count': rg['reject_reason_id_count']
+                })
+                
+        # Sort by count desc
+        reject_reasons = sorted(reject_reasons, key=lambda x: x['count'], reverse=True)
+
+        # 5. Maliyet Analizi (Sadece Yöneticiler Görecek Şekilde UI'da Kısıtlanacak)
+        all_gens_domain = [('state', 'in', ['done', 'failed', 'processing'])]
+        if period == 'this_month':
+            all_gens_domain.append(('create_date', '>=', first_day_this_month))
+        elif period == 'last_month':
+            all_gens_domain.append(('create_date', '>=', first_day_last_month))
+            all_gens_domain.append(('create_date', '<=', last_day_last_month))
+        elif period == 'this_year':
+            all_gens_domain.append(('create_date', '>=', first_day_this_year))
+            
+        all_gens = Generation.search(all_gens_domain)
+        total_cost = sum(all_gens.mapped('cost'))
+        
+        is_manager = self.env.user.has_group('ugurlar_ai_studio.group_ai_studio_manager')
+
         return {
             'overview': {
                 'total': total_sessions,
@@ -157,6 +215,12 @@ class AiStudioLeaderboard(models.Model):
             },
             'leaderboard': leaderboard,
             'past_winners': past_winners,
+            'reject_reasons': reject_reasons,
+            'cost_data': {
+                'show': is_manager,
+                'total_cost': round(total_cost, 2),
+                'currency': self.env.user.company_id.currency_id.symbol or '$'
+            },
             'my_stats': {
                 'rank': my_rank,
                 'score': my_stats.get('score', 0),

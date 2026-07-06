@@ -3,9 +3,36 @@
 
     <t t-name="ugurlar_ai_studio.DashboardScreen" owl="1">
         <div class="ai-dashboard-container">
-            <div class="ai-dashboard-header">
-                <h1>🏆 Stüdyo Liderlik Tablosu</h1>
-                <p>Aylık AI Fotoğraf Stüdyosu Performansı ve Puan Durumu</p>
+            <!-- Custom Control Panel for Date Filtering -->
+            <div class="o_control_panel d-flex flex-column gap-3 gap-lg-1 px-3 pt-2 pb-3 border-bottom mb-4 bg-view">
+                <div class="o_cp_top d-flex align-items-baseline justify-content-between">
+                    <div class="o_cp_top_left d-flex align-items-baseline gap-1">
+                        <ol class="breadcrumb">
+                            <li class="breadcrumb-item active" style="font-size: 1.5rem; font-weight: 500;">
+                                🏆 Stüdyo Liderlik Tablosu
+                            </li>
+                        </ol>
+                    </div>
+                    <div class="o_cp_top_right d-flex align-items-baseline gap-2">
+                        <!-- Date Filter -->
+                        <div class="dropdown">
+                            <button class="btn btn-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                <i class="fa fa-calendar me-1"/> 
+                                <t t-if="state.period === 'this_month'">Bu Ay</t>
+                                <t t-elif="state.period === 'last_month'">Geçen Ay</t>
+                                <t t-elif="state.period === 'this_year'">Bu Yıl</t>
+                                <t t-else="">Tüm Zamanlar</t>
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                <li><a class="dropdown-item" href="#" t-on-click="() => this.setPeriod('this_month')">Bu Ay</a></li>
+                                <li><a class="dropdown-item" href="#" t-on-click="() => this.setPeriod('last_month')">Geçen Ay</a></li>
+                                <li><a class="dropdown-item" href="#" t-on-click="() => this.setPeriod('this_year')">Bu Yıl</a></li>
+                                <li><hr class="dropdown-divider"/></li>
+                                <li><a class="dropdown-item" href="#" t-on-click="() => this.setPeriod('all')">Tüm Zamanlar</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Benim İstatistiklerim -->
@@ -67,6 +94,18 @@
                 <!-- Sağ Taraf: Geçmiş Kazananlar ve Genel Durum -->
                 <div class="ai-dashboard-right">
                     
+                    <!-- Maliyet Panosu (Sadece Manager için) -->
+                    <div class="ai-dashboard-card cost-card" t-if="state.cost_data and state.cost_data.show">
+                        <h2>💰 Bütçe ve Maliyet (AI)</h2>
+                        <div class="overview-stats">
+                            <div class="linear-stats">
+                                <div class="text-danger fw-bold" style="font-size: 1.5rem;">
+                                    Toplam Maliyet: <t t-esc="state.cost_data.total_cost"/> <t t-esc="state.cost_data.currency"/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="ai-dashboard-card overview-card">
                         <h2>📊 Bu Ay Genel Durum</h2>
                         <div class="overview-stats">
@@ -79,6 +118,14 @@
                                 <div class="text-success">Onaylanan: <b t-esc="state.overview.approved"/></div>
                                 <div class="text-danger">Revize/Red: <b t-esc="state.overview.rejected"/></div>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- Reject Reasons Card -->
+                    <div class="ai-dashboard-card reject-reasons-card" t-if="state.reject_reasons.length > 0">
+                        <h2>📉 Red Nedenleri Dağılımı</h2>
+                        <div class="reject-reasons-container" style="position: relative; height: 250px; width: 100%;">
+                            <canvas t-ref="rejectReasonsChart"></canvas>
                         </div>
                     </div>
 

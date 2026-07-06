@@ -66,6 +66,7 @@
                         </group>
                         <group>
                             <field name="model_preset_id"/>
+                            <field name="scene_id"/>
                             <field name="category"/>
                             <field name="quality_mode"/>
                             <field name="prompt_template_id"/>
@@ -117,6 +118,15 @@
                                     <field name="reviewer_id"/>
                                     <field name="company_id" groups="base.group_multi_company"/>
                                 </group>
+                            </group>
+                        </page>
+                        <!-- SEO: Onay sonrası otomatik dolan Gemini verileri -->
+                        <page string="SEO &amp; Metinler" name="seo">
+                            <group>
+                                <field name="seo_tags"/>
+                            </group>
+                            <group>
+                                <field name="seo_description" nolabel="1" placeholder="AI tarafından SEO uyumlu açıklama üretilecek..."/>
                             </group>
                         </page>
                     </notebook>

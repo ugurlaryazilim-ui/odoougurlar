@@ -67,10 +67,22 @@ class AiStudioSession(models.Model):
         ('cancelled', 'İptal'),
     ], string='Durum', default='draft', tracking=True, index=True)
 
+    # --- Zaman Damgaları (Bottleneck Analizi) ---
+    date_photos_ready = fields.Datetime(string='Fotoğraflar Hazır', readonly=True)
+    date_processing_start = fields.Datetime(string='AI Başlama', readonly=True)
+    date_review_start = fields.Datetime(string='Onaya Düşme', readonly=True)
+    date_done = fields.Datetime(string='Tamamlanma', readonly=True)
+
     # --- AI Ayarları ---
     model_preset_id = fields.Many2one(
         'ai.studio.model.preset',
         string='Manken Preseti',
+        tracking=True,
+    )
+    scene_id = fields.Many2one(
+        'ai.studio.scene',
+        string='Sahne / Konsept',
+        domain="[('active', '=', True)]",
         tracking=True,
     )
     category = fields.Selection([
@@ -168,6 +180,16 @@ class AiStudioSession(models.Model):
         'res.company',
         string='Şirket',
         default=lambda self: self.env.company,
+    )
+    
+    # --- SEO Alanları ---
+    seo_description = fields.Html(
+        string='AI SEO Ürün Açıklaması',
+        help='Gemini tarafından üretilen ürün açıklaması'
+    )
+    seo_tags = fields.Char(
+        string='SEO Etiketleri',
+        help='Gemini tarafından üretilen SEO etiketleri (virgülle ayrılmış)'
     )
 
     @api.model_create_multi
@@ -546,6 +568,7 @@ class AiStudioSession(models.Model):
             if not session.photo_ids:
                 raise UserError(_('En az bir fotoğraf çekilmeli.'))
             session.state = 'photos_ready'
+            session.date_photos_ready = fields.Datetime.now()
 
     def action_start_processing(self):
         """AI işlemeyi başlat."""
@@ -585,6 +608,7 @@ class AiStudioSession(models.Model):
             raise UserError(_('AI işlemeyi başlatabilmek için en azından Ön Yüz fotoğrafı yüklenmiş olmalıdır.'))
 
         self.state = 'preprocessing'
+        self.date_processing_start = fields.Datetime.now()
 
         # Eski generation kayıtlarını temizle
         self.generation_ids.unlink()
@@ -779,6 +803,11 @@ class AiStudioSession(models.Model):
                     prompt_locks = [l.prompt_text for l in all_locks]
 
                     from ..services.garment_analyzer import build_generation_prompt
+                    
+                    combined_extra_prompt = session.extra_prompt or ''
+                    if session.scene_id and session.scene_id.prompt_additions:
+                        combined_extra_prompt += f" {session.scene_id.prompt_additions}"
+                        
                     built_prompt = build_generation_prompt(
                         cached_analysis_data or {}, {
                             'gender': preset.gender or 'female',
@@ -786,13 +815,19 @@ class AiStudioSession(models.Model):
                             'target_audience': preset.target_audience or '',
                         },
                         prompt_locks,
-                        session.extra_prompt or '',
+                        combined_extra_prompt.strip(),
                         photo_type=photo_type,
                         outfit_consistency=outfit_consistency,
                         provider_type=provider_type,
                     )
                     prompt_text = built_prompt.get('positive', '')
                     negative_prompt_text = built_prompt.get('negative', '')
+                    
+                    if session.scene_id and session.scene_id.negative_prompt_additions:
+                        if negative_prompt_text:
+                            negative_prompt_text += f", {session.scene_id.negative_prompt_additions}"
+                        else:
+                            negative_prompt_text = session.scene_id.negative_prompt_additions
                 except Exception as pe:
                     _logger.warning('Worker: Prompt olusturma basarisiz (gen=%s): %s', gen.id, pe)
 
@@ -1237,15 +1272,26 @@ class AiStudioSession(models.Model):
                         }
 
                         from ..services.garment_analyzer import build_generation_prompt
+                        
+                        combined_extra_prompt = session.extra_prompt or ''
+                        if session.scene_id and session.scene_id.prompt_additions:
+                            combined_extra_prompt += f" {session.scene_id.prompt_additions}"
+                            
                         built_prompt = build_generation_prompt(
                             analysis_data, preset_data, prompt_locks,
-                            session.extra_prompt or '',
+                            combined_extra_prompt.strip(),
                             photo_type=photo_type,
                             outfit_consistency=outfit_consistency,
                             provider_type=provider_type,
                         )
                         prompt_text = built_prompt.get('positive', '')
                         negative_prompt_text = built_prompt.get('negative', '')
+                        
+                        if session.scene_id and session.scene_id.negative_prompt_additions:
+                            if negative_prompt_text:
+                                negative_prompt_text += f", {session.scene_id.negative_prompt_additions}"
+                            else:
+                                negative_prompt_text = session.scene_id.negative_prompt_additions
                     except Exception as pe:
                         _logger.warning('Prompt oluşturma başarısız: %s', pe)
 
@@ -1534,7 +1580,10 @@ class AiStudioSession(models.Model):
                     cr.commit()
 
             # ═══ TÜM ÜRETİMLER TAMAMLANDI ═══
-            session.write({'state': 'review'})
+            session.write({
+                'state': 'review',
+                'date_review_start': fields.Datetime.now()
+            })
             session.message_post(
                 body=_('AI üretimi tamamlandı. %d görsel onay bekliyor.') % len(session.generation_ids),
             )
@@ -2063,6 +2112,7 @@ class AiStudioSession(models.Model):
                 
                 session.reviewer_id = self.env.user
                 session.state = 'done'
+                session.date_done = fields.Datetime.now()
                 session.message_post(
                     body=_('Arka planda %d onaylı görsel ürüne başarıyla kaydedildi.') % len(approved),
                 )
@@ -2221,3 +2271,144 @@ class AiStudioSession(models.Model):
                 session.message_post(
                     body=_('Bazı üretimler zaman aşımına uğradı. Sonuçları kontrol edin.'),
                 )
+
+    def write(self, vals):
+        res = super(AiStudioSession, self).write(vals)
+        if 'state' in vals:
+            for record in self:
+                if record.state == 'review':
+                    # Review (Onay Bekliyor) durumuna geçtiğinde Aktivite oluştur
+                    activity_type = self.env.ref('mail.mail_activity_data_todo', raise_if_not_found=False)
+                    if activity_type:
+                        # Reviewerları bulalım
+                        reviewers = self.env.ref('ugurlar_ai_studio.group_ai_studio_reviewer').users
+                        for reviewer in reviewers:
+                            self.env['mail.activity'].create({
+                                'res_id': record.id,
+                                'res_model_id': self.env['ir.model']._get('ai.studio.session').id,
+                                'activity_type_id': activity_type.id,
+                                'summary': _('Çekim Onayı Bekliyor'),
+                                'note': _('%s için AI üretimleri tamamlandı. Onayınız bekleniyor.') % record.name,
+                                'user_id': reviewer.id,
+                            })
+                elif record.state in ['done', 'cancelled']:
+                    # Onaylandı veya iptal edildiyse, bu kayıttaki TODO'ları kapat/sil
+                    activities = self.env['mail.activity'].search([
+                        ('res_id', '=', record.id),
+                        ('res_model', '=', 'ai.studio.session')
+                    ])
+                    for activity in activities:
+                        activity.action_done()
+
+                    # Done ise Gemini SEO üretimi tetikle (Thread ile arka planda)
+                    if record.state == 'done':
+                        import threading
+                        thread = threading.Thread(target=record._generate_seo_content_gemini_threaded, args=(record.id,))
+                        thread.start()
+        return res
+
+    def _generate_seo_content_gemini_threaded(self, session_id):
+        """Yeni bir Odoo Environment'i açarak Gemini API çağrısını yapar."""
+        import odoo
+        from odoo import api, SUPERUSER_ID
+        import logging
+        _logger = logging.getLogger(__name__)
+        
+        try:
+            db_name = self.env.cr.dbname
+            registry = odoo.registry(db_name)
+            with registry.cursor() as cr:
+                env = api.Environment(cr, SUPERUSER_ID, {})
+                session = env['ai.studio.session'].browse(session_id)
+                session._generate_seo_content_gemini()
+        except Exception as e:
+            _logger.exception("Gemini Thread error: %s", e)
+
+    def _generate_seo_content_gemini(self):
+        """Gemini API kullanarak SEO açıklaması ve etiket üretir."""
+        import requests
+        import json
+        import logging
+        _logger = logging.getLogger(__name__)
+
+        api_key = self.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.gemini_api_key')
+        if not api_key:
+            _logger.info("Gemini API anahtarı ayarlanmamış, SEO üretimi atlanıyor.")
+            return
+
+        product = self.product_id
+        if not product:
+            return
+
+        # Ürün özelliklerini toparla
+        attributes_text = ""
+        if product.product_template_attribute_value_ids:
+            attrs = [f"{v.attribute_id.name}: {v.name}" for v in product.product_template_attribute_value_ids]
+            attributes_text = ", ".join(attrs)
+
+        prompt = f"""
+Bu fotoğrafı e-ticaret sitemiz için incele. Ürün bilgileri aşağıdadır:
+Ürün Adı: {product.name}
+Kategori: {product.categ_id.name}
+Özellikler: {attributes_text}
+
+Lütfen bu ürün için SEO'ya uygun, ikna edici ve çarpıcı 1 paragraflık bir ürün açıklaması (HTML <p> etiketi içinde) ve SEO için 5 adet etiket (virgülle ayrılmış) üret.
+Çıktıyı sadece JSON formatında ver. Format şu şekilde olmalı:
+{{
+  "seo_description": "<p>Açıklama metni...</p>",
+  "seo_tags": "etiket1, etiket2, etiket3, etiket4, etiket5"
+}}
+"""
+
+        # Gemini API call
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        headers = {'Content-Type': 'application/json'}
+        
+        # Primary fotoğrafı bul
+        primary_gen = self.generation_ids.filtered('is_primary')[:1]
+        if not primary_gen:
+            primary_gen = self.generation_ids.filtered('is_approved')[:1]
+            
+        if not primary_gen or not primary_gen.generated_image:
+            _logger.info("Onaylı görsel bulunamadı, SEO üretimi atlanıyor.")
+            return
+
+        # Base64 decode string for JSON
+        import base64
+        image_data = primary_gen.generated_image.decode('utf-8')
+
+        payload = {
+            "contents": [{
+                "parts": [
+                    {"text": prompt},
+                    {
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": image_data
+                        }
+                    }
+                ]
+            }],
+            "generationConfig": {
+                "response_mime_type": "application/json",
+            }
+        }
+
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=60)
+            response.raise_for_status()
+            data = response.json()
+            
+            result_text = data['candidates'][0]['content']['parts'][0]['text']
+            result_json = json.loads(result_text)
+            
+            self.write({
+                'seo_description': result_json.get('seo_description', ''),
+                'seo_tags': result_json.get('seo_tags', ''),
+            })
+            self.message_post(body="✨ Gemini SEO İçeriği başarıyla üretildi.")
+            self.env.cr.commit()
+            
+        except Exception as e:
+            _logger.error("Gemini API hatası: %s", str(e))
+            self.message_post(body=f"⚠️ Gemini SEO Üretimi Başarısız: {str(e)[:200]}")

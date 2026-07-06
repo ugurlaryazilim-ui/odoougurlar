@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- List View -->
+    <record id="view_ai_studio_scene_list" model="ir.ui.view">
+        <field name="name">ai.studio.scene.list</field>
+        <field name="model">ai.studio.scene</field>
+        <field name="arch" type="xml">
+            <list editable="bottom">
+                <field name="sequence" widget="handle"/>
+                <field name="name"/>
+                <field name="prompt_additions"/>
+                <field name="negative_prompt_additions"/>
+                <field name="active" widget="boolean_toggle"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Form View -->
+    <record id="view_ai_studio_scene_form" model="ir.ui.view">
+        <field name="name">ai.studio.scene.form</field>
+        <field name="model">ai.studio.scene</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <div class="oe_title">
+                        <label for="name" class="oe_edit_only"/>
+                        <h1><field name="name"/></h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="active" widget="boolean_toggle"/>
+                            <field name="sequence"/>
+                        </group>
+                    </group>
+                    <group>
+                        <field name="prompt_additions"/>
+                        <field name="negative_prompt_additions"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="action_ai_studio_scene" model="ir.actions.act_window">
+        <field name="name">Sahneler / Konseptler</field>
+        <field name="res_model">ai.studio.scene</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                İlk çekim sahnesini (konseptini) oluşturun!
+            </p>
+            <p>
+                Örn: Paris sokakları, Stüdyo arka planı vb. sahneler ekleyerek yapay zeka üretimine farklı mekanlar katabilirsiniz.
+            </p>
+        </field>
+    </record>
+</odoo>
