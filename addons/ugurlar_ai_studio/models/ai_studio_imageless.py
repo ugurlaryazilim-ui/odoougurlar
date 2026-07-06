@@ -62,25 +62,39 @@ class AiStudioImagelessLine(models.Model):
         """Görselsiz + stokta olan ürünleri tespit et ve tabloyu güncelle."""
         _logger.info('Görselsiz ürün listesi yenileniyor...')
 
-        # 1) Mevcut listeyi temizle
-        self.search([]).unlink()
+        # 1) Mevcut listeyi temizle (TRUNCATE SQL hizli silme)
+        self.env.cr.execute("TRUNCATE TABLE ai_studio_imageless_line CASCADE")
 
-        # 2) Görselsiz varyantları bul
-        #    - Template'in kendi görseli yok
-        #    - Varyantın kendi görseli yok
+        # 2) Stokta olan ürünlerin listesini al (ÇOK HIZLI SQL)
+        # Sadece iç lokasyonlarda (usage = 'internal') stoku olanları buluruz
+        self.env.cr.execute("""
+            SELECT product_id 
+            FROM stock_quant 
+            WHERE quantity > 0 
+              AND location_id IN (SELECT id FROM stock_location WHERE usage = 'internal')
+            GROUP BY product_id
+            HAVING sum(quantity) > 0
+        """)
+        in_stock_product_ids = [row[0] for row in self.env.cr.fetchall()]
+
+        if not in_stock_product_ids:
+            _logger.info('Stokta hiçbir ürün bulunamadı.')
+            return {'type': 'ir.actions.client', 'tag': 'reload'}
+
+        # 3) Sadece stokta olanlar içinden görselsizleri bul
         Product = self.env['product.product'].sudo()
-        all_variants = Product.search([
+        variants_with_stock = Product.search([
+            ('id', 'in', in_stock_product_ids),
             ('product_tmpl_id.image_1920', '=', False),
             ('image_variant_1920', '=', False),
             ('active', '=', True),
             ('product_tmpl_id.active', '=', True),
         ])
 
-        _logger.info('Görselsiz varyant sayısı (filtresiz): %d', len(all_variants))
-
-        # 3) Stokta olanları filtrele
-        variants_with_stock = all_variants.filtered(lambda p: p.qty_available > 0)
         _logger.info('Stokta olan görselsiz varyant sayısı: %d', len(variants_with_stock))
+
+        if not variants_with_stock:
+            return {'type': 'ir.actions.client', 'tag': 'reload'}
 
         # Prefetch: N+1 sorgu engellemek için attribute verilerini toplu yükle
         variants_with_stock.mapped('product_template_attribute_value_ids.attribute_id')
@@ -91,6 +105,7 @@ class AiStudioImagelessLine(models.Model):
         # 4) Her (template + renk) grubu için bir beden seç
         seen = set()  # (template_id, color_value) çiftleri
         lines_data = []
+        tmpl_cache = {}  # Performans için template verilerini önbelleğe al
 
         # Attribute adlarını doğrudan eşleştir (Nebim'den gelen kesin isimler)
         color_attrs = {'renk', 'color'}
@@ -110,12 +125,33 @@ class AiStudioImagelessLine(models.Model):
         for variant in variants_with_stock:
             tmpl = variant.product_tmpl_id
 
+            # Cache kontrolü: Bu template daha önce işlendi mi?
+            if tmpl.id not in tmpl_cache:
+                b_val, s_val, g_val = '', '', ''
+                # create_variant='no_variant' olan attribute'lar (Marka, Sezon, Cinsiyet)
+                for ptal in tmpl.attribute_line_ids:
+                    attr_name = ptal.attribute_id.name.lower().strip()
+                    if ptal.attribute_id.create_variant == 'no_variant':
+                        values = ptal.value_ids
+                        if values:
+                            val_str = ', '.join(values.mapped('name'))
+                            if any(a in attr_name for a in brand_attrs):
+                                b_val = val_str
+                            elif any(a in attr_name for a in season_attrs):
+                                s_val = val_str
+                            elif any(a in attr_name for a in gender_attrs):
+                                g_val = val_str
+                
+                tmpl_cache[tmpl.id] = {
+                    'brand': b_val,
+                    'season': s_val,
+                    'gender': g_val,
+                    'category': tmpl.categ_id.name if tmpl.categ_id else '-'
+                }
+
             # Varyant attribute değerlerini parse et
             color_val = ''
             size_val = ''
-            brand_val = ''
-            season_val = ''
-            gender_val = ''
 
             # create_variant='always' olan attribute'lar (Renk, Beden)
             for ptav in variant.product_template_attribute_value_ids:
@@ -126,38 +162,23 @@ class AiStudioImagelessLine(models.Model):
                     color_val = value
                 elif any(a in attr_name for a in size_attrs):
                     size_val = value
-
-            # create_variant='no_variant' olan attribute'lar (Marka, Sezon, Cinsiyet)
-            # Bu attribute'lar template seviyesinde, product_template_attribute_value_ids
-            # ile çekilir ama variant oluşturmaz
-            for ptal in tmpl.attribute_line_ids:
-                attr_name = ptal.attribute_id.name.lower().strip()
-                if ptal.attribute_id.create_variant == 'no_variant':
-                    values = ptal.value_ids
-                    if values:
-                        value = ', '.join(values.mapped('name'))
-                        if any(a in attr_name for a in brand_attrs):
-                            brand_val = value
-                        elif any(a in attr_name for a in season_attrs):
-                            season_val = value
-                        elif any(a in attr_name for a in gender_attrs):
-                            gender_val = value
-
             # "Her renkten bir beden" mantığı
             group_key = (tmpl.id, color_val)
             if group_key in seen:
                 continue
             seen.add(group_key)
 
+            t_data = tmpl_cache[tmpl.id]
+
             lines_data.append({
                 'product_id': variant.id,
                 'product_name': variant.display_name or variant.name,
                 'color_name': color_val or '-',
                 'size_name': size_val or '-',
-                'brand_name': brand_val or '-',
-                'season_name': season_val or '-',
-                'gender_name': gender_val or '-',
-                'category_name': tmpl.categ_id.name if tmpl.categ_id else '-',
+                'brand_name': t_data['brand'] or '-',
+                'season_name': t_data['season'] or '-',
+                'gender_name': t_data['gender'] or '-',
+                'category_name': t_data['category'] or '-',
                 'qty_available': variant.qty_available,
                 'has_session': variant.id in existing_sessions,
             })
