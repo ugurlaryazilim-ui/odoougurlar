@@ -14,7 +14,7 @@
                             string="🔄 Listeyi Yenile" class="btn-secondary"/>
                 </header>
                 <field name="default_code" string="SKU"/>
-                <field name="barcode" optional="show"/>
+                <field name="barcode" optional="show" width="150px"/>
                 <field name="product_name"/>
                 <field name="color_value_ids" widget="many2many_tags"/>
                 <field name="size_value_ids" widget="many2many_tags"/>
