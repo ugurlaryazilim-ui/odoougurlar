@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- Client Action for Dashboard -->
+        <record id="action_ai_studio_dashboard" model="ir.actions.client">
+            <field name="name">Performans &amp; Liderlik</field>
+            <field name="tag">ai_studio_dashboard_action</field>
+        </record>
+    </data>
+</odoo>

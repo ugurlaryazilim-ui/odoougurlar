@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="ugurlar_ai_studio.DashboardScreen" owl="1">
+        <div class="ai-dashboard-container">
+            <div class="ai-dashboard-header">
+                <h1>🏆 Stüdyo Liderlik Tablosu</h1>
+                <p>Aylık AI Fotoğraf Stüdyosu Performansı ve Puan Durumu</p>
+            </div>
+
+            <!-- Benim İstatistiklerim -->
+            <div class="ai-my-stats-banner">
+                <div class="stat-item highlight">
+                    <span class="label">Sıralamam</span>
+                    <span class="value"><t t-esc="state.my_stats.rank ? state.my_stats.rank + '.' : '-'"/></span>
+                </div>
+                <div class="stat-item">
+                    <span class="label">Puanım</span>
+                    <span class="value"><t t-esc="state.my_stats.score || 0"/></span>
+                </div>
+                <div class="stat-item">
+                    <span class="label">Onaylanan Çekim</span>
+                    <span class="value text-success"><t t-esc="state.my_stats.approved || 0"/></span>
+                </div>
+                <div class="stat-item">
+                    <span class="label">Revize/Red</span>
+                    <span class="value text-danger"><t t-esc="state.my_stats.rejected || 0"/></span>
+                </div>
+            </div>
+
+            <div class="ai-dashboard-grid">
+                <!-- Sol Taraf: Leaderboard -->
+                <div class="ai-dashboard-card leaderboard-card">
+                    <h2>🌟 Bu Ayın En İyileri (İlk 10)</h2>
+                    <table class="leaderboard-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Operatör</th>
+                                <th>Onaylanan</th>
+                                <th>Revize</th>
+                                <th>Puan</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <t t-if="state.leaderboard.length === 0">
+                                <tr><td colspan="5" class="text-center text-muted">Bu ay henüz çekim yapılmadı.</td></tr>
+                            </t>
+                            <t t-foreach="state.leaderboard" t-as="user" t-key="user.id">
+                                <tr t-att-class="user.id === state.my_stats.id ? 'my-row' : ''">
+                                    <td>
+                                        <t t-if="user_index === 0">🥇</t>
+                                        <t t-elif="user_index === 1">🥈</t>
+                                        <t t-elif="user_index === 2">🥉</t>
+                                        <t t-else=""><t t-esc="user_index + 1"/></t>
+                                    </td>
+                                    <td><t t-esc="user.name"/></td>
+                                    <td class="text-success fw-bold"><t t-esc="user.approved"/></td>
+                                    <td class="text-danger"><t t-esc="user.rejected"/></td>
+                                    <td class="fw-bold"><t t-esc="user.score"/></td>
+                                </tr>
+                            </t>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Sağ Taraf: Geçmiş Kazananlar ve Genel Durum -->
+                <div class="ai-dashboard-right">
+                    
+                    <div class="ai-dashboard-card overview-card">
+                        <h2>📊 Bu Ay Genel Durum</h2>
+                        <div class="overview-stats">
+                            <div class="circle-stat">
+                                <span class="circle-value"><t t-esc="state.overview.approval_rate"/>%</span>
+                                <span class="circle-label">Onay Oranı</span>
+                            </div>
+                            <div class="linear-stats">
+                                <div>Toplam Çekim: <b t-esc="state.overview.total"/></div>
+                                <div class="text-success">Onaylanan: <b t-esc="state.overview.approved"/></div>
+                                <div class="text-danger">Revize/Red: <b t-esc="state.overview.rejected"/></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="ai-dashboard-card hall-of-fame-card">
+                        <h2>🏛️ Onur Tablosu (Geçmiş Aylar)</h2>
+                        <div class="hall-of-fame-list">
+                            <t t-if="state.past_winners.length === 0">
+                                <p class="text-muted">Henüz geçmiş ay kazananı yok.</p>
+                            </t>
+                            <t t-foreach="state.past_winners" t-as="winner" t-key="winner_index">
+                                <div class="winner-item">
+                                    <div class="winner-badge">🏆</div>
+                                    <div class="winner-info">
+                                        <div class="winner-name"><t t-esc="winner.user_name"/></div>
+                                        <div class="winner-title"><t t-esc="winner.title"/> (<t t-esc="winner.date"/>)</div>
+                                    </div>
+                                    <div class="winner-score">
+                                        <t t-esc="winner.score"/> Puan
+                                    </div>
+                                </div>
+                            </t>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </t>
+
+</templates>

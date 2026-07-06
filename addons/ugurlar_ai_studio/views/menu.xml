@@ -116,6 +116,29 @@
               sequence="20"/>
 
     <!-- ======================================================= -->
+    <!-- Raporlama Menusu                                         -->
+    <!-- ======================================================= -->
+
+    <menuitem id="menu_ai_studio_reporting"
+              name="Raporlama"
+              parent="menu_ai_studio_root"
+              sequence="80"/>
+
+    <!-- Performans & Liderlik (Dashboard) -->
+    <menuitem id="menu_ai_studio_dashboard"
+              name="Performans &amp; Liderlik"
+              parent="menu_ai_studio_reporting"
+              action="action_ai_studio_dashboard"
+              sequence="1"/>
+
+    <!-- Performans Analizi (Pivot) -->
+    <menuitem id="menu_ai_studio_session_reports"
+              name="Oturum Analizi"
+              parent="menu_ai_studio_reporting"
+              action="action_ai_studio_session_reports"
+              sequence="2"/>
+
+    <!-- ======================================================= -->
     <!-- 2. Seviye: Yapilandirma Alt Menusu                      -->
     <!-- ======================================================= -->
 

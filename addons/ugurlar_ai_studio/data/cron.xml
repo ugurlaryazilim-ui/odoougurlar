@@ -33,5 +33,16 @@
             <field name="interval_type">days</field>
             <field name="active" eval="True"/>
         </record>
+
+        <!-- Ayın Fotoğrafçısı Hesaplama İşçisi (Her ayın 1'inde çalışır) -->
+        <record id="cron_monthly_leaderboard" model="ir.cron">
+            <field name="name">AI Stüdyo: Ayın Stüdyo Yıldızı Hesapla</field>
+            <field name="model_id" ref="model_ai_studio_leaderboard"/>
+            <field name="state">code</field>
+            <field name="code">model.calculate_monthly_stars()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">months</field>
+            <field name="active" eval="True"/>
+        </record>
     </data>
 </odoo>
