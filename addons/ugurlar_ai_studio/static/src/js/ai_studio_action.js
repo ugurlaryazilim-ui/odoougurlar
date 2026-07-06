@@ -49,6 +49,7 @@ export class AiStudioAction extends Component {
             rejectReasons: [],
             promptTemplates: [],
             dashboardStats: {},
+            userRole: 'operator',  // operator, reviewer, manager
         });
 
         onWillStart(async () => {
@@ -87,6 +88,7 @@ export class AiStudioAction extends Component {
             this.state.rejectReasons = reasonsRes.reasons || [];
             this.state.promptTemplates = templatesRes.templates || [];
             this.state.dashboardStats = statsRes || {};
+            this.state.userRole = statsRes.user_role || 'operator';
         } catch (e) {
             console.error("AI Studio initial data load failed:", e);
         }
@@ -169,6 +171,13 @@ export class AiStudioAction extends Component {
     }
 
     async onProcessingComplete() {
+        // Operatör review ekranına erişemez — direkt scan'e dön
+        if (this.state.userRole === 'operator') {
+            this.notification.add(_t("İşlem tamamlandı! Onayıcı görselleri inceleyecek."), { type: "success" });
+            this.resetSession();
+            this.navigateTo("scan");
+            return;
+        }
         const res = await this._jsonRpc("/ai_studio/generation_status/" + this.state.sessionId, {});
         this.state.generations = res.generations || [];
         this.navigateTo("review");

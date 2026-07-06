@@ -40,9 +40,21 @@
             <!-- Butonlar -->
             <div class="ais-bottom-bar">
                 <t t-if="state.allDone">
-                    <button class="ais-btn-primary ais-btn-large" t-on-click="goToReview">
-                        👁️ Sonuçları İncele
-                    </button>
+                    <!-- Onayıcı/Yönetici: Sonuçları İncele -->
+                    <t t-if="props.userRole !== 'operator'">
+                        <button class="ais-btn-primary ais-btn-large" t-on-click="goToReview">
+                            👁️ Sonuçları İncele
+                        </button>
+                    </t>
+                    <!-- Operatör: Sadece Başka Ürün Tara -->
+                    <t t-else="">
+                        <div class="ais-info-box" style="margin-bottom: 12px;">
+                            <p>✅ AI işlemi tamamlandı! Onayıcı görselleri inceleyecek.</p>
+                        </div>
+                        <button class="ais-btn-primary ais-btn-large" t-on-click="props.onBackToScan">
+                            🔍 Başka Ürün Tara
+                        </button>
+                    </t>
                 </t>
                 <t t-else="">
                     <button class="ais-btn-secondary" t-on-click="props.onBackToScan">

@@ -9,6 +9,7 @@
             <t t-if="state.currentScreen === 'scan'">
                 <ScanScreen
                     dashboardStats="state.dashboardStats"
+                    userRole="state.userRole"
                     onProductFound.bind="onProductFound"
                     onGoToHistory.bind="onGoToHistory"
                     onGoToBatchReview.bind="onGoToBatchReview"/>
@@ -31,10 +32,12 @@
                 <ProcessingScreen
                     sessionId="state.sessionId"
                     sessionName="state.sessionName"
+                    userRole="state.userRole"
                     onProcessingComplete.bind="onProcessingComplete"
                     onBackToScan.bind="onBackToScan"/>
             </t>
-            <t t-elif="state.currentScreen === 'review'">
+            <!-- Review ekranı sadece onayıcı ve yönetici için -->
+            <t t-elif="state.currentScreen === 'review' and state.userRole !== 'operator'">
                 <ReviewScreen
                     sessionId="state.sessionId"
                     generations="state.generations"
@@ -43,6 +46,22 @@
                     onRejectGeneration.bind="onRejectGeneration"
                     onCompleteSession.bind="onCompleteSession"
                     onBackToScan.bind="onBackToScan"/>
+            </t>
+            <!-- Operatör review ekranına erişmeye çalışırsa scan'e yönlendir -->
+            <t t-elif="state.currentScreen === 'review' and state.userRole === 'operator'">
+                <div class="ais-screen ais-processing">
+                    <div class="ais-header">
+                        <h2 class="ais-title">✅ İşlem Tamamlandı</h2>
+                    </div>
+                    <div class="ais-info-box">
+                        <p>📷 Fotoğraflar başarıyla AI'ya gönderildi. Onayıcı inceleyecek.</p>
+                    </div>
+                    <div class="ais-bottom-bar">
+                        <button class="ais-btn-primary ais-btn-large" t-on-click="onBackToScan">
+                            🔍 Başka Ürün Tara
+                        </button>
+                    </div>
+                </div>
             </t>
             <t t-elif="state.currentScreen === 'batch'">
                 <BatchReview onBackToScan.bind="onBackToScan"/>
@@ -62,7 +81,8 @@
         <div class="ais-screen ais-scan">
             <div class="ais-header">
                 <h2 class="ais-title">🎨 AI Stüdyo</h2>
-                <div class="ais-header-actions">
+                <!-- History ve Batch Review: Sadece onayıcı/yönetici -->
+                <div class="ais-header-actions" t-if="props.userRole !== 'operator'">
                     <button class="btn btn-outline-secondary btn-sm" t-on-click="props.onGoToHistory">📊</button>
                     <button class="btn btn-outline-primary btn-sm" t-on-click="props.onGoToBatchReview">📋</button>
                 </div>
@@ -99,7 +119,7 @@
                 <div class="ais-results">
                     <h4 class="ais-results-title">Sonuçlar</h4>
                     <t t-foreach="state.results" t-as="product" t-key="product.id">
-                        <div class="ais-product-card" t-on-click="() => this.selectProduct(product)">
+                        <div class="ais-product-card" t-on-click="() =&gt; this.selectProduct(product)">
                             <div class="ais-product-image">
                                 <t t-if="product.image_128">
                                     <img t-att-src="'data:image/png;base64,' + product.image_128"/>
@@ -126,8 +146,8 @@
                 </div>
             </t>
 
-            <!-- Dashboard İstatistikleri -->
-            <t t-if="!state.showResults">
+            <!-- Dashboard İstatistikleri: Sadece onayıcı/yönetici -->
+            <t t-if="!state.showResults and props.userRole !== 'operator'">
                 <div class="ais-dashboard">
                     <div class="ais-stat-grid">
                         <div class="ais-stat-card">

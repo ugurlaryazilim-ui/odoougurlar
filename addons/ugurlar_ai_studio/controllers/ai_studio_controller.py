@@ -436,6 +436,9 @@ class AiStudioController(http.Controller):
                 ),
                 'month_cost': total_cost,
                 'today_sessions': today_sessions,
+                'user_role': 'manager' if request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_manager')
+                    else 'reviewer' if request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer')
+                    else 'operator',
             }
         except Exception as e:
             _logger.exception('dashboard_stats hatasi: %s', e)

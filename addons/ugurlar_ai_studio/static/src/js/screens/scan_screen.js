@@ -9,6 +9,7 @@ export class ScanScreen extends Component {
     static template = "ugurlar_ai_studio.ScanScreen";
     static props = {
         dashboardStats: { type: Object },
+        userRole: { type: String, optional: true },
         onProductFound: { type: Function },
         onGoToHistory: { type: Function },
         onGoToBatchReview: { type: Function },

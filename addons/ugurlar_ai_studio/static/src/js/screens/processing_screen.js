@@ -8,6 +8,7 @@ export class ProcessingScreen extends Component {
     static props = {
         sessionId: { type: Number },
         sessionName: { type: String },
+        userRole: { type: String, optional: true },
         onProcessingComplete: { type: Function },
         onBackToScan: { type: Function },
     };
