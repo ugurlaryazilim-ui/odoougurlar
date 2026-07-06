@@ -373,11 +373,16 @@ def _build_consistency_prompt(outfit_data):
         return ''
 
     return (
-        "CROSS-VIEW OUTFIT CONSISTENCY — CRITICAL: "
-        "The model MUST wear the EXACT SAME outfit as the front view: "
+        "ABSOLUTE PRIORITY — CROSS-VIEW OUTFIT CONSISTENCY LOCK: "
+        "You MUST replicate the EXACT SAME complete outfit from the front view reference image. "
+        "The model is wearing: "
         + ", ".join(parts) + ". "
-        "Do NOT change ANY of these listed items (top, bottoms, shoes, hair, accessories). "
-        "Every view must look like the SAME photoshoot session. "
+        "Do NOT change, replace, or hallucinate ANY clothing item. "
+        "The bottoms MUST be IDENTICAL — same color, same fabric, same fit, same style. "
+        "The shoes MUST be IDENTICAL. The hair MUST be IDENTICAL. "
+        "If the front view shows white pants, the side/back view MUST also show white pants — NOT jeans, NOT different color. "
+        "Every view must look like the SAME photoshoot session with the SAME outfit. "
+        "ANY outfit change between views is a CRITICAL FAILURE. "
     )
 
 
@@ -503,11 +508,12 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     base_prompt = " ".join(base_prompt.split()) + " "
 
     # ═══ CROSS-VIEW OUTFIT TUTARLILIĞI ═══
-    # Front haric diger acilarda alt kombin (pantolon, ayakkabi) tutarlilik talimatini ekle
+    # Front haric diger acilarda alt kombin (pantolon, ayakkabi) tutarlilik talimatini
+    # prompt'un EN BASINA yerlestir — nano-banana-2 modeli bu talimati once gormeli.
     if outfit_consistency and photo_type != 'front':
         consistency_prompt = outfit_consistency.get('fullOutfitPrompt', '')
         if consistency_prompt:
-            base_prompt += consistency_prompt
+            base_prompt = consistency_prompt + base_prompt
 
     # Preset bilgileri (manken tipi, cinsiyeti)
     if preset:
