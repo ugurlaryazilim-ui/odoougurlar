@@ -8,8 +8,8 @@ import { registry } from "@web/core/registry";
  * Session'ın tüm generation'larını sırayla gösterir:
  * - Ön → Arka → Yan → Detay
  * - Onayla/Reddet diyince otomatik sonrakine geçer
- * - Tamamla Kaydet diyince sonraki review session'a geçer
- * - Görseller yan yana büyük gösterilir
+ * - Revize edilen görseller "Revize üretiliyor" ile gösterilir ve otomatik polling yapılır
+ * - Tamamla Kaydet sadece pending revizyon yokken gösterilir
  */
 
 async function _jsonRpc(url, params = {}) {
@@ -45,6 +45,7 @@ async function openReviewPopup(sessionId) {
     let revisionPrompt = '';
     const userRole = data.user_role || 'operator';
     const canApprove = (userRole === 'reviewer' || userRole === 'manager');
+    let revisionPollTimer = null;
 
     // Overlay oluştur
     const overlay = document.createElement('div');
@@ -66,8 +67,17 @@ async function openReviewPopup(sessionId) {
         if (!item) return;
 
         const approvedCount = items.filter(i => i.is_approved).length;
+        const pendingCount = items.filter(i => i.pending_revision).length;
         const totalCount = items.length;
-        const allApproved = items.every(i => i.is_approved);
+        const allResolved = items.every(i => i.is_approved || i.pending_revision === false || i.pending_revision === undefined);
+        const hasPending = pendingCount > 0;
+        const canComplete = canApprove && approvedCount > 0 && !hasPending;
+
+        // Progress text
+        let progressText = `${approvedCount}/${totalCount} onaylandı`;
+        if (hasPending) {
+            progressText += ` · ⏳ ${pendingCount} revize bekleniyor`;
+        }
 
         overlay.innerHTML = `
             <div class="ais-rp" onclick="event.stopPropagation()">
@@ -81,7 +91,7 @@ async function openReviewPopup(sessionId) {
                         <div class="ais-rp-progress-bar">
                             <div class="ais-rp-progress-fill" style="width: ${(approvedCount / totalCount) * 100}%"></div>
                         </div>
-                        <span class="ais-rp-progress-text">${approvedCount}/${totalCount} onaylandı</span>
+                        <span class="ais-rp-progress-text">${progressText}</span>
                     </div>
                     <button class="ais-rp-close" id="ais-rp-close">✕</button>
                 </div>
@@ -89,39 +99,54 @@ async function openReviewPopup(sessionId) {
                 <!-- Tabs -->
                 <div class="ais-rp-tabs">
                     ${items.map((it, idx) => `
-                        <button class="ais-rp-tab ${idx === currentIndex ? 'active' : ''} ${it.is_approved ? 'approved' : ''}"
+                        <button class="ais-rp-tab ${idx === currentIndex ? 'active' : ''} ${it.is_approved ? 'approved' : ''} ${it.pending_revision ? 'pending' : ''}"
                                 data-idx="${idx}">
                             <span class="ais-rp-tab-icon">${getPhotoTypeIcon(it.photo_type)}</span>
                             <span class="ais-rp-tab-label">${it.photo_type_label}</span>
                             ${it.is_approved ? '<span class="ais-rp-tab-check">✓</span>' : ''}
+                            ${it.pending_revision ? '<span class="ais-rp-tab-check" style="color:#f59e0b">⏳</span>' : ''}
                             ${it.revision_number > 1 ? '<span class="ais-rp-tab-version">v' + it.revision_number + '</span>' : ''}
                         </button>
                     `).join('')}
                 </div>
 
-                <!-- İçerik: Yan yana görseller -->
+                <!-- İçerik -->
                 <div class="ais-rp-content">
-                    <div class="ais-rp-comparison">
-                        <div class="ais-rp-panel">
-                            <div class="ais-rp-panel-label">ORJİNAL</div>
-                            <div class="ais-rp-img-wrap ais-rp-zoomable" data-zoom-src="${item.original_url}">
-                                <img src="${item.original_url}" class="ais-rp-img" alt="Orijinal"/>
+                    ${item.pending_revision ? `
+                        <!-- Revize Bekleniyor Ekranı -->
+                        <div class="ais-rp-pending-revision">
+                            <div class="ais-rp-pending-icon">⏳</div>
+                            <h3>Revize Üretiliyor...</h3>
+                            <p>Bu görsel reddedildi ve yeni versiyon AI tarafından üretiliyor.</p>
+                            <p class="ais-rp-pending-hint">Hazır olduğunda otomatik olarak yüklenecek.</p>
+                            <div class="ais-rp-pending-spinner"></div>
+                        </div>
+                    ` : `
+                        <!-- Yan yana görseller -->
+                        <div class="ais-rp-comparison">
+                            <div class="ais-rp-panel">
+                                <div class="ais-rp-panel-label">ORJİNAL</div>
+                                <div class="ais-rp-img-wrap ais-rp-zoomable" data-zoom-src="${item.original_url}">
+                                    <img src="${item.original_url}" class="ais-rp-img" alt="Orijinal"/>
+                                </div>
+                            </div>
+                            <div class="ais-rp-vs">VS</div>
+                            <div class="ais-rp-panel">
+                                <div class="ais-rp-panel-label ais-rp-ai-label">AI SONUÇ</div>
+                                <div class="ais-rp-img-wrap ais-rp-zoomable" data-zoom-src="${item.generated_url}">
+                                    <img src="${item.generated_url}" class="ais-rp-img" alt="AI Sonucu"/>
+                                </div>
                             </div>
                         </div>
-                        <div class="ais-rp-vs">VS</div>
-                        <div class="ais-rp-panel">
-                            <div class="ais-rp-panel-label ais-rp-ai-label">AI SONUÇ</div>
-                            <div class="ais-rp-img-wrap ais-rp-zoomable" data-zoom-src="${item.generated_url}">
-                                <img src="${item.generated_url}" class="ais-rp-img" alt="AI Sonucu"/>
-                            </div>
-                        </div>
-                    </div>
+                    `}
                 </div>
 
                 <!-- Alt butonlar -->
                 <div class="ais-rp-footer">
                     <div class="ais-rp-actions">
-                        ${!canApprove ? `
+                        ${item.pending_revision ? `
+                            <div class="ais-rp-pending-badge">⏳ Revize üretiliyor — diğer görselleri inceleyebilirsiniz</div>
+                        ` : !canApprove ? `
                             <div class="ais-rp-operator-badge">
                                 📷 Görüntüleme Modu — Onay yetkisi için onaycı rolü gerekli
                             </div>
@@ -144,10 +169,15 @@ async function openReviewPopup(sessionId) {
                         <span class="ais-rp-nav-info">${currentIndex + 1} / ${totalCount}</span>
                         ${currentIndex < totalCount - 1 ? '<button class="ais-rp-btn ais-rp-btn-nav" id="ais-rp-next">Sonraki →</button>' : ''}
                     </div>
-                    ${canApprove && (allApproved || approvedCount > 0) ? `
+                    ${canComplete ? `
                         <button class="ais-rp-btn ais-rp-btn-complete" id="ais-rp-complete">
                             ✅ Tamamla ve Kaydet (${approvedCount} görsel)
                         </button>
+                    ` : ''}
+                    ${canApprove && hasPending && approvedCount > 0 ? `
+                        <div class="ais-rp-pending-warning">
+                            ⏳ ${pendingCount} revize tamamlanınca "Tamamla ve Kaydet" aktif olacak
+                        </div>
                     ` : ''}
                 </div>
             </div>
@@ -216,20 +246,16 @@ async function openReviewPopup(sessionId) {
             });
         });
 
-        // Zoom: Container-based zoom (e-ticaret sitelerinin kullandığı teknik)
-        // Mouse ile gelince img şeffaflaşır, container'ın background-image'ı
-        // büyütülmüş haliyle gösterilir ve mouse pozisyonunu takip eder
+        // Zoom: Container-based zoom
         overlay.querySelectorAll('.ais-rp-zoomable').forEach(wrap => {
             const img = wrap.querySelector('.ais-rp-img');
             const zoomSrc = wrap.dataset.zoomSrc;
             if (!img) return;
 
             wrap.addEventListener('mouseenter', () => {
-                // Container'a büyütülmüş resmi background olarak koy
                 wrap.style.backgroundImage = `url(${zoomSrc})`;
                 wrap.style.backgroundSize = '250%';
                 wrap.style.backgroundRepeat = 'no-repeat';
-                // İmg'yi yarı şeffaf yap ki alttaki zoom görünsün
                 img.style.opacity = '0';
             });
 
@@ -240,7 +266,6 @@ async function openReviewPopup(sessionId) {
 
             wrap.addEventListener('mousemove', (e) => {
                 const rect = wrap.getBoundingClientRect();
-                // Mouse pozisyonunu yüzde olarak hesapla
                 const x = ((e.clientX - rect.left) / rect.width) * 100;
                 const y = ((e.clientY - rect.top) / rect.height) * 100;
                 wrap.style.backgroundPosition = `${x}% ${y}%`;
@@ -260,8 +285,8 @@ async function openReviewPopup(sessionId) {
             });
             item.is_approved = true;
 
-            // Sonraki onaylanmamış görsele geç
-            const nextIdx = items.findIndex((it, idx) => idx > currentIndex && !it.is_approved);
+            // Sonraki onaylanmamış ve revize beklenmeyen görsele geç
+            const nextIdx = items.findIndex((it, idx) => idx > currentIndex && !it.is_approved && !it.pending_revision);
             if (nextIdx >= 0) {
                 currentIndex = nextIdx;
             }
@@ -301,19 +326,79 @@ async function openReviewPopup(sessionId) {
                 return;
             }
 
-            // Reddedilen görseli listeden çıkar (yeni versiyon üretilecek)
-            items.splice(currentIndex, 1);
-            if (items.length === 0) {
-                alert('Tüm görseller revizeye gönderildi. Popup kapatılıyor.');
-                close();
-                return;
+            // Görseli "revize bekleniyor" durumuna al — listeden silmiyoruz!
+            item.pending_revision = true;
+            item.new_generation_id = result.new_generation_id;
+
+            // Sonraki incelenmemiş görsele geç
+            const nextIdx = items.findIndex((it, idx) => idx > currentIndex && !it.is_approved && !it.pending_revision);
+            if (nextIdx >= 0) {
+                currentIndex = nextIdx;
             }
-            if (currentIndex >= items.length) currentIndex = items.length - 1;
+
+            // Revizyon polling başlat
+            startRevisionPolling();
+
             render();
         } catch(e) {
             alert('Red hatası: ' + e.message);
             render();
         }
+    }
+
+    // Revizyon polling — pending olan görsellerin yeni versiyonlarını kontrol et
+    function startRevisionPolling() {
+        if (revisionPollTimer) return; // Zaten çalışıyor
+        
+        revisionPollTimer = setInterval(async () => {
+            const pendingItems = items.filter(i => i.pending_revision);
+            if (pendingItems.length === 0) {
+                clearInterval(revisionPollTimer);
+                revisionPollTimer = null;
+                return;
+            }
+
+            try {
+                // Session'ın güncel review verisini çek
+                const freshData = await _jsonRpc('/ai_studio/review_data', { session_id: data.session_id });
+                if (freshData.error || !freshData.items) return;
+
+                let updated = false;
+
+                for (const pendingItem of pendingItems) {
+                    // Aynı photo_type'ın yeni done versiyonu var mı?
+                    const newVersion = freshData.items.find(fi =>
+                        fi.photo_type === pendingItem.photo_type &&
+                        fi.id !== pendingItem.id &&
+                        !fi.is_approved
+                    );
+
+                    if (newVersion) {
+                        // Pending item'ı yeni versiyonla güncelle
+                        const idx = items.indexOf(pendingItem);
+                        if (idx >= 0) {
+                            items[idx] = {
+                                ...newVersion,
+                                pending_revision: false,
+                            };
+                            updated = true;
+                        }
+                    }
+                }
+
+                if (updated) {
+                    render();
+                }
+
+                // Hala pending var mı kontrol et
+                if (!items.some(i => i.pending_revision)) {
+                    clearInterval(revisionPollTimer);
+                    revisionPollTimer = null;
+                }
+            } catch (e) {
+                console.error('Revision polling error:', e);
+            }
+        }, 5000); // 5 saniyede bir kontrol et
     }
 
     async function complete() {
@@ -355,6 +440,10 @@ async function openReviewPopup(sessionId) {
     }
 
     function close() {
+        if (revisionPollTimer) {
+            clearInterval(revisionPollTimer);
+            revisionPollTimer = null;
+        }
         if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
     }
 
