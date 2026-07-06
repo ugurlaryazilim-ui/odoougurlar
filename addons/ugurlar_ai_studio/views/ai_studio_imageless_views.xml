@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+
+    <!-- ============================================================ -->
+    <!-- List View — Görselsiz Ürünler                                -->
+    <!-- ============================================================ -->
+    <record id="view_ai_studio_imageless_list" model="ir.ui.view">
+        <field name="name">ai.studio.imageless.line.list</field>
+        <field name="model">ai.studio.imageless.line</field>
+        <field name="arch" type="xml">
+            <list decoration-warning="has_session" decoration-muted="qty_available == 0">
+                <header>
+                    <button name="%(action_ai_studio_imageless_refresh)d" type="action"
+                            string="🔄 Listeyi Yenile" class="btn-secondary"/>
+                </header>
+                <field name="default_code" string="SKU"/>
+                <field name="barcode" optional="show"/>
+                <field name="product_name"/>
+                <field name="color_name"/>
+                <field name="size_name"/>
+                <field name="brand_name"/>
+                <field name="season_name"/>
+                <field name="gender_name"/>
+                <field name="category_name" optional="hide"/>
+                <field name="qty_available" string="Stok"/>
+                <field name="has_session" string="Oturum" widget="boolean_toggle" readonly="1"/>
+                <button name="action_start_session" type="object" string="📷 Resim Çek"
+                        class="btn-primary btn-sm"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!-- Form View — Görselsiz Ürün Detayı                            -->
+    <!-- ============================================================ -->
+    <record id="view_ai_studio_imageless_form" model="ir.ui.view">
+        <field name="name">ai.studio.imageless.line.form</field>
+        <field name="model">ai.studio.imageless.line</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="action_start_session" type="object" string="📷 Resim Çek"
+                            class="btn-primary"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group string="Ürün Bilgileri">
+                            <field name="product_id"/>
+                            <field name="default_code"/>
+                            <field name="barcode"/>
+                            <field name="product_name"/>
+                            <field name="category_name"/>
+                        </group>
+                        <group string="Nitelikler">
+                            <field name="color_name"/>
+                            <field name="size_name"/>
+                            <field name="brand_name"/>
+                            <field name="season_name"/>
+                            <field name="gender_name"/>
+                        </group>
+                    </group>
+                    <group>
+                        <group>
+                            <field name="qty_available"/>
+                            <field name="has_session"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!-- Search View — Filtreler                                       -->
+    <!-- ============================================================ -->
+    <record id="view_ai_studio_imageless_search" model="ir.ui.view">
+        <field name="name">ai.studio.imageless.line.search</field>
+        <field name="model">ai.studio.imageless.line</field>
+        <field name="arch" type="xml">
+            <search>
+                <!-- Arama Alanları -->
+                <field name="product_name" string="Ürün Adı"/>
+                <field name="default_code" string="SKU"/>
+                <field name="barcode" string="Barkod"/>
+                <field name="color_name" string="Renk"/>
+                <field name="brand_name" string="Marka"/>
+
+                <!-- Filtreler -->
+                <filter string="Oturumu Yok" name="no_session" domain="[('has_session', '=', False)]"/>
+                <filter string="Oturumu Var" name="has_session" domain="[('has_session', '=', True)]"/>
+                <separator/>
+                <filter string="Stokta Var" name="in_stock" domain="[('qty_available', '&gt;', 0)]"/>
+                <separator/>
+
+                <!-- Group By -->
+                <group expand="0" string="Grupla">
+                    <filter string="Marka" name="group_brand" context="{'group_by': 'brand_name'}"/>
+                    <filter string="Sezon" name="group_season" context="{'group_by': 'season_name'}"/>
+                    <filter string="Cinsiyet" name="group_gender" context="{'group_by': 'gender_name'}"/>
+                    <filter string="Renk" name="group_color" context="{'group_by': 'color_name'}"/>
+                    <filter string="Kategori" name="group_category" context="{'group_by': 'category_name'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!-- Action                                                        -->
+    <!-- ============================================================ -->
+    <record id="action_ai_studio_imageless" model="ir.actions.act_window">
+        <field name="name">Resmi Olmayanlar</field>
+        <field name="res_model">ai.studio.imageless.line</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_ai_studio_imageless_search"/>
+        <field name="context">{'search_default_no_session': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Görselsiz ürün bulunamadı!
+            </p>
+            <p>
+                Başlık butonlarından <strong>🔄 Listeyi Yenile</strong> ile
+                görselsiz ürünleri yeniden tarayabilirsiniz.
+            </p>
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!-- Server Action — Listeyi Yenile                                -->
+    <!-- ============================================================ -->
+    <record id="action_ai_studio_imageless_refresh" model="ir.actions.server">
+        <field name="name">Görselsiz Ürünleri Yenile</field>
+        <field name="model_id" ref="model_ai_studio_imageless_line"/>
+        <field name="state">code</field>
+        <field name="code">
+action = env['ai.studio.imageless.line'].action_refresh()
+        </field>
+    </record>
+
+</odoo>

@@ -101,6 +101,13 @@
               action="action_ai_studio_session"
               sequence="10"/>
 
+    <!-- Resmi Olmayanlar — Gorselsiz urunler listesi -->
+    <menuitem id="menu_ai_studio_imageless"
+              name="Resmi Olmayanlar"
+              parent="menu_ai_studio_root"
+              action="action_ai_studio_imageless"
+              sequence="15"/>
+
     <!-- AI Uretimler — Tum AI gorsel uretimler -->
     <menuitem id="menu_ai_studio_generations"
               name="AI Üretimler"

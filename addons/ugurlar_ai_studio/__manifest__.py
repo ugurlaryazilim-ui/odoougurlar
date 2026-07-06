@@ -38,6 +38,7 @@
         'views/ai_studio_settings_views.xml',
         'views/ai_studio_templates.xml',
         'views/ai_studio_library_views.xml',
+        'views/ai_studio_imageless_views.xml',
         'views/menu.xml',
     ],
     'assets': {
