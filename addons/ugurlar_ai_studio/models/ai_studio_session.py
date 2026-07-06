@@ -781,6 +781,7 @@ class AiStudioSession(models.Model):
                     except Exception:
                         pass
 
+                # ⚠️ DOKUNMA! nano-banana-2/edit sabit kalmalı — redux/image-to-image gibi alternatifleri KULLANMA
                 tryon_model = 'nano-banana-2/edit' if provider_type == 'fal' else 'tryon-v1.6'
                 tryon_resolution = '1K'
                 if provider_type == 'fashn':
@@ -1253,6 +1254,7 @@ class AiStudioSession(models.Model):
                     else:
                         garment_url = provider.upload_image(processed_b64)
 
+                    # ⚠️ DOKUNMA! nano-banana-2/edit sabit kalmalı — redux/image-to-image gibi alternatifleri KULLANMA
                     tryon_model = 'nano-banana-2/edit' if provider_type == 'fal' else 'tryon-v1.6'
                     tryon_resolution = '1K'
                     if provider_type == 'fashn':
@@ -1813,6 +1815,7 @@ class AiStudioSession(models.Model):
                     _logger.warning('Failed to build retry prompt: %s', pe)
 
                 if provider_type == 'fal':
+                    # ⚠️ DOKUNMA! nano-banana-2/edit sabit kalmalı — redux/image-to-image gibi alternatifleri KULLANMA
                     tryon_model = 'nano-banana-2/edit'
                 elif provider_type == 'fashn':
                     tryon_model = getattr(preset, f'fashn_model_{photo_type}', False) or preset.fashn_model_front or 'tryon-v1.6'
