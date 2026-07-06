@@ -32,14 +32,14 @@ class AiStudioLeaderboard(models.Model):
         # Operatör bazlı gruplama yap
         stats = self.env['ai.studio.session'].read_group(
             domain,
-            ['operator_id', 'state'],
-            ['operator_id', 'state'],
+            ['user_id', 'state'],
+            ['user_id', 'state'],
             lazy=False
         )
 
         user_stats = {}
         for stat in stats:
-            user_id = stat['operator_id'][0] if stat.get('operator_id') else False
+            user_id = stat['user_id'][0] if stat.get('user_id') else False
             if not user_id:
                 continue
             
@@ -102,17 +102,17 @@ class AiStudioLeaderboard(models.Model):
         # 2. Operatör Leaderboard (Bu Ayın Anlık Sıralaması)
         stats = Session.read_group(
             this_month_domain + [('state', 'in', ['approved', 'rejected', 'revised'])],
-            ['operator_id', 'state'],
-            ['operator_id', 'state'],
+            ['user_id', 'state'],
+            ['user_id', 'state'],
             lazy=False
         )
 
         user_stats = {}
         for stat in stats:
-            if not stat.get('operator_id'):
+            if not stat.get('user_id'):
                 continue
-            uid = stat['operator_id'][0]
-            uname = stat['operator_id'][1]
+            uid = stat['user_id'][0]
+            uname = stat['user_id'][1]
             if uid not in user_stats:
                 user_stats[uid] = {'id': uid, 'name': uname, 'approved': 0, 'rejected': 0, 'score': 0}
             

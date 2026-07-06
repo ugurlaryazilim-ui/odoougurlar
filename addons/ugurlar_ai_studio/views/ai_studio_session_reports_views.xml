@@ -7,7 +7,7 @@
             <field name="model">ai.studio.session</field>
             <field name="arch" type="xml">
                 <pivot string="Oturum Analizi" sample="1">
-                    <field name="operator_id" type="row"/>
+                    <field name="user_id" type="row"/>
                     <field name="create_date" type="col" interval="month"/>
                     <field name="state" type="col"/>
                 </pivot>
@@ -20,7 +20,7 @@
             <field name="model">ai.studio.session</field>
             <field name="arch" type="xml">
                 <graph string="Oturum Analizi" type="bar" sample="1">
-                    <field name="operator_id"/>
+                    <field name="user_id"/>
                     <field name="state"/>
                 </graph>
             </field>

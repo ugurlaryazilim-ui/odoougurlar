@@ -23,7 +23,7 @@
             <field name="description">Onaylanmış AI Stüdyo Oturumları</field>
             <field name="computation_mode">count</field>
             <field name="model_id" ref="ugurlar_ai_studio.model_ai_studio_session"/>
-            <field name="batch_user_expression">operator_id</field>
+            <field name="batch_user_expression">user_id</field>
             <field name="domain">[('state', '=', 'approved')]</field>
             <field name="condition">higher</field>
         </record>
