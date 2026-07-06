@@ -2284,9 +2284,11 @@ class AiStudioSession(models.Model):
                     # Review (Onay Bekliyor) durumuna geçtiğinde Aktivite oluştur
                     activity_type = self.env.ref('mail.mail_activity_data_todo', raise_if_not_found=False)
                     if activity_type:
-                        # Reviewerları bulalım
-                        reviewers = self.env.ref('ugurlar_ai_studio.group_ai_studio_reviewer').users
-                        for reviewer in reviewers:
+                        # Reviewerları bulalım (res.groups yerine güvenli yöntemle)
+                        reviewer_group = self.env.ref('ugurlar_ai_studio.group_ai_studio_reviewer', raise_if_not_found=False)
+                        if reviewer_group:
+                            reviewers = self.env['res.users'].search([('groups_id', 'in', reviewer_group.id)])
+                            for reviewer in reviewers:
                             # _get('ai.studio.session').id Odoo 19'da veya belirli contextlerde hata verebiliyor.
                             # Bunun yerine model adını string veya _get_id olarak veriyoruz.
                             try:
