@@ -880,7 +880,10 @@ class AiStudioSession(models.Model):
                     })
 
                     # ═══ BACK/SIDE POST-PROCESSING: OUTFIT TUTARLILIĞI ═══
-                    if front_result_b64 and outfit_consistency:
+                    # DEVRE DIŞI: flux/schnell/image-to-image endpoint'i kaldırıldı.
+                    # redux endpoint'i yanlış sonuç üretiyordu.
+                    # nano-banana-2 zaten yeterli kalitede sonuç veriyor.
+                    if False and front_result_b64 and outfit_consistency:
                         consistency_prompt = outfit_consistency.get('fullOutfitPrompt', '')
                         if consistency_prompt:
                             try:
@@ -1346,15 +1349,15 @@ class AiStudioSession(models.Model):
                             'seed': gen_seed,
                         })
 
-                        # ═══ FRONT SONRASI: REFERANS CACHE + KOMBİN GİYDİRME + OUTFIT ANALİZİ ═══
+                        # ═══ FRONT SONRASI: REFERANS CACHE + OUTFIT ANALİZİ ═══
                         if photo_type == 'front':
                             if gen_seed:
                                 front_seed = gen_seed
 
-                            rec_bottoms = (cached_analysis or {}).get('recommendedBottoms', 'dark blue skinny jeans')
-                            rec_shoes = (cached_analysis or {}).get('recommendedShoes', 'white sneakers')
-
-                            try:
+                            # KOMBİN GİYDİRME DEVRE DIŞI: flux/schnell/image-to-image endpoint'i kaldırıldı.
+                            # redux endpoint'i yanlış sonuç üretiyordu.
+                            # nano-banana-2 zaten yeterli kalitede sonuç veriyor.
+                            if False:
                                 _logger.info('Front post-processing (ürüne en uygun kombin giydirme) başlatılıyor (gen=%s)', gen.id)
                                 current_url = provider.upload_image(gen_b64)
                                 
@@ -1448,7 +1451,8 @@ class AiStudioSession(models.Model):
                                     _logger.warning('Outfit tutarlılık analizi başarısız: %s', oe)
 
                         # ═══ BACK/SIDE POST-PROCESSING: OUTFIT TUTARLILIĞI ═══
-                        if photo_type in ('back', 'side') and front_result_b64 and outfit_consistency:
+                        # DEVRE DIŞI: flux/schnell/image-to-image endpoint'i kaldırıldı.
+                        if False and photo_type in ('back', 'side') and front_result_b64 and outfit_consistency:
                             consistency_prompt = outfit_consistency.get('fullOutfitPrompt', '')
                             if consistency_prompt:
                                 try:
@@ -1908,7 +1912,7 @@ class AiStudioSession(models.Model):
                     detail_urls=detail_urls,
                     resolution=tryon_resolution,
                     photo_type=photo_type,
-                    seed=front_seed,  # ← ÖN YÜZ SEED'İNİ ZORLA
+                    seed=front_seed,
                 )
 
                 output_url = tryon_result.get('image_url', '')
@@ -1935,7 +1939,8 @@ class AiStudioSession(models.Model):
                     })
 
                     # ═══ RETRY BACK/SIDE POST-PROCESSING: OUTFIT TUTARLILIĞI ═══
-                    if photo_type in ('back', 'side') and front_result_b64 and outfit_consistency:
+                    # DEVRE DIŞI: flux/schnell/image-to-image endpoint'i kaldırıldı.
+                    if False and photo_type in ('back', 'side') and front_result_b64 and outfit_consistency:
                         consistency_prompt = outfit_consistency.get('fullOutfitPrompt', '')
                         if consistency_prompt:
                             try:
