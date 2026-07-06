@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import datetime
+from datetime import timedelta
 from odoo import api, fields, models
 from dateutil.relativedelta import relativedelta
 

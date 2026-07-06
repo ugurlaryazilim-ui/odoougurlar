@@ -1,7 +1,9 @@
 .ai-dashboard-container {
     padding: 24px;
     background-color: #f9f9fb;
-    min-height: 100vh;
+    min-height: 100%;
+    height: 100%;
+    overflow-y: auto;
     font-family: 'Inter', Roboto, sans-serif;
 }
 
