@@ -2281,50 +2281,71 @@ class AiStudioSession(models.Model):
         if 'state' in vals:
             for record in self:
                 if record.state == 'review':
-                    # Review (Onay Bekliyor) durumuna geçtiğinde Aktivite oluştur
-                    activity_type = self.env.ref('mail.mail_activity_data_todo', raise_if_not_found=False)
-                    if activity_type:
-                        # Reviewerları bulalım (res.groups yerine güvenli yöntemle)
-                        reviewer_group = self.env.ref('ugurlar_ai_studio.group_ai_studio_reviewer', raise_if_not_found=False)
-                        if reviewer_group:
-                            reviewers = self.env['res.users'].search([('groups_id', 'in', reviewer_group.id)])
-                            for reviewer in reviewers:
-                                # _get('ai.studio.session').id Odoo 19'da veya belirli contextlerde hata verebiliyor.
-                                # Bunun yerine model adını string veya _get_id olarak veriyoruz.
-                                try:
-                                    res_model_id = self.env['ir.model']._get_id('ai.studio.session')
-                                except Exception:
-                                    res_model = self.env['ir.model'].search([('model', '=', 'ai.studio.session')], limit=1)
-                                    res_model_id = res_model.id if res_model else False
-
-                                if res_model_id:
-                                    try:
-                                        self.env['mail.activity'].create({
-                                            'res_id': record.id,
-                                            'res_model_id': res_model_id,
-                                            'activity_type_id': activity_type.id,
-                                            'summary': _('Çekim Onayı Bekliyor'),
-                                            'note': _('%s için AI üretimleri tamamlandı. Onayınız bekleniyor.') % record.name,
-                                            'user_id': reviewer.id,
-                                        })
-                                    except Exception as e:
-                                        import logging
-                                        logging.getLogger(__name__).warning("Aktivite oluşturulamadı: %s", e)
+                    # Review durumuna geçtiğinde Aktivite oluşturmayı dene
+                    # AMA asla state geçişini engellememelidir
+                    try:
+                        record._create_review_activities()
+                    except Exception as e:
+                        _logger.warning("Review aktivite oluşturma başarısız (session=%s): %s", record.id, e)
                 elif record.state in ['done', 'cancelled']:
-                    # Onaylandı veya iptal edildiyse, bu kayıttaki TODO'ları kapat/sil
-                    activities = self.env['mail.activity'].search([
-                        ('res_id', '=', record.id),
-                        ('res_model', '=', 'ai.studio.session')
-                    ])
-                    for activity in activities:
-                        activity.action_done()
+                    # Aktiviteleri kapatmayı dene
+                    try:
+                        activities = self.env['mail.activity'].search([
+                            ('res_id', '=', record.id),
+                            ('res_model', '=', 'ai.studio.session')
+                        ])
+                        for activity in activities:
+                            activity.action_done()
+                    except Exception as e:
+                        _logger.warning("Aktivite kapatma başarısız (session=%s): %s", record.id, e)
 
                     # Done ise Gemini SEO üretimi tetikle (Thread ile arka planda)
                     if record.state == 'done':
-                        import threading
-                        thread = threading.Thread(target=record._generate_seo_content_gemini_threaded, args=(record.id,))
-                        thread.start()
+                        try:
+                            import threading
+                            thread = threading.Thread(target=record._generate_seo_content_gemini_threaded, args=(record.id,))
+                            thread.start()
+                        except Exception as e:
+                            _logger.warning("SEO thread başlatma başarısız (session=%s): %s", record.id, e)
         return res
+
+    def _create_review_activities(self):
+        """Review durumuna geçişte onayıcılara aktivite oluşturur."""
+        self.ensure_one()
+        activity_type = self.env.ref('mail.mail_activity_data_todo', raise_if_not_found=False)
+        if not activity_type:
+            return
+
+        reviewer_group = self.env.ref('ugurlar_ai_studio.group_ai_studio_reviewer', raise_if_not_found=False)
+        if not reviewer_group:
+            return
+
+        # Odoo 19 uyumlu: reviewer grubundaki kullanıcıları SQL ile bul
+        self.env.cr.execute("""
+            SELECT uid FROM res_groups_users_rel WHERE gid = %s
+        """, (reviewer_group.id,))
+        reviewer_ids = [row[0] for row in self.env.cr.fetchall()]
+
+        if not reviewer_ids:
+            return
+
+        # Model ID'sini güvenli şekilde bul
+        res_model = self.env['ir.model'].search([('model', '=', 'ai.studio.session')], limit=1)
+        if not res_model:
+            return
+
+        for reviewer_id in reviewer_ids:
+            try:
+                self.env['mail.activity'].create({
+                    'res_id': self.id,
+                    'res_model_id': res_model.id,
+                    'activity_type_id': activity_type.id,
+                    'summary': _('Çekim Onayı Bekliyor'),
+                    'note': _('%s için AI üretimleri tamamlandı. Onayınız bekleniyor.') % self.name,
+                    'user_id': reviewer_id,
+                })
+            except Exception as e:
+                _logger.warning("Aktivite oluşturulamadı (user=%s): %s", reviewer_id, e)
 
     def _generate_seo_content_gemini_threaded(self, session_id):
         """Yeni bir Odoo Environment'i açarak Gemini API çağrısını yapar."""
