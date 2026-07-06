@@ -16,66 +16,56 @@ class AiStudioLeaderboard(models.Model):
     title = fields.Char(string='Unvan', default='Ayın Fotoğrafçısı (Stüdyo Yıldızı)')
 
     @api.model
-    def calculate_monthly_stars(self):
-        """Her ayın sonunda çalışarak o ayın en iyilerini belirler ve tabloya yazar (Cron)."""
+    def _cron_calculate_leaderboard(self):
+        """Her ayın 1'inde gece çalışarak geçen ayın kazananlarını tabloya yazar."""
         today = fields.Date.today()
-        # Bir önceki ayın başlangıç ve bitişi
-        first_day_last_month = (today.replace(day=1) - relativedelta(months=1))
-        last_day_last_month = today.replace(day=1) - relativedelta(days=1)
+        # Geçen ayın 1'i ve son günü
+        first_day_this_month = today.replace(day=1)
+        last_day_last_month = first_day_this_month - timedelta(days=1)
+        first_day_last_month = last_day_last_month.replace(day=1)
 
         domain = [
             ('create_date', '>=', first_day_last_month),
-            ('create_date', '<=', last_day_last_month),
-            ('state', 'in', ['approved', 'rejected', 'revised'])
+            ('create_date', '<', first_day_this_month),
+            ('state', 'in', ['done', 'cancelled'])
         ]
-        
-        # Operatör bazlı gruplama yap
-        stats = self.env['ai.studio.session'].read_group(
-            domain,
-            ['user_id', 'state'],
-            ['user_id', 'state'],
-            lazy=False
-        )
+
+        sessions = self.env['ai.studio.session'].search(domain)
 
         user_stats = {}
-        for stat in stats:
-            user_id = stat['user_id'][0] if stat.get('user_id') else False
+        for sess in sessions:
+            user_id = sess.user_id.id
             if not user_id:
                 continue
             
             if user_id not in user_stats:
-                user_stats[user_id] = {'approved': 0, 'rejected': 0}
+                user_stats[user_id] = {'approved': 0, 'rejected': 0, 'revisions': 0}
                 
-            state = stat['state']
-            count = stat['__count']
-            
-            if state == 'approved':
-                user_stats[user_id]['approved'] += count
-            elif state in ['rejected', 'revised']:
-                user_stats[user_id]['rejected'] += count
+            if sess.state == 'done':
+                user_stats[user_id]['approved'] += 1
+                user_stats[user_id]['revisions'] += sess.revision_count
+            elif sess.state == 'cancelled':
+                user_stats[user_id]['rejected'] += 1
 
-        # Puanlama Mantığı: Onaylanan * 10 Puan - Revize * 5 Puan
+        # Puanlama Mantığı: Onaylanan * 10 Puan - İptal * 5 Puan - Revize * 2 Puan
         leaderboard_records = []
         for user_id, data in user_stats.items():
-            score = (data['approved'] * 10) - (data['rejected'] * 5)
-            # Sadece puanı 0'dan büyük olanları listeye al
+            score = (data['approved'] * 10) - (data['rejected'] * 5) - (data['revisions'] * 2)
             if score > 0:
                 leaderboard_records.append({
                     'user_id': user_id,
                     'date_month': first_day_last_month,
                     'score': score,
                     'approved_count': data['approved'],
-                    'rejected_count': data['rejected'],
+                    'rejected_count': data['rejected'] + data['revisions'],
                 })
 
-        # Skora göre sırala ve ilk 3'ü kaydet (veya hepsini)
+        # Skora göre sırala
         leaderboard_records = sorted(leaderboard_records, key=lambda x: x['score'], reverse=True)
         
-        # O ay için önceden hesaplanmış varsa sil (tekrar çalıştırılırsa diye)
         self.search([('date_month', '=', first_day_last_month)]).unlink()
 
         if leaderboard_records:
-            # En iyi kişiye özel Unvan verilebilir
             leaderboard_records[0]['title'] = 'Altın Vizör - Ayın Fotoğrafçısı'
             if len(leaderboard_records) > 1:
                 leaderboard_records[1]['title'] = 'Gümüş Vizör'
@@ -96,52 +86,67 @@ class AiStudioLeaderboard(models.Model):
         this_month_domain = [('create_date', '>=', first_day_this_month)]
         
         total_sessions = Session.search_count(this_month_domain)
-        approved_sessions = Session.search_count(this_month_domain + [('state', '=', 'approved')])
-        rejected_sessions = Session.search_count(this_month_domain + [('state', 'in', ['rejected', 'revised'])])
+        approved_sessions = Session.search_count(this_month_domain + [('state', '=', 'done')])
+        rejected_sessions = Session.search_count(this_month_domain + [('state', '=', 'cancelled')])
+        
+        # Revizyonları da sayalım
+        all_done_sessions = Session.search(this_month_domain + [('state', '=', 'done')])
+        total_revisions = sum(all_done_sessions.mapped('revision_count'))
+        
+        rejected_sessions += total_revisions
         
         # 2. Operatör Leaderboard (Bu Ayın Anlık Sıralaması)
-        stats = Session.read_group(
-            this_month_domain + [('state', 'in', ['approved', 'rejected', 'revised'])],
-            ['user_id', 'state'],
-            ['user_id', 'state'],
-            lazy=False
-        )
+        sessions = Session.search(this_month_domain + [('state', 'in', ['done', 'cancelled'])])
 
         user_stats = {}
-        for stat in stats:
-            if not stat.get('user_id'):
+        for sess in sessions:
+            if not sess.user_id:
                 continue
-            uid = stat['user_id'][0]
-            uname = stat['user_id'][1]
+            uid = sess.user_id.id
+            uname = sess.user_id.name
             if uid not in user_stats:
-                user_stats[uid] = {'id': uid, 'name': uname, 'approved': 0, 'rejected': 0, 'score': 0}
+                user_stats[uid] = {'id': uid, 'name': uname, 'approved': 0, 'rejected': 0, 'revisions': 0, 'score': 0}
             
-            if stat['state'] == 'approved':
-                user_stats[uid]['approved'] += stat['__count']
-            else:
-                user_stats[uid]['rejected'] += stat['__count']
+            if sess.state == 'done':
+                user_stats[uid]['approved'] += 1
+                user_stats[uid]['revisions'] += sess.revision_count
+            elif sess.state == 'cancelled':
+                user_stats[uid]['rejected'] += 1
 
-        leaderboard = []
         for uid, data in user_stats.items():
-            data['score'] = (data['approved'] * 10) - (data['rejected'] * 5)
-            leaderboard.append(data)
-            
+            data['score'] = (data['approved'] * 10) - (data['rejected'] * 5) - (data['revisions'] * 2)
+            data['rejected'] += data['revisions'] # UI'da birleşik göstermek için
+
+        # Puanı 0'dan büyük olanları sırala
+        leaderboard = [data for data in user_stats.values() if data['score'] > 0]
         leaderboard = sorted(leaderboard, key=lambda x: x['score'], reverse=True)
+        
+        # İlk 10
+        leaderboard = leaderboard[:10]
+
+        # Benim sıramı bul (Aktif Kullanıcı)
+        my_uid = self.env.user.id
+        my_rank = '-'
+        my_stats = {'score': 0, 'approved': 0, 'rejected': 0}
+        
+        for idx, lb in enumerate(leaderboard):
+            if lb['id'] == my_uid:
+                my_rank = idx + 1
+                break
+        
+        if my_uid in user_stats:
+            my_stats = user_stats[my_uid]
 
         # 3. Geçmiş Ayların Kazananları
-        past_winners_recs = self.search([], order='date_month desc, score desc', limit=5)
-        past_winners = [{
-            'user_name': rec.user_id.name,
-            'date': rec.date_month.strftime('%B %Y'),
-            'score': rec.score,
-            'title': rec.title,
-            'approved': rec.approved_count
-        } for rec in past_winners_recs]
-
-        # 4. Mevcut Kullanıcı İstatistikleri
-        uid = self.env.uid
-        my_stats = next((u for u in leaderboard if u['id'] == uid), {'approved': 0, 'rejected': 0, 'score': 0})
-        my_rank = next((i + 1 for i, u in enumerate(leaderboard) if u['id'] == uid), 0)
+        past_winners_records = self.search([], order='date_month desc, score desc', limit=20)
+        past_winners = []
+        for r in past_winners_records:
+            past_winners.append({
+                'month': r.date_month.strftime('%Y %B') if r.date_month else '',
+                'user_name': r.user_id.name,
+                'score': r.score,
+                'title': r.title,
+            })
 
         return {
             'overview': {
@@ -150,12 +155,12 @@ class AiStudioLeaderboard(models.Model):
                 'rejected': rejected_sessions,
                 'approval_rate': round((approved_sessions / total_sessions * 100) if total_sessions else 0, 1)
             },
-            'leaderboard': leaderboard[:10],  # Top 10
+            'leaderboard': leaderboard,
             'past_winners': past_winners,
             'my_stats': {
                 'rank': my_rank,
-                'score': my_stats['score'],
-                'approved': my_stats['approved'],
-                'rejected': my_stats['rejected']
+                'score': my_stats.get('score', 0),
+                'approved': my_stats.get('approved', 0),
+                'rejected': my_stats.get('rejected', 0)
             }
         }
