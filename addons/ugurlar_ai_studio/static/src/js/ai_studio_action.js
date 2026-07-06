@@ -164,6 +164,18 @@ export class AiStudioAction extends Component {
                 prompt_template_id: settings.promptTemplateId || false,
             });
             await this.orm.call("ai.studio.session", "action_start_processing", [this.state.sessionId]);
+
+            // Operatör: Processing ekranını hiç gösterme, direkt scan'e dön
+            if (this.state.userRole === 'operator') {
+                this.notification.add(
+                    _t("📸 AI işlemesi için gönderildi. Onayıcı görselleri inceleyecek."),
+                    { type: "success", sticky: true }
+                );
+                this.resetSession();
+                this.navigateTo("scan");
+                return;
+            }
+
             this.navigateTo("processing");
         } catch (e) {
             this.notification.add(e.message || _t("Islem baslatilamadi."), { type: "danger" });
