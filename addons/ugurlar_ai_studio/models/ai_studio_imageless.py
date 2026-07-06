@@ -40,11 +40,26 @@ class AiStudioImagelessLine(models.Model):
     )
 
     # --- Attribute Bilgileri ---
-    color_value_ids = fields.Many2many('product.attribute.value', 'ai_imageless_color_rel', string='Renk')
-    size_value_ids = fields.Many2many('product.attribute.value', 'ai_imageless_size_rel', string='Beden')
-    brand_value_ids = fields.Many2many('product.attribute.value', 'ai_imageless_brand_rel', string='Marka')
-    season_value_ids = fields.Many2many('product.attribute.value', 'ai_imageless_season_rel', string='Sezon')
-    gender_value_ids = fields.Many2many('product.attribute.value', 'ai_imageless_gender_rel', string='Cinsiyet')
+    color_value_ids = fields.Many2many(
+        'product.attribute.value', 'ai_imageless_color_rel', string='Renk',
+        domain="[('attribute_id.name', 'ilike', 'renk')]"
+    )
+    size_value_ids = fields.Many2many(
+        'product.attribute.value', 'ai_imageless_size_rel', string='Beden',
+        domain="['|', ('attribute_id.name', 'ilike', 'beden'), ('attribute_id.name', 'ilike', 'numara')]"
+    )
+    brand_value_ids = fields.Many2many(
+        'product.attribute.value', 'ai_imageless_brand_rel', string='Marka',
+        domain="[('attribute_id.name', 'ilike', 'marka')]"
+    )
+    season_value_ids = fields.Many2many(
+        'product.attribute.value', 'ai_imageless_season_rel', string='Sezon',
+        domain="[('attribute_id.name', 'ilike', 'sezon')]"
+    )
+    gender_value_ids = fields.Many2many(
+        'product.attribute.value', 'ai_imageless_gender_rel', string='Cinsiyet',
+        domain="[('attribute_id.name', 'ilike', 'cinsiyet')]"
+    )
     category_name = fields.Char(string='Kategori', store=True)
 
     # --- Stok & Durum ---
