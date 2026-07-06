@@ -16,18 +16,16 @@ export class CaptureScreen extends Component {
         this.canvasRef = useRef("captureCanvas");
 
         this.state = useState({
-            activeTab: "front",    // front, back, side, detail
+            activeTab: "front",    // front, back, detail
             cameraActive: false,
             cameraError: null,
             photos: {
                 front: null,
                 back: null,
-                side: null,
                 details: [],
             },
             hasFront: false,
             hasBack: false,
-            hasSide: false,
             detailCount: 0,
             stream: null,
             facingMode: "environment", // Arka kamera
@@ -133,9 +131,6 @@ export class CaptureScreen extends Component {
         } else if (tab === "back") {
             this.state.photos.back = { data: base64Data, preview: dataUrl };
             this.state.hasBack = true;
-        } else if (tab === "side") {
-            this.state.photos.side = { data: base64Data, preview: dataUrl };
-            this.state.hasSide = true;
         } else if (tab === "detail") {
             this.state.photos.details.push({ data: base64Data, preview: dataUrl });
             this.state.detailCount = this.state.photos.details.length;
@@ -150,9 +145,6 @@ export class CaptureScreen extends Component {
         } else if (tab === "back") {
             this.state.photos.back = null;
             this.state.hasBack = false;
-        } else if (tab === "side") {
-            this.state.photos.side = null;
-            this.state.hasSide = false;
         }
     }
 
@@ -173,7 +165,6 @@ export class CaptureScreen extends Component {
         const tab = this.state.activeTab;
         if (tab === "front") return this.state.photos.front;
         if (tab === "back") return this.state.photos.back;
-        if (tab === "side") return this.state.photos.side;
         return null;
     }
 
@@ -186,9 +177,6 @@ export class CaptureScreen extends Component {
         }
         if (this.state.photos.back) {
             photos.push({ type: "back", data: this.state.photos.back.data });
-        }
-        if (this.state.photos.side) {
-            photos.push({ type: "side", data: this.state.photos.side.data });
         }
         for (const detail of this.state.photos.details) {
             photos.push({ type: "detail", data: detail.data });

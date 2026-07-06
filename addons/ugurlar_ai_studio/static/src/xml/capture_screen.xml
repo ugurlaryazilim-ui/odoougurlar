@@ -83,10 +83,6 @@
                             t-on-click="() => this.setTab('back')">
                         <span class="status-indicator" t-att-class="{ active: state.hasBack }"></span> Arka
                     </button>
-                    <button t-attf-class="ais-tab-glass {{ state.activeTab === 'side' ? 'active' : '' }}"
-                            t-on-click="() => this.setTab('side')">
-                        <span class="status-indicator" t-att-class="{ active: state.hasSide }"></span> Yan
-                    </button>
                     <button t-attf-class="ais-tab-glass {{ state.activeTab === 'detail' ? 'active' : '' }}"
                             t-on-click="() => this.setTab('detail')">
                         <span class="plus-icon">+</span> Detay (<t t-out="state.detailCount"/>)
