@@ -22,12 +22,24 @@ export class AiStudioDashboard extends Component {
         });
 
         onWillStart(async () => {
+            await this.loadChartJS();
             await this.loadData();
         });
 
         useEffect(() => {
             this.renderChart();
         }, () => [this.state.reject_reasons]);
+    }
+
+    async loadChartJS() {
+        if (window.Chart) return;
+        return new Promise((resolve, reject) => {
+            const script = document.createElement("script");
+            script.src = "/web/static/lib/Chart/Chart.js";
+            script.onload = resolve;
+            script.onerror = reject;
+            document.head.appendChild(script);
+        });
     }
 
     async loadData() {

@@ -173,19 +173,19 @@ class AiStudioLeaderboard(models.Model):
             first_day_this_year = today.replace(month=1, day=1)
             gen_domain.append(('create_date', '>=', first_day_this_year))
             
-        rejected_gens = Generation.read_group(
+        rejected_gens = Generation._read_group(
             gen_domain,
             ['reject_reason_id'],
-            ['reject_reason_id']
+            ['__count']
         )
         
         reject_reasons = []
-        for rg in rejected_gens:
-            if rg.get('reject_reason_id'):
+        for reason, count in rejected_gens:
+            if reason:
                 reject_reasons.append({
-                    'id': rg['reject_reason_id'][0],
-                    'name': rg['reject_reason_id'][1],
-                    'count': rg['reject_reason_id_count']
+                    'id': reason.id,
+                    'name': reason.display_name,
+                    'count': count
                 })
                 
         # Sort by count desc
