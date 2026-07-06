@@ -16,11 +16,11 @@
                 <field name="default_code" string="SKU"/>
                 <field name="barcode" optional="show"/>
                 <field name="product_name"/>
-                <field name="color_name"/>
-                <field name="size_name"/>
-                <field name="brand_name"/>
-                <field name="season_name"/>
-                <field name="gender_name"/>
+                <field name="color_value_ids" widget="many2many_tags"/>
+                <field name="size_value_ids" widget="many2many_tags"/>
+                <field name="brand_value_ids" widget="many2many_tags"/>
+                <field name="season_value_ids" widget="many2many_tags"/>
+                <field name="gender_value_ids" widget="many2many_tags"/>
                 <field name="category_name" optional="hide"/>
                 <field name="qty_available" string="Stok"/>
                 <field name="has_session" string="Oturum" widget="boolean_toggle" readonly="1"/>
@@ -52,11 +52,11 @@
                             <field name="category_name"/>
                         </group>
                         <group string="Nitelikler">
-                            <field name="color_name"/>
-                            <field name="size_name"/>
-                            <field name="brand_name"/>
-                            <field name="season_name"/>
-                            <field name="gender_name"/>
+                            <field name="color_value_ids" widget="many2many_tags"/>
+                            <field name="size_value_ids" widget="many2many_tags"/>
+                            <field name="brand_value_ids" widget="many2many_tags"/>
+                            <field name="season_value_ids" widget="many2many_tags"/>
+                            <field name="gender_value_ids" widget="many2many_tags"/>
                         </group>
                     </group>
                     <group>
@@ -82,8 +82,9 @@
                 <field name="product_name" string="Ürün Adı"/>
                 <field name="default_code" string="SKU"/>
                 <field name="barcode" string="Barkod"/>
-                <field name="color_name" string="Renk"/>
-                <field name="brand_name" string="Marka"/>
+                <field name="color_value_ids" string="Renk"/>
+                <field name="brand_value_ids" string="Marka"/>
+                <field name="season_value_ids" string="Sezon"/>
 
                 <!-- Filtreler -->
                 <filter string="Oturumu Yok" name="no_session" domain="[('has_session', '=', False)]"/>
@@ -93,10 +94,10 @@
                 <separator/>
 
                 <!-- Group By -->
-                <filter string="Marka" name="group_brand" context="{'group_by': 'brand_name'}"/>
-                <filter string="Sezon" name="group_season" context="{'group_by': 'season_name'}"/>
-                <filter string="Cinsiyet" name="group_gender" context="{'group_by': 'gender_name'}"/>
-                <filter string="Renk" name="group_color" context="{'group_by': 'color_name'}"/>
+                <filter string="Marka" name="group_brand" context="{'group_by': 'brand_value_ids'}"/>
+                <filter string="Sezon" name="group_season" context="{'group_by': 'season_value_ids'}"/>
+                <filter string="Cinsiyet" name="group_gender" context="{'group_by': 'gender_value_ids'}"/>
+                <filter string="Renk" name="group_color" context="{'group_by': 'color_value_ids'}"/>
                 <filter string="Kategori" name="group_category" context="{'group_by': 'category_name'}"/>
             </search>
         </field>

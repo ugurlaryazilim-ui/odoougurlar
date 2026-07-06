@@ -16,7 +16,7 @@ _logger = logging.getLogger(__name__)
 class AiStudioImagelessLine(models.Model):
     _name = 'ai.studio.imageless.line'
     _description = 'Görselsiz Ürün Satırı'
-    _order = 'brand_name, product_name, color_name'
+    _order = 'product_name'
 
     # --- Ana İlişki ---
     product_id = fields.Many2one(
@@ -40,11 +40,11 @@ class AiStudioImagelessLine(models.Model):
     )
 
     # --- Attribute Bilgileri ---
-    color_name = fields.Char(string='Renk', store=True, index=True)
-    size_name = fields.Char(string='Beden', store=True)
-    brand_name = fields.Char(string='Marka', store=True, index=True)
-    season_name = fields.Char(string='Sezon', store=True, index=True)
-    gender_name = fields.Char(string='Cinsiyet', store=True, index=True)
+    color_value_ids = fields.Many2many('product.attribute.value', 'ai_imageless_color_rel', string='Renk')
+    size_value_ids = fields.Many2many('product.attribute.value', 'ai_imageless_size_rel', string='Beden')
+    brand_value_ids = fields.Many2many('product.attribute.value', 'ai_imageless_brand_rel', string='Marka')
+    season_value_ids = fields.Many2many('product.attribute.value', 'ai_imageless_season_rel', string='Sezon')
+    gender_value_ids = fields.Many2many('product.attribute.value', 'ai_imageless_gender_rel', string='Cinsiyet')
     category_name = fields.Char(string='Kategori', store=True)
 
     # --- Stok & Durum ---
@@ -127,41 +127,39 @@ class AiStudioImagelessLine(models.Model):
 
             # Cache kontrolü: Bu template daha önce işlendi mi?
             if tmpl.id not in tmpl_cache:
-                b_val, s_val, g_val = '', '', ''
+                b_ids, s_ids, g_ids = [], [], []
                 # create_variant='no_variant' olan attribute'lar (Marka, Sezon, Cinsiyet)
                 for ptal in tmpl.attribute_line_ids:
                     attr_name = ptal.attribute_id.name.lower().strip()
                     if ptal.attribute_id.create_variant == 'no_variant':
-                        values = ptal.value_ids
-                        if values:
-                            val_str = ', '.join(values.mapped('name'))
-                            if any(a in attr_name for a in brand_attrs):
-                                b_val = val_str
-                            elif any(a in attr_name for a in season_attrs):
-                                s_val = val_str
-                            elif any(a in attr_name for a in gender_attrs):
-                                g_val = val_str
+                        if any(a in attr_name for a in brand_attrs):
+                            b_ids.extend(ptal.value_ids.ids)
+                        elif any(a in attr_name for a in season_attrs):
+                            s_ids.extend(ptal.value_ids.ids)
+                        elif any(a in attr_name for a in gender_attrs):
+                            g_ids.extend(ptal.value_ids.ids)
                 
                 tmpl_cache[tmpl.id] = {
-                    'brand': b_val,
-                    'season': s_val,
-                    'gender': g_val,
+                    'brand_ids': [(6, 0, b_ids)],
+                    'season_ids': [(6, 0, s_ids)],
+                    'gender_ids': [(6, 0, g_ids)],
                     'category': tmpl.categ_id.name if tmpl.categ_id else '-'
                 }
 
             # Varyant attribute değerlerini parse et
+            color_ids = []
+            size_ids = []
             color_val = ''
-            size_val = ''
 
             # create_variant='always' olan attribute'lar (Renk, Beden)
             for ptav in variant.product_template_attribute_value_ids:
                 attr_name = ptav.attribute_id.name.lower().strip()
-                value = ptav.name or ''
-
                 if any(a in attr_name for a in color_attrs):
-                    color_val = value
+                    color_ids.append(ptav.product_attribute_value_id.id)
+                    color_val = ptav.name or ''
                 elif any(a in attr_name for a in size_attrs):
-                    size_val = value
+                    size_ids.append(ptav.product_attribute_value_id.id)
+
             # "Her renkten bir beden" mantığı
             group_key = (tmpl.id, color_val)
             if group_key in seen:
@@ -173,11 +171,11 @@ class AiStudioImagelessLine(models.Model):
             lines_data.append({
                 'product_id': variant.id,
                 'product_name': variant.display_name or variant.name,
-                'color_name': color_val or '-',
-                'size_name': size_val or '-',
-                'brand_name': t_data['brand'] or '-',
-                'season_name': t_data['season'] or '-',
-                'gender_name': t_data['gender'] or '-',
+                'color_value_ids': [(6, 0, color_ids)],
+                'size_value_ids': [(6, 0, size_ids)],
+                'brand_value_ids': t_data['brand_ids'],
+                'season_value_ids': t_data['season_ids'],
+                'gender_value_ids': t_data['gender_ids'],
                 'category_name': t_data['category'] or '-',
                 'qty_available': variant.qty_available,
                 'has_session': variant.id in existing_sessions,
