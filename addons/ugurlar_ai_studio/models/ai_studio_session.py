@@ -932,7 +932,7 @@ class AiStudioSession(models.Model):
                                         arguments_to_send['mask_url'] = mask_url
 
                                     edit_result = fal_client.subscribe(
-                                        'fal-ai/flux/schnell/image-to-image',
+                                        'fal-ai/flux/schnell/redux',
                                         arguments=arguments_to_send,
                                         client_timeout=300,
                                     )
@@ -1398,7 +1398,7 @@ class AiStudioSession(models.Model):
                                     for attempt in range(max_retries):
                                         try:
                                             edit_result = fal_client.subscribe(
-                                                'fal-ai/flux/schnell/image-to-image',
+                                                'fal-ai/flux/schnell/redux',
                                                 arguments=arguments_to_send,
                                                 client_timeout=300,
                                             )
@@ -1512,7 +1512,7 @@ class AiStudioSession(models.Model):
                                         for attempt in range(max_retries):
                                             try:
                                                 edit_result = fal_client.subscribe(
-                                                    'fal-ai/flux/schnell/image-to-image',
+                                                    'fal-ai/flux/schnell/redux',
                                                     arguments=arguments_to_send,
                                                     client_timeout=300,
                                                 )
@@ -1995,7 +1995,7 @@ class AiStudioSession(models.Model):
                                     for attempt in range(max_retries):
                                         try:
                                             edit_result = fal_client.subscribe(
-                                                'fal-ai/flux/schnell/image-to-image',
+                                                'fal-ai/flux/schnell/redux',
                                                 arguments=arguments_to_send,
                                                 client_timeout=300,
                                             )

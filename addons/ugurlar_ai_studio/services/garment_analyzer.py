@@ -28,6 +28,10 @@ def _prepare_gemini_image(image_url):
     if not image_url:
         return None, None
 
+    # Odoo Binary alanları bytes döner, str'ye çevir
+    if isinstance(image_url, bytes):
+        image_url = image_url.decode('utf-8')
+
     import base64
     # Case 1: Data URI
     if image_url.startswith('data:'):
@@ -173,6 +177,10 @@ def _analyze_via_fal(api_key, image_url, prompt):
 
     import os
     os.environ['FAL_KEY'] = api_key
+
+    # Odoo Binary alanları bytes döner, str'ye çevir (JSON serialization için)
+    if isinstance(image_url, bytes):
+        image_url = image_url.decode('utf-8')
 
     try:
         result = fal_client.subscribe(
