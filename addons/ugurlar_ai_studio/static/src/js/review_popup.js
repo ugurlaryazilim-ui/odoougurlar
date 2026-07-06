@@ -43,6 +43,8 @@ async function openReviewPopup(sessionId) {
     let showRejectModal = false;
     let selectedReasonId = null;
     let revisionPrompt = '';
+    const userRole = data.user_role || 'operator';
+    const canApprove = (userRole === 'reviewer' || userRole === 'manager');
 
     // Overlay oluştur
     const overlay = document.createElement('div');
@@ -119,7 +121,11 @@ async function openReviewPopup(sessionId) {
                 <!-- Alt butonlar -->
                 <div class="ais-rp-footer">
                     <div class="ais-rp-actions">
-                        ${item.is_approved ? `
+                        ${!canApprove ? `
+                            <div class="ais-rp-operator-badge">
+                                📷 Görüntüleme Modu — Onay yetkisi için onaycı rolü gerekli
+                            </div>
+                        ` : item.is_approved ? `
                             <div class="ais-rp-approved-badge">✅ Bu görsel onaylandı ${item.is_primary ? '⭐' : ''}</div>
                         ` : `
                             <button class="ais-rp-btn ais-rp-btn-reject" id="ais-rp-reject">
@@ -138,7 +144,7 @@ async function openReviewPopup(sessionId) {
                         <span class="ais-rp-nav-info">${currentIndex + 1} / ${totalCount}</span>
                         ${currentIndex < totalCount - 1 ? '<button class="ais-rp-btn ais-rp-btn-nav" id="ais-rp-next">Sonraki →</button>' : ''}
                     </div>
-                    ${allApproved || approvedCount > 0 ? `
+                    ${canApprove && (allApproved || approvedCount > 0) ? `
                         <button class="ais-rp-btn ais-rp-btn-complete" id="ais-rp-complete">
                             ✅ Tamamla ve Kaydet (${approvedCount} görsel)
                         </button>

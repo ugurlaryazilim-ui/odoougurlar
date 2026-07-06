@@ -164,8 +164,10 @@ class AiStudioController(http.Controller):
 
     @http.route('/ai_studio/approve_generation', type='json', auth='user', methods=['POST'])
     def approve_generation(self, generation_id, is_primary=False):
-        """AI uretimini onayla."""
+        """AI uretimini onayla. Sadece onaycı ve yönetici."""
         try:
+            if not request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'):
+                return {'error': 'Bu i\u015flemi yapmaya yetkiniz yok. Onayc\u0131 veya y\u00f6netici rol\u00fc gerekli.'}
             gen = request.env['ai.studio.generation'].browse(int(generation_id))
             if not gen.exists():
                 return {'error': 'Uretim bulunamadi.'}
@@ -181,8 +183,10 @@ class AiStudioController(http.Controller):
 
     @http.route('/ai_studio/reject_generation', type='json', auth='user', methods=['POST'])
     def reject_generation(self, generation_id, reason_id=None, revision_prompt=''):
-        """AI uretimini reddet ve revizeye gonder."""
+        """AI uretimini reddet ve revizeye gonder. Sadece onaycı ve yönetici."""
         try:
+            if not request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'):
+                return {'error': 'Bu i\u015flemi yapmaya yetkiniz yok. Onayc\u0131 veya y\u00f6netici rol\u00fc gerekli.'}
             gen = request.env['ai.studio.generation'].browse(int(generation_id))
             if not gen.exists():
                 return {'error': 'Uretim bulunamadi.'}
@@ -228,9 +232,11 @@ class AiStudioController(http.Controller):
 
     @http.route('/ai_studio/complete_session', type='json', auth='user', methods=['POST'])
     def complete_session(self, session_id):
-        """Oturumu tamamla ve gorselleri urune kaydet."""
+        """Oturumu tamamla ve gorselleri urune kaydet. Sadece onaycı ve yönetici."""
         import psycopg2
         try:
+            if not request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'):
+                return {'error': 'Bu i\u015flemi yapmaya yetkiniz yok. Onayc\u0131 veya y\u00f6netici rol\u00fc gerekli.'}
             session = request.env['ai.studio.session'].browse(int(session_id))
             if not session.exists():
                 return {'error': 'Oturum bulunamadi.'}
@@ -286,6 +292,15 @@ class AiStudioController(http.Controller):
                 ('id', '!=', session.id),
             ], limit=1, order='id asc')
 
+            # Kullanıcı rolünü belirle
+            user = request.env.user
+            if user.has_group('ugurlar_ai_studio.group_ai_studio_manager'):
+                user_role = 'manager'
+            elif user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'):
+                user_role = 'reviewer'
+            else:
+                user_role = 'operator'
+
             return {
                 'session_id': session.id,
                 'session_name': session.name,
@@ -294,6 +309,7 @@ class AiStudioController(http.Controller):
                 'reject_reasons': reason_list,
                 'next_session_id': next_session.id if next_session else False,
                 'session_state': session.state,
+                'user_role': user_role,
             }
         except Exception as e:
             _logger.exception('review_data hatasi: %s', e)

@@ -404,6 +404,17 @@
     font-weight: 600;
 }
 
+.ais-rp-operator-badge {
+    background: #e2e3e5;
+    border: 1px solid #d6d8db;
+    color: #383d41;
+    padding: 8px 20px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 500;
+    font-style: italic;
+}
+
 /* ─── Red Modal ───────────────────────────────────────── */
 .ais-rp-modal-bg {
     position: fixed;
