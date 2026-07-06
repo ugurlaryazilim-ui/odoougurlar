@@ -2,7 +2,6 @@
 
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
-import { loadJS } from "@web/core/network/download";
 import { Component, onWillStart, useState, useRef, useEffect } from "@odoo/owl";
 
 export class AiStudioDashboard extends Component {
@@ -23,7 +22,6 @@ export class AiStudioDashboard extends Component {
         });
 
         onWillStart(async () => {
-            await loadJS("/web/static/lib/Chart/Chart.js");
             await this.loadData();
         });
 
