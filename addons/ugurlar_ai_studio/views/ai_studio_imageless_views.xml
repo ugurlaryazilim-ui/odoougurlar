@@ -122,4 +122,17 @@
         </field>
     </record>
 
+    <!-- ============================================================ -->
+    <!-- Server Action (Menu Entry)                                    -->
+    <!-- ============================================================ -->
+    <record id="action_ai_studio_imageless_server" model="ir.actions.server">
+        <field name="name">Resmi Olmayanlar</field>
+        <field name="model_id" ref="model_ai_studio_imageless_line"/>
+        <field name="state">code</field>
+        <field name="code">
+env['ai.studio.imageless.line'].action_refresh()
+action = env.ref('ugurlar_ai_studio.action_ai_studio_imageless').sudo().read()[0]
+        </field>
+    </record>
+
 </odoo>

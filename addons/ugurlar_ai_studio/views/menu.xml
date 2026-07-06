@@ -105,7 +105,7 @@
     <menuitem id="menu_ai_studio_imageless"
               name="Resmi Olmayanlar"
               parent="menu_ai_studio_root"
-              action="action_ai_studio_imageless"
+              action="action_ai_studio_imageless_server"
               sequence="15"/>
 
     <!-- AI Uretimler — Tum AI gorsel uretimler -->
