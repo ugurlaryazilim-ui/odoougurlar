@@ -1516,16 +1516,21 @@ class AiStudioSession(models.Model):
                     cr.commit()
 
                 except Exception as e:
+                    cr.rollback()
                     from ..services.fal_error_handler import parse_fal_error
                     parsed = parse_fal_error(e)
                     _logger.error('AI üretim hatası (gen=%s): %s', gen.id, e)
-                    gen.write({
-                        'state': 'failed',
-                        'error_message': parsed['message'][:500],
-                    })
-                    if photo_type == 'front':
-                        front_failed = True
-                    cr.commit()
+                    try:
+                        gen.write({
+                            'state': 'failed',
+                            'error_message': parsed['message'][:500],
+                        })
+                        if photo_type == 'front':
+                            front_failed = True
+                        cr.commit()
+                    except Exception as db_e:
+                        cr.rollback()
+                        _logger.error('Uretim hatasi kaydedilemedi (gen=%s): %s', gen.id, db_e)
 
             # ═══ TÜM ÜRETİMLER TAMAMLANDI ═══
             session.write({
@@ -2003,14 +2008,19 @@ class AiStudioSession(models.Model):
                 cr.commit()
 
             except Exception as e:
+                cr.rollback()
                 from ..services.fal_error_handler import parse_fal_error, format_fal_error_for_log
                 parsed = parse_fal_error(e)
                 _logger.error('Retry hatası: %s', format_fal_error_for_log(e, f'gen={gen_id}'))
-                gen.write({
-                    'state': 'failed',
-                    'error_message': parsed['message'][:500],
-                })
-                cr.commit()
+                try:
+                    gen.write({
+                        'state': 'failed',
+                        'error_message': parsed['message'][:500],
+                    })
+                    cr.commit()
+                except Exception as db_e:
+                    cr.rollback()
+                    _logger.error('Retry hatasi kaydedilemedi (gen=%s): %s', gen_id, db_e)
 
     def action_mark_done(self):
         """Onaylanmış görselleri ürüne kaydet ve oturumu tamamla (Asenkron)."""
