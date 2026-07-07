@@ -1764,13 +1764,33 @@ class AiStudioSession(models.Model):
                 outfit_consistency = None
                 front_result_b64 = None
                 front_output_url = None
+                detail_urls = []
                 import random
                 front_seed = random.randint(100000, 99999999)
+
+                # Detay fotoğraflarını mevcut view'a göre filtrele (tüm photo_type'lar için)
+                detail_placement_filter = photo_type if photo_type in ('front', 'back') else 'front'
+                detail_photos = env['ai.studio.photo'].search([
+                    ('session_id', '=', session.id),
+                    ('photo_type', '=', 'detail'),
+                    ('detail_placement', '=', detail_placement_filter),
+                ])
+                # Fallback: Eşleşen yoksa tüm detayları gönder (geriye uyumluluk)
+                if not detail_photos:
+                    detail_photos = env['ai.studio.photo'].search([
+                        ('session_id', '=', session.id),
+                        ('photo_type', '=', 'detail')
+                    ])
+                for dp in detail_photos:
+                    try:
+                        dp_url = provider.upload_image(dp.image_original)
+                        detail_urls.append(dp_url)
+                    except Exception:
+                        pass
 
                 if photo_type in ('back', 'side', 'detail'):
                     # Session içindeki tamamlanmış front kaydını bul
                     front_gen = session.generation_ids.filtered(lambda g: g.photo_type == 'front' and g.state == 'done')
-                    detail_urls = []
                     if front_gen and front_gen[0].generated_image:
                         front_result_b64 = front_gen[0].generated_image
                         front_seed = front_gen[0].seed or False
@@ -1778,28 +1798,7 @@ class AiStudioSession(models.Model):
                             front_output_url = provider.upload_image(front_result_b64)
                         except Exception:
                             pass
-                            
-                        detail_urls = []
-                        # Detay fotoğraflarını mevcut view'a göre filtrele
-                        detail_placement_filter = photo_type if photo_type in ('front', 'back') else 'front'
-                        detail_photos = env['ai.studio.photo'].search([
-                            ('session_id', '=', session.id),
-                            ('photo_type', '=', 'detail'),
-                            ('detail_placement', '=', detail_placement_filter),
-                        ])
-                        # Fallback: Eşleşen yoksa tüm detayları gönder (geriye uyumluluk)
-                        if not detail_photos:
-                            detail_photos = env['ai.studio.photo'].search([
-                                ('session_id', '=', session.id),
-                                ('photo_type', '=', 'detail')
-                            ])
-                        for dp in detail_photos:
-                            try:
-                                dp_url = provider.upload_image(dp.image_original)
-                                detail_urls.append(dp_url)
-                            except Exception:
-                                pass
-                                
+
                         try:
                             from ..services.garment_analyzer import analyze_outfit_consistency
                             outfit_consistency = analyze_outfit_consistency(
