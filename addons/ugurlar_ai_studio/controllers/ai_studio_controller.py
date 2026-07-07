@@ -111,6 +111,27 @@ class AiStudioController(http.Controller):
                 except Exception:
                     img128 = False
 
+                # Ürünün cinsiyet attribute'unu bul
+                product_gender = ''
+                try:
+                    gender_attrs = {'cinsiyet', 'gender'}
+                    for ptal in p.product_tmpl_id.attribute_line_ids:
+                        attr_name = ptal.attribute_id.name.lower().strip()
+                        if any(a in attr_name for a in gender_attrs):
+                            for val in ptal.value_ids:
+                                val_lower = val.name.lower().strip()
+                                if val_lower in ('kadın', 'kadin', 'female', 'women', 'woman', 'bayan'):
+                                    product_gender = 'female'
+                                elif val_lower in ('erkek', 'male', 'men', 'man', 'bay'):
+                                    product_gender = 'male'
+                                elif val_lower in ('çocuk', 'cocuk', 'child', 'kids', 'kid'):
+                                    product_gender = 'child'
+                                elif val_lower in ('unisex',):
+                                    product_gender = 'unisex'
+                            break
+                except Exception:
+                    product_gender = ''
+
                 result.append({
                     'id': p.id,
                     'name': p.display_name,
@@ -121,6 +142,7 @@ class AiStudioController(http.Controller):
                     'categ_name': p.categ_id.display_name,
                     'variant_count': p.product_tmpl_id.product_variant_count,
                     'has_image': bool(p.image_variant_1920),
+                    'gender': product_gender,
                 })
 
             return {
@@ -316,12 +338,19 @@ class AiStudioController(http.Controller):
             return {'error': str(e)}
 
     @http.route('/ai_studio/get_presets', type='json', auth='user', methods=['POST'])
-    def get_presets(self, garment_type=None):
-        """Aktif manken presetlerini getir."""
+    def get_presets(self, garment_type=None, gender=None):
+        """Aktif manken presetlerini getir. Opsiyonel cinsiyet filtresi."""
         try:
             domain = [('active', '=', True)]
             if garment_type:
                 domain.append(('garment_type', '=', garment_type))
+            # Cinsiyet filtresi: ürün cinsiyetine göre uygun presetleri göster
+            if gender and gender in ('female', 'male', 'child'):
+                # Seçilen cinsiyete uygun + unisex presetleri göster
+                domain.append(('gender', 'in', [gender, 'unisex']))
+            elif gender == 'unisex':
+                # Unisex ürünlerde tüm presetleri göster
+                pass
 
             presets = request.env['ai.studio.model.preset'].search(domain)
             result = []
