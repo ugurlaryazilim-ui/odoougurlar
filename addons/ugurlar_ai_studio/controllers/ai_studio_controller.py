@@ -91,56 +91,95 @@ class AiStudioController(http.Controller):
             if not product.exists():
                 return {'variants': []}
 
-            template = product.product_tmpl_id
-            # Aynı template'ın tüm varyantları (mevcut ürün hariç)
-            siblings = template.product_variant_ids.filtered(
-                lambda v: v.id != product.id and v.active
-            )
+            # Mevcut ürünün renk ID'sini bul
+            current_color_id = None
+            color_attr_names = {'renk', 'color', 'colour'}
+            for ptav in product.product_template_attribute_value_ids:
+                attr_name = ptav.attribute_id.name.lower().strip()
+                if any(c in attr_name for c in color_attr_names):
+                    current_color_id = ptav.id
+                    break
 
-            if not siblings:
+            template = product.product_tmpl_id
+            # Tüm varyantları al (gruplama yapacağımız için mevcut ürün dahil her şeyi tarayacağız ama active_session/image'larına bakacağız)
+            all_variants = template.product_variant_ids.filtered(lambda v: v.active)
+
+            if not all_variants:
                 return {'variants': []}
 
-            # Renk attribute'unu bul
-            color_attr_names = {'renk', 'color', 'colour'}
-            
-            missing_variants = []
-            # Template'in kendi görseli var mı? (varyantlar inherit eder)
             template_has_image = bool(template.image_1920)
-            for variant in siblings:
-                # Görseli var mı kontrol et (varyant özel + template inherit)
-                has_own_image = bool(variant.image_variant_1920)
-                if has_own_image or template_has_image:
-                    continue
+            color_groups = {}
 
-                # Stok kontrol — toplam stok miktarı
-                qty = variant.qty_available or 0
-                if qty <= 0:
-                    continue
-
-                # Renk bilgisini çıkar
-                color_name = ''
+            for variant in all_variants:
+                variant_color_id = None
+                variant_color_name = ''
                 variant_attrs = []
                 for ptav in variant.product_template_attribute_value_ids:
                     attr_name = ptav.attribute_id.name.lower().strip()
                     variant_attrs.append(ptav.name)
                     if any(c in attr_name for c in color_attr_names):
-                        color_name = ptav.name
+                        variant_color_id = ptav.id
+                        variant_color_name = ptav.name
 
-                # Bu varyant için aktif AI Studio session var mı?
+                # Renk attribute'u yoksa varyant id'sine göre grupla (fallback)
+                key = variant_color_id or f"no_color_{variant.id}"
+
+                if key not in color_groups:
+                    color_groups[key] = {
+                        'color_name': variant_color_name,
+                        'attributes': ', '.join(variant_attrs),
+                        'has_image': False,
+                        'has_active_session': False,
+                        'total_stock': 0,
+                        'representative_variant': None
+                    }
+
+                # Resim veya aktif oturum varsa tüm renk grubu tamamlanmış sayılır
+                if bool(variant.image_variant_1920) or template_has_image:
+                    color_groups[key]['has_image'] = True
+                    
                 active_session = request.env['ai.studio.session'].search([
                     ('product_id', '=', variant.id),
                     ('state', 'not in', ['cancelled', 'done']),
                 ], limit=1)
+                
+                if active_session:
+                    color_groups[key]['has_active_session'] = True
+
+                qty = variant.qty_available or 0
+                if qty > 0:
+                    color_groups[key]['total_stock'] += qty
+                    # Çekim için stoklu bir varyantı temsilci seç
+                    if not color_groups[key]['representative_variant']:
+                        color_groups[key]['representative_variant'] = variant
+
+            missing_variants = []
+            for key, group in color_groups.items():
+                # Mevcut işlenen rengi atla
+                if current_color_id and key == current_color_id:
+                    continue
+                    
+                # Bu rengin herhangi bir bedeninde görsel veya aktif oturum varsa atla
+                if group['has_image'] or group['has_active_session']:
+                    continue
+                    
+                # Bu renkte hiç stok yoksa atla
+                if group['total_stock'] <= 0:
+                    continue
+                    
+                rep = group['representative_variant']
+                if not rep:
+                    continue
 
                 missing_variants.append({
-                    'id': variant.id,
-                    'name': variant.display_name,
-                    'barcode': variant.barcode or '',
-                    'default_code': variant.default_code or '',
-                    'color': color_name,
-                    'attributes': ', '.join(variant_attrs),
-                    'qty_available': qty,
-                    'has_active_session': bool(active_session),
+                    'id': rep.id,
+                    'name': rep.display_name,
+                    'barcode': rep.barcode or '',
+                    'default_code': rep.default_code or '',
+                    'color': group['color_name'],
+                    'attributes': group['attributes'],
+                    'qty_available': group['total_stock'],
+                    'has_active_session': False,
                 })
 
             return {'variants': missing_variants}
