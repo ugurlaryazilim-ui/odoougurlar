@@ -127,7 +127,7 @@ class FalProvider(AIProviderBase):
                     elif idx % 10 == 3 and idx % 100 != 13:
                         suffix = "rd"
                         
-                    dynamic_prompt += f"The {idx}{suffix} reference image is a MACRO DETAIL shot of the garment (showing fabric texture, buttons, or specific patterns). You MUST accurately apply this exact texture and detail to the garment. DO NOT hallucinate details. "
+                    dynamic_prompt += f"The {idx}{suffix} reference image is a MACRO DETAIL shot of the garment (showing fabric texture, buttons, or specific patterns). You MUST accurately apply this exact texture and detail to the garment. DO NOT hallucinate details. DO NOT modify, invent, or change any buttons, patterns, prints, textures, or hardware visible in this reference. Copy them EXACTLY. "
                 
                 # CRITICAL: Prevent the AI from hallucinating a macro shot as the main output
                 dynamic_prompt += (
@@ -135,6 +135,10 @@ class FalProvider(AIProviderBase):
                     "DO NOT generate a macro shot. DO NOT generate a close-up of the detail. "
                     "The macro detail image is strictly for texture and button reference only. "
                     "The model (mannequin) must remain fully visible in the shot. "
+                    "GARMENT DETAIL ANTI-HALLUCINATION: The garment in the output MUST be a pixel-perfect match "
+                    "of the 1st reference image (garment photo). Count the buttons — reproduce the EXACT count. "
+                    "Match the pattern — do NOT simplify or reinterpret any print, stripe, or graphic. "
+                    "Match the hardware — same zippers, snaps, rivets. Any deviation is a failure. "
                 )
                     
             if dynamic_prompt:

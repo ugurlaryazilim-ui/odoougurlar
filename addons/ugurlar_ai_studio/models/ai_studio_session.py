@@ -744,7 +744,7 @@ class AiStudioSession(models.Model):
 
                 preprocessed = preprocess_garment_image(
                     source_image,
-                    target_long_edge=864,
+                    target_long_edge=1200,  # Yuksek cozunurluk: detay korumasi icin
                 )
                 processed_b64 = preprocessed['image_base64']
 
@@ -783,7 +783,7 @@ class AiStudioSession(models.Model):
 
                 # ⚠️ DOKUNMA! nano-banana-2/edit sabit kalmalı — redux/image-to-image gibi alternatifleri KULLANMA
                 tryon_model = 'nano-banana-2/edit' if provider_type == 'fal' else 'tryon-v1.6'
-                tryon_resolution = '1K'
+                tryon_resolution = '2K'  # Detay korumasi icin 2K zorunlu
                 if provider_type == 'fashn':
                     tryon_model = preset.fashn_model_side if photo_type == 'side' else (preset.fashn_model_back if photo_type == 'back' else preset.fashn_model_front)
                     if not tryon_model:
@@ -1063,7 +1063,7 @@ class AiStudioSession(models.Model):
                 front_gen = generations.filtered(lambda g: g.photo_type == 'front')
                 if front_gen and front_gen[0].original_image:
                     from ..services.garment_preprocessor import preprocess_garment_image
-                    _pre = preprocess_garment_image(front_gen[0].original_image, target_long_edge=864)
+                    _pre = preprocess_garment_image(front_gen[0].original_image, target_long_edge=1200)
                     _pre_url = provider.upload_image(_pre['image_base64'])
 
                     from ..services.garment_analyzer import analyze_garment
@@ -1117,7 +1117,7 @@ class AiStudioSession(models.Model):
                         convert_birefnet_output_to_rgb,
                     )
 
-                    preprocessed = preprocess_garment_image(source_image, target_long_edge=864)
+                    preprocessed = preprocess_garment_image(source_image, target_long_edge=1200)
                     processed_b64 = preprocessed['image_base64']
 
                     # ═══ DETAY FOTOĞRAFI ═══
@@ -1256,7 +1256,7 @@ class AiStudioSession(models.Model):
 
                     # ⚠️ DOKUNMA! nano-banana-2/edit sabit kalmalı — redux/image-to-image gibi alternatifleri KULLANMA
                     tryon_model = 'nano-banana-2/edit' if provider_type == 'fal' else 'tryon-v1.6'
-                    tryon_resolution = '1K'
+                    tryon_resolution = '2K'  # Detay korumasi icin 2K zorunlu
                     if provider_type == 'fashn':
                         tryon_model = getattr(preset, f'fashn_model_{photo_type}', False) or preset.fashn_model_front or 'tryon-v1.6'
                         tryon_resolution = '2K' if 'max' in tryon_model else '1K'
@@ -1606,7 +1606,7 @@ class AiStudioSession(models.Model):
                         preprocess_garment_image,
                         convert_birefnet_output_to_rgb,
                     )
-                    preprocessed = preprocess_garment_image(source_image, target_long_edge=864)
+                    preprocessed = preprocess_garment_image(source_image, target_long_edge=1200)
                     processed_b64 = preprocessed['image_base64']
                     
                     auto_bg = env['ir.config_parameter'].sudo().get_param(
@@ -1686,7 +1686,7 @@ class AiStudioSession(models.Model):
                     preprocess_garment_image,
                     convert_birefnet_output_to_rgb,
                 )
-                preprocessed = preprocess_garment_image(source_image, target_long_edge=864)
+                preprocessed = preprocess_garment_image(source_image, target_long_edge=1200)
                 processed_b64 = preprocessed['image_base64']
 
                 if auto_bg and processed_b64:

@@ -476,12 +476,19 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
 
         # ═══ DONANIM VE DETAY KORUMA (ALARM YOK SAYMA) ═══
         closure = analysis.get('closureType', '')
+        button_count = analysis.get('buttonCount')
         if closure and str(closure).lower() not in ['yok', 'none', 'null', 'false', '']:
             base_prompt += (
                 f"CRITICAL HARDWARE PRESERVATION: The garment has {closure} details. "
                 "You MUST exactly preserve all visible buttons, zippers, snaps, rivets, and hardware "
                 "from the original image. Do not alter their size, shape, color, or placement. "
             )
+            if button_count and str(button_count).isdigit() and int(str(button_count)) > 0:
+                base_prompt += (
+                    f"BUTTON COUNT LOCK: This garment has EXACTLY {button_count} buttons. "
+                    f"You MUST reproduce exactly {button_count} buttons — no more, no fewer. "
+                    "Match their exact size, shape, material, and placement. "
+                )
         else:
             base_prompt += (
                 "CRITICAL HARDWARE PRESERVATION: You MUST exactly preserve any visible buttons, "
