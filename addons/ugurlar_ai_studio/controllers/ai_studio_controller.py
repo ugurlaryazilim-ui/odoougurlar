@@ -83,6 +83,69 @@ class AiStudioController(http.Controller):
             _logger.exception('create_session hatasi: %s', e)
             return {'error': str(e)}
 
+    @http.route('/ai_studio/sibling_variants', type='json', auth='user', methods=['POST'])
+    def sibling_variants(self, product_id):
+        """Aynı ürün template'ının stokta olup görseli olmayan diğer renk varyantlarını döndürür."""
+        try:
+            product = request.env['product.product'].browse(int(product_id))
+            if not product.exists():
+                return {'variants': []}
+
+            template = product.product_tmpl_id
+            # Aynı template'ın tüm varyantları (mevcut ürün hariç)
+            siblings = template.product_variant_ids.filtered(
+                lambda v: v.id != product.id and v.active
+            )
+
+            if not siblings:
+                return {'variants': []}
+
+            # Renk attribute'unu bul
+            color_attr_names = {'renk', 'color', 'colour'}
+            
+            missing_variants = []
+            for variant in siblings:
+                # Görseli var mı kontrol et
+                has_image = bool(variant.image_variant_1920)
+                if has_image:
+                    continue
+
+                # Stok kontrol — toplam stok miktarı
+                qty = variant.qty_available or 0
+                if qty <= 0:
+                    continue
+
+                # Renk bilgisini çıkar
+                color_name = ''
+                variant_attrs = []
+                for ptav in variant.product_template_attribute_value_ids:
+                    attr_name = ptav.attribute_id.name.lower().strip()
+                    variant_attrs.append(ptav.name)
+                    if any(c in attr_name for c in color_attr_names):
+                        color_name = ptav.name
+
+                # Bu varyant için aktif AI Studio session var mı?
+                active_session = request.env['ai.studio.session'].search([
+                    ('product_id', '=', variant.id),
+                    ('state', 'not in', ['cancelled', 'done']),
+                ], limit=1)
+
+                missing_variants.append({
+                    'id': variant.id,
+                    'name': variant.display_name,
+                    'barcode': variant.barcode or '',
+                    'default_code': variant.default_code or '',
+                    'color': color_name,
+                    'attributes': ', '.join(variant_attrs),
+                    'qty_available': qty,
+                    'has_active_session': bool(active_session),
+                })
+
+            return {'variants': missing_variants}
+        except Exception as e:
+            _logger.exception('sibling_variants hatasi: %s', e)
+            return {'variants': []}
+
     @http.route('/ai_studio/find_product', type='json', auth='user', methods=['POST'])
     def find_product(self, query):
         """Barkod, SKU veya isim ile urun ara."""

@@ -4,6 +4,7 @@ import { Component, useState, onWillStart } from "@odoo/owl";
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { _t } from "@web/core/l10n/translation";
+import { markup } from "@odoo/owl";
 import { ConfirmationDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
 
 import { ScanScreen } from "./screens/scan_screen";
@@ -181,18 +182,87 @@ export class AiStudioAction extends Component {
 
             // Operatör: Processing ekranını hiç gösterme, direkt scan'e dön
             if (this.state.userRole === 'operator') {
-                this.notification.add(
-                    _t("📸 AI işlemesi için gönderildi. Onayıcı görselleri inceleyecek."),
-                    { type: "success", sticky: true }
-                );
-                this.resetSession();
-                this.navigateTo("scan");
+                // Aynı ürünün diğer renk varyantlarını kontrol et
+                const currentProductId = this.state.productId;
+                await this._checkSiblingVariants(currentProductId);
                 return;
             }
 
             this.navigateTo("processing");
         } catch (e) {
             this.notification.add(e.message || _t("Islem baslatilamadi."), { type: "danger" });
+        }
+    }
+
+    async _checkSiblingVariants(productId) {
+        try {
+            const res = await this._jsonRpc("/ai_studio/sibling_variants", {
+                product_id: productId,
+            });
+
+            const variants = (res.variants || []).filter(v => !v.has_active_session);
+
+            if (variants.length > 0) {
+                // Varyant listesi HTML'i oluştur
+                const variantLines = variants.map(v => {
+                    const colorLabel = v.color || v.attributes;
+                    return `<div style="padding:4px 0;">🎨 <strong>${colorLabel}</strong> <span style="color:#888;">(Stok: ${Math.floor(v.qty_available)})</span></div>`;
+                }).join('');
+
+                const bodyHtml = markup(
+                    `<div style="margin-bottom:12px;">📸 AI işlemesi için gönderildi!</div>` +
+                    `<div style="background:#fff8e1; border-left:4px solid #ffa000; padding:10px 14px; border-radius:6px; margin-bottom:10px;">` +
+                    `<strong>⚠️ Bu ürünün görseli olmayan ${variants.length} renk varyantı daha var:</strong></div>` +
+                    `<div style="padding:6px 0;">${variantLines}</div>`
+                );
+
+                // Dialog ile operatöre sor
+                this.dialog.add(ConfirmationDialog, {
+                    title: _t("📦 Diğer Renk Varyantları"),
+                    body: bodyHtml,
+                    confirmLabel: _t("🎨 İlk Varyantı Çek (" + (variants[0].color || variants[0].attributes) + ")"),
+                    cancelLabel: _t("⏭️ Başka Ürüne Geç"),
+                    confirm: () => {
+                        // İlk görselsiz varyantı direkt çekime yönlendir
+                        const nextVariant = variants[0];
+                        this.resetSession();
+                        this.state.productId = nextVariant.id;
+                        this.state.productInfo = {
+                            id: nextVariant.id,
+                            name: nextVariant.name,
+                            barcode: nextVariant.barcode,
+                            default_code: nextVariant.default_code,
+                        };
+                        this.state.productGender = '';  // Aynı template, aynı cinsiyet
+                        this.notification.add(
+                            _t("🎨 " + (nextVariant.color || nextVariant.attributes) + " varyantı çekime hazır!"),
+                            { type: "info" }
+                        );
+                        this.navigateTo("capture");
+                    },
+                    cancel: () => {
+                        this.resetSession();
+                        this.navigateTo("scan");
+                    },
+                });
+            } else {
+                // Görselsiz varyant yok, direkt scan'e dön
+                this.notification.add(
+                    _t("📸 AI işlemesi için gönderildi. Onayıcı görselleri inceleyecek."),
+                    { type: "success", sticky: true }
+                );
+                this.resetSession();
+                this.navigateTo("scan");
+            }
+        } catch (e) {
+            console.error("Sibling variants check error:", e);
+            // Hata olsa bile scan'e dön
+            this.notification.add(
+                _t("📸 AI işlemesi için gönderildi. Onayıcı görselleri inceleyecek."),
+                { type: "success", sticky: true }
+            );
+            this.resetSession();
+            this.navigateTo("scan");
         }
     }
 
