@@ -153,6 +153,7 @@ class FalProvider(AIProviderBase):
                 'safety_tolerance': '4',
                 'resolution': kwargs.get('resolution', '2K'),
                 'limit_generations': True,
+                'enable_watermark': False,
             }
             if 'negative_prompt' in kwargs and kwargs['negative_prompt']:
                 arguments['negative_prompt'] = kwargs['negative_prompt']
@@ -176,6 +177,7 @@ class FalProvider(AIProviderBase):
                 'category': fal_category,
                 'mode': mode,
                 'garment_photo_type': kwargs.get('garment_photo_type', 'flat-lay'),
+                'enable_watermark': False,
             }
             if prompt:
                 arguments['prompt'] = prompt
@@ -269,6 +271,7 @@ class FalProvider(AIProviderBase):
                 'prompt': prompt,
                 'image_size': {'width': width, 'height': height},
                 'num_images': 1,
+                'enable_watermark': False,
             },
             client_timeout=120,
         )
