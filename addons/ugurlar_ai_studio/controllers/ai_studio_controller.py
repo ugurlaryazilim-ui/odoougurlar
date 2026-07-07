@@ -104,10 +104,12 @@ class AiStudioController(http.Controller):
             color_attr_names = {'renk', 'color', 'colour'}
             
             missing_variants = []
+            # Template'in kendi görseli var mı? (varyantlar inherit eder)
+            template_has_image = bool(template.image_1920)
             for variant in siblings:
-                # Görseli var mı kontrol et
-                has_image = bool(variant.image_variant_1920)
-                if has_image:
+                # Görseli var mı kontrol et (varyant özel + template inherit)
+                has_own_image = bool(variant.image_variant_1920)
+                if has_own_image or template_has_image:
                     continue
 
                 # Stok kontrol — toplam stok miktarı
