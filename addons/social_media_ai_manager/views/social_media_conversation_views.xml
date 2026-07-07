@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="social_media_conversation_view_tree" model="ir.ui.view">
+        <field name="name">social.media.conversation.tree</field>
+        <field name="model">social.media.conversation</field>
+        <field name="arch" type="xml">
+            <list string="Inbox Conversations">
+                <field name="name"/>
+                <field name="platform"/>
+                <field name="last_message_date"/>
+                <field name="unread_count"/>
+                <field name="state" widget="badge" decoration-success="state == 'open'" decoration-info="state == 'bot'" decoration-muted="state == 'closed'"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="social_media_conversation_view_form" model="ir.ui.view">
+        <field name="name">social.media.conversation.form</field>
+        <field name="model">social.media.conversation</field>
+        <field name="arch" type="xml">
+            <form string="Conversation">
+                <header>
+                    <button name="action_handoff_to_human" type="object" string="Handoff to Human" class="oe_highlight" invisible="state != 'bot'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="open,bot,closed"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="name"/></h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="account_id"/>
+                            <field name="platform"/>
+                        </group>
+                        <group>
+                            <field name="partner_id"/>
+                            <field name="social_user_id"/>
+                            <field name="unread_count"/>
+                        </group>
+                    </group>
+                    <!-- Legacy message view, will be replaced by OWL later -->
+                    <notebook>
+                        <page string="Messages">
+                            <field name="message_ids">
+                                <list>
+                                    <field name="date"/>
+                                    <field name="message_type"/>
+                                    <field name="content"/>
+                                    <field name="is_read"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_social_media_conversation" model="ir.actions.act_window">
+        <field name="name">Unified Inbox</field>
+        <field name="res_model">social.media.conversation</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <menuitem id="menu_social_media_inbox_all" name="All Conversations" parent="menu_social_media_inbox" action="action_social_media_conversation" sequence="10"/>
+</odoo>

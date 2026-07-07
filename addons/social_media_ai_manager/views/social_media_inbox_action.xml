@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="action_social_media_inbox_client" model="ir.actions.client">
+        <field name="name">Live Inbox</field>
+        <field name="tag">social_media_ai.inbox</field>
+    </record>
+
+    <menuitem id="menu_social_media_inbox_live" name="Live Inbox" parent="menu_social_media_inbox" action="action_social_media_inbox_client" sequence="5"/>
+</odoo>

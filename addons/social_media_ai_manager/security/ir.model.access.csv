@@ -1,0 +1,7 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_social_media_ai_rule,social.media.ai.rule,model_social_media_ai_rule,base.group_user,1,1,1,1
+access_social_media_account,social.media.account,model_social_media_account,base.group_user,1,1,1,1
+access_social_media_conversation,social.media.conversation,model_social_media_conversation,base.group_user,1,1,1,1
+access_social_media_message,social.media.message,model_social_media_message,base.group_user,1,1,1,1
+access_social_media_post,social.media.post,model_social_media_post,base.group_user,1,1,1,1
+access_social_media_post_line,social.media.post_line,model_social_media_post_line,base.group_user,1,1,1,1

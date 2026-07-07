@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="social_media_ai_rule_view_tree" model="ir.ui.view">
+        <field name="name">social.media.ai.rule.tree</field>
+        <field name="model">social.media.ai.rule</field>
+        <field name="arch" type="xml">
+            <list string="AI Rules">
+                <field name="name"/>
+                <field name="trigger_type"/>
+                <field name="action_type"/>
+                <field name="context_type"/>
+                <field name="active" widget="boolean_toggle"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="social_media_ai_rule_view_form" model="ir.ui.view">
+        <field name="name">social.media.ai.rule.form</field>
+        <field name="model">social.media.ai.rule</field>
+        <field name="arch" type="xml">
+            <form string="AI Rule">
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" placeholder="Rule Name..."/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="active" widget="boolean_toggle"/>
+                            <field name="trigger_type"/>
+                            <field name="trigger_keywords" invisible="trigger_type != 'keyword'"/>
+                        </group>
+                        <group>
+                            <field name="action_type"/>
+                            <field name="context_type" invisible="action_type == 'handoff'"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Instructions">
+                            <field name="additional_prompt" placeholder="Extra instructions for this specific rule..."/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_social_media_ai_rule" model="ir.actions.act_window">
+        <field name="name">AI Rules</field>
+        <field name="res_model">social.media.ai.rule</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <menuitem id="menu_social_media_ai_rules" name="AI Rules" parent="menu_social_media_config" action="action_social_media_ai_rule" sequence="10"/>
+</odoo>

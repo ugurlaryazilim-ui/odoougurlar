@@ -1,0 +1,626 @@
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* social_media_ai_manager
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 19.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-07-05 10:00+0000\n"
+"PO-Revision-Date: 2026-07-05 10:00+0000\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: tr_TR\n"
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.res_config_settings_view_form
+msgid "Social Media & AI"
+msgstr "Sosyal Medya ve Yapay Zeka"
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.res_config_settings_view_form
+msgid "Social AI"
+msgstr "Sosyal Yapay Zeka"
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.res_config_settings_view_form
+msgid "AI Provider Configuration"
+msgstr "Yapay Zeka Sağlayıcı Yapılandırması"
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.res_config_settings_view_form
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_res_config_settings__social_ai_provider
+msgid "AI Provider"
+msgstr "Yapay Zeka Sağlayıcısı"
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.res_config_settings_view_form
+msgid "Choose which AI engine will handle automated responses."
+msgstr "Otomatik yanıtları hangi yapay zeka motorunun yöneteceğini seçin."
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.res_config_settings_view_form
+msgid "OpenAI Configuration"
+msgstr "OpenAI Yapılandırması"
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.res_config_settings_view_form
+msgid "Google Gemini Configuration"
+msgstr "Google Gemini Yapılandırması"
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.res_config_settings_view_form
+msgid "Ollama Configuration"
+msgstr "Ollama Yapılandırması"
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.res_config_settings_view_form
+msgid "AI System Settings"
+msgstr "Yapay Zeka Sistem Ayarları"
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.res_config_settings_view_form
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_res_config_settings__social_system_prompt
+msgid "Global System Prompt"
+msgstr "Genel Sistem Komutu"
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.res_config_settings_view_form
+msgid "The main prompt given to the AI."
+msgstr "Yapay zekaya verilen ana komut."
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__res_config_settings__social_ai_provider__openai
+msgid "OpenAI (ChatGPT)"
+msgstr "OpenAI (ChatGPT)"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__res_config_settings__social_ai_provider__gemini
+msgid "Google Gemini"
+msgstr "Google Gemini"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__res_config_settings__social_ai_provider__ollama
+msgid "Ollama (Local/Open Source)"
+msgstr "Ollama (Yerel/Açık Kaynak)"
+
+#. module: social_media_ai_manager
+#: model:ir.ui.menu,name:social_media_ai_manager.menu_social_media_root
+msgid "Social & AI Manager"
+msgstr "Sosyal & Yapay Zeka"
+
+#. module: social_media_ai_manager
+#: model:ir.ui.menu,name:social_media_ai_manager.menu_social_media_inbox
+msgid "Inbox"
+msgstr "Gelen Kutusu"
+
+#. module: social_media_ai_manager
+#: model:ir.ui.menu,name:social_media_ai_manager.menu_social_media_posts
+msgid "Posts"
+msgstr "Gönderiler"
+
+#. module: social_media_ai_manager
+#: model:ir.ui.menu,name:social_media_ai_manager.menu_social_media_config
+msgid "Configuration"
+msgstr "Yapılandırma"
+
+#. module: social_media_ai_manager
+#: model:ir.ui.menu,name:social_media_ai_manager.menu_social_media_ai_rules
+msgid "AI Rules"
+msgstr "Yapay Zeka Kuralları"
+
+#. module: social_media_ai_manager
+#: model:ir.ui.menu,name:social_media_ai_manager.menu_social_media_settings
+msgid "Settings"
+msgstr "Ayarlar"
+
+#. module: social_media_ai_manager
+#: model:ir.ui.menu,name:social_media_ai_manager.menu_social_media_accounts
+msgid "Social Accounts"
+msgstr "Sosyal Hesaplar"
+
+#. module: social_media_ai_manager
+#: model:ir.ui.menu,name:social_media_ai_manager.menu_social_media_inbox_live
+#: model:ir.actions.client,name:social_media_ai_manager.action_social_media_inbox_client
+msgid "Live Inbox"
+msgstr "Canlı Gelen Kutusu"
+
+#. module: social_media_ai_manager
+#: model:ir.ui.menu,name:social_media_ai_manager.menu_social_media_inbox_all
+msgid "All Conversations"
+msgstr "Tüm Görüşmeler"
+
+#. module: social_media_ai_manager
+#: model:ir.actions.act_window,name:social_media_ai_manager.action_social_media_account
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.social_media_account_view_list
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.social_media_account_view_form
+msgid "Social Media Accounts"
+msgstr "Sosyal Medya Hesapları"
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.social_media_account_view_form
+msgid "API Credentials"
+msgstr "API Kimlik Bilgileri"
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.social_media_account_view_form
+msgid "Test Connection"
+msgstr "Bağlantıyı Test Et"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_account__platform__whatsapp
+msgid "WhatsApp"
+msgstr "WhatsApp"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_account__platform__instagram
+msgid "Instagram"
+msgstr "Instagram"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_account__platform__facebook
+msgid "Facebook"
+msgstr "Facebook"
+
+#. module: social_media_ai_manager
+#: model:ir.actions.act_window,name:social_media_ai_manager.action_social_media_conversation
+msgid "Unified Inbox"
+msgstr "Birleştirilmiş Gelen Kutusu"
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.social_media_conversation_view_list
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.social_media_conversation_view_form
+msgid "Inbox Conversations"
+msgstr "Gelen Kutusu Görüşmeleri"
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.social_media_conversation_view_form
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_conversation__message_ids
+msgid "Messages"
+msgstr "Mesajlar"
+
+#. module: social_media_ai_manager
+#. odoo-javascript
+msgid "Handoff to Human"
+msgstr "İnsana Devret"
+
+#. module: social_media_ai_manager
+#: model:ir.actions.act_window,name:social_media_ai_manager.action_social_media_post
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.social_media_post_view_list
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.social_media_post_view_form
+msgid "Social Media Posts"
+msgstr "Sosyal Medya Gönderileri"
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.social_media_post_view_form
+msgid "Content"
+msgstr "İçerik"
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.social_media_post_view_form
+msgid "Media"
+msgstr "Medya"
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.social_media_post_view_form
+msgid "Schedule"
+msgstr "Planla"
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.social_media_post_view_form
+msgid "Back to Draft"
+msgstr "Taslağa Geri Dön"
+
+#. module: social_media_ai_manager
+#: model:ir.actions.act_window,name:social_media_ai_manager.action_social_media_ai_rule
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.social_media_ai_rule_view_list
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.social_media_ai_rule_view_form
+msgid "AI Rules"
+msgstr "Yapay Zeka Kuralları"
+
+#. module: social_media_ai_manager
+#. odoo-javascript
+msgid "Conversations"
+msgstr "Görüşmeler"
+
+#. module: social_media_ai_manager
+#. odoo-javascript
+msgid "Type a message..."
+msgstr "Bir mesaj yazın..."
+
+#. module: social_media_ai_manager
+#. odoo-javascript
+msgid "Send"
+msgstr "Gönder"
+
+#. module: social_media_ai_manager
+msgid "Select a conversation to start messaging"
+msgstr "Mesajlaşmaya başlamak için bir görüşme seçin"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_account__name
+msgid "Account Name"
+msgstr "Hesap Adı"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_account__platform
+msgid "Platform"
+msgstr "Bağlantı Platformu"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_account__state
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_conversation__state
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_post__state
+msgid "Status"
+msgstr "Durum"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_account__state__draft
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_post__state__draft
+msgid "Draft"
+msgstr "Taslak"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_account__state__connected
+msgid "Connected"
+msgstr "Bağlı"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_account__state__error
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_post__state__error
+msgid "Error"
+msgstr "Hata"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_conversation__partner_id
+msgid "Customer"
+msgstr "Müşteri"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_message__is_read
+msgid "Read"
+msgstr "Okundu"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_message__message_type__incoming
+msgid "Incoming"
+msgstr "Gelen"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_message__message_type__outgoing
+msgid "Outgoing"
+msgstr "Giden"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_post__state__posted
+msgid "Posted"
+msgstr "Yayınlandı"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_post__state__scheduled
+msgid "Scheduled"
+msgstr "Planlandı"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_post__name
+msgid "Post Title"
+msgstr "Gönderi Başlığı"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_ai_rule__name
+msgid "Rule Name"
+msgstr "Kural Adı"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_ai_rule__ai_model
+msgid "AI Context / Skill"
+msgstr "Yapay Zeka Yeteneği"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_ai_rule__instructions
+msgid "Instructions"
+msgstr "Talimatlar"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_ai_rule__trigger_type
+msgid "Trigger Type"
+msgstr "Tetikleyici Tipi"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_ai_rule__trigger_keywords
+msgid "Keywords (comma separated)"
+msgstr "Anahtar Kelimeler (virgülle ayırın)"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_ai_rule__action_type
+msgid "Action"
+msgstr "Aksiyon"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_ai_rule__additional_prompt
+msgid "Additional Prompt Instructions"
+msgstr "Ek İstem Talimatları"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_ai_rule__active
+msgid "Active"
+msgstr "Aktif"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_account__api_token
+msgid "API Token / Access Token"
+msgstr "API / Erişim Anahtarı"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_account__webhook_secret
+msgid "Webhook Secret (Verify Token)"
+msgstr "Webhook Gizli Anahtarı (Doğrulama)"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_account__phone_number
+msgid "Phone Number (WhatsApp)"
+msgstr "Telefon Numarası (WhatsApp)"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_conversation__name
+msgid "Conversation Reference"
+msgstr "Görüşme Referansı"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_conversation__account_id
+msgid "Social Account"
+msgstr "Sosyal Hesap"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_conversation__social_user_id
+msgid "Platform User ID / Phone Number"
+msgstr "Platform Kullanıcı ID / Telefon Numarası"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_conversation__last_message_date
+msgid "Last Message Date"
+msgstr "Son Mesaj Tarihi"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_conversation__unread_count
+msgid "Unread Messages"
+msgstr "Okunmamış Mesajlar"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_conversation__state__open
+msgid "Open"
+msgstr "Açık"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_conversation__state__bot
+msgid "Bot Handling"
+msgstr "Bot Yönetiyor"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_conversation__state__closed
+msgid "Closed"
+msgstr "Kapalı"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_message__conversation_id
+msgid "Conversation"
+msgstr "Görüşme"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_message__platform_message_id
+msgid "Platform Message ID"
+msgstr "Platform Mesaj ID"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_message__message_type
+msgid "Direction"
+msgstr "Yön"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_message__content
+msgid "Message Content"
+msgstr "Mesaj İçeriği"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_message__date
+msgid "Date"
+msgstr "Tarih"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_message__author_id
+msgid "Sent By (Agent)"
+msgstr "Gönderen (Temsilci)"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_post__message
+msgid "Post Message"
+msgstr "Gönderi Mesajı"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_post__scheduled_date
+msgid "Scheduled Date"
+msgstr "Planlanan Tarih"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_post__account_ids
+msgid "Publish to Accounts"
+msgstr "Yayınlanacak Hesaplar"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_post__image_ids
+msgid "Images/Videos"
+msgstr "Resimler/Videolar"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_post__post_line_ids
+msgid "Platform Statuses"
+msgstr "Platform Durumları"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_post__error_message
+msgid "Error Details"
+msgstr "Hata Detayları"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_post__platform_post_id
+msgid "Platform Post ID"
+msgstr "Platform Gönderi ID"
+
+#. module: social_media_ai_manager
+#: model:ir.ui.menu,name:social_media_ai_manager.menu_social_media_posts_all
+msgid "All Posts"
+msgstr "Tüm Gönderiler"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields,field_description:social_media_ai_manager.field_social_media_ai_rule__active
+msgid "Active"
+msgstr "Aktif"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_ai_rule__trigger_type__all
+msgid "All Incoming Messages"
+msgstr "Tüm Gelen Mesajlar"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_ai_rule__trigger_type__keyword
+msgid "Contains Specific Keywords"
+msgstr "Belirli Kelimeleri İçeriyorsa"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_ai_rule__action_type__reply
+msgid "Generate AI Reply"
+msgstr "Yapay Zeka Yanıtı Üret"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_ai_rule__action_type__handoff
+msgid "Hand-off to Human (Pause AI)"
+msgstr "İnsana Devret (YZ'yi Durdur)"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_ai_rule__context_type__general
+msgid "General Chat"
+msgstr "Genel Sohbet"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_ai_rule__context_type__product
+msgid "Product & Pricing Search"
+msgstr "Ürün & Fiyat Arama"
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_ai_rule__context_type__appointment
+msgid "Appointment Booking (Calendar)"
+msgstr "Randevu Alma (Takvim)"
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.social_media_ai_rule_view_form
+msgid "Rule Name..."
+msgstr "Kural Adı..."
+
+#. module: social_media_ai_manager
+#: model_terms:ir.ui.view,arch_db:social_media_ai_manager.social_media_ai_rule_view_form
+msgid "Extra instructions for this specific rule..."
+msgstr "Bu kurala özel ek talimatlar..."
+
+#. module: social_media_ai_manager
+#: model:ir.module.module,shortdesc:base.module_social_media_ai_manager
+msgid "Social Media & AI Manager"
+msgstr "Sosyal Medya & Yapay Zeka Yöneticisi"
+
+#. module: social_media_ai_manager
+#: model:ir.module.module,summary:base.module_social_media_ai_manager
+msgid "Manage Social Media (WhatsApp, Instagram, Facebook, TikTok, YouTube) and AI Customer Support"
+msgstr "Sosyal Medya (WhatsApp, Instagram, Facebook, TikTok, YouTube) ve Yapay Zeka Desteği Yönetimi"
+
+
+#. module: social_media_ai_manager
+#: model:ir.model.fields.selection,name:social_media_ai_manager.selection__social_media_ai_rule__trigger_type__all
+msgid "All Incoming Messages"
+msgstr "Tüm Gelen Mesajlar"
+
+#. module: social_media_ai_manager
+#: model:ir.ui.menu,name:social_media_ai_manager.menu_social_media_posts_all
+msgid "All Posts"
+msgstr "Tüm Gönderiler"
+
+#. module: social_media_ai_manager
+msgid "AI Rule"
+msgstr "Yapay Zeka Kuralı"
+
+#. module: social_media_ai_manager
+msgid "Gemini API Key"
+msgstr "Gemini API Anahtarı"
+
+#. module: social_media_ai_manager
+msgid "If empty and outgoing, sent by AI"
+msgstr "Boşsa ve giden bir mesajsa, yapay zeka tarafından gönderilmiştir"
+
+#. module: social_media_ai_manager
+msgid "Keywords to trigger this rule."
+msgstr "Bu kuralı tetikleyecek anahtar kelimeler."
+
+#. module: social_media_ai_manager
+msgid "Ollama Endpoint URL"
+msgstr "Ollama Uç Nokta URL'si"
+
+#. module: social_media_ai_manager
+msgid "Ollama Model Name"
+msgstr "Ollama Model Adı"
+
+#. module: social_media_ai_manager
+msgid "OpenAI API Key"
+msgstr "OpenAI API Anahtarı"
+
+#. module: social_media_ai_manager
+msgid "Post Calendar"
+msgstr "Gönderi Takvimi"
+
+#. module: social_media_ai_manager
+msgid "Publishing Status"
+msgstr "Yayınlanma Durumu"
+
+#. module: social_media_ai_manager
+msgid "Social Media & AI"
+msgstr "Sosyal Medya & Yapay Zeka"
+
+#. module: social_media_ai_manager
+msgid "Social Media Account"
+msgstr "Sosyal Medya Hesabı"
+
+#. module: social_media_ai_manager
+msgid "Social Media Post"
+msgstr "Sosyal Medya Gönderisi"
+
+#. module: social_media_ai_manager
+msgid "Specific instructions for this rule."
+msgstr "Bu kural için özel talimatlar."
+
+#. module: social_media_ai_manager
+msgid "System Prompt"
+msgstr "Sistem İstemi (Prompt)"
+
+#. module: social_media_ai_manager
+msgid "Unique ID from WhatsApp/Meta"
+msgstr "WhatsApp/Meta'dan Benzersiz Kimlik"
+
+#. module: social_media_ai_manager
+msgid "WhatsApp Number or Instagram/FB User ID"
+msgstr "WhatsApp Numarası veya Instagram/FB Kullanıcı Kimliği"
+
+
+#. module: social_media_ai_manager
+msgid "Conversations"
+msgstr "Görüşmeler"
+
+#. module: social_media_ai_manager
+msgid "Handoff to Human"
+msgstr "İnsana Devret"
+
+#. module: social_media_ai_manager
+msgid "Type a message..."
+msgstr "Bir mesaj yazın..."
+
+#. module: social_media_ai_manager
+msgid "Send"
+msgstr "Gönder"

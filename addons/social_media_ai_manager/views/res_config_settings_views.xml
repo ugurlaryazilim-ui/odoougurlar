@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="res_config_settings_view_form" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.social.ai</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app data-string="Social AI" string="Social Media &amp; AI" name="social_media_ai_manager">
+                    <block title="AI Provider Configuration" name="ai_config">
+                        <setting string="AI Provider" help="Choose which AI engine will handle automated responses.">
+                            <field name="social_ai_provider" widget="radio"/>
+                        </setting>
+
+                        <setting string="OpenAI Configuration" invisible="social_ai_provider != 'openai'">
+                            <field name="social_openai_api_key" password="True"/>
+                        </setting>
+
+                        <setting string="Google Gemini Configuration" invisible="social_ai_provider != 'gemini'">
+                            <field name="social_gemini_api_key" password="True"/>
+                        </setting>
+
+                        <setting string="Ollama Configuration" invisible="social_ai_provider != 'ollama'">
+                            <div class="content-group">
+                                <field name="social_ollama_endpoint" placeholder="http://localhost:11434/api/generate"/>
+                                <br/>
+                                <field name="social_ollama_model" placeholder="llama3"/>
+                            </div>
+                        </setting>
+                    </block>
+                    
+                    <block title="AI System Settings" name="ai_system_settings">
+                        <setting string="Global System Prompt" help="The main prompt given to the AI.">
+                            <field name="social_system_prompt" widget="text"/>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="action_social_media_config_settings" model="ir.actions.act_window">
+        <field name="name">Settings</field>
+        <field name="res_model">res.config.settings</field>
+        <field name="view_mode">form</field>
+        <field name="context">{'module' : 'social_media_ai_manager', 'bin_size': False}</field>
+    </record>
+
+    <menuitem id="menu_social_media_settings" name="Settings" parent="menu_social_media_config" action="action_social_media_config_settings" sequence="100"/>
+</odoo>

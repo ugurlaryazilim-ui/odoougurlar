@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <menuitem id="menu_social_media_root" name="Social &amp; AI Manager" web_icon="social_media_ai_manager,static/description/icon.png" sequence="100"/>
+    
+    <menuitem id="menu_social_media_inbox" name="Inbox" parent="menu_social_media_root" sequence="10"/>
+    <menuitem id="menu_social_media_posts" name="Posts" parent="menu_social_media_root" sequence="20"/>
+    <menuitem id="menu_social_media_config" name="Configuration" parent="menu_social_media_root" sequence="90"/>
+</odoo>

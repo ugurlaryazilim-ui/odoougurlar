@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Calendar View -->
+    <record id="social_media_post_view_calendar" model="ir.ui.view">
+        <field name="name">social.media.post.calendar</field>
+        <field name="model">social.media.post</field>
+        <field name="arch" type="xml">
+            <calendar string="Post Calendar" date_start="scheduled_date" color="state">
+                <field name="name"/>
+                <field name="state" filters="1"/>
+            </calendar>
+        </field>
+    </record>
+
+    <!-- Tree View -->
+    <record id="social_media_post_view_tree" model="ir.ui.view">
+        <field name="name">social.media.post.tree</field>
+        <field name="model">social.media.post</field>
+        <field name="arch" type="xml">
+            <list string="Social Media Posts" decoration-info="state == 'draft'" decoration-warning="state == 'scheduled'" decoration-success="state == 'posted'" decoration-danger="state == 'error'">
+                <field name="name"/>
+                <field name="scheduled_date"/>
+                <field name="state" widget="badge"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Form View -->
+    <record id="social_media_post_view_form" model="ir.ui.view">
+        <field name="name">social.media.post.form</field>
+        <field name="model">social.media.post</field>
+        <field name="arch" type="xml">
+            <form string="Social Media Post">
+                <header>
+                    <button name="action_schedule" type="object" string="Schedule" class="oe_highlight" invisible="state != 'draft'"/>
+                    <button name="action_draft" type="object" string="Back to Draft" invisible="state not in ('scheduled', 'error')"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,scheduled,posted"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" placeholder="Post Title..."/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="scheduled_date" readonly="state != 'draft'"/>
+                            <field name="account_ids" widget="many2many_tags" readonly="state != 'draft'"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Content">
+                            <field name="message" placeholder="What do you want to share?" readonly="state != 'draft'"/>
+                            <group string="Media">
+                                <field name="image_ids" widget="many2many_binary" readonly="state != 'draft'"/>
+                            </group>
+                        </page>
+                        <page string="Publishing Status" invisible="state == 'draft'">
+                            <field name="post_line_ids" readonly="1">
+                                <list>
+                                    <field name="account_id"/>
+                                    <field name="platform"/>
+                                    <field name="state" widget="badge" decoration-success="state == 'success'" decoration-danger="state == 'error'"/>
+                                    <field name="error_message"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+                <!-- Chatter -->
+                <div class="oe_chatter">
+                    <field name="message_follower_ids"/>
+                    <field name="activity_ids"/>
+                    <field name="message_ids"/>
+                </div>
+            </form>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="action_social_media_post" model="ir.actions.act_window">
+        <field name="name">Social Posts</field>
+        <field name="res_model">social.media.post</field>
+        <field name="view_mode">calendar,list,form</field>
+    </record>
+
+    <menuitem id="menu_social_media_posts_all" name="All Posts" parent="menu_social_media_posts" action="action_social_media_post" sequence="10"/>
+</odoo>
