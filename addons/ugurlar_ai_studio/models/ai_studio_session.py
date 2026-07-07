@@ -2,11 +2,35 @@ import logging
 import base64
 import threading
 import time
+import json
+import uuid
 
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
+
+def _safe_write_and_commit(cr, record, vals, max_retries=5):
+    """Concurrent update (SerializationFailure) hatalarını önlemek için güvenli DB yazma."""
+    import time, random
+    for attempt in range(max_retries):
+        try:
+            record.write(vals)
+            cr.commit()
+            return True
+        except Exception as e:
+            cr.rollback()
+            err_str = str(e).lower()
+            is_serialization = (
+                'serialize access' in err_str or
+                'serializationfailure' in str(e.__class__).lower() or
+                'current transaction is aborted' in err_str or
+                'concurrent update' in err_str
+            )
+            if is_serialization and attempt < max_retries - 1:
+                time.sleep(random.uniform(0.2, 1.5))
+                continue
+            raise e
 
 
 class AiStudioSession(models.Model):
@@ -1612,8 +1636,7 @@ class AiStudioSession(models.Model):
             try:
                 provider = self._create_provider(api_key, provider_type)
 
-                gen.write({'state': 'processing'})
-                cr.commit()
+                _safe_write_and_commit(cr, gen, {'state': 'processing'})
 
                 source_image = gen.original_image
                 preset = session.model_preset_id
@@ -1885,12 +1908,12 @@ class AiStudioSession(models.Model):
                     gen_b64 = base64.b64encode(img_data)
                     gen_seed = tryon_result.get('seed') or False
                     
-                    gen.write({
+                    gen_vals = {
                         'generated_image': gen_b64,
                         'state': 'done',
                         'error_message': False,
                         'seed': gen_seed,
-                    })
+                    }
 
                     # ═══ RETRY BACK/SIDE POST-PROCESSING: OUTFIT TUTARLILIĞI ═══
                     # DEVRE DIŞI: flux/schnell/image-to-image endpoint'i kaldırıldı.
@@ -1983,9 +2006,7 @@ class AiStudioSession(models.Model):
                                             import requests as req_lib
                                             edit_data = req_lib.get(edit_url, timeout=60).content
                                             edited_b64 = base64.b64encode(edit_data)
-                                            gen.write({
-                                                'generated_image': edited_b64,
-                                            })
+                                            gen_vals['generated_image'] = edited_b64
                                             gen_b64 = edited_b64
                                             _logger.info(
                                                 'Retry post-processing outfit tutarlılığı tamamlandı (gen=%s, tip=%s)',
@@ -1998,14 +2019,12 @@ class AiStudioSession(models.Model):
                     try:
                         from ..services.quality_checker import compute_quality_score
                         qc = compute_quality_score(source_image, gen_b64)
-                        gen.write({
-                            'quality_score': qc['score'],
-                            'quality_details': qc['details'],
-                        })
+                        gen_vals['quality_score'] = qc['score']
+                        gen_vals['quality_details'] = qc['details']
                     except Exception:
                         pass
 
-                cr.commit()
+                    _safe_write_and_commit(cr, gen, gen_vals)
 
             except Exception as e:
                 cr.rollback()
@@ -2013,11 +2032,10 @@ class AiStudioSession(models.Model):
                 parsed = parse_fal_error(e)
                 _logger.error('Retry hatası: %s', format_fal_error_for_log(e, f'gen={gen_id}'))
                 try:
-                    gen.write({
+                    _safe_write_and_commit(cr, gen, {
                         'state': 'failed',
                         'error_message': parsed['message'][:500],
                     })
-                    cr.commit()
                 except Exception as db_e:
                     cr.rollback()
                     _logger.error('Retry hatasi kaydedilemedi (gen=%s): %s', gen_id, db_e)
