@@ -453,6 +453,19 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
                     "Any fabric on the shoulders or arms is a hallucination and a FAILURE. "
                     "Ignore any hanger strings in the input image. "
                 )
+            
+            # Ince askili / Abiye Cift Aski Onleme Kilidi
+            garment_type_lower = garment_type.lower()
+            style_lower = style.lower()
+            if any(k in sleeve_lower for k in ['ince askı', 'ince aski', 'spaghetti', 'thin strap', 'strap', 'askili', 'askılı']) or \
+               any(k in garment_type_lower or k in style_lower for k in ['abiye', 'evening', 'gown']):
+                base_prompt += (
+                    "CRITICAL SHOULDER STRAP LOCK: This garment has SINGLE THIN STRAPS (spaghetti straps). "
+                    "You MUST generate EXACTLY ONE thin strap per shoulder. "
+                    "Do NOT generate double straps, multiple strings, or thick straps. "
+                    "The original image is on a hanger which may show both front and back straps — "
+                    "IGNORE the back straps. Consolidate them into a SINGLE elegant strap over each shoulder. "
+                )
 
         # ═══ BASKI / GRAFIK KORUMA TALIMATLARI ═══
         has_graphic = analysis.get('hasGraphic', False)
@@ -616,7 +629,8 @@ _VIEW_NEGATIVE_PROMPTS = {
         "altered garment design, changed collar, wrong garment color, "
         "wrong fabric texture, wrong button style, modified print, "
         "different pattern, altered graphic, changed logo, "
-        "security tag, anti-theft alarm, plastic tag, price tag, store label, hanger clip, "
+        "security tag, anti-theft alarm, plastic tag, price tag, store label, hanger clip, hanger strings, "
+        "double straps, multiple straps on one shoulder, extra strings, thick straps, "
         "altered buttons, missing buttons, changed zipper, modified hardware, "
         "stiff pose, rigid standing, arms straight at sides, amateur pose, "
         "military stance, passport photo pose, "
@@ -630,7 +644,8 @@ _VIEW_NEGATIVE_PROMPTS = {
         "blurry, low quality, collage, split screen, multi-panel, "
         "studio equipment, softbox, light stand, flash head, "
         "altered garment design, wrong garment color, wrong fabric texture, "
-        "security tag, anti-theft alarm, plastic tag, price tag, store label, hanger clip, "
+        "security tag, anti-theft alarm, plastic tag, price tag, store label, hanger clip, hanger strings, "
+        "double straps, multiple straps on one shoulder, extra strings, thick straps, "
         "altered buttons, missing buttons, changed zipper, modified hardware, "
         "stiff pose, rigid standing, arms straight at sides, amateur pose, "
         "military stance, "
