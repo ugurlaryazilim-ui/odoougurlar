@@ -17,6 +17,9 @@ class MetaOAuthController(http.Controller):
             return "Meta App ID not configured in settings."
 
         base_url = env['ir.config_parameter'].sudo().get_param('web.base.url')
+        if base_url.startswith('http://') and 'localhost' not in base_url:
+            base_url = base_url.replace('http://', 'https://')
+            
         redirect_uri = f"{base_url}/social_media_ai/facebook/callback"
 
         scope = "pages_show_list,pages_messaging,pages_manage_metadata,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish"
@@ -34,6 +37,9 @@ class MetaOAuthController(http.Controller):
         app_id = env['ir.config_parameter'].sudo().get_param('social_media_ai.meta_app_id')
         app_secret = env['ir.config_parameter'].sudo().get_param('social_media_ai.meta_app_secret')
         base_url = env['ir.config_parameter'].sudo().get_param('web.base.url')
+        if base_url.startswith('http://') and 'localhost' not in base_url:
+            base_url = base_url.replace('http://', 'https://')
+            
         redirect_uri = f"{base_url}/social_media_ai/facebook/callback"
 
         # 1. Exchange code for user access token
