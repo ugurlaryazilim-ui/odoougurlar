@@ -1557,13 +1557,17 @@ class AiStudioSession(models.Model):
                         _logger.error('Uretim hatasi kaydedilemedi (gen=%s): %s', gen.id, db_e)
 
             # ═══ TÜM ÜRETİMLER TAMAMLANDI ═══
+            has_failed = any(g.state == 'failed' for g in session.generation_ids)
+            final_state = 'failed' if has_failed else 'review'
+            
             session.write({
-                'state': 'review',
+                'state': final_state,
                 'date_review_start': fields.Datetime.now()
             })
-            session.message_post(
-                body=_('AI üretimi tamamlandı. %d görsel onay bekliyor.') % len(session.generation_ids),
-            )
+            if has_failed:
+                session.message_post(body=_('AI üretimi tamamlandı ancak BAZI GÖRSELLER BAŞARISIZ oldu. İncele butonuna basarak başarısız olanları tekrar deneyebilirsiniz.'))
+            else:
+                session.message_post(body=_('AI üretimi tamamlandı. %d görsel onay bekliyor.') % len(session.generation_ids))
             cr.commit()
 
     def _process_single_generation(self, generation):
@@ -2039,6 +2043,15 @@ class AiStudioSession(models.Model):
                 except Exception as db_e:
                     cr.rollback()
                     _logger.error('Retry hatasi kaydedilemedi (gen=%s): %s', gen_id, db_e)
+
+            # Session durumu güncellemesi (eğer tüm hatalılar çözüldüyse)
+            try:
+                if gen.session_id.state == 'failed':
+                    all_gens = gen.session_id.generation_ids
+                    if not any(g.state == 'failed' for g in all_gens):
+                        _safe_write_and_commit(cr, gen.session_id, {'state': 'review'})
+            except Exception as se:
+                _logger.warning("Retry sonrasi session state guncellenirken hata: %s", se)
 
     def action_mark_done(self):
         """Onaylanmış görselleri ürüne kaydet ve oturumu tamamla (Asenkron)."""
