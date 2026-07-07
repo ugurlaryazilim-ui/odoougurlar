@@ -34,6 +34,18 @@
                             <field name="social_system_prompt" widget="text"/>
                         </setting>
                     </block>
+
+                    <block title="Meta (Facebook &amp; Instagram) OAuth Configuration" name="meta_oauth_settings">
+                        <setting string="Meta App Credentials" help="Enter your App ID and Secret from Facebook Developer Console for OAuth Login.">
+                            <div class="content-group">
+                                <label for="social_meta_app_id" string="App ID"/>
+                                <field name="social_meta_app_id"/>
+                                <br/>
+                                <label for="social_meta_app_secret" string="App Secret"/>
+                                <field name="social_meta_app_secret" password="True"/>
+                            </div>
+                        </setting>
+                    </block>
                 </app>
             </xpath>
         </field>

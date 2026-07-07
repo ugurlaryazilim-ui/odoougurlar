@@ -18,13 +18,14 @@
         <field name="arch" type="xml">
             <form string="Social Media Account">
                 <header>
-                    <button name="action_test_connection" type="object" string="Test Connection" class="oe_highlight"/>
-                    <field name="state" widget="statusbar" statusbar_visible="draft,connected"/>
+                    <button name="action_login_facebook" string="Login with Facebook" type="object" class="oe_highlight" invisible="platform not in ('facebook', 'instagram')"/>
+                    <button name="action_test_connection" string="Test Connection" type="object" class="oe_highlight" invisible="state == 'connected'"/>
+                    <field name="state" widget="statusbar"/>
                 </header>
                 <sheet>
                     <div class="oe_title">
                         <h1>
-                            <field name="name" placeholder="e.g. Main WhatsApp Number"/>
+                            <field name="name" placeholder="e.g. My Facebook Page"/>
                         </h1>
                     </div>
                     <group>
@@ -33,17 +34,13 @@
                             <field name="active" widget="boolean_toggle"/>
                         </group>
                         <group>
+                            <field name="api_token" password="True"/>
+                            <field name="webhook_secret" password="True"/>
                             <field name="phone_number" invisible="platform != 'whatsapp'"/>
+                            <field name="meta_page_id" invisible="platform not in ('facebook', 'instagram')"/>
+                            <field name="meta_ig_id" invisible="platform != 'instagram'"/>
                         </group>
                     </group>
-                    <notebook>
-                        <page string="API Credentials">
-                            <group>
-                                <field name="api_token" password="True"/>
-                                <field name="webhook_secret" password="True"/>
-                            </group>
-                        </page>
-                    </notebook>
                 </sheet>
             </form>
         </field>

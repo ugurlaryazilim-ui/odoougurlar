@@ -21,6 +21,10 @@ class SocialMediaAccount(models.Model):
     webhook_secret = fields.Char(string="Webhook Secret (Verify Token)")
     phone_number = fields.Char(string="Phone Number (WhatsApp)")
     
+    # Meta Specific IDs
+    meta_page_id = fields.Char(string="Meta Page ID")
+    meta_ig_id = fields.Char(string="Instagram Account ID")
+    
     # Connection status
     state = fields.Selection([
         ('draft', 'Not Connected'),
@@ -33,3 +37,11 @@ class SocialMediaAccount(models.Model):
         self.ensure_one()
         # TODO: Implement connection tests for each platform
         self.state = 'connected'
+
+    def action_login_facebook(self):
+        """ Redirect to Facebook Login """
+        return {
+            'type': 'ir.actions.act_url',
+            'url': '/social_media_ai/facebook/login',
+            'target': 'self',
+        }

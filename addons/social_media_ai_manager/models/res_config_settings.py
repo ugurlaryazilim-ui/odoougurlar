@@ -20,3 +20,7 @@ class ResConfigSettings(models.TransientModel):
         default="You are a helpful customer support assistant. Answer user queries concisely.",
         config_parameter='social_media_ai.system_prompt'
     )
+
+    # Meta Integration Settings
+    social_meta_app_id = fields.Char(string="Meta App ID", config_parameter='social_media_ai.meta_app_id')
+    social_meta_app_secret = fields.Char(string="Meta App Secret", config_parameter='social_media_ai.meta_app_secret')
