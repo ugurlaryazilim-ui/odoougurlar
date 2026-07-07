@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Privacy Policy Page -->
+    <template id="page_privacy_policy" name="Privacy Policy">
+        <t t-call="web.layout">
+            <t t-set="title">Privacy Policy</t>
+            <div class="container mt-5 mb-5" style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px;">
+                <h1 class="mb-4">Privacy Policy</h1>
+                <p class="text-muted">Last updated: <t t-esc="datetime.datetime.now().strftime('%B %d, %Y')"/></p>
+                
+                <h3>1. Introduction</h3>
+                <p>Welcome to our application. This Privacy Policy explains how we collect, use, and protect your information when you use our Social Media integration services.</p>
+                
+                <h3>2. Information We Collect</h3>
+                <p>When you connect your Facebook or Instagram account, we collect basic profile information (such as name, ID) and permissions necessary to read comments, messages, and publish posts on your behalf. We do not store your personal passwords.</p>
+                
+                <h3>3. How We Use Information</h3>
+                <p>We use the collected information solely to provide our AI-powered social media management services, including automated responses to comments and direct messages.</p>
+                
+                <h3>4. Data Protection</h3>
+                <p>Your data is stored securely on our servers. Access tokens are encrypted and used only for authorized API calls to Meta platforms.</p>
+                
+                <h3>5. Contact Us</h3>
+                <p>If you have any questions about this Privacy Policy, please contact us at our official email address.</p>
+            </div>
+        </t>
+    </template>
+
+    <!-- Terms of Service Page -->
+    <template id="page_terms_of_service" name="Terms of Service">
+        <t t-call="web.layout">
+            <t t-set="title">Terms of Service</t>
+            <div class="container mt-5 mb-5" style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px;">
+                <h1 class="mb-4">Terms of Service</h1>
+                <p class="text-muted">Last updated: <t t-esc="datetime.datetime.now().strftime('%B %d, %Y')"/></p>
+                
+                <h3>1. Acceptance of Terms</h3>
+                <p>By accessing or using our application, you agree to be bound by these Terms of Service. If you disagree with any part of the terms, you may not access the service.</p>
+                
+                <h3>2. Service Description</h3>
+                <p>We provide a platform for managing social media accounts, including automated AI responses and post scheduling. Our service integrates with third-party platforms like Meta (Facebook and Instagram).</p>
+                
+                <h3>3. User Responsibilities</h3>
+                <p>You are responsible for maintaining the security of your account and for all activities that occur under your account. You must comply with all applicable laws and third-party platform terms (e.g., Meta Terms of Service).</p>
+                
+                <h3>4. Termination</h3>
+                <p>We may terminate or suspend access to our service immediately, without prior notice or liability, for any reason whatsoever, including without limitation if you breach the Terms.</p>
+            </div>
+        </t>
+    </template>
+
+    <!-- Data Deletion Instructions Page -->
+    <template id="page_data_deletion" name="Data Deletion Instructions">
+        <t t-call="web.layout">
+            <t t-set="title">Data Deletion Instructions</t>
+            <div class="container mt-5 mb-5" style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px;">
+                <h1 class="mb-4">User Data Deletion Instructions</h1>
+                
+                <p>We respect your privacy and provide a simple way to delete your data from our application.</p>
+                
+                <h3>How to Remove Your Data</h3>
+                <p>According to Facebook platform rules, we have provided the following instructions to delete your user data:</p>
+                
+                <ol>
+                    <li class="mb-2">Go to your Facebook Account's "Settings &amp; Privacy".</li>
+                    <li class="mb-2">Click on "Settings".</li>
+                    <li class="mb-2">Look for "Apps and Websites" and you will see all of the apps and websites you linked with your Facebook account.</li>
+                    <li class="mb-2">Search for and click on our app in the list.</li>
+                    <li class="mb-2">Scroll down and click "Remove".</li>
+                </ol>
+                
+                <p class="mt-4">Once you remove the app, we will automatically delete your access tokens and stop all automated services. If you want us to completely erase all historical conversation data stored on our servers, please contact our support team.</p>
+            </div>
+        </t>
+    </template>
+</odoo>

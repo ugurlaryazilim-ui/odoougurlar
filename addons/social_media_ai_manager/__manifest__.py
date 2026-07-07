@@ -29,6 +29,7 @@ Kapsamlı omnichannel gelen kutusu ve sosyal medya gönderi planlama aracı.
         'views/social_media_post_views.xml',
         'views/social_media_conversation_views.xml',
         'views/social_media_inbox_action.xml',
+        'views/legal_pages.xml',
     ],
     'assets': {
         'web.assets_backend': [
