@@ -12,7 +12,7 @@ class AiStudioController(http.Controller):
     """AI Studio REST API endpointleri."""
 
     @http.route('/ai_studio/upload_photo', type='json', auth='user', methods=['POST'])
-    def upload_photo(self, session_id, photo_type, image_data):
+    def upload_photo(self, session_id, photo_type, image_data, detail_placement=None):
         """Mobil cihazdan fotograf yukle."""
         try:
             session = request.env['ai.studio.session'].browse(int(session_id))
@@ -40,13 +40,18 @@ class AiStudioController(http.Controller):
                 'is_acceptable': score >= 50,
             }
 
-            photo = request.env['ai.studio.photo'].create({
+            photo_vals = {
                 'session_id': session.id,
                 'photo_type': photo_type,
                 'image_original': image_data,
                 'quality_score': quality['score'],
                 'quality_warnings': json.dumps(quality['warnings'], ensure_ascii=False),
-            })
+            }
+            # Detay fotoğraflarında konum bilgisi
+            if photo_type == 'detail' and detail_placement in ('front', 'back'):
+                photo_vals['detail_placement'] = detail_placement
+
+            photo = request.env['ai.studio.photo'].create(photo_vals)
 
             return {
                 'success': True,

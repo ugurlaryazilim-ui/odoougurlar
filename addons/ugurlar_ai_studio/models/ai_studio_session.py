@@ -770,10 +770,19 @@ class AiStudioSession(models.Model):
                         pass
                         
                 detail_urls = []
+                # Detay fotoğraflarını mevcut view'a göre filtrele
+                detail_placement_filter = photo_type if photo_type in ('front', 'back') else 'front'
                 detail_photos = env['ai.studio.photo'].search([
                     ('session_id', '=', session_id),
-                    ('photo_type', '=', 'detail')
+                    ('photo_type', '=', 'detail'),
+                    ('detail_placement', '=', detail_placement_filter),
                 ])
+                # Fallback: Eşleşen yoksa tüm detayları gönder (geriye uyumluluk)
+                if not detail_photos:
+                    detail_photos = env['ai.studio.photo'].search([
+                        ('session_id', '=', session_id),
+                        ('photo_type', '=', 'detail')
+                    ])
                 for dp in detail_photos:
                     try:
                         dp_url = provider.upload_image(dp.image_original)
@@ -1226,10 +1235,19 @@ class AiStudioSession(models.Model):
                             pass
                             
                     detail_urls = []
+                    # Detay fotoğraflarını mevcut view'a göre filtrele
+                    detail_placement_filter = photo_type if photo_type in ('front', 'back') else 'front'
                     detail_photos = env['ai.studio.photo'].search([
                         ('session_id', '=', session.id),
-                        ('photo_type', '=', 'detail')
+                        ('photo_type', '=', 'detail'),
+                        ('detail_placement', '=', detail_placement_filter),
                     ])
+                    # Fallback: Eşleşen yoksa tüm detayları gönder (geriye uyumluluk)
+                    if not detail_photos:
+                        detail_photos = env['ai.studio.photo'].search([
+                            ('session_id', '=', session.id),
+                            ('photo_type', '=', 'detail')
+                        ])
                     for dp in detail_photos:
                         try:
                             dp_url = provider.upload_image(dp.image_original)
@@ -1762,10 +1780,19 @@ class AiStudioSession(models.Model):
                             pass
                             
                         detail_urls = []
+                        # Detay fotoğraflarını mevcut view'a göre filtrele
+                        detail_placement_filter = photo_type if photo_type in ('front', 'back') else 'front'
                         detail_photos = env['ai.studio.photo'].search([
                             ('session_id', '=', session.id),
-                            ('photo_type', '=', 'detail')
+                            ('photo_type', '=', 'detail'),
+                            ('detail_placement', '=', detail_placement_filter),
                         ])
+                        # Fallback: Eşleşen yoksa tüm detayları gönder (geriye uyumluluk)
+                        if not detail_photos:
+                            detail_photos = env['ai.studio.photo'].search([
+                                ('session_id', '=', session.id),
+                                ('photo_type', '=', 'detail')
+                            ])
                         for dp in detail_photos:
                             try:
                                 dp_url = provider.upload_image(dp.image_original)

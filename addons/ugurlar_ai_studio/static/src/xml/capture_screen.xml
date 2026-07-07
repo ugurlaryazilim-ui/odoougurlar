@@ -100,12 +100,32 @@
                     </div>
                 </t>
 
+                <!-- Detay Konum Seçici (Ön Yüz / Arka Yüz) -->
+                <t t-if="state.activeTab === 'detail'">
+                    <div class="ais-detail-placement-selector">
+                        <span class="ais-placement-label">Detay konumu:</span>
+                        <button t-attf-class="ais-placement-btn {{ state.detailPlacement === 'front' ? 'active' : '' }}"
+                                t-on-click="() => this.setDetailPlacement('front')">
+                            👔 Ön Yüz
+                        </button>
+                        <button t-attf-class="ais-placement-btn {{ state.detailPlacement === 'back' ? 'active' : '' }}"
+                                t-on-click="() => this.setDetailPlacement('back')">
+                            🔙 Arka Yüz
+                        </button>
+                    </div>
+                </t>
+
                 <!-- Detay Fotoğraf Listesi -->
                 <t t-if="state.activeTab === 'detail' and state.photos.details.length > 0">
                     <div class="ais-detail-gallery-glass">
                         <t t-foreach="state.photos.details" t-as="detail" t-key="detail_index">
                             <div class="ais-detail-item-glass">
                                 <img t-att-src="detail.preview" class="ais-detail-thumb-glass"/>
+                                <span class="ais-detail-placement-badge"
+                                      t-att-title="detail.placement === 'front' ? 'Ön Yüz Detayı' : 'Arka Yüz Detayı'">
+                                    <t t-if="detail.placement === 'front'">👔</t>
+                                    <t t-else="">🔙</t>
+                                </span>
                                 <button class="ais-detail-remove-glass" t-on-click="() => this.removeDetail(detail_index)">✕</button>
                             </div>
                         </t>

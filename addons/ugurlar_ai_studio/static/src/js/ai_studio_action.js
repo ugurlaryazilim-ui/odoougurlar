@@ -139,11 +139,16 @@ export class AiStudioAction extends Component {
 
                 for (const photo of photos) {
                     try {
-                        await this._jsonRpc("/ai_studio/upload_photo", {
+                        const uploadParams = {
                             session_id: res.session_id,
                             photo_type: photo.type,
                             image_data: photo.data,
-                        });
+                        };
+                        // Detay fotoğraflarında konum bilgisi gönder
+                        if (photo.type === 'detail' && photo.detail_placement) {
+                            uploadParams.detail_placement = photo.detail_placement;
+                        }
+                        await this._jsonRpc("/ai_studio/upload_photo", uploadParams);
                     } catch (uploadErr) {
                         console.error("Photo upload error:", uploadErr);
                     }

@@ -19,6 +19,7 @@ export class CaptureScreen extends Component {
             activeTab: "front",    // front, back, detail
             cameraActive: false,
             cameraError: null,
+            detailPlacement: "front",  // Detay hangi yüze ait: front veya back
             photos: {
                 front: null,
                 back: null,
@@ -132,7 +133,11 @@ export class CaptureScreen extends Component {
             this.state.photos.back = { data: base64Data, preview: dataUrl };
             this.state.hasBack = true;
         } else if (tab === "detail") {
-            this.state.photos.details.push({ data: base64Data, preview: dataUrl });
+            this.state.photos.details.push({
+                data: base64Data,
+                preview: dataUrl,
+                placement: this.state.detailPlacement,
+            });
             this.state.detailCount = this.state.photos.details.length;
         }
     }
@@ -157,6 +162,10 @@ export class CaptureScreen extends Component {
         this.state.activeTab = tab;
     }
 
+    setDetailPlacement(placement) {
+        this.state.detailPlacement = placement;
+    }
+
     get canProceed() {
         return this.state.hasFront; // En az ön fotoğraf gerekli
     }
@@ -179,7 +188,11 @@ export class CaptureScreen extends Component {
             photos.push({ type: "back", data: this.state.photos.back.data });
         }
         for (const detail of this.state.photos.details) {
-            photos.push({ type: "detail", data: detail.data });
+            photos.push({
+                type: "detail",
+                data: detail.data,
+                detail_placement: detail.placement || 'front',
+            });
         }
 
         this.stopCamera();
