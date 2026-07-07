@@ -68,15 +68,20 @@ async function openReviewPopup(sessionId) {
 
         const approvedCount = items.filter(i => i.is_approved).length;
         const pendingCount = items.filter(i => i.pending_revision).length;
+        const failedCount = items.filter(i => i.state === 'failed').length;
         const totalCount = items.length;
         const allResolved = items.every(i => i.is_approved || i.pending_revision === false || i.pending_revision === undefined);
         const hasPending = pendingCount > 0;
-        const canComplete = canApprove && approvedCount > 0 && !hasPending;
+        const hasFailed = failedCount > 0;
+        const canComplete = canApprove && approvedCount > 0 && !hasPending && !hasFailed;
 
         // Progress text
         let progressText = `${approvedCount}/${totalCount} onaylandı`;
         if (hasPending) {
             progressText += ` · ⏳ ${pendingCount} revize bekleniyor`;
+        }
+        if (hasFailed) {
+            progressText += ` · ❌ ${failedCount} başarısız`;
         }
 
         overlay.innerHTML = `
@@ -105,6 +110,7 @@ async function openReviewPopup(sessionId) {
                             <span class="ais-rp-tab-label">${it.photo_type_label}</span>
                             ${it.is_approved ? '<span class="ais-rp-tab-check">✓</span>' : ''}
                             ${it.pending_revision ? '<span class="ais-rp-tab-check" style="color:#f59e0b">⏳</span>' : ''}
+                            ${it.state === 'failed' ? '<span class="ais-rp-tab-check" style="color:#ef4444">✗</span>' : ''}
                             ${it.revision_number > 1 ? '<span class="ais-rp-tab-version">v' + it.revision_number + '</span>' : ''}
                         </button>
                     `).join('')}
@@ -120,6 +126,20 @@ async function openReviewPopup(sessionId) {
                             <p>Bu görsel reddedildi ve yeni versiyon AI tarafından üretiliyor.</p>
                             <p class="ais-rp-pending-hint">Hazır olduğunda otomatik olarak yüklenecek.</p>
                             <div class="ais-rp-pending-spinner"></div>
+                        </div>
+                    ` : item.state === 'failed' ? `
+                        <!-- Başarısız Ekranı -->
+                        <div class="ais-rp-pending-revision">
+                            <div class="ais-rp-pending-icon" style="color:#ef4444">❌</div>
+                            <h3 style="color:#ef4444">Üretim Başarısız Oldu</h3>
+                            <p style="color:#9ca3af; max-width:500px; text-align:center;">${item.error_message || 'Bilinmeyen bir hata oluştu.'}</p>
+                            ${canApprove ? `
+                                <button class="ais-rp-btn ais-rp-btn-approve" id="ais-rp-retry" style="margin-top:20px; background:#f59e0b;">
+                                    🔄 Tekrar Dene
+                                </button>
+                            ` : `
+                                <p style="color:#6b7280; margin-top:10px;">Onaycının tekrar denemesi bekleniyor.</p>
+                            `}
                         </div>
                     ` : `
                         <!-- Yan yana görseller -->
@@ -146,6 +166,8 @@ async function openReviewPopup(sessionId) {
                     <div class="ais-rp-actions">
                         ${item.pending_revision ? `
                             <div class="ais-rp-pending-badge">⏳ Revize üretiliyor — diğer görselleri inceleyebilirsiniz</div>
+                        ` : item.state === 'failed' ? `
+                            <div class="ais-rp-pending-badge" style="background:rgba(239,68,68,0.15); color:#ef4444;">❌ Bu görsel başarısız oldu${canApprove ? ' — Tekrar Dene butonunu kullanın' : ''}</div>
                         ` : !canApprove ? `
                             <div class="ais-rp-operator-badge">
                                 📷 Görüntüleme Modu — Onay yetkisi için onaycı rolü gerekli
@@ -229,6 +251,7 @@ async function openReviewPopup(sessionId) {
         document.getElementById('ais-rp-modal-bg')?.addEventListener('click', () => { showRejectModal = false; render(); });
         document.getElementById('ais-rp-modal-close')?.addEventListener('click', () => { showRejectModal = false; render(); });
         document.getElementById('ais-rp-submit-reject')?.addEventListener('click', submitReject);
+        document.getElementById('ais-rp-retry')?.addEventListener('click', retryFailed);
 
         // Tab clicks
         overlay.querySelectorAll('.ais-rp-tab').forEach(tab => {
@@ -346,6 +369,37 @@ async function openReviewPopup(sessionId) {
         }
     }
 
+    async function retryFailed() {
+        const item = items[currentIndex];
+        const btn = document.getElementById('ais-rp-retry');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ Yeniden deneniyor...'; }
+
+        try {
+            const result = await _jsonRpc('/ai_studio/retry_generation', {
+                generation_id: item.id,
+            });
+
+            if (result.error) {
+                alert(result.error);
+                render();
+                return;
+            }
+
+            // Başarılı — item'ı pending durumuna al
+            item.state = 'pending';
+            item.pending_revision = true;
+            item.error_message = '';
+
+            // Polling başlat
+            startRevisionPolling();
+
+            render();
+        } catch(e) {
+            alert('Tekrar deneme hatası: ' + e.message);
+            render();
+        }
+    }
+
     // Revizyon polling — pending olan görsellerin yeni versiyonlarını kontrol et
     function startRevisionPolling() {
         if (revisionPollTimer) return; // Zaten çalışıyor
@@ -366,19 +420,22 @@ async function openReviewPopup(sessionId) {
                 let updated = false;
 
                 for (const pendingItem of pendingItems) {
-                    // Aynı photo_type'ın yeni done versiyonu var mı?
-                    const newVersion = freshData.items.find(fi =>
-                        fi.photo_type === pendingItem.photo_type &&
-                        fi.id !== pendingItem.id &&
-                        !fi.is_approved
+                    // Aynı photo_type veya aynı ID'nin güncel durumunu bul
+                    // action_retry: aynı ID'yi tekrar kullanır (copy yapmaz)
+                    // action_confirm_reject: yeni ID oluşturur
+                    const freshVersion = freshData.items.find(fi =>
+                        (fi.id === pendingItem.id && (fi.state === 'done' || fi.state === 'failed')) ||
+                        (fi.photo_type === pendingItem.photo_type &&
+                         fi.id !== pendingItem.id &&
+                         !fi.is_approved &&
+                         (fi.state === 'done' || fi.state === 'failed'))
                     );
 
-                    if (newVersion) {
-                        // Pending item'ı yeni versiyonla güncelle
+                    if (freshVersion) {
                         const idx = items.indexOf(pendingItem);
                         if (idx >= 0) {
                             items[idx] = {
-                                ...newVersion,
+                                ...freshVersion,
                                 pending_revision: false,
                             };
                             updated = true;

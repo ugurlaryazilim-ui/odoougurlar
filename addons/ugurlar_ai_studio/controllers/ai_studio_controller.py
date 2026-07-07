@@ -252,6 +252,28 @@ class AiStudioController(http.Controller):
             _logger.exception('reject_generation hatasi: %s', e)
             return {'error': str(e)}
 
+    @http.route('/ai_studio/retry_generation', type='json', auth='user', methods=['POST'])
+    def retry_generation(self, generation_id):
+        """Başarısız üretimi tekrar dene. Onaycı ve yönetici yetkili."""
+        try:
+            if not request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'):
+                return {'error': 'Bu işlemi yapmaya yetkiniz yok.'}
+
+            gen = request.env['ai.studio.generation'].browse(int(generation_id))
+            if not gen.exists():
+                return {'error': 'Üretim bulunamadı.'}
+            if gen.state != 'failed':
+                return {'error': 'Sadece başarısız üretimler tekrar denenebilir.'}
+
+            gen.action_retry()
+            return {
+                'success': True,
+                'generation_id': gen.id,
+            }
+        except Exception as e:
+            _logger.exception('retry_generation hatasi: %s', e)
+            return {'error': str(e)}
+
     @http.route('/ai_studio/complete_session', type='json', auth='user', methods=['POST'])
     def complete_session(self, session_id):
         """Oturumu tamamla ve gorselleri urune kaydet. Sadece onaycı ve yönetici."""
@@ -282,9 +304,10 @@ class AiStudioController(http.Controller):
             if not session.exists():
                 return {'error': 'Oturum bulunamadi.'}
 
-            # Sadece son versiyon (reject_reason_id yok veya approved) generation'lari al
+            # Son versiyon generation'lari al (done, failed, pending, processing)
+            # Reddedilmis olanlari haric tut (reject_reason_id var = eski versiyon)
             generations = session.generation_ids.filtered(
-                lambda g: g.state == 'done' and not g.reject_reason_id
+                lambda g: g.state in ('done', 'failed', 'pending', 'processing') and not g.reject_reason_id
             ).sorted(key=lambda g: (
                 {'front': 0, 'back': 1, 'side': 2, 'detail': 3}.get(g.photo_type, 9),
                 g.revision_number
@@ -302,6 +325,8 @@ class AiStudioController(http.Controller):
                     'revision_number': gen.revision_number,
                     'original_url': '/web/image/ai.studio.generation/%d/original_image' % gen.id,
                     'generated_url': '/web/image/ai.studio.generation/%d/generated_image' % gen.id,
+                    'error_message': gen.error_message or '',
+                    'pending_revision': gen.state in ('pending', 'processing'),
                 })
 
             # Red sebepleri
