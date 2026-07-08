@@ -2078,6 +2078,10 @@ class AiStudioSession(models.Model):
         if not approved:
             raise UserError(_('En az bir görsel onaylanmalı.'))
             
+        has_primary = approved.filtered(lambda g: g.is_primary)
+        if not has_primary:
+            raise UserError(_('Lütfen onayladığınız görsellerden birini "Ana Görsel" (Yıldızlı ikon) olarak seçin!'))
+            
         self.state = 'saving'
         
         # Odoo'nun cron sistemini tetikle ki güvenli bir environment'te asenkron işlesin

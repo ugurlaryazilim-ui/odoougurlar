@@ -173,7 +173,10 @@ async function openReviewPopup(sessionId) {
                                 📷 Görüntüleme Modu — Onay yetkisi için onaycı rolü gerekli
                             </div>
                         ` : item.is_approved ? `
-                            <div class="ais-rp-approved-badge">✅ Bu görsel onaylandı ${item.is_primary ? '⭐' : ''}</div>
+                            <div class="ais-rp-approved-badge">✅ Bu görsel onaylandı</div>
+                            <button class="ais-rp-btn ais-rp-btn-star ${item.is_primary ? 'active' : ''}" id="ais-rp-star">
+                                ⭐ Ana Görsel
+                            </button>
                         ` : `
                             <button class="ais-rp-btn ais-rp-btn-reject" id="ais-rp-reject">
                                 ❌ Reddet
@@ -459,6 +462,12 @@ async function openReviewPopup(sessionId) {
     }
 
     async function complete() {
+        const approvedItems = items.filter(i => i.is_approved);
+        if (approvedItems.length > 0 && !approvedItems.some(i => i.is_primary)) {
+            alert('Lütfen onayladığınız görsellerden birini "Ana Görsel" (yıldız ikonuna tıklayarak) olarak seçin!');
+            return;
+        }
+
         const btn = document.getElementById('ais-rp-complete');
         if (btn) { btn.disabled = true; btn.textContent = '⏳ Kaydediliyor...'; }
 
