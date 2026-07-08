@@ -60,7 +60,7 @@ class SocialAIProvider(models.AbstractModel):
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
         headers = {'Content-Type': 'application/json'}
         data = {
-            "system_instruction": {
+            "systemInstruction": {
                 "parts": [{"text": system_prompt}]
             },
             "contents": [{
