@@ -42,7 +42,7 @@ class SocialMediaAccount(models.Model):
         
         subscribe_url = f"https://graph.facebook.com/v19.0/{self.meta_page_id}/subscribed_apps"
         sub_data = {
-            'subscribed_fields': 'messages,messaging_postbacks,comments,feed',
+            'subscribed_fields': 'messages,messaging_postbacks,feed',
             'access_token': self.api_token
         }
         
