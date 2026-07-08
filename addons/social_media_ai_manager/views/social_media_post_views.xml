@@ -44,6 +44,7 @@
                     </div>
                     <group>
                         <group>
+                            <field name="post_type" widget="radio" options="{'horizontal': true}" readonly="state != 'draft'"/>
                             <field name="scheduled_date" readonly="state != 'draft'"/>
                             <field name="account_ids" widget="many2many_tags" readonly="state != 'draft'"/>
                         </group>

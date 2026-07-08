@@ -11,6 +11,11 @@ class SocialMediaPost(models.Model):
     message = fields.Text(string="Post Message", required=True)
     
     # Scheduling
+    post_type = fields.Selection([
+        ('post', 'Gönderi (Akış)'),
+        ('story', 'Hikaye (Story)'),
+        ('reels', 'Reels (Kısa Video)')
+    ], string="Gönderi Tipi", default='post', required=True)
     scheduled_date = fields.Datetime(string="Scheduled Date", default=fields.Datetime.now, required=True)
     state = fields.Selection([
         ('draft', 'Draft'),
@@ -113,9 +118,27 @@ class SocialMediaPostLine(models.Model):
         message = self.post_id.message
 
         if not images:
+            if self.post_id.post_type != 'post':
+                raise ValueError("Hikaye (Story) veya Reels paylaşımları için en az 1 görsel/video gereklidir.")
             # Text only post
             url = f"https://graph.facebook.com/v19.0/{page_id}/feed"
             payload = {'message': message, 'access_token': token}
+            res = requests.post(url, data=payload).json()
+            if 'error' in res:
+                raise ValueError(res['error']['message'])
+            self.platform_post_id = res.get('id')
+        elif self.post_id.post_type == 'story':
+            url = f"https://graph.facebook.com/v19.0/{page_id}/photo_stories"
+            img_url = f"{base_url}/web/image/{images[0].id}"
+            payload = {'url': img_url, 'access_token': token}
+            res = requests.post(url, data=payload).json()
+            if 'error' in res:
+                raise ValueError(res['error']['message'])
+            self.platform_post_id = res.get('post_id') or res.get('id')
+        elif self.post_id.post_type == 'reels':
+            url = f"https://graph.facebook.com/v19.0/{page_id}/videos"
+            video_url = f"{base_url}/web/image/{images[0].id}"
+            payload = {'file_url': video_url, 'description': message, 'access_token': token}
             res = requests.post(url, data=payload).json()
             if 'error' in res:
                 raise ValueError(res['error']['message'])
@@ -179,10 +202,16 @@ class SocialMediaPostLine(models.Model):
             img_url = f"{base_url}/web/image/{img.id}"
             encoded_url = urllib.parse.quote(img_url, safe='')
             # Is carousel item?
-            is_carousel = "true" if len(images) > 1 else "false"
+            is_carousel = "true" if len(images) > 1 and self.post_id.post_type == 'post' else "false"
             
             cont_url = f"https://graph.facebook.com/v19.0/{ig_id}/media?image_url={encoded_url}&is_carousel_item={is_carousel}&access_token={token}"
-            if len(images) == 1:
+            
+            if self.post_id.post_type == 'story':
+                cont_url = f"https://graph.facebook.com/v19.0/{ig_id}/media?image_url={encoded_url}&media_type=STORIES&access_token={token}"
+            elif self.post_id.post_type == 'reels':
+                cont_url = f"https://graph.facebook.com/v19.0/{ig_id}/media?video_url={encoded_url}&media_type=REELS&access_token={token}"
+                
+            if len(images) == 1 and self.post_id.post_type != 'story':
                  cont_url += f"&caption={urllib.parse.quote(message, safe='')}"
                  
             res = requests.post(cont_url).json()
