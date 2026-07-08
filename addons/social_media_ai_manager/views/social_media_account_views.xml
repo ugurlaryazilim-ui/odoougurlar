@@ -19,7 +19,7 @@
             <form string="Social Media Account">
                 <header>
                     <button name="action_login_facebook" string="Login with Facebook" type="object" class="oe_highlight" invisible="platform not in ('facebook', 'instagram')"/>
-                    <button name="action_test_connection" string="Test Connection" type="object" class="oe_highlight" invisible="state == 'connected'"/>
+                    <button name="action_subscribe_webhooks" string="Tetikleyicileri Bağla" type="object" class="oe_highlight" invisible="platform not in ('facebook', 'instagram')"/>
                     <field name="state" widget="statusbar"/>
                 </header>
                 <sheet>

@@ -32,11 +32,30 @@ class SocialMediaAccount(models.Model):
         ('error', 'Error / Disconnected')
     ], string="Status", default='draft')
     
-    def action_test_connection(self):
-        """ Test the API connection based on platform """
+    def action_subscribe_webhooks(self):
+        """ Manually subscribe the Page to the App's Webhooks and show result """
         self.ensure_one()
-        # TODO: Implement connection tests for each platform
-        self.state = 'connected'
+        if self.platform not in ['facebook', 'instagram'] or not self.api_token or not self.meta_page_id:
+            raise models.ValidationError("Bu işlem için Facebook/Instagram seçili olmalı, Meta Page ID ve API Token dolu olmalıdır.")
+            
+        import requests
+        
+        subscribe_url = f"https://graph.facebook.com/v19.0/{self.meta_page_id}/subscribed_apps"
+        sub_data = {
+            'subscribed_fields': 'messages,messaging_postbacks',
+            'access_token': self.api_token
+        }
+        
+        try:
+            resp = requests.post(subscribe_url, data=sub_data).json()
+            if resp.get('success'):
+                raise models.ValidationError("BAŞARILI! Facebook sayfanız Odoo tetikleyicisine başarıyla bağlandı. Artık mesajlar Odoo'ya düşecek.")
+            else:
+                raise models.ValidationError(f"HATA! Facebook tetikleyiciyi reddetti: {resp}")
+        except Exception as e:
+            if "BAŞARILI" in str(e) or "HATA" in str(e):
+                raise e
+            raise models.ValidationError(f"Bağlantı hatası: {e}")
 
     def action_login_facebook(self):
         """ Redirect to Facebook Login """
