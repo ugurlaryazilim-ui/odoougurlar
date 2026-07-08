@@ -33,6 +33,9 @@
                         <setting string="Global System Prompt" help="The main prompt given to the AI.">
                             <field name="social_system_prompt" widget="text"/>
                         </setting>
+                        <setting string="Comment Auto-Reply" help="The public reply text sent when responding to a comment. The AI's actual answer will be sent via DM.">
+                            <field name="social_comment_auto_reply"/>
+                        </setting>
                     </block>
 
                     <block title="Meta (Facebook &amp; Instagram) OAuth Configuration" name="meta_oauth_settings">

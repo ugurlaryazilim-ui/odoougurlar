@@ -15,10 +15,17 @@ class ResConfigSettings(models.TransientModel):
     social_ollama_endpoint = fields.Char(string="Ollama Endpoint URL", default="http://localhost:11434/api/generate", config_parameter='social_media_ai.ollama_endpoint')
     social_ollama_model = fields.Char(string="Ollama Model Name", default="llama3", config_parameter='social_media_ai.ollama_model')
 
-    social_system_prompt = fields.Char(
+    social_system_prompt = fields.Text(
         string="System Prompt", 
-        default="You are a helpful customer support assistant. Answer user queries concisely.",
+        default="Sen profesyonel bir müşteri temsilcisisin. Sorulara kısa ve nazik cevaplar ver. Eğer soruyu cevaplayamıyorsan veya müşteri bir insanla görüşmek istiyorsa cevabının sonuna [DEVRET] yaz.",
         config_parameter='social_media_ai.system_prompt'
+    )
+    
+    social_comment_auto_reply = fields.Char(
+        string="Yorum Otomatik Yanıt (Herkese Açık)",
+        default="Merhaba, konu ile ilgili detaylı bilgi DM (Mesaj) üzerinden iletilmiştir. Teşekkür ederiz.",
+        config_parameter='social_media_ai.comment_auto_reply',
+        help="Bir gönderiye yorum yapıldığında, AI herkese açık olarak bu metni yazar. Gerçek cevabı DM'den gönderir."
     )
 
     # Meta Integration Settings

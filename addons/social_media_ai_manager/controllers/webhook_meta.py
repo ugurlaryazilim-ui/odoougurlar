@@ -231,6 +231,15 @@ class WebhookMeta(http.Controller):
         reply_text = ai_provider.generate_response(user_message, f"User is asking on {account.platform}. Keep it friendly and concise.")
         
         if reply_text:
+            # Check for Handoff trigger
+            if "[DEVRET]" in reply_text.upper():
+                reply_text = reply_text.replace("[DEVRET]", "").replace("[devret]", "").strip()
+                conversation.sudo().write({'state': 'open'})
+                
+                # If AI gave an empty string after removing the tag, send a generic message
+                if not reply_text:
+                    reply_text = "Sizi hemen bir müşteri temsilcimize aktarıyorum. Lütfen hattan ayrılmayın."
+            
             # Save AI response in Odoo
             env['social.media.message'].sudo().create({
                 'conversation_id': conversation.id,
@@ -240,9 +249,14 @@ class WebhookMeta(http.Controller):
             })
             
             if comment_id:
-                # Reply to the comment directly
-                self._send_meta_comment_reply(comment_id, reply_text, account)
-                # Send private message to the commenter
+                # Get the auto-reply text for public comments from settings
+                auto_reply = env['ir.config_parameter'].sudo().get_param(
+                    'social_media_ai.comment_auto_reply', 
+                    'Merhaba, detaylı bilgi DM üzerinden iletilmiştir.'
+                )
+                # Reply to the comment publicly with the generic text
+                self._send_meta_comment_reply(comment_id, auto_reply, account)
+                # Send the actual AI answer via private DM
                 self._send_meta_private_reply(comment_id, reply_text, account)
             else:
                 # Standard DM
