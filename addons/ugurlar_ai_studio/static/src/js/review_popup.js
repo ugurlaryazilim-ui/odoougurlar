@@ -513,8 +513,13 @@ async function openReviewPopup(sessionId) {
         const btn = document.getElementById('ais-rp-complete');
         if (btn) { btn.disabled = true; btn.textContent = '⏳ Kaydediliyor...'; }
 
+        const payload = {
+            session_id: data.session_id,
+            approved_items: approvedItems.map(i => ({ id: i.id, is_primary: i.is_primary }))
+        };
+
         try {
-            await _jsonRpc('/ai_studio/complete_session', { session_id: data.session_id });
+            await _jsonRpc('/ai_studio/complete_session', payload);
 
             // Sonraki review session var mı?
             if (data.next_session_id) {
@@ -542,7 +547,7 @@ async function openReviewPopup(sessionId) {
                 window.location.reload();
             }
         } catch(e) {
-            alert('Kaydetme hatası: ' + e.message);
+            showToast('Kaydetme hatası: ' + e.message);
             render();
         }
     }

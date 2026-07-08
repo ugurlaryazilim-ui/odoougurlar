@@ -384,7 +384,7 @@ class AiStudioController(http.Controller):
             return {'error': str(e)}
 
     @http.route('/ai_studio/complete_session', type='json', auth='user', methods=['POST'])
-    def complete_session(self, session_id):
+    def complete_session(self, session_id, approved_items=None):
         """Oturumu tamamla ve gorselleri urune kaydet. Sadece onaycı ve yönetici."""
         import psycopg2
         try:
@@ -393,6 +393,14 @@ class AiStudioController(http.Controller):
             session = request.env['ai.studio.session'].browse(int(session_id))
             if not session.exists():
                 return {'error': 'Oturum bulunamadi.'}
+
+            if approved_items:
+                for item in approved_items:
+                    gen_id = item.get('id')
+                    is_primary = item.get('is_primary', False)
+                    gen = request.env['ai.studio.generation'].browse(int(gen_id))
+                    if gen.exists() and gen.session_id.id == session.id:
+                        gen.write({'is_primary': is_primary})
 
             session.action_mark_done_async()
             return {'success': True}
