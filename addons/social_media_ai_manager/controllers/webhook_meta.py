@@ -165,11 +165,15 @@ class WebhookMeta(http.Controller):
         if not account:
             return
 
+        # Extract name directly from webhook payload if available
+        sender_from = value.get('from', {})
+        webhook_sender_name = sender_from.get('name') or sender_from.get('username')
+
         # Find or create Partner
         partner = env['res.partner'].sudo().search([('ref', '=', f'meta_{sender_id}')], limit=1)
         
         # Try to fetch real name
-        meta_name = f"Meta Commenter {sender_id}"
+        meta_name = webhook_sender_name or f"Meta Commenter {sender_id}"
         if not partner or partner.name.startswith("Meta "):
             profile = self._fetch_meta_user_profile(sender_id, account)
             if profile and ('name' in profile or 'first_name' in profile):
