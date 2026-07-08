@@ -83,6 +83,11 @@ class WebhookMeta(http.Controller):
                 _logger.error("No matching Meta account found in Odoo.")
                 return
 
+            ignored_ids = [idx for idx in [account.meta_page_id, account.meta_ig_id] if idx]
+            if sender_id in ignored_ids:
+                _logger.info("Ignoring outgoing DM from the business account itself.")
+                return
+
             # Find or create Partner
             partner = env['res.partner'].sudo().search([('ref', '=', f'meta_{sender_id}')], limit=1)
             
@@ -163,6 +168,11 @@ class WebhookMeta(http.Controller):
         ], limit=1) # Note: For production, match by page/ig ID from webhook context
 
         if not account:
+            return
+
+        ignored_ids = [idx for idx in [account.meta_page_id, account.meta_ig_id] if idx]
+        if sender_id in ignored_ids:
+            _logger.info("Ignoring outgoing comment from the business account itself.")
             return
 
         # Extract name directly from webhook payload if available
