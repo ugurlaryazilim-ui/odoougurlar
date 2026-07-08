@@ -59,34 +59,28 @@ class MetaOAuthController(http.Controller):
             if not long_user_token:
                 return f"Error getting long-lived token: {long_token_resp}"
 
-            # 3. Get Pages and Page Tokens
-            pages_url = f"https://graph.facebook.com/v19.0/me/accounts?access_token={long_user_token}"
-            pages_resp = requests.get(pages_url).json()
-            
-            _logger.info("Meta Pages Response: %s", pages_resp)
+            # 3. Bypass `me/accounts` (pages_show_list) by directly querying configured pages
+            # Since Meta blocks pages_show_list for internal apps, we fetch the token directly for the pages configured in Odoo.
+            accounts = env['social.media.account'].sudo().search([('platform', '=', 'facebook')])
             
             created_accounts = []
+            responses_log = []
 
-            for page in pages_resp.get('data', []):
-                page_id = page.get('id')
-                page_name = page.get('name')
-                page_token = page.get('access_token')
+            for account in accounts:
+                page_id = account.meta_page_id
+                if not page_id:
+                    continue
+                    
+                # Query the page directly using the user token
+                page_url = f"https://graph.facebook.com/v19.0/{page_id}?fields=name,access_token,instagram_business_account&access_token={long_user_token}"
+                page_resp = requests.get(page_url).json()
+                responses_log.append(f"Page {page_id}: {page_resp}")
                 
-                # 4. Check for linked Instagram Account
-                ig_url = f"https://graph.facebook.com/v19.0/{page_id}?fields=instagram_business_account&access_token={page_token}"
-                ig_resp = requests.get(ig_url).json()
-                ig_account = ig_resp.get('instagram_business_account')
-                
-                # Create or Update Facebook Page Account
-                account = env['social.media.account'].sudo().search([('meta_page_id', '=', page_id), ('platform', '=', 'facebook')], limit=1)
-                if not account:
-                    account = env['social.media.account'].sudo().create({
-                        'name': f"{page_name} (Facebook Page)",
-                        'platform': 'facebook',
-                        'meta_page_id': page_id,
-                    })
-                
-                # Update tokens
+                page_token = page_resp.get('access_token')
+                if not page_token:
+                    continue
+                    
+                # Update Facebook tokens
                 account.sudo().write({
                     'api_token': page_token,
                     'active': True,
@@ -94,12 +88,14 @@ class MetaOAuthController(http.Controller):
                 })
                 created_accounts.append(account.name)
                 
+                # Check for linked Instagram Account
+                ig_account = page_resp.get('instagram_business_account')
                 if ig_account:
                     ig_id = ig_account.get('id')
                     ig_acc = env['social.media.account'].sudo().search([('meta_ig_id', '=', ig_id), ('platform', '=', 'instagram')], limit=1)
                     if not ig_acc:
                         ig_acc = env['social.media.account'].sudo().create({
-                            'name': f"{page_name} (Instagram)",
+                            'name': f"{page_resp.get('name', 'Instagram')} (Instagram)",
                             'platform': 'instagram',
                             'meta_ig_id': ig_id,
                             'meta_page_id': page_id,
@@ -113,7 +109,7 @@ class MetaOAuthController(http.Controller):
                     created_accounts.append(ig_acc.name)
 
             if not created_accounts:
-                return f"Facebook BAŞARIYLA bağlandı ama Odoo'ya HİÇBİR SAYFA göndermedi! Facebook'un verdiği tam yanıt: {pages_resp}"
+                return f"Facebook bağlandı ancak Odoo'daki hesaplarda geçerli bir 'Meta Page ID' bulunamadı veya Facebook token vermedi! Facebook Yanıtları: {responses_log}"
 
             return request.redirect('/web#action=social_media_ai_manager.action_social_media_account')
         except Exception as e:
