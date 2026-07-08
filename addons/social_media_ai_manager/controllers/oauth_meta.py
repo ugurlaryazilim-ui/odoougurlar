@@ -112,6 +112,9 @@ class MetaOAuthController(http.Controller):
                     })
                     created_accounts.append(ig_acc.name)
 
+            if not created_accounts:
+                return f"Facebook BAŞARIYLA bağlandı ama Odoo'ya HİÇBİR SAYFA göndermedi! Facebook'un verdiği tam yanıt: {pages_resp}"
+
             return request.redirect('/web#action=social_media_ai_manager.action_social_media_account')
         except Exception as e:
             _logger.error("Facebook Callback Error: %s", str(e), exc_info=True)
