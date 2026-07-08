@@ -33,6 +33,11 @@ class ResConfigSettings(models.TransientModel):
     social_meta_app_secret = fields.Char(string="Meta App Secret", config_parameter='social_media_ai.meta_app_secret')
 
     social_post_cron_interval = fields.Integer(string="Gönderi Yayınlama Gecikmesi (Dakika)", default=3)
+    
+    # Feature Toggles
+    social_enable_comments = fields.Boolean(string="Yorumlara Cevap Ver", config_parameter='social_media_ai.enable_comments')
+    social_enable_dms = fields.Boolean(string="DM'lere Cevap Ver", config_parameter='social_media_ai.enable_dms')
+    social_enable_posting = fields.Boolean(string="Paylaşımları Yap", default=True, config_parameter='social_media_ai.enable_posting')
 
     @api.model
     def get_values(self):

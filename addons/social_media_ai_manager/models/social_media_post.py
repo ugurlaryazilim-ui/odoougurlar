@@ -54,6 +54,12 @@ class SocialMediaPost(models.Model):
     @api.model
     def _cron_publish_scheduled_posts(self):
         """ Cron job to publish posts whose time has come """
+        
+        # Check if automated posting is enabled in settings
+        enable_posting = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.enable_posting', 'True')
+        if enable_posting != 'True':
+            return
+            
         posts = self.search([
             ('state', '=', 'scheduled'),
             ('scheduled_date', '<=', fields.Datetime.now())

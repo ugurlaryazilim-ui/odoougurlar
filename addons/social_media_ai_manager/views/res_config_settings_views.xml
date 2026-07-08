@@ -37,6 +37,18 @@
                             <field name="social_comment_auto_reply"/>
                         </setting>
                     </block>
+                    <block title="Yapay Zeka Yetkileri (İzinler)" name="ai_permissions_settings">
+                        <setting string="Yorumlara Cevap Ver" help="Yapay zekanın gönderilere gelen yorumları okuyup cevaplamasına izin verir.">
+                            <field name="social_enable_comments" widget="boolean_toggle"/>
+                        </setting>
+                        <setting string="DM'lere Cevap Ver" help="Yapay zekanın DM kutunuza gelen mesajları okuyup cevaplamasına izin verir.">
+                            <field name="social_enable_dms" widget="boolean_toggle"/>
+                        </setting>
+                        <setting string="Paylaşımları Yap" help="Zamanlanmış içeriklerin otomatik olarak Meta'da yayınlanmasına izin verir.">
+                            <field name="social_enable_posting" widget="boolean_toggle"/>
+                        </setting>
+                    </block>
+
                     <block title="Sistem Zamanlamaları" name="cron_settings">
                         <setting string="Gönderi Yayınlama Kontrolü (Dakika)" help="Zamanlanmış gönderilerin kaç dakikada bir kontrol edilip yayınlanacağını belirler (Varsayılan: 3).">
                             <field name="social_post_cron_interval"/>
