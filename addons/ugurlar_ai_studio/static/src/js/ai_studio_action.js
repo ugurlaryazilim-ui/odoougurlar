@@ -139,7 +139,7 @@ export class AiStudioAction extends Component {
                 product_id: this.state.productId,
             });
             if (res.error) {
-                this.notification.add(res.error, { type: "danger" });
+                this.notification.add(res.error, { type: "danger", sticky: false });
                 console.error("Session create error:", res.error);
                 return;
             }
@@ -173,7 +173,7 @@ export class AiStudioAction extends Component {
                 this.navigateTo("settings");
             }
         } catch (e) {
-            this.notification.add(e.message || _t("Oturum olusturulamadi."), { type: "danger" });
+            this.notification.add(e.message || _t("Oturum olusturulamadi."), { type: "danger", sticky: false });
             console.error("Session creation exception:", e);
         }
     }
@@ -199,7 +199,7 @@ export class AiStudioAction extends Component {
 
             this.navigateTo("processing");
         } catch (e) {
-            this.notification.add(e.message || _t("Islem baslatilamadi."), { type: "danger" });
+            this.notification.add(e.message || _t("Islem baslatilamadi."), { type: "danger", sticky: false });
         }
     }
 
@@ -245,7 +245,7 @@ export class AiStudioAction extends Component {
                         this.state.productGender = '';  // Aynı template, aynı cinsiyet
                         this.notification.add(
                             _t("🎨 " + (nextVariant.color || nextVariant.attributes) + " varyantı çekime hazır!"),
-                            { type: "info" }
+                            { type: "info", sticky: false }
                         );
                         this.navigateTo("capture");
                     },
@@ -258,7 +258,7 @@ export class AiStudioAction extends Component {
                 // Görselsiz varyant yok, direkt scan'e dön
                 this.notification.add(
                     _t("📸 AI işlemesi için gönderildi. Onayıcı görselleri inceleyecek."),
-                    { type: "success", sticky: true }
+                    { type: "success", sticky: false }
                 );
                 this.resetSession();
                 this.navigateTo("scan");
@@ -268,7 +268,7 @@ export class AiStudioAction extends Component {
             // Hata olsa bile scan'e dön
             this.notification.add(
                 _t("📸 AI işlemesi için gönderildi. Onayıcı görselleri inceleyecek."),
-                { type: "success", sticky: true }
+                { type: "success", sticky: false }
             );
             this.resetSession();
             this.navigateTo("scan");
@@ -278,7 +278,7 @@ export class AiStudioAction extends Component {
     async onProcessingComplete() {
         // Operatör review ekranına erişemez — direkt scan'e dön
         if (this.state.userRole === 'operator') {
-            this.notification.add(_t("İşlem tamamlandı! Onayıcı görselleri inceleyecek."), { type: "success" });
+            this.notification.add(_t("İşlem tamamlandı! Onayıcı görselleri inceleyecek."), { type: "success", sticky: false });
             this.resetSession();
             this.navigateTo("scan");
             return;
@@ -294,7 +294,7 @@ export class AiStudioAction extends Component {
             is_primary: isPrimary,
         });
         if (res.success) {
-            this.notification.add(_t("Gorsel onaylandi."), { type: "success" });
+            this.notification.add(_t("Gorsel onaylandi."), { type: "success", sticky: false });
             await this.refreshGenerations();
         }
     }
@@ -306,10 +306,10 @@ export class AiStudioAction extends Component {
             revision_prompt: prompt,
         });
         if (res.success) {
-            this.notification.add(_t("Revizyon gonderildi."), { type: "warning" });
+            this.notification.add(_t("Revizyon gonderildi."), { type: "warning", sticky: false });
             this.navigateTo("processing");
         } else if (res.needs_supervisor) {
-            this.notification.add(res.error, { type: "danger" });
+            this.notification.add(res.error, { type: "danger", sticky: false });
         }
     }
 
@@ -318,11 +318,11 @@ export class AiStudioAction extends Component {
             session_id: this.state.sessionId,
         });
         if (res.success) {
-            this.notification.add(_t("Gorseller urune kaydedildi!"), { type: "success", sticky: true });
+            this.notification.add(_t("Gorseller urune kaydedildi!"), { type: "success", sticky: false });
             this.resetSession();
             this.navigateTo("scan");
         } else {
-            this.notification.add(res.error || _t("Hata olustu."), { type: "danger" });
+            this.notification.add(res.error || _t("Hata olustu."), { type: "danger", sticky: false });
         }
     }
 

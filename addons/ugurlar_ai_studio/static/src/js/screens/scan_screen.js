@@ -64,10 +64,10 @@ export class ScanScreen extends Component {
                 this.state.results = res.products;
                 this.state.showResults = true;
             } else {
-                this.notification.add(_t("Urun bulunamadi."), { type: "warning" });
+                this.notification.add(_t("Urun bulunamadi."), { type: "warning", sticky: false });
             }
         } catch (e) {
-            this.notification.add(_t("Arama hatasi."), { type: "danger" });
+            this.notification.add(_t("Arama hatasi."), { type: "danger", sticky: false });
         } finally {
             this.state.searching = false;
         }

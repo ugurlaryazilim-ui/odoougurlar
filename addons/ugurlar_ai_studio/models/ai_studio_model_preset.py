@@ -230,7 +230,7 @@ class AiStudioModelPreset(models.Model):
                     'İşlem 30-90 saniye sürebilir. Sayfayı yenileyin.'
                 ),
                 'type': 'info',
-                'sticky': True,
+                'sticky': False,
             },
         }
 

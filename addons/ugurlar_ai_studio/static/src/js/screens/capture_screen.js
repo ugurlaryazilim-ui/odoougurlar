@@ -179,15 +179,15 @@ export class CaptureScreen extends Component {
 
     proceed() {
         if (!this.state.hasFront && !this.state.hasBack) {
-            this.env.services.notification.add("Lütfen Ürünün Önünü ve Arkasını Çekiniz!", { type: "danger" });
+            this.env.services.notification.add("Lütfen Ürünün Önünü ve Arkasını Çekiniz!", { type: "danger", sticky: false });
             return;
         }
         if (!this.state.hasFront) {
-            this.env.services.notification.add("Lütfen Ürünün Önünü Çekiniz!", { type: "danger" });
+            this.env.services.notification.add("Lütfen Ürünün Önünü Çekiniz!", { type: "danger", sticky: false });
             return;
         }
         if (!this.state.hasBack) {
-            this.env.services.notification.add("Lütfen Ürünün Arkasını Çekiniz!", { type: "danger" });
+            this.env.services.notification.add("Lütfen Ürünün Arkasını Çekiniz!", { type: "danger", sticky: false });
             return;
         }
 

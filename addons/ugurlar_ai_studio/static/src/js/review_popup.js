@@ -582,7 +582,7 @@ async function openReviewPopup(sessionId) {
 registry.category("actions").add("ugurlar_ai_studio.review_popup", async (env, action) => {
     const sessionId = action.params?.session_id;
     if (!sessionId) {
-        env.services.notification.add("Session ID bulunamadı.", { type: "danger" });
+        env.services.notification.add("Session ID bulunamadı.", { type: "danger", sticky: false });
         return;
     }
     await openReviewPopup(sessionId);
