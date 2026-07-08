@@ -6,7 +6,7 @@
             <field name="model_id" ref="model_social_media_post"/>
             <field name="state">code</field>
             <field name="code">model._cron_publish_scheduled_posts()</field>
-            <field name="interval_number">10</field>
+            <field name="interval_number">3</field>
             <field name="interval_type">minutes</field>
             <field name="active" eval="True"/>
         </record>

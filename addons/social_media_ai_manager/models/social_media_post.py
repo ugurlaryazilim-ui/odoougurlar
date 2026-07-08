@@ -129,26 +129,40 @@ class SocialMediaPostLine(models.Model):
             self.platform_post_id = res.get('id')
         elif self.post_id.post_type == 'story':
             is_video = images[0].mimetype and images[0].mimetype.startswith('video')
-            # Facebook Graph API video_stories requires complex 3-step Resumable Upload. 
-            # We fallback to standard /videos endpoint for video stories to ensure it posts successfully via URL.
-            endpoint = "videos" if is_video else "photo_stories"
-            url = f"https://graph.facebook.com/v19.0/{page_id}/{endpoint}"
-            
-            # Use /web/content for videos, /web/image for images
             route = "content" if is_video else "image"
             media_url = f"{base_url}/web/{route}/{images[0].id}"
             
-            payload = {'access_token': token}
             if is_video:
-                payload['file_url'] = media_url
-                payload['description'] = message or "Story"
-            else:
-                payload['url'] = media_url
+                # 3-step Resumable Upload for Facebook Video Stories
+                start_url = f"https://graph.facebook.com/v19.0/{page_id}/video_stories"
+                start_payload = {'upload_phase': 'start', 'access_token': token}
+                start_res = requests.post(start_url, data=start_payload).json()
+                if 'error' in start_res:
+                    raise ValueError("Upload Phase 1 Error: " + start_res['error']['message'])
                 
-            res = requests.post(url, data=payload).json()
-            if 'error' in res:
-                raise ValueError(res['error']['message'])
-            self.platform_post_id = res.get('post_id') or res.get('id')
+                video_id = start_res.get('video_id')
+                upload_url = start_res.get('upload_url')
+                
+                # Phase 2: Transfer (pass file_url in headers for rupload.facebook.com)
+                headers = {'Authorization': f'OAuth {token}', 'file_url': media_url}
+                transfer_res = requests.post(upload_url, headers=headers).json()
+                if 'error' in transfer_res:
+                    raise ValueError("Upload Phase 2 Error: " + transfer_res['error']['message'])
+                
+                # Phase 3: Finish
+                finish_payload = {'upload_phase': 'finish', 'video_id': video_id, 'access_token': token}
+                finish_res = requests.post(start_url, data=finish_payload).json()
+                if 'error' in finish_res:
+                    raise ValueError("Upload Phase 3 Error: " + finish_res['error']['message'])
+                    
+                self.platform_post_id = finish_res.get('id') or video_id
+            else:
+                url = f"https://graph.facebook.com/v19.0/{page_id}/photo_stories"
+                payload = {'url': media_url, 'access_token': token}
+                res = requests.post(url, data=payload).json()
+                if 'error' in res:
+                    raise ValueError(res['error']['message'])
+                self.platform_post_id = res.get('post_id') or res.get('id')
         elif self.post_id.post_type == 'reels':
             url = f"https://graph.facebook.com/v19.0/{page_id}/videos"
             media_url = f"{base_url}/web/content/{images[0].id}"
