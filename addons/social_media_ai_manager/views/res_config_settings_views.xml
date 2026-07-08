@@ -37,6 +37,11 @@
                             <field name="social_comment_auto_reply"/>
                         </setting>
                     </block>
+                    <block title="Sistem Zamanlamaları" name="cron_settings">
+                        <setting string="Gönderi Yayınlama Kontrolü (Dakika)" help="Zamanlanmış gönderilerin kaç dakikada bir kontrol edilip yayınlanacağını belirler (Varsayılan: 3).">
+                            <field name="social_post_cron_interval"/>
+                        </setting>
+                    </block>
 
                     <block title="Meta (Facebook &amp; Instagram) OAuth Configuration" name="meta_oauth_settings">
                         <setting string="Meta App Credentials" help="Enter your App ID and Secret from Facebook Developer Console for OAuth Login.">

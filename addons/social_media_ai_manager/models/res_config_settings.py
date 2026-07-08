@@ -31,3 +31,19 @@ class ResConfigSettings(models.TransientModel):
     # Meta Integration Settings
     social_meta_app_id = fields.Char(string="Meta App ID", config_parameter='social_media_ai.meta_app_id')
     social_meta_app_secret = fields.Char(string="Meta App Secret", config_parameter='social_media_ai.meta_app_secret')
+
+    social_post_cron_interval = fields.Integer(string="Gönderi Yayınlama Gecikmesi (Dakika)", default=3)
+
+    @api.model
+    def get_values(self):
+        res = super(ResConfigSettings, self).get_values()
+        cron = self.env.ref('social_media_ai_manager.ir_cron_publish_social_posts', raise_if_not_found=False)
+        if cron:
+            res.update(social_post_cron_interval=cron.interval_number)
+        return res
+
+    def set_values(self):
+        super(ResConfigSettings, self).set_values()
+        cron = self.env.ref('social_media_ai_manager.ir_cron_publish_social_posts', raise_if_not_found=False)
+        if cron and self.social_post_cron_interval > 0:
+            cron.sudo().write({'interval_number': self.social_post_cron_interval})
