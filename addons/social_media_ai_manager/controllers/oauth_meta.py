@@ -88,6 +88,18 @@ class MetaOAuthController(http.Controller):
                 })
                 created_accounts.append(account.name)
                 
+                # Subscribe the Page to the App's Webhooks
+                try:
+                    subscribe_url = f"https://graph.facebook.com/v19.0/{page_id}/subscribed_apps"
+                    sub_data = {
+                        'subscribed_fields': 'messages,messaging_postbacks,comments',
+                        'access_token': page_token
+                    }
+                    sub_resp = requests.post(subscribe_url, data=sub_data).json()
+                    _logger.info("Webhook Subscribe Response for Page %s: %s", page_id, sub_resp)
+                except Exception as e:
+                    _logger.error("Error subscribing webhook: %s", e)
+                
                 # Check for linked Instagram Account
                 ig_account = page_resp.get('instagram_business_account')
                 if ig_account:
