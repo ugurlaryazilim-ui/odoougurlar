@@ -63,6 +63,8 @@ class MetaOAuthController(http.Controller):
             pages_url = f"https://graph.facebook.com/v19.0/me/accounts?access_token={long_user_token}"
             pages_resp = requests.get(pages_url).json()
             
+            _logger.info("Meta Pages Response: %s", pages_resp)
+            
             created_accounts = []
 
             for page in pages_resp.get('data', []):
@@ -87,7 +89,8 @@ class MetaOAuthController(http.Controller):
                 # Update tokens
                 account.sudo().write({
                     'api_token': page_token,
-                    'active': True
+                    'active': True,
+                    'state': 'connected'
                 })
                 created_accounts.append(account.name)
                 
@@ -104,7 +107,8 @@ class MetaOAuthController(http.Controller):
                     
                     ig_acc.sudo().write({
                         'api_token': page_token,
-                        'active': True
+                        'active': True,
+                        'state': 'connected'
                     })
                     created_accounts.append(ig_acc.name)
 
