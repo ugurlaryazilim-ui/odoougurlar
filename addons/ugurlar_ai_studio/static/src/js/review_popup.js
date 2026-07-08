@@ -25,15 +25,57 @@ async function _jsonRpc(url, params = {}) {
     return data.result;
 }
 
+function showToast(message, type = 'error') {
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: ${type === 'error' ? '#ef4444' : '#10b981'};
+        color: white;
+        padding: 14px 20px;
+        border-radius: 8px;
+        font-size: 15px;
+        font-weight: 500;
+        box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
+        z-index: 2147483647;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        opacity: 0;
+        transition: opacity 0.3s ease, top 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        pointer-events: none;
+        max-width: 90vw;
+        text-align: center;
+    `;
+    toast.innerHTML = `
+        <span style="font-size: 20px;">${type === 'error' ? '⚠️' : '✨'}</span>
+        <span>${message}</span>
+    `;
+    document.body.appendChild(toast);
+    
+    requestAnimationFrame(() => {
+        toast.style.top = '50px';
+        toast.style.opacity = '1';
+    });
+
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.top = '20px';
+        setTimeout(() => toast.remove(), 300);
+    }, 4000);
+}
+
 async function openReviewPopup(sessionId) {
     // Veriyi çek
     const data = await _jsonRpc('/ai_studio/review_data', { session_id: sessionId });
     if (data.error) {
-        alert(data.error);
+        showToast(data.error);
         return;
     }
     if (!data.items || data.items.length === 0) {
-        alert('İncelenecek görsel bulunamadı.');
+        showToast('İncelenecek görsel bulunamadı.');
         return;
     }
 
@@ -318,7 +360,7 @@ async function openReviewPopup(sessionId) {
             }
             render();
         } catch(e) {
-            alert('Onay hatası: ' + e.message);
+            showToast('Onay hatası: ' + e.message);
             render();
         }
     }
@@ -329,7 +371,7 @@ async function openReviewPopup(sessionId) {
         revisionPrompt = promptEl ? promptEl.value : '';
 
         if (!selectedReasonId) {
-            alert('Lütfen bir red sebebi seçin.');
+            showToast('Lütfen bir red sebebi seçin.');
             return;
         }
 
@@ -347,7 +389,7 @@ async function openReviewPopup(sessionId) {
             revisionPrompt = '';
 
             if (result.error) {
-                alert(result.error);
+                showToast(result.error);
                 render();
                 return;
             }
@@ -367,7 +409,7 @@ async function openReviewPopup(sessionId) {
 
             render();
         } catch(e) {
-            alert('Red hatası: ' + e.message);
+            showToast('Red hatası: ' + e.message);
             render();
         }
     }
@@ -383,7 +425,7 @@ async function openReviewPopup(sessionId) {
             });
 
             if (result.error) {
-                alert(result.error);
+                showToast(result.error);
                 render();
                 return;
             }
@@ -398,7 +440,7 @@ async function openReviewPopup(sessionId) {
 
             render();
         } catch(e) {
-            alert('Tekrar deneme hatası: ' + e.message);
+            showToast('Tekrar deneme hatası: ' + e.message);
             render();
         }
     }
@@ -464,7 +506,7 @@ async function openReviewPopup(sessionId) {
     async function complete() {
         const approvedItems = items.filter(i => i.is_approved);
         if (approvedItems.length > 0 && !approvedItems.some(i => i.is_primary)) {
-            alert('Lütfen onayladığınız görsellerden birini "Ana Görsel" (yıldız ikonuna tıklayarak) olarak seçin!');
+            showToast('Lütfen onayladığınız görsellerden birini "Ana Görsel" (yıldız ikonuna tıklayarak) olarak seçin!', 'error');
             return;
         }
 
@@ -480,7 +522,7 @@ async function openReviewPopup(sessionId) {
                 currentIndex = 0;
                 const nextData = await _jsonRpc('/ai_studio/review_data', { session_id: data.next_session_id });
                 if (nextData.error || !nextData.items || nextData.items.length === 0) {
-                    alert('✅ Tamamlandı! İncelenecek başka oturum yok.');
+                    showToast('✅ Tamamlandı! İncelenecek başka oturum yok.', 'success');
                     close();
                     window.location.reload();
                     return;
@@ -495,7 +537,7 @@ async function openReviewPopup(sessionId) {
                 currentIndex = 0;
                 render();
             } else {
-                alert('✅ Tamamlandı! İncelenecek başka oturum yok.');
+                showToast('✅ Tamamlandı! İncelenecek başka oturum yok.', 'success');
                 close();
                 window.location.reload();
             }
