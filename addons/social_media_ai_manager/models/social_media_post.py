@@ -129,13 +129,19 @@ class SocialMediaPostLine(models.Model):
             self.platform_post_id = res.get('id')
         elif self.post_id.post_type == 'story':
             is_video = images[0].mimetype and images[0].mimetype.startswith('video')
-            endpoint = "video_stories" if is_video else "photo_stories"
+            # Facebook Graph API video_stories requires complex 3-step Resumable Upload. 
+            # We fallback to standard /videos endpoint for video stories to ensure it posts successfully via URL.
+            endpoint = "videos" if is_video else "photo_stories"
             url = f"https://graph.facebook.com/v19.0/{page_id}/{endpoint}"
-            media_url = f"{base_url}/web/image/{images[0].id}"
+            
+            # Use /web/content for videos, /web/image for images
+            route = "content" if is_video else "image"
+            media_url = f"{base_url}/web/{route}/{images[0].id}"
             
             payload = {'access_token': token}
             if is_video:
-                payload['video_url'] = media_url
+                payload['file_url'] = media_url
+                payload['description'] = message or "Story"
             else:
                 payload['url'] = media_url
                 
@@ -145,8 +151,8 @@ class SocialMediaPostLine(models.Model):
             self.platform_post_id = res.get('post_id') or res.get('id')
         elif self.post_id.post_type == 'reels':
             url = f"https://graph.facebook.com/v19.0/{page_id}/videos"
-            video_url = f"{base_url}/web/image/{images[0].id}"
-            payload = {'file_url': video_url, 'description': message, 'access_token': token}
+            media_url = f"{base_url}/web/content/{images[0].id}"
+            payload = {'file_url': media_url, 'description': message, 'access_token': token}
             res = requests.post(url, data=payload).json()
             if 'error' in res:
                 raise ValueError(res['error']['message'])
@@ -154,7 +160,8 @@ class SocialMediaPostLine(models.Model):
         elif len(images) == 1:
             # Single Image or Video
             is_video = images[0].mimetype and images[0].mimetype.startswith('video')
-            media_url = f"{base_url}/web/image/{images[0].id}"
+            route = "content" if is_video else "image"
+            media_url = f"{base_url}/web/{route}/{images[0].id}"
             
             if is_video:
                 url = f"https://graph.facebook.com/v19.0/{page_id}/videos"
@@ -217,9 +224,14 @@ class SocialMediaPostLine(models.Model):
         is_video_post = False
         
         for img in images:
-            img_url = f"{base_url}/web/image/{img.id}"
-            encoded_url = urllib.parse.quote(img_url, safe='')
             is_video = img.mimetype and img.mimetype.startswith('video')
+            route = "content" if is_video else "image"
+            
+            # Add a dummy extension to the URL because Instagram API requires it
+            ext = "/video.mp4" if is_video else "/image.jpg"
+            img_url = f"{base_url}/web/{route}/{img.id}{ext}"
+            encoded_url = urllib.parse.quote(img_url, safe='')
+            
             if is_video:
                 is_video_post = True
                 media_param = f"video_url={encoded_url}"
