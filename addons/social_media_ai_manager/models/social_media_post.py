@@ -128,9 +128,17 @@ class SocialMediaPostLine(models.Model):
                 raise ValueError(res['error']['message'])
             self.platform_post_id = res.get('id')
         elif self.post_id.post_type == 'story':
-            url = f"https://graph.facebook.com/v19.0/{page_id}/photo_stories"
-            img_url = f"{base_url}/web/image/{images[0].id}"
-            payload = {'url': img_url, 'access_token': token}
+            is_video = images[0].mimetype and images[0].mimetype.startswith('video')
+            endpoint = "video_stories" if is_video else "photo_stories"
+            url = f"https://graph.facebook.com/v19.0/{page_id}/{endpoint}"
+            media_url = f"{base_url}/web/image/{images[0].id}"
+            
+            payload = {'access_token': token}
+            if is_video:
+                payload['video_url'] = media_url
+            else:
+                payload['url'] = media_url
+                
             res = requests.post(url, data=payload).json()
             if 'error' in res:
                 raise ValueError(res['error']['message'])
@@ -144,10 +152,17 @@ class SocialMediaPostLine(models.Model):
                 raise ValueError(res['error']['message'])
             self.platform_post_id = res.get('id')
         elif len(images) == 1:
-            # Single Image
-            url = f"https://graph.facebook.com/v19.0/{page_id}/photos"
-            img_url = f"{base_url}/web/image/{images[0].id}"
-            payload = {'url': img_url, 'message': message, 'access_token': token}
+            # Single Image or Video
+            is_video = images[0].mimetype and images[0].mimetype.startswith('video')
+            media_url = f"{base_url}/web/image/{images[0].id}"
+            
+            if is_video:
+                url = f"https://graph.facebook.com/v19.0/{page_id}/videos"
+                payload = {'file_url': media_url, 'description': message, 'access_token': token}
+            else:
+                url = f"https://graph.facebook.com/v19.0/{page_id}/photos"
+                payload = {'url': media_url, 'message': message, 'access_token': token}
+                
             res = requests.post(url, data=payload).json()
             if 'error' in res:
                 raise ValueError(res['error']['message'])
@@ -182,6 +197,9 @@ class SocialMediaPostLine(models.Model):
 
     def _publish_to_instagram(self):
         import requests
+        import time
+        import urllib.parse
+        
         base_url = self.env['ir.config_parameter'].sudo().get_param('web.base.url')
         ig_id = self.account_id.meta_ig_id
         token = self.account_id.api_token
@@ -196,20 +214,27 @@ class SocialMediaPostLine(models.Model):
             raise ValueError("Instagram requires at least one image/video.")
 
         container_ids = []
-        import urllib.parse
+        is_video_post = False
         
         for img in images:
             img_url = f"{base_url}/web/image/{img.id}"
             encoded_url = urllib.parse.quote(img_url, safe='')
+            is_video = img.mimetype and img.mimetype.startswith('video')
+            if is_video:
+                is_video_post = True
+                media_param = f"video_url={encoded_url}"
+            else:
+                media_param = f"image_url={encoded_url}"
+
             # Is carousel item?
             is_carousel = "true" if len(images) > 1 and self.post_id.post_type == 'post' else "false"
             
-            cont_url = f"https://graph.facebook.com/v19.0/{ig_id}/media?image_url={encoded_url}&is_carousel_item={is_carousel}&access_token={token}"
+            cont_url = f"https://graph.facebook.com/v19.0/{ig_id}/media?{media_param}&is_carousel_item={is_carousel}&access_token={token}"
             
             if self.post_id.post_type == 'story':
-                cont_url = f"https://graph.facebook.com/v19.0/{ig_id}/media?image_url={encoded_url}&media_type=STORIES&access_token={token}"
+                cont_url = f"https://graph.facebook.com/v19.0/{ig_id}/media?{media_param}&media_type=STORIES&access_token={token}"
             elif self.post_id.post_type == 'reels':
-                cont_url = f"https://graph.facebook.com/v19.0/{ig_id}/media?video_url={encoded_url}&media_type=REELS&access_token={token}"
+                cont_url = f"https://graph.facebook.com/v19.0/{ig_id}/media?{media_param}&media_type=REELS&access_token={token}"
                 
             if len(images) == 1 and self.post_id.post_type != 'story':
                  cont_url += f"&caption={urllib.parse.quote(message, safe='')}"
@@ -231,12 +256,27 @@ class SocialMediaPostLine(models.Model):
                 raise ValueError(res2['error']['message'])
             publish_container_id = res2.get('id')
 
-        # Publish the container
+        # Publish the container (with retry for videos)
         pub_url = f"https://graph.facebook.com/v19.0/{ig_id}/media_publish?creation_id={publish_container_id}&access_token={token}"
-        res3 = requests.post(pub_url).json()
-        if 'error' in res3:
-            raise ValueError(res3['error']['message'])
-
-        self.platform_post_id = res3.get('id')
-        self.state = 'success'
-        return True
+        
+        max_retries = 6 if is_video_post else 1
+        wait_time = 10  # wait 10 seconds between retries for video processing
+        
+        for attempt in range(max_retries):
+            if is_video_post and attempt > 0:
+                time.sleep(wait_time)
+                
+            res3 = requests.post(pub_url).json()
+            
+            if 'error' not in res3:
+                self.platform_post_id = res3.get('id')
+                self.state = 'success'
+                return True
+                
+            error_msg = res3['error']['message']
+            # If it's processing, Instagram returns specific errors (like Media ID is not available).
+            # We retry if we have attempts left.
+            if attempt == max_retries - 1:
+                raise ValueError(f"Publish Error (Attempt {attempt+1}): {error_msg}")
+        
+        return False
