@@ -15,7 +15,7 @@ class ResConfigSettings(models.TransientModel):
     social_ollama_endpoint = fields.Char(string="Ollama Endpoint URL", default="http://localhost:11434/api/generate", config_parameter='social_media_ai.ollama_endpoint')
     social_ollama_model = fields.Char(string="Ollama Model Name", default="llama3", config_parameter='social_media_ai.ollama_model')
 
-    social_system_prompt = fields.Text(
+    social_system_prompt = fields.Char(
         string="System Prompt", 
         default="Sen profesyonel bir müşteri temsilcisisin. Sorulara kısa ve nazik cevaplar ver. Eğer soruyu cevaplayamıyorsan veya müşteri bir insanla görüşmek istiyorsa cevabının sonuna [DEVRET] yaz.",
         config_parameter='social_media_ai.system_prompt'

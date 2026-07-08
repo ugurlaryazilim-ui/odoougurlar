@@ -268,12 +268,13 @@ class WebhookMeta(http.Controller):
             return
             
         endpoint = "replies" if account.platform == 'instagram' else "comments"
-        url = f"https://graph.facebook.com/v19.0/{comment_id}/{endpoint}?access_token={account.api_token}"
+        url = f"https://graph.facebook.com/v19.0/{comment_id}/{endpoint}"
         payload = {
-            "message": message_text
+            "message": message_text,
+            "access_token": account.api_token
         }
         try:
-            response = requests.post(url, json=payload, timeout=10)
+            response = requests.post(url, data=payload, timeout=10)
             if not response.ok:
                 _logger.error(f"Failed to reply to comment: {response.text}")
             else:
