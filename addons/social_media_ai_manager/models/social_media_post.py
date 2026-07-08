@@ -31,6 +31,9 @@ class SocialMediaPost(models.Model):
     def action_schedule(self):
         for rec in self:
             rec.state = 'scheduled'
+            # Make images public so Facebook/Instagram can download them
+            if rec.image_ids:
+                rec.image_ids.sudo().write({'public': True})
             # Create lines
             for account in rec.account_ids:
                 self.env['social.media.post.line'].create({
