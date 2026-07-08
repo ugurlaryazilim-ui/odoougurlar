@@ -85,11 +85,21 @@ class WebhookMeta(http.Controller):
 
             # Find or create Partner
             partner = env['res.partner'].sudo().search([('ref', '=', f'meta_{sender_id}')], limit=1)
+            
+            # Try to fetch real name
+            meta_name = f"Meta User {sender_id}"
+            if not partner or partner.name.startswith("Meta User"):
+                profile = self._fetch_meta_user_profile(sender_id, account)
+                if profile and ('name' in profile or 'first_name' in profile):
+                    meta_name = profile.get('name') or f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip()
+
             if not partner:
                 partner = env['res.partner'].sudo().create({
-                    'name': f"Meta User {sender_id}",
+                    'name': meta_name,
                     'ref': f'meta_{sender_id}',
                 })
+            elif partner.name.startswith("Meta User") and not meta_name.startswith("Meta User"):
+                partner.sudo().write({'name': meta_name})
 
             # Find or create Conversation
             conversation = env['social.media.conversation'].sudo().search([
@@ -157,11 +167,21 @@ class WebhookMeta(http.Controller):
 
         # Find or create Partner
         partner = env['res.partner'].sudo().search([('ref', '=', f'meta_{sender_id}')], limit=1)
+        
+        # Try to fetch real name
+        meta_name = f"Meta Commenter {sender_id}"
+        if not partner or partner.name.startswith("Meta "):
+            profile = self._fetch_meta_user_profile(sender_id, account)
+            if profile and ('name' in profile or 'first_name' in profile):
+                meta_name = profile.get('name') or f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip()
+
         if not partner:
             partner = env['res.partner'].sudo().create({
-                'name': f"Meta Commenter {sender_id}",
+                'name': meta_name,
                 'ref': f'meta_{sender_id}',
             })
+        elif partner.name.startswith("Meta ") and not meta_name.startswith("Meta "):
+            partner.sudo().write({'name': meta_name})
 
         # Save Comment as a Message
         conversation = env['social.media.conversation'].sudo().search([
@@ -273,3 +293,16 @@ class WebhookMeta(http.Controller):
             _logger.error(f"Failed to send Meta message: {e}")
             if hasattr(e, 'response') and e.response is not None:
                 _logger.error(f"Meta Error details: {e.response.text}")
+
+    def _fetch_meta_user_profile(self, user_id, account):
+        """ Fetch real name from Meta Graph API using PSID or ASID """
+        if not account.api_token:
+            return None
+        url = f"https://graph.facebook.com/v19.0/{user_id}?fields=name,first_name,last_name,profile_pic&access_token={account.api_token}"
+        try:
+            res = requests.get(url, timeout=5).json()
+            if 'error' not in res:
+                return res
+        except Exception as e:
+            _logger.error(f"Failed to fetch user profile for {user_id}: {e}")
+        return None
