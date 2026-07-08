@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from odoo import models, fields
+from odoo import models, fields, exceptions
 
 class SocialMediaAccount(models.Model):
     _name = 'social.media.account'
@@ -36,7 +36,7 @@ class SocialMediaAccount(models.Model):
         """ Manually subscribe the Page to the App's Webhooks and show result """
         self.ensure_one()
         if self.platform not in ['facebook', 'instagram'] or not self.api_token or not self.meta_page_id:
-            raise models.ValidationError("Bu işlem için Facebook/Instagram seçili olmalı, Meta Page ID ve API Token dolu olmalıdır.")
+            raise exceptions.UserError("Bu işlem için Facebook/Instagram seçili olmalı, Meta Page ID ve API Token dolu olmalıdır.")
             
         import requests
         
@@ -49,13 +49,13 @@ class SocialMediaAccount(models.Model):
         try:
             resp = requests.post(subscribe_url, data=sub_data).json()
             if resp.get('success'):
-                raise models.ValidationError("BAŞARILI! Facebook sayfanız Odoo tetikleyicisine başarıyla bağlandı. Artık mesajlar Odoo'ya düşecek.")
+                raise exceptions.UserError("BAŞARILI! Facebook sayfanız Odoo tetikleyicisine başarıyla bağlandı. Artık mesajlar Odoo'ya düşecek.")
             else:
-                raise models.ValidationError(f"HATA! Facebook tetikleyiciyi reddetti: {resp}")
+                raise exceptions.UserError(f"HATA! Facebook tetikleyiciyi reddetti: {resp}")
         except Exception as e:
             if "BAŞARILI" in str(e) or "HATA" in str(e):
                 raise e
-            raise models.ValidationError(f"Bağlantı hatası: {e}")
+            raise exceptions.UserError(f"Bağlantı hatası: {e}")
 
     def action_login_facebook(self):
         """ Redirect to Facebook Login """
