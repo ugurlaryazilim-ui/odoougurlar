@@ -61,7 +61,7 @@ class SocialAIProvider(models.AbstractModel):
         headers = {'Content-Type': 'application/json'}
         data = {
             "system_instruction": {
-                "parts": {"text": system_prompt}
+                "parts": [{"text": system_prompt}]
             },
             "contents": [{
                 "parts": [{"text": message_text}]
