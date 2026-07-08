@@ -82,6 +82,10 @@
         <field name="name">Social Posts</field>
         <field name="res_model">social.media.post</field>
         <field name="view_mode">calendar,list,form</field>
+        <field name="view_ids" eval="[(5, 0, 0),
+            (0, 0, {'view_mode': 'calendar', 'view_id': ref('social_media_post_view_calendar')}),
+            (0, 0, {'view_mode': 'list', 'view_id': ref('social_media_post_view_tree')}),
+            (0, 0, {'view_mode': 'form', 'view_id': ref('social_media_post_view_form')})]"/>
     </record>
 
     <menuitem id="menu_social_media_posts_all" name="All Posts" parent="menu_social_media_posts" action="action_social_media_post" sequence="10"/>
