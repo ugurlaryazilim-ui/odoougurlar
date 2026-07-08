@@ -92,7 +92,7 @@ class MetaOAuthController(http.Controller):
                 try:
                     subscribe_url = f"https://graph.facebook.com/v19.0/{page_id}/subscribed_apps"
                     sub_data = {
-                        'subscribed_fields': 'messages,messaging_postbacks,comments',
+                        'subscribed_fields': 'messages,messaging_postbacks,comments,feed',
                         'access_token': page_token
                     }
                     sub_resp = requests.post(subscribe_url, data=sub_data).json()
