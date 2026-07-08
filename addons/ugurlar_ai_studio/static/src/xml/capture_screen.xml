@@ -151,13 +151,11 @@
                 </div>
 
                 <!-- Devam Et Barı -->
-                <t t-if="canProceed">
-                    <div class="ais-proceed-bar">
-                        <button class="ais-btn-proceed" t-on-click="proceed">
-                            Devam Et (AI Giydirme Ayarları) →
-                        </button>
-                    </div>
-                </t>
+                <div class="ais-proceed-bar">
+                    <button class="ais-btn-proceed" t-on-click="proceed">
+                        Devam Et (AI Giydirme Ayarları) →
+                    </button>
+                </div>
             </div>
         </div>
     </t>

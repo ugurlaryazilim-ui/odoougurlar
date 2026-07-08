@@ -589,8 +589,16 @@ class AiStudioSession(models.Model):
     def action_photos_ready(self):
         """Fotoğraflar çekildi, AI'ya göndermeye hazır."""
         for session in self:
-            if not session.photo_ids:
-                raise UserError(_('En az bir fotoğraf çekilmeli.'))
+            has_front = any(p.photo_type == 'front' for p in session.photo_ids)
+            has_back = any(p.photo_type == 'back' for p in session.photo_ids)
+            
+            if not has_front and not has_back:
+                raise UserError(_('Lütfen ürünün Önünü ve Arkasını çekiniz!'))
+            if not has_front:
+                raise UserError(_('Lütfen ürünün Önünü çekiniz!'))
+            if not has_back:
+                raise UserError(_('Lütfen ürünün Arkasını çekiniz!'))
+                
             session.state = 'photos_ready'
             session.date_photos_ready = fields.Datetime.now()
 

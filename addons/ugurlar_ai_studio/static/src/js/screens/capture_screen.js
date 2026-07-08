@@ -167,7 +167,7 @@ export class CaptureScreen extends Component {
     }
 
     get canProceed() {
-        return this.state.hasFront; // En az ön fotoğraf gerekli
+        return true; // Düğme her zaman açık, uyarıları proceed içinde vereceğiz
     }
 
     get currentPhoto() {
@@ -178,7 +178,18 @@ export class CaptureScreen extends Component {
     }
 
     proceed() {
-        if (!this.canProceed) return;
+        if (!this.state.hasFront && !this.state.hasBack) {
+            this.env.services.notification.add("Lütfen Ürünün Önünü ve Arkasını Çekiniz!", { type: "danger" });
+            return;
+        }
+        if (!this.state.hasFront) {
+            this.env.services.notification.add("Lütfen Ürünün Önünü Çekiniz!", { type: "danger" });
+            return;
+        }
+        if (!this.state.hasBack) {
+            this.env.services.notification.add("Lütfen Ürünün Arkasını Çekiniz!", { type: "danger" });
+            return;
+        }
 
         const photos = [];
         if (this.state.photos.front) {
