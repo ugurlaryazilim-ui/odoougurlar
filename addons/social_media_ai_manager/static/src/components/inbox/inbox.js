@@ -68,7 +68,7 @@ export class SocialInbox extends Component {
         this.state.messages = await this.orm.searchRead(
             "social.media.message",
             [["conversation_id", "=", convId]],
-            ["id", "content", "message_type", "date", "is_read"],
+            ["id", "content", "message_type", "date", "is_read", "post_link"],
             { order: "date asc" }
         );
     }

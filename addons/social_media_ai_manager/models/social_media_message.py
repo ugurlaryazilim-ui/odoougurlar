@@ -8,6 +8,7 @@ class SocialMediaMessage(models.Model):
 
     conversation_id = fields.Many2one('social.media.conversation', string="Conversation", required=True, ondelete='cascade')
     platform_message_id = fields.Char(string="Platform Message ID", help="Unique ID from WhatsApp/Meta")
+    post_link = fields.Char(string="Post URL", help="Direct link to the post if this is a comment")
     
     message_type = fields.Selection([
         ('incoming', 'Incoming (Customer)'),

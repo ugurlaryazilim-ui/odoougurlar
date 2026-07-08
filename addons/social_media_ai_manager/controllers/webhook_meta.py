@@ -201,12 +201,22 @@ class WebhookMeta(http.Controller):
                 'state': 'bot'
             })
 
+        # Build post URL if possible
+        post_link = False
+        if platform == 'facebook' and post_id:
+            # Facebook post_id is usually pageID_postID
+            post_link = f"https://facebook.com/{post_id}"
+        elif platform == 'instagram' and post_id:
+            # Instagram media ID is hard to link without shortcode, but we can try generic
+            pass # Instagram direct links usually require shortcode from Graph API, left empty for now
+
         msg = env['social.media.message'].sudo().create({
             'conversation_id': conversation.id,
             'message_type': 'incoming',
-            'content': f"[COMMENT on {post_id}]: {message_text}",
+            'content': f"[YORUM]: {message_text}",
             'is_read': False,
-            'platform_message_id': comment_id
+            'platform_message_id': comment_id,
+            'post_link': post_link
         })
         conversation.sudo().write({'unread_count': conversation.unread_count + 1})
 

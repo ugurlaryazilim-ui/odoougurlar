@@ -45,6 +45,11 @@
                             <div t-att-class="'d-flex w-100 ' + (msg.message_type === 'outgoing' ? 'justify-content-end' : 'justify-content-start')">
                                 <div t-attf-class="p-2 rounded" t-att-style="msg.message_type === 'outgoing' ? 'background-color: #dcf8c6; max-width: 70%;' : 'background-color: white; border: 1px solid #dee2e6; max-width: 70%;'">
                                     <t t-esc="msg.content"/>
+                                    <div t-if="msg.post_link" class="mt-2">
+                                        <a t-att-href="msg.post_link" target="_blank" class="btn btn-sm btn-outline-secondary w-100" style="font-size: 0.8em; text-decoration: none;">
+                                            <i class="fa fa-external-link"></i> Gönderiye Git
+                                        </a>
+                                    </div>
                                     <div class="text-end text-muted mt-1" style="font-size: 0.7em;">
                                         <t t-esc="msg.date"/>
                                     </div>
