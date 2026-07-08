@@ -268,15 +268,18 @@ class WebhookMeta(http.Controller):
             return
             
         endpoint = "replies" if account.platform == 'instagram' else "comments"
-        url = f"https://graph.facebook.com/v19.0/{comment_id}/{endpoint}"
+        url = f"https://graph.facebook.com/v19.0/{comment_id}/{endpoint}?access_token={account.api_token}"
         payload = {
-            "message": message_text,
-            "access_token": account.api_token
+            "message": message_text
         }
         try:
-            requests.post(url, data=payload, timeout=10)
+            response = requests.post(url, json=payload, timeout=10)
+            if not response.ok:
+                _logger.error(f"Failed to reply to comment: {response.text}")
+            else:
+                _logger.info(f"Successfully replied to comment {comment_id}")
         except Exception as e:
-            _logger.error(f"Failed to reply to comment: {e}")
+            _logger.error(f"Exception when replying to comment: {e}")
 
     def _send_meta_private_reply(self, comment_id, message_text, account):
         """ Send a private DM reply based on a comment """
