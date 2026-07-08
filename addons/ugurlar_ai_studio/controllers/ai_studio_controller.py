@@ -241,6 +241,12 @@ class AiStudioController(http.Controller):
                 except Exception:
                     product_gender = ''
 
+                # Aktif oturum var mi kontrol et
+                active_session = request.env['ai.studio.session'].search([
+                    ('product_id', '=', p.id),
+                    ('state', 'in', ['draft', 'photos_ready', 'processing', 'review', 'failed', 'saving'])
+                ], limit=1)
+
                 result.append({
                     'id': p.id,
                     'name': p.display_name,
@@ -252,6 +258,7 @@ class AiStudioController(http.Controller):
                     'variant_count': p.product_tmpl_id.product_variant_count,
                     'has_image': bool(p.image_variant_1920),
                     'gender': product_gender,
+                    'has_active_session': bool(active_session),
                 })
 
             return {

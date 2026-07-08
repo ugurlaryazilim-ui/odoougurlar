@@ -5,7 +5,7 @@ import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { _t } from "@web/core/l10n/translation";
 import { markup } from "@odoo/owl";
-import { ConfirmationDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
+import { ConfirmationDialog, AlertDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
 
 import { ScanScreen } from "./screens/scan_screen";
 import { CaptureScreen } from "./screens/capture_screen";
@@ -103,6 +103,15 @@ export class AiStudioAction extends Component {
     }
 
     onProductFound(productInfo) {
+        if (productInfo.has_active_session) {
+            this.dialog.add(AlertDialog, {
+                title: _t("Aktif Oturum Bulundu!"),
+                body: `Bu ürün (${productInfo.name}) için halihazırda açık bir oturum (çekim, AI işleme veya onay süreci) bulunuyor.\n\nLütfen onayıcının işlemi bitirmesini bekleyin ve başka bir ürüne geçin.`,
+                confirmLabel: _t("Tamam"),
+                confirm: () => {},
+            });
+            return;
+        }
         if (productInfo.has_image) {
             this.dialog.add(ConfirmationDialog, {
                 title: _t("Görsel Zaten Mevcut"),
