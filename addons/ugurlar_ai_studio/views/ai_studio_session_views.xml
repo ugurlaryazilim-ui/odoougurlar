@@ -11,6 +11,12 @@
                 <field name="state" widget="badge"/>
                 <field name="user_id" widget="many2one_avatar_user"/>
                 <field name="create_date"/>
+                <field name="brand_value_ids" widget="many2many_tags" optional="show"/>
+                <field name="season_value_ids" widget="many2many_tags" optional="show"/>
+                <field name="color_value_ids" widget="many2many_tags" optional="hide"/>
+                <field name="size_value_ids" widget="many2many_tags" optional="hide"/>
+                <field name="gender_value_ids" widget="many2many_tags" optional="hide"/>
+                <field name="qty_available" optional="hide"/>
                 <!-- Onayıcı/Yönetici: İncele butonu -->
                 <button name="action_review_generations" type="object" string="İncele" class="btn-primary"
                         invisible="state not in ('review', 'failed')"
@@ -145,12 +151,18 @@
                 <field name="name"/>
                 <field name="product_id"/>
                 <field name="user_id"/>
+                <field name="brand_value_ids"/>
+                <field name="season_value_ids"/>
+                <field name="category_id"/>
                 <filter string="Taslak" name="draft" domain="[('state', '=', 'draft')]"/>
                 <filter string="Onay Bekliyor" name="review" domain="[('state', '=', 'review')]"/>
                 <filter string="Tamamlandi" name="done" domain="[('state', '=', 'done')]"/>
                 <separator/>
                 <filter string="Durum" name="group_state" context="{'group_by': 'state'}"/>
                 <filter string="Operator" name="group_user" context="{'group_by': 'user_id'}"/>
+                <filter string="Marka" name="group_brand" context="{'group_by': 'brand_value_ids'}"/>
+                <filter string="Sezon" name="group_season" context="{'group_by': 'season_value_ids'}"/>
+                <filter string="Kategori" name="group_category" context="{'group_by': 'category_id'}"/>
             </search>
         </field>
     </record>

@@ -67,6 +67,69 @@ class AiStudioSession(models.Model):
         string='Mevcut Ürün Resmi',
     )
 
+    # --- Pivot & Filtreleme Bilgileri ---
+    category_id = fields.Many2one(
+        'product.category', string='Kategori',
+        related='product_id.categ_id', store=True
+    )
+    qty_available = fields.Float(
+        string='Stok Miktarı',
+        related='product_id.qty_available', store=True
+    )
+    color_value_ids = fields.Many2many(
+        'product.attribute.value', 'ai_session_color_rel', string='Renk',
+        compute='_compute_attributes', store=True
+    )
+    size_value_ids = fields.Many2many(
+        'product.attribute.value', 'ai_session_size_rel', string='Beden',
+        compute='_compute_attributes', store=True
+    )
+    brand_value_ids = fields.Many2many(
+        'product.attribute.value', 'ai_session_brand_rel', string='Marka',
+        compute='_compute_attributes', store=True
+    )
+    season_value_ids = fields.Many2many(
+        'product.attribute.value', 'ai_session_season_rel', string='Sezon',
+        compute='_compute_attributes', store=True
+    )
+    gender_value_ids = fields.Many2many(
+        'product.attribute.value', 'ai_session_gender_rel', string='Cinsiyet',
+        compute='_compute_attributes', store=True
+    )
+
+    @api.depends('product_id', 'product_id.product_template_attribute_value_ids', 'product_id.product_tmpl_id.attribute_line_ids')
+    def _compute_attributes(self):
+        color_attrs = {'renk', 'color'}
+        size_attrs = {'beden', 'size', 'numara'}
+        brand_attrs = {'marka', 'brand'}
+        season_attrs = {'sezon', 'sezon/yıl', 'season'}
+        gender_attrs = {'cinsiyet', 'gender'}
+
+        for session in self:
+            c_ids, s_ids, b_ids, se_ids, g_ids = [], [], [], [], []
+            if session.product_id:
+                for ptav in session.product_id.product_template_attribute_value_ids:
+                    attr_name = ptav.attribute_id.name.lower().strip()
+                    if any(a in attr_name for a in color_attrs):
+                        c_ids.append(ptav.product_attribute_value_id.id)
+                    elif any(a in attr_name for a in size_attrs):
+                        s_ids.append(ptav.product_attribute_value_id.id)
+                
+                for ptal in session.product_id.product_tmpl_id.attribute_line_ids:
+                    attr_name = ptal.attribute_id.name.lower().strip()
+                    if any(a in attr_name for a in brand_attrs):
+                        b_ids.extend(ptal.value_ids.ids)
+                    elif any(a in attr_name for a in season_attrs):
+                        se_ids.extend(ptal.value_ids.ids)
+                    elif any(a in attr_name for a in gender_attrs):
+                        g_ids.extend(ptal.value_ids.ids)
+
+            session.color_value_ids = [(6, 0, c_ids)]
+            session.size_value_ids = [(6, 0, s_ids)]
+            session.brand_value_ids = [(6, 0, b_ids)]
+            session.season_value_ids = [(6, 0, se_ids)]
+            session.gender_value_ids = [(6, 0, g_ids)]
+
     # --- Varyant Grubu ---
     apply_to_siblings = fields.Boolean(
         string='Tüm Bedenlere Uygula',

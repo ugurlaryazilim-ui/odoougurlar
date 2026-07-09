@@ -10,6 +10,9 @@
                     <field name="user_id" type="row"/>
                     <field name="create_date" type="col" interval="month"/>
                     <field name="state" type="col"/>
+                    <field name="brand_value_ids" type="row" invisible="1"/>
+                    <field name="season_value_ids" type="row" invisible="1"/>
+                    <field name="category_id" type="row" invisible="1"/>
                 </pivot>
             </field>
         </record>
@@ -22,6 +25,9 @@
                 <graph string="Oturum Analizi" type="bar" sample="1">
                     <field name="user_id"/>
                     <field name="state"/>
+                    <field name="brand_value_ids" invisible="1"/>
+                    <field name="season_value_ids" invisible="1"/>
+                    <field name="category_id" invisible="1"/>
                 </graph>
             </field>
         </record>
