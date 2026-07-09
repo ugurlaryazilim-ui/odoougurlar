@@ -27,6 +27,17 @@ class TailorController(http.Controller):
         connector = request.env['ugurlar.tailor.mssql.connector']
         return connector.verify_product(invoice_no, barcode)
 
+    @http.route('/ugurlar_tailor/search_product', type='json', auth='user')
+    def search_product(self, barcode=''):
+        product = request.env['product.product'].search([('barcode', '=', barcode)], limit=1)
+        if product:
+            return {
+                'barcode': product.barcode,
+                'product_code': product.default_code or '',
+                'product_name': product.name or ''
+            }
+        return None
+
     @http.route('/ugurlar_tailor/test_connection', type='json', auth='user')
     def test_connection(self):
         connector = request.env['ugurlar.tailor.mssql.connector']

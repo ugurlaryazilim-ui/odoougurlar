@@ -8,6 +8,7 @@
             <TailorNewOrder t-if="state.screen === 'new_order'" onNavigate.bind="switchScreen" scanner="scanner"/>
             <TailorOrderList t-if="state.screen === 'order_list'" onNavigate.bind="switchScreen" scanner="scanner"/>
             <TailorGiftLabel t-if="state.screen === 'gift_label'" onNavigate.bind="switchScreen" scanner="scanner"/>
+            <TailorStoreItem t-if="state.screen === 'store_item'" onNavigate.bind="switchScreen" scanner="scanner"/>
         </div>
     </t>
 
@@ -33,6 +34,11 @@
                     <div class="tailor-card-icon">&#127873;</div>
                     <div class="tailor-card-title">Hediye Etiketi</div>
                     <div class="tailor-card-desc">Hediye fisi yazdirin</div>
+                </div>
+                <div class="tailor-menu-card" style="background:#8e44ad;color:white;" t-on-click="onStoreItem">
+                    <div class="tailor-card-icon">&#128717;</div>
+                    <div class="tailor-card-title">Reyon</div>
+                    <div class="tailor-card-desc">Magaza ici urunleri faturasiz isleyin</div>
                 </div>
             </div>
         </div>
@@ -379,6 +385,121 @@
                         </button>
                         <button class="tailor-btn tailor-btn-back tailor-btn-lg" t-on-click="() =&gt; this.props.onNavigate('main_menu')">
                             &#8592; Ana Menü
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </t>
+
+    <!-- Store Item (Reyon) Screen -->
+    <t t-name="ugurlar_tailor.TailorStoreItem">
+        <div class="tailor-screen tailor-new-order">
+            <div class="tailor-toolbar">
+                <button class="tailor-btn tailor-btn-back" t-on-click="goBack">&#8592; Geri</button>
+                <h2 t-if="state.step === 1">&#128717; Reyon - Ürün Okut</h2>
+                <h2 t-if="state.step === 2">&#128717; Sipariş Oluşturuldu</h2>
+            </div>
+
+            <!-- Step 1: Barkod Okutma ve Terzi Secimi -->
+            <div t-if="state.step === 1" class="tailor-step">
+                <div class="tailor-search-box">
+                    <input type="text" class="tailor-input tailor-barcode-input"
+                           placeholder="Barkod okutunuz..."
+                           t-model="state.searchQuery"
+                           t-on-keydown="onSearchKeydown"
+                           t-ref="storeSearchInput"/>
+                    <button class="tailor-btn" style="background:#f59e0b;color:#fff;font-size:18px;padding:8px 14px;"
+                            t-on-click="scanCamera" title="Kamera ile Barkod Okut">
+                        <i class="fa fa-barcode"/>
+                    </button>
+                    <button class="tailor-btn tailor-btn-primary" t-on-click="searchProduct"
+                            t-att-disabled="state.searching">
+                        <t t-if="state.searching"><span class="tailor-spinner"/> </t>
+                        <t t-if="!state.searching">Ekle</t>
+                    </button>
+                </div>
+
+                <div class="tailor-items" style="margin-top: 16px;">
+                    <t t-foreach="state.items || []" t-as="item" t-key="item.barcode">
+                        <div t-att-class="'tailor-item-card' + (item.tailor_id ? ' has-tailor' : '')">
+                            <div class="tailor-item-header">
+                                <strong><t t-esc="item.product_name || item.barcode"/></strong>
+                                <span class="tailor-item-barcode">Barkod: <t t-esc="item.barcode"/></span>
+                                <button class="tailor-btn tailor-btn-sm" style="float: right; background: #e74c3c; color: white;" t-on-click="() =&gt; this.removeItem(item.barcode)">Sil</button>
+                            </div>
+
+                            <!-- Terzi Secimi -->
+                            <div class="tailor-item-row">
+                                <label>Terzi:</label>
+                                <select class="tailor-select" t-on-change="(ev) =&gt; this.onTailorChange(item.barcode, ev)">
+                                    <option value="">-- Terzi Secin --</option>
+                                    <t t-foreach="state.tailors" t-as="tailor" t-key="tailor.id">
+                                        <option t-att-value="tailor.id" t-esc="tailor.name" t-att-selected="item.tailor_id === tailor.id"/>
+                                    </t>
+                                </select>
+                            </div>
+
+                            <!-- Terzi secilmediyse bilgi mesaji -->
+                            <div t-if="!item.tailor_id" class="tailor-hint">
+                                Hizmetleri gormek icin terzi seciniz
+                            </div>
+
+                            <!-- Hizmet Secimi -->
+                            <div t-if="item.tailor_id" class="tailor-item-services tailor-fade-in">
+                                <label>Hizmetler:</label>
+                                <div class="tailor-service-grid">
+                                    <t t-foreach="this.getTailorServices(item.tailor_id)" t-as="svc" t-key="svc.id">
+                                        <label class="tailor-service-check">
+                                            <input type="checkbox"
+                                                   t-on-change="() =&gt; this.onServiceToggle(item.barcode, svc.id)"
+                                                   t-att-checked="(item.service_ids || []).includes(svc.id)"/>
+                                            <span>
+                                                <t t-esc="svc.name"/>
+                                                (<t t-esc="this.getServicePrice(svc.id, item.tailor_id).toFixed(2)"/> TL)
+                                            </span>
+                                        </label>
+                                    </t>
+                                </div>
+                            </div>
+
+                            <!-- Not -->
+                            <div t-if="item.tailor_id" class="tailor-item-row tailor-fade-in">
+                                <input type="text" class="tailor-input tailor-input-sm"
+                                       placeholder="Not ekleyin..."
+                                       t-on-change="(ev) =&gt; this.onNotesChange(item.barcode, ev)" t-att-value="item.notes"/>
+                            </div>
+
+                            <!-- Toplam -->
+                            <div t-if="item.tailor_id" class="tailor-item-total tailor-fade-in">
+                                Toplam: <strong><t t-esc="this.getItemTotal(item.barcode).toFixed(2)"/> TL</strong>
+                            </div>
+                        </div>
+                    </t>
+                </div>
+
+                <div class="tailor-submit-bar" t-if="state.items.length &gt; 0">
+                    <button class="tailor-btn tailor-btn-success tailor-btn-lg"
+                            t-on-click="submitOrders"
+                            t-att-disabled="state.submitting">
+                        <t t-if="state.submitting"><span class="tailor-spinner"/> Olusturuluyor...</t>
+                        <t t-else="">Siparisleri Olustur</t>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 2: Basari Ekrani -->
+            <div t-if="state.step === 2" class="tailor-step">
+                <div class="tailor-success-screen">
+                    <div class="tailor-success-icon">&#10004;&#65039;</div>
+                    <h3>Siparisler Olusturuldu!</h3>
+                    <p><t t-esc="state.createdCount"/> adet reyon siparisi basariyla olusturuldu ve etiketler yazdirildi.</p>
+                    <div class="tailor-success-actions">
+                        <button class="tailor-btn tailor-btn-primary tailor-btn-lg" t-on-click="() =&gt; { this.state.step = 1; this.state.searchQuery = ''; this.state.items = []; }">
+                            Yeni Ürün Okut
+                        </button>
+                        <button class="tailor-btn tailor-btn-back tailor-btn-lg" t-on-click="() =&gt; this.props.onNavigate('main_menu')">
+                            &#8592; Ana Menu
                         </button>
                     </div>
                 </div>

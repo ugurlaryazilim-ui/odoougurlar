@@ -40,6 +40,7 @@
             'ugurlar_tailor/static/src/js/screens/tailor_new_order.js',
             'ugurlar_tailor/static/src/js/screens/tailor_order_list.js',
             'ugurlar_tailor/static/src/js/screens/tailor_gift_label.js',
+            'ugurlar_tailor/static/src/js/screens/tailor_store_item.js',
         ],
     },
     'installable': True,

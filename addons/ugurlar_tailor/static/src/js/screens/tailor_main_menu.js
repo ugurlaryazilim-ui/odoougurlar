@@ -19,4 +19,8 @@ export class TailorMainMenu extends Component {
     onGiftLabel() {
         this.props.onNavigate("gift_label");
     }
+
+    onStoreItem() {
+        this.props.onNavigate("store_item");
+    }
 }

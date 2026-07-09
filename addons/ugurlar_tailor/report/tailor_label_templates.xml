@@ -23,13 +23,15 @@
                     </div>
 
                     <!-- NUSHA 3: MUSTERI -->
-                    <div class="page tailor-label">
-                        <t t-call="ugurlar_tailor.report_tailor_label_copy">
-                            <t t-set="copy_title">MUSTERI NUSHASI</t>
-                            <t t-set="copy_bg">#27ae60</t>
-                            <t t-set="copy_note">Bu nusha musteride kalir</t>
-                        </t>
-                    </div>
+                    <t t-if="o.customer_name != 'MAĞAZA (REYON)'">
+                        <div class="page tailor-label">
+                            <t t-call="ugurlar_tailor.report_tailor_label_copy">
+                                <t t-set="copy_title">MUSTERI NUSHASI</t>
+                                <t t-set="copy_bg">#27ae60</t>
+                                <t t-set="copy_note">Bu nusha musteride kalir</t>
+                            </t>
+                        </div>
+                    </t>
                 </t>
             </t>
         </template>
