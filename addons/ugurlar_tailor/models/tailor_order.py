@@ -76,6 +76,10 @@ class UgurlarTailorOrder(models.Model):
                     user_id=order.create_uid.id,
                     note='Reyon siparişiniz (%s) onaylandı. %s' % (order.name, link)
                 )
+                order.message_post(
+                    body='Reyon siparişiniz (%s) onaylandı. Lütfen etiketi yazdırınız.' % order.name,
+                    partner_ids=[order.create_uid.partner_id.id]
+                )
 
     def action_reject_reyon(self):
         for order in self:
@@ -85,6 +89,10 @@ class UgurlarTailorOrder(models.Model):
                     'mail.mail_activity_data_todo',
                     user_id=order.create_uid.id,
                     note='Reyon siparişiniz (%s) reddedildi ve iptal edildi. %s' % (order.name, link)
+                )
+                order.message_post(
+                    body='Reyon siparişiniz (%s) yöneticiniz tarafından reddedildi ve iptal edildi.' % order.name,
+                    partner_ids=[order.create_uid.partner_id.id]
                 )
         self.unlink()
 
@@ -106,6 +114,11 @@ class UgurlarTailorOrder(models.Model):
                         user_id=manager.id,
                         summary='Reyon Sipariş Onayı',
                         note='Yeni bir faturasız reyon siparişi onayınızı bekliyor. %s' % link
+                    )
+                if managers:
+                    order.message_post(
+                        body='Yeni bir faturasız reyon siparişi onayınızı bekliyor.',
+                        partner_ids=managers.mapped('partner_id').ids
                     )
         return orders
 
