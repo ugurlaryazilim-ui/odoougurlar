@@ -291,7 +291,7 @@ class SocialMediaPostLine(models.Model):
         # Publish the container (with retry for videos)
         pub_url = f"https://graph.facebook.com/v19.0/{ig_id}/media_publish?creation_id={publish_container_id}&access_token={token}"
         
-        max_retries = 6 if is_video_post else 1
+        max_retries = 18 if is_video_post else 1
         wait_time = 10  # wait 10 seconds between retries for video processing
         
         for attempt in range(max_retries):
