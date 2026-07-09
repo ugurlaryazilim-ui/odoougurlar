@@ -8,11 +8,12 @@
             <list decoration-info="state == 'pending'" decoration-warning="state == 'in_progress'" decoration-success="state == 'completed'" decoration-muted="state == 'delivered'">
                 <field name="name"/>
                 <field name="invoice_no"/>
+                <field name="is_reyon" column_invisible="True"/>
                 <field name="product_name"/>
                 <field name="customer_name"/>
                 <field name="tailor_id"/>
                 <field name="total_price"/>
-                <field name="state" widget="badge" decoration-info="state == 'pending'" decoration-warning="state == 'in_progress'" decoration-success="state == 'completed'" decoration-muted="state == 'delivered'"/>
+                <field name="state" widget="badge" decoration-danger="state == 'waiting_approval'" decoration-info="state == 'pending'" decoration-warning="state == 'in_progress'" decoration-success="state == 'completed'" decoration-muted="state == 'delivered'"/>
                 <field name="create_date"/>
             </list>
         </field>
@@ -25,12 +26,14 @@
         <field name="arch" type="xml">
             <form>
                 <header>
+                    <button name="action_approve_reyon" string="Onayla" type="object" class="btn-success" invisible="state != 'waiting_approval'"/>
+                    <button name="action_reject_reyon" string="Reddet" type="object" class="btn-danger" invisible="state != 'waiting_approval'"/>
                     <button name="action_send_to_tailor" string="Terziye Gönder" type="object" class="btn-primary" invisible="state != 'pending'"/>
                     <button name="action_mark_completed" string="Hazır" type="object" class="btn-primary" invisible="state != 'in_progress'"/>
                     <button name="action_mark_delivered" string="Teslim Edildi" type="object" class="btn-primary" invisible="state != 'completed'"/>
                     <button name="action_reset_to_pending" string="Sıfırla" type="object" class="btn-secondary" invisible="state == 'pending'"/>
-                    <button name="action_print_label" string="Etiket Yazdir" type="object" class="btn-warning" icon="fa-print"/>
-                    <field name="state" widget="statusbar" statusbar_visible="pending,in_progress,completed,delivered"/>
+                    <button name="action_print_label" string="Etiket Yazdir" type="object" class="btn-warning" icon="fa-print" invisible="state == 'waiting_approval'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="waiting_approval,pending,in_progress,completed,delivered"/>
                 </header>
                 <sheet>
                     <div class="oe_title">
@@ -38,7 +41,8 @@
                     </div>
                     <group>
                         <group>
-                            <field name="invoice_no"/>
+                            <field name="is_reyon"/>
+                            <field name="invoice_no" invisible="is_reyon"/>
                             <field name="product_barcode"/>
                             <field name="product_code"/>
                             <field name="product_name"/>

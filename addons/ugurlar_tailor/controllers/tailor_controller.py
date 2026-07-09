@@ -91,6 +91,8 @@ class TailorController(http.Controller):
             # Sipariş oluştur
             order = Order.create({
                 'invoice_no': order_data.get('invoice_no', ''),
+                'is_reyon': order_data.get('is_reyon', False),
+                'state': 'waiting_approval' if order_data.get('is_reyon') else 'pending',
                 'product_barcode': order_data.get('barcode', ''),
                 'product_code': order_data.get('product_code', ''),
                 'product_name': order_data.get('product_name', ''),

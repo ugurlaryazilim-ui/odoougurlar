@@ -5,6 +5,7 @@ import { useService } from "@web/core/utils/hooks";
 import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
 import { printMultipleTailorLabels } from "../label_print";
+import { openCameraScanner } from "@ugurlar_barcode/js/camera_scanner";
 
 export class TailorStoreItem extends Component {
     static template = "ugurlar_tailor.TailorStoreItem";
@@ -182,7 +183,8 @@ export class TailorStoreItem extends Component {
             }));
 
             orders.push({
-                invoice_no: "", // Reyon isleminde fatura yok
+                invoice_no: "",
+                is_reyon: true,
                 barcode: item.barcode,
                 product_code: item.product_code || item.barcode,
                 product_name: item.product_name || item.barcode,
@@ -205,24 +207,11 @@ export class TailorStoreItem extends Component {
             const result = await rpc("/ugurlar_tailor/create_order", { orders });
             if (result.success) {
                 this.notification.add(
-                    _t("%(count)s siparis basariyla olusturuldu!", { count: result.orders.length }),
+                    _t("%(count)s siparis basariyla onaya gonderildi!", { count: result.orders.length }),
                     { type: "success" }
                 );
                 
-                const labelDataArray = [];
-                for (const order of result.orders) {
-                    try {
-                        const data = await rpc("/ugurlar_tailor/label_data", { order_id: order.id });
-                        if (data && !data.error) {
-                            labelDataArray.push(data);
-                        }
-                    } catch (e) {
-                        console.error("Etiket verisi alinamadi:", e);
-                    }
-                }
-                if (labelDataArray.length > 0) {
-                    printMultipleTailorLabels(labelDataArray);
-                }
+                // Reyon siparisleri dogrudan onaya dustugu icin etiket yazdirmasi yapilmayacak
                 
                 this.state.createdCount = result.orders.length;
                 this.state.step = 2;
@@ -252,6 +241,11 @@ export class TailorStoreItem extends Component {
     }
 
     scanCamera() {
-        this.notification.add(_t("Kamera tarama reyon ekraninda yakinda aktif olacak."), { type: "info" });
+        openCameraScanner((barcode) => {
+            if (this.state.step === 1) {
+                this.state.searchQuery = barcode;
+                this.searchProduct();
+            }
+        }, { headerText: 'Ürün Barkodu Okut' });
     }
 }

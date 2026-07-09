@@ -40,6 +40,14 @@
                                 </div>
                             </setting>
                         </block>
+
+                        <block title="Reyon Ayarlari" name="tailor_reyon_settings">
+                            <setting string="Reyon Yöneticileri" help="Reyon işlemi onayı bildirimlerinin gideceği yöneticiler">
+                                <div class="content-group">
+                                    <field name="reyon_manager_ids" widget="many2many_tags" options="{'no_create': True}"/>
+                                </div>
+                            </setting>
+                        </block>
                     </app>
                 </xpath>
             </field>

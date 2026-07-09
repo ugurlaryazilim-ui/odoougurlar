@@ -41,3 +41,10 @@ class ResConfigSettings(models.TransientModel):
         default='vw_TerziFaturalar',
         help='Nebim ERP\'deki fatura view adı (ör: vw_TerziFaturalar)',
     )
+
+    # ── Reyon Ayarları ──
+    reyon_manager_ids = fields.Many2many(
+        related='company_id.reyon_manager_ids',
+        readonly=False,
+        string='Reyon Yöneticileri'
+    )

@@ -18,7 +18,8 @@ class UgurlarTailorOrder(models.Model):
     )
 
     # ── Nebim Fatura Bilgileri ──
-    invoice_no = fields.Char(string='Fatura No', required=True, index=True, tracking=True)
+    invoice_no = fields.Char(string='Fatura No', index=True, tracking=True)
+    is_reyon = fields.Boolean(string='Reyon Siparişi', default=False, tracking=True)
     product_barcode = fields.Char(string='Barkod', required=True)
     product_code = fields.Char(string='Ürün Kodu')
     product_name = fields.Char(string='Ürün Adı')
@@ -44,6 +45,7 @@ class UgurlarTailorOrder(models.Model):
 
     # ── Durum Takibi ──
     state = fields.Selection([
+        ('waiting_approval', 'Yönetici Onayı Bekliyor'),
         ('pending', 'Bekliyor'),
         ('in_progress', 'Terzide'),
         ('completed', 'Hazır'),
@@ -60,12 +62,35 @@ class UgurlarTailorOrder(models.Model):
         for order in self:
             order.total_price = sum(order.line_ids.mapped('price'))
 
+    def action_deliver(self):
+        self.write({'state': 'delivered', 'delivered_at': fields.Datetime.now()})
+
+    def action_approve_reyon(self):
+        self.write({'state': 'pending'})
+        self.activity_feedback(['mail.mail_activity_data_todo'])
+
+    def action_reject_reyon(self):
+        self.unlink()
+
     @api.model_create_multi
     def create(self, vals_list):
         for vals in vals_list:
             if vals.get('name', 'Yeni') == 'Yeni':
                 vals['name'] = self.env['ir.sequence'].next_by_code('ugurlar.tailor.order') or 'Yeni'
-        return super().create(vals_list)
+        
+        orders = super().create(vals_list)
+        
+        for order in orders:
+            if order.is_reyon and order.state == 'waiting_approval':
+                managers = order.env.company.reyon_manager_ids
+                for manager in managers:
+                    order.activity_schedule(
+                        'mail.mail_activity_data_todo',
+                        user_id=manager.id,
+                        summary='Reyon Sipariş Onayı',
+                        note='Yeni bir faturasız reyon siparişi onayınızı bekliyor.'
+                    )
+        return orders
 
     def action_send_to_tailor(self):
         """Durumu 'Terzide' olarak güncelle."""

@@ -35,7 +35,7 @@
                     <div class="tailor-card-title">Hediye Etiketi</div>
                     <div class="tailor-card-desc">Hediye fisi yazdirin</div>
                 </div>
-                <div class="tailor-menu-card" style="background:#8e44ad;color:white;" t-on-click="onStoreItem">
+                <div class="tailor-menu-card tailor-card-reyon" t-on-click="onStoreItem">
                     <div class="tailor-card-icon">&#128717;</div>
                     <div class="tailor-card-title">Reyon</div>
                     <div class="tailor-card-desc">Magaza ici urunleri faturasiz isleyin</div>
@@ -212,6 +212,7 @@
                 </button>
                 <select class="tailor-select" t-on-change="onFilterChange">
                     <option value="">Tumu</option>
+                    <option value="waiting_approval">Onay Bekleyen</option>
                     <option value="pending">Bekliyor</option>
                     <option value="in_progress">Terzide</option>
                     <option value="completed">Hazir</option>
@@ -252,7 +253,7 @@
                             </div>
                         </div>
                         <div class="tailor-order-actions">
-                            <button class="tailor-btn tailor-btn-sm" style="background:#f39c12;color:#fff;"
+                            <button t-if="order.state != 'waiting_approval'" class="tailor-btn tailor-btn-sm" style="background:#f39c12;color:#fff;"
                                     t-on-click="() =&gt; this.printLabel(order.id)">
                                 Etiket Yazdir
                             </button>
@@ -403,17 +404,19 @@
 
             <!-- Step 1: Barkod Okutma ve Terzi Secimi -->
             <div t-if="state.step === 1" class="tailor-step">
-                <div class="tailor-search-box">
+                <div class="tailor-search-box" style="display: flex; gap: 10px; align-items: center; padding: 10px; background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
                     <input type="text" class="tailor-input tailor-barcode-input"
+                           style="flex: 1; padding: 12px 16px; font-size: 16px; border: 1px solid #ddd; border-radius: 6px;"
                            placeholder="Barkod okutunuz..."
                            t-model="state.searchQuery"
                            t-on-keydown="onSearchKeydown"
                            t-ref="storeSearchInput"/>
-                    <button class="tailor-btn" style="background:#f59e0b;color:#fff;font-size:18px;padding:8px 14px;"
+                    <button class="tailor-btn" style="background:#f59e0b;color:#fff;font-size:20px;padding:10px 16px;border-radius:6px;"
                             t-on-click="scanCamera" title="Kamera ile Barkod Okut">
                         <i class="fa fa-barcode"/>
                     </button>
-                    <button class="tailor-btn tailor-btn-primary" t-on-click="searchProduct"
+                    <button class="tailor-btn tailor-btn-primary" style="padding:10px 20px; font-size: 16px; border-radius:6px;"
+                            t-on-click="searchProduct"
                             t-att-disabled="state.searching">
                         <t t-if="state.searching"><span class="tailor-spinner"/> </t>
                         <t t-if="!state.searching">Ekle</t>

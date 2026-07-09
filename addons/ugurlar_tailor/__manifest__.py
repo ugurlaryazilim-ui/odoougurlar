@@ -1,6 +1,6 @@
 {
     'name': 'Terzi Takip',
-    'version': '19.0.1.0.0',
+    'version': '19.0.1.0.1',
     'category': 'Services',
     'summary': 'Mağaza terzi takip ve yönetim sistemi — Nebim ERP entegrasyonlu',
     'description': """
@@ -16,7 +16,7 @@
         * Raporlama ve istatistik
     """,
     'author': 'Uğurlar',
-    'depends': ['base', 'mail'],
+    'depends': ['base', 'mail', 'ugurlar_barcode'],
     'data': [
         'security/ugurlar_tailor_security.xml',
         'security/ir.model.access.csv',

@@ -5,3 +5,4 @@ from . import tailor_order
 from . import tailor_order_line
 from . import tailor_settings
 from . import tailor_mssql
+from . import res_company
