@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, onWillStart } from "@odoo/owl";
+import { Component, useState, onWillStart, onMounted, onPatched, onWillUnmount, useRef } from "@odoo/owl";
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { _t } from "@web/core/l10n/translation";
@@ -10,6 +10,7 @@ export class SocialInbox extends Component {
     setup() {
         this.orm = useService("orm");
         this.actionService = useService("action");
+        this.chatContainerRef = useRef("chatMessagesContainer");
         
         this.state = useState({
             conversations: [],
@@ -22,6 +23,42 @@ export class SocialInbox extends Component {
         onWillStart(async () => {
             await this.loadConversations();
         });
+        
+        onMounted(() => {
+            // Live Polling every 10 seconds
+            this.pollInterval = setInterval(async () => {
+                await this.loadConversations();
+                if (this.state.activeConversation) {
+                    // Save scroll position before reload to see if we need to auto-scroll
+                    const isAtBottom = this.chatContainerRef.el ? 
+                        (this.chatContainerRef.el.scrollHeight - this.chatContainerRef.el.scrollTop <= this.chatContainerRef.el.clientHeight + 50) : false;
+                    
+                    await this.loadMessages(this.state.activeConversation.id);
+                    
+                    if (isAtBottom) {
+                        setTimeout(() => this.scrollToBottom(), 50);
+                    }
+                }
+            }, 10000);
+            this.scrollToBottom();
+        });
+        
+        onPatched(() => {
+            // Scroll to bottom after state changes if needed
+            this.scrollToBottom();
+        });
+        
+        onWillUnmount(() => {
+            if (this.pollInterval) {
+                clearInterval(this.pollInterval);
+            }
+        });
+    }
+
+    scrollToBottom() {
+        if (this.chatContainerRef.el) {
+            this.chatContainerRef.el.scrollTop = this.chatContainerRef.el.scrollHeight;
+        }
     }
 
     t(enStr) {
@@ -64,24 +101,35 @@ export class SocialInbox extends Component {
         this.state.activeConversation = this.state.conversations.find(c => c.id === convId);
         this.state.showChatOnMobile = true;
         await this.loadMessages(convId);
+        setTimeout(() => this.scrollToBottom(), 50);
     }
     
     backToList() {
         this.state.showChatOnMobile = false;
-        // Optionally clear active conversation: this.state.activeConversation = null;
     }
 
     formatTime(dateStr) {
         if (!dateStr) return "";
         try {
-            // Odoo returns UTC strings like "2026-07-09 14:30:00"
-            // Convert to local time
             let utcDate = dateStr;
             if (!dateStr.endsWith('Z')) {
                 utcDate = dateStr.replace(' ', 'T') + 'Z';
             }
             const date = new Date(utcDate);
-            return date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            const today = new Date();
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            
+            const timeStr = date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            
+            if (date.toDateString() === today.toDateString()) {
+                return timeStr;
+            } else if (date.toDateString() === yesterday.toDateString()) {
+                return `Dün ${timeStr}`;
+            } else {
+                const dateFmt = date.toLocaleDateString([], {day: 'numeric', month: 'short'});
+                return `${dateFmt} ${timeStr}`;
+            }
         } catch(e) {
             return dateStr;
         }
@@ -113,6 +161,7 @@ export class SocialInbox extends Component {
         
         this.state.newMessage = "";
         await this.loadMessages(this.state.activeConversation.id);
+        setTimeout(() => this.scrollToBottom(), 50);
     }
     
     async handoffToHuman() {

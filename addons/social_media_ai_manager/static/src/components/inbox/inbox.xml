@@ -8,9 +8,12 @@
                 <div class="p-3 border-bottom bg-light d-flex align-items-center justify-content-between">
                     <h4 class="m-0 fw-bold"><t t-esc="t('Conversations')"/></h4>
                     <div class="dropdown">
-                        <button class="btn btn-sm btn-light rounded-circle" type="button" data-bs-toggle="dropdown">
+                        <button class="btn btn-sm btn-light rounded-circle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                             <i class="fa fa-ellipsis-v"></i>
                         </button>
+                        <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0">
+                            <li><a class="dropdown-item cursor-pointer" t-on-click="loadConversations"><i class="fa fa-refresh me-2 text-muted"></i>Yenile</a></li>
+                        </ul>
                     </div>
                 </div>
                 <div class="flex-grow-1 overflow-auto custom-scrollbar">
@@ -80,7 +83,7 @@
                     </div>
 
                     <!-- Chat Messages -->
-                    <div class="p-4 flex-grow-1 overflow-auto d-flex flex-column gap-3 custom-scrollbar">
+                    <div class="p-4 flex-grow-1 overflow-auto d-flex flex-column gap-3 custom-scrollbar" t-ref="chatMessagesContainer">
                         <t t-foreach="state.messages" t-as="msg" t-key="msg.id">
                             <div t-att-class="'d-flex w-100 ' + (msg.message_type === 'outgoing' ? 'justify-content-end' : 'justify-content-start')">
                                 <div t-attf-class="msg-bubble #{msg.message_type === 'outgoing' ? 'msg-outgoing' : 'msg-incoming'}" style="max-width: 75%;">
