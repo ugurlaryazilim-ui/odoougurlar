@@ -49,7 +49,10 @@ export class SettingsScreen extends Component {
     }
 
     startProcessing() {
-        if (!this.state.selectedPresetId) return;
+        if (!this.state.selectedPresetId) {
+            this.env.services.notification.add("Lütfen AI işlemi başlatmadan önce bir manken seçiniz!", { type: "danger", sticky: false });
+            return;
+        }
         this.props.onStartProcessing({
             presetId: this.state.selectedPresetId,
             category: this.state.category,
