@@ -78,7 +78,8 @@ class UgurlarTailorOrder(models.Model):
                 )
                 order.message_post(
                     body='Reyon siparişiniz (%s) onaylandı. Lütfen etiketi yazdırınız.' % order.name,
-                    partner_ids=[order.create_uid.partner_id.id]
+                    partner_ids=[order.create_uid.partner_id.id],
+                    author_id=self.env.ref('base.partner_root').id
                 )
 
     def action_reject_reyon(self):
@@ -92,7 +93,8 @@ class UgurlarTailorOrder(models.Model):
                 )
                 order.message_post(
                     body='Reyon siparişiniz (%s) yöneticiniz tarafından reddedildi ve iptal edildi.' % order.name,
-                    partner_ids=[order.create_uid.partner_id.id]
+                    partner_ids=[order.create_uid.partner_id.id],
+                    author_id=self.env.ref('base.partner_root').id
                 )
         self.unlink()
 
@@ -118,7 +120,8 @@ class UgurlarTailorOrder(models.Model):
                 if managers:
                     order.message_post(
                         body='Yeni bir faturasız reyon siparişi onayınızı bekliyor.',
-                        partner_ids=managers.mapped('partner_id').ids
+                        partner_ids=managers.mapped('partner_id').ids,
+                        author_id=self.env.ref('base.partner_root').id
                     )
         return orders
 
