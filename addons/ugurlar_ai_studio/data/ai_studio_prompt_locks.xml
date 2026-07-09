@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
-    <data noupdate="1">
+    <data noupdate="0">
         <!-- ============================================================ -->
         <!-- SaaS Prompt Lock Sistemi — Otomatik yuklenen sablonlar       -->
         <!-- Kaynak: ai-fashion-studio/services/sharedPrompts.ts          -->
@@ -31,7 +31,7 @@
         <record id="prompt_garment_lock" model="ai.studio.prompt.template">
             <field name="name">Kiyafet Yapi Lock</field>
             <field name="scope">global</field>
-            <field name="prompt_text">GARMENT CONSTRUCTION IMMUTABLE LOCK: Every garment element must match the reference product images exactly. Collar type/shape, pocket count/type/placement, button count/spacing/style, zipper position, neckline cut, cuff style, sleeve length. Waistband type, leg opening, pleat structure, hem finish. Do NOT redesign, restyle, simplify, or reinterpret any garment piece. Do NOT hallucinate embellishments: no adding fringes, tassels, ruffles, patches that are not visible in the reference images.</field>
+            <field name="prompt_text">GARMENT CONSTRUCTION IMMUTABLE LOCK: Every garment element must match the reference product images exactly. Collar type/shape, pocket count/type/placement, button count/spacing/style, zipper position, neckline cut, cuff style, sleeve length. Waistband type, leg opening, pleat structure, hem finish. Do NOT redesign, restyle, simplify, or reinterpret any garment piece. [STRICT RULE FOR BOTTOMS/PANTS]: Do NOT add fake pockets, cargo pockets, buttons, zippers, seams, or patterns if they are not CLEARLY visible in the original reference. If the pants are flat and plain, they MUST remain flat and plain. Do NOT hallucinate embellishments: no adding fringes, tassels, ruffles, patches that are not visible in the reference images.</field>
         </record>
 
         <!-- 5. Renk Sadakati Lock -->
@@ -59,7 +59,7 @@
         <record id="prompt_anti_hallucination" model="ai.studio.prompt.template">
             <field name="name">Anti-Halusinasyon Lock</field>
             <field name="scope">global</field>
-            <field name="prompt_text">ANTI-HALLUCINATION LOCK: Do NOT invent or add any decorative element not visible in the reference product images. Banned hallucinations: fringes, tassels, ruffles, visible contrasting embroidery when original has tone-on-tone texture, patches, beading, ribbon trim, lace inserts, extra zippers, chains. The garment must look EXACTLY like the reference, not a creative interpretation of it. [NECKLINE LOCK] Ensure neckline stays true to garment input. [EDGE/HEM LOCK] Maintain continuous, unbroken hem details. [HARDWARE LOCK] Do NOT invent fake chest pockets.</field>
+            <field name="prompt_text">ANTI-HALLUCINATION LOCK: Do NOT invent or add any decorative element not visible in the reference product images. Banned hallucinations: fringes, tassels, ruffles, visible contrasting embroidery when original has tone-on-tone texture, patches, beading, ribbon trim, lace inserts, extra zippers, chains, FAKE POCKETS, FAKE BUTTONS, UNWANTED PATTERNS. The garment must look EXACTLY like the reference, not a creative interpretation of it. [NECKLINE LOCK] Ensure neckline stays true to garment input. [EDGE/HEM LOCK] Maintain continuous, unbroken hem details. [HARDWARE &amp; POCKET LOCK] Do NOT invent fake chest pockets, fake side pockets, back pockets, or extra buttons. If the garment (especially pants/bottoms) does not have a pattern, it MUST remain a solid color.</field>
         </record>
 
         <!-- 9. Kiyafet Idealizasyonu Lock -->
