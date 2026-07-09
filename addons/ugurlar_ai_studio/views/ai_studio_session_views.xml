@@ -8,6 +8,7 @@
             <list>
                 <field name="name"/>
                 <field name="product_id"/>
+                <field name="product_barcode" optional="show"/>
                 <field name="state" widget="badge"/>
                 <field name="user_id" widget="many2one_avatar_user"/>
                 <field name="create_date"/>

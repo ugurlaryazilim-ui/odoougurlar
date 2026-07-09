@@ -29,7 +29,7 @@
     <record id="group_ai_studio_reviewer" model="res.groups">
         <field name="name">Onayıcı</field>
         <field name="privilege_id" ref="privilege_ai_studio"/>
-        <field name="implied_ids" eval="[(4, ref('group_ai_studio_operator'))]"/>
+        <field name="implied_ids" eval="[(4, ref('group_ai_studio_operator')), (4, ref('base.group_allow_export'))]"/>
         <field name="comment">Tüm oturumları görme, onay/red yetkisi</field>
     </record>
 
