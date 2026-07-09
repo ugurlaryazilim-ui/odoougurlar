@@ -66,10 +66,24 @@ class UgurlarTailorOrder(models.Model):
         self.write({'state': 'delivered', 'delivered_at': fields.Datetime.now()})
 
     def action_approve_reyon(self):
-        self.write({'state': 'pending'})
-        self.activity_feedback(['mail.mail_activity_data_todo'])
+        for order in self:
+            order.write({'state': 'pending'})
+            order.activity_feedback(['mail.mail_activity_data_todo'])
+            if order.create_uid:
+                order.activity_schedule(
+                    'mail.mail_activity_data_todo',
+                    user_id=order.create_uid.id,
+                    note='Reyon siparişiniz (%s) onaylandı. Sipariş listesinden etiketi yazdırabilirsiniz.' % order.name
+                )
 
     def action_reject_reyon(self):
+        for order in self:
+            if order.create_uid:
+                order.activity_schedule(
+                    'mail.mail_activity_data_todo',
+                    user_id=order.create_uid.id,
+                    note='Reyon siparişiniz (%s) reddedildi ve iptal edildi.' % order.name
+                )
         self.unlink()
 
     @api.model_create_multi

@@ -229,6 +229,34 @@
     gap: 8px;
 }
 
+.tailor-search-box-elevated {
+    align-items: center;
+    padding: 10px;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.tailor-input-lg {
+    padding: 12px 16px;
+    font-size: 16px;
+}
+
+.tailor-btn-camera {
+    background: #f59e0b;
+    color: #fff;
+    font-size: 20px;
+    padding: 10px 16px;
+}
+.tailor-btn-camera:hover {
+    background: #d97706;
+}
+
+.tailor-btn-add {
+    padding: 10px 20px;
+    font-size: 16px;
+}
+
 .tailor-search-box .tailor-input { flex: 1; }
 
 /* ── Invoice List ── */
@@ -599,7 +627,7 @@
     .tailor-service-check { width: 100%; }
     .tailor-filters { flex-direction: column; }
     .tailor-filters .tailor-select { width: 100%; }
-    .tailor-search-box { flex-direction: column; }
+    .tailor-search-box { flex-direction: column; align-items: stretch; }
 
     /* Bigger touch targets on mobile */
     .tailor-btn-sm { padding: 10px 16px; font-size: 14px; min-height: 44px; }

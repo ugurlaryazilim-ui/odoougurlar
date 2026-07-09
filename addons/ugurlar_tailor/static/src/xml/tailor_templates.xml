@@ -69,7 +69,7 @@
                            t-model="state.searchQuery"
                            t-on-keydown="onSearchKeydown"
                            t-ref="searchInput"/>
-                    <button class="tailor-btn" style="background:#f59e0b;color:#fff;font-size:18px;padding:8px 14px;"
+                    <button class="tailor-btn tailor-btn-camera"
                             t-on-click="scanCamera" title="Kamera ile Barkod Okut">
                         <i class="fa fa-barcode"/>
                     </button>
@@ -206,7 +206,7 @@
             <div class="tailor-filters">
                 <input type="text" class="tailor-input" placeholder="Ara (fatura, musteri, siparis no)..."
                        t-model="state.search" t-on-keydown="onSearchKeydown"/>
-                <button class="tailor-btn" style="background:#f59e0b;color:#fff;font-size:18px;padding:8px 14px;"
+                <button class="tailor-btn tailor-btn-camera"
                         t-on-click="scanCamera" title="Kamera ile Barkod Okut">
                     <i class="fa fa-barcode"/>
                 </button>
@@ -296,7 +296,7 @@
                            t-model="state.searchQuery"
                            t-on-keydown="onSearchKeydown"
                            t-ref="giftSearchInput"/>
-                    <button class="tailor-btn" style="background:#f59e0b;color:#fff;font-size:18px;padding:8px 14px;"
+                    <button class="tailor-btn tailor-btn-camera"
                             t-on-click="scanCamera" title="Kamera ile Barkod Okut">
                         <i class="fa fa-barcode"/>
                     </button>
@@ -404,18 +404,17 @@
 
             <!-- Step 1: Barkod Okutma ve Terzi Secimi -->
             <div t-if="state.step === 1" class="tailor-step">
-                <div class="tailor-search-box" style="display: flex; gap: 10px; align-items: center; padding: 10px; background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                    <input type="text" class="tailor-input tailor-barcode-input"
-                           style="flex: 1; padding: 12px 16px; font-size: 16px; border: 1px solid #ddd; border-radius: 6px;"
+                <div class="tailor-search-box tailor-search-box-elevated">
+                    <input type="text" class="tailor-input tailor-barcode-input tailor-input-lg"
                            placeholder="Barkod okutunuz..."
                            t-model="state.searchQuery"
                            t-on-keydown="onSearchKeydown"
                            t-ref="storeSearchInput"/>
-                    <button class="tailor-btn" style="background:#f59e0b;color:#fff;font-size:20px;padding:10px 16px;border-radius:6px;"
+                    <button class="tailor-btn tailor-btn-camera"
                             t-on-click="scanCamera" title="Kamera ile Barkod Okut">
                         <i class="fa fa-barcode"/>
                     </button>
-                    <button class="tailor-btn tailor-btn-primary" style="padding:10px 20px; font-size: 16px; border-radius:6px;"
+                    <button class="tailor-btn tailor-btn-primary tailor-btn-add"
                             t-on-click="searchProduct"
                             t-att-disabled="state.searching">
                         <t t-if="state.searching"><span class="tailor-spinner"/> </t>
@@ -494,9 +493,9 @@
             <!-- Step 2: Basari Ekrani -->
             <div t-if="state.step === 2" class="tailor-step">
                 <div class="tailor-success-screen">
-                    <div class="tailor-success-icon">&#10004;&#65039;</div>
-                    <h3>Siparisler Olusturuldu!</h3>
-                    <p><t t-esc="state.createdCount"/> adet reyon siparisi basariyla olusturuldu ve etiketler yazdirildi.</p>
+                    <div class="tailor-success-icon" style="color: #f59e0b; font-size: 60px;">&#8987;</div>
+                    <h3 style="color: #d97706;">Yetkili Onayına Gönderildi!</h3>
+                    <p><t t-esc="state.createdCount"/> adet reyon siparişi oluşturuldu. Yetkili onay verdiğinde size bildirim gelecek ve yazdırma butonu Sipariş Listesi ekranında görünür olacaktır.</p>
                     <div class="tailor-success-actions">
                         <button class="tailor-btn tailor-btn-primary tailor-btn-lg" t-on-click="() =&gt; { this.state.step = 1; this.state.searchQuery = ''; this.state.items = []; }">
                             Yeni Ürün Okut
