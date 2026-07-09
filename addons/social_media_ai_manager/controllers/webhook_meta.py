@@ -58,6 +58,10 @@ class WebhookMeta(http.Controller):
 
     def _process_messaging_event(self, event):
         """ Process incoming DMs """
+        env = request.env
+        enable_dms = env['ir.config_parameter'].sudo().get_param('social_media_ai.enable_dms')
+        if enable_dms != 'True':
+            return
         sender_id = event.get('sender', {}).get('id')
         recipient_id = event.get('recipient', {}).get('id')
         
@@ -137,6 +141,11 @@ class WebhookMeta(http.Controller):
 
     def _process_changes_event(self, change):
         """ Process feed changes (e.g. comments on a post) """
+        env = request.env
+        enable_comments = env['ir.config_parameter'].sudo().get_param('social_media_ai.enable_comments')
+        if enable_comments != 'True':
+            return
+            
         _logger.info(f"Processing feed change: {change}")
         value = change.get('value', {})
         
