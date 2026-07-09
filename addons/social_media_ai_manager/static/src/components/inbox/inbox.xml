@@ -1,57 +1,100 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <templates xml:space="preserve">
     <t t-name="social_media_ai_manager.SocialInbox" owl="1">
-        <div class="social-inbox-container d-flex h-100 bg-white">
+        <div class="social-inbox-container d-flex position-relative bg-white">
+            
             <!-- Sidebar -->
-            <div class="inbox-sidebar border-end d-flex flex-column" style="width: 300px;">
-                <div class="p-3 border-bottom bg-light">
-                    <h4 class="m-0"><t t-esc="t('Conversations')"/></h4>
+            <div t-attf-class="inbox-sidebar d-flex flex-column border-end #{state.showChatOnMobile ? 'mobile-hidden' : ''}" style="width: 350px;">
+                <div class="p-3 border-bottom bg-light d-flex align-items-center justify-content-between">
+                    <h4 class="m-0 fw-bold"><t t-esc="t('Conversations')"/></h4>
+                    <div class="dropdown">
+                        <button class="btn btn-sm btn-light rounded-circle" type="button" data-bs-toggle="dropdown">
+                            <i class="fa fa-ellipsis-v"></i>
+                        </button>
+                    </div>
                 </div>
-                <div class="flex-grow-1 overflow-auto">
+                <div class="flex-grow-1 overflow-auto custom-scrollbar">
                     <t t-foreach="state.conversations" t-as="conv" t-key="conv.id">
-                        <div class="p-3 border-bottom cursor-pointer conversation-item" 
+                        <div class="p-3 border-bottom cursor-pointer conversation-item d-flex align-items-center gap-3" 
                              t-on-click="() => this.selectConversation(conv.id)"
-                             t-att-class="{'bg-light': state.activeConversation?.id === conv.id}">
-                            <div class="d-flex justify-content-between">
-                                <strong><t t-esc="conv.name"/></strong>
-                                <span class="badge bg-primary rounded-pill" t-if="conv.unread_count > 0">
-                                    <t t-esc="conv.unread_count"/>
-                                </span>
+                             t-att-class="{'active': state.activeConversation?.id === conv.id}">
+                            
+                            <!-- Platform Icon Avatar -->
+                            <div t-attf-class="platform-icon flex-shrink-0 #{conv.platform === 'instagram' ? 'platform-instagram' : (conv.platform === 'facebook' ? 'platform-facebook' : (conv.platform === 'whatsapp' ? 'platform-whatsapp' : 'platform-default'))}">
+                                <i t-attf-class="fa #{conv.platform === 'instagram' ? 'fa-instagram' : (conv.platform === 'facebook' ? 'fa-facebook' : (conv.platform === 'whatsapp' ? 'fa-whatsapp' : 'fa-comment'))}"></i>
                             </div>
-                            <div class="text-muted small mt-1">
-                                <t t-esc="conv.platform"/> - <t t-esc="conv.state"/>
+
+                            <!-- Conversation Details -->
+                            <div class="flex-grow-1 min-w-0">
+                                <div class="d-flex justify-content-between align-items-baseline mb-1">
+                                    <strong class="text-truncate d-block" style="font-size: 1.05rem;"><t t-esc="conv.name"/></strong>
+                                    <span class="badge bg-danger rounded-pill" t-if="conv.unread_count > 0">
+                                        <t t-esc="conv.unread_count"/>
+                                    </span>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <small class="text-muted text-capitalize"><t t-esc="conv.platform"/></small>
+                                    <small t-attf-class="badge rounded-pill #{conv.state === 'bot' ? 'bg-secondary' : 'bg-success'}">
+                                        <t t-esc="conv.state"/>
+                                    </small>
+                                </div>
                             </div>
+                        </div>
+                    </t>
+                    <t t-if="state.conversations.length === 0">
+                        <div class="text-center text-muted p-5">
+                            <i class="fa fa-inbox fa-3x mb-3 text-light"></i>
+                            <p>Hiç görüşme bulunamadı.</p>
                         </div>
                     </t>
                 </div>
             </div>
 
             <!-- Chat Area -->
-            <div class="inbox-chat d-flex flex-column flex-grow-1">
+            <div t-attf-class="inbox-chat d-flex flex-column flex-grow-1 #{!state.showChatOnMobile ? 'mobile-hidden' : ''}">
                 <t t-if="state.activeConversation">
+                    
                     <!-- Chat Header -->
-                    <div class="p-3 border-bottom d-flex justify-content-between align-items-center bg-light">
-                        <h4 class="m-0"><t t-esc="state.activeConversation.name"/></h4>
-                        <button class="btn btn-warning btn-sm" 
+                    <div class="p-3 chat-header d-flex justify-content-between align-items-center">
+                        <div class="d-flex align-items-center gap-3">
+                            <!-- Mobile Back Button -->
+                            <button class="btn btn-light rounded-circle d-md-none" t-on-click="backToList">
+                                <i class="fa fa-arrow-left"></i>
+                            </button>
+                            
+                            <div t-attf-class="platform-icon flex-shrink-0 #{state.activeConversation.platform === 'instagram' ? 'platform-instagram' : (state.activeConversation.platform === 'facebook' ? 'platform-facebook' : 'platform-default')}">
+                                <i t-attf-class="fa #{state.activeConversation.platform === 'instagram' ? 'fa-instagram' : (state.activeConversation.platform === 'facebook' ? 'fa-facebook' : 'fa-user')}"></i>
+                            </div>
+                            
+                            <div>
+                                <h5 class="m-0 fw-bold"><t t-esc="state.activeConversation.name"/></h5>
+                                <small class="text-muted text-capitalize"><t t-esc="state.activeConversation.platform"/> Sohbeti</small>
+                            </div>
+                        </div>
+
+                        <button class="btn btn-outline-warning btn-sm fw-bold rounded-pill px-3" 
                                 t-if="state.activeConversation.state === 'bot'"
                                 t-on-click="handoffToHuman">
-                            <i class="fa fa-user"></i> <t t-esc="t('Handoff to Human')"/>
+                            <i class="fa fa-user me-1"></i> <t t-esc="t('Handoff to Human')"/>
                         </button>
                     </div>
 
                     <!-- Chat Messages -->
-                    <div class="p-3 flex-grow-1 overflow-auto d-flex flex-column gap-2" style="background-color: #f8f9fa;">
+                    <div class="p-4 flex-grow-1 overflow-auto d-flex flex-column gap-3 custom-scrollbar">
                         <t t-foreach="state.messages" t-as="msg" t-key="msg.id">
                             <div t-att-class="'d-flex w-100 ' + (msg.message_type === 'outgoing' ? 'justify-content-end' : 'justify-content-start')">
-                                <div t-attf-class="p-2 rounded" t-att-style="msg.message_type === 'outgoing' ? 'background-color: #dcf8c6; max-width: 70%;' : 'background-color: white; border: 1px solid #dee2e6; max-width: 70%;'">
-                                    <t t-esc="msg.content"/>
+                                <div t-attf-class="msg-bubble #{msg.message_type === 'outgoing' ? 'msg-outgoing' : 'msg-incoming'}" style="max-width: 75%;">
+                                    <div style="white-space: pre-wrap;"><t t-esc="msg.content"/></div>
+                                    
                                     <div t-if="msg.post_link" class="mt-2">
-                                        <a t-att-href="msg.post_link" target="_blank" class="btn btn-sm btn-outline-secondary w-100" style="font-size: 0.8em; text-decoration: none;">
+                                        <a t-att-href="msg.post_link" target="_blank" class="btn btn-sm btn-light border w-100 text-primary fw-bold" style="text-decoration: none;">
                                             <i class="fa fa-external-link"></i> Gönderiye Git
                                         </a>
                                     </div>
-                                    <div class="text-end text-muted mt-1" style="font-size: 0.7em;">
-                                        <t t-esc="msg.date"/>
+                                    
+                                    <div class="msg-time d-flex align-items-center gap-1">
+                                        <t t-esc="formatTime(msg.date)"/>
+                                        <i class="fa fa-check-double text-info" t-if="msg.message_type === 'outgoing'"></i>
                                     </div>
                                 </div>
                             </div>
@@ -59,20 +102,30 @@
                     </div>
 
                     <!-- Chat Input -->
-                    <div class="p-3 border-top bg-white">
-                        <div class="input-group">
-                            <input type="text" class="form-control" t-att-placeholder="t('Type a message...')" 
-                                   t-model="state.newMessage" 
-                                   t-on-keyup="onKeyup"/>
-                            <button class="btn btn-primary" t-on-click="sendMessage">
-                                <i class="fa fa-paper-plane"></i> <t t-esc="t('Send')"/>
+                    <div class="chat-input-container">
+                        <div class="d-flex align-items-center">
+                            <div class="input-group">
+                                <input type="text" class="form-control chat-input" t-att-placeholder="t('Type a message...')" 
+                                       t-model="state.newMessage" 
+                                       t-on-keyup="onKeyup"/>
+                            </div>
+                            <button class="chat-send-btn flex-shrink-0 shadow-sm" t-on-click="sendMessage">
+                                <i class="fa fa-paper-plane"></i>
                             </button>
                         </div>
                     </div>
                 </t>
+                
+                <!-- Empty State -->
                 <t t-else="">
-                    <div class="d-flex align-items-center justify-content-center h-100 text-muted">
-                        <h4><t t-esc="t('Select a conversation to start messaging')"/></h4>
+                    <div class="d-flex flex-column align-items-center justify-content-center h-100 text-center" style="background-color: #f8f9fa;">
+                        <img src="https://cdn-icons-png.flaticon.com/512/1041/1041916.png" style="width: 150px; opacity: 0.5; margin-bottom: 20px; filter: grayscale(100%);"/>
+                        <h4 class="text-muted fw-light"><t t-esc="t('Select a conversation to start messaging')"/></h4>
+                        <p class="text-muted small">Sol menüden bir görüşme seçerek yanıt vermeye başlayabilirsiniz.</p>
+                        
+                        <button class="btn btn-primary d-md-none mt-3 rounded-pill px-4" t-on-click="backToList">
+                            <i class="fa fa-list me-2"></i> Görüşmeleri Aç
+                        </button>
                     </div>
                 </t>
             </div>

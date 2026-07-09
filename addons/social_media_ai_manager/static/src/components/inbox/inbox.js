@@ -16,6 +16,7 @@ export class SocialInbox extends Component {
             activeConversation: null,
             messages: [],
             newMessage: "",
+            showChatOnMobile: false,
         });
 
         onWillStart(async () => {
@@ -61,7 +62,29 @@ export class SocialInbox extends Component {
 
     async selectConversation(convId) {
         this.state.activeConversation = this.state.conversations.find(c => c.id === convId);
+        this.state.showChatOnMobile = true;
         await this.loadMessages(convId);
+    }
+    
+    backToList() {
+        this.state.showChatOnMobile = false;
+        // Optionally clear active conversation: this.state.activeConversation = null;
+    }
+
+    formatTime(dateStr) {
+        if (!dateStr) return "";
+        try {
+            // Odoo returns UTC strings like "2026-07-09 14:30:00"
+            // Convert to local time
+            let utcDate = dateStr;
+            if (!dateStr.endsWith('Z')) {
+                utcDate = dateStr.replace(' ', 'T') + 'Z';
+            }
+            const date = new Date(utcDate);
+            return date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        } catch(e) {
+            return dateStr;
+        }
     }
 
     async loadMessages(convId) {
