@@ -14,7 +14,7 @@
                     </div>
 
                     <!-- NUSHA 2: MAGAZA -->
-                    <div class="page tailor-label">
+                    <div class="page tailor-label" style="page-break-before: always;">
                         <t t-call="ugurlar_tailor.report_tailor_label_copy">
                             <t t-set="copy_title">MAGAZA NUSHASI</t>
                             <t t-set="copy_bg">#2980b9</t>
@@ -24,7 +24,7 @@
 
                     <!-- NUSHA 3: MUSTERI -->
                     <t t-if="o.customer_name != 'MAĞAZA (REYON)'">
-                        <div class="page tailor-label">
+                        <div class="page tailor-label" style="page-break-before: always;">
                             <t t-call="ugurlar_tailor.report_tailor_label_copy">
                                 <t t-set="copy_title">MUSTERI NUSHASI</t>
                                 <t t-set="copy_bg">#27ae60</t>
@@ -47,7 +47,7 @@
                     margin: 0 auto;
                     color: #000;
                     line-height: 1.4;
-                    page-break-after: always;
+                    page-break-inside: avoid;
                 }
                 .label-hdr {
                     text-align: center;

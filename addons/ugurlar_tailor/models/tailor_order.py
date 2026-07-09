@@ -70,19 +70,21 @@ class UgurlarTailorOrder(models.Model):
             order.write({'state': 'pending'})
             order.activity_feedback(['mail.mail_activity_data_todo'])
             if order.create_uid:
+                link = '<a href="/web#id=%s&model=ugurlar.tailor.order&view_type=form" target="_blank">Siparişe Git: %s</a>' % (order.id, order.name)
                 order.activity_schedule(
                     'mail.mail_activity_data_todo',
                     user_id=order.create_uid.id,
-                    note='Reyon siparişiniz (%s) onaylandı. Sipariş listesinden etiketi yazdırabilirsiniz.' % order.name
+                    note='Reyon siparişiniz (%s) onaylandı. %s' % (order.name, link)
                 )
 
     def action_reject_reyon(self):
         for order in self:
             if order.create_uid:
+                link = '<a href="/web#id=%s&model=ugurlar.tailor.order&view_type=form" target="_blank">Siparişe Git: %s</a>' % (order.id, order.name)
                 order.activity_schedule(
                     'mail.mail_activity_data_todo',
                     user_id=order.create_uid.id,
-                    note='Reyon siparişiniz (%s) reddedildi ve iptal edildi.' % order.name
+                    note='Reyon siparişiniz (%s) reddedildi ve iptal edildi. %s' % (order.name, link)
                 )
         self.unlink()
 
@@ -98,11 +100,12 @@ class UgurlarTailorOrder(models.Model):
             if order.is_reyon and order.state == 'waiting_approval':
                 managers = order.env.company.reyon_manager_ids
                 for manager in managers:
+                    link = '<a href="/web#id=%s&model=ugurlar.tailor.order&view_type=form" target="_blank">Siparişi İncele: %s</a>' % (order.id, order.name)
                     order.activity_schedule(
                         'mail.mail_activity_data_todo',
                         user_id=manager.id,
                         summary='Reyon Sipariş Onayı',
-                        note='Yeni bir faturasız reyon siparişi onayınızı bekliyor.'
+                        note='Yeni bir faturasız reyon siparişi onayınızı bekliyor. %s' % link
                     )
         return orders
 
