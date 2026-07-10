@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from odoo import models, fields, exceptions
+from odoo import models, fields, exceptions, api
 
 class SocialMediaAccount(models.Model):
     _name = 'social.media.account'
