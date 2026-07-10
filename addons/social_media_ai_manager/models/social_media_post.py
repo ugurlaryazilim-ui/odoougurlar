@@ -24,6 +24,14 @@ class SocialMediaPost(models.Model):
         ('posted', 'Posted'),
         ('error', 'Error')
     ], string="Status", default='draft', tracking=True)
+    
+    # YouTube Specific
+    youtube_privacy = fields.Selection([
+        ('public', 'Herkese Açık (Public)'),
+        ('unlisted', 'Liste Dışı (Unlisted)'),
+        ('private', 'Gizli (Private)')
+    ], string="YouTube Gizlilik", default='public', tracking=True)
+    youtube_tags = fields.Char(string="YouTube Etiketleri", help="Virgülle ayırarak yazın (Örn: moda,giyim,trend)")
 
     # Platforms
     account_ids = fields.Many2many('social.media.account', string="Publish to Accounts", required=True)
@@ -354,6 +362,12 @@ class SocialMediaPostLine(models.Model):
         if is_shorts and '#shorts' not in description.lower():
             description += "\n\n#shorts"
             
+        if self.post_id.youtube_tags:
+            custom_tags = [t.strip() for t in self.post_id.youtube_tags.split(',') if t.strip()]
+            tags.extend(custom_tags)
+            
+        privacy_status = self.post_id.youtube_privacy or 'public'
+            
         metadata = {
             "snippet": {
                 "title": title,
@@ -362,7 +376,7 @@ class SocialMediaPostLine(models.Model):
                 "categoryId": "22" # 22 = People & Blogs
             },
             "status": {
-                "privacyStatus": "public",
+                "privacyStatus": privacy_status,
                 "selfDeclaredMadeForKids": False
             }
         }

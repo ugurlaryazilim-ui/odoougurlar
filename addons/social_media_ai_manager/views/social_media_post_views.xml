@@ -64,6 +64,15 @@
                                 <field name="product_tmpl_ids" widget="many2many_tags" readonly="state != 'draft'" options="{'no_create': True}"/>
                             </group>
                         </page>
+                        <page string="YouTube Ayarları">
+                            <group>
+                                <div class="text-muted mb-3" colspan="2">
+                                    <i>Sadece YouTube paylaşımlarında geçerli olacak profesyonel ayarlar.</i>
+                                </div>
+                                <field name="youtube_privacy" widget="radio" options="{'horizontal': true}" readonly="state != 'draft'"/>
+                                <field name="youtube_tags" placeholder="Örn: moda,elbise,bursa,trend" readonly="state != 'draft'"/>
+                            </group>
+                        </page>
                         <page string="Publishing Status" invisible="state == 'draft'">
                             <field name="post_line_ids" readonly="1">
                                 <list>
