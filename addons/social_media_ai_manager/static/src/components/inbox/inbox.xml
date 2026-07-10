@@ -81,9 +81,8 @@
                         </div>
 
                         <button class="btn btn-outline-warning btn-sm fw-bold rounded-pill px-3" 
-                                t-if="state.activeConversation.state === 'bot' || !state.activeConversation.user_id"
                                 t-on-click="handoffToHuman">
-                            <i class="fa fa-user me-1"></i> <t t-esc="state.activeConversation.user_id ? t('Handoff to Human') : 'Devret / Üstlen'"/>
+                            <i class="fa fa-user me-1"></i> <t t-esc="state.activeConversation.state === 'bot' ? 'İnsana Devret' : 'Bota Devret'"/>
                         </button>
                     </div>
 
