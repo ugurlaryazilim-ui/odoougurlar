@@ -115,13 +115,14 @@ class SocialMediaMessage(models.Model):
                     if last_msg.platform_message_id: # it's a comment
                         account._send_youtube_comment_reply(last_msg.platform_message_id, reply_text, account)
                 elif account.platform in ['facebook', 'instagram']:
-                    # We check if it's a comment or a DM. If it's a comment, it usually has platform_message_id containing an underscore.
-                    # But simpler: if content starts with [YORUM]:
-                    is_comment = any(m.content.startswith('[YORUM]:') for m in conv_msgs)
-                    if is_comment and last_msg.platform_message_id:
-                        auto_reply = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.comment_auto_reply', 'Merhaba, detaylı bilgi DM üzerinden iletilmiştir.')
-                        account._send_meta_comment_reply(last_msg.platform_message_id, auto_reply)
-                        account._send_meta_private_reply(last_msg.platform_message_id, reply_text)
+                    # Separate comment logic to find the exact comment ID
+                    comment_msgs = [m for m in conv_msgs if m.content.startswith('[YORUM]:')]
+                    if comment_msgs:
+                        last_comment_id = comment_msgs[-1].platform_message_id
+                        if last_comment_id:
+                            auto_reply = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.comment_auto_reply', 'Merhaba, detaylı bilgi DM üzerinden iletilmiştir.')
+                            account._send_meta_comment_reply(last_comment_id, auto_reply)
+                            account._send_meta_private_reply(last_comment_id, reply_text)
                     else:
                         account._send_meta_message(conversation.social_user_id, reply_text)
                 elif account.platform == 'whatsapp':
