@@ -257,12 +257,14 @@ class WebhookMeta(http.Controller):
         system_context += f"\n\nKullanıcı {account.platform} üzerinden yazıyor."
         
         if linked_post and hasattr(linked_post, 'product_tmpl_ids') and linked_post.product_tmpl_ids:
+            import urllib.parse
             ecommerce_url = env['ir.config_parameter'].sudo().get_param('social_media_ai.ecommerce_url', 'https://www.ugurlar.com').strip('/')
-            system_context += "\n\nKULLANICININ YORUM YAPTIĞI GÖNDERİDEKİ ÜRÜNLER (Bu bilgileri kullanarak soruları cevapla. Sipariş linkini direkt ver):"
+            system_context += "\n\nKULLANICININ YORUM YAPTIĞI GÖNDERİDEKİ ÜRÜNLER (Müşteri bilgi veya fiyat sorarsa bu ürünlerin bilgilerini ayrı ayrı sun ve her bir ürün için ilgili sipariş linkini mutlaka paylaş):"
             for p in linked_post.product_tmpl_ids:
                 price = f"{p.list_price} TL" if hasattr(p, 'list_price') else "Bilinmiyor"
                 stock = p.qty_available if hasattr(p, 'qty_available') else 10
                 sku = p.default_code or ""
+                search_term = sku if sku else p.name
                 
                 stock_text = f"{stock} Adet (Tükenmek üzere, müşteriye aciliyet bildir!)" if 0 < stock < 5 else f"{stock} Adet" if stock > 0 else "Stokta Yok (Müşteriye stokta olmadığını nazikçe belirt)"
                 
@@ -272,9 +274,10 @@ class WebhookMeta(http.Controller):
                     for attr in p.attribute_line_ids:
                         variants_text += f"{attr.attribute_id.name}: {', '.join(attr.value_ids.mapped('name'))}. "
                 
-                link = f"{ecommerce_url}/search?q={sku}" if sku else ecommerce_url
+                query = urllib.parse.quote(search_term)
+                link = f"{ecommerce_url}/search?q={query}"
                 
-                system_context += f"\n- Ürün: {p.name}"
+                system_context += f"\n\n- Ürün: {p.name}"
                 if sku:
                     system_context += f" (Kodu: {sku})"
                 system_context += f"\n  Fiyat: {price}"
