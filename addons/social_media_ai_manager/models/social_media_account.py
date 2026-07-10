@@ -198,7 +198,8 @@ class SocialMediaAccount(models.Model):
                 
                 # AI Routing logic moved to Cron job
         except Exception as e:
-            pass
+            import logging
+            logging.getLogger(__name__).error(f"YouTube Sync Error: {e}")
 
     def _trigger_youtube_ai_response(self, conversation, user_message, account, comment_id, video_id):
         ai_provider = self.env['social.media.ai.provider'].sudo()

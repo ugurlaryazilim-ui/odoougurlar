@@ -59,6 +59,19 @@ class SocialMediaMessage(models.Model):
                 # Combine user messages into one paragraph
                 user_message = "\n".join([m.content.replace("[YORUM]:", "").strip() for m in conv_msgs])
                 
+                # Fetch Conversation History for AI Context
+                past_messages = self.search([
+                    ('conversation_id', '=', conversation.id),
+                    ('id', 'not in', conv_msgs.ids)
+                ], order='date desc', limit=6)
+                
+                if past_messages:
+                    history_text = "\n".join([
+                        f"{'Müşteri' if m.message_type == 'incoming' else 'Asistan'}: {m.content.replace('[YORUM]:', '').strip()}"
+                        for m in reversed(past_messages)
+                    ])
+                    system_context += f"\n\nÖNCEKİ KONUŞMA GEÇMİŞİ (Bu konuşma geçmişine göre yanıt ver):\n{history_text}\n"
+                
                 # We use the LAST message for context (like which post they commented on)
                 last_msg = conv_msgs[-1]
                 
