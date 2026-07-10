@@ -50,14 +50,14 @@ class SocialAIProvider(models.AbstractModel):
             return res_data['choices'][0]['message']['content']
         except Exception as e:
             _logger.error(f"OpenAI API Error: {e}")
-            return "An error occurred with the OpenAI service."
+            return "[ERROR] An error occurred with the OpenAI service."
 
     def _call_gemini(self, message_text, system_prompt):
         api_key = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.gemini_key')
         if not api_key:
             return "Gemini API Key is not configured."
         
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
         headers = {'Content-Type': 'application/json'}
         data = {
             "systemInstruction": {
@@ -74,7 +74,7 @@ class SocialAIProvider(models.AbstractModel):
             return res_data['candidates'][0]['content']['parts'][0]['text']
         except Exception as e:
             _logger.error(f"Gemini API Error: {e}")
-            return "An error occurred with the Gemini service."
+            return "[ERROR] An error occurred with the Gemini service."
 
     def _call_ollama(self, message_text, system_prompt):
         endpoint = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.ollama_endpoint', 'http://localhost:11434/api/generate')
@@ -94,4 +94,4 @@ class SocialAIProvider(models.AbstractModel):
             return res_data.get('response', '')
         except Exception as e:
             _logger.error(f"Ollama API Error: {e}")
-            return "An error occurred with the local Ollama service."
+            return "[ERROR] An error occurred with the local Ollama service."

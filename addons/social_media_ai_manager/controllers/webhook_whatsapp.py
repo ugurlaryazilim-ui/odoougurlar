@@ -98,7 +98,7 @@ class WebhookWhatsApp(http.Controller):
         # Simple AI execution
         reply_text = ai_provider.generate_response(user_message, "User is asking on WhatsApp. Keep it short.")
         
-        if reply_text:
+        if reply_text and not str(reply_text).startswith("[ERROR]"):
             # Save AI response in Odoo
             env['social.media.message'].sudo().create({
                 'conversation_id': conversation.id,

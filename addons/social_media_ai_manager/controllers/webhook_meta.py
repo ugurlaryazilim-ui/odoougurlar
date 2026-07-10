@@ -297,7 +297,7 @@ class WebhookMeta(http.Controller):
         
         reply_text = ai_provider.generate_response(user_message, system_context)
         
-        if reply_text:
+        if reply_text and not str(reply_text).startswith("[ERROR]"):
             # Check for Handoff trigger
             if "[DEVRET]" in reply_text.upper():
                 reply_text = reply_text.replace("[DEVRET]", "").replace("[devret]", "").strip()

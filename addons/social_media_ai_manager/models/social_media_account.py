@@ -226,7 +226,7 @@ class SocialMediaAccount(models.Model):
 
         reply_text = ai_provider.generate_response(user_message, system_context)
         
-        if reply_text:
+        if reply_text and not str(reply_text).startswith("[ERROR]"):
             if "[DEVRET]" in reply_text.upper():
                 reply_text = reply_text.replace("[DEVRET]", "").replace("[devret]", "").strip()
                 conversation.sudo().write({'state': 'open'})
