@@ -95,8 +95,19 @@ class SocialMediaMessage(models.Model):
                                 variants.append(f"{attr.attribute_id.name}: {vals}")
                         variant_text = " | ".join(variants) if variants else "Tek Çeşit"
                         
-                        # Order Link
-                        search_query = p.barcode or p.default_code or p.name.replace(" ", "+")
+                        # Order Link (Prioritize Barcode)
+                        search_query = p.barcode or p.default_code
+                        if not search_query and p.product_variant_ids:
+                            for variant in p.product_variant_ids:
+                                if variant.barcode:
+                                    search_query = variant.barcode
+                                    break
+                                elif variant.default_code and not search_query:
+                                    search_query = variant.default_code
+                                    
+                        if not search_query:
+                            search_query = p.name.replace(" ", "+")
+                            
                         order_link = f"https://www.ugurlar.com/search?q={search_query}"
                         
                         system_context += f"\n\n- Ürün: {p.name}"
