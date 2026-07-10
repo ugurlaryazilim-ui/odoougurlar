@@ -535,6 +535,22 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         if consistency_prompt:
             base_prompt = consistency_prompt + base_prompt
 
+    if photo_type == 'back':
+        base_prompt += (
+            "CRITICAL VIEW REFERENCE LOCK: This is the BACK VIEW. "
+            "The provided garment image is the BACK of the product. "
+            "You MUST treat the provided garment image as the ABSOLUTE PRIMARY TRUTH for the back design. "
+            "Do NOT hallucinate, carry over, or invent details, patterns, or pockets from the front view. "
+            "If the provided back garment image is plain and flat, the generated back MUST be completely plain and flat. "
+        )
+    elif photo_type == 'side':
+        base_prompt += (
+            "CRITICAL VIEW REFERENCE LOCK: This is the SIDE VIEW. "
+            "The provided garment image is the SIDE of the product. "
+            "You MUST treat the provided garment image as the ABSOLUTE PRIMARY TRUTH for the side design. "
+            "Do NOT hallucinate or carry over details from the front view that are not clearly visible here. "
+        )
+
     # Preset bilgileri (manken tipi, cinsiyeti)
     if preset:
         gender = preset.get('gender', 'female')
