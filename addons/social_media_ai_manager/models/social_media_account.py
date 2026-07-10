@@ -191,6 +191,8 @@ class SocialMediaAccount(models.Model):
                 # AI Routing
                 if conversation.state == 'bot':
                     self._trigger_youtube_ai_response(conversation, text_original, self, comment_id, video_id)
+                    import time
+                    time.sleep(4) # Uyku ekleyerek API Rate Limit (15 RPM) aşımını engelliyoruz
         except Exception as e:
             pass
 
