@@ -263,8 +263,9 @@ class WebhookMeta(http.Controller):
             for p in linked_post.product_tmpl_ids:
                 price = f"{p.list_price} TL" if hasattr(p, 'list_price') else "Bilinmiyor"
                 stock = p.qty_available if hasattr(p, 'qty_available') else 10
+                barcode = p.barcode or ""
                 sku = p.default_code or ""
-                search_term = sku if sku else p.name
+                search_term = barcode if barcode else (sku if sku else p.name)
                 
                 stock_text = f"{stock} Adet (Tükenmek üzere, müşteriye aciliyet bildir!)" if 0 < stock < 5 else f"{stock} Adet" if stock > 0 else "Stokta Yok (Müşteriye stokta olmadığını nazikçe belirt)"
                 
