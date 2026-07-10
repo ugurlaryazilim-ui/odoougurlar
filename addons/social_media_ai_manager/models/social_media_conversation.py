@@ -54,15 +54,19 @@ class SocialMediaConversation(models.Model):
     def action_handoff_to_human(self):
         handoff_user_ids = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.handoff_user_ids')
         for rec in self:
-            rec.state = 'open'
-            if not rec.user_id and handoff_user_ids:
-                import json
-                try:
-                    user_ids = json.loads(handoff_user_ids)
-                    if user_ids and isinstance(user_ids, list):
-                        # Simple logic: Assign to the first user in the list for now
-                        # Ideally, could do round-robin or check workload
-                        rec.user_id = user_ids[0]
-                except Exception:
-                    pass
+            if rec.state == 'bot':
+                rec.state = 'open'
+                if not rec.user_id and handoff_user_ids:
+                    import json
+                    try:
+                        user_ids = json.loads(handoff_user_ids)
+                        if user_ids and isinstance(user_ids, list):
+                            # Simple logic: Assign to the first user in the list for now
+                            # Ideally, could do round-robin or check workload
+                            rec.user_id = user_ids[0]
+                    except Exception:
+                        pass
+            else:
+                rec.state = 'bot'
+                rec.user_id = False
         return True
