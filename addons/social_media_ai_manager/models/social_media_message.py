@@ -46,10 +46,20 @@ class SocialMediaMessage(models.Model):
             
         ai_provider = self.env['social.media.ai.provider'].sudo()
         
-        for msg in messages:
+        # Group by conversation to avoid multiple AI calls for consecutive messages (debouncing)
+        conversations = messages.mapped('conversation_id')
+        
+        for conversation in conversations:
             try:
-                conversation = msg.conversation_id
+                # All unprocessed messages for this conversation in this batch
+                conv_msgs = messages.filtered(lambda m: m.conversation_id.id == conversation.id)
                 account = conversation.account_id
+                
+                # Combine user messages into one paragraph
+                user_message = "\n".join([m.content.replace("[YORUM]:", "").strip() for m in conv_msgs])
+                
+                # We use the LAST message for context (like which post they commented on)
+                last_msg = conv_msgs[-1]
                 
                 # Setup Context
                 system_context = self.env['ir.config_parameter'].sudo().get_param(
@@ -61,16 +71,12 @@ class SocialMediaMessage(models.Model):
                 whatsapp_number = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.whatsapp_number', '').strip()
                 wa_link = f"https://wa.me/{whatsapp_number}?text=Merhaba+{account.platform}'dan+geliyorum" if whatsapp_number else ""
                 
-                # Extract Product Info from Post if applicable (YouTube/Meta)
+                # Extract Product Info from Post if applicable
                 linked_post = False
-                if msg.post_link and 'youtube.com/watch?v=' in msg.post_link:
-                    video_id = msg.post_link.split('v=')[-1]
+                if last_msg.post_link and 'youtube.com/watch?v=' in last_msg.post_link:
+                    video_id = last_msg.post_link.split('v=')[-1]
                     post_line = self.env['social.media.post.line'].search([('platform_post_id', '=', video_id)], limit=1)
                     if post_line: linked_post = post_line.post_id
-                elif msg.platform_message_id and account.platform in ['facebook', 'instagram']:
-                    # We might not have the direct post ID stored for Meta comments easily here,
-                    # but if we do, it would be checked here. For simplicity, we skip linking for Meta in cron unless stored.
-                    pass
                 
                 if linked_post and hasattr(linked_post, 'product_tmpl_ids') and linked_post.product_tmpl_ids:
                     system_context += "\n\nKULLANICININ YORUM YAPTIĞI GÖNDERİDEKİ ÜRÜNLER:"
@@ -82,13 +88,11 @@ class SocialMediaMessage(models.Model):
                 if wa_link:
                     system_context += f"\n\nMesajının sonuna MUTLAKA şu WhatsApp sipariş ve detaylı bilgi linkini ekle: {wa_link}"
 
-                user_message = msg.content.replace("[YORUM]:", "").strip()
-                
-                # Generate Reply
+                # Generate Reply ONCE for all consecutive messages
                 reply_text = ai_provider.generate_response(user_message, system_context)
                 
                 if not reply_text or str(reply_text).startswith("[ERROR]"):
-                    _logger.error(f"AI Provider error or empty reply for message {msg.id}")
+                    _logger.error(f"AI Provider error or empty reply for conversation {conversation.id}")
                     continue # Will retry next cron run
                     
                 # Process Handoff
@@ -98,7 +102,7 @@ class SocialMediaMessage(models.Model):
                     if not reply_text:
                         reply_text = f"Detaylı bilgi için müşteri temsilcimize WhatsApp üzerinden ulaşabilirsiniz: {wa_link}"
                         
-                # Create Outgoing Message Record
+                # Create ONE Outgoing Message Record
                 out_msg = self.create({
                     'conversation_id': conversation.id,
                     'message_type': 'outgoing',
@@ -108,24 +112,28 @@ class SocialMediaMessage(models.Model):
                 
                 # Send back to platform
                 if account.platform == 'youtube':
-                    if msg.platform_message_id: # it's a comment
-                        account._send_youtube_comment_reply(msg.platform_message_id, reply_text, account)
+                    if last_msg.platform_message_id: # it's a comment
+                        account._send_youtube_comment_reply(last_msg.platform_message_id, reply_text, account)
                 elif account.platform in ['facebook', 'instagram']:
-                    if msg.platform_message_id: # it's a comment
+                    # We check if it's a comment or a DM. If it's a comment, it usually has platform_message_id containing an underscore.
+                    # But simpler: if content starts with [YORUM]:
+                    is_comment = any(m.content.startswith('[YORUM]:') for m in conv_msgs)
+                    if is_comment and last_msg.platform_message_id:
                         auto_reply = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.comment_auto_reply', 'Merhaba, detaylı bilgi DM üzerinden iletilmiştir.')
-                        account._send_meta_comment_reply(msg.platform_message_id, auto_reply)
-                        account._send_meta_private_reply(msg.platform_message_id, reply_text)
-                    else: # it's a DM
+                        account._send_meta_comment_reply(last_msg.platform_message_id, auto_reply)
+                        account._send_meta_private_reply(last_msg.platform_message_id, reply_text)
+                    else:
                         account._send_meta_message(conversation.social_user_id, reply_text)
                 elif account.platform == 'whatsapp':
                     account._send_whatsapp_message(conversation.social_user_id, reply_text)
                     
-                # Mark as processed
-                msg.ai_processed = True
+                # Mark ALL messages in this batch as processed
+                for m in conv_msgs:
+                    m.ai_processed = True
                 
                 # Commit progress (Odoo 19 Best Practice for crons)
                 self.env.cr.commit()
                 
             except Exception as e:
-                _logger.error(f"Failed to process AI queue for message {msg.id}: {e}")
+                _logger.error(f"Failed to process AI queue for conversation {conversation.id}: {e}")
                 self.env.cr.rollback()
