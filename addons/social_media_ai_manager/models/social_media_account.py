@@ -188,11 +188,7 @@ class SocialMediaAccount(models.Model):
                 })
                 conversation.write({'unread_count': conversation.unread_count + 1})
                 
-                # AI Routing
-                if conversation.state == 'bot':
-                    self._trigger_youtube_ai_response(conversation, text_original, self, comment_id, video_id)
-                    import time
-                    time.sleep(4) # Uyku ekleyerek API Rate Limit (15 RPM) aşımını engelliyoruz
+                # AI Routing logic moved to Cron job
         except Exception as e:
             pass
 
@@ -265,6 +261,48 @@ class SocialMediaAccount(models.Model):
         except Exception as e:
             logging.getLogger(__name__).error(f"Exception replying to YouTube comment: {e}")
 
+    def _send_meta_comment_reply(self, comment_id, message_text):
+        """ Send a public reply to a Meta comment """
+        if not self.api_token: return
+        import requests, logging
+        endpoint = "replies" if self.platform == 'instagram' else "comments"
+        url = f"https://graph.facebook.com/v19.0/{comment_id}/{endpoint}"
+        payload = {"message": message_text, "access_token": self.api_token}
+        try:
+            requests.post(url, data=payload, timeout=10)
+        except Exception as e:
+            logging.getLogger(__name__).error(f"Exception replying to Meta comment: {e}")
+
+    def _send_meta_private_reply(self, comment_id, message_text):
+        """ Send a private DM reply based on a comment """
+        if not self.api_token: return
+        import requests, logging
+        url = "https://graph.facebook.com/v19.0/me/messages"
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_token}"}
+        payload = {"recipient": {"comment_id": comment_id}, "message": {"text": message_text}}
+        try:
+            requests.post(url, headers=headers, json=payload, timeout=10)
+        except Exception as e:
+            logging.getLogger(__name__).error(f"Exception sending Meta private reply: {e}")
+
+    def _send_meta_message(self, recipient_id, message_text):
+        """ Send a DM using Meta Graph API """
+        if not self.api_token: return
+        import requests, logging
+        url = "https://graph.facebook.com/v19.0/me/messages"
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_token}"}
+        payload = {"recipient": {"id": recipient_id}, "message": {"text": message_text}}
+        try:
+            requests.post(url, headers=headers, json=payload, timeout=10)
+        except Exception as e:
+            logging.getLogger(__name__).error(f"Exception sending Meta message: {e}")
+
+    def _send_whatsapp_message(self, recipient_id, message_text):
+        """ Send WhatsApp message (Placeholder for WAHA/Evolution API) """
+        # TODO: Implement specific WhatsApp API call based on chosen provider
+        import logging
+        logging.getLogger(__name__).info(f"WhatsApp message would be sent to {recipient_id}: {message_text}")
+
     def action_fix_youtube_errors(self):
         self.ensure_one()
         if self.platform != 'youtube':
@@ -302,9 +340,6 @@ class SocialMediaAccount(models.Model):
             # Generate new reply
             user_text = incoming.content.replace("[YORUM]:", "").strip()
             new_reply = ai_provider.generate_response(user_text, system_context)
-            
-            import time
-            time.sleep(4) # Rate limit aşımını engellemek için her yapay zeka isteğinden sonra 4 sn bekle
             
             if not new_reply or str(new_reply).startswith("[ERROR]"):
                 continue

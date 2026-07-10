@@ -89,23 +89,7 @@ class WebhookWhatsApp(http.Controller):
 
         # Call AI Provider if state is 'bot'
         if conversation.state == 'bot':
-            self._trigger_ai_response(conversation, message_text)
-
-    def _trigger_ai_response(self, conversation, user_message):
-        env = request.env
-        ai_provider = env['social.media.ai.provider'].sudo()
-        
-        # Simple AI execution
-        reply_text = ai_provider.generate_response(user_message, "User is asking on WhatsApp. Keep it short.")
-        
-        if reply_text and not str(reply_text).startswith("[ERROR]"):
-            # Save AI response in Odoo
-            env['social.media.message'].sudo().create({
-                'conversation_id': conversation.id,
-                'message_type': 'outgoing',
-                'content': reply_text,
-                'is_read': True
-            })
-            
-            # TODO: Add API call back to WAHA / Evolution to actually send the WhatsApp message
-            # requests.post(...)
+            # Artık anında cevap üretmiyoruz, Cron (Zamanlanmış Görev) sırayla işleyecek.
+            pass
+        else:
+            msg.is_read = True

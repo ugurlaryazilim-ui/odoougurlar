@@ -135,9 +135,7 @@ class WebhookMeta(http.Controller):
             
             conversation.sudo().write({'unread_count': conversation.unread_count + 1})
 
-            # AI Routing
-            if conversation.state == 'bot':
-                self._trigger_ai_response(conversation, message_text, account)
+            # AI Routing logic moved to Cron job
 
     def _process_changes_event(self, change):
         """ Process feed changes (e.g. comments on a post) """
@@ -245,157 +243,7 @@ class WebhookMeta(http.Controller):
         })
         conversation.sudo().write({'unread_count': conversation.unread_count + 1})
 
-        # AI Routing for Comment
-        if conversation.state == 'bot':
-            self._trigger_ai_response(conversation, message_text, account, comment_id=comment_id, linked_post=linked_post)
-
-    def _trigger_ai_response(self, conversation, user_message, account, comment_id=False, linked_post=False):
-        env = request.env
-        ai_provider = env['social.media.ai.provider'].sudo()
-        
-        system_context = env['ir.config_parameter'].sudo().get_param('social_media_ai.system_prompt', 'Sen profesyonel bir müşteri temsilcisisin. Sorulara kısa ve nazik cevaplar ver.')
-        system_context += f"\n\nKullanıcı {account.platform} üzerinden yazıyor. ÖNEMLİ KURAL: Mesajlarında KESİNLİKLE '**' veya '*' gibi markdown kalınlaştırma işaretleri KULLANMA. Bunun yerine maddeleri ayırmak için şık emojiler (👗, 💳, 📦, 🛍️ vb.) ve temiz satır boşlukları kullanarak çok profesyonel ve zarif bir görünüm sağla."
-        
-        if linked_post and hasattr(linked_post, 'product_tmpl_ids') and linked_post.product_tmpl_ids:
-            import urllib.parse
-            ecommerce_url = env['ir.config_parameter'].sudo().get_param('social_media_ai.ecommerce_url', 'https://www.ugurlar.com').strip('/')
-            system_context += "\n\nKULLANICININ YORUM YAPTIĞI GÖNDERİDEKİ ÜRÜNLER (Müşteri bilgi veya fiyat sorarsa bu ürünlerin bilgilerini ayrı ayrı sun ve her bir ürün için ilgili sipariş linkini mutlaka paylaş):"
-            for p in linked_post.product_tmpl_ids:
-                price = f"{p.list_price} TL" if hasattr(p, 'list_price') else "Bilinmiyor"
-                stock = p.qty_available if hasattr(p, 'qty_available') else 10
-                
-                barcode = p.barcode
-                if not barcode and hasattr(p, 'product_variant_ids') and p.product_variant_ids:
-                    for variant in p.product_variant_ids:
-                        if variant.barcode:
-                            barcode = variant.barcode
-                            break
-                barcode = barcode or ""
-                
-                sku = p.default_code or ""
-                search_term = barcode if barcode else (sku if sku else p.name)
-                
-                stock_text = f"{stock} Adet (Tükenmek üzere, müşteriye aciliyet bildir!)" if 0 < stock < 5 else f"{stock} Adet" if stock > 0 else "Stokta Yok (Müşteriye stokta olmadığını nazikçe belirt)"
-                
-                # Variants
-                variants_text = ""
-                if hasattr(p, 'attribute_line_ids') and p.attribute_line_ids:
-                    for attr in p.attribute_line_ids:
-                        variants_text += f"{attr.attribute_id.name}: {', '.join(attr.value_ids.mapped('name'))}. "
-                
-                query = urllib.parse.quote(search_term)
-                link = f"{ecommerce_url}/search?q={query}"
-                
-                system_context += f"\n\n- Ürün: {p.name}"
-                if sku:
-                    system_context += f" (Kodu: {sku})"
-                system_context += f"\n  Fiyat: {price}"
-                system_context += f"\n  Stok Durumu: {stock_text}"
-                if variants_text:
-                    system_context += f"\n  Seçenekler: {variants_text}"
-                system_context += f"\n  Sipariş Linki: {link}\n"
-        
-        reply_text = ai_provider.generate_response(user_message, system_context)
-        
-        if reply_text and not str(reply_text).startswith("[ERROR]"):
-            # Check for Handoff trigger
-            if "[DEVRET]" in reply_text.upper():
-                reply_text = reply_text.replace("[DEVRET]", "").replace("[devret]", "").strip()
-                conversation.sudo().write({'state': 'open'})
-                
-                # If AI gave an empty string after removing the tag, send a generic message
-                if not reply_text:
-                    reply_text = "Sizi hemen bir müşteri temsilcimize aktarıyorum. Lütfen hattan ayrılmayın."
-            
-            # Save AI response in Odoo
-            env['social.media.message'].sudo().create({
-                'conversation_id': conversation.id,
-                'message_type': 'outgoing',
-                'content': reply_text,
-                'is_read': True
-            })
-            
-            if comment_id:
-                # Get the auto-reply text for public comments from settings
-                auto_reply = env['ir.config_parameter'].sudo().get_param(
-                    'social_media_ai.comment_auto_reply', 
-                    'Merhaba, detaylı bilgi DM üzerinden iletilmiştir.'
-                )
-                # Reply to the comment publicly with the generic text
-                self._send_meta_comment_reply(comment_id, auto_reply, account)
-                # Send the actual AI answer via private DM
-                self._send_meta_private_reply(comment_id, reply_text, account)
-            else:
-                # Standard DM
-                self._send_meta_message(conversation.social_user_id, reply_text, account)
-
-    def _send_meta_comment_reply(self, comment_id, message_text, account):
-        """ Send a public reply to a comment """
-        if not account.api_token:
-            return
-            
-        endpoint = "replies" if account.platform == 'instagram' else "comments"
-        url = f"https://graph.facebook.com/v19.0/{comment_id}/{endpoint}"
-        payload = {
-            "message": message_text,
-            "access_token": account.api_token
-        }
-        try:
-            response = requests.post(url, data=payload, timeout=10)
-            if not response.ok:
-                _logger.error(f"Failed to reply to comment: {response.status_code} - {response.text}")
-            else:
-                _logger.info(f"Successfully replied to comment {comment_id}")
-        except Exception as e:
-            _logger.error(f"Exception when replying to comment: {e}")
-
-    def _send_meta_private_reply(self, comment_id, message_text, account):
-        """ Send a private DM reply based on a comment """
-        if not account.api_token:
-            return
-            
-        url = f"https://graph.facebook.com/v19.0/me/messages"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {account.api_token}"
-        }
-        payload = {
-            "recipient": {"comment_id": comment_id},
-            "message": {"text": message_text}
-        }
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=10)
-            if not response.ok:
-                _logger.error(f"Failed to send private reply: {response.status_code} - {response.text}")
-            else:
-                _logger.info(f"Successfully sent private reply for comment {comment_id}")
-        except Exception as e:
-            _logger.error(f"Exception when sending private reply: {e}")
-
-    def _send_meta_message(self, recipient_id, message_text, account):
-        """ Send a message using Facebook Graph API """
-        if not account.api_token:
-            _logger.error("Meta API Token not configured for this account.")
-            return
-
-        url = "https://graph.facebook.com/v19.0/me/messages"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {account.api_token}"
-        }
-        payload = {
-            "recipient": {"id": recipient_id},
-            "message": {"text": message_text}
-        }
-        
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=10)
-            response.raise_for_status()
-            _logger.info(f"Successfully sent Meta message to {recipient_id}")
-        except Exception as e:
-            _logger.error(f"Failed to send Meta message: {e}")
-            if hasattr(e, 'response') and e.response is not None:
-                _logger.error(f"Meta Error details: {e.response.text}")
+        # Meta AI response logic has been moved to a Cron job inside models/social_media_message_processor.py
 
     def _fetch_meta_user_profile(self, user_id, account):
         """ Fetch real name from Meta Graph API using PSID or ASID """
@@ -403,6 +251,7 @@ class WebhookMeta(http.Controller):
             return None
         url = f"https://graph.facebook.com/v19.0/{user_id}?fields=name,first_name,last_name,profile_pic&access_token={account.api_token}"
         try:
+            import requests
             res = requests.get(url, timeout=5).json()
             if 'error' not in res:
                 return res
