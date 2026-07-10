@@ -343,7 +343,7 @@ class WebhookMeta(http.Controller):
         try:
             response = requests.post(url, data=payload, timeout=10)
             if not response.ok:
-                _logger.error(f"Failed to reply to comment: {response.text}")
+                _logger.error(f"Failed to reply to comment: {response.status_code} - {response.text}")
             else:
                 _logger.info(f"Successfully replied to comment {comment_id}")
         except Exception as e:
@@ -364,9 +364,13 @@ class WebhookMeta(http.Controller):
             "message": {"text": message_text}
         }
         try:
-            requests.post(url, headers=headers, json=payload, timeout=10)
+            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            if not response.ok:
+                _logger.error(f"Failed to send private reply: {response.status_code} - {response.text}")
+            else:
+                _logger.info(f"Successfully sent private reply for comment {comment_id}")
         except Exception as e:
-            _logger.error(f"Failed to send private reply: {e}")
+            _logger.error(f"Exception when sending private reply: {e}")
 
     def _send_meta_message(self, recipient_id, message_text, account):
         """ Send a message using Facebook Graph API """
