@@ -37,9 +37,14 @@
                                 </div>
                                 <div class="d-flex justify-content-between align-items-center">
                                     <small class="text-muted text-capitalize"><t t-esc="conv.platform"/></small>
-                                    <small t-attf-class="badge rounded-pill #{conv.state === 'bot' ? 'bg-secondary' : 'bg-success'}">
-                                        <t t-esc="conv.state"/>
-                                    </small>
+                                    <div class="d-flex gap-1 align-items-center">
+                                        <small t-if="conv.user_id" class="text-primary fw-bold" style="font-size: 0.7em;">
+                                            <i class="fa fa-user-circle"></i> <t t-esc="conv.user_id[1]"/>
+                                        </small>
+                                        <small t-attf-class="badge rounded-pill #{conv.state === 'bot' ? 'bg-secondary' : 'bg-success'}">
+                                            <t t-esc="conv.state"/>
+                                        </small>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -76,9 +81,9 @@
                         </div>
 
                         <button class="btn btn-outline-warning btn-sm fw-bold rounded-pill px-3" 
-                                t-if="state.activeConversation.state === 'bot'"
+                                t-if="state.activeConversation.state === 'bot' || !state.activeConversation.user_id"
                                 t-on-click="handoffToHuman">
-                            <i class="fa fa-user me-1"></i> <t t-esc="t('Handoff to Human')"/>
+                            <i class="fa fa-user me-1"></i> <t t-esc="state.activeConversation.user_id ? t('Handoff to Human') : 'Devret / Üstlen'"/>
                         </button>
                     </div>
 

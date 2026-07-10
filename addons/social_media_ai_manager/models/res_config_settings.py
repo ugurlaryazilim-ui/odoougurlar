@@ -38,6 +38,12 @@ class ResConfigSettings(models.TransientModel):
     social_enable_comments = fields.Boolean(string="Yorumlara Cevap Ver", config_parameter='social_media_ai.enable_comments')
     social_enable_dms = fields.Boolean(string="DM'lere Cevap Ver", config_parameter='social_media_ai.enable_dms')
     social_enable_posting = fields.Boolean(string="Paylaşımları Yap", default=True, config_parameter='social_media_ai.enable_posting')
+    
+    social_handoff_user_ids = fields.Many2many(
+        'res.users', 'res_config_social_handoff_rel', 'config_id', 'user_id',
+        string="Devredilecek Personeller (Handoff Users)",
+        help="Yapay zeka başa çıkamadığında veya manuel olarak devret dendiğinde atanacak personeller."
+    )
 
     @api.model
     def get_values(self):
@@ -45,6 +51,16 @@ class ResConfigSettings(models.TransientModel):
         cron = self.env.ref('social_media_ai_manager.ir_cron_publish_social_posts', raise_if_not_found=False)
         if cron:
             res.update(social_post_cron_interval=cron.interval_number)
+            
+        handoff_users = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.handoff_user_ids')
+        if handoff_users:
+            import json
+            try:
+                user_ids = json.loads(handoff_users)
+                res.update(social_handoff_user_ids=[(6, 0, user_ids)])
+            except Exception:
+                pass
+                
         return res
 
     def set_values(self):
@@ -52,3 +68,9 @@ class ResConfigSettings(models.TransientModel):
         cron = self.env.ref('social_media_ai_manager.ir_cron_publish_social_posts', raise_if_not_found=False)
         if cron and self.social_post_cron_interval > 0:
             cron.sudo().write({'interval_number': self.social_post_cron_interval})
+            
+        import json
+        self.env['ir.config_parameter'].sudo().set_param(
+            'social_media_ai.handoff_user_ids', 
+            json.dumps(self.social_handoff_user_ids.ids)
+        )

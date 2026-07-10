@@ -92,7 +92,7 @@ export class SocialInbox extends Component {
         this.state.conversations = await this.orm.searchRead(
             "social.media.conversation",
             [],
-            ["id", "name", "platform", "unread_count", "state"],
+            ["id", "name", "platform", "unread_count", "state", "user_id"],
             { order: "last_message_date desc" }
         );
     }
@@ -100,6 +100,13 @@ export class SocialInbox extends Component {
     async selectConversation(convId) {
         this.state.activeConversation = this.state.conversations.find(c => c.id === convId);
         this.state.showChatOnMobile = true;
+        
+        // CRM: Mark as read
+        await this.orm.call("social.media.conversation", "mark_as_read", [[convId]]);
+        if (this.state.activeConversation) {
+            this.state.activeConversation.unread_count = 0;
+        }
+        
         await this.loadMessages(convId);
         setTimeout(() => this.scrollToBottom(), 50);
     }
@@ -166,10 +173,11 @@ export class SocialInbox extends Component {
     
     async handoffToHuman() {
         if (!this.state.activeConversation) return;
-        await this.orm.write("social.media.conversation", [this.state.activeConversation.id], {
-            state: "open"
-        });
-        this.state.activeConversation.state = "open";
+        await this.orm.call("social.media.conversation", "action_handoff_to_human", [[this.state.activeConversation.id]]);
+        
+        // Reload conversations to get the newly assigned user_id and state
+        await this.loadConversations();
+        this.state.activeConversation = this.state.conversations.find(c => c.id === this.state.activeConversation.id);
     }
 }
 
