@@ -254,7 +254,7 @@ class WebhookMeta(http.Controller):
         ai_provider = env['social.media.ai.provider'].sudo()
         
         system_context = env['ir.config_parameter'].sudo().get_param('social_media_ai.system_prompt', 'Sen profesyonel bir müşteri temsilcisisin. Sorulara kısa ve nazik cevaplar ver.')
-        system_context += f"\n\nKullanıcı {account.platform} üzerinden yazıyor."
+        system_context += f"\n\nKullanıcı {account.platform} üzerinden yazıyor. ÖNEMLİ KURAL: Mesajlarında KESİNLİKLE '**' veya '*' gibi markdown kalınlaştırma işaretleri KULLANMA. Bunun yerine maddeleri ayırmak için şık emojiler (👗, 💳, 📦, 🛍️ vb.) ve temiz satır boşlukları kullanarak çok profesyonel ve zarif bir görünüm sağla."
         
         if linked_post and hasattr(linked_post, 'product_tmpl_ids') and linked_post.product_tmpl_ids:
             import urllib.parse
