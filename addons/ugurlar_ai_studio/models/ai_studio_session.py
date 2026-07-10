@@ -872,12 +872,8 @@ class AiStudioSession(models.Model):
                     ('photo_type', '=', 'detail'),
                     ('detail_placement', '=', detail_placement_filter),
                 ])
-                # Fallback: Eşleşen yoksa tüm detayları gönder (geriye uyumluluk)
-                if not detail_photos:
-                    detail_photos = env['ai.studio.photo'].search([
-                        ('session_id', '=', session_id),
-                        ('photo_type', '=', 'detail')
-                    ])
+                # Geriye uyumluluk / Fallback İPTAL: Sadece ilgili view'ın detay fotoğrafları gönderilir.
+                # Bu sayede ön yüzdeki desen/cepler arka yüze taşmaz.
                 for dp in detail_photos:
                     try:
                         dp_url = provider.upload_image(dp.image_original)
@@ -1337,12 +1333,8 @@ class AiStudioSession(models.Model):
                         ('photo_type', '=', 'detail'),
                         ('detail_placement', '=', detail_placement_filter),
                     ])
-                    # Fallback: Eşleşen yoksa tüm detayları gönder (geriye uyumluluk)
-                    if not detail_photos:
-                        detail_photos = env['ai.studio.photo'].search([
-                            ('session_id', '=', session.id),
-                            ('photo_type', '=', 'detail')
-                        ])
+                    # Geriye uyumluluk / Fallback İPTAL: Sadece ilgili view'ın detay fotoğrafları gönderilir.
+                    # Bu sayede ön yüzdeki desen/cepler arka yüze taşmaz.
                     for dp in detail_photos:
                         try:
                             dp_url = provider.upload_image(dp.image_original)
@@ -1878,12 +1870,8 @@ class AiStudioSession(models.Model):
                     ('photo_type', '=', 'detail'),
                     ('detail_placement', '=', detail_placement_filter),
                 ])
-                # Fallback: Eşleşen yoksa tüm detayları gönder (geriye uyumluluk)
-                if not detail_photos:
-                    detail_photos = env['ai.studio.photo'].search([
-                        ('session_id', '=', session.id),
-                        ('photo_type', '=', 'detail')
-                    ])
+                # Geriye uyumluluk / Fallback İPTAL: Sadece ilgili view'ın detay fotoğrafları gönderilir.
+                # Bu sayede ön yüzdeki desen/cepler arka yüze taşmaz.
                 for dp in detail_photos:
                     try:
                         dp_url = provider.upload_image(dp.image_original)
