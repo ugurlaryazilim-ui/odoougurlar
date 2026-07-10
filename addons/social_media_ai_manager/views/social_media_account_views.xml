@@ -19,6 +19,7 @@
             <form string="Social Media Account">
                 <header>
                     <button name="action_login_facebook" string="Login with Facebook" type="object" class="oe_highlight" invisible="platform not in ('facebook', 'instagram')"/>
+                    <button name="action_login_youtube" string="Login with Google (YouTube)" type="object" class="btn-danger" invisible="platform != 'youtube'"/>
                     <button name="action_subscribe_webhooks" string="Tetikleyicileri Bağla" type="object" class="oe_highlight" invisible="platform not in ('facebook', 'instagram')"/>
                     <field name="state" widget="statusbar"/>
                 </header>
@@ -35,10 +36,13 @@
                         </group>
                         <group>
                             <field name="api_token" password="True"/>
-                            <field name="webhook_secret" password="True"/>
+                            <field name="webhook_secret" password="True" invisible="platform == 'youtube'"/>
                             <field name="phone_number" invisible="platform != 'whatsapp'"/>
                             <field name="meta_page_id" invisible="platform not in ('facebook', 'instagram')"/>
                             <field name="meta_ig_id" invisible="platform != 'instagram'"/>
+                            
+                            <field name="youtube_refresh_token" password="True" invisible="platform != 'youtube'"/>
+                            <field name="youtube_channel_id" invisible="platform != 'youtube'"/>
                         </group>
                     </group>
                 </sheet>

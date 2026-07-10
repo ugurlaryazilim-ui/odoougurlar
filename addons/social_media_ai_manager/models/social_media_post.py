@@ -105,6 +105,8 @@ class SocialMediaPostLine(models.Model):
                 return self._publish_to_facebook()
             elif self.platform == 'instagram':
                 return self._publish_to_instagram()
+            elif self.platform == 'youtube':
+                return self._publish_to_youtube()
             else:
                 self.state = 'success'
                 self.platform_post_id = "DUMMY_ID"
@@ -315,3 +317,74 @@ class SocialMediaPostLine(models.Model):
                 raise ValueError(f"Publish Error (Attempt {attempt+1}): {error_msg}")
         
         return False
+
+    def _publish_to_youtube(self):
+        self.account_id._refresh_youtube_token()
+        token = self.account_id.api_token
+        
+        if not token:
+            raise ValueError("YouTube API Token is missing. Please re-authenticate.")
+
+        images = self.post_id.image_ids
+        if not images:
+            raise ValueError("YouTube platform requires a video attachment.")
+            
+        attachment = images[0]
+        if not attachment.mimetype or not attachment.mimetype.startswith('video'):
+            raise ValueError("YouTube only supports video uploads.")
+
+        import requests
+        import base64
+        
+        video_data = base64.b64decode(attachment.datas)
+        
+        url = 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status'
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'X-Upload-Content-Length': str(len(video_data)),
+            'X-Upload-Content-Type': attachment.mimetype,
+            'Content-Type': 'application/json; charset=UTF-8'
+        }
+        
+        is_shorts = self.post_id.post_type in ('story', 'reels')
+        tags = ['shorts'] if is_shorts else []
+        title = self.post_id.name
+        description = self.post_id.message
+        
+        if is_shorts and '#shorts' not in description.lower():
+            description += "\n\n#shorts"
+            
+        metadata = {
+            "snippet": {
+                "title": title,
+                "description": description,
+                "tags": tags,
+                "categoryId": "22" # 22 = People & Blogs
+            },
+            "status": {
+                "privacyStatus": "public",
+                "selfDeclaredMadeForKids": False
+            }
+        }
+        
+        # Step 1: Start Resumable Upload
+        res = requests.post(url, headers=headers, json=metadata, timeout=20)
+        if not res.ok:
+            raise ValueError(f"YouTube Upload Init Error: {res.status_code} - {res.text}")
+            
+        upload_url = res.headers.get('Location')
+        if not upload_url:
+            raise ValueError("YouTube did not return an upload URL")
+            
+        # Step 2: Upload Data
+        headers2 = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': attachment.mimetype
+        }
+        res2 = requests.put(upload_url, headers=headers2, data=video_data, timeout=300) # Allow 5 minutes for upload
+        if not res2.ok:
+            raise ValueError(f"YouTube Upload Error: {res2.status_code} - {res2.text}")
+            
+        self.platform_post_id = res2.json().get('id')
+        self.state = 'success'
+        return True

@@ -62,6 +62,9 @@
                         <setting string="E-Ticaret Linki (Shopify vb.)" help="AI sipariş linki oluştururken bu kök domaini kullanır. (Örn: https://www.ugurlar.com)">
                             <field name="social_ecommerce_url"/>
                         </setting>
+                        <setting string="WhatsApp Yönlendirme Hattı" help="YouTube vb. DM özelliği olmayan kanallardan gelen müşterileri WhatsApp hattınıza yönlendirmek için numara (Örn: 905XXXXXXXXX).">
+                            <field name="social_whatsapp_number"/>
+                        </setting>
                     </block>
 
                     <block title="Meta (Facebook &amp; Instagram) OAuth Configuration" name="meta_oauth_settings">
@@ -72,6 +75,18 @@
                                 <br/>
                                 <label for="social_meta_app_secret" string="App Secret"/>
                                 <field name="social_meta_app_secret" password="True"/>
+                            </div>
+                        </setting>
+                    </block>
+
+                    <block title="YouTube (Google) API Configuration" name="youtube_oauth_settings">
+                        <setting string="Google Client Credentials" help="Enter your Client ID and Client Secret from Google Cloud Console for YouTube Data API v3 OAuth.">
+                            <div class="content-group">
+                                <label for="social_youtube_client_id" string="Client ID"/>
+                                <field name="social_youtube_client_id"/>
+                                <br/>
+                                <label for="social_youtube_client_secret" string="Client Secret"/>
+                                <field name="social_youtube_client_secret" password="True"/>
                             </div>
                         </setting>
                     </block>

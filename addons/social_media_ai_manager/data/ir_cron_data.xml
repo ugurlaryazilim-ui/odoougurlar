@@ -10,5 +10,14 @@
             <field name="interval_type">minutes</field>
             <field name="active" eval="True"/>
         </record>
+        <record id="ir_cron_sync_youtube_comments" model="ir.cron">
+            <field name="name">Social Media: Sync YouTube Comments</field>
+            <field name="model_id" ref="model_social_media_account"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_sync_youtube_comments()</field>
+            <field name="interval_number">10</field>
+            <field name="interval_type">minutes</field>
+            <field name="active" eval="True"/>
+        </record>
     </data>
 </odoo>

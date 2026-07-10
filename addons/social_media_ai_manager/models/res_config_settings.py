@@ -32,6 +32,17 @@ class ResConfigSettings(models.TransientModel):
     social_meta_app_id = fields.Char(string="Meta App ID", config_parameter='social_media_ai.meta_app_id')
     social_meta_app_secret = fields.Char(string="Meta App Secret", config_parameter='social_media_ai.meta_app_secret')
 
+    # YouTube Integration Settings
+    social_youtube_client_id = fields.Char(string="Google Client ID (YouTube)", config_parameter='social_media_ai.youtube_client_id')
+    social_youtube_client_secret = fields.Char(string="Google Client Secret", config_parameter='social_media_ai.youtube_client_secret')
+
+    # WhatsApp Redirection
+    social_whatsapp_number = fields.Char(
+        string="WhatsApp Yönlendirme Numarası", 
+        config_parameter='social_media_ai.whatsapp_number',
+        help="YouTube vb. kanallardan gelen müşterileri WhatsApp'a yönlendirirken kullanılacak numara (Örn: 905XXXXXXXXX)"
+    )
+
     social_post_cron_interval = fields.Integer(string="Gönderi Yayınlama Gecikmesi (Dakika)", default=3)
     
     # Feature Toggles
