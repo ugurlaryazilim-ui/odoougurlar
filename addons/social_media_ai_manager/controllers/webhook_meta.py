@@ -263,7 +263,15 @@ class WebhookMeta(http.Controller):
             for p in linked_post.product_tmpl_ids:
                 price = f"{p.list_price} TL" if hasattr(p, 'list_price') else "Bilinmiyor"
                 stock = p.qty_available if hasattr(p, 'qty_available') else 10
-                barcode = p.barcode or ""
+                
+                barcode = p.barcode
+                if not barcode and hasattr(p, 'product_variant_ids') and p.product_variant_ids:
+                    for variant in p.product_variant_ids:
+                        if variant.barcode:
+                            barcode = variant.barcode
+                            break
+                barcode = barcode or ""
+                
                 sku = p.default_code or ""
                 search_term = barcode if barcode else (sku if sku else p.name)
                 
