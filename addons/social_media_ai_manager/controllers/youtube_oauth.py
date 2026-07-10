@@ -37,7 +37,7 @@ class YouTubeOAuth(http.Controller):
             'state': str(account_id)
         })
         
-        return request.redirect(auth_url)
+        return request.redirect(auth_url, local=False)
 
     @http.route('/social_media_ai/youtube/callback', type='http', auth='user')
     def youtube_callback(self, **kwargs):
@@ -106,8 +106,8 @@ class YouTubeOAuth(http.Controller):
             
             account.sudo().write(update_vals)
             
-            # Redirect back to the account form
-            return request.redirect(f'/web#id={account.id}&model=social.media.account&view_type=form')
+            # Redirect back to the account form (local URL)
+            return request.redirect(f'/web#id={account.id}&model=social.media.account&view_type=form', local=False)
             
         except Exception as e:
             _logger.error(f"YouTube OAuth Exception: {e}")
