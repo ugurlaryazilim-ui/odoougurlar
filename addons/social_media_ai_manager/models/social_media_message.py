@@ -28,11 +28,17 @@ class SocialMediaMessage(models.Model):
         import logging
         _logger = logging.getLogger(__name__)
         
-        # 1. Find unprocessed incoming messages
+        # 1. Find unprocessed incoming messages from the last 10 minutes (to prevent spamming old messages)
+        from datetime import datetime, timedelta
+        from dateutil.relativedelta import relativedelta
+        from odoo import fields
+        ten_mins_ago = fields.Datetime.now() - relativedelta(minutes=10)
+        
         messages = self.search([
             ('message_type', '=', 'incoming'),
             ('ai_processed', '=', False),
-            ('conversation_id.state', '=', 'bot')
+            ('conversation_id.state', '=', 'bot'),
+            ('create_date', '>=', ten_mins_ago)
         ], limit=limit, order='create_date asc')
         
         if not messages:
