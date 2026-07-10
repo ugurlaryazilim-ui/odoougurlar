@@ -302,6 +302,10 @@ class SocialMediaAccount(models.Model):
             # Generate new reply
             user_text = incoming.content.replace("[YORUM]:", "").strip()
             new_reply = ai_provider.generate_response(user_text, system_context)
+            
+            import time
+            time.sleep(4) # Rate limit aşımını engellemek için her yapay zeka isteğinden sonra 4 sn bekle
+            
             if not new_reply or str(new_reply).startswith("[ERROR]"):
                 continue
                 
