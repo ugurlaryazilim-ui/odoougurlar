@@ -79,9 +79,9 @@ class SocialMediaMessage(models.Model):
                     system_context += "\n\nKULLANICININ YORUM YAPTIĞI GÖNDERİDEKİ ÜRÜNLER HAKKINDA DETAYLI BİLGİ:"
                     
                     if account.platform == 'youtube':
-                        system_context += "\n(YOUTUBE İÇİN KESİN KURAL: Yorumlar herkese açık olduğu için ASLA FİYAT BİLGİSİ VERME. Sadece ürün adı, beden/renk seçenekleri ve stok belirt. Sipariş için WhatsApp'a yönlendir.)\n"
+                        system_context += "\n(YOUTUBE İÇİN KURAL: Müşteriye ürünün adını, stok durumunu, beden/renk seçeneklerini ve aşağıda verilen sipariş linkini çok şık ve net bir şekilde listele. ASLA FİYAT BİLGİSİ VERME. En sona da her türlü soru için WhatsApp destek hattını ekle.)\n"
                     else:
-                        system_context += "\n(INSTAGRAM/FACEBOOK İÇİN KURAL: Müşteriye ürünün adını, FİYATINI, stok durumunu, beden/renk seçeneklerini ve aşağıda verilen sipariş linkini çok şık ve net bir şekilde listele.)\n"
+                        system_context += "\n(INSTAGRAM/FACEBOOK İÇİN KURAL: Müşteriye ürünün adını, FİYATINI, stok durumunu, beden/renk seçeneklerini ve aşağıda verilen sipariş linkini çok şık ve net bir şekilde listele. En sona da her türlü soru için WhatsApp destek hattını ekle.)\n"
 
                     for p in linked_post.product_tmpl_ids:
                         stock = p.qty_available if hasattr(p, 'qty_available') else 10
@@ -111,7 +111,8 @@ class SocialMediaMessage(models.Model):
                         order_link = f"https://www.ugurlar.com/search?q={search_query}"
                         
                         system_context += f"\n\n- Ürün: {p.name}"
-                        system_context += f"\n  Fiyat: {p.list_price} TL"
+                        if account.platform != 'youtube':
+                            system_context += f"\n  Fiyat: {p.list_price} TL"
                         system_context += f"\n  Stok Durumu: {stock_text}"
                         system_context += f"\n  Seçenekler: {variant_text}"
                         system_context += f"\n  Sipariş Linki: {order_link}"
