@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from odoo import models, fields
+from odoo import models, fields, api
 
 class SocialMediaMessage(models.Model):
     _name = 'social.media.message'
