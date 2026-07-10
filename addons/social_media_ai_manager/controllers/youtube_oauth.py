@@ -18,7 +18,10 @@ class YouTubeOAuth(http.Controller):
         if not client_id:
             return "YouTube (Google) Client ID is not configured in settings."
 
-        redirect_uri = env['ir.config_parameter'].sudo().get_param('web.base.url') + '/social_media_ai/youtube/callback'
+        base_url = env['ir.config_parameter'].sudo().get_param('web.base.url')
+        if base_url and base_url.startswith('http://'):
+            base_url = base_url.replace('http://', 'https://')
+        redirect_uri = base_url + '/social_media_ai/youtube/callback'
         
         # Scopes for YouTube Data API (Upload videos and read/write comments)
         scopes = [
@@ -60,7 +63,10 @@ class YouTubeOAuth(http.Controller):
 
         client_id = env['ir.config_parameter'].sudo().get_param('social_media_ai.youtube_client_id')
         client_secret = env['ir.config_parameter'].sudo().get_param('social_media_ai.youtube_client_secret')
-        redirect_uri = env['ir.config_parameter'].sudo().get_param('web.base.url') + '/social_media_ai/youtube/callback'
+        base_url = env['ir.config_parameter'].sudo().get_param('web.base.url')
+        if base_url and base_url.startswith('http://'):
+            base_url = base_url.replace('http://', 'https://')
+        redirect_uri = base_url + '/social_media_ai/youtube/callback'
 
         token_url = "https://oauth2.googleapis.com/token"
         data = {
