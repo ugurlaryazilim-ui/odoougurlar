@@ -9,6 +9,7 @@ class SocialMediaMessage(models.Model):
     conversation_id = fields.Many2one('social.media.conversation', string="Conversation", required=True, ondelete='cascade')
     platform_message_id = fields.Char(string="Platform Message ID", help="Unique ID from WhatsApp/Meta")
     post_link = fields.Char(string="Post URL", help="Direct link to the post if this is a comment")
+    post_id = fields.Many2one('social.media.post', string="Linked Post", help="The social media post this message belongs to")
     
     message_type = fields.Selection([
         ('incoming', 'Incoming (Customer)'),
@@ -71,19 +72,38 @@ class SocialMediaMessage(models.Model):
                 whatsapp_number = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.whatsapp_number', '').strip()
                 wa_link = f"https://wa.me/{whatsapp_number}?text=Merhaba+{account.platform}'dan+geliyorum" if whatsapp_number else ""
                 
-                # Extract Product Info from Post if applicable
-                linked_post = False
-                if last_msg.post_link and 'youtube.com/watch?v=' in last_msg.post_link:
-                    video_id = last_msg.post_link.split('v=')[-1]
-                    post_line = self.env['social.media.post.line'].search([('platform_post_id', '=', video_id)], limit=1)
-                    if post_line: linked_post = post_line.post_id
+                # Extract Product Info from Post
+                linked_post = last_msg.post_id
                 
                 if linked_post and hasattr(linked_post, 'product_tmpl_ids') and linked_post.product_tmpl_ids:
-                    system_context += "\n\nKULLANICININ YORUM YAPTIĞI GÖNDERİDEKİ ÜRÜNLER:"
+                    system_context += "\n\nKULLANICININ YORUM YAPTIĞI GÖNDERİDEKİ ÜRÜNLER HAKKINDA DETAYLI BİLGİ:"
+                    
+                    if account.platform == 'youtube':
+                        system_context += "\n(YOUTUBE İÇİN KESİN KURAL: Yorumlar herkese açık olduğu için ASLA FİYAT BİLGİSİ VERME. Sadece ürün adı, beden/renk seçenekleri ve stok belirt. Sipariş için WhatsApp'a yönlendir.)\n"
+                    else:
+                        system_context += "\n(INSTAGRAM/FACEBOOK İÇİN KURAL: Müşteriye ürünün adını, FİYATINI, stok durumunu, beden/renk seçeneklerini ve aşağıda verilen sipariş linkini çok şık ve net bir şekilde listele.)\n"
+
                     for p in linked_post.product_tmpl_ids:
                         stock = p.qty_available if hasattr(p, 'qty_available') else 10
-                        stock_text = f"{stock} Adet (Tükenmek üzere, aciliyet bildir!)" if 0 < stock < 5 else f"{stock} Adet" if stock > 0 else "Stokta Yok"
-                        system_context += f"\n\n- Ürün: {p.name}\n  Stok Durumu: {stock_text}"
+                        stock_text = f"Sadece {int(stock)} adet kaldı, tükenmek üzere!" if 0 < stock < 5 else f"{int(stock)} Adet" if stock > 0 else "Stokta Yok"
+                        
+                        # Extract variants
+                        variants = []
+                        if hasattr(p, 'attribute_line_ids'):
+                            for attr in p.attribute_line_ids:
+                                vals = ", ".join(attr.value_ids.mapped('name'))
+                                variants.append(f"{attr.attribute_id.name}: {vals}")
+                        variant_text = " | ".join(variants) if variants else "Tek Çeşit"
+                        
+                        # Order Link
+                        search_query = p.barcode or p.default_code or p.name.replace(" ", "+")
+                        order_link = f"https://www.ugurlar.com/search?q={search_query}"
+                        
+                        system_context += f"\n\n- Ürün: {p.name}"
+                        system_context += f"\n  Fiyat: {p.list_price} TL"
+                        system_context += f"\n  Stok Durumu: {stock_text}"
+                        system_context += f"\n  Seçenekler: {variant_text}"
+                        system_context += f"\n  Sipariş Linki: {order_link}"
                 
                 if wa_link:
                     system_context += f"\n\nMesajının sonuna MUTLAKA şu WhatsApp sipariş ve detaylı bilgi linkini ekle: {wa_link}"

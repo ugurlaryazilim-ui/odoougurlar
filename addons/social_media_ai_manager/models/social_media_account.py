@@ -177,6 +177,13 @@ class SocialMediaAccount(models.Model):
                         'state': 'bot'
                     })
                     
+                # Find Linked Post
+                linked_post = False
+                if video_id:
+                    post_line = self.env['social.media.post.line'].search([('platform_post_id', '=', video_id)], limit=1)
+                    if post_line:
+                        linked_post = post_line.post_id
+
                 # Create Message
                 msg = self.env['social.media.message'].create({
                     'conversation_id': conversation.id,
@@ -184,7 +191,8 @@ class SocialMediaAccount(models.Model):
                     'content': f"[YORUM]: {text_original}",
                     'is_read': False,
                     'platform_message_id': comment_id,
-                    'post_link': f"https://youtube.com/watch?v={video_id}" if video_id else False
+                    'post_link': f"https://youtube.com/watch?v={video_id}" if video_id else False,
+                    'post_id': linked_post.id if linked_post else False
                 })
                 conversation.write({'unread_count': conversation.unread_count + 1})
                 

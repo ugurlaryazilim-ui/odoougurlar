@@ -239,7 +239,8 @@ class WebhookMeta(http.Controller):
             'content': f"[YORUM]: {message_text}",
             'is_read': False,
             'platform_message_id': comment_id,
-            'post_link': post_link
+            'post_link': post_link,
+            'post_id': linked_post.id if linked_post else False
         })
         conversation.sudo().write({'unread_count': conversation.unread_count + 1})
 
