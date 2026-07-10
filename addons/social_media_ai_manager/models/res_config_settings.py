@@ -45,6 +45,13 @@ class ResConfigSettings(models.TransientModel):
         help="Yapay zeka başa çıkamadığında veya manuel olarak devret dendiğinde atanacak personeller."
     )
 
+    social_ecommerce_url = fields.Char(
+        string="E-Ticaret Mağaza Linki (URL)",
+        default="https://www.ugurlar.com",
+        config_parameter='social_media_ai.ecommerce_url',
+        help="Yapay zeka sipariş linki verirken bu alan adını kullanır. Örn: https://www.ugurlar.com/search?q=[ÜRÜNKODU]"
+    )
+
     @api.model
     def get_values(self):
         res = super(ResConfigSettings, self).get_values()

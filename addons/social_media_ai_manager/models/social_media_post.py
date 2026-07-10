@@ -31,6 +31,9 @@ class SocialMediaPost(models.Model):
     # Media
     image_ids = fields.Many2many('ir.attachment', string="Images/Videos")
 
+    # Products (AI context)
+    product_tmpl_ids = fields.Many2many('product.template', string="Posttaki Ürünler (AI İçin)", help="Bu gönderiye yorum geldiğinde yapay zeka bu ürünlerin stok ve fiyat bilgilerini kullanır.")
+
     post_line_ids = fields.One2many('social.media.post.line', 'post_id', string="Platform Statuses")
 
     def action_schedule(self):

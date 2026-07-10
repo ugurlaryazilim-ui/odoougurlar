@@ -222,12 +222,18 @@ class WebhookMeta(http.Controller):
 
         # Build post URL if possible
         post_link = False
+        linked_post = False
         if platform == 'facebook' and post_id:
             # Facebook post_id is usually pageID_postID
             post_link = f"https://facebook.com/{post_id}"
         elif platform == 'instagram' and post_id:
             # Instagram media ID is hard to link without shortcode, but we can try generic
             pass # Instagram direct links usually require shortcode from Graph API, left empty for now
+            
+        if post_id:
+            post_line = env['social.media.post.line'].sudo().search([('platform_post_id', '=', post_id)], limit=1)
+            if post_line:
+                linked_post = post_line.post_id
 
         msg = env['social.media.message'].sudo().create({
             'conversation_id': conversation.id,
@@ -241,13 +247,43 @@ class WebhookMeta(http.Controller):
 
         # AI Routing for Comment
         if conversation.state == 'bot':
-            self._trigger_ai_response(conversation, message_text, account, comment_id=comment_id)
+            self._trigger_ai_response(conversation, message_text, account, comment_id=comment_id, linked_post=linked_post)
 
-    def _trigger_ai_response(self, conversation, user_message, account, comment_id=False):
+    def _trigger_ai_response(self, conversation, user_message, account, comment_id=False, linked_post=False):
         env = request.env
         ai_provider = env['social.media.ai.provider'].sudo()
         
-        reply_text = ai_provider.generate_response(user_message, f"User is asking on {account.platform}. Keep it friendly and concise.")
+        system_context = env['ir.config_parameter'].sudo().get_param('social_media_ai.system_prompt', 'Sen profesyonel bir müşteri temsilcisisin. Sorulara kısa ve nazik cevaplar ver.')
+        system_context += f"\n\nKullanıcı {account.platform} üzerinden yazıyor."
+        
+        if linked_post and hasattr(linked_post, 'product_tmpl_ids') and linked_post.product_tmpl_ids:
+            ecommerce_url = env['ir.config_parameter'].sudo().get_param('social_media_ai.ecommerce_url', 'https://www.ugurlar.com').strip('/')
+            system_context += "\n\nKULLANICININ YORUM YAPTIĞI GÖNDERİDEKİ ÜRÜNLER (Bu bilgileri kullanarak soruları cevapla. Sipariş linkini direkt ver):"
+            for p in linked_post.product_tmpl_ids:
+                price = f"{p.list_price} TL" if hasattr(p, 'list_price') else "Bilinmiyor"
+                stock = p.qty_available if hasattr(p, 'qty_available') else 10
+                sku = p.default_code or ""
+                
+                stock_text = f"{stock} Adet (Tükenmek üzere, müşteriye aciliyet bildir!)" if 0 < stock < 5 else f"{stock} Adet" if stock > 0 else "Stokta Yok (Müşteriye stokta olmadığını nazikçe belirt)"
+                
+                # Variants
+                variants_text = ""
+                if hasattr(p, 'attribute_line_ids') and p.attribute_line_ids:
+                    for attr in p.attribute_line_ids:
+                        variants_text += f"{attr.attribute_id.name}: {', '.join(attr.value_ids.mapped('name'))}. "
+                
+                link = f"{ecommerce_url}/search?q={sku}" if sku else ecommerce_url
+                
+                system_context += f"\n- Ürün: {p.name}"
+                if sku:
+                    system_context += f" (Kodu: {sku})"
+                system_context += f"\n  Fiyat: {price}"
+                system_context += f"\n  Stok Durumu: {stock_text}"
+                if variants_text:
+                    system_context += f"\n  Seçenekler: {variants_text}"
+                system_context += f"\n  Sipariş Linki: {link}\n"
+        
+        reply_text = ai_provider.generate_response(user_message, system_context)
         
         if reply_text:
             # Check for Handoff trigger

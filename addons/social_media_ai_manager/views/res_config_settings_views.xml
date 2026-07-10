@@ -55,9 +55,12 @@
                         </setting>
                     </block>
 
-                    <block title="CRM: Personel Atamaları" name="crm_assignment_settings">
+                    <block title="CRM ve Satış Asistanı" name="crm_assignment_settings">
                         <setting string="Devredilecek Personeller (Handoff)" help="Yapay zeka başa çıkamadığında veya İnsana Devret dendiğinde sohbetin atanacağı Odoo kullanıcılarını seçin.">
                             <field name="social_handoff_user_ids" widget="many2many_tags" options="{'no_create': True}"/>
+                        </setting>
+                        <setting string="E-Ticaret Linki (Shopify vb.)" help="AI sipariş linki oluştururken bu kök domaini kullanır. (Örn: https://www.ugurlar.com)">
+                            <field name="social_ecommerce_url"/>
                         </setting>
                     </block>
 

@@ -56,6 +56,14 @@
                                 <field name="image_ids" widget="many2many_binary" readonly="state != 'draft'"/>
                             </group>
                         </page>
+                        <page string="Posttaki Ürünler (Yapay Zeka)">
+                            <group>
+                                <div class="text-muted mb-3" colspan="2">
+                                    <i>Bu gönderiye yorum geldiğinde, Yapay Zeka müşteriye buradaki ürünlerin bilgilerini (fiyat, stok vb.) ve Shopify sipariş linkini sunar.</i>
+                                </div>
+                                <field name="product_tmpl_ids" widget="many2many_tags" readonly="state != 'draft'" options="{'no_create': True}"/>
+                            </group>
+                        </page>
                         <page string="Publishing Status" invisible="state == 'draft'">
                             <field name="post_line_ids" readonly="1">
                                 <list>
