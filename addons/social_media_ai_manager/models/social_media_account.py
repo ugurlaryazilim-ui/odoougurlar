@@ -264,3 +264,75 @@ class SocialMediaAccount(models.Model):
                 logging.getLogger(__name__).error(f"Failed to reply to YouTube comment {comment_id}: {res.status_code} - {res.text}")
         except Exception as e:
             logging.getLogger(__name__).error(f"Exception replying to YouTube comment: {e}")
+
+    def action_fix_youtube_errors(self):
+        self.ensure_one()
+        if self.platform != 'youtube':
+            return
+            
+        self._refresh_youtube_token()
+        error_msgs = self.env['social.media.message'].search([
+            ('message_type', '=', 'outgoing'),
+            ('content', 'ilike', 'An error occurred with the Gemini service.')
+        ])
+        
+        import requests
+        ai_provider = self.env['social.media.ai.provider'].sudo()
+        
+        system_context = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.system_prompt', 'Sen profesyonel bir müşteri temsilcisisin. Sorulara kısa ve nazik cevaplar ver.')
+        system_context += f"\n\nKullanıcı YouTube üzerinden yorum yazıyor. ÖNEMLİ KURAL: Mesajlarında KESİNLİKLE '**' veya '*' gibi markdown kalınlaştırma işaretleri KULLANMA. Bunun yerine maddeleri ayırmak için şık emojiler (👗, 💳, 📦, 🛍️ vb.) ve temiz satır boşlukları kullanarak çok profesyonel ve zarif bir görünüm sağla."
+        whatsapp_number = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.whatsapp_number', '').strip()
+        wa_link = f"https://wa.me/{whatsapp_number}?text=Merhaba+YouTube'dan+geliyorum" if whatsapp_number else ""
+        if wa_link:
+            system_context += f"\n\nMesajının sonuna MUTLAKA şu WhatsApp sipariş ve detaylı bilgi linkini ekle: {wa_link}"
+        
+        for msg in error_msgs:
+            # Find the incoming message before this
+            incoming = self.env['social.media.message'].search([
+                ('conversation_id', '=', msg.conversation_id.id),
+                ('message_type', '=', 'incoming'),
+                ('date', '<=', msg.date)
+            ], order='date desc', limit=1)
+            
+            if not incoming or not incoming.platform_message_id:
+                continue
+                
+            parent_id = incoming.platform_message_id
+            
+            # Generate new reply
+            user_text = incoming.content.replace("[YORUM]:", "").strip()
+            new_reply = ai_provider.generate_response(user_text, system_context)
+            if not new_reply or str(new_reply).startswith("[ERROR]"):
+                continue
+                
+            if "[DEVRET]" in new_reply.upper():
+                new_reply = new_reply.replace("[DEVRET]", "").replace("[devret]", "").strip()
+            if not new_reply:
+                new_reply = f"Detaylı bilgi için WhatsApp üzerinden ulaşabilirsiniz: {wa_link}"
+            
+            # Fetch replies from YouTube
+            url = f"https://www.googleapis.com/youtube/v3/comments?parentId={parent_id}&part=snippet&access_token={self.api_token}"
+            res = requests.get(url).json()
+            reply_id_to_update = None
+            
+            for item in res.get('items', []):
+                snippet = item.get('snippet', {})
+                if snippet.get('authorChannelId', {}).get('value') == self.youtube_channel_id:
+                    reply_id_to_update = item['id']
+                    break
+                    
+            if reply_id_to_update:
+                put_url = "https://www.googleapis.com/youtube/v3/comments?part=snippet"
+                headers = {
+                    'Authorization': f'Bearer {self.api_token}',
+                    'Content-Type': 'application/json'
+                }
+                payload = {
+                    "id": reply_id_to_update,
+                    "snippet": {
+                        "textOriginal": new_reply
+                    }
+                }
+                update_res = requests.put(put_url, headers=headers, json=payload)
+                if update_res.ok:
+                    msg.content = new_reply

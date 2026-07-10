@@ -19,7 +19,8 @@
             <form string="Social Media Account">
                 <header>
                     <button name="action_login_facebook" string="Login with Facebook" type="object" class="oe_highlight" invisible="platform not in ('facebook', 'instagram')"/>
-                    <button name="action_login_youtube" string="Login with Google (YouTube)" type="object" class="btn-danger" invisible="platform != 'youtube'"/>
+                    <button name="action_login_youtube" type="object" string="Login with Google (YouTube)" class="oe_highlight btn-danger" invisible="platform != 'youtube'"/>
+                    <button name="action_fix_youtube_errors" type="object" string="Hatalı Yorumları Düzelt (Yapay Zeka)" class="oe_highlight btn-warning" invisible="platform != 'youtube'" confirm="Eski hatalı yorumlar tek tek YouTube üzerinden bulunup silinecek/güncellenecektir. Emin misiniz?"/>
                     <button name="action_subscribe_webhooks" string="Tetikleyicileri Bağla" type="object" class="oe_highlight" invisible="platform not in ('facebook', 'instagram')"/>
                     <field name="state" widget="statusbar"/>
                 </header>
