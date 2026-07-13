@@ -63,25 +63,25 @@
                 <t t-if="state.activeConversation">
                     
                     <!-- Chat Header -->
-                    <div class="p-3 chat-header d-flex justify-content-between align-items-center">
-                        <div class="d-flex align-items-center gap-3">
+                    <div class="p-2 p-md-3 chat-header d-flex justify-content-between align-items-center border-bottom shadow-sm">
+                        <div class="d-flex align-items-center gap-2 gap-md-3 overflow-hidden">
                             <!-- Mobile Back Button -->
-                            <button class="btn btn-light rounded-circle d-md-none" t-on-click="backToList">
+                            <button class="btn btn-light btn-sm rounded-circle d-md-none flex-shrink-0" t-on-click="backToList" style="width: 32px; height: 32px; padding: 0;">
                                 <i class="fa fa-arrow-left"></i>
                             </button>
                             
-                            <div t-attf-class="platform-icon flex-shrink-0 #{state.activeConversation.platform === 'instagram' ? 'platform-instagram' : (state.activeConversation.platform === 'facebook' ? 'platform-facebook' : 'platform-default')}">
+                            <div t-attf-class="platform-icon flex-shrink-0 #{state.activeConversation.platform === 'instagram' ? 'platform-instagram' : (state.activeConversation.platform === 'facebook' ? 'platform-facebook' : 'platform-default')}" style="width: 35px; height: 35px; font-size: 1.2rem;">
                                 <i t-attf-class="fa #{state.activeConversation.platform === 'instagram' ? 'fa-instagram' : (state.activeConversation.platform === 'facebook' ? 'fa-facebook' : 'fa-user')}"></i>
                             </div>
                             
-                            <div>
-                                <h5 class="m-0 fw-bold"><t t-esc="state.activeConversation.name"/></h5>
-                                <small class="text-muted text-capitalize"><t t-esc="state.activeConversation.platform"/> Sohbeti</small>
+                            <div class="overflow-hidden">
+                                <h6 class="m-0 fw-bold text-truncate" style="max-width: 45vw; font-size: 0.95rem;"><t t-esc="state.activeConversation.name"/></h6>
+                                <small class="text-muted text-capitalize d-block text-truncate" style="font-size: 0.75rem;"><t t-esc="state.activeConversation.platform"/> Sohbeti</small>
                             </div>
                         </div>
 
-                        <button class="btn btn-outline-warning btn-sm fw-bold rounded-pill px-3" 
-                                t-on-click="handoffToHuman">
+                        <button class="btn btn-outline-warning btn-sm fw-bold rounded-pill px-2 px-md-3 text-nowrap ms-2 flex-shrink-0 shadow-sm" 
+                                t-on-click="handoffToHuman" style="font-size: 0.8rem;">
                             <i class="fa fa-user me-1"></i> <t t-esc="state.activeConversation.state === 'bot' ? 'İnsana Devret' : 'Bota Devret'"/>
                         </button>
                     </div>
