@@ -24,6 +24,45 @@ class SocialMediaMessage(models.Model):
     author_id = fields.Many2one('res.users', string="Sent By (Agent)", help="If empty and outgoing, sent by AI")
     ai_processed = fields.Boolean(string="AI Processed", default=False, help="True if AI has answered this incoming message")
 
+    @api.model_create_multi
+    def create(self, vals_list):
+        records = super().create(vals_list)
+        
+        # If created manually from the UI, send to the platform!
+        if not self.env.context.get('from_ai_cron'):
+            import logging
+            _logger = logging.getLogger(__name__)
+            for rec in records:
+                if rec.message_type == 'outgoing':
+                    account = rec.conversation_id.account_id
+                    conv = rec.conversation_id
+                    
+                    # Find last incoming message to determine if we reply to a comment or DM
+                    last_incoming = self.search([
+                        ('conversation_id', '=', conv.id),
+                        ('message_type', '=', 'incoming')
+                    ], order='date desc', limit=1)
+                    
+                    is_comment = last_incoming and last_incoming.content and last_incoming.content.startswith('[YORUM]:')
+                    comment_id = last_incoming.platform_message_id if is_comment else False
+
+                    try:
+                        if account.platform == 'youtube':
+                            if comment_id:
+                                account._send_youtube_comment_reply(comment_id, rec.content, account)
+                        elif account.platform in ['facebook', 'instagram']:
+                            if is_comment and comment_id:
+                                # For human replies, we just send a private message to the comment
+                                account._send_meta_private_reply(comment_id, rec.content)
+                            else:
+                                account._send_meta_message(conv.social_user_id, rec.content)
+                        elif account.platform == 'whatsapp':
+                            account._send_whatsapp_message(conv.social_user_id, rec.content)
+                    except Exception as e:
+                        _logger.error(f"Failed to send manual message for conversation {conv.id}: {e}")
+                        
+        return records
+
     @api.model
     def _cron_process_ai_queue(self, limit=50):
         import logging
@@ -148,7 +187,7 @@ class SocialMediaMessage(models.Model):
                         reply_text = f"Detaylı bilgi için müşteri temsilcimize WhatsApp üzerinden ulaşabilirsiniz: {wa_link}"
                         
                 # Create ONE Outgoing Message Record
-                out_msg = self.create({
+                out_msg = self.with_context(from_ai_cron=True).create({
                     'conversation_id': conversation.id,
                     'message_type': 'outgoing',
                     'content': reply_text,
