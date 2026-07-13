@@ -4,7 +4,17 @@
         <div class="d-flex align-items-center w-100">
             <!-- Native Odoo CharField -->
             <div class="flex-grow-1">
-                <t t-call="web.CharField"/>
+                <t t-if="props.readonly">
+                    <span t-esc="props.record.data[props.name]" />
+                </t>
+                <t t-else="">
+                    <input
+                        class="o_input"
+                        type="text"
+                        t-att-placeholder="props.placeholder || 'Barkod ile Ekle...'"
+                        t-ref="input"
+                    />
+                </t>
             </div>
             
             <button t-if="!props.readonly" type="button" class="btn btn-primary ms-2 flex-shrink-0" t-on-click="startScanning" title="Kamera ile Barkod Okut">

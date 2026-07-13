@@ -18,7 +18,7 @@ Kapsamlı omnichannel gelen kutusu ve sosyal medya gönderi planlama aracı.
     'author': 'Antigravity',
     'website': '',
     'license': 'LGPL-3',
-    'depends': ['base', 'mail', 'calendar', 'web', 'product'],
+    'depends': ['base', 'mail', 'calendar', 'web', 'product', 'ugurlar_barcode'],
     'data': [
         'security/ir.model.access.csv',
         'data/ir_cron_data.xml',
