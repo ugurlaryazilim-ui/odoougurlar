@@ -78,6 +78,57 @@ class SocialMediaMessage(models.Model):
         return records
 
     @api.model
+    def search_product_for_chat(self, query):
+        """ Used by OWL Component to search products and return formatted chat message """
+        Product = self.env['product.product']
+        domain = ['|', ('barcode', '=', query), ('name', 'ilike', query)]
+        products = Product.search(domain, limit=10)
+        
+        results = []
+        for p in products:
+            tmpl = p.product_tmpl_id
+            stock = tmpl.qty_available if hasattr(tmpl, 'qty_available') else p.qty_available if hasattr(p, 'qty_available') else 10
+            stock_text = f"Sadece {int(stock)} adet kaldı, tükenmek üzere!" if 0 < stock < 5 else f"{int(stock)} Adet" if stock > 0 else "Stokta Yok"
+            
+            variants = []
+            if hasattr(tmpl, 'attribute_line_ids'):
+                for attr in tmpl.attribute_line_ids:
+                    vals = ", ".join(attr.value_ids.mapped('name'))
+                    variants.append(f"{attr.attribute_id.name}: {vals}")
+            variant_text = " | ".join(variants) if variants else "Tek Çeşit"
+            
+            search_query = p.barcode or p.default_code
+            if not search_query:
+                for variant in tmpl.product_variant_ids:
+                    if variant.barcode:
+                        search_query = variant.barcode
+                        break
+                    elif variant.default_code and not search_query:
+                        search_query = variant.default_code
+            if not search_query:
+                search_query = tmpl.name.replace(" ", "+")
+                
+            order_link = f"https://www.ugurlar.com/search?q={search_query}"
+            
+            chat_text = f"👗 Ürün: {tmpl.name}\n"
+            chat_text += f"💰 Fiyat: {tmpl.list_price} TL\n"
+            chat_text += f"📦 Stok Durumu: {stock_text}\n"
+            if variants:
+                chat_text += f"🎨 Seçenekler: {variant_text}\n"
+            chat_text += f"🔗 Sipariş Linki: {order_link}\n"
+            
+            results.append({
+                'id': p.id,
+                'display_name': p.display_name,
+                'barcode': p.barcode or '-',
+                'list_price': p.list_price,
+                'qty_available': stock,
+                'chat_text': chat_text
+            })
+            
+        return results
+
+    @api.model
     def _cron_process_ai_queue(self, limit=50):
         import logging
         _logger = logging.getLogger(__name__)

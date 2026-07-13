@@ -132,12 +132,17 @@
                                    t-on-keyup="onKeyup" style="box-shadow: none !important; outline: none;"/>
                             
                             <div class="d-flex align-items-center pe-1">
-                                <button class="btn btn-link text-muted p-2 text-decoration-none" t-on-click="triggerGalleryInput" title="Galeri" style="box-shadow: none;">
-                                    <i class="fa fa-paperclip fs-5"></i>
-                                </button>
-                                <button class="btn btn-link text-muted p-2 text-decoration-none me-1" t-on-click="triggerCameraInput" title="Kamera" style="box-shadow: none;">
-                                    <i class="fa fa-camera fs-5"></i>
-                                </button>
+                                <div class="dropdown dropup" style="margin-right: 4px;">
+                                    <button class="btn btn-link text-muted p-2 text-decoration-none" data-bs-toggle="dropdown" aria-expanded="false" title="Ekle" style="box-shadow: none;">
+                                        <i class="fa fa-paperclip fs-5"></i>
+                                    </button>
+                                    <ul class="dropdown-menu dropdown-menu-end shadow border-0 rounded-4 mb-2" style="min-width: 150px; padding: 8px 0;">
+                                        <li><a class="dropdown-item py-2" href="#" t-on-click="triggerGalleryInput"><i class="fa fa-image me-2 text-primary"></i> Galeri</a></li>
+                                        <li><a class="dropdown-item py-2" href="#" t-on-click="triggerCameraInput"><i class="fa fa-camera me-2 text-danger"></i> Kamera</a></li>
+                                        <li><hr class="dropdown-divider"/></li>
+                                        <li><a class="dropdown-item py-2" href="#" t-on-click="openProductSearch"><i class="fa fa-barcode me-2 text-success"></i> Ürün Ara</a></li>
+                                    </ul>
+                                </div>
                                 <button class="btn btn-primary rounded-circle d-flex align-items-center justify-content-center shadow-sm" t-on-click="sendMessage" style="width: 38px; height: 38px;">
                                     <i class="fa fa-paper-plane" style="margin-left: -2px;"></i>
                                 </button>
@@ -159,6 +164,51 @@
                     </div>
                 </t>
             </div>
+            
+            <!-- Product Search Modal -->
+            <div t-if="state.showProductSearch" class="modal d-block" tabindex="-1" style="background: rgba(0,0,0,0.5);">
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content border-0 shadow-lg rounded-4">
+                        <div class="modal-header border-0 pb-0">
+                            <h5 class="modal-title fw-bold">Ürün Ara / Barkod Okut</h5>
+                            <button type="button" class="btn-close" t-on-click="closeProductSearch"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="input-group mb-3 shadow-sm rounded-pill overflow-hidden">
+                                <span class="input-group-text bg-white border-end-0 text-muted"><i class="fa fa-search"></i></span>
+                                <input type="text" class="form-control border-start-0 border-end-0 px-0 shadow-none" 
+                                       placeholder="Barkod okutun veya ürün adı..." 
+                                       t-model="state.productQuery" t-on-keyup="searchProduct" t-ref="productSearchInput"/>
+                                <button class="btn btn-white border border-start-0 text-primary" type="button" t-on-click="startBarcodeScanner" title="Kamera ile Barkod Oku">
+                                    <i class="fa fa-barcode fs-5"></i>
+                                </button>
+                            </div>
+                            
+                            <div class="list-group list-group-flush rounded-3" style="max-height: 350px; overflow-y: auto;">
+                                <t t-foreach="state.productResults" t-as="prod" t-key="prod.id">
+                                    <button class="list-group-item list-group-item-action py-3 border-bottom" t-on-click="() => selectProduct(prod)">
+                                        <div class="d-flex w-100 justify-content-between align-items-center mb-1">
+                                            <h6 class="mb-0 fw-bold text-truncate" style="max-width: 75%;"><t t-esc="prod.display_name"/></h6>
+                                            <span t-attf-class="badge rounded-pill #{prod.qty_available > 0 ? 'bg-success' : 'bg-danger'}">
+                                                <t t-esc="prod.qty_available"/> Stok
+                                            </span>
+                                        </div>
+                                        <div class="d-flex w-100 justify-content-between">
+                                            <small class="text-muted"><i class="fa fa-barcode me-1"></i> <t t-esc="prod.barcode"/></small>
+                                            <small class="text-dark fw-bold"><t t-esc="prod.list_price"/> TL</small>
+                                        </div>
+                                    </button>
+                                </t>
+                                <div t-if="state.productQuery.length > 2 and state.productResults.length === 0" class="text-center text-muted py-4">
+                                    <i class="fa fa-search fa-2x mb-2 text-light"></i>
+                                    <p class="mb-0">Ürün bulunamadı.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
         </div>
     </t>
 </templates>

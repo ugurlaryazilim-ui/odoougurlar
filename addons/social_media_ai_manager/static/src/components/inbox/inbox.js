@@ -5,6 +5,7 @@ import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { _t } from "@web/core/l10n/translation";
 import { user } from "@web/core/user";
+import { openCameraScanner } from "@ugurlar_barcode/js/camera_scanner";
 
 export class SocialInbox extends Component {
     setup() {
@@ -13,6 +14,7 @@ export class SocialInbox extends Component {
         this.chatContainerRef = useRef("chatMessagesContainer");
         this.galleryInputRef = useRef("galleryInput");
         this.cameraInputRef = useRef("cameraInput");
+        this.productSearchInputRef = useRef("productSearchInput");
         
         this.state = useState({
             conversations: [],
@@ -23,6 +25,9 @@ export class SocialInbox extends Component {
             attachmentData: null,
             attachmentPreview: null,
             attachmentName: null,
+            showProductSearch: false,
+            productQuery: "",
+            productResults: [],
         });
 
         onWillStart(async () => {
@@ -216,6 +221,45 @@ export class SocialInbox extends Component {
         if (this.cameraInputRef.el) {
             this.cameraInputRef.el.value = "";
         }
+    }
+
+    openProductSearch() {
+        this.state.showProductSearch = true;
+        this.state.productQuery = "";
+        this.state.productResults = [];
+        setTimeout(() => {
+            if (this.productSearchInputRef.el) {
+                this.productSearchInputRef.el.focus();
+            }
+        }, 100);
+    }
+
+    closeProductSearch() {
+        this.state.showProductSearch = false;
+    }
+
+    async searchProduct(ev) {
+        if (ev && ev.key === "Enter" || this.state.productQuery.length > 2) {
+            this.state.productResults = await this.orm.call(
+                "social.media.message",
+                "search_product_for_chat",
+                [this.state.productQuery]
+            );
+        }
+    }
+
+    selectProduct(prod) {
+        this.state.newMessage += (this.state.newMessage ? "\n\n" : "") + prod.chat_text;
+        this.closeProductSearch();
+    }
+
+    startBarcodeScanner() {
+        openCameraScanner((barcode) => {
+            if (barcode) {
+                this.state.productQuery = barcode;
+                this.searchProduct({ key: "Enter" });
+            }
+        });
     }
     
     async handoffToHuman() {
