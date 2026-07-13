@@ -127,7 +127,7 @@
                             <input type="file" accept="image/*" class="d-none" t-ref="galleryInput" t-on-change="onFileChange"/>
                             <input type="file" accept="image/*" capture="environment" class="d-none" t-ref="cameraInput" t-on-change="onFileChange"/>
                             
-                            <textarea class="form-control border-0 bg-transparent shadow-none px-3 py-2 m-0" 
+                            <textarea class="form-control border-0 bg-transparent shadow-none px-3 py-2 m-0 flex-grow-1" 
                                    t-att-placeholder="t('Type a message...')" 
                                    t-model="state.newMessage" 
                                    t-ref="messageInput"
@@ -135,7 +135,7 @@
                                    t-on-keydown="onKeydown" 
                                    style="box-shadow: none !important; outline: none; resize: none; overflow-y: auto; max-height: 150px; min-height: 40px; display: block;"></textarea>
                             
-                            <div class="d-flex align-items-center pe-1 pb-1">
+                            <div class="d-flex align-items-center pe-1 pb-1 flex-shrink-0">
                                 <div class="dropdown dropup" style="margin-right: 4px;">
                                     <button class="btn btn-link text-muted p-2 text-decoration-none" data-bs-toggle="dropdown" aria-expanded="false" title="Ekle" style="box-shadow: none;">
                                         <i class="fa fa-paperclip fs-5"></i>
