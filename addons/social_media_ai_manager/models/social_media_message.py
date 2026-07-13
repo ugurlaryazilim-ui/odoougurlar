@@ -52,8 +52,11 @@ class SocialMediaMessage(models.Model):
                                 account._send_youtube_comment_reply(comment_id, rec.content, account)
                         elif account.platform in ['facebook', 'instagram']:
                             if is_comment and comment_id:
-                                # For human replies, we just send a private message to the comment
-                                account._send_meta_private_reply(comment_id, rec.content)
+                                # For human replies, we try to send a private message to the comment
+                                success = account._send_meta_private_reply(comment_id, rec.content)
+                                if not success:
+                                    # Meta only allows ONE private reply per comment. If it fails, fallback to public comment.
+                                    account._send_meta_comment_reply(comment_id, rec.content)
                             else:
                                 account._send_meta_message(conv.social_user_id, rec.content)
                         elif account.platform == 'whatsapp':

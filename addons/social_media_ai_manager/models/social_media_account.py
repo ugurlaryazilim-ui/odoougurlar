@@ -284,15 +284,20 @@ class SocialMediaAccount(models.Model):
 
     def _send_meta_private_reply(self, comment_id, message_text):
         """ Send a private DM reply based on a comment """
-        if not self.api_token: return
+        if not self.api_token: return False
         import requests, logging
         url = "https://graph.facebook.com/v19.0/me/messages"
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_token}"}
         payload = {"recipient": {"comment_id": comment_id}, "message": {"text": message_text}}
         try:
-            requests.post(url, headers=headers, json=payload, timeout=10)
+            res = requests.post(url, headers=headers, json=payload, timeout=10)
+            if not res.ok:
+                logging.getLogger(__name__).error(f"Meta Private Reply Error: {res.status_code} - {res.text}")
+                return False
+            return True
         except Exception as e:
             logging.getLogger(__name__).error(f"Exception sending Meta private reply: {e}")
+            return False
 
     def _send_meta_message(self, recipient_id, message_text):
         """ Send a DM using Meta Graph API """
@@ -302,7 +307,9 @@ class SocialMediaAccount(models.Model):
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_token}"}
         payload = {"recipient": {"id": recipient_id}, "message": {"text": message_text}}
         try:
-            requests.post(url, headers=headers, json=payload, timeout=10)
+            res = requests.post(url, headers=headers, json=payload, timeout=10)
+            if not res.ok:
+                logging.getLogger(__name__).error(f"Meta Message Error: {res.status_code} - {res.text}")
         except Exception as e:
             logging.getLogger(__name__).error(f"Exception sending Meta message: {e}")
 
