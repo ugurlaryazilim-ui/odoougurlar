@@ -17,12 +17,21 @@ class SocialMediaMessage(models.Model):
         ('system', 'System Note')
     ], string="Direction", required=True)
     
-    content = fields.Text(string="Message Content", required=True)
+    content = fields.Text(string="Message Content", required=False)
+    attachment = fields.Binary(string="Attachment")
+    attachment_name = fields.Char(string="Attachment Name")
+    has_attachment = fields.Boolean(compute="_compute_has_attachment")
+    
     date = fields.Datetime(string="Date", default=fields.Datetime.now)
     
     is_read = fields.Boolean(string="Read", default=False)
     author_id = fields.Many2one('res.users', string="Sent By (Agent)", help="If empty and outgoing, sent by AI")
     ai_processed = fields.Boolean(string="AI Processed", default=False, help="True if AI has answered this incoming message")
+
+    @api.depends('attachment')
+    def _compute_has_attachment(self):
+        for rec in self:
+            rec.has_attachment = bool(rec.attachment)
 
     @api.model_create_multi
     def create(self, vals_list):
@@ -49,18 +58,20 @@ class SocialMediaMessage(models.Model):
                     try:
                         if account.platform == 'youtube':
                             if comment_id:
+                                if rec.attachment:
+                                    _logger.warning("YouTube comments do not support image replies. Sending text only.")
                                 account._send_youtube_comment_reply(comment_id, rec.content, account)
                         elif account.platform in ['facebook', 'instagram']:
                             if is_comment and comment_id:
                                 # For human replies, we try to send a private message to the comment
-                                success = account._send_meta_private_reply(comment_id, rec.content)
+                                success = account._send_meta_private_reply(comment_id, rec.content, attachment=rec.attachment, attachment_name=rec.attachment_name)
                                 if not success:
                                     # Meta only allows ONE private reply per comment. If it fails, fallback to public comment.
                                     account._send_meta_comment_reply(comment_id, rec.content)
                             else:
-                                account._send_meta_message(conv.social_user_id, rec.content)
+                                account._send_meta_message(conv.social_user_id, rec.content, attachment=rec.attachment, attachment_name=rec.attachment_name)
                         elif account.platform == 'whatsapp':
-                            account._send_whatsapp_message(conv.social_user_id, rec.content)
+                            account._send_whatsapp_message(conv.social_user_id, rec.content, attachment=rec.attachment, attachment_name=rec.attachment_name)
                     except Exception as e:
                         _logger.error(f"Failed to send manual message for conversation {conv.id}: {e}")
                         

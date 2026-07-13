@@ -282,38 +282,75 @@ class SocialMediaAccount(models.Model):
         except Exception as e:
             logging.getLogger(__name__).error(f"Exception replying to Meta comment: {e}")
 
-    def _send_meta_private_reply(self, comment_id, message_text):
+    def _send_meta_private_reply(self, comment_id, message_text, attachment=None, attachment_name=None):
         """ Send a private DM reply based on a comment """
         if not self.api_token: return False
-        import requests, logging
+        import requests, logging, json, base64
         url = "https://graph.facebook.com/v19.0/me/messages"
-        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_token}"}
-        payload = {"recipient": {"comment_id": comment_id}, "message": {"text": message_text}}
-        try:
-            res = requests.post(url, headers=headers, json=payload, timeout=10)
-            if not res.ok:
-                logging.getLogger(__name__).error(f"Meta Private Reply Error: {res.status_code} - {res.text}")
-                return False
-            return True
-        except Exception as e:
-            logging.getLogger(__name__).error(f"Exception sending Meta private reply: {e}")
-            return False
+        
+        success = True
+        if attachment:
+            payload = {
+                "recipient": json.dumps({"comment_id": comment_id}),
+                "message": json.dumps({"attachment": {"type": "image", "payload": {"is_reusable": True}}})
+            }
+            files = {
+                'filedata': (attachment_name or 'image.jpg', base64.b64decode(attachment), 'image/jpeg')
+            }
+            try:
+                res = requests.post(url, data=payload, files=files, params={"access_token": self.api_token}, timeout=20)
+                if not res.ok:
+                    logging.getLogger(__name__).error(f"Meta Private Image Error: {res.status_code} - {res.text}")
+                    success = False
+            except Exception as e:
+                logging.getLogger(__name__).error(f"Exception sending Meta private image: {e}")
+                success = False
 
-    def _send_meta_message(self, recipient_id, message_text):
+        if message_text and message_text.strip():
+            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_token}"}
+            payload = {"recipient": {"comment_id": comment_id}, "message": {"text": message_text}}
+            try:
+                res = requests.post(url, headers=headers, json=payload, timeout=10)
+                if not res.ok:
+                    logging.getLogger(__name__).error(f"Meta Private Text Error: {res.status_code} - {res.text}")
+                    success = False
+            except Exception as e:
+                logging.getLogger(__name__).error(f"Exception sending Meta private text: {e}")
+                success = False
+        return success
+
+    def _send_meta_message(self, recipient_id, message_text, attachment=None, attachment_name=None):
         """ Send a DM using Meta Graph API """
         if not self.api_token: return
-        import requests, logging
+        import requests, logging, json, base64
         url = "https://graph.facebook.com/v19.0/me/messages"
-        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_token}"}
-        payload = {"recipient": {"id": recipient_id}, "message": {"text": message_text}}
-        try:
-            res = requests.post(url, headers=headers, json=payload, timeout=10)
-            if not res.ok:
-                logging.getLogger(__name__).error(f"Meta Message Error: {res.status_code} - {res.text}")
-        except Exception as e:
-            logging.getLogger(__name__).error(f"Exception sending Meta message: {e}")
+        
+        if attachment:
+            payload = {
+                "recipient": json.dumps({"id": recipient_id}),
+                "message": json.dumps({"attachment": {"type": "image", "payload": {"is_reusable": True}}})
+            }
+            files = {
+                'filedata': (attachment_name or 'image.jpg', base64.b64decode(attachment), 'image/jpeg')
+            }
+            try:
+                res = requests.post(url, data=payload, files=files, params={"access_token": self.api_token}, timeout=20)
+                if not res.ok:
+                    logging.getLogger(__name__).error(f"Meta Image Error: {res.status_code} - {res.text}")
+            except Exception as e:
+                logging.getLogger(__name__).error(f"Exception sending Meta image: {e}")
+                
+        if message_text and message_text.strip():
+            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_token}"}
+            payload = {"recipient": {"id": recipient_id}, "message": {"text": message_text}}
+            try:
+                res = requests.post(url, headers=headers, json=payload, timeout=10)
+                if not res.ok:
+                    logging.getLogger(__name__).error(f"Meta Text Error: {res.status_code} - {res.text}")
+            except Exception as e:
+                logging.getLogger(__name__).error(f"Exception sending Meta text: {e}")
 
-    def _send_whatsapp_message(self, recipient_id, message_text):
+    def _send_whatsapp_message(self, recipient_id, message_text, attachment=None, attachment_name=None):
         """ Send WhatsApp message (Placeholder for WAHA/Evolution API) """
         # TODO: Implement specific WhatsApp API call based on chosen provider
         import logging

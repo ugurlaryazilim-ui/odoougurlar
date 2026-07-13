@@ -91,11 +91,16 @@
                         <t t-foreach="state.messages" t-as="msg" t-key="msg.id">
                             <div t-att-class="'d-flex w-100 ' + (msg.message_type === 'outgoing' ? 'justify-content-end' : 'justify-content-start')">
                                 <div t-attf-class="msg-bubble #{msg.message_type === 'outgoing' ? 'msg-outgoing' : 'msg-incoming'}" style="max-width: 75%;">
+                                    <t t-if="msg.has_attachment">
+                                        <div class="mb-2">
+                                            <img t-attf-src="/web/image/social.media.message/{{msg.id}}/attachment" style="max-width: 200px; max-height: 200px; border-radius: 8px; object-fit: contain;" alt="Attachment"/>
+                                        </div>
+                                    </t>
                                     <div style="white-space: pre-wrap;"><t t-esc="msg.content"/></div>
                                     
-                                    <div t-if="msg.post_link" class="mt-2">
-                                        <a t-att-href="msg.post_link" target="_blank" class="btn btn-sm btn-light border w-100 text-primary fw-bold" style="text-decoration: none;">
-                                            <i class="fa fa-external-link"></i> Gönderiye Git
+                                    <div class="mt-2" t-if="msg.post_link">
+                                        <a t-att-href="msg.post_link" target="_blank" class="btn btn-sm btn-light rounded-pill" style="font-size: 0.8rem;">
+                                            <i class="fa fa-external-link me-1"></i> Gönderiyi Gör
                                         </a>
                                     </div>
                                     
@@ -110,7 +115,19 @@
 
                     <!-- Chat Input -->
                     <div class="chat-input-container">
+                        <t t-if="state.attachmentPreview">
+                            <div class="attachment-preview p-2 bg-light mb-2 rounded position-relative d-inline-block shadow-sm">
+                                <img t-att-src="state.attachmentPreview" style="max-height: 80px; border-radius: 4px;"/>
+                                <button class="btn btn-sm btn-danger position-absolute top-0 start-100 translate-middle rounded-circle shadow" t-on-click="removeAttachment" style="width: 24px; height: 24px; padding: 0; line-height: 1;">
+                                    <i class="fa fa-times" style="font-size: 12px;"></i>
+                                </button>
+                            </div>
+                        </t>
                         <div class="d-flex align-items-center">
+                            <input type="file" accept="image/*" class="d-none" t-ref="fileInput" t-on-change="onFileChange"/>
+                            <button class="btn btn-light me-2 rounded-circle shadow-sm" t-on-click="triggerFileInput" title="Resim Ekle" style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
+                                <i class="fa fa-paperclip"></i>
+                            </button>
                             <div class="input-group">
                                 <input type="text" class="form-control chat-input" t-att-placeholder="t('Type a message...')" 
                                        t-model="state.newMessage" 

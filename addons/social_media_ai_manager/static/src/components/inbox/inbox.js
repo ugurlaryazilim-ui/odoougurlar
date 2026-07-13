@@ -11,6 +11,7 @@ export class SocialInbox extends Component {
         this.orm = useService("orm");
         this.actionService = useService("action");
         this.chatContainerRef = useRef("chatMessagesContainer");
+        this.fileInputRef = useRef("fileInput");
         
         this.state = useState({
             conversations: [],
@@ -18,6 +19,9 @@ export class SocialInbox extends Component {
             messages: [],
             newMessage: "",
             showChatOnMobile: false,
+            attachmentData: null,
+            attachmentPreview: null,
+            attachmentName: null,
         });
 
         onWillStart(async () => {
@@ -146,7 +150,7 @@ export class SocialInbox extends Component {
         this.state.messages = await this.orm.searchRead(
             "social.media.message",
             [["conversation_id", "=", convId]],
-            ["id", "content", "message_type", "date", "is_read", "post_link"],
+            ["id", "content", "message_type", "date", "is_read", "post_link", "has_attachment"],
             { order: "date asc" }
         );
     }
@@ -158,17 +162,50 @@ export class SocialInbox extends Component {
     }
 
     async sendMessage() {
-        if (!this.state.newMessage.trim() || !this.state.activeConversation) return;
+        if (!this.state.newMessage.trim() && !this.state.attachmentData) return;
+        if (!this.state.activeConversation) return;
         
         await this.orm.create("social.media.message", [{
             conversation_id: this.state.activeConversation.id,
-            content: this.state.newMessage,
+            content: this.state.newMessage.trim() || "[GÖRSEL]",
             message_type: "outgoing",
+            attachment: this.state.attachmentData,
+            attachment_name: this.state.attachmentName
         }]);
         
         this.state.newMessage = "";
+        this.removeAttachment();
         await this.loadMessages(this.state.activeConversation.id);
         setTimeout(() => this.scrollToBottom(), 50);
+    }
+
+    triggerFileInput() {
+        if (this.fileInputRef.el) {
+            this.fileInputRef.el.click();
+        }
+    }
+
+    onFileChange(ev) {
+        const file = ev.target.files[0];
+        if (!file) return;
+
+        this.state.attachmentName = file.name;
+        
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            this.state.attachmentPreview = e.target.result;
+            this.state.attachmentData = e.target.result.split(',')[1];
+        };
+        reader.readAsDataURL(file);
+    }
+
+    removeAttachment() {
+        this.state.attachmentData = null;
+        this.state.attachmentPreview = null;
+        this.state.attachmentName = null;
+        if (this.fileInputRef.el) {
+            this.fileInputRef.el.value = "";
+        }
     }
     
     async handoffToHuman() {
