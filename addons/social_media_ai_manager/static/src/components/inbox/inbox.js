@@ -15,6 +15,7 @@ export class SocialInbox extends Component {
         this.galleryInputRef = useRef("galleryInput");
         this.cameraInputRef = useRef("cameraInput");
         this.productSearchInputRef = useRef("productSearchInput");
+        this.messageInputRef = useRef("messageInput");
         
         this.state = useState({
             conversations: [],
@@ -161,8 +162,15 @@ export class SocialInbox extends Component {
         );
     }
 
-    onKeyup(ev) {
-        if (ev.key === "Enter") {
+    autoResizeInput(ev) {
+        const el = ev.target;
+        el.style.height = "auto";
+        el.style.height = (el.scrollHeight) + "px";
+    }
+
+    onKeydown(ev) {
+        if (ev.key === "Enter" && !ev.shiftKey) {
+            ev.preventDefault();
             this.sendMessage();
         }
     }
@@ -180,6 +188,9 @@ export class SocialInbox extends Component {
         }]);
         
         this.state.newMessage = "";
+        if (this.messageInputRef.el) {
+            this.messageInputRef.el.style.height = "auto";
+        }
         this.removeAttachment();
         await this.loadMessages(this.state.activeConversation.id);
         setTimeout(() => this.scrollToBottom(), 50);
@@ -251,6 +262,15 @@ export class SocialInbox extends Component {
     selectProduct(prod) {
         this.state.newMessage += (this.state.newMessage ? "\n\n" : "") + prod.chat_text;
         this.closeProductSearch();
+        setTimeout(() => {
+            if (this.messageInputRef.el) {
+                const el = this.messageInputRef.el;
+                el.focus();
+                el.selectionStart = el.selectionEnd = el.value.length;
+                el.style.height = "auto";
+                el.style.height = el.scrollHeight + "px";
+            }
+        }, 50);
     }
 
     startBarcodeScanner() {
