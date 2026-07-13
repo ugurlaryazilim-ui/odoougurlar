@@ -186,7 +186,7 @@
                             
                             <div class="list-group list-group-flush rounded-3" style="max-height: 350px; overflow-y: auto;">
                                 <t t-foreach="state.productResults" t-as="prod" t-key="prod.id">
-                                    <button class="list-group-item list-group-item-action py-3 border-bottom" t-on-click="() => selectProduct(prod)">
+                                    <button class="list-group-item list-group-item-action py-3 border-bottom" t-on-click="() => this.selectProduct(prod)">
                                         <div class="d-flex w-100 justify-content-between align-items-center mb-1">
                                             <h6 class="mb-0 fw-bold text-truncate" style="max-width: 75%;"><t t-esc="prod.display_name"/></h6>
                                             <span t-attf-class="badge rounded-pill #{prod.qty_available > 0 ? 'bg-success' : 'bg-danger'}">
