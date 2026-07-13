@@ -33,6 +33,10 @@ class SocialMediaAccount(models.Model):
     tiktok_refresh_token = fields.Char(string="TikTok Refresh Token")
     tiktok_open_id = fields.Char(string="TikTok Open ID")
     
+    # WhatsApp Specific (Evolution API)
+    whatsapp_api_url = fields.Char(string="WhatsApp API URL (Evolution)")
+    whatsapp_instance_name = fields.Char(string="WhatsApp Instance Name")
+    
     # Connection status
     state = fields.Selection([
         ('draft', 'Not Connected'),
@@ -397,10 +401,110 @@ class SocialMediaAccount(models.Model):
                 logging.getLogger(__name__).error(f"Exception sending Meta text: {e}")
 
     def _send_whatsapp_message(self, recipient_id, message_text, attachment=None, attachment_name=None):
-        """ Send WhatsApp message (Placeholder for WAHA/Evolution API) """
-        # TODO: Implement specific WhatsApp API call based on chosen provider
+        """ Send WhatsApp message via Evolution API """
+        if not self.api_token or not self.whatsapp_api_url or not self.whatsapp_instance_name:
+            import logging
+            logging.getLogger(__name__).warning("WhatsApp credentials missing (API Token, URL or Instance Name)")
+            return False
+
+        import requests
         import logging
-        logging.getLogger(__name__).info(f"WhatsApp message would be sent to {recipient_id}: {message_text}")
+
+        base_url = self.whatsapp_api_url.rstrip('/')
+        instance_name = self.whatsapp_instance_name
+
+        headers = {
+            'apikey': self.api_token,
+            'Content-Type': 'application/json'
+        }
+
+        # Evolution API accepts number in pure digits or with @s.whatsapp.net
+        clean_number = ''.join(filter(str.isdigit, str(recipient_id)))
+        remote_jid = f"{clean_number}@s.whatsapp.net"
+
+        success = True
+
+        # Send Media if attachment exists
+        if attachment:
+            url = f"{base_url}/message/sendMedia/{instance_name}"
+            # Basic mimetype detection
+            mimetype = "application/octet-stream"
+            mediatype = "document"
+            if attachment_name:
+                name_lower = attachment_name.lower()
+                if name_lower.endswith('.jpg') or name_lower.endswith('.jpeg'):
+                    mimetype, mediatype = "image/jpeg", "image"
+                elif name_lower.endswith('.png'):
+                    mimetype, mediatype = "image/png", "image"
+                elif name_lower.endswith('.pdf'):
+                    mimetype, mediatype = "application/pdf", "document"
+                elif name_lower.endswith('.mp4'):
+                    mimetype, mediatype = "video/mp4", "video"
+
+            # Check if attachment is bytes (decode to str if needed)
+            import base64
+            media_b64 = attachment.decode('utf-8') if isinstance(attachment, bytes) else attachment
+            
+            # Evolution API expects base64 data to have data prefix if mediatype is specified, 
+            # or just raw base64. Best practice is raw base64 and explicit mimetype.
+            # But the documentation specifies sending base64 in "media" field.
+            # Adding data URL format to be safe: data:image/jpeg;base64,...
+            if not media_b64.startswith('data:'):
+                media_b64 = f"data:{mimetype};base64,{media_b64}"
+
+            media_message = {
+                "number": remote_jid,
+                "mediatype": mediatype,
+                "mimetype": mimetype,
+                "caption": message_text if message_text else "",
+                "media": media_b64,
+                "fileName": attachment_name or "file"
+            }
+            try:
+                res = requests.post(url, headers=headers, json=media_message, timeout=20)
+                if not res.ok:
+                    logging.getLogger(__name__).error(f"Evolution API Media Error: {res.status_code} - {res.text}")
+                    success = False
+                else:
+                    return True # If text is sent as caption, we are done
+            except Exception as e:
+                logging.getLogger(__name__).error(f"Exception sending Evolution API media: {e}")
+                success = False
+
+        # Send Text
+        if message_text:
+            url = f"{base_url}/message/sendText/{instance_name}"
+            text_message = {
+                "number": remote_jid,
+                "text": message_text
+            }
+            try:
+                res = requests.post(url, headers=headers, json=text_message, timeout=10)
+                if not res.ok:
+                    logging.getLogger(__name__).error(f"Evolution API Text Error: {res.status_code} - {res.text}")
+                    success = False
+            except Exception as e:
+                logging.getLogger(__name__).error(f"Exception sending Evolution API text: {e}")
+                success = False
+
+        return success
+
+    def action_test_whatsapp(self):
+        """ Send a test message to the configured phone number """
+        from odoo import exceptions
+        self.ensure_one()
+        if self.platform != 'whatsapp':
+            raise exceptions.UserError("Bu özellik sadece WhatsApp hesapları için geçerlidir.")
+            
+        test_number = self.phone_number
+        if not test_number:
+            raise exceptions.UserError("Lütfen önce formda 'Phone Number' alanını doldurun (örn: 905551234567)")
+            
+        success = self._send_whatsapp_message(test_number, "Merhaba! Odoo'dan Evolution API test mesajıdır. 🚀")
+        if success:
+            raise exceptions.UserError("Test mesajı başarıyla gönderildi!")
+        else:
+            raise exceptions.UserError("Mesaj gönderilemedi. Lütfen logları ve API bağlantısını kontrol edin.")
 
     def action_fix_youtube_errors(self):
         self.ensure_one()

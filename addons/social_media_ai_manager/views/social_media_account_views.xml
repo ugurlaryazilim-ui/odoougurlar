@@ -21,6 +21,7 @@
                     <button name="action_login_facebook" string="Login with Facebook" type="object" class="oe_highlight" invisible="platform not in ('facebook', 'instagram')"/>
                     <button name="action_login_youtube" type="object" string="Login with Google (YouTube)" class="oe_highlight btn-danger" invisible="platform != 'youtube'"/>
                     <button name="action_login_tiktok" type="object" string="TikTok ile Giriş Yap" class="oe_highlight" invisible="platform != 'tiktok'" icon="fa-music"/>
+                    <button name="action_test_whatsapp" type="object" string="WhatsApp Test Mesajı Gönder" class="oe_highlight btn-success" invisible="platform != 'whatsapp'" icon="fa-whatsapp"/>
                     <button name="action_fix_youtube_errors" type="object" string="Hatalı Yorumları Düzelt (Yapay Zeka)" class="oe_highlight btn-warning" invisible="platform != 'youtube'" confirm="Eski hatalı yorumlar tek tek YouTube üzerinden bulunup silinecek/güncellenecektir. Emin misiniz?"/>
                     <button name="action_subscribe_webhooks" string="Tetikleyicileri Bağla" type="object" class="oe_highlight" invisible="platform not in ('facebook', 'instagram')"/>
                     <field name="state" widget="statusbar"/>
@@ -40,6 +41,8 @@
                             <field name="api_token" password="True"/>
                             <field name="webhook_secret" password="True" invisible="platform == 'youtube'"/>
                             <field name="phone_number" invisible="platform != 'whatsapp'"/>
+                            <field name="whatsapp_api_url" invisible="platform != 'whatsapp'"/>
+                            <field name="whatsapp_instance_name" invisible="platform != 'whatsapp'"/>
                             <field name="meta_page_id" invisible="platform not in ('facebook', 'instagram')"/>
                             <field name="meta_ig_id" invisible="platform != 'instagram'"/>
                             
