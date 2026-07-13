@@ -92,9 +92,12 @@ class SocialMediaMessage(models.Model):
             
             variants = []
             if hasattr(tmpl, 'attribute_line_ids'):
+                allowed_attrs = ['renk', 'beden', 'numara']
                 for attr in tmpl.attribute_line_ids:
-                    vals = ", ".join(attr.value_ids.mapped('name'))
-                    variants.append(f"{attr.attribute_id.name}: {vals}")
+                    attr_name = attr.attribute_id.name
+                    if any(a in attr_name.lower() for a in allowed_attrs):
+                        vals = ", ".join(attr.value_ids.mapped('name'))
+                        variants.append(f"{attr_name}: {vals}")
             variant_text = " | ".join(variants) if variants else "Tek Çeşit"
             
             search_query = p.barcode or p.default_code
@@ -207,9 +210,12 @@ class SocialMediaMessage(models.Model):
                         # Extract variants
                         variants = []
                         if hasattr(p, 'attribute_line_ids'):
+                            allowed_attrs = ['renk', 'beden', 'numara']
                             for attr in p.attribute_line_ids:
-                                vals = ", ".join(attr.value_ids.mapped('name'))
-                                variants.append(f"{attr.attribute_id.name}: {vals}")
+                                attr_name = attr.attribute_id.name
+                                if any(a in attr_name.lower() for a in allowed_attrs):
+                                    vals = ", ".join(attr.value_ids.mapped('name'))
+                                    variants.append(f"{attr_name}: {vals}")
                         variant_text = " | ".join(variants) if variants else "Tek Çeşit"
                         
                         # Order Link (Prioritize Barcode)
