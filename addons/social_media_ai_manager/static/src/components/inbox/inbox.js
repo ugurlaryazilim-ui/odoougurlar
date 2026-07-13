@@ -11,7 +11,8 @@ export class SocialInbox extends Component {
         this.orm = useService("orm");
         this.actionService = useService("action");
         this.chatContainerRef = useRef("chatMessagesContainer");
-        this.fileInputRef = useRef("fileInput");
+        this.galleryInputRef = useRef("galleryInput");
+        this.cameraInputRef = useRef("cameraInput");
         
         this.state = useState({
             conversations: [],
@@ -179,9 +180,15 @@ export class SocialInbox extends Component {
         setTimeout(() => this.scrollToBottom(), 50);
     }
 
-    triggerFileInput() {
-        if (this.fileInputRef.el) {
-            this.fileInputRef.el.click();
+    triggerGalleryInput() {
+        if (this.galleryInputRef.el) {
+            this.galleryInputRef.el.click();
+        }
+    }
+
+    triggerCameraInput() {
+        if (this.cameraInputRef.el) {
+            this.cameraInputRef.el.click();
         }
     }
 
@@ -203,8 +210,11 @@ export class SocialInbox extends Component {
         this.state.attachmentData = null;
         this.state.attachmentPreview = null;
         this.state.attachmentName = null;
-        if (this.fileInputRef.el) {
-            this.fileInputRef.el.value = "";
+        if (this.galleryInputRef.el) {
+            this.galleryInputRef.el.value = "";
+        }
+        if (this.cameraInputRef.el) {
+            this.cameraInputRef.el.value = "";
         }
     }
     

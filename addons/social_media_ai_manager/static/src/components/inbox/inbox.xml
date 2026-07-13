@@ -123,19 +123,25 @@
                                 </button>
                             </div>
                         </t>
-                        <div class="d-flex align-items-center">
-                            <input type="file" accept="image/*" class="d-none" t-ref="fileInput" t-on-change="onFileChange"/>
-                            <button class="btn btn-light me-2 rounded-circle shadow-sm" t-on-click="triggerFileInput" title="Resim Ekle" style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
-                                <i class="fa fa-paperclip"></i>
-                            </button>
-                            <div class="input-group">
-                                <input type="text" class="form-control chat-input" t-att-placeholder="t('Type a message...')" 
-                                       t-model="state.newMessage" 
-                                       t-on-keyup="onKeyup"/>
+                        <div class="d-flex align-items-center bg-white rounded-pill p-1 shadow-sm border">
+                            <input type="file" accept="image/*" class="d-none" t-ref="galleryInput" t-on-change="onFileChange"/>
+                            <input type="file" accept="image/*" capture="environment" class="d-none" t-ref="cameraInput" t-on-change="onFileChange"/>
+                            
+                            <input type="text" class="form-control border-0 bg-transparent shadow-none px-3" t-att-placeholder="t('Type a message...')" 
+                                   t-model="state.newMessage" 
+                                   t-on-keyup="onKeyup" style="box-shadow: none !important; outline: none;"/>
+                            
+                            <div class="d-flex align-items-center pe-1">
+                                <button class="btn btn-link text-muted p-2 text-decoration-none" t-on-click="triggerGalleryInput" title="Galeri" style="box-shadow: none;">
+                                    <i class="fa fa-paperclip fs-5"></i>
+                                </button>
+                                <button class="btn btn-link text-muted p-2 text-decoration-none me-1" t-on-click="triggerCameraInput" title="Kamera" style="box-shadow: none;">
+                                    <i class="fa fa-camera fs-5"></i>
+                                </button>
+                                <button class="btn btn-primary rounded-circle d-flex align-items-center justify-content-center shadow-sm" t-on-click="sendMessage" style="width: 38px; height: 38px;">
+                                    <i class="fa fa-paper-plane" style="margin-left: -2px;"></i>
+                                </button>
                             </div>
-                            <button class="chat-send-btn flex-shrink-0 shadow-sm" t-on-click="sendMessage">
-                                <i class="fa fa-paper-plane"></i>
-                            </button>
                         </div>
                     </div>
                 </t>
