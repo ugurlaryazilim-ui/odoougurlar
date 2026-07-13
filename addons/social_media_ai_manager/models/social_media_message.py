@@ -189,11 +189,23 @@ class SocialMediaMessage(models.Model):
                 )
                 system_context += f"\n\nKullanıcı {account.platform} üzerinden yazıyor. ÖNEMLİ KURAL: Mesajlarında KESİNLİKLE '**' veya '*' gibi markdown kalınlaştırma işaretleri KULLANMA. Bunun yerine maddeleri ayırmak için şık emojiler (👗, 💳, 📦, 🛍️ vb.) ve temiz satır boşlukları kullanarak çok profesyonel ve zarif bir görünüm sağla."
                 
+                # Setup WhatsApp Link with Context
                 whatsapp_number = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.whatsapp_number', '').strip()
-                wa_link = f"https://wa.me/{whatsapp_number}?text=Merhaba+{account.platform}'dan+geliyorum" if whatsapp_number else ""
+                linked_post = last_msg.post_id
+                
+                wa_text = f"Merhaba, {account.platform.capitalize()}'dan geliyorum."
+                if last_msg.post_link:
+                    wa_text += f"\nGeldiğim Link: {last_msg.post_link}"
+                    
+                if linked_post and hasattr(linked_post, 'product_tmpl_ids') and linked_post.product_tmpl_ids:
+                    product_names = ", ".join([p.name for p in linked_post.product_tmpl_ids])
+                    wa_text += f"\nİlgilendiğim Ürün(ler): {product_names}"
+                
+                import urllib.parse
+                encoded_wa_text = urllib.parse.quote(wa_text)
+                wa_link = f"https://wa.me/{whatsapp_number}?text={encoded_wa_text}" if whatsapp_number else ""
                 
                 # Extract Product Info from Post
-                linked_post = last_msg.post_id
                 
                 if linked_post and hasattr(linked_post, 'product_tmpl_ids') and linked_post.product_tmpl_ids:
                     system_context += "\n\nKULLANICININ YORUM YAPTIĞI GÖNDERİDEKİ ÜRÜNLER HAKKINDA DETAYLI BİLGİ:"
