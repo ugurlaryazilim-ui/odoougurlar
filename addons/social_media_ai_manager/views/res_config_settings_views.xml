@@ -53,6 +53,9 @@
                         <setting string="Gönderi Yayınlama Kontrolü (Dakika)" help="Zamanlanmış gönderilerin kaç dakikada bir kontrol edilip yayınlanacağını belirler (Varsayılan: 3).">
                             <field name="social_post_cron_interval"/>
                         </setting>
+                        <setting string="YouTube Yorum Senkronizasyonu (Dakika)" help="YouTube videolarındaki yorumların kaç dakikada bir çekileceğini belirler (Varsayılan: 10).">
+                            <field name="social_youtube_cron_interval"/>
+                        </setting>
                     </block>
 
                     <block title="CRM ve Satış Asistanı" name="crm_assignment_settings">

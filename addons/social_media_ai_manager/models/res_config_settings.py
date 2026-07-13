@@ -44,6 +44,7 @@ class ResConfigSettings(models.TransientModel):
     )
 
     social_post_cron_interval = fields.Integer(string="Gönderi Yayınlama Gecikmesi (Dakika)", default=3)
+    social_youtube_cron_interval = fields.Integer(string="YouTube Yorum Senkronizasyonu (Dakika)", default=10)
     
     # Feature Toggles
     social_enable_comments = fields.Boolean(string="Yorumlara Cevap Ver", config_parameter='social_media_ai.enable_comments')
@@ -70,6 +71,10 @@ class ResConfigSettings(models.TransientModel):
         if cron:
             res.update(social_post_cron_interval=cron.interval_number)
             
+        yt_cron = self.env.ref('social_media_ai_manager.ir_cron_sync_youtube_comments', raise_if_not_found=False)
+        if yt_cron:
+            res.update(social_youtube_cron_interval=yt_cron.interval_number)
+            
         handoff_users = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.handoff_user_ids')
         if handoff_users:
             import json
@@ -86,6 +91,10 @@ class ResConfigSettings(models.TransientModel):
         cron = self.env.ref('social_media_ai_manager.ir_cron_publish_social_posts', raise_if_not_found=False)
         if cron and self.social_post_cron_interval > 0:
             cron.sudo().write({'interval_number': self.social_post_cron_interval})
+            
+        yt_cron = self.env.ref('social_media_ai_manager.ir_cron_sync_youtube_comments', raise_if_not_found=False)
+        if yt_cron and self.social_youtube_cron_interval > 0:
+            yt_cron.sudo().write({'interval_number': self.social_youtube_cron_interval})
             
         import json
         self.env['ir.config_parameter'].sudo().set_param(
