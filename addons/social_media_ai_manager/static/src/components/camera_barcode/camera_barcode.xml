@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="social_media_ai_manager.CameraBarcodeField" owl="1">
+        <div class="d-flex align-items-center w-100">
+            <!-- Native Odoo CharField -->
+            <div class="flex-grow-1">
+                <t t-call="web.CharField"/>
+            </div>
+            
+            <button t-if="!props.readonly" type="button" class="btn btn-primary ms-2 flex-shrink-0" t-on-click="startScanning" title="Kamera ile Barkod Okut">
+                <i class="fa fa-camera"></i> Oku
+            </button>
+        </div>
+    </t>
+</templates>
