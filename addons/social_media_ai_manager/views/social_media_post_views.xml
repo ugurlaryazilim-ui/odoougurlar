@@ -61,7 +61,11 @@
                                 <div class="text-muted mb-3" colspan="2">
                                     <i>Bu gönderiye yorum geldiğinde, Yapay Zeka müşteriye buradaki ürünlerin bilgilerini (fiyat, stok vb.) ve Shopify sipariş linkini sunar.</i>
                                 </div>
-                                <field name="product_tmpl_ids" widget="many2many_tags" readonly="state != 'draft'" options="{'no_create': True}"/>
+                                <label for="product_tmpl_ids" string="Gönderideki Ürünler" style="font-weight: bold;"/>
+                                <div class="o_row w-100">
+                                    <field name="product_tmpl_ids" widget="many2many_tags" readonly="state != 'draft'" options="{'no_create': True}" style="flex: 1;"/>
+                                    <field name="barcode_scan" widget="barcode" placeholder="Barkod ile Ekle..." invisible="state != 'draft'" class="oe_inline" style="max-width: 200px;"/>
+                                </div>
                             </group>
                         </page>
                         <page string="YouTube Ayarları">

@@ -40,6 +40,7 @@ class SocialMediaPost(models.Model):
     image_ids = fields.Many2many('ir.attachment', string="Images/Videos")
 
     # Products (AI context)
+    barcode_scan = fields.Char(string="Barkod Okut", help="Kamera veya barkod okuyucu ile barkod okutarak ürün ekleyin.")
     product_tmpl_ids = fields.Many2many('product.template', string="Posttaki Ürünler (AI İçin)", help="Bu gönderiye yorum geldiğinde yapay zeka bu ürünlerin stok ve fiyat bilgilerini kullanır.")
 
     post_line_ids = fields.One2many('social.media.post.line', 'post_id', string="Platform Statuses")
@@ -61,6 +62,35 @@ class SocialMediaPost(models.Model):
     def action_draft(self):
         self.write({'state': 'draft'})
         self.post_line_ids.unlink()
+
+    @api.onchange('barcode_scan')
+    def _onchange_barcode_scan(self):
+        if self.barcode_scan:
+            barcode = self.barcode_scan.strip()
+            # Try to find the product template or product variant
+            product = self.env['product.product'].search([('barcode', '=', barcode)], limit=1)
+            
+            if not product:
+                tmpl = self.env['product.template'].search([('barcode', '=', barcode)], limit=1)
+            else:
+                tmpl = product.product_tmpl_id
+                
+            if tmpl:
+                # Add the product template to the many2many field
+                self.product_tmpl_ids = [(4, tmpl.id)]
+            else:
+                # Store barcode in a variable to show in warning, because we clear it right after
+                failed_barcode = barcode
+                self.barcode_scan = False
+                return {
+                    'warning': {
+                        'title': 'Ürün Bulunamadı',
+                        'message': f"'{failed_barcode}' barkoduna sahip bir ürün bulunamadı. Lütfen barkodu kontrol edin."
+                    }
+                }
+            
+            # Clear the input for the next scan
+            self.barcode_scan = False
 
     @api.model
     def _cron_publish_scheduled_posts(self):
