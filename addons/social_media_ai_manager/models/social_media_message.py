@@ -219,9 +219,9 @@ class SocialMediaMessage(models.Model):
                         system_context += "\n\nKULLANICININ YORUM YAPTIĞI GÖNDERİDEKİ ÜRÜNLER HAKKINDA DETAYLI BİLGİ:"
                         
                         if account.platform == 'youtube':
-                            system_context += "\n(YOUTUBE İÇİN KURAL: Müşteriye ürünün adını, stok durumunu, beden/renk seçeneklerini ve aşağıda verilen sipariş linkini çok şık ve net bir şekilde listele. ASLA FİYAT BİLGİSİ VERME. En sona da her türlü soru için WhatsApp destek hattını ekle.)\n"
+                            system_context += "\n(YOUTUBE İÇİN KESİN KURAL: Müşteri sadece 'Bilgi alabilir miyim' veya 'Fiyat nedir' yazsa bile, müşteriye soru sormadan DOĞRUDAN aşağıdaki ürünlerin adını, stok durumunu, seçeneklerini ve sipariş linkini listele. YOUTUBE'DA ASLA FİYAT BİLGİSİ YAZMA! Sadece stok ve link verip en sona WhatsApp hattını ekle.)\n"
                         else:
-                            system_context += "\n(INSTAGRAM/FACEBOOK İÇİN KURAL: Müşteriye ürünün adını, FİYATINI, stok durumunu, beden/renk seçeneklerini ve aşağıda verilen sipariş linkini çok şık ve net bir şekilde listele. En sona da her türlü soru için WhatsApp destek hattını ekle.)\n"
+                            system_context += "\n(INSTAGRAM/FACEBOOK İÇİN KESİN KURAL: Müşteri sadece 'Bilgi alabilir miyim' veya 'Fiyat nedir' yazsa bile, müşteriye soru sormadan DOĞRUDAN aşağıdaki ürünlerin adını, FİYATINI, stok durumunu, seçeneklerini ve sipariş linkini listele. En sona WhatsApp hattını ekle.)\n"
     
                         for p in linked_post.product_tmpl_ids:
                             stock = p.qty_available if hasattr(p, 'qty_available') else 10
