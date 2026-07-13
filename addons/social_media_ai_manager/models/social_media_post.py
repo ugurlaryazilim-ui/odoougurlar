@@ -67,28 +67,33 @@ class SocialMediaPost(models.Model):
     def _onchange_barcode_scan(self):
         if self.barcode_scan:
             barcode = self.barcode_scan.strip()
-            # Try to find the product template or product variant
-            product = self.env['product.product'].search([('barcode', '=', barcode)], limit=1)
-            
-            if not product:
-                tmpl = self.env['product.template'].search([('barcode', '=', barcode)], limit=1)
+            tmpl = False
+
+            # Use unified barcode search (barcode → nebim_barcode → default_code)
+            ProductProduct = self.env['product.product']
+            if hasattr(ProductProduct, 'find_by_marketplace_barcode'):
+                product = ProductProduct.find_by_marketplace_barcode(barcode)
+                if product:
+                    tmpl = product.product_tmpl_id
             else:
-                tmpl = product.product_tmpl_id
-                
+                product = ProductProduct.search([('barcode', '=', barcode)], limit=1)
+                if not product:
+                    tmpl = self.env['product.template'].search([('barcode', '=', barcode)], limit=1)
+                else:
+                    tmpl = product.product_tmpl_id
+
             if tmpl:
-                # Add the product template to the many2many field
                 self.product_tmpl_ids = [(4, tmpl.id)]
             else:
-                # Store barcode in a variable to show in warning, because we clear it right after
                 failed_barcode = barcode
                 self.barcode_scan = False
                 return {
                     'warning': {
                         'title': 'Ürün Bulunamadı',
-                        'message': f"'{failed_barcode}' barkoduna sahip bir ürün bulunamadı. Lütfen barkodu kontrol edin."
+                        'message': f"'{failed_barcode}' barkoduna sahip bir ürün bulunamadı."
                     }
                 }
-            
+
             # Clear the input for the next scan
             self.barcode_scan = False
 
@@ -103,18 +108,33 @@ class SocialMediaPost(models.Model):
 
     @api.model
     def action_add_barcode(self, post_id, barcode):
+        """Add a product to the post by barcode. Called from the camera scanner client action."""
         post = self.browse(post_id)
-        if post and barcode:
-            barcode = barcode.strip()
-            product = self.env['product.product'].search([('barcode', '=', barcode)], limit=1)
+        if not post.exists() or not barcode:
+            return {'success': False, 'message': 'Geçersiz parametre'}
+
+        barcode = barcode.strip()
+        tmpl = False
+
+        # Use unified barcode search (barcode → nebim_barcode → default_code)
+        ProductProduct = self.env['product.product']
+        if hasattr(ProductProduct, 'find_by_marketplace_barcode'):
+            product = ProductProduct.find_by_marketplace_barcode(barcode)
+            if product:
+                tmpl = product.product_tmpl_id
+        else:
+            product = ProductProduct.search([('barcode', '=', barcode)], limit=1)
             if not product:
                 tmpl = self.env['product.template'].search([('barcode', '=', barcode)], limit=1)
             else:
                 tmpl = product.product_tmpl_id
-                
-            if tmpl:
+
+        if tmpl:
+            if tmpl.id not in post.product_tmpl_ids.ids:
                 post.write({'product_tmpl_ids': [(4, tmpl.id)]})
-        return True
+            return {'success': True, 'product_name': tmpl.name}
+
+        return {'success': False, 'message': f"'{barcode}' barkoduna sahip ürün bulunamadı."}
 
     @api.model
     def _cron_publish_scheduled_posts(self):

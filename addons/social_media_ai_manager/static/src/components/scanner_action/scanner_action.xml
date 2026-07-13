@@ -1,6 +1,41 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <templates xml:space="preserve">
     <t t-name="social_media_ai_manager.CameraScannerAction" owl="1">
-        <div class="d-none"></div>
+        <div class="p-4">
+            <!-- Scanned products list -->
+            <div t-if="state.scannedProducts.length > 0" class="mb-3">
+                <h6 class="text-success mb-2">
+                    <i class="fa fa-check-circle me-1"/>
+                    <t t-esc="state.scannedProducts.length"/> ürün eklendi
+                </h6>
+                <ul class="list-unstyled mb-0 ps-2">
+                    <li t-foreach="state.scannedProducts" t-as="productName" t-key="productName_index" class="mb-1">
+                        <i class="fa fa-tag text-primary me-1"/>
+                        <t t-esc="productName"/>
+                    </li>
+                </ul>
+            </div>
+
+            <!-- Error message -->
+            <div t-if="state.lastError" class="alert alert-warning py-2 mb-3">
+                <i class="fa fa-exclamation-triangle me-1"/>
+                <t t-esc="state.lastError"/>
+            </div>
+
+            <!-- Info when scanner is closed -->
+            <div t-if="!state.scanning and state.scannedProducts.length === 0" class="text-muted mb-3">
+                <i class="fa fa-info-circle me-1"/> Kamera kapatıldı.
+            </div>
+
+            <!-- Action buttons -->
+            <div class="d-flex gap-2 flex-wrap">
+                <button class="btn btn-outline-primary" t-on-click="scanAgain" t-if="!state.scanning">
+                    <i class="fa fa-camera me-1"/> Tekrar Okut
+                </button>
+                <button class="btn btn-success" t-on-click="closeAndReload">
+                    <i class="fa fa-check me-1"/> Tamamla
+                </button>
+            </div>
+        </div>
     </t>
 </templates>

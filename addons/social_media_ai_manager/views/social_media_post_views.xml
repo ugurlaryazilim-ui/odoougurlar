@@ -61,21 +61,26 @@
                                 <div class="text-muted mb-3" colspan="2">
                                     <i>Bu gönderiye yorum geldiğinde, Yapay Zeka müşteriye buradaki ürünlerin bilgilerini (fiyat, stok vb.) ve Shopify sipariş linkini sunar.</i>
                                 </div>
-                                <label for="product_tmpl_ids" string="Gönderideki Ürünler" style="font-weight: bold;"/>
-                                <div class="o_row w-100 mb-2">
-                                    <field name="barcode_scan" widget="barcode" placeholder="Barkod ile Ekle..." invisible="state != 'draft'" class="oe_inline"/>
-                                    <button name="action_open_barcode_scanner" type="object" string="Kamera ile Oku" icon="fa-camera" class="btn btn-primary ms-2" invisible="state != 'draft'"/>
+                                <div colspan="2">
+                                    <div class="d-flex align-items-center gap-2 mb-2">
+                                        <div class="flex-grow-1">
+                                            <field name="product_tmpl_ids" widget="many2many_tags" options="{'no_create': True}" readonly="state != 'draft'" placeholder="Ürün adı ile arayın..." nolabel="1"/>
+                                        </div>
+                                        <button name="action_open_barcode_scanner" type="object" class="btn btn-outline-primary" invisible="state != 'draft'" title="Kamera ile Barkod Okut">
+                                            <i class="fa fa-barcode"/>
+                                        </button>
+                                    </div>
                                 </div>
-                                <field name="product_tmpl_ids" readonly="state != 'draft'" nolabel="1">
-                                    <list>
-                                        <field name="barcode" widget="CopyClipboardChar" string="Barkod"/>
-                                        <field name="default_code" string="Ürün Kodu"/>
-                                        <field name="name" string="Ürün Adı"/>
-                                        <field name="list_price" string="Fiyat" optional="show"/>
-                                        <field name="qty_available" string="Stok" optional="show"/>
-                                    </list>
-                                </field>
                             </group>
+                            <field name="product_tmpl_ids" readonly="1" nolabel="1">
+                                <list>
+                                    <field name="barcode" widget="CopyClipboardChar" string="Barkod"/>
+                                    <field name="default_code" string="Ürün Kodu"/>
+                                    <field name="name" string="Ürün Adı"/>
+                                    <field name="list_price" string="Fiyat" optional="show"/>
+                                    <field name="qty_available" string="Stok" optional="show"/>
+                                </list>
+                            </field>
                         </page>
                         <page string="YouTube Ayarları">
                             <group>
