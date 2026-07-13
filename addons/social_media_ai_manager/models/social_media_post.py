@@ -92,6 +92,30 @@ class SocialMediaPost(models.Model):
             # Clear the input for the next scan
             self.barcode_scan = False
 
+    def action_open_barcode_scanner(self):
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'social_media.camera_scanner',
+            'target': 'new',
+            'context': {'default_post_id': self.id}
+        }
+
+    @api.model
+    def action_add_barcode(self, post_id, barcode):
+        post = self.browse(post_id)
+        if post and barcode:
+            barcode = barcode.strip()
+            product = self.env['product.product'].search([('barcode', '=', barcode)], limit=1)
+            if not product:
+                tmpl = self.env['product.template'].search([('barcode', '=', barcode)], limit=1)
+            else:
+                tmpl = product.product_tmpl_id
+                
+            if tmpl:
+                post.write({'product_tmpl_ids': [(4, tmpl.id)]})
+        return True
+
     @api.model
     def _cron_publish_scheduled_posts(self):
         """ Cron job to publish posts whose time has come """
