@@ -77,6 +77,7 @@ class SocialMediaPost(models.Model):
         ])
         for post in posts:
             post.state = 'posting'
+            self.env.cr.commit()
             all_success = True
             
             for line in post.post_line_ids.filtered(lambda l: l.state == 'pending'):
@@ -86,6 +87,7 @@ class SocialMediaPost(models.Model):
                     all_success = False
 
             post.state = 'posted' if all_success else 'error'
+            self.env.cr.commit()
 
 
 class SocialMediaPostLine(models.Model):

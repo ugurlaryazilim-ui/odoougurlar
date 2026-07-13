@@ -96,7 +96,7 @@
                                             <img t-attf-src="/web/image/social.media.message/{{msg.id}}/attachment" style="max-width: 200px; max-height: 200px; border-radius: 8px; object-fit: contain;" alt="Attachment"/>
                                         </div>
                                     </t>
-                                    <div style="white-space: pre-wrap;"><t t-esc="msg.content"/></div>
+                                    <div style="white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;"><t t-esc="msg.content"/></div>
                                     
                                     <div class="mt-2" t-if="msg.post_link">
                                         <a t-att-href="msg.post_link" target="_blank" class="btn btn-sm btn-light rounded-pill" style="font-size: 0.8rem;">
