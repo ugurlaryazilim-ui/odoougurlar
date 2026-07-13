@@ -93,6 +93,18 @@
                             </div>
                         </setting>
                     </block>
+
+                    <block title="TikTok API Configuration" name="tiktok_settings">
+                        <setting string="TikTok App Credentials" help="TikTok Developer Portal'dan aldığınız Client Key ve Client Secret bilgilerini buraya girin.">
+                            <div class="content-group">
+                                <label for="social_tiktok_client_key" string="Client Key"/>
+                                <field name="social_tiktok_client_key"/>
+                                <br/>
+                                <label for="social_tiktok_client_secret" string="Client Secret"/>
+                                <field name="social_tiktok_client_secret" password="True"/>
+                            </div>
+                        </setting>
+                    </block>
                 </app>
             </xpath>
         </field>

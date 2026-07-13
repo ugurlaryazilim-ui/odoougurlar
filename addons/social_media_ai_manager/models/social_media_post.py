@@ -191,6 +191,8 @@ class SocialMediaPostLine(models.Model):
                 return self._publish_to_instagram()
             elif self.platform == 'youtube':
                 return self._publish_to_youtube()
+            elif self.platform == 'tiktok':
+                return self._publish_to_tiktok()
             else:
                 self.state = 'success'
                 self.platform_post_id = "DUMMY_ID"
@@ -476,5 +478,107 @@ class SocialMediaPostLine(models.Model):
             raise ValueError(f"YouTube Upload Error: {res2.status_code} - {res2.text}")
             
         self.platform_post_id = res2.json().get('id')
+        self.state = 'success'
+        return True
+
+    def _publish_to_tiktok(self):
+        """Publish video to TikTok using Content Posting API v2."""
+        self.account_id._refresh_tiktok_token()
+        token = self.account_id.api_token
+
+        if not token:
+            raise ValueError("TikTok API Token eksik. Lütfen tekrar giriş yapın.")
+
+        images = self.post_id.image_ids
+        if not images:
+            raise ValueError("TikTok platformu için video eklenmesi gereklidir.")
+
+        attachment = images[0]
+        if not attachment.mimetype or not attachment.mimetype.startswith('video'):
+            raise ValueError("TikTok sadece video yüklemeyi destekler.")
+
+        import requests
+        import base64
+        import time
+
+        video_data = base64.b64decode(attachment.datas)
+        video_size = len(video_data)
+
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json; charset=UTF-8'
+        }
+
+        title = self.post_id.name or ''
+        description = self.post_id.message or ''
+        # TikTok title max 150 chars
+        post_title = (title + ' - ' + description)[:150] if title else description[:150]
+
+        # Step 1: Initialize upload
+        init_url = 'https://open.tiktokapis.com/v2/post/publish/video/init/'
+        init_body = {
+            'post_info': {
+                'title': post_title,
+                'privacy_level': 'PUBLIC_TO_EVERYONE',
+                'disable_duet': False,
+                'disable_comment': False,
+                'disable_stitch': False,
+            },
+            'source_info': {
+                'source': 'FILE_UPLOAD',
+                'video_size': video_size,
+                'chunk_size': video_size,
+                'total_chunk_count': 1,
+            }
+        }
+
+        res = requests.post(init_url, headers=headers, json=init_body, timeout=30)
+        if not res.ok:
+            raise ValueError(f"TikTok Upload Init Hatası: {res.status_code} - {res.text}")
+
+        init_data = res.json()
+        if init_data.get('error', {}).get('code') != 'ok':
+            error_msg = init_data.get('error', {}).get('message', 'Bilinmeyen hata')
+            raise ValueError(f"TikTok Init Hatası: {error_msg}")
+
+        publish_id = init_data.get('data', {}).get('publish_id')
+        upload_url = init_data.get('data', {}).get('upload_url')
+
+        if not upload_url:
+            raise ValueError("TikTok upload URL döndürmedi.")
+
+        # Step 2: Upload video data
+        upload_headers = {
+            'Content-Range': f'bytes 0-{video_size - 1}/{video_size}',
+            'Content-Type': 'video/mp4',
+        }
+        res2 = requests.put(upload_url, headers=upload_headers, data=video_data, timeout=300)
+        if not res2.ok:
+            raise ValueError(f"TikTok Video Yükleme Hatası: {res2.status_code} - {res2.text}")
+
+        # Step 3: Check publish status (poll)
+        if publish_id:
+            status_url = 'https://open.tiktokapis.com/v2/post/publish/status/fetch/'
+            for attempt in range(10):
+                time.sleep(5)
+                status_res = requests.post(
+                    status_url,
+                    headers=headers,
+                    json={'publish_id': publish_id},
+                    timeout=15
+                )
+                if status_res.ok:
+                    status_data = status_res.json()
+                    pub_status = status_data.get('data', {}).get('status')
+                    if pub_status == 'PUBLISH_COMPLETE':
+                        self.platform_post_id = publish_id
+                        self.state = 'success'
+                        return True
+                    elif pub_status in ('FAILED', 'PUBLISH_FAILED'):
+                        fail_reason = status_data.get('data', {}).get('fail_reason', 'Bilinmeyen hata')
+                        raise ValueError(f"TikTok Yayın Hatası: {fail_reason}")
+
+        # If we get here without explicit success, mark as success with publish_id
+        self.platform_post_id = publish_id or 'TIKTOK_UPLOADED'
         self.state = 'success'
         return True

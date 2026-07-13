@@ -36,6 +36,10 @@ class ResConfigSettings(models.TransientModel):
     social_youtube_client_id = fields.Char(string="Google Client ID (YouTube)", config_parameter='social_media_ai.youtube_client_id')
     social_youtube_client_secret = fields.Char(string="Google Client Secret", config_parameter='social_media_ai.youtube_client_secret')
 
+    # TikTok Integration Settings
+    social_tiktok_client_key = fields.Char(string="TikTok Client Key", config_parameter='social_media_ai.tiktok_client_key')
+    social_tiktok_client_secret = fields.Char(string="TikTok Client Secret", config_parameter='social_media_ai.tiktok_client_secret')
+
     # WhatsApp Redirection
     social_whatsapp_number = fields.Char(
         string="WhatsApp Yönlendirme Numarası", 

@@ -20,6 +20,7 @@
                 <header>
                     <button name="action_login_facebook" string="Login with Facebook" type="object" class="oe_highlight" invisible="platform not in ('facebook', 'instagram')"/>
                     <button name="action_login_youtube" type="object" string="Login with Google (YouTube)" class="oe_highlight btn-danger" invisible="platform != 'youtube'"/>
+                    <button name="action_login_tiktok" type="object" string="TikTok ile Giriş Yap" class="oe_highlight" invisible="platform != 'tiktok'" icon="fa-music"/>
                     <button name="action_fix_youtube_errors" type="object" string="Hatalı Yorumları Düzelt (Yapay Zeka)" class="oe_highlight btn-warning" invisible="platform != 'youtube'" confirm="Eski hatalı yorumlar tek tek YouTube üzerinden bulunup silinecek/güncellenecektir. Emin misiniz?"/>
                     <button name="action_subscribe_webhooks" string="Tetikleyicileri Bağla" type="object" class="oe_highlight" invisible="platform not in ('facebook', 'instagram')"/>
                     <field name="state" widget="statusbar"/>
@@ -44,6 +45,8 @@
                             
                             <field name="youtube_refresh_token" password="True" invisible="platform != 'youtube'"/>
                             <field name="youtube_channel_id" invisible="platform != 'youtube'"/>
+                            <field name="tiktok_refresh_token" password="True" invisible="platform != 'tiktok'"/>
+                            <field name="tiktok_open_id" invisible="platform != 'tiktok'"/>
                         </group>
                     </group>
                 </sheet>

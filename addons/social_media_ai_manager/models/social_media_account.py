@@ -28,6 +28,10 @@ class SocialMediaAccount(models.Model):
     # YouTube Specific
     youtube_refresh_token = fields.Char(string="YouTube Refresh Token")
     youtube_channel_id = fields.Char(string="YouTube Channel ID")
+
+    # TikTok Specific
+    tiktok_refresh_token = fields.Char(string="TikTok Refresh Token")
+    tiktok_open_id = fields.Char(string="TikTok Open ID")
     
     # Connection status
     state = fields.Selection([
@@ -77,6 +81,48 @@ class SocialMediaAccount(models.Model):
             'url': f'/social_media_ai/youtube/login?account_id={self.id}',
             'target': 'self',
         }
+
+    def action_login_tiktok(self):
+        """ Redirect to TikTok OAuth Login """
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.act_url',
+            'url': f'/social_media_ai/tiktok/login?account_id={self.id}',
+            'target': 'self',
+        }
+
+    def _refresh_tiktok_token(self):
+        """ Refresh TikTok Access Token using the refresh token """
+        self.ensure_one()
+        if self.platform != 'tiktok' or not self.tiktok_refresh_token:
+            return False
+
+        client_key = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.tiktok_client_key')
+        client_secret = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.tiktok_client_secret')
+
+        if not client_key or not client_secret:
+            return False
+
+        import requests
+        token_url = "https://open.tiktokapis.com/v2/oauth/token/"
+        data = {
+            'client_key': client_key,
+            'client_secret': client_secret,
+            'refresh_token': self.tiktok_refresh_token,
+            'grant_type': 'refresh_token'
+        }
+
+        try:
+            resp = requests.post(token_url, data=data, headers={'Content-Type': 'application/x-www-form-urlencoded'}).json()
+            if 'access_token' in resp:
+                self.api_token = resp['access_token']
+                if resp.get('refresh_token'):
+                    self.tiktok_refresh_token = resp['refresh_token']
+                return True
+        except Exception:
+            pass
+
+        return False
 
     def _refresh_youtube_token(self):
         """ Refresh YouTube Access Token using the refresh token """
