@@ -95,8 +95,7 @@
             <!-- Başlat -->
             <div class="ais-bottom-bar">
                 <button class="ais-btn-primary ais-btn-large"
-                        t-on-click="startProcessing"
-                        t-att-disabled="!state.selectedPresetId">
+                        t-on-click="startProcessing">
                     🚀 AI İşlemeyi Başlat
                 </button>
             </div>

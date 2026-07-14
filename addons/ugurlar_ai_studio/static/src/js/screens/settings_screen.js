@@ -51,6 +51,16 @@ export class SettingsScreen extends Component {
     startProcessing() {
         if (!this.state.selectedPresetId) {
             this.env.services.notification.add("Lütfen AI işlemi başlatmadan önce bir manken seçiniz!", { type: "danger", sticky: false });
+            const presetGrid = document.querySelector(".ais-preset-grid");
+            if (presetGrid) {
+                presetGrid.scrollIntoView({ behavior: "smooth", block: "center" });
+                presetGrid.style.transition = "outline 0.3s ease";
+                presetGrid.style.outline = "3px solid #dc3545";
+                presetGrid.style.borderRadius = "8px";
+                setTimeout(() => {
+                    if (presetGrid) presetGrid.style.outline = "none";
+                }, 2000);
+            }
             return;
         }
         this.props.onStartProcessing({
