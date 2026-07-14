@@ -120,6 +120,37 @@ class SocialMediaAccount(models.Model):
                 raise e
             raise exceptions.UserError(f"Webhook bağlantı hatası: {e}")
 
+    def action_logout_whatsapp(self):
+        self.ensure_one()
+        if self.platform != 'whatsapp':
+            raise exceptions.UserError("Bu işlem sadece WhatsApp için geçerlidir.")
+        if not self.whatsapp_api_url or not self.api_token or not self.whatsapp_instance_name:
+            raise exceptions.UserError("API URL, API Şifresi ve Instance Name alanları dolu olmalıdır.")
+
+        import requests
+        base_url = self.whatsapp_api_url.rstrip('/')
+        instance_name = self.whatsapp_instance_name
+        headers = {'apikey': self.api_token}
+        
+        logout_url = f"{base_url}/instance/logout/{instance_name}"
+        delete_url = f"{base_url}/instance/delete/{instance_name}"
+        
+        try:
+            # Önce logout yapmayı dene (Opsiyonel, zaten delete her şeyi temizler ama güvenli olsun)
+            requests.delete(logout_url, headers=headers, timeout=10)
+            # Sonra Instance'ı tamamen sil
+            res = requests.delete(delete_url, headers=headers, timeout=10)
+            
+            if res.ok:
+                self.state = 'draft'
+                raise exceptions.UserError("BAŞARILI! WhatsApp oturumu sunucudan tamamen silindi ve çıkış yapıldı. Artık yeni QR kod okutabilirsiniz.")
+            else:
+                raise exceptions.UserError(f"HATA: Oturum silinemedi. Yanıt: {res.text}")
+        except Exception as e:
+            if "BAŞARILI" in str(e) or "HATA" in str(e):
+                raise e
+            raise exceptions.UserError(f"Oturum kapatma hatası: {e}")
+
     def action_login_facebook(self):
         """ Redirect to Facebook Login """
         return {

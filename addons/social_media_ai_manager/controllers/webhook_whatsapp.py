@@ -45,10 +45,16 @@ class WebhookWhatsApp(http.Controller):
 
         env = request.env
         
+        instance_name = data.get('instance')
+        
         # Find WhatsApp Account
-        account = env['social.media.account'].sudo().search([('platform', '=', 'whatsapp')], limit=1)
+        domain = [('platform', '=', 'whatsapp')]
+        if instance_name:
+            domain.append(('whatsapp_instance_name', '=', instance_name))
+            
+        account = env['social.media.account'].sudo().search(domain, limit=1)
         if not account:
-            _logger.error("No active WhatsApp account found in Odoo.")
+            _logger.error(f"No active WhatsApp account found in Odoo for instance {instance_name}.")
             return
 
         # Find or create Partner based on phone number

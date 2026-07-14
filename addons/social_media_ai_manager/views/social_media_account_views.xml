@@ -24,6 +24,7 @@
                     <button name="action_open_qr_wizard" type="object" string="Yeni WhatsApp Bağlantısı (QR)" class="oe_highlight btn-success" invisible="platform != 'whatsapp'" icon="fa-qrcode"/>
                     <button name="action_setup_webhook" type="object" string="Otomatik Webhook Kur" class="oe_highlight btn-info" invisible="platform != 'whatsapp'" icon="fa-plug"/>
                     <button name="action_test_whatsapp" type="object" string="WhatsApp Test Mesajı Gönder" class="btn-secondary" invisible="platform != 'whatsapp'" icon="fa-whatsapp"/>
+                    <button name="action_logout_whatsapp" type="object" string="Çıkış Yap / Oturumu Sil" class="btn-danger" invisible="platform != 'whatsapp'" confirm="Bu işlem Evolution API üzerindeki oturumunuzu tamamen silecektir. Devam etmek istiyor musunuz?" icon="fa-sign-out"/>
                     <button name="action_fix_youtube_errors" type="object" string="Hatalı Yorumları Düzelt (Yapay Zeka)" class="oe_highlight btn-warning" invisible="platform != 'youtube'" confirm="Eski hatalı yorumlar tek tek YouTube üzerinden bulunup silinecek/güncellenecektir. Emin misiniz?"/>
                     <button name="action_subscribe_webhooks" string="Tetikleyicileri Bağla" type="object" class="oe_highlight" invisible="platform not in ('facebook', 'instagram')"/>
                     <field name="state" widget="statusbar"/>
