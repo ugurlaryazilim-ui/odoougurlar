@@ -61,7 +61,7 @@ class WhatsAppQRWizard(models.TransientModel):
                         'status_message': 'Lütfen telefonunuzun WhatsApp Ayarlar > Bağlı Cihazlar bölümünden QR kodu okutun.',
                         'state': 'qr_ready'
                     })
-                elif 'state' in data and data.get('state') == 'open':
+                elif data.get('instance', {}).get('state') == 'open':
                     self.write({
                         'status_message': 'Harika! Telefonunuz zaten başarılı şekilde bağlı.',
                         'state': 'connected',
