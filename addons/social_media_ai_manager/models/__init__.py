@@ -6,3 +6,4 @@ from . import social_media_post
 from . import social_media_conversation
 from . import social_media_message
 from . import ai_provider
+from . import whatsapp_qr_wizard

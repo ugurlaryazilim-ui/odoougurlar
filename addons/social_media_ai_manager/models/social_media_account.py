@@ -69,6 +69,57 @@ class SocialMediaAccount(models.Model):
                 raise e
             raise exceptions.UserError(f"Bağlantı hatası: {e}")
 
+    def action_open_qr_wizard(self):
+        self.ensure_one()
+        if self.platform != 'whatsapp':
+            raise exceptions.UserError("Bu işlem sadece WhatsApp için geçerlidir.")
+        
+        wizard = self.env['social.media.whatsapp.qr.wizard'].create({
+            'account_id': self.id
+        })
+        wizard.action_fetch_qr()
+        return wizard._reopen()
+
+    def action_setup_webhook(self):
+        self.ensure_one()
+        if self.platform != 'whatsapp':
+            raise exceptions.UserError("Bu işlem sadece WhatsApp için geçerlidir.")
+        if not self.whatsapp_api_url or not self.api_token or not self.whatsapp_instance_name:
+            raise exceptions.UserError("API URL, API Şifresi ve Instance Name alanları dolu olmalıdır.")
+
+        import requests
+        base_url = self.whatsapp_api_url.rstrip('/')
+        instance_name = self.whatsapp_instance_name
+        headers = {
+            'apikey': self.api_token,
+            'Content-Type': 'application/json'
+        }
+
+        # Odoo'nun dışarıdan erişilebilir web adresi (Config'den çekilir veya sistem parametresinden)
+        base_web_url = self.env['ir.config_parameter'].sudo().get_param('web.base.url')
+        webhook_url = f"{base_web_url}/social_media_ai/webhook/whatsapp"
+
+        set_webhook_url = f"{base_url}/webhook/set/{instance_name}"
+        payload = {
+            "webhook": {
+                "enabled": True,
+                "url": webhook_url,
+                "webhookByEvents": False,
+                "events": ["MESSAGES_UPSERT"]
+            }
+        }
+
+        try:
+            res = requests.post(set_webhook_url, headers=headers, json=payload, timeout=10)
+            if res.ok:
+                raise exceptions.UserError(f"BAŞARILI! Webhook başarıyla ayarlandı.\nAdres: {webhook_url}")
+            else:
+                raise exceptions.UserError(f"HATA: Webhook ayarlanamadı. Yanıt: {res.text}")
+        except Exception as e:
+            if "BAŞARILI" in str(e) or "HATA" in str(e):
+                raise e
+            raise exceptions.UserError(f"Webhook bağlantı hatası: {e}")
+
     def action_login_facebook(self):
         """ Redirect to Facebook Login """
         return {
