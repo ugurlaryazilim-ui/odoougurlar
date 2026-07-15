@@ -70,6 +70,16 @@ class AiStudioController(http.Controller):
             if not product.exists():
                 return {'error': 'Urun bulunamadi.'}
 
+            # Profesyonel Yöntem: Kullanıcının daha önceden yarım bıraktığı (Taslak) 
+            # tüm oturumları temizle. Bu sayede "kapatıp açınca" oluşan taslak çöplüğü önlenir.
+            # Operatör aynı anda sadece 1 işlem yapabileceği için güvenlidir.
+            abandoned_drafts = request.env['ai.studio.session'].search([
+                ('create_uid', '=', request.env.user.id),
+                ('state', '=', 'draft')
+            ])
+            if abandoned_drafts:
+                abandoned_drafts.unlink()
+
             session = request.env['ai.studio.session'].create({
                 'product_id': product.id,
             })

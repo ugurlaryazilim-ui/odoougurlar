@@ -72,7 +72,7 @@ def load_config(path='config.json'):
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(DEFAULT_CONFIG, f, indent=4, ensure_ascii=False)
         _logger.info("config.json oluşturuldu. Lütfen ayarları düzenleyin ve tekrar çalıştırın.")
-        sys.exit(0)
+        # sys.exit(0) kaldırıldı, böylece GUI uygulaması kapanmaz.
 
     with open(path, 'r', encoding='utf-8') as f:
         config = json.load(f)
@@ -149,26 +149,34 @@ class OdooImageSync:
             _logger.warning("Odoo bağlantısı başarısız, tekrar denenecek: %s", e)
 
     def _connect(self):
-        """Odoo'ya XML-RPC ile bağlan."""
+        """Odoo'ya XML-RPC ile bağlanıp ORM sarmalayıcısını (OdooEnv) kurar."""
         url = self.config['odoo_url'].rstrip('/')
         db = self.config['odoo_db']
         user = self.config['odoo_user']
         password = self.config['odoo_password']
 
-        _logger.info("Odoo'ya bağlanılıyor: %s (DB: %s)", url, db)
+        _logger.info("Odoo'ya bağlanılıyor: %s (DB: %s) [XML-RPC ORM üzerinden]", url, db)
+
+        import xmlrpc.client
+        from odoo_orm import OdooEnv
 
         common = xmlrpc.client.ServerProxy(f'{url}/xmlrpc/2/common')
-        self.uid = common.authenticate(db, user, password, {})
+        uid = common.authenticate(db, user, password, {})
 
-        if not self.uid:
+        if not uid:
             raise Exception("Odoo bağlantısı başarısız! Kullanıcı adı/şifre kontrol edin.")
 
-        self.models = xmlrpc.client.ServerProxy(f'{url}/xmlrpc/2/object')
+        models = xmlrpc.client.ServerProxy(f'{url}/xmlrpc/2/object')
+        
+        # OdooEnv sarmalayıcısı ile ORM deneyimi
+        self.env = OdooEnv(models.execute_kw, db, uid, password)
+        self.uid = uid
+
         _logger.info("Odoo bağlantısı başarılı. UID: %d", self.uid)
 
         # product.image modeli kontrol
         try:
-            self._execute('product.image', 'fields_get', attributes=['string'])
+            self.env['product.image'].fields_get( attributes=['string'])
             self.has_product_image = True
             _logger.info("product.image modeli mevcut — ek resimler destekleniyor.")
         except Exception:
@@ -212,8 +220,7 @@ class OdooImageSync:
 
         try:
             for param_key, config_key in _PARAM_MAP.items():
-                val = self._execute(
-                    'ir.config_parameter', 'get_param',
+                val = self.env['ir.config_parameter'].get_param(
                     param_key,
                 )
                 if val:
@@ -248,13 +255,11 @@ class OdooImageSync:
             return self._product_cache[barcode]
 
         field = self.config['match_field']
-        ids = self._execute(
-            'product.product', 'search',
+        ids = self.env['product.product'].search(
             [(field, '=', barcode)],
         )
         if ids:
-            products = self._execute(
-                'product.product', 'read',
+            products = self.env['product.product'].read(
                 ids[:1],
                 fields=['id', 'name', 'barcode', 'product_tmpl_id',
                         'image_1920', 'product_template_attribute_value_ids'],
@@ -290,8 +295,7 @@ class OdooImageSync:
             return []
 
         # PTAV kayıtlarını oku — hangi özellik (attribute) hangi değer
-        ptavs = self._execute(
-            'product.template.attribute.value', 'read',
+        ptavs = self.env['product.template.attribute.value'].read(
             ptav_ids,
             fields=['id', 'attribute_id', 'name'],
         )
@@ -310,8 +314,7 @@ class OdooImageSync:
             return []
 
         # Aynı template + aynı renk PTAV'ına sahip varyantları bul
-        sibling_ids = self._execute(
-            'product.product', 'search',
+        sibling_ids = self.env['product.product'].search(
             [
                 ('product_tmpl_id', '=', tmpl_id),
                 ('product_template_attribute_value_ids', 'in', [color_ptav['id']]),
@@ -321,8 +324,7 @@ class OdooImageSync:
 
         siblings = []
         if sibling_ids:
-            siblings = self._execute(
-                'product.product', 'read',
+            siblings = self.env['product.product'].read(
                 sibling_ids,
                 fields=['id', 'name', 'barcode', 'product_tmpl_id'],
             )
@@ -342,8 +344,7 @@ class OdooImageSync:
         if not self.has_product_image:
             return 0
 
-        old_images = self._execute(
-            'product.image', 'search',
+        old_images = self.env['product.image'].search(
             [
                 '|',
                 ('product_variant_id', '=', variant_id),
@@ -351,7 +352,7 @@ class OdooImageSync:
             ],
         )
         if old_images:
-            self._execute('product.image', 'unlink', old_images)
+            self.env['product.image'].unlink( old_images)
             return len(old_images)
         return 0
 
@@ -361,8 +362,7 @@ class OdooImageSync:
         is_main = (str(order) == main_index)
 
         if is_main:
-            self._execute(
-                'product.product', 'write',
+            self.env['product.product'].write(
                 [variant_id],
                 {'image_variant_1920': img_b64},
             )
@@ -371,44 +371,35 @@ class OdooImageSync:
             # _compute_image_1920 override sayesinde bu artık güvenli:
             # çoklu varyantlarda template resmi varyantlara sızmaz.
             if tmpl_id:
-                tmpl_data = self._execute(
-                    'product.template', 'read',
+                tmpl_data = self.env['product.template'].read(
                     [tmpl_id],
                     fields=['image_1920'],
                 )
                 if tmpl_data and not tmpl_data[0].get('image_1920'):
-                    self._execute(
-                        'product.template', 'write',
+                    self.env['product.template'].write(
                         [tmpl_id],
                         {'image_1920': img_b64},
                     )
                     _logger.info("🖼️ Template kapak görseli ayarlandı (tmpl_id=%d)", tmpl_id)
+            time.sleep(0.5) # Odoo'yu yormamak için kısa bekleme
         else:
-            if self.has_product_image:
-                img_name = f'{barcode}{separator}{order}'
-                self._execute(
-                    'product.image', 'create',
-                    {
-                        'product_variant_id': variant_id,
-                        'product_tmpl_id': tmpl_id,
-                        'name': img_name,
-                        'image_1920': img_b64,
-                    },
-                )
-            else:
-                self._execute(
-                    'product.product', 'write',
-                    [variant_id],
-                    {'image_variant_1920': img_b64},
-                )
+            # Ek resim
+            name_label = f"Ek Görsel {order}"
+            self.env['product.image'].create({
+                'product_tmpl_id': tmpl_id,
+                'product_variant_id': variant_id,
+                'name': name_label,
+                'image_1920': img_b64,
+            })
+            time.sleep(0.5) # Odoo'yu yormamak için kısa bekleme
 
     # ═══════════════════════════════════════════════════════════════
     # SQLite CACHE — her dosya anında diske yazılır, crash-safe
     # ═══════════════════════════════════════════════════════════════
 
     def _db_path(self):
-        """SQLite veritabanı yolunu döner (agent'ın yanında)."""
-        return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'processed_cache.db')
+        """SQLite veritabanı yolunu döner (config.json ile aynı klasörde)."""
+        return os.path.join(os.getcwd(), 'processed_cache.db')
 
     def _init_db(self):
         """SQLite veritabanını başlat ve tabloyu oluştur."""
@@ -441,7 +432,7 @@ class OdooImageSync:
 
     def _migrate_json_cache(self):
         """Eski processed_cache.json varsa SQLite'a aktar ve sil."""
-        json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'processed_cache.json')
+        json_path = os.path.join(os.getcwd(), 'processed_cache.json')
         if not os.path.exists(json_path):
             return
         try:
@@ -517,8 +508,7 @@ class OdooImageSync:
 
         # ── 2. Odoo DB (best-effort, hata olursa SQLite yeter) ──
         try:
-            self._execute(
-                'ugurlar.image.sync.file', 'mark_processed',
+            self.env['ugurlar.image.sync.file'].mark_processed(
                 filename, barcode, file_size, file_mtime,
                 product_id=product_id,
                 tmpl_id=tmpl_id,
@@ -543,8 +533,7 @@ class OdooImageSync:
 
         # ── 2. Odoo DB (best-effort) ──
         try:
-            self._execute(
-                'ugurlar.image.sync.file', 'mark_error',
+            self.env['ugurlar.image.sync.file'].mark_error(
                 filename, barcode, file_size, file_mtime, error_msg,
             )
         except Exception as e:
@@ -559,30 +548,34 @@ class OdooImageSync:
         if not self.uid: return
         
         try:
-            # Sadece dışarı aktarılmamış, onaylı ve oturumu tamamlanmış olanları getir
-            exports = self._execute('ai.studio.generation', 'search_read', 
-                [('is_approved', '=', True), ('is_exported_to_local', '=', False), ('session_id.state', '=', 'done')],
-                ['id', 'generated_image', 'photo_type', 'session_id']
+            # MemoryError önlemi: Önce sadece ID'leri al (tüm resimleri aynı anda RAM'e yüklememek için)
+            export_ids = self.env['ai.studio.generation'].search( 
+                [('is_approved', '=', True), ('is_exported_to_local', '=', False), ('session_id.state', '=', 'done')]
             )
             
-            if not exports:
+            if not export_ids:
                 return
 
             watch = self.config['watch_folder']
-            for exp in exports:
+            # Odoo RAM'ini şişirmemek için her birini ayrı ayrı oku
+            for exp_id in export_ids:
+                exports = self.env['ai.studio.generation'].read( [exp_id], ['id', 'generated_image', 'photo_type', 'session_id'])
+                if not exports:
+                    continue
+                exp = exports[0]
                 if not exp.get('generated_image'):
-                    self._execute('ai.studio.generation', 'write', [exp['id']], {'is_exported_to_local': True})
+                    self.env['ai.studio.generation'].write( [exp['id']], {'is_exported_to_local': True})
                     continue
 
-                session = self._execute('ai.studio.session', 'read', [exp['session_id'][0]], ['product_id'])[0]
+                session = self.env['ai.studio.session'].read( [exp['session_id'][0]], ['product_id'])[0]
                 if not session.get('product_id'):
-                    self._execute('ai.studio.generation', 'write', [exp['id']], {'is_exported_to_local': True})
+                    self.env['ai.studio.generation'].write( [exp['id']], {'is_exported_to_local': True})
                     continue
 
-                product = self._execute('product.product', 'read', [session['product_id'][0]], ['barcode'])[0]
+                product = self.env['product.product'].read( [session['product_id'][0]], ['barcode'])[0]
                 barcode = product.get('barcode')
                 if not barcode:
-                    self._execute('ai.studio.generation', 'write', [exp['id']], {'is_exported_to_local': True})
+                    self.env['ai.studio.generation'].write( [exp['id']], {'is_exported_to_local': True})
                     continue
                 
                 # İsimlendirme mantığı: photo_type'a göre index
@@ -614,7 +607,7 @@ class OdooImageSync:
                 _logger.info("🤖 AI Görseli indirildi ve klasöre kaydedildi (Agent yok sayacak): %s", filename)
                 
                 # Odoo'ya indirildiğini bildir
-                self._execute('ai.studio.generation', 'write', [exp['id']], {'is_exported_to_local': True})
+                self.env['ai.studio.generation'].write( [exp['id']], {'is_exported_to_local': True})
                 
         except Exception as e:
             _logger.error("AI görsel indirme hatası: %s", e)
