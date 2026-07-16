@@ -514,10 +514,29 @@ class AiStudioController(http.Controller):
             else:
                 user_role = 'operator'
 
+            # Özel ürün adı oluşturma (Renk her zaman parantez içinde gözüksün)
+            product_name = ''
+            if session.product_id:
+                product_name = session.product_id.display_name
+                color_name = ''
+                color_attr_names = {'renk', 'color', 'colour'}
+                for ptav in session.product_id.product_template_attribute_value_ids:
+                    if any(c in ptav.attribute_id.name.lower().strip() for c in color_attr_names):
+                        color_name = ptav.name
+                        break
+                
+                # Eğer renk adı bulunmuşsa ve Odoo'nun display_name'inde geçmiyorsa ekle
+                if color_name and color_name not in product_name:
+                    if product_name.endswith(')'):
+                        # Parantez içine ekle (Örn: "(L)" -> "(Siyah, L)")
+                        product_name = product_name[:-1] + f" - {color_name})"
+                    else:
+                        product_name = f"{product_name} ({color_name})"
+
             return {
                 'session_id': session.id,
                 'session_name': session.name,
-                'product_name': session.product_id.display_name if session.product_id else '',
+                'product_name': product_name,
                 'items': items,
                 'reject_reasons': reason_list,
                 'next_session_id': next_session.id if next_session else False,
