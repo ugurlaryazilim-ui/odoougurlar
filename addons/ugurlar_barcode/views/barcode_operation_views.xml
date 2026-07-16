@@ -104,6 +104,7 @@
         <field name="name">Sayım Geçmişi</field>
         <field name="res_model">ugurlar.barcode.count.session</field>
         <field name="view_mode">list,form</field>
+        <field name="domain">[]</field>
         <field name="context">{'search_default_group_by_date': 1, 'search_default_group_by_location': 1}</field>
         <field name="search_view_id" ref="view_ugurlar_barcode_count_session_search"/>
         <field name="help" type="html">
