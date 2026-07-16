@@ -513,6 +513,16 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
             "or store price tags attached to the garment. Do not generate them. "
         )
 
+        # ═══ YAKA & ASTAR KORUMA (ASKI İÇİ GÖRÜNÜMÜ HALÜSİNASYONU) ═══
+        if photo_type in ['front', 'side']:
+            base_prompt += (
+                "CRITICAL NECKLINE & COLLAR LOCK: Ensure the front neckline is clean and single-layered. "
+                "Because the garment is photographed on a hanger, the inside back lining or inner back neck label "
+                "might be visible through the neck opening. You MUST completely IGNORE this inner back fabric. "
+                "Do NOT hallucinate a double collar, do NOT generate a back layer on the front, and do NOT incorporate "
+                "the inner back lining into the front design. "
+            )
+
         # ═══ E-TİCARET PROFESYONEL STYLING & AKSESUAR ═══
         if photo_type in ['front', 'side', 'back']:
             base_prompt += (
@@ -646,6 +656,7 @@ _VIEW_NEGATIVE_PROMPTS = {
         "wrong fabric texture, wrong button style, modified print, "
         "different pattern, altered graphic, changed logo, "
         "security tag, anti-theft alarm, plastic tag, price tag, store label, hanger clip, hanger strings, "
+        "double collar, inner lining visible, inner back label, back neckline showing, neck hole hallucination, back fabric on front, "
         "double straps, multiple straps on one shoulder, extra strings, thick straps, "
         "altered buttons, missing buttons, changed zipper, modified hardware, "
         "stiff pose, rigid standing, arms straight at sides, amateur pose, "
