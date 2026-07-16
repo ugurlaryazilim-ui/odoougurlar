@@ -120,6 +120,7 @@ export class AiStudioAction extends Component {
                     this.state.productInfo = productInfo;
                     this.state.productId = productInfo.id;
                     this.state.productGender = productInfo.gender || '';
+                    this.state.productBodyType = productInfo.body_type || 'standard';
                     this.navigateTo("capture");
                 },
                 cancel: () => {},
@@ -129,6 +130,7 @@ export class AiStudioAction extends Component {
         this.state.productInfo = productInfo;
         this.state.productId = productInfo.id;
         this.state.productGender = productInfo.gender || '';
+        this.state.productBodyType = productInfo.body_type || 'standard';
         this.navigateTo("capture");
     }
 
@@ -163,10 +165,12 @@ export class AiStudioAction extends Component {
                         console.error("Photo upload error:", uploadErr);
                     }
                 }
-                // Presetleri ürün cinsiyetine göre filtreli yükle
+                // Presetleri ürün cinsiyetine ve vücut tipine göre filtreli yükle
                 const gender = this.state.productGender || '';
+                const bodyType = this.state.productBodyType || 'standard';
                 const presetsRes = await this._jsonRpc("/ai_studio/get_presets", {
                     gender: gender || undefined,
+                    body_type: bodyType,
                 });
                 this.state.presets = presetsRes.presets || [];
 

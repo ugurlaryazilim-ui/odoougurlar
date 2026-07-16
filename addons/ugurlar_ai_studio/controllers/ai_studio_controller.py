@@ -231,11 +231,15 @@ class AiStudioController(http.Controller):
                     img128 = False
 
                 # Ürünün cinsiyet attribute'unu bul
+                # Ürünün cinsiyet ve vücut tipi attribute'larını bul
                 product_gender = ''
+                product_body_type = 'standard'
                 try:
                     gender_attrs = {'cinsiyet', 'gender'}
+                    reyon_attrs = {'reyon', 'department', 'bölüm'}
                     for ptal in p.product_tmpl_id.attribute_line_ids:
                         attr_name = ptal.attribute_id.name.lower().strip()
+                        # Cinsiyet kontrolü
                         if any(a in attr_name for a in gender_attrs):
                             for val in ptal.value_ids:
                                 val_lower = val.name.lower().strip()
@@ -247,9 +251,17 @@ class AiStudioController(http.Controller):
                                     product_gender = 'child'
                                 elif val_lower in ('unisex',):
                                     product_gender = 'unisex'
-                            break
+                        
+                        # Reyon (Büyük Beden) kontrolü
+                        if any(a in attr_name for a in reyon_attrs):
+                            for val in ptal.value_ids:
+                                val_lower = val.name.lower().strip()
+                                if 'büyük beden' in val_lower or 'plus size' in val_lower:
+                                    product_body_type = 'plus_size'
+                                    
                 except Exception:
                     product_gender = ''
+                    product_body_type = 'standard'
 
                 # Aktif oturum var mi kontrol et
                 active_session = request.env['ai.studio.session'].search([
@@ -268,6 +280,7 @@ class AiStudioController(http.Controller):
                     'variant_count': p.product_tmpl_id.product_variant_count,
                     'has_image': bool(p.image_variant_1920),
                     'gender': product_gender,
+                    'body_type': product_body_type,
                     'has_active_session': bool(active_session),
                 })
 
@@ -497,12 +510,15 @@ class AiStudioController(http.Controller):
             return {'error': str(e)}
 
     @http.route('/ai_studio/get_presets', type='json', auth='user', methods=['POST'])
-    def get_presets(self, garment_type=None, gender=None):
-        """Aktif manken presetlerini getir. Opsiyonel cinsiyet filtresi."""
+    def get_presets(self, garment_type=None, gender=None, body_type=None):
+        """Aktif manken presetlerini getir. Opsiyonel cinsiyet ve vücut tipi filtresi."""
         try:
             domain = [('active', '=', True)]
             if garment_type:
                 domain.append(('garment_type', '=', garment_type))
+            
+            # Vücut tipi filtresi (Büyük beden vs standart)
+            domain.append(('body_type', '=', body_type or 'standard'))
             # Cinsiyet filtresi: ürün cinsiyetine göre uygun presetleri göster
             if gender and gender in ('female', 'male', 'child'):
                 # Seçilen cinsiyete uygun + unisex presetleri göster
