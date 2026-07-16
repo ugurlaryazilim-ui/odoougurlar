@@ -176,7 +176,7 @@ export class CountingScreen extends Component {
                 <div class="ub-action-buttons" t-if="state.items.length">
                     <button class="btn ub-action-btn ub-action-putaway" t-on-click="onSave"
                             t-att-disabled="state.loading || !countedCount">
-                        <i class="fa fa-save"></i> Tümünü Tamamla (<t t-esc="countedCount"/> ürün)
+                        <i class="fa fa-save"></i> Sayımı Kaydet (Rafı Senkronize Et)
                     </button>
                 </div>
             </t>
@@ -417,13 +417,14 @@ export class CountingScreen extends Component {
 
     // ─── KAYDET ───────────────────────────────────
     async onSave() {
-        const counted = this.state.items.filter(i => i.counted);
-        if (!counted.length) return;
+        // Rafı sıfırlayabilmek için, okutulmayanları (quantity: 0) da gönderiyoruz.
+        const items = this.state.items;
+        if (!items.length) return;
 
         this.state.loading = true;
         this.state.error = null;
         try {
-            const payload = counted.map(i => ({ barcode: i.barcode, quantity: i.quantity }));
+            const payload = items.map(i => ({ barcode: i.barcode, quantity: i.quantity }));
             const res = await BarcodeService.countSave(this.state.shelfBarcode.trim(), payload);
             if (res.error) {
                 this.state.error = res.error;
