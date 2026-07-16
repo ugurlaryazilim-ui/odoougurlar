@@ -84,6 +84,7 @@ def analyze_garment(api_key, image_url, gemini_api_key=None):
     prompt = """You are a senior Fashion Merchandiser analyzing a product image.
 Ignore any hangers, clips, hands, or mannequins holding the garment. Focus ONLY on the garment's actual design.
 CRITICAL: If there are any plastic security tags, anti-theft alarms, or store price tags visible on the garment, completely IGNORE them. Do not describe them or treat them as part of the garment's design.
+CRITICAL NECKLINE INSTRUCTION: If the garment is hanging on a hanger, the front collar often drops down, revealing the INSIDE of the BACK panel (inner back lining, back collar label, or back keyhole). You MUST completely IGNORE anything visible through the neck hole. Do NOT describe the inner back lining as part of the front collar. If you see a keyhole or label through the neck opening, do NOT say the garment has a keyhole collar. Assume a clean, standard front neckline.
 
 Analyze the garment and return a JSON with these fields:
 {
