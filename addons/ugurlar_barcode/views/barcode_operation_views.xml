@@ -1,61 +1,117 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <!-- ═══ Search View ═══ -->
-    <record id="view_ugurlar_barcode_operation_counting_search" model="ir.ui.view">
-        <field name="name">ugurlar.barcode.operation.counting.search</field>
-        <field name="model">ugurlar.barcode.operation</field>
+
+    <!-- ═══ Sayım Fişi Search View ═══ -->
+    <record id="view_ugurlar_barcode_count_session_search" model="ir.ui.view">
+        <field name="name">ugurlar.barcode.count.session.search</field>
+        <field name="model">ugurlar.barcode.count.session</field>
         <field name="arch" type="xml">
             <search string="Sayım Geçmişi">
-                <field name="barcode"/>
-                <field name="product_id"/>
+                <field name="name" string="Sayım Kodu"/>
                 <field name="location_id"/>
                 <field name="user_id"/>
+                <field name="operation_ids" string="Ürün/Barkod Ara" filter_domain="['|', ('operation_ids.barcode', 'ilike', self), ('operation_ids.product_id', 'ilike', self)]"/>
                 
                 <separator/>
-                <filter string="Bugün" name="today" domain="[('create_date', '&gt;=', datetime.datetime.combine(context_today(), datetime.time(0,0,0))), ('create_date', '&lt;=', datetime.datetime.combine(context_today(), datetime.time(23,59,59)))]"/>
+                <filter string="Bugün" name="today" domain="[('date', '&gt;=', datetime.datetime.combine(context_today(), datetime.time(0,0,0))), ('date', '&lt;=', datetime.datetime.combine(context_today(), datetime.time(23,59,59)))]"/>
                 
                 <separator/>
-                <filter string="Tarih" name="group_by_date" context="{'group_by':'create_date:day'}"/>
+                <filter string="Taslak" name="state_draft" domain="[('state', '=', 'draft')]"/>
+                <filter string="Tamamlandı" name="state_done" domain="[('state', '=', 'done')]"/>
+                <filter string="Onaylandı" name="state_validated" domain="[('state', '=', 'validated')]"/>
+
+                <separator/>
+                <filter string="Tarih" name="group_by_date" context="{'group_by':'date:day'}"/>
                 <filter string="Raf (Konum)" name="group_by_location" context="{'group_by':'location_id'}"/>
                 <filter string="Operatör" name="group_by_user" context="{'group_by':'user_id'}"/>
-                <filter string="Ürün" name="group_by_product" context="{'group_by':'product_id'}"/>
+                <filter string="Durum" name="group_by_state" context="{'group_by':'state'}"/>
             </search>
         </field>
     </record>
 
-    <!-- ═══ Tree/List View ═══ -->
-    <record id="view_ugurlar_barcode_operation_counting_tree" model="ir.ui.view">
-        <field name="name">ugurlar.barcode.operation.counting.tree</field>
-        <field name="model">ugurlar.barcode.operation</field>
+    <!-- ═══ Sayım Fişi Tree View ═══ -->
+    <record id="view_ugurlar_barcode_count_session_tree" model="ir.ui.view">
+        <field name="name">ugurlar.barcode.count.session.tree</field>
+        <field name="model">ugurlar.barcode.count.session</field>
         <field name="arch" type="xml">
-            <list string="Sayım Geçmişi" default_order="create_date desc" create="0" edit="0">
-                <field name="create_date" string="Tarih"/>
+            <list string="Sayım Geçmişi" default_order="date desc">
+                <field name="name" string="Sayım Kodu"/>
+                <field name="date" string="Tarih"/>
                 <field name="location_id" string="Raf (Konum)"/>
-                <field name="barcode" string="Barkod"/>
-                <field name="product_id" string="Ürün"/>
-                <field name="quantity" string="Adet" sum="Toplam Adet"/>
+                <field name="total_products" string="Çeşit"/>
+                <field name="total_counted_qty" string="Toplam Adet" sum="Genel Toplam"/>
                 <field name="user_id" string="Operatör" widget="many2one_avatar_user"/>
-                <field name="notes" string="Notlar" optional="show"/>
-                <field name="state" string="Durum" widget="badge" decoration-success="state == 'done'" decoration-danger="state == 'error'" optional="hide"/>
+                <field name="state" string="Durum" widget="badge" decoration-info="state == 'draft'" decoration-success="state == 'done'" decoration-primary="state == 'validated'"/>
             </list>
+        </field>
+    </record>
+
+    <!-- ═══ Sayım Fişi Form View ═══ -->
+    <record id="view_ugurlar_barcode_count_session_form" model="ir.ui.view">
+        <field name="name">ugurlar.barcode.count.session.form</field>
+        <field name="model">ugurlar.barcode.count.session</field>
+        <field name="arch" type="xml">
+            <form string="Sayım Fişi">
+                <header>
+                    <button name="action_validate" type="object" string="Onayla" class="oe_highlight" invisible="state != 'done'"/>
+                    <button name="action_draft" type="object" string="Taslağa Al" invisible="state == 'draft'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,done,validated"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="location_id"/>
+                            <field name="date"/>
+                        </group>
+                        <group>
+                            <field name="user_id" widget="many2one_avatar_user"/>
+                            <field name="total_products"/>
+                            <field name="total_counted_qty"/>
+                        </group>
+                    </group>
+                    
+                    <notebook>
+                        <page string="Sayım Detayları">
+                            <field name="operation_ids">
+                                <list editable="bottom" default_order="create_date desc">
+                                    <field name="barcode" string="Barkod"/>
+                                    <field name="product_id" string="Ürün"/>
+                                    <field name="theoretical_qty" string="Sistem Adedi"/>
+                                    <field name="quantity" string="Sayılan Adet" sum="Toplam"/>
+                                    <field name="difference_qty" string="Fark" decoration-danger="difference_qty &lt; 0" decoration-success="difference_qty &gt; 0"/>
+                                    <field name="notes" string="Notlar" optional="show"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Diğer Bilgiler">
+                            <group>
+                                <field name="notes"/>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
         </field>
     </record>
 
     <!-- ═══ Action ═══ -->
     <record id="action_barcode_operation_counting" model="ir.actions.act_window">
         <field name="name">Sayım Geçmişi</field>
-        <field name="res_model">ugurlar.barcode.operation</field>
-        <field name="view_mode">list</field>
-        <field name="domain">[('operation_type', '=', 'counting')]</field>
+        <field name="res_model">ugurlar.barcode.count.session</field>
+        <field name="view_mode">list,form</field>
         <field name="context">{'search_default_group_by_date': 1, 'search_default_group_by_location': 1}</field>
-        <field name="search_view_id" ref="view_ugurlar_barcode_operation_counting_search"/>
-        <field name="view_id" ref="view_ugurlar_barcode_operation_counting_tree"/>
+        <field name="search_view_id" ref="view_ugurlar_barcode_count_session_search"/>
         <field name="help" type="html">
             <p class="o_view_nocontent_empty_folder">
-                Henüz herhangi bir sayım kaydı bulunmamaktadır.
+                Henüz herhangi bir sayım fişi bulunmamaktadır.
             </p>
             <p>
-                Mobil uygulama üzerinden yapılan sayımlar burada listelenecektir.
+                Mobil uygulama üzerinden yapılan sayımlar burada Sayım Fişleri olarak listelenecektir.
             </p>
         </field>
     </record>

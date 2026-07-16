@@ -28,6 +28,13 @@ class CountingApiController(BarcodeApiBase):
         results = []
         StockQuant = request.env['stock.quant'].sudo()
 
+        # Sayım Fişi Oluştur
+        count_session = request.env['ugurlar.barcode.count.session'].sudo().create({
+            'location_id': location.id,
+            'user_id': request.env.uid,
+            'state': 'done'
+        })
+
         for item in items:
             bc = item.get('barcode', '').strip()
             new_qty = float(item.get('quantity', 0))
@@ -54,11 +61,13 @@ class CountingApiController(BarcodeApiBase):
 
                     request.env['ugurlar.barcode.operation'].sudo().create({
                         'operation_type': 'counting',
+                        'count_session_id': count_session.id,
                         'barcode': bc,
                         'product_id': product.id,
                         'location_id': location.id,
                         'quantity': new_qty,
-                        'notes': f'Eski: {old_qty} -> Yeni: {new_qty}',
+                        'theoretical_qty': old_qty,
+                        'notes': f'Sistem: {old_qty} -> Sayılan: {new_qty}',
                         'state': 'done',
                     })
 

@@ -9,3 +9,5 @@ access_picking_schedule_line_user,ugurlar.picking.schedule.line user,model_ugurl
 access_picking_schedule_line_manager,ugurlar.picking.schedule.line manager,model_ugurlar_picking_schedule_line,stock.group_stock_manager,1,1,1,1
 access_tts_message_user,ugurlar.tts.message user,model_ugurlar_tts_message,stock.group_stock_user,1,0,0,0
 access_tts_message_manager,ugurlar.tts.message manager,model_ugurlar_tts_message,stock.group_stock_manager,1,1,1,1
+access_barcode_count_session_user,ugurlar.barcode.count.session user,model_ugurlar_barcode_count_session,stock.group_stock_user,1,1,1,0
+access_barcode_count_session_manager,ugurlar.barcode.count.session manager,model_ugurlar_barcode_count_session,stock.group_stock_manager,1,1,1,1

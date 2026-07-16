@@ -34,6 +34,16 @@ class BarcodeOperation(models.Model):
         ('error', 'Hata'),
     ], string='Durum', default='done')
 
+    # Sayım Oturumu Bağlantısı
+    count_session_id = fields.Many2one('ugurlar.barcode.count.session', string='Sayım Fişi', ondelete='cascade', index=True)
+    theoretical_qty = fields.Float('Sistem Adedi', default=0.0)
+    difference_qty = fields.Float('Fark', compute='_compute_difference_qty', store=True)
+
+    @api.depends('theoretical_qty', 'quantity')
+    def _compute_difference_qty(self):
+        for rec in self:
+            rec.difference_qty = rec.quantity - rec.theoretical_qty
+
     @api.autovacuum
     def _gc_old_operations(self):
         """Eski operasyon kayıtlarını otomatik temizle (Odoo autovacuum).
