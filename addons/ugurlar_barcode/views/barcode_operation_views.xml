@@ -14,12 +14,11 @@
                 <separator/>
                 <filter string="Bugün" name="today" domain="[('create_date', '&gt;=', datetime.datetime.combine(context_today(), datetime.time(0,0,0))), ('create_date', '&lt;=', datetime.datetime.combine(context_today(), datetime.time(23,59,59)))]"/>
                 
-                <group expand="0" string="Grupla">
-                    <filter string="Tarih" name="group_by_date" context="{'group_by':'create_date:day'}"/>
-                    <filter string="Raf (Konum)" name="group_by_location" context="{'group_by':'location_id'}"/>
-                    <filter string="Operatör" name="group_by_user" context="{'group_by':'user_id'}"/>
-                    <filter string="Ürün" name="group_by_product" context="{'group_by':'product_id'}"/>
-                </group>
+                <separator/>
+                <filter string="Tarih" name="group_by_date" context="{'group_by':'create_date:day'}"/>
+                <filter string="Raf (Konum)" name="group_by_location" context="{'group_by':'location_id'}"/>
+                <filter string="Operatör" name="group_by_user" context="{'group_by':'user_id'}"/>
+                <filter string="Ürün" name="group_by_product" context="{'group_by':'product_id'}"/>
             </search>
         </field>
     </record>
