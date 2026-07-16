@@ -42,45 +42,46 @@ export class CountingScreen extends Component {
                 </div>
             </t>
 
-            <!-- SAYIM LİSTESİ (HamurLabs tarzı geçmiş) -->
+            <!-- SAYIM LİSTESİ (Kart Görünümü) -->
             <t t-if="state.view === 'history'">
                 <t t-if="state.historyLoading">
                     <div class="ub-loading"><i class="fa fa-spinner fa-spin fa-2x"></i><p>Yükleniyor...</p></div>
                 </t>
-                <t t-if="!state.historyLoading and state.historyItems.length">
-                    <div class="ub-variants-section" style="margin-top:1rem;">
-                        <div class="ub-section-title-dark" style="display:flex; justify-content:space-between; align-items:center;">
-                            <span><i class="fa fa-list"></i> Sayım Listesi</span>
-                            <span class="ub-table-summary"><t t-esc="state.historyItems.length"/> sayım</span>
-                        </div>
-                        <div class="ub-variant-table-wrap">
-                            <table class="ub-variant-table ub-variant-table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>Raf</th>
-                                        <th>Depo</th>
-                                        <th>Kullanıcı</th>
-                                        <th class="text-center">Ürün</th>
-                                        <th class="text-center">Adet</th>
-                                        <th>Tarih</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <t t-foreach="state.historyItems" t-as="h" t-key="h.id">
-                                        <tr style="cursor:pointer;" t-on-click="() => this.showHistoryDetail(h)">
-                                            <td><strong t-esc="h.location_name"/></td>
-                                            <td t-esc="h.warehouse || '-'"/>
-                                            <td t-esc="h.user_name"/>
-                                            <td class="text-center"><span class="badge" style="background:#714B67;color:#fff;" t-esc="h.product_count"/></td>
-                                            <td class="text-center"><span class="ub-stock-positive" t-esc="h.total_quantity"/></td>
-                                            <td t-esc="h.create_date"/>
-                                        </tr>
-                                    </t>
-                                </tbody>
-                            </table>
-                        </div>
+                
+                <!-- ANA LİSTE GÖRÜNÜMÜ -->
+                <t t-if="!state.historyLoading and state.historyItems.length and !state.historyDetail">
+                    <div class="ub-section-title-dark" style="padding: 1rem; padding-bottom: 0;">
+                        <span><i class="fa fa-list"></i> Sayım Geçmişi</span>
+                    </div>
+                    <div class="ub-history-list" style="margin-top: 1rem;">
+                        <t t-foreach="state.historyItems" t-as="h" t-key="h.id">
+                            <div class="ub-history-card" t-on-click="() => this.showHistoryDetail(h)">
+                                <div class="ub-history-card-header">
+                                    <div class="ub-history-card-title">
+                                        <i class="fa fa-map-marker"></i> <t t-esc="h.location_name"/>
+                                    </div>
+                                    <div class="ub-history-card-date">
+                                        <t t-esc="h.create_date.substring(0, 16)"/>
+                                    </div>
+                                </div>
+                                <div class="ub-history-card-body">
+                                    <div class="ub-history-card-user">
+                                        <i class="fa fa-user-circle-o"></i> <t t-esc="h.user_name"/>
+                                    </div>
+                                    <div class="ub-history-card-stats">
+                                        <span class="badge ub-badge-products" title="Farklı Ürün Sayısı">
+                                            <i class="fa fa-barcode"></i> <t t-esc="h.product_count"/>
+                                        </span>
+                                        <span class="badge ub-badge-qty" title="Toplam Adet">
+                                            <i class="fa fa-cubes"></i> <t t-esc="h.total_quantity"/>
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </t>
                     </div>
                 </t>
+                
                 <t t-if="!state.historyLoading and !state.historyItems.length">
                     <div style="text-align:center; padding:3rem; color:#999;">
                         <i class="fa fa-inbox fa-2x"></i>
@@ -88,50 +89,47 @@ export class CountingScreen extends Component {
                     </div>
                 </t>
 
-                <!-- Sayım detayı modal -->
+                <!-- SAYIM DETAYI (Kart Görünümü) -->
                 <t t-if="state.historyDetail">
-                    <div class="ub-shelf-info-section" style="margin-top:0.5rem;">
-                        <div class="ub-shelf-detail-row">
-                            <span class="ub-shelf-detail-label">Raf:</span>
-                            <strong t-esc="state.historyDetail.location_name"/>
+                    <div class="ub-detail-card">
+                        <div class="ub-detail-header">
+                            <div>
+                                <h3 style="margin:0; font-size:1.2rem; color:#714B67;">
+                                    <i class="fa fa-map-marker"></i> <t t-esc="state.historyDetail.location_name"/>
+                                </h3>
+                                <div style="font-size:0.85rem; color:#888; margin-top:0.3rem;">
+                                    <i class="fa fa-clock-o"></i> <t t-esc="state.historyDetail.create_date"/> &amp;nbsp;|&amp;nbsp; 
+                                    <i class="fa fa-user"></i> <t t-esc="state.historyDetail.user_name"/>
+                                </div>
+                            </div>
+                            <button class="ub-btn-excel" t-on-click="() => this.exportExcel(state.historyDetail)" title="Excel (CSV) Olarak İndir">
+                                <i class="fa fa-file-excel-o"></i> Dışa Aktar
+                            </button>
                         </div>
-                        <div class="ub-shelf-detail-row">
-                            <span class="ub-shelf-detail-label">Tarih:</span>
-                            <span t-esc="state.historyDetail.create_date"/>
+                        
+                        <div class="ub-items-list">
+                            <t t-foreach="state.historyDetail.items" t-as="item" t-key="item.barcode">
+                                <div class="ub-item-card">
+                                    <div class="ub-item-info">
+                                        <div class="ub-item-name"><t t-esc="item.product_name"/></div>
+                                        <div class="ub-item-barcode">
+                                            <i class="fa fa-barcode"></i> <t t-esc="item.barcode"/>
+                                            <t t-if="item.notes">
+                                                <span style="margin-left: 10px; color:#e67e22; font-size:0.8rem;"><i class="fa fa-info-circle"></i> <t t-esc="item.notes"/></span>
+                                            </t>
+                                        </div>
+                                    </div>
+                                    <div class="ub-item-qty">
+                                        <t t-esc="item.quantity"/>
+                                    </div>
+                                </div>
+                            </t>
                         </div>
-                        <div class="ub-shelf-detail-row">
-                            <span class="ub-shelf-detail-label">Kullanıcı:</span>
-                            <span t-esc="state.historyDetail.user_name"/>
-                        </div>
-                        <button class="btn btn-sm btn-outline-secondary mt-2" t-on-click="() => this.state.historyDetail = null">
-                            <i class="fa fa-times"></i> Kapat
-                        </button>
-                    </div>
-                    <div class="ub-variants-section" style="margin-top:0.5rem;">
-                        <div class="ub-section-title-dark">
-                            <i class="fa fa-cubes"></i> Sayılan Ürünler
-                        </div>
-                        <div class="ub-variant-table-wrap">
-                            <table class="ub-variant-table ub-variant-table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>Barkod</th>
-                                        <th>Ürün</th>
-                                        <th class="text-end">Adet</th>
-                                        <th>Not</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <t t-foreach="state.historyDetail.items" t-as="item" t-key="item.barcode">
-                                        <tr>
-                                            <td class="ub-barcode-cell" t-esc="item.barcode"/>
-                                            <td t-esc="item.product_name"/>
-                                            <td class="text-end"><strong t-esc="item.quantity"/></td>
-                                            <td style="font-size:0.8rem;color:#888;" t-esc="item.notes"/>
-                                        </tr>
-                                    </t>
-                                </tbody>
-                            </table>
+                        
+                        <div style="text-align:center; margin-top: 1.5rem;">
+                            <button class="btn btn-outline-secondary" t-on-click="() => this.state.historyDetail = null" style="width:100%; border-radius:8px;">
+                                <i class="fa fa-arrow-left"></i> Listeye Dön
+                            </button>
                         </div>
                     </div>
                 </t>
@@ -414,6 +412,13 @@ export class CountingScreen extends Component {
 
     showHistoryDetail(h) {
         this.state.historyDetail = h;
+    }
+
+    exportExcel(h) {
+        if (!h || !h.id) return;
+        // countList'ten dönen h.id "{loc_id}_{op_time}" formatındadır
+        const url = `/ugurlar_barcode/api/count_export_excel?count_id=${encodeURIComponent(h.id)}`;
+        window.location.href = url;
     }
 
     // ─── ADIM 1: RAF TARA ─────────────────────────
