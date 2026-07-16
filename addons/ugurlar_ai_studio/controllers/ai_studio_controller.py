@@ -78,7 +78,7 @@ class AiStudioController(http.Controller):
                 ('state', '=', 'draft')
             ])
             if abandoned_drafts:
-                abandoned_drafts.unlink()
+                abandoned_drafts.sudo().unlink()
 
             session = request.env['ai.studio.session'].create({
                 'product_id': product.id,
@@ -263,11 +263,30 @@ class AiStudioController(http.Controller):
                     product_gender = ''
                     product_body_type = 'standard'
 
-                # Aktif oturum var mi kontrol et
+                # Aynı renkteki varyantları bul
+                current_color_id = None
+                color_attr_names = {'renk', 'color', 'colour'}
+                for ptav in p.product_template_attribute_value_ids:
+                    attr_name = ptav.attribute_id.name.lower().strip()
+                    if any(c in attr_name for c in color_attr_names):
+                        current_color_id = ptav.id
+                        break
+
+                if current_color_id:
+                    color_variants = p.product_tmpl_id.product_variant_ids.filtered(
+                        lambda v: current_color_id in v.product_template_attribute_value_ids.ids
+                    )
+                else:
+                    color_variants = p
+
+                # Aktif oturum var mi kontrol et (Aynı renkteki TÜM bedenler taranır)
                 active_session = request.env['ai.studio.session'].search([
-                    ('product_id', '=', p.id),
+                    ('product_id', 'in', color_variants.ids),
                     ('state', 'in', ['draft', 'photos_ready', 'processing', 'review', 'failed', 'saving'])
                 ], limit=1)
+
+                # Resim var mı kontrol et (Aynı renkteki TÜM bedenler taranır)
+                has_image = any(bool(v.image_variant_1920) for v in color_variants) or bool(p.product_tmpl_id.image_1920)
 
                 result.append({
                     'id': p.id,
@@ -278,7 +297,7 @@ class AiStudioController(http.Controller):
                     'categ_id': p.categ_id.id,
                     'categ_name': p.categ_id.display_name,
                     'variant_count': p.product_tmpl_id.product_variant_count,
-                    'has_image': bool(p.image_variant_1920),
+                    'has_image': has_image,
                     'gender': product_gender,
                     'body_type': product_body_type,
                     'has_active_session': bool(active_session),
