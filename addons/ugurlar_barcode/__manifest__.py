@@ -25,6 +25,7 @@
         'views/picking_batch_views.xml',
         'views/stock_picking_ext_views.xml',
         'views/tts_message_views.xml',
+        'views/barcode_operation_views.xml',
         'data/sequence.xml',
         'data/cron.xml',
         'data/tts_defaults.xml',

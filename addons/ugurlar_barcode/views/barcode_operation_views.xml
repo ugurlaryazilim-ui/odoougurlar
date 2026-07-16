@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ═══ Search View ═══ -->
+    <record id="view_ugurlar_barcode_operation_counting_search" model="ir.ui.view">
+        <field name="name">ugurlar.barcode.operation.counting.search</field>
+        <field name="model">ugurlar.barcode.operation</field>
+        <field name="arch" type="xml">
+            <search string="Sayım Geçmişi">
+                <field name="barcode"/>
+                <field name="product_id"/>
+                <field name="location_id"/>
+                <field name="user_id"/>
+                
+                <separator/>
+                <filter string="Bugün" name="today" domain="[('create_date', '&gt;=', datetime.datetime.combine(context_today(), datetime.time(0,0,0))), ('create_date', '&lt;=', datetime.datetime.combine(context_today(), datetime.time(23,59,59)))]"/>
+                
+                <group expand="0" string="Grupla">
+                    <filter string="Tarih" name="group_by_date" context="{'group_by':'create_date:day'}"/>
+                    <filter string="Raf (Konum)" name="group_by_location" context="{'group_by':'location_id'}"/>
+                    <filter string="Operatör" name="group_by_user" context="{'group_by':'user_id'}"/>
+                    <filter string="Ürün" name="group_by_product" context="{'group_by':'product_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- ═══ Tree/List View ═══ -->
+    <record id="view_ugurlar_barcode_operation_counting_tree" model="ir.ui.view">
+        <field name="name">ugurlar.barcode.operation.counting.tree</field>
+        <field name="model">ugurlar.barcode.operation</field>
+        <field name="arch" type="xml">
+            <list string="Sayım Geçmişi" default_order="create_date desc" create="0" edit="0">
+                <field name="create_date" string="Tarih"/>
+                <field name="location_id" string="Raf (Konum)"/>
+                <field name="barcode" string="Barkod"/>
+                <field name="product_id" string="Ürün"/>
+                <field name="quantity" string="Adet" sum="Toplam Adet"/>
+                <field name="user_id" string="Operatör" widget="many2one_avatar_user"/>
+                <field name="notes" string="Notlar" optional="show"/>
+                <field name="state" string="Durum" widget="badge" decoration-success="state == 'done'" decoration-danger="state == 'error'" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- ═══ Action ═══ -->
+    <record id="action_barcode_operation_counting" model="ir.actions.act_window">
+        <field name="name">Sayım Geçmişi</field>
+        <field name="res_model">ugurlar.barcode.operation</field>
+        <field name="view_mode">list</field>
+        <field name="domain">[('operation_type', '=', 'counting')]</field>
+        <field name="context">{'search_default_group_by_date': 1, 'search_default_group_by_location': 1}</field>
+        <field name="search_view_id" ref="view_ugurlar_barcode_operation_counting_search"/>
+        <field name="view_id" ref="view_ugurlar_barcode_operation_counting_tree"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_empty_folder">
+                Henüz herhangi bir sayım kaydı bulunmamaktadır.
+            </p>
+            <p>
+                Mobil uygulama üzerinden yapılan sayımlar burada listelenecektir.
+            </p>
+        </field>
+    </record>
+    
+    <!-- ═══ Backend Menü ═══ -->
+    <menuitem id="menu_barcode_operation_counting"
+              name="Sayım Geçmişi"
+              parent="menu_ugurlar_barcode_root"
+              action="action_barcode_operation_counting"
+              sequence="20"/>
+</odoo>
