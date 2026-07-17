@@ -19,9 +19,13 @@ class StockPicking(models.Model):
                 continue
 
             # Flo siparişi mi?
-            sale_order = picking.sale_id or (picking.group_id and self.env['sale.order'].search(
-                [('procurement_group_id', '=', picking.group_id.id)], limit=1
-            ))
+            sale_order = picking.sale_id
+            if not sale_order:
+                group = getattr(picking, 'group_id', False)
+                if group:
+                    sale_order = self.env['sale.order'].search(
+                        [('procurement_group_id', '=', group.id)], limit=1
+                    )
             
             if not sale_order or not sale_order.flo_order_id:
                 continue
