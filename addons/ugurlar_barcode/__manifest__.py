@@ -29,6 +29,7 @@
         'data/sequence.xml',
         'data/cron.xml',
         'data/tts_defaults.xml',
+        'data/server_actions.xml',
     ],
     'assets': {
         'web.assets_backend': [

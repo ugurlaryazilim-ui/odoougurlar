@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Sayım Fişlerini Excel'e Aktar Server Action -->
+    <record id="action_count_session_export_xlsx" model="ir.actions.server">
+        <field name="name">Excel'e Aktar</field>
+        <field name="model_id" ref="model_ugurlar_barcode_count_session"/>
+        <field name="binding_model_id" ref="model_ugurlar_barcode_count_session"/>
+        <field name="binding_view_types">list,form</field>
+        <field name="state">code</field>
+        <field name="code">action = records.action_export_xlsx()</field>
+    </record>
+</odoo>
