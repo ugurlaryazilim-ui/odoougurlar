@@ -490,38 +490,85 @@ class PickingSchedule(models.Model):
         count_return = 0
         count_unavailable = 0
 
+        # ═══ FAZ 1: İlk stok kontrolü ═══
         for picking in pickings:
-            # action_assign ile primary depodaki stoku rezerve et
             try:
                 picking.action_assign()
             except Exception:
                 pass
 
+        # ═══ FAZ 2: Transfer ihtiyaçlarını topla ═══
+        transfer_from_fallback = {}  # {product_id: total_qty}
+        transfer_from_return = {}
+        # Kalan stok takibi (aynı üründen birden fazla sipariş varsa aşırı tahsis önleme)
+        fb_remaining = dict(fallback_qty_map)
+        ret_remaining = dict(return_qty_map)
+
+        for picking in pickings:
+            for move in picking.move_ids:
+                if move.state != 'assigned':
+                    demand = move.product_uom_qty
+                    pid = move.product_id.id
+                    fb_avail = max(0, fb_remaining.get(pid, 0))
+                    if fb_avail >= demand and fallback_wh:
+                        transfer_from_fallback[pid] = transfer_from_fallback.get(pid, 0) + demand
+                        fb_remaining[pid] = fb_remaining.get(pid, 0) - demand
+                    else:
+                        ret_avail = max(0, ret_remaining.get(pid, 0))
+                        if ret_avail >= demand and return_wh:
+                            transfer_from_return[pid] = transfer_from_return.get(pid, 0) + demand
+                            ret_remaining[pid] = ret_remaining.get(pid, 0) - demand
+
+        # ═══ FAZ 3: Otomatik iç transferleri oluştur ve onayla ═══
+        transfers_created = []
+        if transfer_from_fallback and fallback_wh:
+            t = self._create_auto_internal_transfer(
+                transfer_from_fallback, fallback_wh, primary_wh, 'Yedek Depo')
+            if t:
+                transfers_created.append(t)
+
+        if transfer_from_return and return_wh:
+            t = self._create_auto_internal_transfer(
+                transfer_from_return, return_wh, primary_wh, 'İade Deposu')
+            if t:
+                transfers_created.append(t)
+
+        # ═══ FAZ 4: Transfer sonrası tekrar stok rezervasyonu ═══
+        if transfers_created:
+            _logger.info(
+                "Toplama [%s] %s — %d otomatik iç transfer tamamlandı, "
+                "pickings tekrar assign ediliyor...",
+                self.name, window_label, len(transfers_created))
+            for picking in pickings:
+                try:
+                    picking.action_assign()
+                except Exception:
+                    pass
+
+        # ═══ FAZ 5: Source warehouse etiketleme ═══
+        for picking in pickings:
             for move in picking.move_ids:
                 demand = move.product_uom_qty
 
                 if move.state == 'assigned':
-                    # Odoo stoku primary depoda rezerve edebildi
+                    # Stok artık primary depoda (ya zaten vardı ya transfer geldi)
                     move.sudo().write({'source_warehouse_id': primary_wh.id})
                     count_primary += 1
                 else:
-                    # Primary'de yok — fallback kontrol
+                    # Hala assign olamadı — kaynak depo etiketle
                     fb_qty = max(0, fallback_qty_map.get(move.product_id.id, 0))
                     if fb_qty >= demand and fallback_wh:
                         move.sudo().write({'source_warehouse_id': fallback_wh.id})
                         count_fallback += 1
                     else:
-                        # Return warehouse kontrol
                         ret_qty = max(0, return_qty_map.get(move.product_id.id, 0))
                         if ret_qty >= demand and return_wh:
                             move.sudo().write({'source_warehouse_id': return_wh.id})
                             count_return += 1
                         elif return_wh:
-                            # Hiçbir depoda yok — default olarak iade deposuna at
                             move.sudo().write({'source_warehouse_id': return_wh.id})
                             count_unavailable += 1
                         else:
-                            # İade deposu tanımlı değil — primary'ye at
                             move.sudo().write({'source_warehouse_id': primary_wh.id})
                             count_unavailable += 1
 
@@ -586,6 +633,122 @@ class PickingSchedule(models.Model):
                         _logger.warning("Batch silinemedi %s: %s", old_batch.name, e)
 
         return batch
+
+    # ═══════════════════════════════════════════════════════
+    # OTOMATİK İÇ TRANSFER
+    # ═══════════════════════════════════════════════════════
+
+    def _create_auto_internal_transfer(self, product_qty_map, source_wh, dest_wh, label):
+        """Otomatik iç transfer oluştur ve onayla.
+
+        Stok başka depoda tespit edildiğinde, ürünleri ana depoya taşır.
+        Bu sayede picking doğru depodan (ana depo) stok düşer ve negatif
+        stok oluşmaz.
+
+        Args:
+            product_qty_map: {product_id: total_qty} transfere ihtiyaç duyan ürünler
+            source_wh: kaynak depo (stock.warehouse) — stokun bulunduğu yer
+            dest_wh: hedef depo (stock.warehouse) — stokun taşınacağı yer (ana depo)
+            label: transfer etiketi (loglama için)
+
+        Returns:
+            stock.picking or None
+        """
+        if not product_qty_map:
+            return None
+
+        # İç transfer operasyon türünü bul
+        internal_type = self.env['stock.picking.type'].search([
+            ('warehouse_id', '=', dest_wh.id),
+            ('code', '=', 'internal'),
+        ], limit=1)
+
+        if not internal_type:
+            _logger.warning(
+                "Otomatik transfer: İç transfer tipi bulunamadı — %s", dest_wh.name)
+            return None
+
+        src_loc = source_wh.lot_stock_id
+        dst_loc = dest_wh.lot_stock_id
+
+        if not src_loc or not dst_loc:
+            _logger.warning(
+                "Otomatik transfer: Stok lokasyonu bulunamadı — %s → %s",
+                source_wh.name, dest_wh.name)
+            return None
+
+        try:
+            picking = self.env['stock.picking'].sudo().create({
+                'picking_type_id': internal_type.id,
+                'location_id': src_loc.id,
+                'location_dest_id': dst_loc.id,
+                'origin': f'Toplama Otomatik Transfer ({label})',
+                'scheduled_date': fields.Datetime.now(),
+            })
+
+            Product = self.env['product.product'].sudo()
+            for pid, qty in product_qty_map.items():
+                product = Product.browse(pid)
+                if not product.exists():
+                    continue
+                self.env['stock.move'].sudo().create({
+                    'name': f'{product.display_name} ({label} → {dest_wh.name})',
+                    'product_id': pid,
+                    'product_uom_qty': qty,
+                    'product_uom': product.uom_id.id,
+                    'picking_id': picking.id,
+                    'location_id': src_loc.id,
+                    'location_dest_id': dst_loc.id,
+                })
+
+            # Onayla ve stoku rezerve et
+            picking.action_confirm()
+            picking.action_assign()
+
+            # Miktarları doldur
+            for move in picking.move_ids:
+                move.quantity = move.product_uom_qty
+
+            # Validate — wizard çıkarsa otomatik işle
+            ctx = {
+                'skip_backorder': True,
+                'skip_immediate': True,
+                'picking_ids_not_to_backorder': picking.ids,
+                'button_validate_picking_ids': picking.ids,
+            }
+            result = picking.with_context(**ctx).button_validate()
+
+            # Wizard döndüyse otomatik işle
+            if isinstance(result, dict) and result.get('res_model'):
+                try:
+                    wiz_model = result['res_model']
+                    wiz_ctx = {**ctx, **result.get('context', {})}
+                    if result.get('res_id'):
+                        wizard = self.env[wiz_model].sudo().with_context(
+                            **wiz_ctx).browse(result['res_id'])
+                    else:
+                        wizard = self.env[wiz_model].sudo().with_context(
+                            **wiz_ctx).create({})
+                    if hasattr(wizard, 'process'):
+                        wizard.process()
+                    elif hasattr(wizard, 'action_done'):
+                        wizard.action_done()
+                except Exception as e2:
+                    _logger.warning(
+                        "Otomatik transfer wizard hatası (%s): %s", label, e2)
+
+            _logger.info(
+                "Otomatik iç transfer tamamlandı: %s → %s (%d ürün, %s) [%s]",
+                source_wh.name, dest_wh.name, len(product_qty_map),
+                label, picking.name)
+
+            return picking
+
+        except Exception as e:
+            _logger.warning(
+                "Otomatik iç transfer hatası (%s → %s): %s",
+                source_wh.name, dest_wh.name, e)
+            return None
 
     def _update_sale_order_batch_names(self, pickings, batch_name):
         """Picking'lere ait sale order'ların 'Rota' alanını güncelle.

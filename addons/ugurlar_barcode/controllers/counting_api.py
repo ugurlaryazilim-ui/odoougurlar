@@ -90,6 +90,7 @@ class CountingApiController(BarcodeApiBase):
                     'old_qty': old_qty,
                     'new_qty': new_qty,
                     'status': 'updated',
+                    '_product_id': product.id,
                 })
             except Exception as e:
                 _logger.warning('Sayım hatası [%s]: %s', bc, e)
@@ -99,12 +100,72 @@ class CountingApiController(BarcodeApiBase):
                     'status': 'error',
                     'message': str(e),
                 })
+        # ═══ AKILLI SAYIM DÜZELTMESİ ═══
+        # Sayılan ürünlerde başka konumlarda negatif bakiye varsa temizle
+        counted_product_ids = []
+        for r in results:
+            if r.get('status') == 'updated' and r.get('_product_id'):
+                counted_product_ids.append(r['_product_id'])
+
+        adjustment_notes = []
+        if counted_product_ids:
+            negative_quants = StockQuant.search([
+                ('product_id', 'in', list(set(counted_product_ids))),
+                ('quantity', '<', 0),
+                ('location_id.usage', '=', 'internal'),
+            ])
+
+            for nq in negative_quants:
+                old_neg = nq.quantity
+                product = nq.product_id
+                neg_location = nq.location_id
+
+                # Düzeltme operasyon kaydı
+                request.env['ugurlar.barcode.operation'].sudo().create({
+                    'operation_type': 'count_adjustment',
+                    'count_session_id': count_session.id,
+                    'barcode': product.barcode or '',
+                    'product_id': product.id,
+                    'location_id': neg_location.id,
+                    'quantity': 0,
+                    'theoretical_qty': old_neg,
+                    'notes': f'Negatif bakiye düzeltmesi: {neg_location.complete_name} ({old_neg} → 0)',
+                    'state': 'done',
+                })
+
+                # Negatif quant'ı sil
+                nq.unlink()
+
+                # Ürün chatter'ına uyarı notu
+                try:
+                    msg = Markup(
+                        '<b>&#9888; Sayım Düzeltmesi:</b> <em>%s</em> konumunda '
+                        '<b>%s</b> adet negatif bakiye tespit edildi ve sıfırlandı. '
+                        '(Sayım: %s)'
+                    ) % (neg_location.complete_name, int(old_neg), count_session.name)
+                    product.sudo().message_post(
+                        body=msg, message_type='notification',
+                        subtype_xmlid='mail.mt_note')
+                except Exception as e:
+                    _logger.warning('Düzeltme chatter hatası: %s', e)
+
+                adjustment_notes.append(
+                    f'{product.display_name}: {neg_location.complete_name} ({old_neg} → 0)')
+
+            if adjustment_notes:
+                count_session.sudo().write({
+                    'notes': 'Sayım Düzeltmeleri:\n' + '\n'.join(adjustment_notes)
+                })
+                _logger.info(
+                    'Sayım düzeltmesi [%s]: %d negatif bakiye temizlendi',
+                    count_session.name, len(adjustment_notes))
 
         return {
             'success': True,
             'location': location.complete_name,
             'results': results,
             'total_counted': len([r for r in results if r['status'] == 'updated']),
+            'adjustments': len(adjustment_notes),
         }
 
     # ─── SAYIM LİSTESİ (HamurLabs tarzı geçmiş) ─────────

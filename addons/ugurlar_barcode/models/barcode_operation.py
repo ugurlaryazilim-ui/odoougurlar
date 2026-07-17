@@ -20,6 +20,7 @@ class BarcodeOperation(models.Model):
         ('remove', 'Raftan Kaldırma'),
         ('picking', 'Sipariş Toplama'),
         ('counting', 'Sayım'),
+        ('count_adjustment', 'Sayım Düzeltmesi'),
         ('transfer', 'Transfer'),
         ('shelf_transfer', 'Raf Taşıma'),
         ('label', 'Etiket Yazdırma'),
