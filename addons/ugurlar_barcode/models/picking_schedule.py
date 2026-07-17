@@ -677,39 +677,86 @@ class PickingSchedule(models.Model):
                 source_wh.name, dest_wh.name)
             return None
 
-        try:
-            picking = self.env['stock.picking'].sudo().create({
-                'picking_type_id': internal_type.id,
+        company = dest_wh.company_id or self.env.company
+
+        # ─── ADIM 1: Picking oluştur ───
+        picking = self.env['stock.picking'].sudo().create({
+            'picking_type_id': internal_type.id,
+            'location_id': src_loc.id,
+            'location_dest_id': dst_loc.id,
+            'origin': f'Toplama Otomatik Transfer ({label})',
+            'scheduled_date': fields.Datetime.now(),
+            'company_id': company.id,
+        })
+        _logger.info(
+            "Otomatik transfer ADIM 1: Picking oluşturuldu — %s [%s → %s]",
+            picking.name, source_wh.name, dest_wh.name)
+
+        # ─── ADIM 2: Move'ları oluştur ───
+        Product = self.env['product.product'].sudo()
+        move_vals_list = []
+        for pid, qty in product_qty_map.items():
+            product = Product.browse(pid)
+            if not product.exists():
+                continue
+            move_vals_list.append({
+                'name': f'{product.display_name} ({label} → {dest_wh.name})',
+                'product_id': pid,
+                'product_uom_qty': qty,
+                'product_uom': product.uom_id.id,
+                'picking_id': picking.id,
                 'location_id': src_loc.id,
                 'location_dest_id': dst_loc.id,
-                'origin': f'Toplama Otomatik Transfer ({label})',
-                'scheduled_date': fields.Datetime.now(),
+                'company_id': company.id,
             })
 
-            Product = self.env['product.product'].sudo()
-            for pid, qty in product_qty_map.items():
-                product = Product.browse(pid)
-                if not product.exists():
-                    continue
-                self.env['stock.move'].sudo().create({
-                    'name': f'{product.display_name} ({label} → {dest_wh.name})',
-                    'product_id': pid,
-                    'product_uom_qty': qty,
-                    'product_uom': product.uom_id.id,
-                    'picking_id': picking.id,
-                    'location_id': src_loc.id,
-                    'location_dest_id': dst_loc.id,
-                })
+        if not move_vals_list:
+            _logger.warning("Otomatik transfer: Geçerli ürün bulunamadı, picking siliniyor")
+            picking.unlink()
+            return None
 
-            # Onayla ve stoku rezerve et
+        self.env['stock.move'].sudo().create(move_vals_list)
+        # Flush — move'ların DB'ye yazıldığından emin ol
+        self.env.flush_all()
+        picking.invalidate_recordset()
+
+        _logger.info(
+            "Otomatik transfer ADIM 2: %d move oluşturuldu — %s",
+            len(move_vals_list), picking.name)
+
+        # ─── ADIM 3: Onayla (Confirm) ───
+        try:
             picking.action_confirm()
+            _logger.info(
+                "Otomatik transfer ADIM 3: Confirm OK — %s (state=%s)",
+                picking.name, picking.state)
+        except Exception as e:
+            _logger.exception(
+                "Otomatik transfer ADIM 3 HATA (confirm): %s — %s",
+                picking.name, e)
+            return None
+
+        # ─── ADIM 4: Stok rezervasyonu (Assign) ───
+        try:
             picking.action_assign()
+            _logger.info(
+                "Otomatik transfer ADIM 4: Assign OK — %s (state=%s)",
+                picking.name, picking.state)
+        except Exception as e:
+            _logger.warning(
+                "Otomatik transfer ADIM 4 UYARI (assign): %s — %s",
+                picking.name, e)
+            # Assign başarısız olsa bile devam et — force transfer yapacağız
 
-            # Miktarları doldur
-            for move in picking.move_ids:
-                move.quantity = move.product_uom_qty
+        # ─── ADIM 5: Miktarları doldur ───
+        for move in picking.move_ids:
+            move.quantity = move.product_uom_qty
+        _logger.info(
+            "Otomatik transfer ADIM 5: Miktarlar dolduruldu — %s (%d move)",
+            picking.name, len(picking.move_ids))
 
-            # Validate — wizard çıkarsa otomatik işle
+        # ─── ADIM 6: Validate ───
+        try:
             ctx = {
                 'skip_backorder': True,
                 'skip_immediate': True,
@@ -719,7 +766,9 @@ class PickingSchedule(models.Model):
             result = picking.with_context(**ctx).button_validate()
 
             # Wizard döndüyse otomatik işle
-            if isinstance(result, dict) and result.get('res_model'):
+            for _ in range(3):
+                if not isinstance(result, dict) or not result.get('res_model'):
+                    break
                 try:
                     wiz_model = result['res_model']
                     wiz_ctx = {**ctx, **result.get('context', {})}
@@ -730,24 +779,35 @@ class PickingSchedule(models.Model):
                         wizard = self.env[wiz_model].sudo().with_context(
                             **wiz_ctx).create({})
                     if hasattr(wizard, 'process'):
-                        wizard.process()
+                        result = wizard.process() or True
                     elif hasattr(wizard, 'action_done'):
-                        wizard.action_done()
+                        result = wizard.action_done() or True
+                    else:
+                        _logger.warning(
+                            "Otomatik transfer: Bilinmeyen wizard — %s", wiz_model)
+                        break
                 except Exception as e2:
-                    _logger.warning(
+                    _logger.exception(
                         "Otomatik transfer wizard hatası (%s): %s", label, e2)
+                    break
 
-            _logger.info(
-                "Otomatik iç transfer tamamlandı: %s → %s (%d ürün, %s) [%s]",
-                source_wh.name, dest_wh.name, len(product_qty_map),
-                label, picking.name)
-
-            return picking
+            # Sonuç kontrolü
+            picking.invalidate_recordset(['state'])
+            if picking.state == 'done':
+                _logger.info(
+                    "✅ Otomatik iç transfer TAMAMLANDI: %s → %s (%d ürün) [%s]",
+                    source_wh.name, dest_wh.name, len(product_qty_map), picking.name)
+                return picking
+            else:
+                _logger.warning(
+                    "⚠️ Otomatik transfer validate sonrası state=%s (beklenen: done) — %s",
+                    picking.state, picking.name)
+                return None
 
         except Exception as e:
-            _logger.warning(
-                "Otomatik iç transfer hatası (%s → %s): %s",
-                source_wh.name, dest_wh.name, e)
+            _logger.exception(
+                "Otomatik transfer ADIM 6 HATA (validate): %s — %s",
+                picking.name, e)
             return None
 
     def _update_sale_order_batch_names(self, pickings, batch_name):
