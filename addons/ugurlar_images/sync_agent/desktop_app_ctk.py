@@ -201,6 +201,7 @@ class OdooSyncApp(ctk.CTk):
                     
                 self.agent.process_folder()
                 self.agent.download_ai_exports()
+                self.agent.optimize_large_local_images()
                 
                 # Her döngüde 3 saniye bekle (event set edilirse anında çıkar)
                 self.stop_event.wait(3.0)

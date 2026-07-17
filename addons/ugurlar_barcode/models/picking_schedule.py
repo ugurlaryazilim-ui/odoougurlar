@@ -700,7 +700,6 @@ class PickingSchedule(models.Model):
             if not product.exists():
                 continue
             move_vals_list.append({
-                'name': f'{product.display_name} ({label} → {dest_wh.name})',
                 'product_id': pid,
                 'product_uom_qty': qty,
                 'product_uom': product.uom_id.id,

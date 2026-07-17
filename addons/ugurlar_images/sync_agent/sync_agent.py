@@ -585,10 +585,18 @@ class OdooImageSync:
                 filename = f"{barcode}_{idx}.jpg"
                 filepath = os.path.join(watch, filename)
                 
-                # Base64 çöz ve kaydet
+                # Base64 çöz ve kaydet (Sıkıştırarak)
                 img_data = base64.b64decode(exp['generated_image'])
-                with open(filepath, 'wb') as f:
-                    f.write(img_data)
+                try:
+                    from PIL import Image
+                    img = Image.open(io.BytesIO(img_data))
+                    if img.mode in ("RGBA", "P"):
+                        img = img.convert("RGB")
+                    img.save(filepath, format='JPEG', optimize=True, quality=85)
+                except Exception as e:
+                    _logger.warning("Görsel sıkıştırılamadı, orijinali kaydediliyor (%s): %s", filename, e)
+                    with open(filepath, 'wb') as f:
+                        f.write(img_data)
                 
                 # Dosya stat bilgilerini al (cache'e yazmak için)
                 stat = os.stat(filepath)
@@ -611,6 +619,59 @@ class OdooImageSync:
                 
         except Exception as e:
             _logger.error("AI görsel indirme hatası: %s", e)
+
+    def optimize_large_local_images(self):
+        """Klasördeki 3 MB (3,145,728 byte) üstü resimleri kalitesini bozmadan sıkıştırır.
+        SQLite Cache'in bozulmaması için orijinal dosyanın değiştirilme tarihini korur.
+        """
+        watch = self.config['watch_folder']
+        if not os.path.exists(watch):
+            return
+
+        MAX_SIZE_BYTES = 3 * 1024 * 1024 # 3 MB
+        
+        try:
+            for f in os.listdir(watch):
+                fpath = os.path.join(watch, f)
+                if not os.path.isfile(fpath):
+                    continue
+                    
+                _, ext = os.path.splitext(f)
+                if ext.lower() not in ALLOWED_EXTENSIONS:
+                    continue
+                    
+                file_size, file_mtime = self._get_file_meta(fpath)
+                
+                if file_size > MAX_SIZE_BYTES:
+                    _logger.info("📦 Büyük dosya tespit edildi, sıkıştırılıyor: %s (%.2f MB)", f, file_size / (1024*1024))
+                    try:
+                        from PIL import Image
+                        img = Image.open(fpath)
+                        if img.mode in ("RGBA", "P"):
+                            img = img.convert("RGB")
+                            
+                        # Geçici dosyaya kaydet
+                        temp_path = fpath + ".tmp"
+                        img.save(temp_path, format='JPEG', optimize=True, quality=85)
+                        
+                        # Orijinali ez
+                        shutil.move(temp_path, fpath)
+                        
+                        # Cache mekanizmasının şaşırmaması için eski değiştirilme tarihini (mtime) geri yükle!
+                        os.utime(fpath, (float(file_mtime), float(file_mtime)))
+                        
+                        new_size = os.path.getsize(fpath)
+                        _logger.info("✅ Sıkıştırma tamamlandı: %s (%.2f MB -> %.2f MB)", f, file_size / (1024*1024), new_size / (1024*1024))
+                        
+                        # Her dosyadan sonra nefes al
+                        time.sleep(0.1)
+                    except Exception as e:
+                        _logger.warning("Sıkıştırma başarısız oldu (%s): %s", f, e)
+                        if os.path.exists(fpath + ".tmp"):
+                            try: os.remove(fpath + ".tmp")
+                            except: pass
+        except Exception as e:
+            _logger.error("Klasör optimizasyonu sırasında hata: %s", e)
 
     def process_folder(self):
         """Klasördeki tüm görselleri tarar ve işler.
