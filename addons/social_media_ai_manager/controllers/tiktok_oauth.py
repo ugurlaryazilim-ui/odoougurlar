@@ -24,7 +24,7 @@ class TikTokOAuth(http.Controller):
         redirect_uri = base_url + '/social_media_ai/tiktok/callback'
 
         # Scopes for TikTok API (comma-separated)
-        scopes = "user.info.basic,video.publish,video.upload,video.list"
+        scopes = "user.info.basic,video.publish,video.upload"
 
         auth_url = "https://www.tiktok.com/v2/auth/authorize/?" + urllib.parse.urlencode({
             'client_key': client_key,
