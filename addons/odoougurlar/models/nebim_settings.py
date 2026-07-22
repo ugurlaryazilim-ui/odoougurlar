@@ -115,6 +115,18 @@ class ResConfigSettings(models.TransientModel):
         default='sp_Odoougurlar_GetProductMatrix',
         help='Renk ve beden matris raporunu getiren stored procedure adı (Barkod Okutma)',
     )
+    nebim_sp_product_cost = fields.Char(
+        string='Ürün Maliyet SP',
+        config_parameter='odoougurlar.nebim_sp_product_cost',
+        default='usp_UrunEkstresi_BirimMaliyetHesapla',
+        help='Ürün maliyetlerini (Birim Maliyet) getiren stored procedure adı',
+    )
+    nebim_sync_cost_enabled = fields.Boolean(
+        string='Maliyet Senkronizasyonu Aktif',
+        config_parameter='odoougurlar.nebim_sync_cost_enabled',
+        default=False,
+        help='Aktif olduğunda ürünlerin maliyet fiyatları düzenli olarak Nebim\'den çekilerek güncellenir.',
+    )
 
     # -----------------------------------------------------------------
     #  Nebim Gönderim Ayarları (Cari / Sipariş / Fatura)

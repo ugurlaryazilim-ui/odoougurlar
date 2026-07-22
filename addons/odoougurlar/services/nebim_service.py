@@ -166,3 +166,94 @@ class NebimService(models.AbstractModel):
             log.sudo().write(vals)
         except Exception:
             _logger.warning("Sync log güncelleme hatası: %s", log.id)
+    # -----------------------------------------------------------------
+    #  Maliyet Güncelleme (Birim Maliyet)
+    # -----------------------------------------------------------------
+    def sync_product_costs(self):
+        """
+        Nebim'den ürün maliyetlerini (NetMaliyet) çekip Odoo'da standard_price günceller.
+        vw_UrunBirimMaliyetleri tablosuna dayalı SP'yi kullanır.
+        """
+        ICP = self.env['ir.config_parameter'].sudo()
+        enabled = ICP.get_param('odoougurlar.nebim_sync_cost_enabled', 'False') == 'True'
+    # -----------------------------------------------------------------
+    #  Maliyet Güncelleme (Birim Maliyet)
+    # -----------------------------------------------------------------
+    def sync_product_costs(self):
+        """
+        Nebim'den ürün maliyetlerini (NetMaliyet) çekip Odoo'da standard_price günceller.
+        vw_UrunBirimMaliyetleri tablosuna dayalı SP'yi kullanır.
+        """
+        ICP = self.env['ir.config_parameter'].sudo()
+        enabled = ICP.get_param('odoougurlar.nebim_sync_cost_enabled', 'False') == 'True'
+        if not enabled:
+            _logger.info("Maliyet senkronizasyonu kapalı.")
+            return
+
+        sp_name = ICP.get_param('odoougurlar.nebim_sp_product_cost', 'usp_UrunEkstresi_BirimMaliyetHesapla')
+        
+        log_id = self._create_sync_log('cost')
+        stats = {'processed': 0, 'updated': 0, 'failed': 0}
+        connector = self.env['odoougurlar.nebim.connector']
+        
+        try:
+            # SP çağır
+            _logger.info(f"Maliyet SP çağrılıyor: {sp_name}")
+            results = connector.run_proc(sp_name)
+            if not results or not isinstance(results, list):
+                self._update_sync_log(log_id, 'completed', stats, note="Nebim'den maliyet verisi dönmedi.")
+                return stats
+            
+            stats['processed'] = len(results)
+            
+            # Verileri belleğe al: barkod veya productcode'a göre NetMaliyet veya Price2 eşlemesi
+            cost_by_code = {}
+            for row in results:
+                product_code = str(row.get('ProductCode', '')).strip()
+                barcode = str(row.get('Barcode', '')).strip()
+                net_maliyet = row.get('NetMaliyet')
+                if net_maliyet is None:
+                    net_maliyet = row.get('Price2', 0.0)
+                
+                if barcode:
+                    cost_by_code[barcode] = float(net_maliyet)
+                if product_code:
+                    cost_by_code[product_code] = float(net_maliyet)
+            
+            if not cost_by_code:
+                self._update_sync_log(log_id, 'completed', stats, note="İşlenecek geçerli ürün kodu/barkod bulunamadı.")
+                return stats
+                
+            # Odoo'daki ürünleri bul
+            keys = list(cost_by_code.keys())
+            
+            # Limit IN query size
+            BATCH_SIZE = 1000
+            for i in range(0, len(keys), BATCH_SIZE):
+                batch_keys = keys[i:i+BATCH_SIZE]
+                products = self.env['product.product'].search([
+                    '|',
+                    ('default_code', 'in', batch_keys),
+                    ('barcode', 'in', batch_keys)
+                ])
+                
+                # Güncelle
+                for product in products:
+                    try:
+                        new_cost = cost_by_code.get(product.barcode)
+                        if new_cost is None:
+                            new_cost = cost_by_code.get(product.default_code)
+                            
+                        if new_cost is not None and round(product.standard_price, 2) != round(new_cost, 2):
+                            product.standard_price = new_cost
+                            stats['updated'] += 1
+                    except Exception as e:
+                        stats['failed'] += 1
+                        _logger.error("Ürün maliyet güncelleme hatası: %s - %s", product.display_name, e)
+            
+            self._update_sync_log(log_id, 'completed', stats)
+            
+        except Exception as e:
+            self._update_sync_log(log_id, 'failed', error=str(e))
+            
+        return stats

@@ -35,6 +35,17 @@
             <field name="active" eval="False"/>
         </record>
 
+        <!-- Maliyet Güncelleme: Günde 1 kez -->
+        <record id="cron_cost_sync" model="ir.cron">
+            <field name="name">Uğurlar Nebim: Maliyet Senkronizasyonu</field>
+            <field name="model_id" ref="model_odoougurlar_nebim_service"/>
+            <field name="state">code</field>
+            <field name="code">model.sync_product_costs()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="active" eval="False"/>
+        </record>
+
     </data>
 
     <!-- Kuyruk İşleyici: noupdate=0 çünkü upgrade'de oluşturulmalı -->

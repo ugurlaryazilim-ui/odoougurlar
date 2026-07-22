@@ -616,7 +616,7 @@ class HepsiburadaOrderSync(models.AbstractModel):
                 continue
 
             # HB unitPrice KDV DAHİL tutardır
-            unit_price = line.merchant_unit_price if line.merchant_unit_price > 0 else line.price
+            unit_price = line.price if line.price > 0 else line.merchant_unit_price
 
             ol_vals = {
                 'product_id': product.id,
