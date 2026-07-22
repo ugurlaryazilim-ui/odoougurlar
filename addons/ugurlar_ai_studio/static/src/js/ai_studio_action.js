@@ -104,9 +104,11 @@ export class AiStudioAction extends Component {
 
     onProductFound(productInfo) {
         if (productInfo.has_active_session) {
+            const operatorStr = productInfo.active_session_operator ? ` (${productInfo.active_session_operator})` : '';
+            const sessionStr = productInfo.active_session_name ? ` [${productInfo.active_session_name}]` : '';
             this.dialog.add(AlertDialog, {
                 title: _t("Aktif Oturum Bulundu!"),
-                body: `Bu ürün (${productInfo.name}) için halihazırda açık bir oturum (çekim, AI işleme veya onay süreci) bulunuyor.\n\nLütfen onayıcının işlemi bitirmesini bekleyin ve başka bir ürüne geçin.`,
+                body: `Bu ürün (${productInfo.name}) için halihazırda${operatorStr} tarafından açık bir oturum${sessionStr} (çekim, AI işleme veya onay süreci) bulunuyor.\n\nLütfen onayıcının veya ilgili operatörün işlemi bitirmesini bekleyin ve başka bir ürüne geçin.`,
                 confirmLabel: _t("Tamam"),
                 confirm: () => {},
             });

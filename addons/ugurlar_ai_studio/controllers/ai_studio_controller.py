@@ -70,10 +70,36 @@ class AiStudioController(http.Controller):
             if not product.exists():
                 return {'error': 'Urun bulunamadi.'}
 
-            # Profesyonel Yöntem: Kullanıcının daha önceden yarım bıraktığı (Taslak) 
-            # tüm oturumları temizle. Bu sayede "kapatıp açınca" oluşan taslak çöplüğü önlenir.
-            # Operatör aynı anda sadece 1 işlem yapabileceği için güvenlidir.
-            abandoned_drafts = request.env['ai.studio.session'].search([
+            # Aynı renkteki varyantları bul
+            current_color_id = None
+            color_attr_names = {'renk', 'color', 'colour'}
+            for ptav in product.product_template_attribute_value_ids:
+                attr_name = ptav.attribute_id.name.lower().strip()
+                if any(c in attr_name for c in color_attr_names):
+                    current_color_id = ptav.id
+                    break
+
+            if current_color_id:
+                color_variants = product.product_tmpl_id.product_variant_ids.filtered(
+                    lambda v: current_color_id in v.product_template_attribute_value_ids.ids
+                )
+            else:
+                color_variants = product
+
+            # Güvenlik Kontrolü: Herhangi bir kullanıcı tarafından başlatılmış aktif oturum var mı? (sudo)
+            existing_active_session = request.env['ai.studio.session'].sudo().search([
+                ('product_id', 'in', color_variants.ids),
+                ('state', 'in', ['photos_ready', 'processing', 'review', 'failed', 'saving'])
+            ], limit=1)
+
+            if existing_active_session:
+                op_name = existing_active_session.create_uid.name or 'Başka bir operatör'
+                return {
+                    'error': f"Bu ürün ({product.display_name}) için {op_name} tarafından başlatılmış aktif bir oturum ({existing_active_session.name}) bulunmaktadır! Mükerrer çekim yapamazsınız."
+                }
+
+            # Kullanıcının daha önceden yarım bıraktığı kendi (Taslak) oturumlarını temizle
+            abandoned_drafts = request.env['ai.studio.session'].sudo().search([
                 ('create_uid', '=', request.env.user.id),
                 ('state', '=', 'draft')
             ])
@@ -148,7 +174,7 @@ class AiStudioController(http.Controller):
                 if bool(variant.image_variant_1920) or template_has_image:
                     color_groups[key]['has_image'] = True
                     
-                active_session = request.env['ai.studio.session'].search([
+                active_session = request.env['ai.studio.session'].sudo().search([
                     ('product_id', '=', variant.id),
                     ('state', 'not in', ['cancelled', 'done']),
                 ], limit=1)
@@ -279,8 +305,8 @@ class AiStudioController(http.Controller):
                 else:
                     color_variants = p
 
-                # Aktif oturum var mi kontrol et (Aynı renkteki TÜM bedenler taranır)
-                active_session = request.env['ai.studio.session'].search([
+                # Aktif oturum var mi kontrol et (Aynı renkteki TÜM bedenler taranır - Record Rule aşımı için sudo)
+                active_session = request.env['ai.studio.session'].sudo().search([
                     ('product_id', 'in', color_variants.ids),
                     ('state', 'in', ['draft', 'photos_ready', 'processing', 'review', 'failed', 'saving'])
                 ], limit=1)
@@ -301,6 +327,8 @@ class AiStudioController(http.Controller):
                     'gender': product_gender,
                     'body_type': product_body_type,
                     'has_active_session': bool(active_session),
+                    'active_session_operator': active_session.create_uid.name if active_session else '',
+                    'active_session_name': active_session.name if active_session else '',
                 })
 
             return {
