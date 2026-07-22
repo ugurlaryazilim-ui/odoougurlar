@@ -519,7 +519,9 @@ class SocialMediaPostLine(models.Model):
         init_body = {
             'post_info': {
                 'title': post_title,
-                'privacy_level': 'PUBLIC_TO_EVERYONE',
+                # SELF_ONLY: Required for unaudited/sandbox apps.
+                # Change to PUBLIC_TO_EVERYONE after TikTok app is approved.
+                'privacy_level': 'SELF_ONLY',
                 'disable_duet': False,
                 'disable_comment': False,
                 'disable_stitch': False,
