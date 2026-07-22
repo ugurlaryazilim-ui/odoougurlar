@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_ugurlar_invoice_collector_user,ugurlar.invoice.collector.user,model_ugurlar_invoice_collector,base.group_user,1,1,1,1
+access_ugurlar_invoice_collector_line_user,ugurlar.invoice.collector.line.user,model_ugurlar_invoice_collector_line,base.group_user,1,1,1,1
