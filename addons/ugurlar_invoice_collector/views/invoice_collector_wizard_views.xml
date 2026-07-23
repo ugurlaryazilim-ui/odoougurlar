@@ -22,6 +22,29 @@
             </field>
         </record>
 
+        <!-- Main Jobs List View (History & Active Downloads) -->
+        <record id="view_ugurlar_invoice_collector_tree" model="ir.ui.view">
+            <field name="name">ugurlar.invoice.collector.list</field>
+            <field name="model">ugurlar.invoice.collector</field>
+            <field name="arch" type="xml">
+                <list string="Toptan Alış Fatura Arşivleri" default_order="create_date desc">
+                    <field name="create_date" string="Oluşturulma Tarihi"/>
+                    <field name="brand_id"/>
+                    <field name="product_group_id"/>
+                    <field name="total_found_invoices"/>
+                    <field name="processed_count"/>
+                    <field name="progress_text"/>
+                    <field name="state" widget="badge" 
+                           decoration-success="state == 'completed'" 
+                           decoration-info="state == 'downloading'"
+                           decoration-warning="state == 'scanned'"
+                           decoration-muted="state == 'draft'"/>
+                    <field name="zip_filename" optional="show"/>
+                    <field name="zip_file" filename="zip_filename" widget="binary" string="ZIP Arşivini İndir"/>
+                </list>
+            </field>
+        </record>
+
         <!-- Wizard Form View -->
         <record id="view_ugurlar_invoice_collector_form" model="ir.ui.view">
             <field name="name">ugurlar.invoice.collector.form</field>
@@ -112,11 +135,11 @@
             </field>
         </record>
 
-        <!-- Action to open wizard -->
+        <!-- Action to open wizard/history -->
         <record id="action_ugurlar_invoice_collector" model="ir.actions.act_window">
             <field name="name">Toptan Alış Fatura Arşivi (ZIP)</field>
             <field name="res_model">ugurlar.invoice.collector</field>
-            <field name="view_mode">form</field>
+            <field name="view_mode">list,form</field>
             <field name="target">current</field>
         </record>
 

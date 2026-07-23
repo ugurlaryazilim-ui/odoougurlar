@@ -53,16 +53,16 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
         string='Bulunan Faturalar'
     )
 
-    zip_file = fields.Binary(string='ZIP Dosyası', readonly=True)
+    zip_file = fields.Binary(string='ZIP Dosyası', readonly=True, attachment=True)
     zip_filename = fields.Char(string='ZIP Dosya Adı', readonly=True)
     
-    total_found_invoices = fields.Integer(string='Bulunan Fatura Sayısı', compute='_compute_totals')
-    selected_invoices_count = fields.Integer(string='Seçili Fatura Sayısı', compute='_compute_totals')
+    total_found_invoices = fields.Integer(string='Bulunan Fatura Sayısı', compute='_compute_totals', store=True)
+    selected_invoices_count = fields.Integer(string='Seçili Fatura Sayısı', compute='_compute_totals', store=True)
 
-    processed_count = fields.Integer(string='İşlenen Fatura', compute='_compute_progress')
-    pending_count = fields.Integer(string='Bekleyen Fatura', compute='_compute_progress')
-    progress_percent = fields.Float(string='İlerleme Yüzdesi', compute='_compute_progress')
-    progress_text = fields.Char(string='İndirme İlerlemesi', compute='_compute_progress')
+    processed_count = fields.Integer(string='İşlenen Fatura', compute='_compute_progress', store=True)
+    pending_count = fields.Integer(string='Bekleyen Fatura', compute='_compute_progress', store=True)
+    progress_percent = fields.Float(string='İlerleme Yüzdesi', compute='_compute_progress', store=True)
+    progress_text = fields.Char(string='İndirme İlerlemesi', compute='_compute_progress', store=True)
 
     @api.depends('line_ids', 'line_ids.selected')
     def _compute_totals(self):
@@ -363,7 +363,7 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             raise UserError('Lütfen ZIP arşivine eklenecek en az bir fatura seçiniz.')
 
         start_time = time.time()
-        max_duration = 25.0  # Max 25s per HTTP call (guarantees zero HTTP timeouts)
+        max_duration = 25.0
         batch_sz = self.batch_size if self.batch_size > 0 else 15
 
         while True:
@@ -409,7 +409,7 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             'tag': 'display_notification',
             'params': {
                 'title': 'Arka Planda İndirme Başlatıldı 🚀',
-                'message': 'Faturalar arka planda otomatik indirilmeye başlandı. Tamamlandığında bildirim alacaksınız.',
+                'message': 'Faturalar arka planda otomatik indirilmeye başlandı. Tamamlandığında ekranınızda bildirim görünecektir.',
                 'type': 'success',
                 'sticky': True,
             }
@@ -419,7 +419,7 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
     def _cron_process_download_jobs(self):
         """
         Arka plan Cron İşleyicisi: 'downloading' durumundaki fatura arşivleme işlerini tarar,
-        arka planda indirir, ZIP oluşturur ve kullanıcıya canlı bildirim (bus.bus) gönderir.
+        arka planda indirir, ZIP oluşturur ve işi başlatan kullanıcıya canlı Bus bildirimi (simple_notification) gönderir.
         """
         jobs = self.search([('state', '=', 'downloading')], limit=5)
         for job in jobs:
@@ -439,19 +439,23 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
                     job._finalize_zip(job.line_ids.filtered(lambda l: l.selected))
                     _logger.info("Cron: Job ID %d tamamlandı! ZIP oluşturuldu: %s", job.id, job.zip_filename)
                     
-                    try:
-                        self.env['bus.bus']._sendone(
-                            self.env.user.partner_id,
-                            'notification',
-                            {
-                                'type': 'success',
-                                'title': '🎉 Fatura ZIP Arşivi Hazır!',
-                                'message': f'{job.zip_filename} başarıyla indirildi ve ZIP dosyası oluşturuldu.',
-                                'sticky': True,
-                            }
-                        )
-                    except Exception as ne:
-                        _logger.debug("Bus bildirim hatası: %s", str(ne))
+                    # Doğru kullanıcı partner ID'sini (create_uid) bulup bildirim gönder
+                    target_partner = job.create_uid.partner_id
+                    if target_partner:
+                        try:
+                            self.env['bus.bus']._sendone(
+                                target_partner,
+                                'simple_notification',
+                                {
+                                    'title': '🎉 Fatura ZIP Arşivi Hazır!',
+                                    'message': f'{job.zip_filename} başarıyla indirildi ve ZIP dosyası oluşturuldu.',
+                                    'type': 'success',
+                                    'sticky': True,
+                                }
+                            )
+                            _logger.info("Cron: Bus bildirimi kullanıcıya iletildi (%s)", job.create_uid.name)
+                        except Exception as ne:
+                            _logger.warning("Bus bildirim gönderim hatası: %s", str(ne))
             except Exception as e:
                 _logger.error("Cron hatası (Job ID %d): %s", job.id, str(e))
 
