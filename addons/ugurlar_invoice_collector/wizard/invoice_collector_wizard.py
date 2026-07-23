@@ -96,18 +96,48 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             )
 
         _logger.info("Fatura Tarama: %d adet benzersiz ürün kodu (ItemCode) bulundu. Nebim SP çağrılıyor...", len(item_codes))
+        
+        # İlk birkaç kodu loglayalım (debug)
+        sample_codes = list(item_codes)[:5]
+        _logger.info("Fatura Tarama - Örnek ItemCode'lar: %s", sample_codes)
 
-        # 2. Nebim SP'yi çağır (usp_GetPurchaseInvoices_Ugurlar)
+        # 2. Nebim SP'yi batch'ler halinde çağır (her batch'te max 20 ItemCode)
+        #    Nebim Integrator API uzun parametre string'lerini kırpabilir.
         connector = self.env['odoougurlar.nebim.connector'].sudo()
-        sp_params = [{'Name': 'ItemCode', 'Value': ','.join(list(item_codes))}]
+        all_results = []
+        batch_size = 20
+        code_list = list(item_codes)
         
         try:
-            results = connector.run_proc('usp_GetPurchaseInvoices_Ugurlar', sp_params)
+            for i in range(0, len(code_list), batch_size):
+                batch = code_list[i:i + batch_size]
+                batch_str = ','.join(batch)
+                _logger.info("Fatura Tarama - Batch %d/%d: %d kod gönderiliyor...", 
+                           (i // batch_size) + 1, 
+                           (len(code_list) + batch_size - 1) // batch_size,
+                           len(batch))
+                
+                sp_params = [{'Name': '@ItemCode', 'Value': batch_str}]
+                batch_results = connector.run_proc('usp_GetPurchaseInvoices_Ugurlar', sp_params)
+                
+                if batch_results and isinstance(batch_results, list):
+                    _logger.info("Fatura Tarama - Batch sonucu: %d kayıt", len(batch_results))
+                    all_results.extend(batch_results)
+                else:
+                    _logger.info("Fatura Tarama - Batch sonucu: 0 kayıt (boş veya dict)")
         except Exception as e:
             raise UserError(f'Nebim prosedürü çalıştırılırken hata oluştu: {str(e)}')
 
-        if not results or not isinstance(results, list):
-            raise UserError('Nebim veritabanından bu ürünler için Toptan Alış faturası bulunamadı.')
+        if not all_results:
+            raise UserError(
+                f'Nebim veritabanından bu ürünler için Toptan Alış faturası bulunamadı.\n'
+                f'Toplam {len(item_codes)} adet ItemCode denendi.\n'
+                f'Örnek kodlar: {", ".join(sample_codes)}\n\n'
+                f'Lütfen tbl_EntegraToptanAlisBelge tablosunun güncel olduğundan emin olun\n'
+                f'(sp_UpdateEntegraToptanAlisBelge prosedürünü çalıştırın).'
+            )
+        
+        results = all_results
 
         # 3. Sonuçları tekleştir ve wizard satırlarına yaz
         existing_lines = [(5, 0, 0)]
