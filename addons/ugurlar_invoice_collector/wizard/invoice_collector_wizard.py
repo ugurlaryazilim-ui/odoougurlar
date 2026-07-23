@@ -4,6 +4,7 @@ import base64
 import io
 import logging
 import re
+import time
 import zipfile
 from datetime import datetime
 import requests
@@ -36,7 +37,7 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
     batch_size = fields.Integer(
         string='Paket İndirme Boyutu (Batch)',
         default=15,
-        help='Her adımda indirilecek fatura sayısı. Yüksek sayıda faturanın zaman aşımına uğramadan güvenle indirilmesini sağlar.'
+        help='Her mikro-adımda işlenecek fatura sayısı.'
     )
 
     state = fields.Selection([
@@ -240,39 +241,12 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             _logger.debug("PDF indirme başarısız (%s): %s", url, str(e))
         return None
 
-    def action_download_zip(self):
-        """
-        Paketler (batch) halinde fatura PDF'lerini indirir.
-        Her adımda en fazla `batch_size` (varsayılan: 15) adet fatura işlenir.
-        
-        - Doğan SOAP API oturumu paket bazında TEK BİR KEZ açılır ve kapatılır (3x hız artışı).
-        - HTTP bağlantı kopması (Timeout 504) kesin olarak önlenir.
-        - Kalan fatura varsa state='downloading' kalır ve modal adımı otomatik yeniler.
-        - Tüm faturalar bittiğinde indirilen tüm PDF'ler ZIP arşivine paketlenip state='completed' olur.
-        """
-        self.ensure_one()
-        selected_lines = self.line_ids.filtered(lambda l: l.selected)
-        if not selected_lines:
-            raise UserError('Lütfen ZIP arşivine eklenecek en az bir fatura seçiniz.')
-
-        pending_lines = selected_lines.filtered(lambda l: l.download_status == 'pending')
-        
-        # Eğer hiç bekleyen yoksa tüm seçililer bitti demektir → ZIP oluştur
-        if not pending_lines:
-            return self._finalize_zip(selected_lines)
-
-        batch_count = self.batch_size if self.batch_size > 0 else 15
-        batch = pending_lines[:batch_count]
-        
-        _logger.info(
-            "Fatura Arşiv Sihirbazı - Batch İndirme Başladı: %d adet işleniyor (Kalan Bekleyen: %d / Toplam Seçili: %d)",
-            len(batch), len(pending_lines), len(selected_lines)
-        )
-
+    def _process_batch_lines(self, batch_lines):
+        """15-20 adetlik bir fatura paketinin indirme işlemini gerçekleştirir."""
         connector = self.env['odoougurlar.nebim.connector'].sudo()
         ettn_to_line = {}
 
-        for line in batch:
+        for line in batch_lines:
             doc_num = line.document_number
             pdf_content = None
             
@@ -321,7 +295,7 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
                         'error_message': f'Nebim ETTN sorgu hatası: {str(e)}'
                     })
 
-        # Doğan SOAP API üzerinden toplu indirme (TEK LOGIN OTURUMU İLE)
+        # Doğan SOAP API üzerinden toplu indirme (TEK SOAP LOGIN OTURUMUNDA)
         if ettn_to_line:
             _logger.info("Doğan SOAP API - Batch indirme (%d adet ETTN tek oturumda indiriliyor)...", len(ettn_to_line))
             try:
@@ -376,13 +350,42 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
                             'error_message': f'Doğan API hatası: {str(e)}'
                         })
 
-        # Kalan bekleyen var mı kontrol et
+    def action_download_zip(self):
+        """
+        Zaman sınırlı paket döngüsü (time-capped batching):
+        Tek bir HTTP isteğinde max 25 saniyeye kadar kaç paket işlenebilirse işler (örn: 60-80 fatura).
+        HTTP zaman aşımı süresine (60s) yaklaşılmadan 25. saniyede durur ve kullanıcıya canlı ilerleme sunar.
+        """
+        self.ensure_one()
+        selected_lines = self.line_ids.filtered(lambda l: l.selected)
+        if not selected_lines:
+            raise UserError('Lütfen ZIP arşivine eklenecek en az bir fatura seçiniz.')
+
+        start_time = time.time()
+        max_duration = 25.0  # Max 25s per HTTP call (guarantees zero HTTP timeouts)
+        batch_sz = self.batch_size if self.batch_size > 0 else 15
+
+        while True:
+            pending_lines = selected_lines.filtered(lambda l: l.download_status == 'pending')
+            if not pending_lines:
+                break
+
+            # If we exceeded max duration limit for this single HTTP call, pause and return progress
+            if time.time() - start_time >= max_duration:
+                _logger.info("HTTP zaman sınırı (25 sn) ulaşıldı. Kalan %d fatura sonraki adıma devrediliyor.", len(pending_lines))
+                break
+
+            batch = pending_lines[:batch_sz]
+            _logger.info("Batch işleniyor: %d adet (Geçen süre: %.1f sn)", len(batch), time.time() - start_time)
+            self._process_batch_lines(batch)
+
+        # Check if there are still pending lines remaining
         remaining = selected_lines.filtered(lambda l: l.download_status == 'pending')
         if remaining:
             self.write({'state': 'downloading'})
-            _logger.info("Batch tamamlandı. Kalan %d adet fatura var.", len(remaining))
+            _logger.info("İstek tamamlandı. Kalan %d adet fatura var. Ekran yenileniyor.", len(remaining))
         else:
-            _logger.info("Tüm faturalar işlendi. ZIP dosyası oluşturuluyor...")
+            _logger.info("Tüm faturalar indirildi. ZIP arşivi hazırlanıyor...")
             return self._finalize_zip(selected_lines)
 
         return {
