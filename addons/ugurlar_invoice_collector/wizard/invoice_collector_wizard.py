@@ -210,10 +210,28 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             'target': 'new',
         }
 
+    def _try_download_pdf(self, url, timeout=15):
+        """URL'den PDF içeriğini indirmeyi dener. Başarısızsa None döner."""
+        try:
+            resp = requests.get(url, timeout=timeout)
+            if resp.status_code == 200 and len(resp.content) > 100:
+                content_type = resp.headers.get('Content-Type', '').lower()
+                # HTML sayfası değil, gerçek PDF/binary olduğundan emin ol
+                if 'text/html' not in content_type or resp.content[:5] == b'%PDF-':
+                    return resp.content
+        except Exception as e:
+            _logger.debug("PDF indirme başarısız (%s): %s", url, str(e))
+        return None
+
     def action_download_zip(self):
         """
         Seçili faturaların PDF'lerini Nebim / Doğan E-Dönüşüm servislerinden indirir,
         RAM bellek üzerinde ZIP dosyasına paketler ve indirme bağlantısı sunar.
+        
+        Akış:
+        1. Önce usp_Invoice_EArchieveURL ile e-Arşiv URL'ini dene (giden faturalar)
+        2. Bulunamazsa usp_PurchaseInvoice_EFaturaURL ile ETTN al (gelen e-Faturalar)
+        3. ETTN ile Doğan E-Dönüşüm portalından PDF'i indir
         """
         self.ensure_one()
         selected_lines = self.line_ids.filtered(lambda l: l.selected)
@@ -229,7 +247,7 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
                 doc_num = line.document_number
                 pdf_content = None
                 
-                # 1. Nebim'den E-Fatura / E-Arşiv URL'ini al
+                # ── Yol 1: e-Arşiv URL'ini dene (giden satış faturaları) ──
                 try:
                     params = [{'Name': 'DocumentNumber', 'Value': doc_num}]
                     res = connector.run_proc('usp_Invoice_EArchieveURL', params)
@@ -238,26 +256,66 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
                     if res and isinstance(res, list) and len(res) > 0:
                         invoice_url = res[0].get('InvoiceURL', '') if isinstance(res[0], dict) else ''
 
-                    # 2. PDF içeriğini indir
                     if invoice_url:
                         line.invoice_url = invoice_url
-                        # Doğan E-Dönüşüm URL'ini direkt PDF çevirme kontrolü
+                        # Doğan E-Dönüşüm: view-earchive → pdf-earchive dönüşümü
                         pdf_url = invoice_url
                         if 'view-earchive' in pdf_url:
                             pdf_url = pdf_url.replace('view-earchive', 'pdf-earchive')
                         
-                        resp = requests.get(pdf_url, timeout=15)
-                        if resp.status_code == 200 and len(resp.content) > 100:
-                            pdf_content = resp.content
+                        pdf_content = self._try_download_pdf(pdf_url)
+                        if pdf_content:
+                            _logger.info("e-Arşiv PDF başarıyla indirildi: %s", doc_num)
                 except Exception as e:
-                    _logger.warning("Fatura PDF indirme uyarısı (%s): %s", doc_num, str(e))
+                    _logger.warning("e-Arşiv PDF uyarısı (%s): %s", doc_num, str(e))
 
-                # 3. Eğer URL'den çekilemediyse fallback varsayılan PDF etiketi oluştur
+                # ── Yol 2: e-Fatura (gelen alış faturaları) — ETTN ile dene ──
                 if not pdf_content:
-                    # Alternatif istek veya boş geçmeme bilgisi
+                    try:
+                        params = [{'Name': 'DocumentNumber', 'Value': doc_num}]
+                        res = connector.run_proc('usp_PurchaseInvoice_EFaturaURL', params)
+                        
+                        ettn = ''
+                        if res and isinstance(res, list) and len(res) > 0:
+                            ettn = str(res[0].get('ETTN', '')).strip() if isinstance(res[0], dict) else ''
+                        
+                        if ettn:
+                            _logger.info("e-Fatura ETTN bulundu (%s): %s", doc_num, ettn)
+                            line.invoice_url = f"ETTN: {ettn}"
+                            
+                            # Doğan E-Dönüşüm portal URL kalıplarını dene
+                            dogan_urls = [
+                                f"https://portal.dogandonusum.com/einvoice/view-einvoice/view-pdf-einvoice.xhtml?uuid={ettn}",
+                                f"https://portal.dogandonusum.com/fatura/pdf/download?ettn={ettn}",
+                                f"https://portal.dogandonusum.com/fatura/pdf/{ettn}",
+                                f"https://portal.dogandonusum.com/einvoice/pdf-einvoice/{ettn}",
+                            ]
+                            
+                            for try_url in dogan_urls:
+                                pdf_content = self._try_download_pdf(try_url)
+                                if pdf_content:
+                                    _logger.info("e-Fatura PDF indirildi (%s) URL: %s", doc_num, try_url)
+                                    break
+                            
+                            if not pdf_content:
+                                _logger.warning(
+                                    "e-Fatura ETTN bulundu ancak PDF indirilemedi (%s). "
+                                    "ETTN: %s — Portal erişimi gerekiyor olabilir.", 
+                                    doc_num, ettn
+                                )
+                        else:
+                            _logger.warning("e-Fatura ETTN bulunamadı: %s", doc_num)
+                    except Exception as e:
+                        _logger.warning("e-Fatura ETTN sorgu hatası (%s): %s", doc_num, str(e))
+
+                # ── Sonuç: PDF bulunamadıysa hata yaz ──
+                if not pdf_content:
                     line.write({
                         'download_status': 'error',
-                        'error_message': 'PDF bağlantısı veya ikili verisi alınamadı.'
+                        'error_message': (
+                            'PDF indirilemedi. '
+                            + (f'ETTN: {ettn}' if 'ettn' in dir() and ettn else 'ETTN bulunamadı.')
+                        )
                     })
                     continue
 
@@ -270,7 +328,12 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
                 success_count += 1
 
         if success_count == 0:
-            raise UserError('Seçilen faturaların hiçbirine ait PDF dosyası indirilemedi. Lütfen bağlantıları kontrol edin.')
+            raise UserError(
+                'Seçilen faturaların hiçbirine ait PDF dosyası indirilemedi.\n\n'
+                'Bu faturalar e-Fatura tipinde olabilir. Doğan E-Dönüşüm portalından '
+                'manuel olarak indirmeniz gerekebilir.\n\n'
+                'Fatura ETTN bilgileri için satır detaylarına bakınız.'
+            )
 
         # ZIP Dosya İsmi: Marka-UrunGrubu-YYYYMMDD_HHMMSS.zip
         brand_name = self.brand_id.name or 'Tumu'
