@@ -409,7 +409,7 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             'tag': 'display_notification',
             'params': {
                 'title': 'Arka Planda İndirme Başlatıldı 🚀',
-                'message': 'Faturalar arka planda otomatik indirilmeye başlandı. Tamamlandığında ekranınızda bildirim görünecektir.',
+                'message': 'Faturalar arka planda otomatik indirilmeye başlandı. Tamamlandığında tıklanabilir bildirim alacaksınız.',
                 'type': 'success',
                 'sticky': True,
             }
@@ -419,7 +419,7 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
     def _cron_process_download_jobs(self):
         """
         Arka plan Cron İşleyicisi: 'downloading' durumundaki fatura arşivleme işlerini tarar,
-        arka planda indirir, ZIP oluşturur ve işi başlatan kullanıcıya canlı Bus bildirimi (simple_notification) gönderir.
+        arka planda indirir, ZIP oluşturur ve işi başlatan kullanıcıya tıklanabilir canlı Bus bildirimi & mesajı gönderir.
         """
         jobs = self.search([('state', '=', 'downloading')], limit=5)
         for job in jobs:
@@ -439,23 +439,45 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
                     job._finalize_zip(job.line_ids.filtered(lambda l: l.selected))
                     _logger.info("Cron: Job ID %d tamamlandı! ZIP oluşturuldu: %s", job.id, job.zip_filename)
                     
-                    # Doğru kullanıcı partner ID'sini (create_uid) bulup bildirim gönder
                     target_partner = job.create_uid.partner_id
                     if target_partner:
                         try:
+                            # 1. Tıklanabilir canlı Bus pop-up bildirimi (Tıklayınca doğrudan bu ZIP formunu açar)
                             self.env['bus.bus']._sendone(
                                 target_partner,
                                 'simple_notification',
                                 {
                                     'title': '🎉 Fatura ZIP Arşivi Hazır!',
-                                    'message': f'{job.zip_filename} başarıyla indirildi ve ZIP dosyası oluşturuldu.',
+                                    'message': f'{job.zip_filename} başarıyla indirildi. Tıklayarak arşivi indirebilirsiniz.',
                                     'type': 'success',
                                     'sticky': True,
+                                    'action': {
+                                        'type': 'ir.actions.act_window',
+                                        'name': job.zip_filename or 'Fatura Arşivi',
+                                        'res_model': 'ugurlar.invoice.collector',
+                                        'res_id': job.id,
+                                        'views': [[False, 'form']],
+                                        'target': 'current',
+                                    }
                                 }
                             )
-                            _logger.info("Cron: Bus bildirimi kullanıcıya iletildi (%s)", job.create_uid.name)
+                            _logger.info("Cron: Bus bildirimi ve yönlendirme linki kullanıcıya iletildi (%s)", job.create_uid.name)
                         except Exception as ne:
                             _logger.warning("Bus bildirim gönderim hatası: %s", str(ne))
+
+                        try:
+                            # 2. Odoo Bildirim Kutusu (Zil İkonu / Discuss Inbox) Mesajı
+                            target_partner.message_post(
+                                body=f"<b>🎉 Fatura ZIP Arşivi Hazır!</b><br/>"
+                                     f"<b>Dosya:</b> {job.zip_filename}<br/>"
+                                     f"<b>Marka / Ürün Grubu:</b> {job.brand_id.name or 'Tümü'} / {job.product_group_id.name or 'Tümü'}<br/>"
+                                     f"<b>İndirilen Fatura Sayısı:</b> {job.processed_count} adet",
+                                subject="Fatura ZIP Arşivi Hazırlandı",
+                                message_type="notification",
+                                subtype_xmlid="mail.mt_comment",
+                            )
+                        except Exception as me:
+                            _logger.debug("Partner message_post hatası: %s", str(me))
             except Exception as e:
                 _logger.error("Cron hatası (Job ID %d): %s", job.id, str(e))
 

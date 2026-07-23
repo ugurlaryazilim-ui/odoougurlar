@@ -27,7 +27,7 @@
             <field name="name">ugurlar.invoice.collector.list</field>
             <field name="model">ugurlar.invoice.collector</field>
             <field name="arch" type="xml">
-                <list string="Toptan Alış Fatura Arşivleri" default_order="create_date desc">
+                <list string="Toptan Alış Fatura Arşivlerim" default_order="create_date desc">
                     <field name="create_date" string="Oluşturulma Tarihi"/>
                     <field name="brand_id"/>
                     <field name="product_group_id"/>
@@ -93,7 +93,7 @@
                             </div>
                             <div style="margin-top: 4px; color: #555;">
                                 • <strong>⚡ Canlı İndir ve ZIP Yap:</strong> Sayfada canlı olarak sırayla paketleri indirir, tıklama gerektirmeden otomatik akar ve bittiğinde ZIP'i indirir.<br/>
-                                • <strong>🚀 Arka Planda İndir (Cron):</strong> Ekranı kapatıp Odoo'da diğer işlerinize devam etmenizi sağlar; bittiğinde ekranınıza yeşil bildirim gelir.
+                                • <strong>🚀 Arka Planda İndir (Cron):</strong> Ekranı kapatıp Odoo'da diğer işlerinize devam etmenizi sağlar; bittiğinde ekranınıza tıklanabilir bildirim gelir.
                             </div>
                         </div>
 
@@ -135,19 +135,40 @@
             </field>
         </record>
 
-        <!-- Action to open wizard/history -->
+        <!-- Action 1: Open Jobs History List -->
         <record id="action_ugurlar_invoice_collector" model="ir.actions.act_window">
-            <field name="name">Toptan Alış Fatura Arşivi (ZIP)</field>
+            <field name="name">Toptan Alış Fatura Arşivlerim</field>
             <field name="res_model">ugurlar.invoice.collector</field>
             <field name="view_mode">list,form</field>
             <field name="target">current</field>
         </record>
 
-        <!-- Menuitem -->
+        <!-- Action 2: Open New Archive Form directly -->
+        <record id="action_ugurlar_invoice_collector_new" model="ir.actions.act_window">
+            <field name="name">Yeni Fatura Arşivi Oluştur</field>
+            <field name="res_model">ugurlar.invoice.collector</field>
+            <field name="view_mode">form</field>
+            <field name="target">new</field>
+        </record>
+
+        <!-- Root Menuitem -->
         <menuitem id="menu_ugurlar_invoice_collector_root" 
                   name="Fatura Arşiv Sihirbazı" 
                   parent="odoougurlar.menu_nebim_root" 
-                  action="action_ugurlar_invoice_collector" 
                   sequence="50"/>
+
+        <!-- Submenu 1: History -->
+        <menuitem id="menu_ugurlar_invoice_collector_history" 
+                  name="📁 Geçmiş Arşivlerim (ZIP)" 
+                  parent="menu_ugurlar_invoice_collector_root" 
+                  action="action_ugurlar_invoice_collector" 
+                  sequence="10"/>
+
+        <!-- Submenu 2: Create New -->
+        <menuitem id="menu_ugurlar_invoice_collector_new_sub" 
+                  name="➕ Yeni Arşiv Oluştur" 
+                  parent="menu_ugurlar_invoice_collector_root" 
+                  action="action_ugurlar_invoice_collector_new" 
+                  sequence="20"/>
     </data>
 </odoo>
