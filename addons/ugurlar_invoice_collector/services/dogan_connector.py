@@ -110,7 +110,7 @@ class DoganEInvoiceConnector:
             _logger.warning("Doğan API Logout error: %s", str(e))
 
     def _get_invoice_content(self, session_id, ettn):
-        # Try GetInvoiceWithType first (without TYPE=PDF, get raw content)
+        # 1. Try GetInvoiceWithTypeRequest (with READ_INCLUDED before DIRECTION according to XSD schema)
         envelope = f"""<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:wsdl="http://schemas.i2i.com/ei/wsdl">
    <soapenv:Body>
       <wsdl:GetInvoiceWithTypeRequest>
@@ -120,8 +120,8 @@ class DoganEInvoiceConnector:
          <INVOICE_SEARCH_KEY>
             <UUID>{ettn}</UUID>
             <TYPE>PDF</TYPE>
-            <DIRECTION>INBOUND</DIRECTION>
             <READ_INCLUDED>true</READ_INCLUDED>
+            <DIRECTION>INBOUND</DIRECTION>
          </INVOICE_SEARCH_KEY>
          <HEADER_ONLY>N</HEADER_ONLY>
       </wsdl:GetInvoiceWithTypeRequest>
@@ -136,35 +136,63 @@ class DoganEInvoiceConnector:
                 timeout=30
             )
             
-            _logger.info("Doğan API GetInvoice response status: %s, body (first 2000): %s",
+            _logger.info("Doğan API GetInvoiceWithType response status: %s, body (first 2000): %s",
                          response.status_code, response.text[:2000])
             
-            if response.status_code != 200:
-                # Try alternative: GetInvoice (without WithType)
-                _logger.info("GetInvoiceWithType failed, trying GetInvoice...")
-                return self._get_invoice_content_v2(session_id, ettn)
+            if response.status_code == 200:
+                content = self._parse_content_node(response.content)
+                if content:
+                    return content
             
-            root = ET.fromstring(response.content)
-            
-            # Namespace-agnostic search for CONTENT element
-            content_node = None
-            for elem in root.iter():
-                if elem.tag.endswith('}CONTENT') or elem.tag == 'CONTENT':
-                    if elem.text:
-                        content_node = elem
-                        break
-            
-            if content_node is not None and content_node.text:
-                return base64.b64decode(content_node.text)
-            else:
-                _logger.warning("Doğan API GetInvoice: CONTENT element not found or empty for ETTN %s", ettn)
-                return None
+            # If 1 failed or returned empty content, try GetInboxInvoiceWithType
+            _logger.info("GetInvoiceWithType failed or empty, trying GetInboxInvoiceWithType...")
+            return self._get_invoice_content_v2(session_id, ettn)
         except Exception as e:
             _logger.error("Doğan API GetInvoice error for ETTN %s: %s", ettn, str(e))
-            return None
+            return self._get_invoice_content_v2(session_id, ettn)
 
     def _get_invoice_content_v2(self, session_id, ettn):
-        """Fallback: Use GetInvoice instead of GetInvoiceWithType"""
+        """Fallback 1: Try GetInboxInvoiceWithType for INBOX (gelen) invoices"""
+        envelope = f"""<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:wsdl="http://schemas.i2i.com/ei/wsdl">
+   <soapenv:Body>
+      <wsdl:GetInboxInvoiceWithTypeRequest>
+         <REQUEST_HEADER>
+            <SESSION_ID>{session_id}</SESSION_ID>
+         </REQUEST_HEADER>
+         <INVOICE_SEARCH_KEY>
+            <UUID>{ettn}</UUID>
+            <TYPE>PDF</TYPE>
+            <READ_INCLUDED>true</READ_INCLUDED>
+         </INVOICE_SEARCH_KEY>
+         <HEADER_ONLY>N</HEADER_ONLY>
+      </wsdl:GetInboxInvoiceWithTypeRequest>
+   </soapenv:Body>
+</soapenv:Envelope>"""
+        
+        try:
+            response = requests.post(
+                self.efatura_url,
+                data=envelope.encode('utf-8'),
+                headers={'Content-Type': 'text/xml;charset=UTF-8'},
+                timeout=30
+            )
+            
+            _logger.info("Doğan API GetInboxInvoiceWithType response status: %s, body (first 2000): %s",
+                         response.status_code, response.text[:2000])
+            
+            if response.status_code == 200:
+                content = self._parse_content_node(response.content)
+                if content:
+                    return content
+            
+            _logger.info("GetInboxInvoiceWithType failed or empty, trying GetInvoice (raw)...")
+            return self._get_invoice_content_v3(session_id, ettn)
+        except Exception as e:
+            _logger.error("Doğan API GetInboxInvoiceWithType error for ETTN %s: %s", ettn, str(e))
+            return self._get_invoice_content_v3(session_id, ettn)
+
+    def _get_invoice_content_v3(self, session_id, ettn):
+        """Fallback 2: Use simple GetInvoiceRequest with READ_INCLUDED before DIRECTION"""
         envelope = f"""<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:wsdl="http://schemas.i2i.com/ei/wsdl">
    <soapenv:Body>
       <wsdl:GetInvoiceRequest>
@@ -173,6 +201,7 @@ class DoganEInvoiceConnector:
          </REQUEST_HEADER>
          <INVOICE_SEARCH_KEY>
             <UUID>{ettn}</UUID>
+            <READ_INCLUDED>true</READ_INCLUDED>
             <DIRECTION>INBOUND</DIRECTION>
          </INVOICE_SEARCH_KEY>
          <HEADER_ONLY>N</HEADER_ONLY>
@@ -188,29 +217,30 @@ class DoganEInvoiceConnector:
                 timeout=30
             )
             
-            _logger.info("Doğan API GetInvoice v2 response status: %s, body (first 2000): %s",
+            _logger.info("Doğan API GetInvoice v3 response status: %s, body (first 2000): %s",
                          response.status_code, response.text[:2000])
             
-            if response.status_code != 200:
-                return None
-            
-            root = ET.fromstring(response.content)
-            
+            if response.status_code == 200:
+                return self._parse_content_node(response.content)
+            return None
+        except Exception as e:
+            _logger.error("Doğan API GetInvoice v3 error for ETTN %s: %s", ettn, str(e))
+            return None
+
+    def _parse_content_node(self, xml_bytes):
+        try:
+            root = ET.fromstring(xml_bytes)
             content_node = None
             for elem in root.iter():
                 if elem.tag.endswith('}CONTENT') or elem.tag == 'CONTENT':
                     if elem.text:
                         content_node = elem
                         break
-            
             if content_node is not None and content_node.text:
                 return base64.b64decode(content_node.text)
-            else:
-                _logger.warning("Doğan API GetInvoice v2: CONTENT not found for ETTN %s", ettn)
-                return None
         except Exception as e:
-            _logger.error("Doğan API GetInvoice v2 error for ETTN %s: %s", ettn, str(e))
-            return None
+            _logger.error("Error parsing CONTENT node from SOAP response: %s", str(e))
+        return None
 
     def get_invoice_pdf(self, ettn):
         """
