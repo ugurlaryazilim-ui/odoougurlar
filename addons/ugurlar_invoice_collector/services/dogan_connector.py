@@ -57,9 +57,23 @@ class DoganEInvoiceConnector:
             )
             response.raise_for_status()
             
+            _logger.info("Doğan API Login response status: %s, body (first 2000): %s", 
+                         response.status_code, response.text[:2000])
+            
             root = ET.fromstring(response.content)
+            
+            # Try with namespace first
             session_node = root.find('.//wsdl:SESSION_ID', self.namespaces)
-            if session_node is not None:
+            
+            # Fallback: try namespace-agnostic search
+            if session_node is None:
+                for elem in root.iter():
+                    if elem.tag.endswith('}SESSION_ID') or elem.tag == 'SESSION_ID':
+                        session_node = elem
+                        break
+            
+            if session_node is not None and session_node.text:
+                _logger.info("Doğan API Login başarılı, SESSION_ID: %s...", session_node.text[:20])
                 return session_node.text
             else:
                 _logger.error("Doğan API Login failed: SESSION_ID not found in response.")
