@@ -129,6 +129,46 @@ class ResConfigSettings(models.TransientModel):
     )
 
     # -----------------------------------------------------------------
+    #  Fatura Arşivleme & e-Dönüşüm Prosedür ve Tablo Ayarları
+    # -----------------------------------------------------------------
+    nebim_sp_purchase_invoices = fields.Char(
+        string='Toptan Alış Fatura SP',
+        config_parameter='odoougurlar.nebim_sp_purchase_invoices',
+        default='usp_GetPurchaseInvoices_Ugurlar',
+        help='Toptan Alış faturalarını ve ürün-belge eşleşmelerini getiren prosedür',
+    )
+    nebim_table_wholesale_invoices = fields.Char(
+        string='Toptan Alış Önbellek Tablosu',
+        config_parameter='odoougurlar.nebim_table_wholesale_invoices',
+        default='tbl_EntegraToptanAlisBelge',
+        help='Toptan Alış belgelerini saklayan Nebim veritabanı önbellek tablosu',
+    )
+    nebim_sp_update_wholesale_invoices = fields.Char(
+        string='Toptan Alış Önbellek Güncelleme SP',
+        config_parameter='odoougurlar.nebim_sp_update_wholesale_invoices',
+        default='sp_UpdateEntegraToptanAlisBelge',
+        help='Toptan Alış önbellek tablosunu güncelleyen prosedür',
+    )
+    nebim_sp_earchive_url = fields.Char(
+        string='e-Arşiv URL SP',
+        config_parameter='odoougurlar.nebim_sp_earchive_url',
+        default='usp_Invoice_EArchieveURL',
+        help='Giden satış faturalarının e-Arşiv URL\'ini getiren prosedür',
+    )
+    nebim_sp_efatura_url = fields.Char(
+        string='e-Fatura ETTN SP',
+        config_parameter='odoougurlar.nebim_sp_efatura_url',
+        default='usp_PurchaseInvoice_EFaturaURL',
+        help='Gelen alış faturalarının e-Fatura ETTN (UUID) ve portal bilgisini getiren prosedür',
+    )
+    dogan_portal_url = fields.Char(
+        string='Doğan E-Dönüşüm Portal API',
+        config_parameter='odoougurlar.dogan_portal_url',
+        default='https://connector.doganedonusum.com/EFaturaOIB',
+        help='Doğan E-Dönüşüm SOAP entegratör PDF ve e-Fatura servis URL adresi',
+    )
+
+    # -----------------------------------------------------------------
     #  Nebim Gönderim Ayarları (Cari / Sipariş / Fatura)
     # -----------------------------------------------------------------
     nebim_sync_customer_enabled = fields.Boolean(

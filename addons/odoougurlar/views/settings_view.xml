@@ -101,6 +101,38 @@
                                 </div>
                             </setting>
                         </block>
+                        <block title="Fatura Arşivleme &amp; e-Dönüşüm Entegrasyon Ayarları" name="nebim_invoice_collector_settings">
+                            <setting string="Toptan Alış Fatura SP" help="Toptan Alış faturalarını ve ürün-belge eşleşmelerini getiren prosedür">
+                                <div class="content-group">
+                                    <field name="nebim_sp_purchase_invoices" placeholder="usp_GetPurchaseInvoices_Ugurlar"/>
+                                </div>
+                            </setting>
+                            <setting string="Toptan Alış Önbellek Tablosu" help="Toptan Alış belgelerini saklayan Nebim veritabanı önbellek tablosu">
+                                <div class="content-group">
+                                    <field name="nebim_table_wholesale_invoices" placeholder="tbl_EntegraToptanAlisBelge"/>
+                                </div>
+                            </setting>
+                            <setting string="Toptan Alış Önbellek Güncelleme SP" help="Toptan Alış önbellek tablosunu güncelleyen prosedür">
+                                <div class="content-group">
+                                    <field name="nebim_sp_update_wholesale_invoices" placeholder="sp_UpdateEntegraToptanAlisBelge"/>
+                                </div>
+                            </setting>
+                            <setting string="e-Arşiv URL SP" help="Giden satış faturalarının e-Arşiv URL'ini getiren prosedür">
+                                <div class="content-group">
+                                    <field name="nebim_sp_earchive_url" placeholder="usp_Invoice_EArchieveURL"/>
+                                </div>
+                            </setting>
+                            <setting string="e-Fatura ETTN SP" help="Gelen alış faturalarının e-Fatura ETTN (UUID) ve portal bilgisini getiren prosedür">
+                                <div class="content-group">
+                                    <field name="nebim_sp_efatura_url" placeholder="usp_PurchaseInvoice_EFaturaURL"/>
+                                </div>
+                            </setting>
+                            <setting string="Doğan E-Dönüşüm API URL" help="Doğan E-Dönüşüm SOAP entegratör PDF ve e-Fatura servis URL adresi">
+                                <div class="content-group">
+                                    <field name="dogan_portal_url" placeholder="https://connector.doganedonusum.com/EFaturaOIB"/>
+                                </div>
+                            </setting>
+                        </block>
                         <block title="Nebim Gönderim Ayarları" name="nebim_dispatch">
                             <setting string="Cari İşle" help="Açık olduğunda pazaryeri siparişlerinden Nebim'e cari (müşteri kartı) gönderilir">
                                 <field name="nebim_sync_customer_enabled"/>
