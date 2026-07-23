@@ -56,6 +56,21 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
         for rec in self:
             rec.total_found_invoices = len(rec.line_ids)
             rec.selected_invoices_count = len(rec.line_ids.filtered(lambda l: l.selected))
+    @staticmethod
+    def _extract_item_code(variant_sku):
+        """
+        Varyant SKU'sundan ana ürün kodunu (Nebim ItemCode) çıkarır.
+        
+        Varyant formatı: {ItemCode}-{RenkKodu}-{Beden}
+        Örnek: '2W22CT1333PR-0138-M' → '2W22CT1333PR'
+                '2SCT1073FX-0065-XL'  → '2SCT1073FX'
+                '2SMORGEN3FX'         → '2SMORGEN3FX'  (zaten ana kod)
+        """
+        # Regex: Son kısımdaki -RenkKodu(3-4 digit)-Beden kalıbını bul ve kaldır
+        match = re.match(r'^(.+)-\d{3,4}-.+$', variant_sku)
+        if match:
+            return match.group(1)
+        return variant_sku  # Zaten ana kod formatında
 
     def action_scan_invoices(self):
         """
@@ -80,14 +95,18 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
 
         item_codes = set()
         for tmpl in templates:
-            # Varyantlardan default_code al
+            # Varyant SKU'larından ana ürün kodunu (ItemCode) çıkar
+            # Varyant formatı: {ItemCode}-{RenkKodu}-{Beden}  örn: 2W22CT1333PR-0138-M
+            # Nebim SP'ye sadece ana ItemCode (2W22CT1333PR) lazım
             for variant in tmpl.product_variant_ids:
                 code = variant.default_code or tmpl.default_code
                 if code:
-                    item_codes.add(code.strip())
+                    main_code = self._extract_item_code(code.strip())
+                    item_codes.add(main_code)
             # Template'in kendi default_code'unu da kontrol et
             if not tmpl.product_variant_ids and tmpl.default_code:
-                item_codes.add(tmpl.default_code.strip())
+                main_code = self._extract_item_code(tmpl.default_code.strip())
+                item_codes.add(main_code)
         
         if not item_codes:
             raise UserError(
@@ -95,7 +114,7 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
                 'Lütfen ürünlerin Dahili Referans (default_code) alanlarını kontrol edin.'
             )
 
-        _logger.info("Fatura Tarama: %d adet benzersiz ürün kodu (ItemCode) bulundu. Nebim SP çağrılıyor...", len(item_codes))
+        _logger.info("Fatura Tarama: %d adet benzersiz ana ürün kodu (ItemCode) bulundu. Nebim SP çağrılıyor...", len(item_codes))
         
         # İlk birkaç kodu loglayalım (debug)
         sample_codes = list(item_codes)[:5]
