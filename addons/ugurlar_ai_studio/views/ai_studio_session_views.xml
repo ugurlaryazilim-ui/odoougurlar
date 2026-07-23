@@ -6,9 +6,9 @@
         <field name="model">ai.studio.session</field>
         <field name="arch" type="xml">
             <list>
-                <field name="name"/>
-                <field name="product_id"/>
-                <field name="product_barcode" optional="show"/>
+                <field name="name" width="140px"/>
+                <field name="product_id" width="380px"/>
+                <field name="product_barcode" optional="show" width="150px"/>
                 <field name="state" widget="badge"/>
                 <field name="user_id" widget="many2one_avatar_user"/>
                 <field name="create_date"/>
