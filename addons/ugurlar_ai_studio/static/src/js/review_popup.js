@@ -219,6 +219,9 @@ async function openReviewPopup(sessionId) {
                             <button class="ais-rp-btn ais-rp-btn-star ${item.is_primary ? 'active' : ''}" id="ais-rp-star">
                                 ⭐ Ana Görsel
                             </button>
+                            <button class="ais-rp-btn ais-rp-btn-unapprove" id="ais-rp-unapprove" style="background:#f59e0b; color:white;">
+                                ↩️ Onayı Geri Al
+                            </button>
                         ` : `
                             <button class="ais-rp-btn ais-rp-btn-reject" id="ais-rp-reject">
                                 ❌ Reddet
@@ -279,6 +282,7 @@ async function openReviewPopup(sessionId) {
         // Event handlers
         document.getElementById('ais-rp-close')?.addEventListener('click', close);
         document.getElementById('ais-rp-approve')?.addEventListener('click', approve);
+        document.getElementById('ais-rp-unapprove')?.addEventListener('click', unapprove);
         document.getElementById('ais-rp-star')?.addEventListener('click', () => {
             // Önce tüm item'ların primary'sini kaldır, sonra bu item'ı primary yap
             items.forEach(it => it.is_primary = false);
@@ -297,6 +301,14 @@ async function openReviewPopup(sessionId) {
         document.getElementById('ais-rp-modal-close')?.addEventListener('click', () => { showRejectModal = false; render(); });
         document.getElementById('ais-rp-submit-reject')?.addEventListener('click', submitReject);
         document.getElementById('ais-rp-retry')?.addEventListener('click', retryFailed);
+
+        // Metin yazılırken ana değişkene anlık kaydet (polling render'ında silinmesin)
+        const promptInput = document.getElementById('ais-rp-revision-prompt');
+        if (promptInput) {
+            promptInput.addEventListener('input', (e) => {
+                revisionPrompt = e.target.value;
+            });
+        }
 
         // Tab clicks
         overlay.querySelectorAll('.ais-rp-tab').forEach(tab => {
@@ -361,6 +373,24 @@ async function openReviewPopup(sessionId) {
             render();
         } catch(e) {
             showToast('Onay hatası: ' + e.message);
+            render();
+        }
+    }
+
+    async function unapprove() {
+        const item = items[currentIndex];
+        const btn = document.getElementById('ais-rp-unapprove');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳...'; }
+
+        try {
+            await _jsonRpc('/ai_studio/unapprove_generation', {
+                generation_id: item.id,
+            });
+            item.is_approved = false;
+            item.is_primary = false;
+            render();
+        } catch(e) {
+            showToast('Onay geri alma hatası: ' + e.message);
             render();
         }
     }
@@ -489,7 +519,10 @@ async function openReviewPopup(sessionId) {
                 }
 
                 if (updated) {
-                    render();
+                    // Kullanıcı red modalında yazı yazıyorsa re-render'ı ertele (girdiyi ve odağı sıfırlamasın)
+                    if (!showRejectModal) {
+                        render();
+                    }
                 }
 
                 // Hala pending var mı kontrol et

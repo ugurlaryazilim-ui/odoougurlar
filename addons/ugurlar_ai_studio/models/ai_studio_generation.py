@@ -139,6 +139,18 @@ class AiStudioGeneration(models.Model):
                 self.source_photo_id.image_processed = self.generated_image
             return self.action_next_generation()
 
+    def action_unapprove(self):
+        """Üretim onayını geri al."""
+        for gen in self:
+            gen.is_approved = False
+            gen.is_primary = False
+            gen.session_id.message_post(
+                body=_('%(type)s görselinin onayı geri alındı (v%(ver)s).') % {
+                    'type': dict(gen._fields['photo_type'].selection).get(gen.photo_type, ''),
+                    'ver': gen.revision_number,
+                },
+            )
+
     def action_reject(self):
         """Red dialog'u aç — revize için."""
         self.ensure_one()
