@@ -6,7 +6,7 @@ import logging
 import re
 import time
 import zipfile
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import requests
 
 from odoo import models, fields, api
@@ -105,13 +105,15 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
         """
         Tüm tarih formatlarını (Microsoft .NET JSON Date /Date(ms)/, ISO, YYYY-MM-DD, DD.MM.YYYY, YYYYMMDD)
         ve Python date/datetime nesnelerini Odoo Date nesnesine dönüştürür.
+        Türkiye saat dilimi (UTC+3 / TRT) farkı hesaba katılarak tam Nebim gün eşlemesi sağlanır.
         """
         if not doc_date_raw:
             return False
         
         # 1. Doğrudan datetime veya date nesnesi
         if isinstance(doc_date_raw, datetime):
-            return doc_date_raw.date()
+            dt_tr = doc_date_raw + timedelta(hours=3) if doc_date_raw.hour >= 21 or doc_date_raw.hour == 0 else doc_date_raw
+            return dt_tr.date()
         if isinstance(doc_date_raw, date):
             return doc_date_raw
 
@@ -124,27 +126,36 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             match_ms = re.search(r'/Date\((\d+)(?:[+-]\d+)?\)/', val_str)
             if match_ms:
                 ms = int(match_ms.group(1))
-                dt = datetime.fromtimestamp(ms / 1000.0)
-                return dt.date()
+                # .NET UTC timestamp'ine Türkiye saati farkı (+3 saat = 10800 sn) eklenir
+                dt_utc = datetime.utcfromtimestamp(ms / 1000.0)
+                dt_tr = dt_utc + timedelta(hours=3)
+                return dt_tr.date()
 
-            # 3. ISO formatı: '2026-07-02T00:00:00' veya '2026-07-02 00:00:00' veya '2026-07-02'
-            if 'T' in val_str:
-                val_str = val_str.split('T')[0]
-            elif ' ' in val_str:
-                val_str = val_str.split(' ')[0]
+            # 3. Saat içeren ISO / String formatları (örn: '2026-06-02T21:00:00')
+            if 'T' in val_str or ' ' in val_str:
+                try:
+                    dt_parsed = fields.Datetime.from_string(val_str)
+                    if dt_parsed:
+                        if dt_parsed.hour >= 21:
+                            dt_parsed = dt_parsed + timedelta(hours=3)
+                        return dt_parsed.date()
+                except Exception:
+                    pass
+                val_str = val_str.replace('T', ' ').split(' ')[0]
 
+            # 4. Standart YYYY-MM-DD ISO formatı
             match_iso = re.search(r'(\d{4})[./-](\d{2})[./-](\d{2})', val_str)
             if match_iso:
                 year, month, day = match_iso.groups()
                 return fields.Date.from_string(f"{year}-{month}-{day}")
 
-            # 4. Türkçe format: '02.07.2026' veya '02/07/2026'
+            # 5. Türkçe format: '02.07.2026' veya '02/07/2026'
             match_tr = re.search(r'(\d{2})[./-](\d{2})[./-](\d{4})', val_str)
             if match_tr:
                 day, month, year = match_tr.groups()
                 return fields.Date.from_string(f"{year}-{month}-{day}")
 
-            # 5. YYYYMMDD formatı: '20260702'
+            # 6. YYYYMMDD formatı: '20260702'
             if len(val_str) == 8 and val_str.isdigit():
                 year = val_str[:4]
                 month = val_str[4:6]
