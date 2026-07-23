@@ -65,23 +65,37 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
         """
         self.ensure_one()
         
-        # 1. Filtrelere uygun ürünleri bul
-        domain = []
+        # 1. Filtrelere uygun ürün şablonlarını bul (template üzerinden arama — tek varyantlı ürünleri de yakalar)
+        template_domain = []
         if self.brand_id:
-            domain.append(('product_template_attribute_value_ids.product_attribute_value_id', '=', self.brand_id.id))
+            template_domain.append(('attribute_line_ids.value_ids', '=', self.brand_id.id))
         if self.product_group_id:
-            domain.append(('product_template_attribute_value_ids.product_attribute_value_id', '=', self.product_group_id.id))
+            template_domain.append(('attribute_line_ids.value_ids', '=', self.product_group_id.id))
 
-        products = self.env['product.product'].search(domain)
+        if not template_domain:
+            raise UserError('Lütfen en az bir filtre kriteri (Marka veya Ürün Grubu) seçiniz.')
+
+        templates = self.env['product.template'].search(template_domain)
+        _logger.info("Fatura Tarama: %d adet ürün şablonu bulundu.", len(templates))
+
         item_codes = set()
-        for p in products:
-            if p.default_code:
-                item_codes.add(p.default_code.strip())
+        for tmpl in templates:
+            # Varyantlardan default_code al
+            for variant in tmpl.product_variant_ids:
+                code = variant.default_code or tmpl.default_code
+                if code:
+                    item_codes.add(code.strip())
+            # Template'in kendi default_code'unu da kontrol et
+            if not tmpl.product_variant_ids and tmpl.default_code:
+                item_codes.add(tmpl.default_code.strip())
         
         if not item_codes:
-            raise UserError('Seçilen filtrelerle eşleşen Odoo ürünü (default_code / ItemCode) bulunamadı.')
+            raise UserError(
+                f'{len(templates)} adet ürün şablonu bulundu ama hiçbirinin ItemCode (default_code) alanı dolu değil.\n'
+                'Lütfen ürünlerin Dahili Referans (default_code) alanlarını kontrol edin.'
+            )
 
-        _logger.info("Fatura Tarama: %d adet ürün kodu bulundu. Nebim SP çağrılıyor...", len(item_codes))
+        _logger.info("Fatura Tarama: %d adet benzersiz ürün kodu (ItemCode) bulundu. Nebim SP çağrılıyor...", len(item_codes))
 
         # 2. Nebim SP'yi çağır (usp_GetPurchaseInvoices_Ugurlar)
         connector = self.env['odoougurlar.nebim.connector'].sudo()
