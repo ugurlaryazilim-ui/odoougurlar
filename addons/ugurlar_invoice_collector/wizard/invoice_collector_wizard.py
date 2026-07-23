@@ -354,7 +354,8 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
         """
         Zaman sınırlı paket döngüsü (time-capped batching):
         Tek bir HTTP isteğinde max 25 saniyeye kadar kaç paket işlenebilirse işler (örn: 60-80 fatura).
-        HTTP zaman aşımı süresine (60s) yaklaşılmadan 25. saniyede durur ve kullanıcıya canlı ilerleme sunar.
+        HTTP zaman aşımı süresine (60s) yaklaşılmadan 25. saniyede durur ve canlı güncellenir.
+        OWL JS sayesinde sonraki adımı otomatik devam ettirir (Zero-Click Auto Streaming).
         """
         self.ensure_one()
         selected_lines = self.line_ids.filtered(lambda l: l.selected)
@@ -370,7 +371,6 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             if not pending_lines:
                 break
 
-            # If we exceeded max duration limit for this single HTTP call, pause and return progress
             if time.time() - start_time >= max_duration:
                 _logger.info("HTTP zaman sınırı (25 sn) ulaşıldı. Kalan %d fatura sonraki adıma devrediliyor.", len(pending_lines))
                 break
@@ -379,7 +379,6 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             _logger.info("Batch işleniyor: %d adet (Geçen süre: %.1f sn)", len(batch), time.time() - start_time)
             self._process_batch_lines(batch)
 
-        # Check if there are still pending lines remaining
         remaining = selected_lines.filtered(lambda l: l.download_status == 'pending')
         if remaining:
             self.write({'state': 'downloading'})
@@ -395,6 +394,66 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             'view_mode': 'form',
             'target': 'new',
         }
+
+    def action_start_background_download(self):
+        """Faturaları indirmeyi arka plan Cron görevine devreder ve kullanıcıya bildirim gösterir."""
+        self.ensure_one()
+        self.write({'state': 'downloading'})
+        
+        cron = self.env.ref('ugurlar_invoice_collector.cron_process_invoice_collector_jobs', raise_if_not_found=False)
+        if cron:
+            cron._trigger()
+
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Arka Planda İndirme Başlatıldı 🚀',
+                'message': 'Faturalar arka planda otomatik indirilmeye başlandı. Tamamlandığında bildirim alacaksınız.',
+                'type': 'success',
+                'sticky': True,
+            }
+        }
+
+    @api.model
+    def _cron_process_download_jobs(self):
+        """
+        Arka plan Cron İşleyicisi: 'downloading' durumundaki fatura arşivleme işlerini tarar,
+        arka planda indirir, ZIP oluşturur ve kullanıcıya canlı bildirim (bus.bus) gönderir.
+        """
+        jobs = self.search([('state', '=', 'downloading')], limit=5)
+        for job in jobs:
+            _logger.info("Cron: Arka plan fatura arşivleme işi işleniyor (Job ID: %d)...", job.id)
+            try:
+                start_time = time.time()
+                while time.time() - start_time < 25.0:
+                    pending = job.line_ids.filtered(lambda l: l.selected and l.download_status == 'pending')
+                    if not pending:
+                        break
+                    batch_sz = job.batch_size if job.batch_size > 0 else 15
+                    batch = pending[:batch_sz]
+                    job._process_batch_lines(batch)
+                
+                remaining = job.line_ids.filtered(lambda l: l.selected and l.download_status == 'pending')
+                if not remaining:
+                    job._finalize_zip(job.line_ids.filtered(lambda l: l.selected))
+                    _logger.info("Cron: Job ID %d tamamlandı! ZIP oluşturuldu: %s", job.id, job.zip_filename)
+                    
+                    try:
+                        self.env['bus.bus']._sendone(
+                            self.env.user.partner_id,
+                            'notification',
+                            {
+                                'type': 'success',
+                                'title': '🎉 Fatura ZIP Arşivi Hazır!',
+                                'message': f'{job.zip_filename} başarıyla indirildi ve ZIP dosyası oluşturuldu.',
+                                'sticky': True,
+                            }
+                        )
+                    except Exception as ne:
+                        _logger.debug("Bus bildirim hatası: %s", str(ne))
+            except Exception as e:
+                _logger.error("Cron hatası (Job ID %d): %s", job.id, str(e))
 
     def _finalize_zip(self, selected_lines):
         """Tüm indirilen PDF'leri tek bir ZIP arşivinde birleştirir."""

@@ -16,7 +16,7 @@
                     <field name="download_status" widget="badge" 
                            decoration-success="download_status == 'success'" 
                            decoration-danger="download_status == 'error'"
-                           decoration-info="download_status == 'pending'"/>
+                           decoration-warning="download_status == 'pending'"/>
                     <field name="error_message" readonly="1" optional="show"/>
                 </list>
             </field>
@@ -36,9 +36,15 @@
                                 invisible="state != 'draft'"/>
                                 
                         <button name="action_download_zip" 
-                                string="Seçilen Faturaları İndir ve ZIP Yap" 
+                                string="⚡ Canlı İndir ve ZIP Yap (Otomatik Akış)" 
                                 type="object" 
                                 class="btn-success" 
+                                invisible="state not in ('scanned', 'downloading')"/>
+
+                        <button name="action_start_background_download" 
+                                string="🚀 Arka Planda İndir (Cron)" 
+                                type="object" 
+                                class="btn-info" 
                                 invisible="state not in ('scanned', 'downloading')"/>
 
                         <button name="action_reset" 
@@ -63,8 +69,8 @@
                                 📊 İndirme İlerlemesi: <field name="progress_text" readonly="1"/>
                             </div>
                             <div style="margin-top: 4px; color: #555;">
-                                Faturalar zaman aşımı olmaması için 25 saniyelik güvenli paketler halinde indirilir.
-                                Kalan faturalar varsa <strong>"Seçilen Faturaları İndir ve ZIP Yap"</strong> butonuna tekrar basarak kaldığı yerden devam edebilirsiniz.
+                                • <strong>⚡ Canlı İndir ve ZIP Yap:</strong> Sayfada canlı olarak sırayla paketleri indirir, tıklama gerektirmeden otomatik akar ve bittiğinde ZIP'i indirir.<br/>
+                                • <strong>🚀 Arka Planda İndir (Cron):</strong> Ekranı kapatıp Odoo'da diğer işlerinize devam etmenizi sağlar; bittiğinde ekranınıza yeşil bildirim gelir.
                             </div>
                         </div>
 
