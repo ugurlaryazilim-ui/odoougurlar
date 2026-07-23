@@ -298,3 +298,52 @@ class DoganEInvoiceConnector:
             self._logout(session_id)
             
         return pdf_content
+
+    def get_invoices_batch_pdf(self, ettn_list):
+        """
+        Batch method: Log in ONCE, fetch PDFs for a list of ETTNs, log out ONCE.
+        Returns dict: {ettn: pdf_binary_content or None}
+        """
+        if not ettn_list:
+            return {}
+
+        session_id = self._login()
+        if not session_id:
+            return {ettn: None for ettn in ettn_list}
+
+        results = {}
+        try:
+            for ettn in ettn_list:
+                pdf_content = None
+                raw_content = self._get_invoice_content(session_id, ettn)
+                if raw_content:
+                    if raw_content.startswith(b'%PDF-'):
+                        pdf_content = raw_content
+                    elif raw_content.startswith(b'PK'):
+                        try:
+                            with zipfile.ZipFile(io.BytesIO(raw_content)) as z:
+                                pdf_files = [f for f in z.namelist() if f.lower().endswith('.pdf')]
+                                if pdf_files:
+                                    _logger.info("Extracted PDF '%s' from ZIP for ETTN %s", pdf_files[0], ettn)
+                                    pdf_content = z.read(pdf_files[0])
+                                else:
+                                    html_files = [f for f in z.namelist() if f.lower().endswith(('.html', '.htm'))]
+                                    if html_files:
+                                        _logger.info("Extracted HTML '%s' from ZIP for ETTN %s", html_files[0], ettn)
+                                        pdf_content = z.read(html_files[0])
+                                    else:
+                                        xml_files = [f for f in z.namelist() if f.lower().endswith('.xml')]
+                                        if xml_files:
+                                            _logger.info("Extracted XML '%s' from ZIP for ETTN %s", xml_files[0], ettn)
+                                            xml_data = z.read(xml_files[0])
+                                            html_wrapped = f"<html><body><pre>{xml_data.decode('utf-8', errors='replace')}</pre></body></html>"
+                                            pdf_content = html_wrapped.encode('utf-8')
+                        except Exception as e:
+                            _logger.error("Failed to extract file from ZIP for ETTN %s: %s", ettn, str(e))
+                    else:
+                        pdf_content = raw_content
+                results[ettn] = pdf_content
+        finally:
+            self._logout(session_id)
+
+        return results
