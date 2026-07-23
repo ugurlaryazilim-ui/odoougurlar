@@ -110,7 +110,14 @@ class DoganEInvoiceConnector:
             _logger.warning("Doğan API Logout error: %s", str(e))
 
     def _get_invoice_content(self, session_id, ettn):
-        # 1. Try GetInvoiceWithTypeRequest (with READ_INCLUDED before DIRECTION according to XSD schema)
+        """
+        Fetches invoice content using Doğan E-Dönüşüm GetInvoiceWithType service.
+        According to Doğan developer docs (https://www.doganedonusum.com/dev/):
+        - DIRECTION: 'IN' for incoming purchase invoices (default)
+        - TYPE: 'PDF', 'HTML', 'XML'
+        - READ_INCLUDED: 'true' to include already read invoices
+        - Returns Base64-encoded ZIP file containing the PDF/HTML
+        """
         envelope = f"""<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:wsdl="http://schemas.i2i.com/ei/wsdl">
    <soapenv:Body>
       <wsdl:GetInvoiceWithTypeRequest>
@@ -121,7 +128,7 @@ class DoganEInvoiceConnector:
             <UUID>{ettn}</UUID>
             <TYPE>PDF</TYPE>
             <READ_INCLUDED>true</READ_INCLUDED>
-            <DIRECTION>INBOUND</DIRECTION>
+            <DIRECTION>IN</DIRECTION>
          </INVOICE_SEARCH_KEY>
          <HEADER_ONLY>N</HEADER_ONLY>
       </wsdl:GetInvoiceWithTypeRequest>
@@ -136,7 +143,7 @@ class DoganEInvoiceConnector:
                 timeout=30
             )
             
-            _logger.info("Doğan API GetInvoiceWithType response status: %s, body (first 2000): %s",
+            _logger.info("Doğan API GetInvoiceWithType (PDF, IN) status: %s, body (first 2000): %s",
                          response.status_code, response.text[:2000])
             
             if response.status_code == 200:
@@ -144,28 +151,29 @@ class DoganEInvoiceConnector:
                 if content:
                     return content
             
-            # If 1 failed or returned empty content, try GetInboxInvoiceWithType
-            _logger.info("GetInvoiceWithType failed or empty, trying GetInboxInvoiceWithType...")
-            return self._get_invoice_content_v2(session_id, ettn)
+            # Fallback 1: Try HTML type if PDF fails
+            _logger.info("GetInvoiceWithType PDF failed/empty, trying HTML type...")
+            return self._get_invoice_content_html(session_id, ettn)
         except Exception as e:
-            _logger.error("Doğan API GetInvoice error for ETTN %s: %s", ettn, str(e))
-            return self._get_invoice_content_v2(session_id, ettn)
+            _logger.error("Doğan API GetInvoiceWithType error for ETTN %s: %s", ettn, str(e))
+            return self._get_invoice_content_html(session_id, ettn)
 
-    def _get_invoice_content_v2(self, session_id, ettn):
-        """Fallback 1: Try GetInboxInvoiceWithType for INBOX (gelen) invoices"""
+    def _get_invoice_content_html(self, session_id, ettn):
+        """Fallback 1: Try TYPE=HTML with DIRECTION=IN"""
         envelope = f"""<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:wsdl="http://schemas.i2i.com/ei/wsdl">
    <soapenv:Body>
-      <wsdl:GetInboxInvoiceWithTypeRequest>
+      <wsdl:GetInvoiceWithTypeRequest>
          <REQUEST_HEADER>
             <SESSION_ID>{session_id}</SESSION_ID>
          </REQUEST_HEADER>
          <INVOICE_SEARCH_KEY>
             <UUID>{ettn}</UUID>
-            <TYPE>PDF</TYPE>
+            <TYPE>HTML</TYPE>
             <READ_INCLUDED>true</READ_INCLUDED>
+            <DIRECTION>IN</DIRECTION>
          </INVOICE_SEARCH_KEY>
          <HEADER_ONLY>N</HEADER_ONLY>
-      </wsdl:GetInboxInvoiceWithTypeRequest>
+      </wsdl:GetInvoiceWithTypeRequest>
    </soapenv:Body>
 </soapenv:Envelope>"""
         
@@ -177,7 +185,7 @@ class DoganEInvoiceConnector:
                 timeout=30
             )
             
-            _logger.info("Doğan API GetInboxInvoiceWithType response status: %s, body (first 2000): %s",
+            _logger.info("Doğan API GetInvoiceWithType (HTML, IN) status: %s, body (first 2000): %s",
                          response.status_code, response.text[:2000])
             
             if response.status_code == 200:
@@ -185,14 +193,14 @@ class DoganEInvoiceConnector:
                 if content:
                     return content
             
-            _logger.info("GetInboxInvoiceWithType failed or empty, trying GetInvoice (raw)...")
-            return self._get_invoice_content_v3(session_id, ettn)
+            _logger.info("GetInvoiceWithType HTML failed, trying raw GetInvoiceRequest...")
+            return self._get_invoice_content_raw(session_id, ettn)
         except Exception as e:
-            _logger.error("Doğan API GetInboxInvoiceWithType error for ETTN %s: %s", ettn, str(e))
-            return self._get_invoice_content_v3(session_id, ettn)
+            _logger.error("Doğan API GetInvoiceWithType HTML error for ETTN %s: %s", ettn, str(e))
+            return self._get_invoice_content_raw(session_id, ettn)
 
-    def _get_invoice_content_v3(self, session_id, ettn):
-        """Fallback 2: Use simple GetInvoiceRequest with READ_INCLUDED before DIRECTION"""
+    def _get_invoice_content_raw(self, session_id, ettn):
+        """Fallback 2: Use simple GetInvoiceRequest with READ_INCLUDED=true and DIRECTION=IN"""
         envelope = f"""<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:wsdl="http://schemas.i2i.com/ei/wsdl">
    <soapenv:Body>
       <wsdl:GetInvoiceRequest>
@@ -202,7 +210,7 @@ class DoganEInvoiceConnector:
          <INVOICE_SEARCH_KEY>
             <UUID>{ettn}</UUID>
             <READ_INCLUDED>true</READ_INCLUDED>
-            <DIRECTION>INBOUND</DIRECTION>
+            <DIRECTION>IN</DIRECTION>
          </INVOICE_SEARCH_KEY>
          <HEADER_ONLY>N</HEADER_ONLY>
       </wsdl:GetInvoiceRequest>
@@ -217,14 +225,14 @@ class DoganEInvoiceConnector:
                 timeout=30
             )
             
-            _logger.info("Doğan API GetInvoice v3 response status: %s, body (first 2000): %s",
+            _logger.info("Doğan API GetInvoice (raw, IN) status: %s, body (first 2000): %s",
                          response.status_code, response.text[:2000])
             
             if response.status_code == 200:
                 return self._parse_content_node(response.content)
             return None
         except Exception as e:
-            _logger.error("Doğan API GetInvoice v3 error for ETTN %s: %s", ettn, str(e))
+            _logger.error("Doğan API GetInvoice raw error for ETTN %s: %s", ettn, str(e))
             return None
 
     def _parse_content_node(self, xml_bytes):
@@ -259,22 +267,33 @@ class DoganEInvoiceConnector:
                 if raw_content.startswith(b'%PDF-'):
                     pdf_content = raw_content
                 elif raw_content.startswith(b'PK'):
-                    # It's a ZIP, extract the XML
+                    # It's a ZIP file containing the invoice file (PDF, HTML, or XML)
                     try:
                         with zipfile.ZipFile(io.BytesIO(raw_content)) as z:
-                            for filename in z.namelist():
-                                if filename.lower().endswith('.xml'):
-                                    xml_data = z.read(filename)
-                                    # Wrap the extracted XML in basic HTML
-                                    html_wrapped = f"<html><body><pre>{xml_data.decode('utf-8', errors='replace')}</pre></body></html>"
-                                    pdf_content = html_wrapped.encode('utf-8')
-                                    break
+                            # 1. Look for PDF first
+                            pdf_files = [f for f in z.namelist() if f.lower().endswith('.pdf')]
+                            if pdf_files:
+                                _logger.info("Extracted PDF '%s' from ZIP for ETTN %s", pdf_files[0], ettn)
+                                pdf_content = z.read(pdf_files[0])
+                            else:
+                                # 2. Look for HTML
+                                html_files = [f for f in z.namelist() if f.lower().endswith(('.html', '.htm'))]
+                                if html_files:
+                                    _logger.info("Extracted HTML '%s' from ZIP for ETTN %s", html_files[0], ettn)
+                                    pdf_content = z.read(html_files[0])
+                                else:
+                                    # 3. Look for XML
+                                    xml_files = [f for f in z.namelist() if f.lower().endswith('.xml')]
+                                    if xml_files:
+                                        _logger.info("Extracted XML '%s' from ZIP for ETTN %s", xml_files[0], ettn)
+                                        xml_data = z.read(xml_files[0])
+                                        html_wrapped = f"<html><body><pre>{xml_data.decode('utf-8', errors='replace')}</pre></body></html>"
+                                        pdf_content = html_wrapped.encode('utf-8')
                     except Exception as e:
-                        _logger.error("Failed to extract XML from ZIP for ETTN %s: %s", ettn, str(e))
+                        _logger.error("Failed to extract file from ZIP for ETTN %s: %s", ettn, str(e))
                 else:
-                    # If it's directly XML or other raw text
-                    html_wrapped = f"<html><body><pre>{raw_content.decode('utf-8', errors='replace')}</pre></body></html>"
-                    pdf_content = html_wrapped.encode('utf-8')
+                    # If it's directly HTML or raw text
+                    pdf_content = raw_content
         finally:
             self._logout(session_id)
             
