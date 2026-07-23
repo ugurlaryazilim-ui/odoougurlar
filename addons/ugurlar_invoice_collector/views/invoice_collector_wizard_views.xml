@@ -101,7 +101,7 @@
         <!-- Menuitem -->
         <menuitem id="menu_ugurlar_invoice_collector_root" 
                   name="Fatura Arşiv Sihirbazı" 
-                  parent="odoougurlar.menu_odoougurlar_root" 
+                  parent="odoougurlar.menu_nebim_root" 
                   action="action_ugurlar_invoice_collector" 
                   sequence="50"/>
     </data>
