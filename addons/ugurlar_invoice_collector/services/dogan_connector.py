@@ -120,7 +120,6 @@ class DoganEInvoiceConnector:
          <INVOICE_SEARCH_KEY>
             <UUID>{ettn}</UUID>
             <DIRECTION>INBOUND</DIRECTION>
-            <READ_INCLUDED>true</READ_INCLUDED>
          </INVOICE_SEARCH_KEY>
          <HEADER_ONLY>N</HEADER_ONLY>
       </wsdl:GetInvoiceWithTypeRequest>
@@ -173,7 +172,6 @@ class DoganEInvoiceConnector:
          <INVOICE_SEARCH_KEY>
             <UUID>{ettn}</UUID>
             <DIRECTION>INBOUND</DIRECTION>
-            <READ_INCLUDED>true</READ_INCLUDED>
          </INVOICE_SEARCH_KEY>
          <HEADER_ONLY>N</HEADER_ONLY>
       </wsdl:GetInvoiceRequest>
