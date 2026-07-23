@@ -6,7 +6,7 @@ import logging
 import re
 import time
 import zipfile
-from datetime import datetime
+from datetime import datetime, date
 import requests
 
 from odoo import models, fields, api
@@ -102,28 +102,58 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
 
     @staticmethod
     def _parse_doc_date(doc_date_raw):
-        """Çeşitli tarih formatlarını (ISO, YYYY-MM-DD, DD.MM.YYYY vb.) Odoo Date nesnesine dönüştürür."""
+        """
+        Tüm tarih formatlarını (Microsoft .NET JSON Date /Date(ms)/, ISO, YYYY-MM-DD, DD.MM.YYYY, YYYYMMDD)
+        ve Python date/datetime nesnelerini Odoo Date nesnesine dönüştürür.
+        """
         if not doc_date_raw:
             return False
+        
+        # 1. Doğrudan datetime veya date nesnesi
+        if isinstance(doc_date_raw, datetime):
+            return doc_date_raw.date()
+        if isinstance(doc_date_raw, date):
+            return doc_date_raw
+
         val_str = str(doc_date_raw).strip()
         if not val_str or val_str.lower() in ('none', 'null', 'false'):
             return False
+
         try:
+            # 2. Microsoft .NET JSON Date formatı: /Date(1782950400000)/ veya /Date(1782950400000+0300)/
+            match_ms = re.search(r'/Date\((\d+)(?:[+-]\d+)?\)/', val_str)
+            if match_ms:
+                ms = int(match_ms.group(1))
+                dt = datetime.fromtimestamp(ms / 1000.0)
+                return dt.date()
+
+            # 3. ISO formatı: '2026-07-02T00:00:00' veya '2026-07-02 00:00:00' veya '2026-07-02'
             if 'T' in val_str:
                 val_str = val_str.split('T')[0]
             elif ' ' in val_str:
                 val_str = val_str.split(' ')[0]
-            
-            match_iso = re.search(r'(\d{4}-\d{2}-\d{2})', val_str)
-            if match_iso:
-                return fields.Date.from_string(match_iso.group(1))
 
-            match_tr = re.search(r'(\d{2})[\./-](\d{2})[\./-](\d{4})', val_str)
+            match_iso = re.search(r'(\d{4})[./-](\d{2})[./-](\d{2})', val_str)
+            if match_iso:
+                year, month, day = match_iso.groups()
+                return fields.Date.from_string(f"{year}-{month}-{day}")
+
+            # 4. Türkçe format: '02.07.2026' veya '02/07/2026'
+            match_tr = re.search(r'(\d{2})[./-](\d{2})[./-](\d{4})', val_str)
             if match_tr:
                 day, month, year = match_tr.groups()
                 return fields.Date.from_string(f"{year}-{month}-{day}")
+
+            # 5. YYYYMMDD formatı: '20260702'
+            if len(val_str) == 8 and val_str.isdigit():
+                year = val_str[:4]
+                month = val_str[4:6]
+                day = val_str[6:8]
+                return fields.Date.from_string(f"{year}-{month}-{day}")
+
         except Exception as e:
-            _logger.debug("Date parse hatası (%s): %s", val_str, str(e))
+            _logger.warning("Date parse hatası (%s): %s", val_str, str(e))
+
         return False
 
     def action_scan_invoices(self):
@@ -204,7 +234,7 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             )
         
         if all_results and isinstance(all_results[0], dict):
-            _logger.info("Nebim SP Sonucu Örnek Satır Anahtarları: %s", list(all_results[0].keys()))
+            _logger.info("Nebim SP Sonucu Örnek Satır: %r", all_results[0])
 
         existing_lines = [(5, 0, 0)]
         seen_docs = set()
@@ -214,7 +244,6 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             if not doc_num or doc_num in seen_docs:
                 continue
 
-            # DocumentDate, InvoiceDate, DocDate, BelgeTarihi veya Date alanlarını tara
             doc_date_raw = (
                 row.get('DocumentDate') or 
                 row.get('InvoiceDate') or 
@@ -225,11 +254,11 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             doc_date = self._parse_doc_date(doc_date_raw)
 
             # Tarih aralığı filtresi aktifse kontrol et
-            if self.date_start:
-                if not doc_date or doc_date < self.date_start:
+            if self.date_start and doc_date:
+                if doc_date < self.date_start:
                     continue
-            if self.date_end:
-                if not doc_date or doc_date > self.date_end:
+            if self.date_end and doc_date:
+                if doc_date > self.date_end:
                     continue
 
             seen_docs.add(doc_num)
