@@ -21,7 +21,13 @@ class DoganEInvoiceConnector:
         
         # Get credentials from config parameters
         self.username = env['ir.config_parameter'].sudo().get_param('ugurlar_invoice_collector.dogan_username', 'ugurlar')
-        self.password = env['ir.config_parameter'].sudo().get_param('ugurlar_invoice_collector.dogan_password', 'MjIxOTA1')
+        raw_password = env['ir.config_parameter'].sudo().get_param('ugurlar_invoice_collector.dogan_password', 'MjIxOTA1')
+        
+        # Nebim stores password as base64 encoded — decode it for the API
+        try:
+            self.password = base64.b64decode(raw_password).decode('utf-8')
+        except Exception:
+            self.password = raw_password  # Use as-is if decode fails
         
         # Default URLs from the task description
         self.auth_url = env['ir.config_parameter'].sudo().get_param(
