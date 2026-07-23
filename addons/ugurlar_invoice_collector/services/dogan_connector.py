@@ -121,6 +121,7 @@ class DoganEInvoiceConnector:
             <UUID>{ettn}</UUID>
             <TYPE>PDF</TYPE>
             <DIRECTION>INBOUND</DIRECTION>
+            <READ_INCLUDED>true</READ_INCLUDED>
          </INVOICE_SEARCH_KEY>
          <HEADER_ONLY>N</HEADER_ONLY>
       </wsdl:GetInvoiceWithTypeRequest>
