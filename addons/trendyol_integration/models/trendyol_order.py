@@ -410,8 +410,11 @@ class TrendyolOrder(models.Model):
             if product:
                 ol_vals['product_id'] = product.id
 
+            # Mikro İhracat kontrolü — Mikro ihracat siparişlerinde yurt dışına KDV uygulanmaz (KDV %0 / Muaf)
+            is_micro = self.micro or package_data.get('micro', False)
+
             # KDV dahil vergi bul ve ata — Odoo'nun tekrar KDV eklemesini engelle
-            vat_rate = line.get('vatRate', 0) or 0
+            vat_rate = 0 if is_micro else (line.get('vatRate', 0) or 0)
             if vat_rate > 0:
                 if vat_rate not in _tax_cache:
                     tax = self.env['account.tax'].sudo().search([

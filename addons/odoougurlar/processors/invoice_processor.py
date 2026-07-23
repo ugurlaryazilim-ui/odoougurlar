@@ -233,11 +233,15 @@ class InvoiceProcessor(models.AbstractModel):
 
             sale_line = line.sale_line_ids[0] if line.sale_line_ids else False
             
+            # İhracat faturalarında (ModelType 24 / Mikro İhracat), KDV sıfır (%0 / Muaf) olduğu için
+            # Nebim'e gidecek birim fiyat, faturanın müşteriden tahsil edilen tam brüt tutarı (price_total / quantity) olmalıdır.
+            line_price = float(line.price_total / line.quantity) if (line.quantity and line.price_total) else float(line.price_unit)
+
             line_data = {
                 'Qty1': float(line.quantity),
                 'ExportFileNumber': export_file_number,
                 'UsedBarcode': line.product_id.barcode or '',
-                'Price': float(line.price_unit),
+                'Price': line_price,
                 'SalesPersonCode': m_sales_person,
             }
             
