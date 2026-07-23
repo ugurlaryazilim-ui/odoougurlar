@@ -123,19 +123,34 @@ class AiStudioImagelessLine(models.Model):
         tmpl_cache = {}  # Performans için template verilerini önbelleğe al
 
         # Attribute adlarını doğrudan eşleştir (Nebim'den gelen kesin isimler)
-        color_attrs = {'renk', 'color'}
+        color_attrs = {'renk', 'color', 'colour'}
         size_attrs = {'beden', 'size', 'numara'}
         brand_attrs = {'marka', 'brand'}
         season_attrs = {'sezon', 'sezon/yıl', 'season'}
         gender_attrs = {'cinsiyet', 'gender'}
 
-        # Mevcut AI session'ları bul
-        existing_sessions = set(
-            self.env['ai.studio.session'].sudo().search([
-                ('product_id', 'in', variants_with_stock.ids),
-                ('state', 'not in', ['cancelled']),
-            ]).mapped('product_id.id')
-        )
+        # Tüm sistem genelinde iptal edilmemiş aktif AI oturumlarını bul
+        active_sessions = self.env['ai.studio.session'].sudo().search([
+            ('state', 'not in', ['cancelled']),
+        ])
+
+        # Oturumu olan (template_id, color_key) gruplarını tespit et
+        existing_session_group_keys = set()
+        for sess in active_sessions:
+            if not sess.product_id:
+                continue
+            sess_prod = sess.product_id
+            sess_tmpl_id = sess_prod.product_tmpl_id.id
+            sess_color_id = None
+            sess_color_name = ''
+            for ptav in sess_prod.product_template_attribute_value_ids:
+                attr_name = ptav.attribute_id.name.lower().strip()
+                if any(c in attr_name for c in color_attrs):
+                    sess_color_id = ptav.product_attribute_value_id.id
+                    sess_color_name = ptav.name or ''
+                    break
+            sess_key = (sess_tmpl_id, sess_color_id or sess_color_name or 'no_color')
+            existing_session_group_keys.add(sess_key)
 
         for variant in variants_with_stock:
             tmpl = variant.product_tmpl_id
@@ -165,23 +180,28 @@ class AiStudioImagelessLine(models.Model):
             color_ids = []
             size_ids = []
             color_val = ''
+            color_ptav_id = None
 
             # create_variant='always' olan attribute'lar (Renk, Beden)
             for ptav in variant.product_template_attribute_value_ids:
                 attr_name = ptav.attribute_id.name.lower().strip()
-                if any(a in attr_name for a in color_attrs):
+                if any(c in attr_name for c in color_attrs):
+                    color_ptav_id = ptav.product_attribute_value_id.id
                     color_ids.append(ptav.product_attribute_value_id.id)
                     color_val = ptav.name or ''
                 elif any(a in attr_name for a in size_attrs):
                     size_ids.append(ptav.product_attribute_value_id.id)
 
-            # "Her renkten bir beden" mantığı
-            group_key = (tmpl.id, color_val)
-            if group_key in seen:
+            # "Her renkten bir beden" gruplama key'i
+            variant_group_key = (tmpl.id, color_ptav_id or color_val or 'no_color')
+            if variant_group_key in seen:
                 continue
-            seen.add(group_key)
+            seen.add(variant_group_key)
 
             t_data = tmpl_cache[tmpl.id]
+
+            # Bu renk grubundaki (herhangi bir bedeninde) aktif oturum var mı?
+            group_has_session = variant_group_key in existing_session_group_keys
 
             lines_data.append({
                 'product_id': variant.id,
@@ -193,7 +213,7 @@ class AiStudioImagelessLine(models.Model):
                 'gender_value_ids': t_data['gender_ids'],
                 'category_name': t_data['category'] or '-',
                 'qty_available': variant.qty_available,
-                'has_session': variant.id in existing_sessions,
+                'has_session': group_has_session,
             })
 
         # 5) Toplu oluştur
