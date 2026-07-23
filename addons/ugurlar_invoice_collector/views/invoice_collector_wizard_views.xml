@@ -1,102 +1,100 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <data>
-        <!-- Wizard Form View -->
-        <record id="view_ugurlar_invoice_collector_form" model="ir.ui.view">
-            <field name="name">ugurlar.invoice.collector.form</field>
-            <field name="model">ugurlar.invoice.collector</field>
-            <field name="arch" type="xml">
-                <form string="Toptan Alış Fatura Toplama ve ZIP Arşivleme">
-                    <header>
-                        <button name="action_scan_invoices" 
-                                string="Faturaları Tara ve Listele" 
-                                type="object" 
-                                class="btn-primary" 
-                                invisible="state != 'draft'"/>
-                                
-                        <button name="action_download_zip" 
-                                string="Seçilen Faturaları İndir ve ZIP Yap" 
-                                type="object" 
-                                class="btn-success" 
-                                invisible="state != 'scanned'"/>
+    <!-- Wizard Form View -->
+    <record id="view_ugurlar_invoice_collector_form" model="ir.ui.view">
+        <field name="name">ugurlar.invoice.collector.form</field>
+        <field name="model">ugurlar.invoice.collector</field>
+        <field name="arch" type="xml">
+            <form string="Toptan Alış Fatura Toplama ve ZIP Arşivleme">
+                <header>
+                    <button name="action_scan_invoices" 
+                            string="Faturaları Tara ve Listele" 
+                            type="object" 
+                            class="btn-primary" 
+                            invisible="state != 'draft'"/>
+                            
+                    <button name="action_download_zip" 
+                            string="Seçilen Faturaları İndir ve ZIP Yap" 
+                            type="object" 
+                            class="btn-success" 
+                            invisible="state != 'scanned'"/>
 
-                        <button name="action_reset" 
-                                string="Yeni Aramaya Başla" 
-                                type="object" 
-                                class="btn-secondary" 
-                                invisible="state == 'draft'"/>
-                                
-                        <field name="state" widget="statusbar" statusbar_visible="draft,scanned,completed"/>
-                    </header>
-                    
-                    <sheet>
-                        <div class="oe_title">
-                            <h1>
-                                <span>Toptan Alış Fatura Arşiv Sihirbazı</span>
-                            </h1>
-                        </div>
+                    <button name="action_reset" 
+                            string="Yeni Aramaya Başla" 
+                            type="object" 
+                            class="btn-secondary" 
+                            invisible="state == 'draft'"/>
+                            
+                    <field name="state" widget="statusbar" statusbar_visible="draft,scanned,completed"/>
+                </header>
+                
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <span>Toptan Alış Fatura Arşiv Sihirbazı</span>
+                        </h1>
+                    </div>
 
-                        <group invisible="state != 'draft'">
-                            <group string="Filtre Kriterleri">
-                                <field name="brand_id" options="{'no_create': True, 'no_open': True}"/>
-                                <field name="product_group_id" options="{'no_create': True, 'no_open': True}"/>
-                            </group>
-                            <group string="Tarih Aralığı (Opsiyonel)">
-                                <field name="date_start"/>
-                                <field name="date_end"/>
-                            </group>
+                    <group invisible="state != 'draft'">
+                        <group string="Filtre Kriterleri">
+                            <field name="brand_id" options="{'no_create': True, 'no_open': True}"/>
+                            <field name="product_group_id" options="{'no_create': True, 'no_open': True}"/>
                         </group>
-
-                        <group invisible="state == 'draft'" string="Tarama Özeti">
-                            <group>
-                                <field name="total_found_invoices" readonly="1"/>
-                                <field name="selected_invoices_count" readonly="1"/>
-                            </group>
+                        <group string="Tarih Aralığı (Opsiyonel)">
+                            <field name="date_start"/>
+                            <field name="date_end"/>
                         </group>
+                    </group>
 
-                        <group invisible="state != 'completed'" string="ZIP Arşivi">
-                            <field name="zip_filename" invisible="1"/>
-                            <field name="zip_file" filename="zip_filename" widget="binary" string="İndirmek için Tıklayın"/>
+                    <group invisible="state == 'draft'" string="Tarama Özeti">
+                        <group>
+                            <field name="total_found_invoices" readonly="1"/>
+                            <field name="selected_invoices_count" readonly="1"/>
                         </group>
+                    </group>
 
-                        <notebook invisible="state == 'draft'">
-                            <page string="Taranan Faturalar">
-                                <field name="line_ids">
-                                    <tree editable="bottom" create="false" delete="true">
-                                        <field name="selected" widget="boolean_toggle" string="Seç"/>
-                                        <field name="item_code" readonly="1"/>
-                                        <field name="document_number" readonly="1"/>
-                                        <field name="document_date" readonly="1"/>
-                                        <field name="vendor_name" readonly="1"/>
-                                        <field name="ref_number" readonly="1"/>
-                                        <field name="download_status" widget="badge" 
-                                               decoration-success="download_status == 'success'" 
-                                               decoration-danger="download_status == 'error'"
-                                               decoration-info="download_status == 'pending'"/>
-                                        <field name="error_message" readonly="1" optional="hide"/>
-                                    </tree>
-                                </field>
-                            </page>
-                        </notebook>
-                    </sheet>
-                </form>
-            </field>
-        </record>
+                    <group invisible="state != 'completed'" string="ZIP Arşivi">
+                        <field name="zip_filename" invisible="1"/>
+                        <field name="zip_file" filename="zip_filename" widget="binary" string="İndirmek için Tıklayın"/>
+                    </group>
 
-        <!-- Action to open wizard -->
-        <record id="action_ugurlar_invoice_collector" model="ir.actions.act_window">
-            <field name="name">Toptan Alış Fatura Arşivi (ZIP)</field>
-            <field name="res_model">ugurlar.invoice.collector</field>
-            <field name="view_mode">form</field>
-            <field name="target">current</field>
-        </record>
+                    <notebook invisible="state == 'draft'">
+                        <page string="Taranan Faturalar">
+                            <field name="line_ids">
+                                <tree editable="bottom" create="false" delete="true">
+                                    <field name="selected" widget="boolean_toggle" string="Seç"/>
+                                    <field name="item_code" readonly="1"/>
+                                    <field name="document_number" readonly="1"/>
+                                    <field name="document_date" readonly="1"/>
+                                    <field name="vendor_name" readonly="1"/>
+                                    <field name="ref_number" readonly="1"/>
+                                    <field name="download_status" widget="badge" 
+                                           decoration-success="download_status == 'success'" 
+                                           decoration-danger="download_status == 'error'"
+                                           decoration-info="download_status == 'pending'"/>
+                                    <field name="error_message" readonly="1" optional="hide"/>
+                                </tree>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
 
-        <!-- Menuitem -->
-        <menuitem id="menu_ugurlar_invoice_collector_root" 
-                  name="Fatura Arşiv Sihirbazı" 
-                  parent="odoougurlar.menu_odoougurlar_root" 
-                  action="action_ugurlar_invoice_collector" 
-                  web_icon="ugurlar_invoice_collector,static/description/icon.png"
-                  sequence="50"/>
-    </data>
+    <!-- Action to open wizard -->
+    <record id="action_ugurlar_invoice_collector" model="ir.actions.act_window">
+        <field name="name">Toptan Alış Fatura Arşivi (ZIP)</field>
+        <field name="res_model">ugurlar.invoice.collector</field>
+        <field name="view_mode">form</field>
+        <field name="target">current</field>
+    </record>
+
+    <!-- Menuitem -->
+    <menuitem id="menu_ugurlar_invoice_collector_root" 
+              name="Fatura Arşiv Sihirbazı" 
+              parent="odoougurlar.menu_odoougurlar_root" 
+              action="action_ugurlar_invoice_collector" 
+              sequence="50"/>
 </odoo>
+
