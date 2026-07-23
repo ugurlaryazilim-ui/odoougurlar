@@ -222,8 +222,13 @@ class InvoiceProcessor(models.AbstractModel):
             order_no = ty.trendyol_order_number or ''
             internal_desc = f"{pkg_id}_{order_no}" if pkg_id and order_no else (pkg_id or order_no)
         
-        # Description — Odoo fatura numarası (HamurLabs: "UGE2026000003293")
-        description = invoice.name or (sale_order.name if sale_order else '')
+        # Description — Pazaryeri Sipariş Numarası (ör: "11425269883") veya Odoo Fatura Numarası
+        if sale_order and sale_order.client_order_ref:
+            description = sale_order.client_order_ref
+        elif sale_order:
+            description = sale_order.name
+        else:
+            description = invoice.ref or invoice.name
         
         # ── Satır verileri — HamurLabs: OrderLineID + Qty1 + ExportFileNumber + UsedBarcode + Price + SalesPersonCode ──
         lines = []
