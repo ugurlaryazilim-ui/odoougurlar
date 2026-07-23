@@ -100,11 +100,38 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             return match.group(1)
         return variant_sku
 
+    @staticmethod
+    def _parse_doc_date(doc_date_raw):
+        """Çeşitli tarih formatlarını (ISO, YYYY-MM-DD, DD.MM.YYYY vb.) Odoo Date nesnesine dönüştürür."""
+        if not doc_date_raw:
+            return False
+        val_str = str(doc_date_raw).strip()
+        if not val_str or val_str.lower() in ('none', 'null', 'false'):
+            return False
+        try:
+            if 'T' in val_str:
+                val_str = val_str.split('T')[0]
+            elif ' ' in val_str:
+                val_str = val_str.split(' ')[0]
+            
+            match_iso = re.search(r'(\d{4}-\d{2}-\d{2})', val_str)
+            if match_iso:
+                return fields.Date.from_string(match_iso.group(1))
+
+            match_tr = re.search(r'(\d{2})[\./-](\d{2})[\./-](\d{4})', val_str)
+            if match_tr:
+                day, month, year = match_tr.groups()
+                return fields.Date.from_string(f"{year}-{month}-{day}")
+        except Exception as e:
+            _logger.debug("Date parse hatası (%s): %s", val_str, str(e))
+        return False
+
     def action_scan_invoices(self):
         """
         Seçilen Marka ve Ürün Grubu filtrelerine uyan Odoo ürünlerinin
         ItemCode (default_code) listesini alır, Nebim SP'sini çağırarak
         Toptan Alış belgelerini tekleştirilmiş olarak çeker.
+        Başlangıç ve Bitiş tarih aralıklarını hassas şekilde filtreler.
         """
         self.ensure_one()
         
@@ -176,6 +203,9 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
                 f'(sp_UpdateEntegraToptanAlisBelge prosedürünü çalıştırın).'
             )
         
+        if all_results and isinstance(all_results[0], dict):
+            _logger.info("Nebim SP Sonucu Örnek Satır Anahtarları: %s", list(all_results[0].keys()))
+
         existing_lines = [(5, 0, 0)]
         seen_docs = set()
 
@@ -184,21 +214,23 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             if not doc_num or doc_num in seen_docs:
                 continue
 
-            doc_date_raw = row.get('DocumentDate')
-            doc_date = False
-            if doc_date_raw:
-                try:
-                    if 'T' in str(doc_date_raw):
-                        doc_date = fields.Date.from_string(str(doc_date_raw).split('T')[0])
-                    else:
-                        doc_date = fields.Date.from_string(str(doc_date_raw).split(' ')[0])
-                except Exception:
-                    doc_date = False
+            # DocumentDate, InvoiceDate, DocDate, BelgeTarihi veya Date alanlarını tara
+            doc_date_raw = (
+                row.get('DocumentDate') or 
+                row.get('InvoiceDate') or 
+                row.get('DocDate') or 
+                row.get('BelgeTarihi') or 
+                row.get('Date')
+            )
+            doc_date = self._parse_doc_date(doc_date_raw)
 
-            if self.date_start and doc_date and doc_date < self.date_start:
-                continue
-            if self.date_end and doc_date and doc_date > self.date_end:
-                continue
+            # Tarih aralığı filtresi aktifse kontrol et
+            if self.date_start:
+                if not doc_date or doc_date < self.date_start:
+                    continue
+            if self.date_end:
+                if not doc_date or doc_date > self.date_end:
+                    continue
 
             seen_docs.add(doc_num)
             existing_lines.append((0, 0, {
@@ -212,7 +244,10 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             }))
 
         if len(existing_lines) <= 1:
-            raise UserError('Belirtilen tarih kriterlerine uyan Toptan Alış faturası bulunamadı.')
+            date_info = ""
+            if self.date_start or self.date_end:
+                date_info = f" (Tarih Aralığı: {self.date_start or '...' } - {self.date_end or '...'})"
+            raise UserError(f'Belirtilen kriterlere{date_info} uyan Toptan Alış faturası bulunamadı.')
 
         self.write({
             'line_ids': existing_lines,
@@ -442,7 +477,6 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
                     target_partner = job.create_uid.partner_id
                     if target_partner:
                         try:
-                            # 1. Tıklanabilir canlı Bus pop-up bildirimi (Tıklayınca doğrudan bu ZIP formunu açar)
                             self.env['bus.bus']._sendone(
                                 target_partner,
                                 'simple_notification',
@@ -466,7 +500,6 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
                             _logger.warning("Bus bildirim gönderim hatası: %s", str(ne))
 
                         try:
-                            # 2. Odoo Bildirim Kutusu (Zil İkonu / Discuss Inbox) Mesajı
                             target_partner.message_post(
                                 body=f"<b>🎉 Fatura ZIP Arşivi Hazır!</b><br/>"
                                      f"<b>Dosya:</b> {job.zip_filename}<br/>"
