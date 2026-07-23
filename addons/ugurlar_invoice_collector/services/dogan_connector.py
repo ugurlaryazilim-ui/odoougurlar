@@ -119,6 +119,7 @@ class DoganEInvoiceConnector:
          </REQUEST_HEADER>
          <INVOICE_SEARCH_KEY>
             <UUID>{ettn}</UUID>
+            <TYPE>PDF</TYPE>
             <DIRECTION>INBOUND</DIRECTION>
          </INVOICE_SEARCH_KEY>
          <HEADER_ONLY>N</HEADER_ONLY>
