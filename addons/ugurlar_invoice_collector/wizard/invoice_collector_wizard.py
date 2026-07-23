@@ -283,26 +283,38 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
                             _logger.info("e-Fatura ETTN bulundu (%s): %s", doc_num, ettn)
                             line.invoice_url = f"ETTN: {ettn}"
                             
-                            # Doğan E-Dönüşüm portal URL kalıplarını dene
-                            dogan_urls = [
-                                f"https://portal.dogandonusum.com/einvoice/view-einvoice/view-pdf-einvoice.xhtml?uuid={ettn}",
-                                f"https://portal.dogandonusum.com/fatura/pdf/download?ettn={ettn}",
-                                f"https://portal.dogandonusum.com/fatura/pdf/{ettn}",
-                                f"https://portal.dogandonusum.com/einvoice/pdf-einvoice/{ettn}",
-                            ]
-                            
-                            for try_url in dogan_urls:
-                                pdf_content = self._try_download_pdf(try_url)
+                            # Try Doğan SOAP API first
+                            try:
+                                from ..services.dogan_connector import DoganEInvoiceConnector
+                                dogan = DoganEInvoiceConnector(self.env)
+                                pdf_content = dogan.get_invoice_pdf(ettn)
                                 if pdf_content:
-                                    _logger.info("e-Fatura PDF indirildi (%s) URL: %s", doc_num, try_url)
-                                    break
+                                    _logger.info("e-Fatura PDF Doğan API'den indirildi (%s)", doc_num)
+                            except Exception as e:
+                                _logger.warning("Doğan API hatası (%s): %s", doc_num, str(e))
                             
+                            # Fallback: try portal URLs if SOAP didn't work
                             if not pdf_content:
-                                _logger.warning(
-                                    "e-Fatura ETTN bulundu ancak PDF indirilemedi (%s). "
-                                    "ETTN: %s — Portal erişimi gerekiyor olabilir.", 
-                                    doc_num, ettn
-                                )
+                                # Doğan E-Dönüşüm portal URL kalıplarını dene
+                                dogan_urls = [
+                                    f"https://portal.dogandonusum.com/einvoice/view-einvoice/view-pdf-einvoice.xhtml?uuid={ettn}",
+                                    f"https://portal.dogandonusum.com/fatura/pdf/download?ettn={ettn}",
+                                    f"https://portal.dogandonusum.com/fatura/pdf/{ettn}",
+                                    f"https://portal.dogandonusum.com/einvoice/pdf-einvoice/{ettn}",
+                                ]
+                                
+                                for try_url in dogan_urls:
+                                    pdf_content = self._try_download_pdf(try_url)
+                                    if pdf_content:
+                                        _logger.info("e-Fatura PDF indirildi (%s) URL: %s", doc_num, try_url)
+                                        break
+                                
+                                if not pdf_content:
+                                    _logger.warning(
+                                        "e-Fatura ETTN bulundu ancak PDF indirilemedi (%s). "
+                                        "ETTN: %s — Portal erişimi gerekiyor olabilir.", 
+                                        doc_num, ettn
+                                    )
                         else:
                             _logger.warning("e-Fatura ETTN bulunamadı: %s", doc_num)
                     except Exception as e:

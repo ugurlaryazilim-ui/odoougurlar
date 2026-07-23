@@ -22,6 +22,7 @@
     ],
     'data': [
         'security/ir.model.access.csv',
+        'data/dogan_config.xml',
         'views/invoice_collector_wizard_views.xml',
     ],
     'installable': True,
