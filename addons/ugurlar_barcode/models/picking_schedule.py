@@ -546,31 +546,34 @@ class PickingSchedule(models.Model):
                     pass
 
         # ═══ FAZ 5: Source warehouse etiketleme ═══
+        # NOT: FAZ 2'de toplanan transfer_from_fallback / transfer_from_return
+        # dict'lerini kullanarak GERÇEK kaynak depoyu etiketliyoruz.
+        # FAZ 3'te otomatik transfer onaylandıktan sonra tüm move'lar 'assigned'
+        # olur ama fiziksel ürün hâlâ yedek depodadır — doğru depoyu göstermeliyiz.
         for picking in pickings:
             for move in picking.move_ids:
+                pid = move.product_id.id
                 demand = move.product_uom_qty
 
-                if move.state == 'assigned':
-                    # Stok artık primary depoda (ya zaten vardı ya transfer geldi)
+                if pid in transfer_from_fallback and fallback_wh:
+                    # Bu ürün HEYKEL'den transfer edildi — kaynak: HEYKEL
+                    move.sudo().write({'source_warehouse_id': fallback_wh.id})
+                    count_fallback += 1
+                elif pid in transfer_from_return and return_wh:
+                    # Bu ürün İADE deposundan transfer edildi — kaynak: İADE
+                    move.sudo().write({'source_warehouse_id': return_wh.id})
+                    count_return += 1
+                elif move.state == 'assigned':
+                    # Stok zaten primary depodaydı (transfer gerekmedi)
                     move.sudo().write({'source_warehouse_id': primary_wh.id})
                     count_primary += 1
                 else:
-                    # Hala assign olamadı — kaynak depo etiketle
-                    fb_qty = max(0, fallback_qty_map.get(move.product_id.id, 0))
-                    if fb_qty >= demand and fallback_wh:
-                        move.sudo().write({'source_warehouse_id': fallback_wh.id})
-                        count_fallback += 1
+                    # Hiçbir depoda stok bulunamadı
+                    if return_wh:
+                        move.sudo().write({'source_warehouse_id': return_wh.id})
                     else:
-                        ret_qty = max(0, return_qty_map.get(move.product_id.id, 0))
-                        if ret_qty >= demand and return_wh:
-                            move.sudo().write({'source_warehouse_id': return_wh.id})
-                            count_return += 1
-                        elif return_wh:
-                            move.sudo().write({'source_warehouse_id': return_wh.id})
-                            count_unavailable += 1
-                        else:
-                            move.sudo().write({'source_warehouse_id': primary_wh.id})
-                            count_unavailable += 1
+                        move.sudo().write({'source_warehouse_id': primary_wh.id})
+                    count_unavailable += 1
 
                 # move.quantity sıfırla — personel barkod okutarak dolduracak
                 if move.quantity > 0 and move.state != 'done':
