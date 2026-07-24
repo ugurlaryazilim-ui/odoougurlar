@@ -44,7 +44,7 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
         ('draft', 'Taslak'),
         ('scanned', 'Faturalar Bulundu'),
         ('downloading', 'İndiriliyor...'),
-        ('completed', 'ZIP Oluşturuldu'),
+        ('completed', 'ZIP / PDF Oluşturuldu'),
     ], string='Durum', default='draft')
 
     line_ids = fields.One2many(
@@ -55,6 +55,9 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
 
     zip_file = fields.Binary(string='ZIP Dosyası', readonly=True, attachment=True)
     zip_filename = fields.Char(string='ZIP Dosya Adı', readonly=True)
+
+    merged_pdf_file = fields.Binary(string='Birleştirilmiş Tek PDF', readonly=True, attachment=True)
+    merged_pdf_filename = fields.Char(string='Birleştirilmiş PDF Adı', readonly=True)
     
     total_found_invoices = fields.Integer(string='Bulunan Fatura Sayısı', compute='_compute_totals', store=True)
     selected_invoices_count = fields.Integer(string='Seçili Fatura Sayısı', compute='_compute_totals', store=True)
@@ -126,7 +129,6 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             match_ms = re.search(r'/Date\((\d+)(?:[+-]\d+)?\)/', val_str)
             if match_ms:
                 ms = int(match_ms.group(1))
-                # .NET UTC timestamp'ine Türkiye saati farkı (+3 saat = 10800 sn) eklenir
                 dt_utc = datetime.utcfromtimestamp(ms / 1000.0)
                 dt_tr = dt_utc + timedelta(hours=3)
                 return dt_tr.date()
@@ -166,6 +168,52 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             _logger.warning("Date parse hatası (%s): %s", val_str, str(e))
 
         return False
+
+    @staticmethod
+    def _merge_pdf_bytes(pdf_bytes_list):
+        """Birden fazla PDF içeriğini (bytes) PyMuPDF (fitz) veya PyPDF2 kullanarak tek bir PDF'te birleştirir."""
+        if not pdf_bytes_list:
+            return None
+        if len(pdf_bytes_list) == 1:
+            return pdf_bytes_list[0]
+        
+        # 1. Öncelik: PyMuPDF (fitz) - yüksek hız ve performans
+        try:
+            import fitz
+            master_doc = fitz.open()
+            for pdf_bytes in pdf_bytes_list:
+                try:
+                    sub_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                    master_doc.insert_pdf(sub_doc)
+                    sub_doc.close()
+                except Exception as sub_e:
+                    _logger.warning("Fatura PDF birleştirme tekil sayfa hatası: %s", sub_e)
+            merged = master_doc.write()
+            master_doc.close()
+            if merged and len(merged) > 100:
+                return merged
+        except Exception as e:
+            _logger.debug("PyMuPDF merge hatası, PyPDF2 deneniyor: %s", e)
+
+        # 2. Öncelik: PyPDF2 fallback
+        try:
+            from PyPDF2 import PdfMerger
+            merger = PdfMerger()
+            for pdf_bytes in pdf_bytes_list:
+                try:
+                    merger.append(io.BytesIO(pdf_bytes))
+                except Exception as sub_e:
+                    _logger.warning("PyPDF2 tekil sayfa hatası: %s", sub_e)
+            output_stream = io.BytesIO()
+            merger.write(output_stream)
+            merger.close()
+            merged_val = output_stream.getvalue()
+            if merged_val and len(merged_val) > 100:
+                return merged_val
+        except Exception as e:
+            _logger.warning("PyPDF2 merge hatası: %s", e)
+
+        return None
 
     def action_scan_invoices(self):
         """
@@ -294,6 +342,8 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             'state': 'scanned',
             'zip_file': False,
             'zip_filename': False,
+            'merged_pdf_file': False,
+            'merged_pdf_filename': False,
         })
 
         return {
@@ -459,7 +509,7 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             self.write({'state': 'downloading'})
             _logger.info("İstek tamamlandı. Kalan %d adet fatura var. Ekran yenileniyor.", len(remaining))
         else:
-            _logger.info("Tüm faturalar indirildi. ZIP arşivi hazırlanıyor...")
+            _logger.info("Tüm faturalar indirildi. ZIP arşivi ve Birleştirilmiş PDF hazırlanıyor...")
             return self._finalize_zip(selected_lines)
 
         return {
@@ -494,7 +544,7 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
     def _cron_process_download_jobs(self):
         """
         Arka plan Cron İşleyicisi: 'downloading' durumundaki fatura arşivleme işlerini tarar,
-        arka planda indirir, ZIP oluşturur ve işi başlatan kullanıcıya tıklanabilir canlı Bus bildirimi & mesajı gönderir.
+        arka planda indirir, ZIP & Birleştirilmiş PDF oluşturur ve kullanıcıya bildirim gönderir.
         """
         jobs = self.search([('state', '=', 'downloading')], limit=5)
         for job in jobs:
@@ -512,7 +562,7 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
                 remaining = job.line_ids.filtered(lambda l: l.selected and l.download_status == 'pending')
                 if not remaining:
                     job._finalize_zip(job.line_ids.filtered(lambda l: l.selected))
-                    _logger.info("Cron: Job ID %d tamamlandı! ZIP oluşturuldu: %s", job.id, job.zip_filename)
+                    _logger.info("Cron: Job ID %d tamamlandı! ZIP ve Birleştirilmiş PDF oluşturuldu: %s", job.id, job.zip_filename)
                     
                     target_partner = job.create_uid.partner_id
                     if target_partner:
@@ -521,8 +571,8 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
                                 target_partner,
                                 'simple_notification',
                                 {
-                                    'title': '🎉 Fatura ZIP Arşivi Hazır!',
-                                    'message': f'{job.zip_filename} başarıyla indirildi. Tıklayarak arşivi indirebilirsiniz.',
+                                    'title': '🎉 Fatura ZIP / PDF Arşivi Hazır!',
+                                    'message': f'{job.zip_filename} ve Birleştirilmiş PDF başarıyla indirildi. Tıklayarak arşivi indirebilirsiniz.',
                                     'type': 'success',
                                     'sticky': True,
                                     'action': {
@@ -541,8 +591,9 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
 
                         try:
                             target_partner.message_post(
-                                body=f"<b>🎉 Fatura ZIP Arşivi Hazır!</b><br/>"
-                                     f"<b>Dosya:</b> {job.zip_filename}<br/>"
+                                body=f"<b>🎉 Fatura Arşivi Hazır!</b><br/>"
+                                     f"<b>ZIP Dosyası:</b> {job.zip_filename}<br/>"
+                                     f"<b>Birleştirilmiş PDF:</b> {job.merged_pdf_filename or 'Oluşturuldu'}<br/>"
                                      f"<b>Marka / Ürün Grubu:</b> {job.brand_id.name or 'Tümü'} / {job.product_group_id.name or 'Tümü'}<br/>"
                                      f"<b>İndirilen Fatura Sayısı:</b> {job.processed_count} adet",
                                 subject="Fatura ZIP Arşivi Hazırlandı",
@@ -555,22 +606,29 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
                 _logger.error("Cron hatası (Job ID %d): %s", job.id, str(e))
 
     def _finalize_zip(self, selected_lines):
-        """Tüm indirilen PDF'leri tek bir ZIP arşivinde birleştirir."""
+        """Tüm indirilen PDF'leri tek bir ZIP arşivinde ve ayrıca birleştirilmiş tek bir PDF dosyasında toplar."""
         in_memory_zip = io.BytesIO()
-        success_count = 0
-
-        with zipfile.ZipFile(in_memory_zip, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            for line in selected_lines.filtered(lambda l: l.download_status == 'success' and l.pdf_file):
-                pdf_data = base64.b64decode(line.pdf_file)
-                filename = line.pdf_filename or f"{line.document_number}.pdf"
-                zip_file.writestr(filename, pdf_data)
-                success_count += 1
-
-        if success_count == 0:
+        success_lines = selected_lines.filtered(lambda l: l.download_status == 'success' and l.pdf_file)
+        
+        if not success_lines:
             raise UserError(
                 'Seçilen faturaların hiçbirine ait PDF dosyası indirilemedi.\n\n'
                 'Lütfen satır detaylarındaki Hata Açıklamalarını kontrol ediniz.'
             )
+
+        pdf_bytes_list = []
+        with zipfile.ZipFile(in_memory_zip, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for line in success_lines:
+                pdf_data = base64.b64decode(line.pdf_file)
+                pdf_bytes_list.append(pdf_data)
+                filename = line.pdf_filename or f"{line.document_number}.pdf"
+                zip_file.writestr(filename, pdf_data)
+
+            # Tüm fatura PDF'lerini tek bir PDF dosyasında birleştir
+            merged_pdf_bytes = self._merge_pdf_bytes(pdf_bytes_list)
+            if merged_pdf_bytes:
+                # Birleştirilmiş tek PDF dosyasını ZIP içine öne gelecek şekilde ekle
+                zip_file.writestr("00_BIRLESTIRILMIS_TUM_FATURALAR.pdf", merged_pdf_bytes)
 
         brand_name = self.brand_id.name or 'Tumu'
         group_name = self.product_group_id.name or 'Tumu'
@@ -578,14 +636,18 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
         safe_group = re.sub(r'[^\w]', '', group_name)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
-        filename = f"{safe_brand}-{safe_group}-{timestamp}.zip"
+        zip_filename = f"{safe_brand}-{safe_group}-{timestamp}.zip"
+        merged_filename = f"{safe_brand}-{safe_group}-{timestamp}-TUMU.pdf"
 
         in_memory_zip.seek(0)
         zip_base64 = base64.b64encode(in_memory_zip.read())
+        merged_base64 = base64.b64encode(merged_pdf_bytes) if merged_pdf_bytes else False
 
         self.write({
             'zip_file': zip_base64,
-            'zip_filename': filename,
+            'zip_filename': zip_filename,
+            'merged_pdf_file': merged_base64,
+            'merged_pdf_filename': merged_filename,
             'state': 'completed',
         })
 
@@ -605,6 +667,8 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             'state': 'draft',
             'zip_file': False,
             'zip_filename': False,
+            'merged_pdf_file': False,
+            'merged_pdf_filename': False,
         })
         return {
             'type': 'ir.actions.act_window',

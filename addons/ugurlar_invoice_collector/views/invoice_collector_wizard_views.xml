@@ -40,7 +40,9 @@
                            decoration-warning="state == 'scanned'"
                            decoration-muted="state == 'draft'"/>
                     <field name="zip_filename" optional="show"/>
-                    <field name="zip_file" filename="zip_filename" widget="binary" string="ZIP Arşivini İndir"/>
+                    <field name="zip_file" filename="zip_filename" widget="binary" string="📦 ZIP Arşivini İndir"/>
+                    <field name="merged_pdf_filename" optional="show"/>
+                    <field name="merged_pdf_file" filename="merged_pdf_filename" widget="binary" string="📄 Birleştirilmiş PDF İndir"/>
                 </list>
             </field>
         </record>
@@ -59,7 +61,7 @@
                                 invisible="state != 'draft'"/>
                                 
                         <button name="action_download_zip" 
-                                string="⚡ Canlı İndir ve ZIP Yap (Otomatik Akış)" 
+                                string="⚡ Canlı İndir ve Arşivle (Otomatik Akış)" 
                                 type="object" 
                                 class="btn-success" 
                                 invisible="state not in ('scanned', 'downloading')"/>
@@ -92,7 +94,7 @@
                                 📊 İndirme İlerlemesi: <field name="progress_text" readonly="1"/>
                             </div>
                             <div style="margin-top: 4px; color: #555;">
-                                • <strong>⚡ Canlı İndir ve ZIP Yap:</strong> Sayfada canlı olarak sırayla paketleri indirir, tıklama gerektirmeden otomatik akar ve bittiğinde ZIP'i indirir.<br/>
+                                • <strong>⚡ Canlı İndir ve Arşivle:</strong> Sayfada canlı olarak sırayla paketleri indirir, otomatik akar ve bittiğinde hem ZIP hem de Birleştirilmiş Tek PDF'i hazırlar.<br/>
                                 • <strong>🚀 Arka Planda İndir (Cron):</strong> Ekranı kapatıp Odoo'da diğer işlerinize devam etmenizi sağlar; bittiğinde ekranınıza tıklanabilir bildirim gelir.
                             </div>
                         </div>
@@ -120,9 +122,15 @@
                             </group>
                         </group>
 
-                        <group invisible="state != 'completed'" string="ZIP Arşivi Hazır!">
-                            <field name="zip_filename" invisible="1"/>
-                            <field name="zip_file" filename="zip_filename" widget="binary" string="ZIP Arşivini İndirmek için Tıklayın"/>
+                        <group invisible="state != 'completed'" string="Arşiv Dosyalarınız Hazır!">
+                            <group string="📦 ZIP Arşivi (Hem Tek Tek PDF Hem Birleşik PDF İçerir)">
+                                <field name="zip_filename" invisible="1"/>
+                                <field name="zip_file" filename="zip_filename" widget="binary" string="📦 ZIP Arşivini İndir"/>
+                            </group>
+                            <group string="📄 Tek Birleştirilmiş PDF Dosyası (Sadece 1 PDF)">
+                                <field name="merged_pdf_filename" invisible="1"/>
+                                <field name="merged_pdf_file" filename="merged_pdf_filename" widget="binary" string="📄 Birleştirilmiş PDF'i İndir"/>
+                            </group>
                         </group>
 
                         <notebook invisible="state == 'draft'">
@@ -159,7 +167,7 @@
 
         <!-- Submenu 1: History -->
         <menuitem id="menu_ugurlar_invoice_collector_history" 
-                  name="📁 Geçmiş Arşivlerim (ZIP)" 
+                  name="📁 Geçmiş Arşivlerim (ZIP/PDF)" 
                   parent="menu_ugurlar_invoice_collector_root" 
                   action="action_ugurlar_invoice_collector" 
                   sequence="10"/>
