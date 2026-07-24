@@ -2,50 +2,20 @@
 
 import base64
 import logging
-import threading
 import zipfile
 import io
 import xml.etree.ElementTree as ET
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
 import requests
-from requests.adapters import HTTPAdapter
+
+from odoo import models, api
 
 _logger = logging.getLogger(__name__)
-
-# ── Thread-local session for connection pooling ──────────────────────────────
-_thread_local = threading.local()
-
-
-def _get_session():
-    """Her thread için izole bir requests.Session döndürür (TCP connection reuse)."""
-    if not hasattr(_thread_local, 'session'):
-        session = requests.Session()
-        session.headers.update({'Content-Type': 'text/xml;charset=UTF-8'})
-        adapter = HTTPAdapter(
-            pool_connections=4,
-            pool_maxsize=10,
-            max_retries=1,
-        )
-        session.mount('http://', adapter)
-        session.mount('https://', adapter)
-        _thread_local.session = session
-    return _thread_local.session
-
 
 class DoganEInvoiceConnector:
     """
     Doğan E-Dönüşüm SOAP API Connector for fetching e-Fatura PDFs.
-    
-    Performans Optimizasyonları:
-    - requests.Session ile TCP bağlantı havuzu (connection pooling)
-    - ThreadPoolExecutor ile çapraz paralel PDF indirme (6 eşzamanlı)
-    - Thread-local session pattern (thread safety)
+    Uses basic requests and ElementTree to avoid zeep dependency.
     """
-
-    # Paralel indirme thread sayısı (I/O bound — 6 thread optimal)
-    MAX_DOWNLOAD_WORKERS = 6
-
     def __init__(self, env):
         self.env = env
         
@@ -85,16 +55,16 @@ class DoganEInvoiceConnector:
 </soapenv:Envelope>"""
         
         try:
-            session = _get_session()
-            response = session.post(
+            response = requests.post(
                 self.auth_url,
                 data=envelope.encode('utf-8'),
+                headers={'Content-Type': 'text/xml;charset=UTF-8'},
                 timeout=15
             )
             response.raise_for_status()
             
-            _logger.info("Doğan API Login response status: %s, body (first 500): %s", 
-                         response.status_code, response.text[:500])
+            _logger.info("Doğan API Login response status: %s, body (first 2000): %s", 
+                         response.status_code, response.text[:2000])
             
             root = ET.fromstring(response.content)
             
@@ -130,10 +100,10 @@ class DoganEInvoiceConnector:
 </soapenv:Envelope>"""
         
         try:
-            session = _get_session()
-            session.post(
+            requests.post(
                 self.auth_url,
                 data=envelope.encode('utf-8'),
+                headers={'Content-Type': 'text/xml;charset=UTF-8'},
                 timeout=10
             )
         except Exception as e:
@@ -166,12 +136,15 @@ class DoganEInvoiceConnector:
 </soapenv:Envelope>"""
         
         try:
-            session = _get_session()
-            response = session.post(
+            response = requests.post(
                 self.efatura_url,
                 data=envelope.encode('utf-8'),
+                headers={'Content-Type': 'text/xml;charset=UTF-8'},
                 timeout=30
             )
+            
+            _logger.info("Doğan API GetInvoiceWithType (PDF, IN) status: %s, body (first 2000): %s",
+                         response.status_code, response.text[:2000])
             
             if response.status_code == 200:
                 content = self._parse_content_node(response.content)
@@ -179,9 +152,10 @@ class DoganEInvoiceConnector:
                     return content
             
             # Fallback 1: Try HTML type if PDF fails
+            _logger.info("GetInvoiceWithType PDF failed/empty, trying HTML type...")
             return self._get_invoice_content_html(session_id, ettn)
         except Exception as e:
-            _logger.warning("Doğan API GetInvoiceWithType error for ETTN %s: %s", ettn, str(e))
+            _logger.error("Doğan API GetInvoiceWithType error for ETTN %s: %s", ettn, str(e))
             return self._get_invoice_content_html(session_id, ettn)
 
     def _get_invoice_content_html(self, session_id, ettn):
@@ -204,21 +178,25 @@ class DoganEInvoiceConnector:
 </soapenv:Envelope>"""
         
         try:
-            session = _get_session()
-            response = session.post(
+            response = requests.post(
                 self.efatura_url,
                 data=envelope.encode('utf-8'),
+                headers={'Content-Type': 'text/xml;charset=UTF-8'},
                 timeout=30
             )
+            
+            _logger.info("Doğan API GetInvoiceWithType (HTML, IN) status: %s, body (first 2000): %s",
+                         response.status_code, response.text[:2000])
             
             if response.status_code == 200:
                 content = self._parse_content_node(response.content)
                 if content:
                     return content
             
+            _logger.info("GetInvoiceWithType HTML failed, trying raw GetInvoiceRequest...")
             return self._get_invoice_content_raw(session_id, ettn)
         except Exception as e:
-            _logger.warning("Doğan API GetInvoiceWithType HTML error for ETTN %s: %s", ettn, str(e))
+            _logger.error("Doğan API GetInvoiceWithType HTML error for ETTN %s: %s", ettn, str(e))
             return self._get_invoice_content_raw(session_id, ettn)
 
     def _get_invoice_content_raw(self, session_id, ettn):
@@ -240,18 +218,21 @@ class DoganEInvoiceConnector:
 </soapenv:Envelope>"""
         
         try:
-            session = _get_session()
-            response = session.post(
+            response = requests.post(
                 self.efatura_url,
                 data=envelope.encode('utf-8'),
+                headers={'Content-Type': 'text/xml;charset=UTF-8'},
                 timeout=30
             )
+            
+            _logger.info("Doğan API GetInvoice (raw, IN) status: %s, body (first 2000): %s",
+                         response.status_code, response.text[:2000])
             
             if response.status_code == 200:
                 return self._parse_content_node(response.content)
             return None
         except Exception as e:
-            _logger.warning("Doğan API GetInvoice raw error for ETTN %s: %s", ettn, str(e))
+            _logger.error("Doğan API GetInvoice raw error for ETTN %s: %s", ettn, str(e))
             return None
 
     def _parse_content_node(self, xml_bytes):
@@ -269,51 +250,6 @@ class DoganEInvoiceConnector:
             _logger.error("Error parsing CONTENT node from SOAP response: %s", str(e))
         return None
 
-    def _extract_pdf_from_raw(self, raw_content, ettn):
-        """Ham içerikten (PDF, ZIP, HTML) kullanılabilir dosyayı çıkarır."""
-        if not raw_content:
-            return None
-        
-        if raw_content.startswith(b'%PDF-'):
-            return raw_content
-        elif raw_content.startswith(b'PK'):
-            try:
-                with zipfile.ZipFile(io.BytesIO(raw_content)) as z:
-                    pdf_files = [f for f in z.namelist() if f.lower().endswith('.pdf')]
-                    if pdf_files:
-                        return z.read(pdf_files[0])
-                    html_files = [f for f in z.namelist() if f.lower().endswith(('.html', '.htm'))]
-                    if html_files:
-                        return z.read(html_files[0])
-                    xml_files = [f for f in z.namelist() if f.lower().endswith('.xml')]
-                    if xml_files:
-                        xml_data = z.read(xml_files[0])
-                        html_wrapped = f"<html><body><pre>{xml_data.decode('utf-8', errors='replace')}</pre></body></html>"
-                        return html_wrapped.encode('utf-8')
-            except Exception as e:
-                _logger.error("Failed to extract file from ZIP for ETTN %s: %s", ettn, str(e))
-        else:
-            return raw_content
-        return None
-
-    def _download_single_invoice(self, session_id, ettn):
-        """
-        Tek bir faturayı indirir — ThreadPoolExecutor tarafından çağrılır.
-        Thread-safe: Sadece HTTP I/O yapar, ORM kullanmaz.
-        
-        Returns:
-            tuple: (ettn, pdf_bytes_or_None)
-        """
-        try:
-            raw_content = self._get_invoice_content(session_id, ettn)
-            pdf_content = self._extract_pdf_from_raw(raw_content, ettn)
-            if pdf_content:
-                _logger.info("✅ Doğan PDF indirildi (ETTN: %s...)", ettn[:12])
-            return (ettn, pdf_content)
-        except Exception as e:
-            _logger.warning("❌ Doğan indirme hatası (ETTN: %s): %s", ettn[:12], str(e))
-            return (ettn, None)
-
     def get_invoice_pdf(self, ettn):
         """
         Main method: Login, get invoice content, determine type, logout.
@@ -323,19 +259,49 @@ class DoganEInvoiceConnector:
         if not session_id:
             return None
         
+        pdf_content = None
         try:
             raw_content = self._get_invoice_content(session_id, ettn)
-            return self._extract_pdf_from_raw(raw_content, ettn)
+            if raw_content:
+                # Check magic bytes to see what we got
+                if raw_content.startswith(b'%PDF-'):
+                    pdf_content = raw_content
+                elif raw_content.startswith(b'PK'):
+                    # It's a ZIP file containing the invoice file (PDF, HTML, or XML)
+                    try:
+                        with zipfile.ZipFile(io.BytesIO(raw_content)) as z:
+                            # 1. Look for PDF first
+                            pdf_files = [f for f in z.namelist() if f.lower().endswith('.pdf')]
+                            if pdf_files:
+                                _logger.info("Extracted PDF '%s' from ZIP for ETTN %s", pdf_files[0], ettn)
+                                pdf_content = z.read(pdf_files[0])
+                            else:
+                                # 2. Look for HTML
+                                html_files = [f for f in z.namelist() if f.lower().endswith(('.html', '.htm'))]
+                                if html_files:
+                                    _logger.info("Extracted HTML '%s' from ZIP for ETTN %s", html_files[0], ettn)
+                                    pdf_content = z.read(html_files[0])
+                                else:
+                                    # 3. Look for XML
+                                    xml_files = [f for f in z.namelist() if f.lower().endswith('.xml')]
+                                    if xml_files:
+                                        _logger.info("Extracted XML '%s' from ZIP for ETTN %s", xml_files[0], ettn)
+                                        xml_data = z.read(xml_files[0])
+                                        html_wrapped = f"<html><body><pre>{xml_data.decode('utf-8', errors='replace')}</pre></body></html>"
+                                        pdf_content = html_wrapped.encode('utf-8')
+                    except Exception as e:
+                        _logger.error("Failed to extract file from ZIP for ETTN %s: %s", ettn, str(e))
+                else:
+                    # If it's directly HTML or raw text
+                    pdf_content = raw_content
         finally:
             self._logout(session_id)
+            
+        return pdf_content
 
     def get_invoices_batch_pdf(self, ettn_list):
         """
-        Batch method: Log in ONCE, fetch PDFs for a list of ETTNs using
-        ThreadPoolExecutor for PARALLEL downloads, log out ONCE.
-        
-        6 eşzamanlı thread ile çapraz indirme yaparak ~5-6x hız artışı sağlar.
-        
+        Batch method: Log in ONCE, fetch PDFs for a list of ETTNs, log out ONCE.
         Returns dict: {ettn: pdf_binary_content or None}
         """
         if not ettn_list:
@@ -347,32 +313,36 @@ class DoganEInvoiceConnector:
 
         results = {}
         try:
-            worker_count = min(self.MAX_DOWNLOAD_WORKERS, len(ettn_list))
-            _logger.info(
-                "🚀 Doğan Paralel İndirme Başladı: %d fatura, %d eşzamanlı thread",
-                len(ettn_list), worker_count
-            )
-            
-            with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                futures = {
-                    executor.submit(self._download_single_invoice, session_id, ettn): ettn
-                    for ettn in ettn_list
-                }
-                
-                for future in as_completed(futures):
-                    ettn = futures[future]
-                    try:
-                        _, pdf_content = future.result(timeout=60)
-                        results[ettn] = pdf_content
-                    except Exception as e:
-                        _logger.warning("Thread sonucu alınamadı (ETTN: %s): %s", ettn[:12], str(e))
-                        results[ettn] = None
-            
-            success_count = sum(1 for v in results.values() if v)
-            _logger.info(
-                "✅ Doğan Paralel İndirme Tamamlandı: %d/%d başarılı",
-                success_count, len(ettn_list)
-            )
+            for ettn in ettn_list:
+                pdf_content = None
+                raw_content = self._get_invoice_content(session_id, ettn)
+                if raw_content:
+                    if raw_content.startswith(b'%PDF-'):
+                        pdf_content = raw_content
+                    elif raw_content.startswith(b'PK'):
+                        try:
+                            with zipfile.ZipFile(io.BytesIO(raw_content)) as z:
+                                pdf_files = [f for f in z.namelist() if f.lower().endswith('.pdf')]
+                                if pdf_files:
+                                    _logger.info("Extracted PDF '%s' from ZIP for ETTN %s", pdf_files[0], ettn)
+                                    pdf_content = z.read(pdf_files[0])
+                                else:
+                                    html_files = [f for f in z.namelist() if f.lower().endswith(('.html', '.htm'))]
+                                    if html_files:
+                                        _logger.info("Extracted HTML '%s' from ZIP for ETTN %s", html_files[0], ettn)
+                                        pdf_content = z.read(html_files[0])
+                                    else:
+                                        xml_files = [f for f in z.namelist() if f.lower().endswith('.xml')]
+                                        if xml_files:
+                                            _logger.info("Extracted XML '%s' from ZIP for ETTN %s", xml_files[0], ettn)
+                                            xml_data = z.read(xml_files[0])
+                                            html_wrapped = f"<html><body><pre>{xml_data.decode('utf-8', errors='replace')}</pre></body></html>"
+                                            pdf_content = html_wrapped.encode('utf-8')
+                        except Exception as e:
+                            _logger.error("Failed to extract file from ZIP for ETTN %s: %s", ettn, str(e))
+                    else:
+                        pdf_content = raw_content
+                results[ettn] = pdf_content
         finally:
             self._logout(session_id)
 
