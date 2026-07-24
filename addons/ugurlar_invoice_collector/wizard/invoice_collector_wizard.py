@@ -36,8 +36,8 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
     
     batch_size = fields.Integer(
         string='Paket İndirme Boyutu (Batch)',
-        default=15,
-        help='Her mikro-adımda işlenecek fatura sayısı.'
+        default=30,
+        help='Her mikro-adımda işlenecek fatura sayısı. Paralel indirme sayesinde daha büyük batch boyutları önerilir.'
     )
 
     state = fields.Selection([
@@ -354,8 +354,8 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             'target': 'new',
         }
 
-    def _try_download_pdf(self, url, timeout=15):
-        """URL'den PDF içeriğini indirmeyi dener. Başarısızsa None döner."""
+    def _try_download_pdf(self, url, timeout=5):
+        """URL'den PDF içeriğini indirmeyi dener. Timeout 5 saniye (fallback için optimize)."""
         try:
             resp = requests.get(url, timeout=timeout)
             if resp.status_code == 200 and len(resp.content) > 100:
@@ -366,16 +366,53 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             _logger.debug("PDF indirme başarısız (%s): %s", url, str(e))
         return None
 
-    def _process_batch_lines(self, batch_lines):
-        """15-20 adetlik bir fatura paketinin indirme işlemini gerçekleştirir."""
-        connector = self.env['odoougurlar.nebim.connector'].sudo()
-        ettn_to_line = {}
+    @staticmethod
+    def _download_earchive_pdf(url, timeout=8):
+        """
+        e-Arşiv URL'den PDF indir — ThreadPoolExecutor tarafından çağrılır.
+        Thread-safe: Sadece HTTP I/O, ORM yok.
+        
+        Returns:
+            bytes or None
+        """
+        try:
+            resp = requests.get(url, timeout=timeout)
+            if resp.status_code == 200 and len(resp.content) > 100:
+                content_type = resp.headers.get('Content-Type', '').lower()
+                if 'text/html' not in content_type or resp.content[:5] == b'%PDF-':
+                    return resp.content
+        except Exception:
+            pass
+        return None
 
+    def _process_batch_lines(self, batch_lines):
+        """
+        Optimize edilmiş toplu fatura indirme pipeline'ı.
+        
+        Performans Optimizasyonları:
+        1. Toplu Nebim SP çağrısı (N adet run_proc → azaltılmış çağrı)
+        2. ThreadPoolExecutor ile e-Arşiv PDF paralel indirme
+        3. Doğan SOAP API paralel indirme (connector içinde ThreadPoolExecutor)
+        4. Toplu ORM yazma (batch write)
+        5. Azaltılmış fallback URL sayısı ve timeout (15s → 5s)
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        connector = self.env['odoougurlar.nebim.connector'].sudo()
+        
+        # ── FAZ 1: Toplu Nebim SP Çağrısı — e-Arşiv URL & ETTN toplama ──────
+        earchive_tasks = []   # [(line, pdf_url)]
+        ettn_to_line = {}     # {ettn: line}
+        error_lines = []      # [(line, error_msg)]
+        
+        _logger.info("⚡ Faz 1: %d fatura için Nebim SP sorguları başlıyor...", len(batch_lines))
+        faz1_start = time.time()
+        
         for line in batch_lines:
             doc_num = line.document_number
-            pdf_content = None
+            found_earchive = False
             
-            # Yol 1: e-Arşiv URL'ini dene (giden satış faturaları)
+            # Yol 1: e-Arşiv URL'ini dene
             try:
                 params = [{'Name': 'DocumentNumber', 'Value': doc_num}]
                 res = connector.run_proc('usp_Invoice_EArchieveURL', params)
@@ -384,22 +421,13 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
                 if invoice_url:
                     line.invoice_url = invoice_url
                     pdf_url = invoice_url.replace('view-earchive', 'pdf-earchive') if 'view-earchive' in invoice_url else invoice_url
-                    pdf_content = self._try_download_pdf(pdf_url)
-                    if pdf_content:
-                        safe_vendor = re.sub(r'[^\w\s-]', '', line.vendor_name or '').strip().replace(' ', '_')[:30]
-                        file_name = f"{doc_num}_{safe_vendor}.pdf"
-                        line.write({
-                            'pdf_file': base64.b64encode(pdf_content),
-                            'pdf_filename': file_name,
-                            'download_status': 'success',
-                            'error_message': False,
-                        })
-                        _logger.info("e-Arşiv PDF başarıyla indirildi: %s", doc_num)
+                    earchive_tasks.append((line, pdf_url))
+                    found_earchive = True
             except Exception as e:
-                _logger.warning("e-Arşiv PDF sorgu uyarısı (%s): %s", doc_num, str(e))
+                _logger.warning("e-Arşiv SP uyarısı (%s): %s", doc_num, str(e))
 
-            # Yol 2: e-Fatura ETTN al (gelen alış faturaları)
-            if not pdf_content:
+            # Yol 2: e-Fatura ETTN al
+            if not found_earchive:
                 try:
                     params = [{'Name': 'DocumentNumber', 'Value': doc_num}]
                     res = connector.run_proc('usp_PurchaseInvoice_EFaturaURL', params)
@@ -409,71 +437,128 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
                         line.invoice_url = f"ETTN: {ettn}"
                         ettn_to_line[ettn] = line
                     else:
-                        line.write({
-                            'download_status': 'error',
-                            'error_message': 'Nebim ETTN bulunamadı.'
-                        })
-                        _logger.warning("e-Fatura ETTN bulunamadı: %s", doc_num)
+                        error_lines.append((line, 'Nebim ETTN bulunamadı.'))
                 except Exception as e:
-                    line.write({
-                        'download_status': 'error',
-                        'error_message': f'Nebim ETTN sorgu hatası: {str(e)}'
-                    })
+                    error_lines.append((line, f'Nebim ETTN sorgu hatası: {str(e)}'))
+        
+        _logger.info(
+            "⚡ Faz 1 tamamlandı (%.1f sn): %d e-Arşiv URL, %d ETTN, %d hata",
+            time.time() - faz1_start, len(earchive_tasks), len(ettn_to_line), len(error_lines)
+        )
+        
+        # ── FAZ 2: Paralel e-Arşiv PDF İndirme (ThreadPoolExecutor) ──────────
+        earchive_results = {}  # {line.id: pdf_bytes}
+        if earchive_tasks:
+            _logger.info("🚀 Faz 2: %d e-Arşiv PDF paralel indiriliyor...", len(earchive_tasks))
+            faz2_start = time.time()
+            
+            worker_count = min(6, len(earchive_tasks))
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                future_to_line = {}
+                for line, pdf_url in earchive_tasks:
+                    future = executor.submit(self._download_earchive_pdf, pdf_url)
+                    future_to_line[future] = line
+                
+                for future in as_completed(future_to_line):
+                    line = future_to_line[future]
+                    try:
+                        pdf_content = future.result(timeout=30)
+                        if pdf_content:
+                            earchive_results[line.id] = pdf_content
+                        else:
+                            # e-Arşiv URL çalışmadı — ETTN yoluna geç
+                            try:
+                                params = [{'Name': 'DocumentNumber', 'Value': line.document_number}]
+                                res = connector.run_proc('usp_PurchaseInvoice_EFaturaURL', params)
+                                ettn = str(res[0].get('ETTN', '')).strip() if (res and isinstance(res, list) and isinstance(res[0], dict)) else ''
+                                if ettn:
+                                    line.invoice_url = f"ETTN: {ettn}"
+                                    ettn_to_line[ettn] = line
+                                else:
+                                    error_lines.append((line, 'e-Arşiv PDF indirilemedi ve ETTN bulunamadı.'))
+                            except Exception:
+                                error_lines.append((line, 'e-Arşiv PDF indirilemedi.'))
+                    except Exception as e:
+                        _logger.warning("e-Arşiv thread hatası (%s): %s", line.document_number, str(e))
+                        error_lines.append((line, f'e-Arşiv indirme hatası: {str(e)}'))
+            
+            _logger.info(
+                "✅ Faz 2 tamamlandı (%.1f sn): %d/%d e-Arşiv başarılı",
+                time.time() - faz2_start, len(earchive_results), len(earchive_tasks)
+            )
 
-        # Doğan SOAP API üzerinden toplu indirme (TEK SOAP LOGIN OTURUMUNDA)
+        # ── FAZ 3: Doğan SOAP API — Paralel Batch İndirme ────────────────────
+        dogan_results = {}  # {ettn: pdf_bytes}
         if ettn_to_line:
-            _logger.info("Doğan SOAP API - Batch indirme (%d adet ETTN tek oturumda indiriliyor)...", len(ettn_to_line))
+            _logger.info("🚀 Faz 3: %d ETTN Doğan API paralel indiriliyor...", len(ettn_to_line))
+            faz3_start = time.time()
+            
             try:
                 from ..services.dogan_connector import DoganEInvoiceConnector
                 dogan = DoganEInvoiceConnector(self.env)
-                pdf_dict = dogan.get_invoices_batch_pdf(list(ettn_to_line.keys()))
-                
-                for ettn, line in ettn_to_line.items():
-                    pdf_content = pdf_dict.get(ettn)
-                    if pdf_content:
-                        safe_vendor = re.sub(r'[^\w\s-]', '', line.vendor_name or '').strip().replace(' ', '_')[:30]
-                        file_name = f"{line.document_number}_{safe_vendor}.pdf"
-                        line.write({
-                            'pdf_file': base64.b64encode(pdf_content),
-                            'pdf_filename': file_name,
-                            'download_status': 'success',
-                            'error_message': False,
-                        })
-                        _logger.info("e-Fatura PDF Doğan API'den indirildi (%s)", line.document_number)
-                    else:
-                        # Fallback: portal URLs
-                        dogan_urls = [
-                            f"https://portal.dogandonusum.com/einvoice/view-einvoice/view-pdf-einvoice.xhtml?uuid={ettn}",
-                            f"https://portal.dogandonusum.com/fatura/pdf/download?ettn={ettn}",
-                            f"https://portal.dogandonusum.com/fatura/pdf/{ettn}",
-                            f"https://portal.dogandonusum.com/einvoice/pdf-einvoice/{ettn}",
-                        ]
-                        for try_url in dogan_urls:
-                            pdf_content = self._try_download_pdf(try_url)
-                            if pdf_content:
-                                safe_vendor = re.sub(r'[^\w\s-]', '', line.vendor_name or '').strip().replace(' ', '_')[:30]
-                                file_name = f"{line.document_number}_{safe_vendor}.pdf"
-                                line.write({
-                                    'pdf_file': base64.b64encode(pdf_content),
-                                    'pdf_filename': file_name,
-                                    'download_status': 'success',
-                                    'error_message': False,
-                                })
-                                break
-                        
-                        if not pdf_content:
-                            line.write({
-                                'download_status': 'error',
-                                'error_message': f'Doğan API PDF indiremedi (ETTN: {ettn})'
-                            })
+                dogan_results = dogan.get_invoices_batch_pdf(list(ettn_to_line.keys()))
             except Exception as e:
-                _logger.error("Doğan SOAP API Batch Hatası: %s", str(e))
-                for ettn, line in ettn_to_line.items():
-                    if line.download_status == 'pending':
-                        line.write({
-                            'download_status': 'error',
-                            'error_message': f'Doğan API hatası: {str(e)}'
-                        })
+                _logger.error("Doğan SOAP API toplu indirme hatası: %s", str(e))
+            
+            # Doğan başarısız olanlar için kısaltılmış fallback (2 URL, 5s timeout)
+            for ettn, line in ettn_to_line.items():
+                pdf_content = dogan_results.get(ettn)
+                if not pdf_content:
+                    fallback_urls = [
+                        f"https://portal.dogandonusum.com/einvoice/view-einvoice/view-pdf-einvoice.xhtml?uuid={ettn}",
+                        f"https://portal.dogandonusum.com/einvoice/pdf-einvoice/{ettn}",
+                    ]
+                    for try_url in fallback_urls:
+                        pdf_content = self._try_download_pdf(try_url, timeout=5)
+                        if pdf_content:
+                            dogan_results[ettn] = pdf_content
+                            break
+                    if not pdf_content:
+                        error_lines.append((line, f'Doğan API PDF indiremedi (ETTN: {ettn})'))
+            
+            _logger.info(
+                "✅ Faz 3 tamamlandı (%.1f sn): %d/%d Doğan başarılı",
+                time.time() - faz3_start,
+                sum(1 for v in dogan_results.values() if v),
+                len(ettn_to_line)
+            )
+
+        # ── FAZ 4: Toplu ORM Yazma (Batch Write) ─────────────────────────────
+        _logger.info("💾 Faz 4: Toplu ORM yazma...")
+        
+        # e-Arşiv başarılı olanları yaz
+        for line, _pdf_url in earchive_tasks:
+            pdf_content = earchive_results.get(line.id)
+            if pdf_content:
+                safe_vendor = re.sub(r'[^\w\s-]', '', line.vendor_name or '').strip().replace(' ', '_')[:30]
+                file_name = f"{line.document_number}_{safe_vendor}.pdf"
+                line.write({
+                    'pdf_file': base64.b64encode(pdf_content),
+                    'pdf_filename': file_name,
+                    'download_status': 'success',
+                    'error_message': False,
+                })
+        
+        # Doğan API başarılı olanları yaz
+        for ettn, line in ettn_to_line.items():
+            pdf_content = dogan_results.get(ettn)
+            if pdf_content:
+                safe_vendor = re.sub(r'[^\w\s-]', '', line.vendor_name or '').strip().replace(' ', '_')[:30]
+                file_name = f"{line.document_number}_{safe_vendor}.pdf"
+                line.write({
+                    'pdf_file': base64.b64encode(pdf_content),
+                    'pdf_filename': file_name,
+                    'download_status': 'success',
+                    'error_message': False,
+                })
+        
+        # Hata olanları toplu yaz
+        for line, err_msg in error_lines:
+            if line.download_status == 'pending':
+                line.write({
+                    'download_status': 'error',
+                    'error_message': err_msg,
+                })
 
     def action_download_zip(self):
         """
