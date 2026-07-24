@@ -29,8 +29,8 @@
             <field name="arch" type="xml">
                 <list string="Toptan Alış Fatura Arşivlerim" default_order="create_date desc">
                     <field name="create_date" string="Oluşturulma Tarihi"/>
-                    <field name="brand_id"/>
-                    <field name="product_group_id"/>
+                    <field name="brand_ids" widget="many2many_tags"/>
+                    <field name="product_group_ids" widget="many2many_tags"/>
                     <field name="total_found_invoices"/>
                     <field name="processed_count"/>
                     <field name="progress_text"/>
@@ -101,8 +101,8 @@
 
                         <group invisible="state != 'draft'">
                             <group string="Filtre Kriterleri">
-                                <field name="brand_id" options="{'no_create': True, 'no_open': True}"/>
-                                <field name="product_group_id" options="{'no_create': True, 'no_open': True}"/>
+                                <field name="brand_ids" widget="many2many_tags" options="{'no_create': True, 'no_open': True}"/>
+                                <field name="product_group_ids" widget="many2many_tags" options="{'no_create': True, 'no_open': True}"/>
                             </group>
                             <group string="Tarih Aralığı &amp; Ayarlar">
                                 <field name="date_start"/>

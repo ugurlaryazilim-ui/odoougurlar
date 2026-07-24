@@ -19,17 +19,21 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
     _name = 'ugurlar.invoice.collector'
     _description = 'Toptan Alış Fatura Toplama & ZIP Arşivleme Wizard'
 
-    brand_id = fields.Many2one(
+    brand_ids = fields.Many2many(
         'product.attribute.value',
+        'ugurlar_invoice_collector_brand_rel',
+        'collector_id', 'brand_id',
         string='Marka',
         domain="[('attribute_id.name', 'ilike', 'Marka')]",
-        help='Faturaları taranacak marka'
+        help='Faturaları taranacak markalar (birden fazla seçilebilir)'
     )
-    product_group_id = fields.Many2one(
+    product_group_ids = fields.Many2many(
         'product.attribute.value',
+        'ugurlar_invoice_collector_group_rel',
+        'collector_id', 'group_id',
         string='Ürün Grubu',
         domain="[('attribute_id.name', 'ilike', 'Ürün Grubu')]",
-        help='Faturaları taranacak ürün grubu'
+        help='Faturaları taranacak ürün grupları (birden fazla seçilebilir)'
     )
     date_start = fields.Date(string='Başlangıç Tarihi')
     date_end = fields.Date(string='Bitiş Tarihi')
@@ -225,10 +229,10 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
         self.ensure_one()
         
         template_domain = []
-        if self.brand_id:
-            template_domain.append(('attribute_line_ids.value_ids', '=', self.brand_id.id))
-        if self.product_group_id:
-            template_domain.append(('attribute_line_ids.value_ids', '=', self.product_group_id.id))
+        if self.brand_ids:
+            template_domain.append(('attribute_line_ids.value_ids', 'in', self.brand_ids.ids))
+        if self.product_group_ids:
+            template_domain.append(('attribute_line_ids.value_ids', 'in', self.product_group_ids.ids))
 
         if not template_domain:
             raise UserError('Lütfen en az bir filtre kriteri (Marka veya Ürün Grubu) seçiniz.')
@@ -594,7 +598,7 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
                                 body=f"<b>🎉 Fatura Arşivi Hazır!</b><br/>"
                                      f"<b>ZIP Dosyası:</b> {job.zip_filename}<br/>"
                                      f"<b>Birleştirilmiş PDF:</b> {job.merged_pdf_filename or 'Oluşturuldu'}<br/>"
-                                     f"<b>Marka / Ürün Grubu:</b> {job.brand_id.name or 'Tümü'} / {job.product_group_id.name or 'Tümü'}<br/>"
+                                     f"<b>Marka / Ürün Grubu:</b> {', '.join(job.brand_ids.mapped('name')) or 'Tümü'} / {', '.join(job.product_group_ids.mapped('name')) or 'Tümü'}<br/>"
                                      f"<b>İndirilen Fatura Sayısı:</b> {job.processed_count} adet",
                                 subject="Fatura ZIP Arşivi Hazırlandı",
                                 message_type="notification",
@@ -630,8 +634,14 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
                 # Birleştirilmiş tek PDF dosyasını ZIP içine öne gelecek şekilde ekle
                 zip_file.writestr("00_BIRLESTIRILMIS_TUM_FATURALAR.pdf", merged_pdf_bytes)
 
-        brand_name = self.brand_id.name or 'Tumu'
-        group_name = self.product_group_id.name or 'Tumu'
+        brand_names = self.brand_ids.mapped('name')
+        brand_name = '-'.join(brand_names[:2]) if brand_names else 'Tumu'
+        if len(brand_names) > 2:
+            brand_name += f'-ve{len(brand_names)-2}diger'
+        group_names = self.product_group_ids.mapped('name')
+        group_name = '-'.join(group_names[:2]) if group_names else 'Tumu'
+        if len(group_names) > 2:
+            group_name += f'-ve{len(group_names)-2}diger'
         safe_brand = re.sub(r'[^\w]', '', brand_name)
         safe_group = re.sub(r'[^\w]', '', group_name)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
