@@ -140,12 +140,25 @@ class SocialMediaMessage(models.Model):
         from odoo import fields
         one_day_ago = fields.Datetime.now() - relativedelta(days=1)
         
-        messages = self.search([
+        # First: Get messages from bot-state conversations (DMs)
+        dm_messages = self.search([
             ('message_type', '=', 'incoming'),
             ('ai_processed', '=', False),
             ('conversation_id.state', '=', 'bot'),
+            ('create_date', '>=', one_day_ago),
+            ('content', 'not like', '[YORUM]:%')
+        ], limit=limit, order='create_date asc')
+        
+        # Second: Get COMMENT messages regardless of conversation state
+        # Comments should always be replied to even if conversation was handed off
+        comment_messages = self.search([
+            ('message_type', '=', 'incoming'),
+            ('ai_processed', '=', False),
+            ('content', 'like', '[YORUM]:%'),
             ('create_date', '>=', one_day_ago)
         ], limit=limit, order='create_date asc')
+        
+        messages = dm_messages | comment_messages
         
         if not messages:
             return
@@ -176,10 +189,21 @@ class SocialMediaMessage(models.Model):
                     user_message = "\n".join([m.content.replace("[YORUM]:", "").strip() for m in batch])
                     
                     # Fetch Conversation History for AI Context
-                    past_messages = self.search([
-                        ('conversation_id', '=', conversation.id),
-                        ('id', 'not in', [m.id for m in batch])
-                    ], order='date desc', limit=6)
+                    # For comments: only fetch history from the SAME post to avoid context confusion
+                    is_comment = any(m.content and m.content.startswith('[YORUM]:') for m in batch)
+                    
+                    if is_comment and last_msg.post_id:
+                        # Only get past messages from the same post
+                        past_messages = self.search([
+                            ('conversation_id', '=', conversation.id),
+                            ('post_id', '=', last_msg.post_id.id),
+                            ('id', 'not in', [m.id for m in batch])
+                        ], order='date desc', limit=6)
+                    else:
+                        past_messages = self.search([
+                            ('conversation_id', '=', conversation.id),
+                            ('id', 'not in', [m.id for m in batch])
+                        ], order='date desc', limit=6)
                     
                     system_context = self.env['ir.config_parameter'].sudo().get_param(
                         'social_media_ai.system_prompt', 
@@ -270,10 +294,13 @@ class SocialMediaMessage(models.Model):
                         _logger.error(f"AI Provider error or empty reply for conversation {conversation.id}")
                         continue # Will retry next cron run
                         
-                    # Process Handoff
+                    # Process Handoff (only for DMs, not comments)
                     if "[DEVRET]" in reply_text.upper():
                         reply_text = reply_text.replace("[DEVRET]", "").replace("[devret]", "").strip()
-                        conversation.sudo().write({'state': 'open'})
+                        # Only change state for DMs, NOT for public comments
+                        # Comments should continue to be auto-replied even after handoff
+                        if not is_comment:
+                            conversation.sudo().write({'state': 'open'})
                         if not reply_text:
                             reply_text = f"Detaylı bilgi için müşteri temsilcimize WhatsApp üzerinden ulaşabilirsiniz: {wa_link}"
                             
