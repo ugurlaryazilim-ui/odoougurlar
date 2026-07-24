@@ -6,7 +6,7 @@ import logging
 import re
 import time
 import zipfile
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 import requests
 
 from odoo import models, fields, api
@@ -129,7 +129,7 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
             match_ms = re.search(r'/Date\((\d+)(?:[+-]\d+)?\)/', val_str)
             if match_ms:
                 ms = int(match_ms.group(1))
-                dt_utc = datetime.utcfromtimestamp(ms / 1000.0)
+                dt_utc = datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
                 dt_tr = dt_utc + timedelta(hours=3)
                 return dt_tr.date()
 
