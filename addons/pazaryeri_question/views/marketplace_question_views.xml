@@ -152,6 +152,7 @@
         <field name="arch" type="xml">
             <kanban default_group_by="status" class="o_kanban_small_column">
                 <field name="marketplace_type"/>
+                <field name="store_id"/>
                 <field name="product_name"/>
                 <field name="question_text"/>
                 <field name="customer_name"/>
@@ -172,6 +173,7 @@
                             <div class="o_kanban_record_body">
                                 <div>
                                     <span class="badge rounded-pill text-bg-info"><field name="marketplace_type"/></span>
+                                    <span t-if="record.store_id.value" class="ms-1 text-muted small"><field name="store_id"/></span>
                                 </div>
                                 <div class="text-truncate mt-1">
                                     <field name="question_text"/>
