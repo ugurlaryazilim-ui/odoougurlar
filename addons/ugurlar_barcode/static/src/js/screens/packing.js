@@ -485,13 +485,16 @@ export class PackingScreen extends Component {
                 this.state.scanOk = false;
                 speak('packing_scan_wrong');
             } else if (res.warning) {
-                this.state.scanMsg = res.message;
-                this.state.scanOk = true;
-                speak('packing_scan_success');
-
-                // "Zaten tamamlandı" durumunda da etiket/fatura tetikle
-                if (res.picking_completed && res.picking_id) {
-                    this.state.scanMsg = res.picking_name + " zaten tamamlandı, etiket yazdırılıyor...";
+                // "Zaten paketlendi" durumu
+                if (res.label_already_printed) {
+                    // Etiket zaten basıldı — tekrar basma, bilgi ver
+                    this.state.scanMsg = `✅ ${res.message} (etiket daha önce basıldı)`;
+                    this.state.scanOk = true;
+                    speak('packing_scan_success');
+                } else if (res.picking_completed && res.picking_id) {
+                    // Etiket henüz basılmamış — bas
+                    this.state.scanMsg = res.picking_name + " zaten paketlendi, etiket yazdırılıyor...";
+                    this.state.scanOk = true;
                     speak('packing_order_complete');
 
                     this.state.completed = true;
@@ -509,6 +512,10 @@ export class PackingScreen extends Component {
                         });
                     }
                     this.printLabel(res.picking_id);
+                } else {
+                    this.state.scanMsg = res.message;
+                    this.state.scanOk = true;
+                    speak('packing_scan_success');
                 }
             } else {
                 this.state.scanMsg = `${res.product_name} — ${res.picking_name} (${res.done_qty}/${res.demand_qty})`;
