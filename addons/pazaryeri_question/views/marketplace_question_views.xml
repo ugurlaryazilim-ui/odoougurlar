@@ -158,26 +158,22 @@
                 <field name="remaining_time_display"/>
                 <field name="priority"/>
                 <field name="status"/>
+                <field name="color"/>
                 <templates>
-                    <t t-name="kanban-box">
-                        <div class="oe_kanban_global_click">
+                    <t t-name="card">
+                        <div class="oe_kanban_content">
                             <div class="o_kanban_record_top">
                                 <div class="o_kanban_record_headings">
                                     <strong class="o_kanban_record_title">
                                         <field name="product_name"/>
                                     </strong>
                                 </div>
-                                <div class="o_dropdown_kanban dropdown">
-                                    <a role="button" class="dropdown-toggle o-no-caret btn" data-bs-toggle="dropdown" href="#" aria-label="Dropdown menu" title="Dropdown menu">
-                                        <span class="fa fa-ellipsis-v"/>
-                                    </a>
-                                </div>
                             </div>
                             <div class="o_kanban_record_body">
                                 <div>
                                     <span class="badge rounded-pill text-bg-info"><field name="marketplace_type"/></span>
                                 </div>
-                                <div class="text-truncate mt-1" title="Soru">
+                                <div class="text-truncate mt-1">
                                     <field name="question_text"/>
                                 </div>
                                 <div>
