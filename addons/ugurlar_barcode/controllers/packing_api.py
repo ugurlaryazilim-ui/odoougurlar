@@ -580,21 +580,34 @@ class PackingApiController(BarcodeApiBase):
 
         # Picking zaten done ise (rota'da validate edilmiş) → paketleme tamamlanınca Nebim sync
         if picking_completed:
-            try:
-                target_picking.packing_done = True
-                # Picking done değilse validate et
-                if target_picking.state not in ('done', 'cancel'):
+            target_picking.packing_done = True
+
+            # Picking done değilse validate et
+            if target_picking.state not in ('done', 'cancel'):
+                try:
+                    # Odoo validate için move.quantity gerekli → packing_scanned_qty'den aktar
+                    for m in target_picking.move_ids:
+                        if m.state != 'cancel' and m.quantity < m.product_uom_qty:
+                            m.write({'quantity': m.packing_scanned_qty})
                     self._safe_validate_picking(target_picking)
-                # Nebim sync tetikle (fatura oluşsun)
+                except Exception as e:
+                    _logger.error("Picking %s validate hatası: %s", target_picking.name, e)
+
+            # Nebim sync tetikle (fatura oluşsun) — validate'den bağımsız çalışsın
+            try:
                 self._trigger_nebim_sync(target_picking)
-                # Etiket basıldı olarak işaretle
+            except Exception as e:
+                _logger.error("Nebim sync hatası %s: %s", target_picking.name, e)
+
+            # Etiket basıldı olarak işaretle
+            try:
                 target_picking.write({
                     'label_printed': True,
                     'label_printed_at': fields.Datetime.now(),
                     'label_printed_by': request.env.user.id,
                 })
             except Exception as e:
-                _logger.error("Auto-validate/sync error for %s: %s", target_picking.name, e)
+                _logger.warning("Label flag hatası %s: %s", target_picking.name, e)
 
         # Tüm batch kontrolü (paketleme bazlı)
         all_matched = all(
