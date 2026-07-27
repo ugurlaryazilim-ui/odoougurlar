@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Root Menu -->
+    <menuitem id="menu_pazaryeri_question_root" 
+              name="Müşteri Soruları" 
+              web_icon="pazaryeri_question,static/description/icon.png"
+              sequence="46"/>
+
+    <!-- Dashboard -->
+    <menuitem id="menu_dashboard" 
+              name="Dashboard" 
+              parent="menu_pazaryeri_question_root" 
+              action="action_marketplace_question_dashboard" 
+              sequence="5"/>
+
+    <!-- Sorular -->
+    <menuitem id="menu_questions" 
+              name="Sorular" 
+              parent="menu_pazaryeri_question_root" 
+              sequence="10"/>
+              
+    <menuitem id="menu_questions_waiting" 
+              name="Bekleyen Sorular" 
+              parent="menu_questions" 
+              action="action_marketplace_questions_waiting" 
+              sequence="10"/>
+              
+    <menuitem id="menu_questions_all" 
+              name="Tüm Sorular" 
+              parent="menu_questions" 
+              action="action_marketplace_questions" 
+              sequence="20"/>
+
+    <!-- Cevap Geçmişi -->
+    <menuitem id="menu_answers" 
+              name="Cevap Geçmişi" 
+              parent="menu_pazaryeri_question_root" 
+              action="action_marketplace_answers" 
+              sequence="20"/>
+
+    <!-- Şablonlar -->
+    <menuitem id="menu_templates" 
+              name="Cevap Şablonları" 
+              parent="menu_pazaryeri_question_root" 
+              action="action_marketplace_templates" 
+              sequence="30"/>
+</odoo>

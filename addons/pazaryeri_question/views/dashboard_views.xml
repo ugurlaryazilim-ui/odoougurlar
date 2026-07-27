@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Simple Pivot View for Dashboard -->
+    <record id="view_marketplace_question_pivot" model="ir.ui.view">
+        <field name="name">marketplace.question.pivot</field>
+        <field name="model">marketplace.question</field>
+        <field name="arch" type="xml">
+            <pivot string="Sorular Analizi" display_quantity="1">
+                <field name="status" type="row"/>
+                <field name="marketplace_type" type="col"/>
+            </pivot>
+        </field>
+    </record>
+
+    <record id="view_marketplace_question_graph" model="ir.ui.view">
+        <field name="name">marketplace.question.graph</field>
+        <field name="model">marketplace.question</field>
+        <field name="arch" type="xml">
+            <graph string="Sorular Analizi" type="bar">
+                <field name="status"/>
+                <field name="marketplace_type"/>
+            </graph>
+        </field>
+    </record>
+
+    <record id="action_marketplace_question_dashboard" model="ir.actions.act_window">
+        <field name="name">Soru Dashboard</field>
+        <field name="res_model">marketplace.question</field>
+        <field name="view_mode">kanban,pivot,graph,list,form</field>
+        <field name="context">{'search_default_group_by_status': 1}</field>
+    </record>
+</odoo>

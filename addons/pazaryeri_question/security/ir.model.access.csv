@@ -1,0 +1,7 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_marketplace_question_user,marketplace.question.user,model_marketplace_question,base.group_user,1,1,0,0
+access_marketplace_question_manager,marketplace.question.manager,model_marketplace_question,sales_team.group_sale_manager,1,1,1,1
+access_marketplace_question_answer_user,marketplace.question.answer.user,model_marketplace_question_answer,base.group_user,1,0,0,0
+access_marketplace_question_answer_manager,marketplace.question.answer.manager,model_marketplace_question_answer,sales_team.group_sale_manager,1,1,1,1
+access_marketplace_question_template_user,marketplace.question.template.user,model_marketplace_question_template,base.group_user,1,0,0,0
+access_marketplace_question_template_manager,marketplace.question.template.manager,model_marketplace_question_template,sales_team.group_sale_manager,1,1,1,1

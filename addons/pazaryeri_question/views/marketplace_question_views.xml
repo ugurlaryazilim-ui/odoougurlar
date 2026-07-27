@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- List View -->
+    <record id="view_marketplace_question_list" model="ir.ui.view">
+        <field name="name">marketplace.question.list</field>
+        <field name="model">marketplace.question</field>
+        <field name="arch" type="xml">
+            <list decoration-danger="status == 'waiting' and remaining_hours &lt; 24"
+                  decoration-warning="status == 'waiting'"
+                  decoration-success="status == 'answered'"
+                  decoration-muted="status in ('rejected', 'unanswered', 'expired')">
+                <field name="marketplace_type" widget="badge"/>
+                <field name="store_id"/>
+                <field name="product_name"/>
+                <field name="question_text"/>
+                <field name="customer_name"/>
+                <field name="question_date"/>
+                <field name="remaining_hours" column_invisible="1"/>
+                <field name="status" widget="badge" 
+                       decoration-danger="status == 'waiting' and remaining_hours &lt; 24"
+                       decoration-warning="status == 'waiting'"
+                       decoration-success="status == 'answered'"
+                       decoration-muted="status in ('rejected', 'unanswered', 'expired')"/>
+                <field name="remaining_time_display" optional="show"/>
+                <field name="priority" widget="priority"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Form View -->
+    <record id="view_marketplace_question_form" model="ir.ui.view">
+        <field name="name">marketplace.question.form</field>
+        <field name="model">marketplace.question</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="action_answer_question" string="Cevapla" type="object" class="btn-primary" invisible="status != 'waiting'"/>
+                    <button name="action_report_question" string="Soruyu Raporla" type="object" invisible="status != 'waiting'"/>
+                    <button name="action_sync_single_question" string="Senkronize Et" type="object"/>
+                    <button name="action_open_product_url" string="Ürün Sayfası" type="object" icon="fa-external-link"/>
+                    <field name="status" widget="statusbar"/>
+                </header>
+                <sheet>
+                    <widget name="web_ribbon" title="Bekliyor" bg_color="bg-warning" invisible="status != 'waiting'"/>
+                    <widget name="web_ribbon" title="Cevaplandı" bg_color="bg-success" invisible="status != 'answered'"/>
+                    
+                    <div class="oe_title">
+                        <field name="priority" widget="priority"/>
+                        <h1>
+                            <field name="marketplace_type" readonly="1"/>
+                        </h1>
+                        <h2>
+                            <field name="store_id" readonly="1"/>
+                        </h2>
+                    </div>
+                    
+                    <group>
+                        <group string="Soru Bilgileri">
+                            <field name="question_text" readonly="1"/>
+                            <field name="customer_name" readonly="1"/>
+                            <field name="question_date" readonly="1"/>
+                            <field name="remaining_time_display" readonly="1"/>
+                            <field name="is_public" readonly="1"/>
+                        </group>
+                        <group string="Ürün Bilgileri">
+                            <field name="product_name" readonly="1"/>
+                            <field name="product_barcode" readonly="1"/>
+                            <field name="product_main_id" readonly="1"/>
+                            <field name="product_tmpl_id" readonly="1"/>
+                            <field name="product_web_url" widget="url" readonly="1"/>
+                            <field name="product_image_url" widget="url" readonly="1"/>
+                        </group>
+                    </group>
+                    
+                    <notebook>
+                        <page name="answer" string="Cevap">
+                            <group>
+                                <field name="template_id"/>
+                                <field name="answer_text" placeholder="Cevabınızı buraya yazın... (min 10, max 2000 karakter)"/>
+                                <field name="answer_char_count" readonly="1"/>
+                            </group>
+                        </page>
+                        <page name="history" string="Cevap Geçmişi">
+                            <field name="answer_ids">
+                                <list>
+                                    <field name="answer_text"/>
+                                    <field name="answer_type" widget="badge"/>
+                                    <field name="sent_date"/>
+                                    <field name="sent_by"/>
+                                    <field name="rejection_reason"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page name="rejected" string="Reddedilen Cevap" invisible="not rejected_answer_text">
+                            <group>
+                                <field name="rejected_answer_text" readonly="1"/>
+                                <field name="rejected_answer_date" readonly="1"/>
+                                <field name="rejection_reason" readonly="1"/>
+                            </group>
+                        </page>
+                        <page name="technical" string="Teknik Bilgiler">
+                            <group>
+                                <field name="external_question_id"/>
+                                <field name="external_answer_id"/>
+                                <field name="customer_id_external"/>
+                                <field name="show_user_name"/>
+                                <field name="report_reason"/>
+                                <field name="reported_date"/>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <!-- Search View -->
+    <record id="view_marketplace_question_search" model="ir.ui.view">
+        <field name="name">marketplace.question.search</field>
+        <field name="model">marketplace.question</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="question_text"/>
+                <field name="customer_name"/>
+                <field name="product_name"/>
+                <field name="product_barcode"/>
+                
+                <filter name="waiting" string="Cevaplanmayı Bekleyen" domain="[('status','=','waiting')]"/>
+                <filter name="answered" string="Cevaplanmış" domain="[('status','=','answered')]"/>
+                <filter name="rejected" string="Reddedilen" domain="[('status','=','rejected')]"/>
+                <filter name="unanswered" string="Cevaplanmamış" domain="[('status','=','unanswered')]"/>
+                <separator/>
+                <filter name="urgent" string="Acil" domain="[('priority','=','3')]"/>
+                <filter name="today" string="Bugün" domain="[('question_date','&gt;=',context_today().strftime('%Y-%m-%d'))]"/>
+                <filter name="last_7_days" string="Son 7 Gün" domain="[('question_date','&gt;=',(context_today()-datetime.timedelta(days=7)).strftime('%Y-%m-%d'))]"/>
+                <separator/>
+                <filter name="trendyol" string="Trendyol" domain="[('marketplace_type','=','trendyol')]"/>
+                
+                <group expand="0" string="Group By">
+                    <filter name="group_by_marketplace" string="Pazaryeri" context="{'group_by':'marketplace_type'}"/>
+                    <filter name="group_by_status" string="Durum" context="{'group_by':'status'}"/>
+                    <filter name="group_by_store" string="Mağaza" context="{'group_by':'store_id'}"/>
+                    <filter name="group_by_date" string="Tarih" context="{'group_by':'question_date:day'}"/>
+                    <filter name="group_by_priority" string="Öncelik" context="{'group_by':'priority'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Kanban View -->
+    <record id="view_marketplace_question_kanban" model="ir.ui.view">
+        <field name="name">marketplace.question.kanban</field>
+        <field name="model">marketplace.question</field>
+        <field name="arch" type="xml">
+            <kanban default_group_by="status" class="o_kanban_small_column">
+                <field name="marketplace_type"/>
+                <field name="product_name"/>
+                <field name="question_text"/>
+                <field name="customer_name"/>
+                <field name="remaining_time_display"/>
+                <field name="priority"/>
+                <field name="status"/>
+                <templates>
+                    <t t-name="kanban-box">
+                        <div class="oe_kanban_global_click">
+                            <div class="o_kanban_record_top">
+                                <div class="o_kanban_record_headings">
+                                    <strong class="o_kanban_record_title">
+                                        <field name="product_name"/>
+                                    </strong>
+                                </div>
+                                <div class="o_dropdown_kanban dropdown">
+                                    <a role="button" class="dropdown-toggle o-no-caret btn" data-bs-toggle="dropdown" href="#" aria-label="Dropdown menu" title="Dropdown menu">
+                                        <span class="fa fa-ellipsis-v"/>
+                                    </a>
+                                </div>
+                            </div>
+                            <div class="o_kanban_record_body">
+                                <div>
+                                    <span class="badge rounded-pill text-bg-info"><field name="marketplace_type"/></span>
+                                </div>
+                                <div class="text-truncate mt-1" title="Soru">
+                                    <field name="question_text"/>
+                                </div>
+                                <div>
+                                    Müşteri: <field name="customer_name"/>
+                                </div>
+                                <div t-if="record.remaining_time_display.raw_value" class="text-danger mt-1">
+                                    <i class="fa fa-clock-o" role="img" aria-label="Kalan Süre"/> <field name="remaining_time_display"/>
+                                </div>
+                            </div>
+                            <div class="o_kanban_record_bottom mt-2">
+                                <div class="oe_kanban_bottom_left">
+                                    <field name="priority" widget="priority"/>
+                                </div>
+                            </div>
+                        </div>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <!-- Actions -->
+    <record id="action_marketplace_questions" model="ir.actions.act_window">
+        <field name="name">Müşteri Soruları</field>
+        <field name="res_model">marketplace.question</field>
+        <field name="view_mode">list,form,kanban</field>
+        <field name="search_view_id" ref="view_marketplace_question_search"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Henüz müşteri sorusu bulunmamaktadır.
+            </p>
+        </field>
+    </record>
+
+    <record id="action_marketplace_questions_waiting" model="ir.actions.act_window">
+        <field name="name">Bekleyen Sorular</field>
+        <field name="res_model">marketplace.question</field>
+        <field name="view_mode">list,form,kanban</field>
+        <field name="domain">[('status', '=', 'waiting')]</field>
+        <field name="search_view_id" ref="view_marketplace_question_search"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Bekleyen müşteri sorusu bulunmamaktadır. Harika iş çıkardınız!
+            </p>
+        </field>
+    </record>
+</odoo>

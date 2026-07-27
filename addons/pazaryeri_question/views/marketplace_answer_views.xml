@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_marketplace_answer_list" model="ir.ui.view">
+        <field name="name">marketplace.question.answer.list</field>
+        <field name="model">marketplace.question.answer</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="question_id"/>
+                <field name="answer_text"/>
+                <field name="answer_type" widget="badge"/>
+                <field name="sent_date"/>
+                <field name="sent_by"/>
+                <field name="rejection_reason"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_marketplace_answer_form" model="ir.ui.view">
+        <field name="name">marketplace.question.answer.form</field>
+        <field name="model">marketplace.question.answer</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="question_id"/>
+                            <field name="answer_type"/>
+                        </group>
+                        <group>
+                            <field name="sent_date"/>
+                            <field name="sent_by"/>
+                            <field name="rejection_reason" invisible="answer_type != 'rejected'"/>
+                        </group>
+                    </group>
+                    <group>
+                        <field name="answer_text"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_marketplace_answers" model="ir.actions.act_window">
+        <field name="name">Cevap Geçmişi</field>
+        <field name="res_model">marketplace.question.answer</field>
+        <field name="view_mode">list,form</field>
+    </record>
+</odoo>

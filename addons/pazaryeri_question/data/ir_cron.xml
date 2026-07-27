@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- ═══════════════════════════════════════════════════════
+         Soru Senkronizasyon Cron Job
+         Her 30 dakikada tüm aktif mağazaların sorularını çeker
+    ═══════════════════════════════════════════════════════ -->
+    <record id="cron_sync_marketplace_questions" model="ir.cron">
+        <field name="name">Pazaryeri: Müşteri Sorularını Senkronize Et</field>
+        <field name="model_id" ref="model_marketplace_question"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_sync_all_questions()</field>
+        <field name="interval_number">30</field>
+        <field name="interval_type">minutes</field>
+        <field name="numbercall">-1</field>
+        <field name="active">True</field>
+        <field name="priority">15</field>
+    </record>
+
+</odoo>
