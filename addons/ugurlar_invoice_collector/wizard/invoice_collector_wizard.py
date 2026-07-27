@@ -513,8 +513,29 @@ class UgurlarInvoiceCollectorWizard(models.Model):
             self.write({'state': 'downloading'})
             _logger.info("İstek tamamlandı. Kalan %d adet fatura var. Ekran yenileniyor.", len(remaining))
         else:
-            _logger.info("Tüm faturalar indirildi. ZIP arşivi ve Birleştirilmiş PDF hazırlanıyor...")
-            return self._finalize_zip(selected_lines)
+            # Tüm faturalar işlendi — başarılı olanlar var mı?
+            success_lines = selected_lines.filtered(lambda l: l.download_status == 'success' and l.pdf_file)
+            error_lines = selected_lines.filtered(lambda l: l.download_status == 'error')
+            
+            if success_lines:
+                _logger.info("Tüm faturalar indirildi. ZIP arşivi ve Birleştirilmiş PDF hazırlanıyor...")
+                return self._finalize_zip(selected_lines)
+            else:
+                # Hiç başarılı indirme yok — hata durumuna geç (UserError fırlatma!)
+                error_count = len(error_lines)
+                sample_errors = error_lines[:3].mapped('error_message')
+                error_summary = '; '.join(filter(None, sample_errors)) or 'Bilinmeyen hata'
+                _logger.warning(
+                    "Tüm faturalar hata aldı (%d adet). Örnek: %s", error_count, error_summary
+                )
+                self.write({'state': 'completed'})
+                return {
+                    'type': 'ir.actions.act_window',
+                    'res_model': self._name,
+                    'res_id': self.id,
+                    'view_mode': 'form',
+                    'target': 'current',
+                }
 
         return {
             'type': 'ir.actions.act_window',
@@ -565,8 +586,16 @@ class UgurlarInvoiceCollectorWizard(models.Model):
                 
                 remaining = job.line_ids.filtered(lambda l: l.selected and l.download_status == 'pending')
                 if not remaining:
-                    job._finalize_zip(job.line_ids.filtered(lambda l: l.selected))
-                    _logger.info("Cron: Job ID %d tamamlandı! ZIP ve Birleştirilmiş PDF oluşturuldu: %s", job.id, job.zip_filename)
+                    selected = job.line_ids.filtered(lambda l: l.selected)
+                    success_lines = selected.filtered(lambda l: l.download_status == 'success' and l.pdf_file)
+                    
+                    if success_lines:
+                        job._finalize_zip(selected)
+                        _logger.info("Cron: Job ID %d tamamlandı! ZIP ve Birleştirilmiş PDF oluşturuldu: %s", job.id, job.zip_filename)
+                    else:
+                        error_lines = selected.filtered(lambda l: l.download_status == 'error')
+                        _logger.warning("Cron: Job ID %d — hiç başarılı indirme yok (%d hata). ZIP oluşturulamadı.", job.id, len(error_lines))
+                        job.write({'state': 'completed'})
                     
                     target_partner = job.create_uid.partner_id
                     if target_partner:
