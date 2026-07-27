@@ -552,6 +552,19 @@ class PackingApiController(BarcodeApiBase):
             for m in target_picking.move_ids if m.state != 'cancel'
         )
 
+        # ─── DEBUG LOG ───
+        _logger.info(
+            "PACKING SCAN %s: product=%s, new_packing_qty=%s, "
+            "picking=%s (state=%s), picking_completed=%s, "
+            "moves=[%s]",
+            batch.name, product.display_name, new_qty,
+            target_picking.name, target_picking.state, picking_completed,
+            ', '.join(
+                f'{m.product_id.display_name}: packing={m.packing_scanned_qty}/{m.product_uom_qty} state={m.state}'
+                for m in target_picking.move_ids
+            )
+        )
+
         # ─── Aynı siparişe ait diğer picking'leri kontrol et ───
         sibling_remaining = []
         all_siblings_complete = True
@@ -580,6 +593,8 @@ class PackingApiController(BarcodeApiBase):
 
         # Picking zaten done ise (rota'da validate edilmiş) → paketleme tamamlanınca Nebim sync
         if picking_completed:
+            _logger.info("PACKING COMPLETION: %s → packing_done=True, state=%s",
+                         target_picking.name, target_picking.state)
             target_picking.packing_done = True
 
             # Picking done değilse validate et
@@ -595,6 +610,8 @@ class PackingApiController(BarcodeApiBase):
 
             # Nebim sync tetikle (fatura oluşsun) — validate'den bağımsız çalışsın
             try:
+                _logger.info("NEBIM SYNC tetikleniyor: %s (origin=%s)",
+                             target_picking.name, target_picking.origin)
                 self._trigger_nebim_sync(target_picking)
             except Exception as e:
                 _logger.error("Nebim sync hatası %s: %s", target_picking.name, e)
