@@ -6,9 +6,8 @@
         <field name="inherit_id" ref="trendyol_integration.trendyol_store_form"/>
         <field name="arch" type="xml">
             <xpath expr="//div[@name='button_box']" position="inside">
-                <button name="%(pazaryeri_question.action_marketplace_questions)d" 
-                        type="action" class="oe_stat_button" icon="fa-comments" 
-                        context="{'search_default_store_id': active_id}">
+                <button name="action_view_questions" 
+                        type="object" class="oe_stat_button" icon="fa-comments">
                     <field name="question_count" widget="statinfo" string="Sorular"/>
                 </button>
             </xpath>
