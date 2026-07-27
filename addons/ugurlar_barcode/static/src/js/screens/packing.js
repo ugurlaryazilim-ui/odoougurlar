@@ -160,6 +160,11 @@ export class PackingScreen extends Component {
                                 <i class="fa fa-exclamation-triangle"></i> Eksik Onayla (Backorder Yap)
                             </button>
                         </t>
+                        <t t-if="state.reprintPickingId">
+                            <button class="btn btn-info w-100 fw-bold mt-2" t-on-click="() => this.onReprintLabel(state.reprintPickingId)">
+                                <i class="fa fa-print"></i> 🖨️ Etiketi Tekrar Yazdır
+                            </button>
+                        </t>
                     </div>
                 </t>
 
@@ -270,6 +275,7 @@ export class PackingScreen extends Component {
             all_matched: false,
             scanInput: '',
             scanMsg: '',
+            reprintPickingId: null,
             scanOk: false,
             // completed
             completed: false,
@@ -475,6 +481,7 @@ export class PackingScreen extends Component {
     async onScan() {
         if (!this.state.scanInput.trim()) return;
         this.state.scanMsg = '';
+        this.state.reprintPickingId = null;
         try {
             const res = await BarcodeService.call('/ugurlar_barcode/api/packing_scan', {
                 batch_id: this.state.batch.id,
@@ -487,9 +494,10 @@ export class PackingScreen extends Component {
             } else if (res.warning) {
                 // "Zaten paketlendi" durumu
                 if (res.label_already_printed) {
-                    // Etiket zaten basıldı — tekrar basma, bilgi ver
+                    // Etiket zaten basıldı — tekrar basma seçeneği sun
                     this.state.scanMsg = `✅ ${res.message} (etiket daha önce basıldı)`;
                     this.state.scanOk = true;
+                    this.state.reprintPickingId = res.picking_id || null;
                     speak('packing_scan_success');
                 } else if (res.picking_completed && res.picking_id) {
                     // Etiket henüz basılmamış — bas
@@ -574,6 +582,14 @@ export class PackingScreen extends Component {
             speak('packing_error');
         }
         this.state.scanInput = '';
+    }
+
+    // ─── ETİKET TEKRAR YAZDIRMA ─────────────────────
+    async onReprintLabel(pickingId) {
+        this.state.scanMsg = 'Etiket tekrar yazdırılıyor...';
+        this.state.scanOk = true;
+        this.state.reprintPickingId = null;
+        this.printLabel(pickingId);
     }
 
     // ─── TAMAMLA ─────────────────────────────────
