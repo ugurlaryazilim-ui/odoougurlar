@@ -125,19 +125,16 @@
                 <field name="customer_name"/>
                 <field name="product_name"/>
                 <field name="product_barcode"/>
-                
                 <filter name="waiting" string="Cevaplanmayı Bekleyen" domain="[('status','=','waiting')]"/>
                 <filter name="answered" string="Cevaplanmış" domain="[('status','=','answered')]"/>
                 <filter name="rejected" string="Reddedilen" domain="[('status','=','rejected')]"/>
                 <filter name="unanswered" string="Cevaplanmamış" domain="[('status','=','unanswered')]"/>
                 <separator/>
                 <filter name="urgent" string="Acil" domain="[('priority','=','3')]"/>
-                <filter name="today" string="Bugün" domain="[('question_date','&gt;=',context_today().strftime('%Y-%m-%d'))]"/>
-                <filter name="last_7_days" string="Son 7 Gün" domain="[('question_date','&gt;=',(context_today()-datetime.timedelta(days=7)).strftime('%Y-%m-%d'))]"/>
+                <filter name="today" string="Bugün" domain="[('question_date','&gt;=', (context_today()).strftime('%Y-%m-%d'))]"/>
                 <separator/>
                 <filter name="trendyol" string="Trendyol" domain="[('marketplace_type','=','trendyol')]"/>
-                
-                <group expand="0" string="Group By">
+                <group>
                     <filter name="group_by_marketplace" string="Pazaryeri" context="{'group_by':'marketplace_type'}"/>
                     <filter name="group_by_status" string="Durum" context="{'group_by':'status'}"/>
                     <filter name="group_by_store" string="Mağaza" context="{'group_by':'store_id'}"/>
