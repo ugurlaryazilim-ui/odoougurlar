@@ -904,18 +904,53 @@ class PackingApiController(BarcodeApiBase):
         if not data['customer_name']:
             data['customer_name'] = data['partner_name']
 
-        # Nebim fatura bilgileri
+        # Nebim fatura bilgileri — yoksa Nebim sync tetikle
+        nebim_invoice_found = False
         if picking.origin:
             sale = request.env['sale.order'].sudo().search([('name', '=', picking.origin)], limit=1)
-            if sale and sale.invoice_ids:
-                for inv in sale.invoice_ids.filtered(lambda i: i.state == 'posted'):
-                    nebim_no = getattr(inv, 'nebim_invoice_number', '') or ''
-                    nebim_date = getattr(inv, 'nebim_sent_date', None)
-                    if nebim_no:
-                        data['nebim_invoice_no'] = nebim_no
-                        if nebim_date:
-                            data['nebim_invoice_date'] = nebim_date.strftime('%d.%m.%Y %H:%M')
-                        break
+            if sale:
+                # Önce mevcut faturayı kontrol et
+                if sale.invoice_ids:
+                    for inv in sale.invoice_ids.filtered(lambda i: i.state == 'posted'):
+                        nebim_no = getattr(inv, 'nebim_invoice_number', '') or ''
+                        nebim_date = getattr(inv, 'nebim_sent_date', None)
+                        if nebim_no:
+                            data['nebim_invoice_no'] = nebim_no
+                            if nebim_date:
+                                data['nebim_invoice_date'] = nebim_date.strftime('%d.%m.%Y %H:%M')
+                            nebim_invoice_found = True
+                            break
+
+                # Fatura yoksa → Nebim sync tetikle ve tekrar kontrol et
+                if not nebim_invoice_found:
+                    _logger.info(
+                        "LABEL DATA: %s için fatura bulunamadı, Nebim sync tetikleniyor...",
+                        picking.name)
+                    try:
+                        self._trigger_nebim_sync(picking)
+                        # Sync sonrası tekrar kontrol
+                        sale.invalidate_recordset(['invoice_ids'])
+                        if sale.invoice_ids:
+                            for inv in sale.invoice_ids.filtered(lambda i: i.state == 'posted'):
+                                nebim_no = getattr(inv, 'nebim_invoice_number', '') or ''
+                                nebim_date = getattr(inv, 'nebim_sent_date', None)
+                                if nebim_no:
+                                    data['nebim_invoice_no'] = nebim_no
+                                    if nebim_date:
+                                        data['nebim_invoice_date'] = nebim_date.strftime('%d.%m.%Y %H:%M')
+                                    nebim_invoice_found = True
+                                    _logger.info(
+                                        "LABEL DATA: %s Nebim fatura oluştu: %s",
+                                        picking.name, nebim_no)
+                                    break
+                        if not nebim_invoice_found:
+                            _logger.warning(
+                                "LABEL DATA: %s Nebim sync sonrası da fatura oluşmadı",
+                                picking.name)
+                    except Exception as e:
+                        _logger.error(
+                            "LABEL DATA: %s Nebim sync hatası: %s",
+                            picking.name, e)
 
         # Ürün listesi
         items = []
