@@ -317,7 +317,7 @@ class PackingApiController(BarcodeApiBase):
         """packing_scan asıl implementasyonu."""
         # Duplicate guard: aynı barkod 500ms içinde tekrar taranırsa atla
         if self._check_duplicate_request('packing_scan', batch_id, barcode):
-            return {'warning': True, 'message': 'Çift okutma algılandı, lütfen tekrar deneyin'}
+            return {'error': 'Çift okutma algılandı, lütfen tekrar deneyin'}
         batch = request.env['stock.picking.batch'].sudo().browse(int(batch_id))
         if not batch.exists():
             return {'error': 'Rota bulunamadı'}
@@ -480,15 +480,30 @@ class PackingApiController(BarcodeApiBase):
                 }
 
         if not target_move:
-            # Belki tamamlanmış — bilgi ver
+            # Belki tamamlanmış — bilgi ver + fatura/sync tetikle
             for picking in all_pickings:
                 for move in picking.move_ids:
                     if move.product_id.id == product.id and move.state != 'cancel':
+                        picking_completed = all(
+                            m.quantity >= m.product_uom_qty
+                            for m in picking.move_ids if m.state != 'cancel'
+                        )
+                        # Zaten tamamlanmış ama Nebim sync yapılmamış olabilir → tetikle
+                        if picking_completed and picking.state in ('done', 'assigned'):
+                            try:
+                                if picking.state != 'done':
+                                    picking.packing_done = True
+                                    self._safe_validate_picking(picking)
+                                self._trigger_nebim_sync(picking)
+                            except Exception as e:
+                                _logger.warning(
+                                    "Zaten tamamlanmış picking %s için Nebim sync hatası: %s",
+                                    picking.name, e)
                         return {
                             'warning': True,
                             'message': f'{product.display_name} zaten tamamlandı',
                             'product_name': product.display_name,
-                            'picking_completed': all(m.quantity >= m.product_uom_qty for m in picking.move_ids if m.state != 'cancel'),
+                            'picking_completed': picking_completed,
                             'picking_id': picking.id,
                             'picking_name': picking.name,
                         }

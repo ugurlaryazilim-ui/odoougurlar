@@ -488,15 +488,35 @@ export class PackingScreen extends Component {
                 this.state.scanMsg = res.message;
                 this.state.scanOk = true;
                 speak('packing_scan_success');
+
+                // "Zaten tamamlandı" durumunda da etiket/fatura tetikle
+                if (res.picking_completed && res.picking_id) {
+                    this.state.scanMsg = res.picking_name + " zaten tamamlandı, etiket yazdırılıyor...";
+                    speak('packing_order_complete');
+
+                    this.state.completed = true;
+                    this.state.inc_picking_id = null;
+                    if (!this.state.completedPickings) this.state.completedPickings = [];
+                    if (!this.state.completedPickings.find(p => p.picking_id === res.picking_id)) {
+                        const matchedItem = (this.state.items || []).find(i => i.picking_id === res.picking_id);
+                        this.state.completedPickings.unshift({
+                            id: res.picking_id,
+                            picking_id: res.picking_id,
+                            name: res.picking_name,
+                            cargo_tracking: matchedItem ? matchedItem.cargo_tracking : '',
+                            cargo_provider: matchedItem ? matchedItem.cargo_provider : '',
+                            customer_name: matchedItem ? matchedItem.customer_name : '',
+                        });
+                    }
+                    this.printLabel(res.picking_id);
+                }
             } else {
                 this.state.scanMsg = `${res.product_name} — ${res.picking_name} (${res.done_qty}/${res.demand_qty})`;
                 this.state.scanOk = true;
                 speak('packing_scan_success');
 
+
                 // Listeyi güncelle
-                for (const item of this.state.items) {
-                    if (item.move_id === undefined) continue;
-                }
                 const fresh = await BarcodeService.call('/ugurlar_barcode/api/packing_batch_detail', {
                     batch_id: this.state.batch.id,
                 });
