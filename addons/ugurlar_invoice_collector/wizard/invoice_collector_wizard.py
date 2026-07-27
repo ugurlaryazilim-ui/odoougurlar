@@ -570,13 +570,17 @@ class UgurlarInvoiceCollectorWizard(models.Model):
                     
                     target_partner = job.create_uid.partner_id
                     if target_partner:
+                        # Bildirim metnini hazırla (düz metin — simple_notification HTML desteklemez)
+                        brand_text = ', '.join(job.brand_ids.mapped('name')) or 'Tümü'
+                        group_text = ', '.join(job.product_group_ids.mapped('name')) or 'Tümü'
+                        
                         try:
                             self.env['bus.bus']._sendone(
                                 target_partner,
                                 'simple_notification',
                                 {
                                     'title': '🎉 Fatura ZIP / PDF Arşivi Hazır!',
-                                    'message': f'{job.zip_filename} ve Birleştirilmiş PDF başarıyla indirildi. Tıklayarak arşivi indirebilirsiniz.',
+                                    'message': f"ZIP: {job.zip_filename}\nMarka: {brand_text} / Ürün Grubu: {group_text}\nİndirilen: {job.processed_count} adet",
                                     'type': 'success',
                                     'sticky': True,
                                     'action': {
@@ -594,12 +598,21 @@ class UgurlarInvoiceCollectorWizard(models.Model):
                             _logger.warning("Bus bildirim gönderim hatası: %s", str(ne))
 
                         try:
+                            from markupsafe import Markup
                             target_partner.message_post(
-                                body=f"<b>🎉 Fatura Arşivi Hazır!</b><br/>"
-                                     f"<b>ZIP Dosyası:</b> {job.zip_filename}<br/>"
-                                     f"<b>Birleştirilmiş PDF:</b> {job.merged_pdf_filename or 'Oluşturuldu'}<br/>"
-                                     f"<b>Marka / Ürün Grubu:</b> {', '.join(job.brand_ids.mapped('name')) or 'Tümü'} / {', '.join(job.product_group_ids.mapped('name')) or 'Tümü'}<br/>"
-                                     f"<b>İndirilen Fatura Sayısı:</b> {job.processed_count} adet",
+                                body=Markup(
+                                    "<b>🎉 Fatura Arşivi Hazır!</b><br/>"
+                                    "<b>ZIP Dosyası:</b> {zip}<br/>"
+                                    "<b>Birleştirilmiş PDF:</b> {pdf}<br/>"
+                                    "<b>Marka / Ürün Grubu:</b> {brand} / {group}<br/>"
+                                    "<b>İndirilen Fatura Sayısı:</b> {count} adet"
+                                ).format(
+                                    zip=job.zip_filename,
+                                    pdf=job.merged_pdf_filename or 'Oluşturuldu',
+                                    brand=brand_text,
+                                    group=group_text,
+                                    count=job.processed_count,
+                                ),
                                 subject="Fatura ZIP Arşivi Hazırlandı",
                                 message_type="notification",
                                 subtype_xmlid="mail.mt_comment",
