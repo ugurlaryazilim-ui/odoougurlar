@@ -49,6 +49,7 @@ class UgurlarInvoiceCollectorWizard(models.Model):
         ('scanned', 'Faturalar Bulundu'),
         ('downloading', 'İndiriliyor...'),
         ('completed', 'ZIP / PDF Oluşturuldu'),
+        ('error', 'Hata (PDF Bulunamadı)'),
     ], string='Durum', default='draft')
 
     line_ids = fields.One2many(
@@ -518,17 +519,21 @@ class UgurlarInvoiceCollectorWizard(models.Model):
             error_lines = selected_lines.filtered(lambda l: l.download_status == 'error')
             
             if success_lines:
-                _logger.info("Tüm faturalar indirildi. ZIP arşivi ve Birleştirilmiş PDF hazırlanıyor...")
+                # Başarılı olanlardan ZIP oluştur (kısmi hata olsa bile)
+                if error_lines:
+                    _logger.info("%d başarılı, %d hatalı fatura. Başarılı olanlardan ZIP oluşturuluyor...", len(success_lines), len(error_lines))
+                else:
+                    _logger.info("Tüm faturalar indirildi. ZIP arşivi ve Birleştirilmiş PDF hazırlanıyor...")
                 return self._finalize_zip(selected_lines)
             else:
-                # Hiç başarılı indirme yok — hata durumuna geç (UserError fırlatma!)
+                # Hiç başarılı indirme yok — hata durumuna geç
                 error_count = len(error_lines)
                 sample_errors = error_lines[:3].mapped('error_message')
                 error_summary = '; '.join(filter(None, sample_errors)) or 'Bilinmeyen hata'
                 _logger.warning(
                     "Tüm faturalar hata aldı (%d adet). Örnek: %s", error_count, error_summary
                 )
-                self.write({'state': 'completed'})
+                self.write({'state': 'error'})
                 return {
                     'type': 'ir.actions.act_window',
                     'res_model': self._name,
@@ -595,7 +600,7 @@ class UgurlarInvoiceCollectorWizard(models.Model):
                     else:
                         error_lines = selected.filtered(lambda l: l.download_status == 'error')
                         _logger.warning("Cron: Job ID %d — hiç başarılı indirme yok (%d hata). ZIP oluşturulamadı.", job.id, len(error_lines))
-                        job.write({'state': 'completed'})
+                        job.write({'state': 'error'})
                     
                     target_partner = job.create_uid.partner_id
                     if target_partner:

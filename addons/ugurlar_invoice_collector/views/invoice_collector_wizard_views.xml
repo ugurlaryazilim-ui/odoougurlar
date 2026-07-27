@@ -38,6 +38,7 @@
                            decoration-success="state == 'completed'" 
                            decoration-info="state == 'downloading'"
                            decoration-warning="state == 'scanned'"
+                           decoration-danger="state == 'error'"
                            decoration-muted="state == 'draft'"/>
                     <field name="zip_filename" optional="show"/>
                     <field name="zip_file" filename="zip_filename" widget="binary" string="📦 ZIP Arşivini İndir"/>
@@ -76,7 +77,7 @@
                                 string="Yeni Aramaya Başla" 
                                 type="object" 
                                 class="btn-secondary" 
-                                invisible="state == 'draft'"/>
+                                invisible="state in ('draft',)"/>
                                 
                         <field name="state" widget="statusbar" statusbar_visible="draft,scanned,downloading,completed"/>
                     </header>
@@ -122,7 +123,12 @@
                             </group>
                         </group>
 
-                        <group invisible="state != 'completed'" string="Arşiv Dosyalarınız Hazır!">
+                        <div class="alert alert-danger" role="alert" invisible="state != 'error'">
+                            <strong>⚠️ Tüm faturalar hata aldı!</strong> Hiçbir PDF indirilemedi. Aşağıdaki tablodaki <b>Hata Detayı</b> sütununu kontrol ediniz.
+                            Yeni bir arama başlatmak için üstteki <b>Yeni Aramaya Başla</b> butonunu kullanabilirsiniz.
+                        </div>
+
+                        <group invisible="state not in ('completed',)" string="Arşiv Dosyalarınız Hazır!">
                             <group string="📦 ZIP Arşivi (Hem Tek Tek PDF Hem Birleşik PDF İçerir)">
                                 <field name="zip_filename" invisible="1"/>
                                 <field name="zip_file" filename="zip_filename" widget="binary" string="📦 ZIP Arşivini İndir"/>
