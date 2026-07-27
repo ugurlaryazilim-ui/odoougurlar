@@ -19,6 +19,11 @@ class StockMoveExt(models.Model):
         'stock.warehouse', string='Toplama Deposu',
         help='Bu ürünün toplanacağı depo. Batch oluşturulurken otomatik atanır.',
     )
+    packing_scanned_qty = fields.Integer(
+        string='Paketleme Okutma',
+        default=0,
+        help='Paketleme ekranında barkod okutarak eşleştirilen miktar.',
+    )
 
 AVAILABILITY_STATUS = [
     ('available', 'Stokta Mevcut'),
@@ -49,6 +54,20 @@ class StockPickingExt(models.Model):
     )
     packing_done = fields.Boolean(string='Paketlendi', default=False)
     invoice_done = fields.Boolean(string='Faturalandı', default=False)
+    label_printed = fields.Boolean(
+        string='Etiket Basıldı',
+        default=False,
+        help='Kargo etiketi basıldıysa True.',
+    )
+    label_printed_at = fields.Datetime(
+        string='Etiket Basım Zamanı',
+        readonly=True,
+    )
+    label_printed_by = fields.Many2one(
+        'res.users',
+        string='Etiketi Basan',
+        readonly=True,
+    )
 
     def _check_availability_status(self, primary_warehouse, fallback_warehouse=None, return_warehouse=None):
         """Ürün stoğunu kontrol et ve durumu ata.

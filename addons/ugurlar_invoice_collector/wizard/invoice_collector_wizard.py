@@ -15,7 +15,7 @@ from odoo.exceptions import UserError
 _logger = logging.getLogger(__name__)
 
 
-class UgurlarInvoiceCollectorWizard(models.TransientModel):
+class UgurlarInvoiceCollectorWizard(models.Model):
     _name = 'ugurlar.invoice.collector'
     _description = 'Toptan Alış Fatura Toplama & ZIP Arşivleme Wizard'
 
@@ -689,7 +689,7 @@ class UgurlarInvoiceCollectorWizard(models.TransientModel):
         }
 
 
-class UgurlarInvoiceCollectorLine(models.TransientModel):
+class UgurlarInvoiceCollectorLine(models.Model):
     _name = 'ugurlar.invoice.collector.line'
     _description = 'Fatura Toplama Wizard Satırı'
 
