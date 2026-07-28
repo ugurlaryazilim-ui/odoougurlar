@@ -310,41 +310,46 @@ class AiStudioGeneration(models.Model):
         """Cron garbage-collect tarafından yanlışlıkla silinen orijinal görselleri
         source_photo_id üzerinden geri yükle.
 
-        DİKKAT: generated_image (AI çıktısı) geri yüklenemez, sadece orijinal
-        (çekilen) fotoğraflar source_photo'dan kopyalanabilir.
-
-        Bellek tasarrufu için doğrudan SQL kullanır ve her kayıt sonrası commit yapar.
+        Odoo 19'da Image alanları ir_attachment tablosunda saklandığı için
+        attachment bazlı kurtarma yapar. Her kayıt sonrası commit ile bellek korunur.
         """
-        self.env.cr.execute("""
-            SELECT g.id, g.source_photo_id
-            FROM ai_studio_generation g
-            JOIN ai_studio_photo p ON p.id = g.source_photo_id
-            WHERE g.original_image IS NULL
-              AND g.source_photo_id IS NOT NULL
-              AND g.state = 'done'
-              AND g.reject_reason_id IS NULL
-              AND p.image_original IS NOT NULL
-        """)
-        rows = self.env.cr.fetchall()
+        # Orijinal görseli silinmiş, ama source_photo'su olan generation'ları bul
+        damaged = self.search([
+            ('source_photo_id', '!=', False),
+            ('state', '=', 'done'),
+            ('reject_reason_id', '=', False),
+        ])
+
+        # Orijinal görseli olmayan generation'ları filtrele
+        to_recover = self.env['ai.studio.generation']
+        for gen in damaged:
+            if not gen.original_image and gen.source_photo_id.image_original:
+                to_recover |= gen
+
         recovered = 0
-        for gen_id, photo_id in rows:
+        total = len(to_recover)
+        _logger.info('Kurtarılacak toplam generation: %d', total)
+
+        for gen in to_recover:
             try:
-                self.env.cr.execute("""
-                    UPDATE ai_studio_generation
-                    SET original_image = (
-                        SELECT image_original FROM ai_studio_photo WHERE id = %s
-                    )
-                    WHERE id = %s
-                """, (photo_id, gen_id))
+                # Doğrudan binary kopyala (ORM cache temizleyerek bellek tasarrufu)
+                photo = gen.source_photo_id
+                gen.with_context(image_no_postprocess=True).write({
+                    'original_image': photo.image_original,
+                })
                 self.env.cr.commit()
+                # ORM cache temizle (bellek tasarrufu)
+                self.env.invalidate_all()
                 recovered += 1
-                if recovered % 10 == 0:
-                    _logger.info('Kurtarma devam ediyor: %d / %d', recovered, len(rows))
+                if recovered % 5 == 0:
+                    _logger.info('Kurtarma devam ediyor: %d / %d', recovered, total)
             except Exception as e:
                 self.env.cr.rollback()
-                _logger.warning('Generation %d kurtarılamadı: %s', gen_id, e)
+                _logger.warning('Generation %d kurtarılamadı: %s', gen.id, e)
+
         _logger.info(
             'Kurtarma tamamlandı: %d / %d generation orijinal görseli geri yüklendi.',
-            recovered, len(rows)
+            recovered, total
         )
         return recovered
+
