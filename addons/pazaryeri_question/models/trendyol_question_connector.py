@@ -188,7 +188,9 @@ class TrendyolQuestionConnector(models.AbstractModel):
             
             return 'updated'
         else:
-            Question.create(vals)
+            new_question = Question.create(vals)
+            # Bildirim: seçili müşteri temsilcilerine bildirim gönder
+            self._notify_representatives(new_question)
             return 'created'
 
     def send_answer(self, question):
@@ -230,3 +232,31 @@ class TrendyolQuestionConnector(models.AbstractModel):
             self._process_question(result.get('data', {}), question.store_id)
         else:
             raise UserError(_('Soru güncellenemedi: %s') % result.get('error', 'Bilinmeyen hata'))
+
+    def _notify_representatives(self, question):
+        """Yeni soru geldiğinde seçili müşteri temsilcilerine bildirim gönder."""
+        try:
+            company = self.env.company
+            users = company.pq_notification_user_ids
+            if not users:
+                return
+
+            # Kullanıcıları takipçi olarak ekle
+            partners = users.mapped('partner_id')
+            question.message_subscribe(partner_ids=partners.ids)
+
+            # Bildirim mesajı gönder
+            product_info = question.product_name or 'Bilinmeyen Ürün'
+            store_name = question.store_id.name or ''
+            question.message_post(
+                body=f"🔔 <b>Yeni müşteri sorusu!</b><br/>"
+                     f"<b>Mağaza:</b> {store_name}<br/>"
+                     f"<b>Ürün:</b> {product_info}<br/>"
+                     f"<b>Soru:</b> {question.question_text[:200]}",
+                subject=f"Yeni Soru: {product_info}",
+                partner_ids=partners.ids,
+                message_type='notification',
+                subtype_xmlid='mail.mt_comment',
+            )
+        except Exception as e:
+            _logger.warning("Soru bildirim hatası (ID: %s): %s", question.id, e)

@@ -35,3 +35,11 @@ class ResConfigSettings(models.TransientModel):
         default=2000,
         help='Cevap için maksimum karakter sayısı',
     )
+
+    # ─── Bildirim ────────────────────────────────────────
+    pq_notification_user_ids = fields.Many2many(
+        related='company_id.pq_notification_user_ids',
+        readonly=False,
+        string='Müşteri Temsilcileri',
+        help='Yeni pazaryeri sorusu geldiğinde bildirim alacak kullanıcılar',
+    )

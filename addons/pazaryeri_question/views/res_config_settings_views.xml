@@ -39,6 +39,14 @@
                         </setting>
                     </block>
 
+                    <block title="Bildirimler" name="pq_notification_block">
+                        <setting string="Müşteri Temsilcileri" help="Yeni pazaryeri sorusu geldiğinde bu kullanıcılara Odoo bildirimi gider">
+                            <div class="mt8">
+                                <field name="pq_notification_user_ids" widget="many2many_tags" options="{'color_field': 'color'}"/>
+                            </div>
+                        </setting>
+                    </block>
+
                 </app>
             </xpath>
         </field>
