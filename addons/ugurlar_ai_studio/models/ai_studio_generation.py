@@ -312,21 +312,39 @@ class AiStudioGeneration(models.Model):
 
         DİKKAT: generated_image (AI çıktısı) geri yüklenemez, sadece orijinal
         (çekilen) fotoğraflar source_photo'dan kopyalanabilir.
+
+        Bellek tasarrufu için doğrudan SQL kullanır ve her kayıt sonrası commit yapar.
         """
-        damaged = self.search([
-            ('original_image', '=', False),
-            ('source_photo_id', '!=', False),
-            ('state', '=', 'done'),
-            ('reject_reason_id', '=', False),   # Reddedilmemiş (aktif versiyon)
-        ])
+        self.env.cr.execute("""
+            SELECT g.id, g.source_photo_id
+            FROM ai_studio_generation g
+            JOIN ai_studio_photo p ON p.id = g.source_photo_id
+            WHERE g.original_image IS NULL
+              AND g.source_photo_id IS NOT NULL
+              AND g.state = 'done'
+              AND g.reject_reason_id IS NULL
+              AND p.image_original IS NOT NULL
+        """)
+        rows = self.env.cr.fetchall()
         recovered = 0
-        for gen in damaged:
-            photo = gen.source_photo_id
-            if photo and photo.image_original:
-                gen.write({'original_image': photo.image_original})
+        for gen_id, photo_id in rows:
+            try:
+                self.env.cr.execute("""
+                    UPDATE ai_studio_generation
+                    SET original_image = (
+                        SELECT image_original FROM ai_studio_photo WHERE id = %s
+                    )
+                    WHERE id = %s
+                """, (photo_id, gen_id))
+                self.env.cr.commit()
                 recovered += 1
+                if recovered % 10 == 0:
+                    _logger.info('Kurtarma devam ediyor: %d / %d', recovered, len(rows))
+            except Exception as e:
+                self.env.cr.rollback()
+                _logger.warning('Generation %d kurtarılamadı: %s', gen_id, e)
         _logger.info(
             'Kurtarma tamamlandı: %d / %d generation orijinal görseli geri yüklendi.',
-            recovered, len(damaged)
+            recovered, len(rows)
         )
         return recovered
