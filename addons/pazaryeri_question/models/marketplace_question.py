@@ -81,15 +81,22 @@ class MarketplaceQuestion(models.Model):
     _marketplace_status_idx = models.Index('(marketplace_type, status)')
     _question_date_idx = models.Index('(question_date)')
 
-    @api.depends('product_barcode')
+    @api.depends('product_barcode', 'product_main_id')
     def _compute_product_tmpl(self):
-        """Barkod üzerinden Odoo ürünü ile otomatik eşleştirme."""
+        """Barkod veya Model Kodu (default_code) üzerinden Odoo ürünü ile otomatik eşleştirme."""
         for rec in self:
+            product = False
+            # Önce barkod ile dene
             if rec.product_barcode:
-                product = self.env['product.product'].search([('barcode', '=', rec.product_barcode)], limit=1)
-                rec.product_tmpl_id = product.product_tmpl_id.id if product else False
-            else:
-                rec.product_tmpl_id = False
+                product = self.env['product.product'].search(
+                    [('barcode', '=', rec.product_barcode)], limit=1
+                )
+            # Barkod yoksa veya bulunamadıysa model kodu (default_code) ile dene
+            if not product and rec.product_main_id:
+                product = self.env['product.product'].search(
+                    [('default_code', '=', rec.product_main_id)], limit=1
+                )
+            rec.product_tmpl_id = product.product_tmpl_id.id if product else False
 
     @api.depends('answer_text')
     def _compute_answer_char_count(self):
@@ -234,6 +241,15 @@ class MarketplaceQuestion(models.Model):
                 TrendyolConnector.sync_questions_for_store(store)
             except Exception as e:
                 _logger.error("Trendyol soru sync hatası (mağaza: %s): %s", store.name, e)
+        # Kalan süreleri güncelle
+        self._cron_update_remaining_time()
+
+    @api.model
+    def _cron_update_remaining_time(self):
+        """Bekleyen soruların kalan sürelerini yeniden hesapla."""
+        waiting = self.search([('status', '=', 'waiting')])
+        if waiting:
+            waiting._compute_remaining_time()
 
     def action_generate_ai_answer(self):
         """AI ile cevap önerisi oluştur."""

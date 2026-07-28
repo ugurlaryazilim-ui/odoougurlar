@@ -87,12 +87,23 @@ class TrendyolQuestionConnector(models.AbstractModel):
             'UNANSWERED': 'unanswered',
         }
         
+        # Müşteri adı: showUserName=false ise Trendyol boş döner
+        customer_name = data.get('userName', '')
+        show_user_name = data.get('showUserName', True)
+        if not customer_name and not show_user_name:
+            # Ayar: müşteri adı gizliyse varsayılan değer
+            show_name_setting = self.env['ir.config_parameter'].sudo().get_param(
+                'pazaryeri_question.show_hidden_customer_name', 'True'
+            )
+            if show_name_setting == 'True':
+                customer_name = 'Gizli Müşteri'
+
         vals = {
             'marketplace_type': 'trendyol',
             'store_id': store.id,
             'external_question_id': question_id,
             'question_text': data.get('text', ''),
-            'customer_name': data.get('userName', ''),
+            'customer_name': customer_name,
             'customer_id_external': str(data.get('customerId', '')),
             'product_name': data.get('productName', ''),
             'product_image_url': data.get('imageUrl', ''),
@@ -100,7 +111,7 @@ class TrendyolQuestionConnector(models.AbstractModel):
             'product_main_id': data.get('productMainId', ''),
             'status': status_map.get(data.get('status', ''), 'waiting'),
             'is_public': data.get('public', True),
-            'show_user_name': data.get('showUserName', True),
+            'show_user_name': show_user_name,
             'answered_date_message': data.get('answeredDateMessage', ''),
         }
         
@@ -125,6 +136,10 @@ class TrendyolQuestionConnector(models.AbstractModel):
             if rejected.get('creationDate'):
                 vals['rejected_answer_date'] = datetime.fromtimestamp(rejected['creationDate'] / 1000)
         
+        # Root-level reason (soru red sebebi)
+        if data.get('reason') and not vals.get('rejection_reason'):
+            vals['rejection_reason'] = data.get('reason', '')
+
         # Report data
         if data.get('reportReason'):
             vals['report_reason'] = data.get('reportReason', '')

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="res_config_settings_view_form_pazaryeri_question" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.pazaryeri_question</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app data-string="Müşteri Soruları" string="Müşteri Soruları" name="pazaryeri_question" data-key="pazaryeri_question" logo="/pazaryeri_question/static/description/icon.png" icon="/pazaryeri_question/static/description/icon.png">
+
+                    <block title="Müşteri Bilgileri" name="pq_customer_block">
+                        <setting string="Gizli Müşteri Adı" help="Trendyol'da müşteri adı gizli olan sorularda 'Gizli Müşteri' yazılsın mı?">
+                            <field name="pq_show_hidden_customer_name"/>
+                        </setting>
+                    </block>
+
+                    <block title="Senkronizasyon" name="pq_sync_block">
+                        <setting string="Otomatik Senkronizasyon" help="Cron job ile belirli aralıklarla soruları otomatik çek">
+                            <field name="pq_auto_sync_enabled"/>
+                            <div invisible="not pq_auto_sync_enabled" class="row mt8">
+                                <label for="pq_sync_interval" class="col-3 col-lg-3 o_light_label"/>
+                                <field name="pq_sync_interval" class="col-2"/>
+                                <span class="ms-1">dakika</span>
+                            </div>
+                        </setting>
+                    </block>
+
+                    <block title="Cevap Ayarları" name="pq_answer_block">
+                        <setting string="Cevap Karakter Limitleri" help="Pazaryerlerine gönderilecek cevaplar için karakter sınırları">
+                            <div class="row mt8">
+                                <label for="pq_answer_min_chars" class="col-3 col-lg-3 o_light_label"/>
+                                <field name="pq_answer_min_chars" class="col-2"/>
+                            </div>
+                            <div class="row mt8">
+                                <label for="pq_answer_max_chars" class="col-3 col-lg-3 o_light_label"/>
+                                <field name="pq_answer_max_chars" class="col-2"/>
+                            </div>
+                        </setting>
+                    </block>
+
+                </app>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>
