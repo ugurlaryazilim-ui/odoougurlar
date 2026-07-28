@@ -310,46 +310,81 @@ class AiStudioGeneration(models.Model):
         """Cron garbage-collect tarafından yanlışlıkla silinen orijinal görselleri
         source_photo_id üzerinden geri yükle.
 
-        Odoo 19'da Image alanları ir_attachment tablosunda saklandığı için
-        attachment bazlı kurtarma yapar. Her kayıt sonrası commit ile bellek korunur.
+        Tamamen SQL bazlı: ir_attachment kayıtlarını kopyalayarak çalışır.
+        Python belleğine hiç görsel yüklenmez — MemoryError riski sıfır.
         """
-        # Orijinal görseli silinmiş, ama source_photo'su olan generation'ları bul
-        damaged = self.search([
-            ('source_photo_id', '!=', False),
-            ('state', '=', 'done'),
-            ('reject_reason_id', '=', False),
-        ])
+        cr = self.env.cr
 
-        # Orijinal görseli olmayan generation'ları filtrele
-        to_recover = self.env['ai.studio.generation']
-        for gen in damaged:
-            if not gen.original_image and gen.source_photo_id.image_original:
-                to_recover |= gen
-
-        recovered = 0
-        total = len(to_recover)
+        # 1. Kurtarılacak generation'ları bul:
+        #    - original_image attachment'ı YOK
+        #    - source_photo_id VAR
+        #    - source photo'nun image_original attachment'ı VAR
+        cr.execute("""
+            SELECT g.id AS gen_id, g.source_photo_id AS photo_id
+            FROM ai_studio_generation g
+            WHERE g.source_photo_id IS NOT NULL
+              AND g.state = 'done'
+              AND g.reject_reason_id IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM ir_attachment a
+                  WHERE a.res_model = 'ai.studio.generation'
+                    AND a.res_field = 'original_image'
+                    AND a.res_id = g.id
+              )
+              AND EXISTS (
+                  SELECT 1 FROM ir_attachment a
+                  WHERE a.res_model = 'ai.studio.photo'
+                    AND a.res_field = 'image_original'
+                    AND a.res_id = g.source_photo_id
+              )
+        """)
+        rows = cr.fetchall()
+        total = len(rows)
         _logger.info('Kurtarılacak toplam generation: %d', total)
 
-        for gen in to_recover:
+        recovered = 0
+        for gen_id, photo_id in rows:
             try:
-                # Doğrudan binary kopyala (ORM cache temizleyerek bellek tasarrufu)
-                photo = gen.source_photo_id
-                gen.with_context(image_no_postprocess=True).write({
-                    'original_image': photo.image_original,
-                })
-                self.env.cr.commit()
-                # ORM cache temizle (bellek tasarrufu)
-                self.env.invalidate_all()
+                # ir_attachment kaydını SQL ile kopyala (binary Python'a hiç yüklenmez)
+                cr.execute("""
+                    INSERT INTO ir_attachment (
+                        name, res_model, res_field, res_id, type,
+                        db_datas, store_fname, file_size, checksum, mimetype,
+                        create_uid, create_date, write_uid, write_date
+                    )
+                    SELECT
+                        'original_image',
+                        'ai.studio.generation',
+                        'original_image',
+                        %s,
+                        a.type,
+                        a.db_datas,
+                        a.store_fname,
+                        a.file_size,
+                        a.checksum,
+                        a.mimetype,
+                        a.create_uid,
+                        NOW() AT TIME ZONE 'UTC',
+                        a.write_uid,
+                        NOW() AT TIME ZONE 'UTC'
+                    FROM ir_attachment a
+                    WHERE a.res_model = 'ai.studio.photo'
+                      AND a.res_field = 'image_original'
+                      AND a.res_id = %s
+                    LIMIT 1
+                """, (gen_id, photo_id))
+                cr.commit()
                 recovered += 1
-                if recovered % 5 == 0:
+                if recovered % 10 == 0:
                     _logger.info('Kurtarma devam ediyor: %d / %d', recovered, total)
             except Exception as e:
-                self.env.cr.rollback()
-                _logger.warning('Generation %d kurtarılamadı: %s', gen.id, e)
+                cr.rollback()
+                _logger.warning('Generation %d kurtarılamadı: %s', gen_id, e)
 
         _logger.info(
             'Kurtarma tamamlandı: %d / %d generation orijinal görseli geri yüklendi.',
             recovered, total
         )
         return recovered
+
 
