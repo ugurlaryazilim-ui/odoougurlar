@@ -270,7 +270,19 @@ class AiStudioGeneration(models.Model):
 
     @api.model
     def _cron_garbage_collect(self):
-        """Reddedilen ve eski görselleri temizle."""
+        """Reddedilen ve eski versiyonların görsellerini temizle (disk tasarrufu).
+
+        KOŞULLAR (HEPSİ AYNI ANDA SAĞLANMALI):
+        1. reject_reason_id VAR — gerçekten reddedilmiş (sadece onaylanmamış yetmez!)
+        2. child_generation_ids VAR — yeni versiyonu üretilmiş (eski versiyon)
+        3. Oturumu tamamlanmış (done) veya iptal edilmiş
+        4. 7 günden eski
+
+        ASLA TEMİZLENMEYECEKLER:
+        - Henüz incelenmemiş (review durumundaki) oturumların görselleri
+        - Son versiyon olan generation'lar (çocuğu yok = hâlâ gösterilecek)
+        - Reddedilmemiş ama onaylanmamış generation'lar (beklemede olanlar)
+        """
         days = int(self.env['ir.config_parameter'].sudo().get_param(
             'ugurlar_ai_studio.garbage_days', '7'
         ))
@@ -278,16 +290,43 @@ class AiStudioGeneration(models.Model):
         cutoff = fields.Datetime.now() - timedelta(days=days)
 
         old_rejected = self.search([
-            ('is_approved', '=', False),
-            ('state', '=', 'done'),
+            ('reject_reason_id', '!=', False),         # Gerçekten reddedilmiş
+            ('child_generation_ids', '!=', False),      # Yeni versiyonu var (eski versiyon)
+            ('session_id.state', 'in', ['done', 'cancelled']),  # Oturum tamamlanmış
             ('write_date', '<', cutoff),
-            ('child_generation_ids', '=', False),  # Son versiyon değilse
+            ('generated_image', '!=', False),           # Zaten temizlenmemişleri bul
         ])
         if old_rejected:
             _logger.info(
-                'Çöp temizleme: %d eski reddedilen üretim siliniyor', len(old_rejected)
+                'Çöp temizleme: %d eski reddedilen üretim görseli temizleniyor', len(old_rejected)
             )
             old_rejected.write({
                 'generated_image': False,
                 'original_image': False,
             })
+
+    @api.model
+    def action_recover_originals(self):
+        """Cron garbage-collect tarafından yanlışlıkla silinen orijinal görselleri
+        source_photo_id üzerinden geri yükle.
+
+        DİKKAT: generated_image (AI çıktısı) geri yüklenemez, sadece orijinal
+        (çekilen) fotoğraflar source_photo'dan kopyalanabilir.
+        """
+        damaged = self.search([
+            ('original_image', '=', False),
+            ('source_photo_id', '!=', False),
+            ('state', '=', 'done'),
+            ('reject_reason_id', '=', False),   # Reddedilmemiş (aktif versiyon)
+        ])
+        recovered = 0
+        for gen in damaged:
+            photo = gen.source_photo_id
+            if photo and photo.image_original:
+                gen.write({'original_image': photo.image_original})
+                recovered += 1
+        _logger.info(
+            'Kurtarma tamamlandı: %d / %d generation orijinal görseli geri yüklendi.',
+            recovered, len(damaged)
+        )
+        return recovered
