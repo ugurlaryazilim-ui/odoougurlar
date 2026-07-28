@@ -149,10 +149,43 @@ class TrendyolQuestionConnector(models.AbstractModel):
             vals['rejected_answer_date'] = datetime.fromtimestamp(data['rejectedDate'] / 1000)
         
         if existing:
-            # Don't overwrite user's answer_text if they typed one
-            if existing.status == 'waiting' and existing.answer_text:
+            old_status = existing.status
+            new_status = vals.get('status', old_status)
+            
+            # Don't overwrite user's answer_text if they typed one and question is still waiting
+            if old_status == 'waiting' and existing.answer_text and new_status == 'waiting':
                 vals.pop('answer_text', None)
+            
             existing.write(vals)
+            
+            # Pazaryerinden cevaplandıysa: cevap geçmişine kaydet + chatter bildirimi
+            if old_status == 'waiting' and new_status == 'answered' and vals.get('answer_text'):
+                # Daha önce bu cevap kaydedilmemiş mi kontrol et
+                ext_answer_id = vals.get('external_answer_id', '')
+                existing_answer = self.env['marketplace.question.answer'].search([
+                    ('question_id', '=', existing.id),
+                    ('external_answer_id', '=', ext_answer_id),
+                ], limit=1) if ext_answer_id else False
+                
+                if not existing_answer:
+                    self.env['marketplace.question.answer'].sudo().create({
+                        'question_id': existing.id,
+                        'answer_text': vals.get('answer_text', ''),
+                        'answer_type': 'sent',
+                        'external_answer_id': ext_answer_id,
+                        'sent_date': vals.get('answer_date', fields.Datetime.now()),
+                    })
+                    existing.message_post(
+                        body="📣 Bu soru Trendyol panelinden cevaplanmış ve otomatik güncellendi.",
+                    )
+            
+            # Reddedildiyse de bildirim
+            elif old_status != 'rejected' and new_status == 'rejected':
+                existing.message_post(
+                    body="❌ Bu sorunun cevabı Trendyol tarafından reddedildi.\n"
+                         f"Sebep: {vals.get('rejection_reason', 'Belirtilmemiş')}",
+                )
+            
             return 'updated'
         else:
             Question.create(vals)
