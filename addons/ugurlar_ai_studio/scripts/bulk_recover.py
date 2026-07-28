@@ -9,10 +9,10 @@ headers = {'Authorization': f'Key {api_key}'}
 cr = self.env.cr
 
 print("=" * 60)
-print("TOPLU GORSEL KURTARMA SCRIPTI")
+print("TOPLU GORSEL KURTARMA v2 (Oturum Bazli)")
 print("=" * 60)
 
-# PHASE 1: Eksik generation'lari cek
+# Eksik generation'lari cek
 cr.execute("""
     SELECT g.id, g.session_id, g.photo_type, s.create_date
     FROM ai_studio_generation g
@@ -31,96 +31,111 @@ for gen_id, sess_id, ptype, sdate in missing:
 
 total_gens = len(missing)
 total_sess = len(sess_map)
-print(f"Phase 1: {total_gens} eksik gorsel, {total_sess} oturum\n")
+print(f"Toplam: {total_gens} eksik gorsel, {total_sess} oturum\n")
 
-# PHASE 2: fal.ai gecmisini saatlik dilimlerle cek
-print("Phase 2: fal.ai gecmisi cekiliyor (bu 3-5 dk surebilir)...")
+# fal.ai cache - ayni zaman dilimini tekrar sorgulamayalim
+fal_cache = {}
+stats = {'ok': 0, 'fail': 0, 'api_calls': 0, 'api_err': 0}
 
-all_fal = []
-start_d = datetime(2026, 7, 3, 0, 0, 0)
-end_d = datetime(2026, 7, 19, 0, 0, 0)
-cur = start_d
-hcount = 0
+def get_fal_items(sdate):
+    """Oturum tarihine gore fal.ai'den istekleri cek (+-5dk pencere)"""
+    # Cache key: dakika hassasiyetinde
+    cache_key = sdate.strftime('%Y%m%d%H%M')
+    if cache_key in fal_cache:
+        return fal_cache[cache_key]
 
-while cur < end_d:
-    nxt = cur + timedelta(hours=1)
-    try:
-        p = {
-            'endpoint_id': 'fal-ai/nano-banana-2/edit',
-            'start': cur.strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'end': nxt.strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'status': 'success',
-            'limit': 200,
-            'expand': 'payloads',
-        }
-        r = http_requests.get('https://api.fal.ai/v1/models/requests/by-endpoint',
-                              headers=headers, params=p, timeout=30)
-        items = r.json().get('items', []) if r.status_code == 200 else []
-        all_fal.extend(items)
-    except:
-        items = []
-    hcount += 1
-    if hcount % 24 == 0:
-        print(f"  {cur.strftime('%Y-%m-%d')}: toplam {len(all_fal)} istek")
-    time.sleep(0.15)
-    cur = nxt
+    min_dt = (sdate - timedelta(minutes=3)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    max_dt = (sdate + timedelta(minutes=7)).strftime('%Y-%m-%dT%H:%M:%SZ')
 
-print(f"\nToplam {len(all_fal)} fal.ai istegi cekildi")
-
-# PHASE 3: Istekleri garment URL + zaman ile indexle
-# garment_url -> [{item, ended_ts}]
-garment_idx = defaultdict(list)
-for item in all_fal:
-    inp = item.get('json_input', {})
-    urls = inp.get('image_urls', [])
-    ended = item.get('ended_at', '')
-    if urls and ended:
+    for attempt in range(3):
         try:
-            ended_clean = ended.replace('Z', '').split('.')[0]
-            ets = datetime.fromisoformat(ended_clean).timestamp()
-        except:
-            ets = 0
-        garment_idx[urls[0]].append({'item': item, 'ts': ets})
+            p = {
+                'endpoint_id': 'fal-ai/nano-banana-2/edit',
+                'start': min_dt,
+                'end': max_dt,
+                'status': 'success',
+                'limit': 50,
+                'expand': 'payloads',
+            }
+            r = http_requests.get('https://api.fal.ai/v1/models/requests/by-endpoint',
+                                  headers=headers, params=p, timeout=30)
+            stats['api_calls'] += 1
 
-print(f"{len(garment_idx)} benzersiz garment URL'si\n")
+            if r.status_code == 200:
+                items = r.json().get('items', [])
+                fal_cache[cache_key] = items
+                return items
+            elif r.status_code == 429:
+                wait = 5 * (attempt + 1)
+                print(f"    Rate limit! {wait}s bekleniyor...")
+                time.sleep(wait)
+            else:
+                stats['api_err'] += 1
+                time.sleep(2)
+        except Exception as e:
+            stats['api_err'] += 1
+            time.sleep(2)
 
-# PHASE 4: Eslestirme ve yukleme
-print("Phase 4: Eslestirme ve yukleme basliyor...")
+    fal_cache[cache_key] = []
+    return []
 
-stats = {'ok': 0, 'fail': 0}
+print("Eslestirme ve yukleme basliyor...\n")
 
 for idx, (sess_id, sinfo) in enumerate(sess_map.items()):
     sdate = sinfo['date']
     gens = sinfo['gens']
 
-    try:
-        sdate_ts = sdate.timestamp()
-    except:
+    # fal.ai'den bu oturumun zaman dilimindeki istekleri cek
+    items = get_fal_items(sdate)
+    time.sleep(0.5)  # Rate limit koruması
+
+    if not items:
         stats['fail'] += len(gens)
+        if idx % 50 == 0:
+            print(f"[{idx}/{total_sess}] Sess {sess_id}: fal.ai'de istek yok | OK:{stats['ok']} FAIL:{stats['fail']} API:{stats['api_calls']}")
         continue
 
-    # En yakin garment grubunu bul (+-5 dk icinde)
+    # Istekleri garment URL (image_urls[0]) ile grupla
+    garment_groups = defaultdict(list)
+    for item in items:
+        inp = item.get('json_input', {})
+        urls = inp.get('image_urls', [])
+        if urls:
+            garment_groups[urls[0]].append(item)
+
+    # Oturum tarihine en yakin grubu sec
     best_group = None
     best_score = 999999
+    sdate_ts = sdate.timestamp()
 
-    for gurl, gitems in garment_idx.items():
-        avg_ts = sum(g['ts'] for g in gitems) / len(gitems) if gitems else 0
-        score = abs(avg_ts - sdate_ts)
-        if score < 420 and score < best_score:  # 7 dakika pencere
-            best_score = score
-            best_group = [g['item'] for g in gitems]
+    for gurl, gitems in garment_groups.items():
+        timestamps = []
+        for item in gitems:
+            ended = item.get('ended_at', '')
+            if ended:
+                try:
+                    clean = ended.replace('Z', '').split('.')[0].split('+')[0]
+                    timestamps.append(datetime.fromisoformat(clean).timestamp())
+                except:
+                    pass
+        if timestamps:
+            avg = sum(timestamps) / len(timestamps)
+            score = abs(avg - sdate_ts)
+            if score < best_score:
+                best_score = score
+                best_group = gitems
 
     if not best_group:
         stats['fail'] += len(gens)
-        if idx % 50 == 0:
-            print(f"  [{idx}/{total_sess}] {sess_id}: fal grubu bulunamadi")
         continue
 
+    # Her photo_type icin eslestir
     for ptype, gen_id in gens.items():
         try:
             img_url = None
 
             if ptype == 'front':
+                # Front = back isteginin image_urls[2]
                 for it in best_group:
                     pr = (it.get('json_input', {}).get('prompt', '') or '').upper()
                     if 'BACK' in pr:
@@ -128,8 +143,7 @@ for idx, (sess_id, sinfo) in enumerate(sess_map.items()):
                         if len(u) >= 3:
                             img_url = u[2]
                             break
-
-            elif ptype in ('back', 'side', 'detail'):
+            else:
                 kw = {'back': ['BACK'], 'side': ['SIDE'], 'detail': ['DETAIL', 'MACRO']}
                 targets = kw.get(ptype, [])
                 for it in best_group:
@@ -166,11 +180,15 @@ for idx, (sess_id, sinfo) in enumerate(sess_map.items()):
                 stats['fail'] += 1
         except Exception as e:
             stats['fail'] += 1
-            cr.rollback()
+            try:
+                cr.rollback()
+            except:
+                pass
 
-    if idx % 20 == 0:
-        print(f"  [{idx}/{total_sess}] OK: {stats['ok']}, FAIL: {stats['fail']}")
+    if idx % 10 == 0:
+        print(f"[{idx}/{total_sess}] OK:{stats['ok']} FAIL:{stats['fail']} API:{stats['api_calls']} ERR:{stats['api_err']}")
 
 print(f"\n{'=' * 60}")
 print(f"SONUC: {stats['ok']} basarili, {stats['fail']} basarisiz / {total_gens} toplam")
+print(f"API Calls: {stats['api_calls']}, Errors: {stats['api_err']}")
 print(f"{'=' * 60}")
