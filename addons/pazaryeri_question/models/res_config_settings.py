@@ -1,4 +1,4 @@
-from odoo import fields, models
+from odoo import api, fields, models
 
 
 class ResConfigSettings(models.TransientModel):
@@ -43,3 +43,15 @@ class ResConfigSettings(models.TransientModel):
         string='Müşteri Temsilcileri',
         help='Yeni pazaryeri sorusu geldiğinde bildirim alacak kullanıcılar',
     )
+
+    def set_values(self):
+        """Ayarlar kaydedildiğinde cron job'u da güncelle."""
+        super().set_values()
+        cron = self.env.ref('pazaryeri_question.cron_sync_marketplace_questions', raise_if_not_found=False)
+        if cron:
+            interval = max(self.pq_sync_interval or 5, 1)
+            cron.sudo().write({
+                'interval_number': interval,
+                'interval_type': 'minutes',
+                'active': self.pq_auto_sync_enabled,
+            })
