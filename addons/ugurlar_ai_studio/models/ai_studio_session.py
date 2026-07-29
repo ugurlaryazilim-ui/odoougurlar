@@ -908,6 +908,22 @@ class AiStudioSession(models.Model):
                     combined_extra_prompt = session.extra_prompt or ''
                     if session.scene_id and session.scene_id.prompt_additions:
                         combined_extra_prompt += f" {session.scene_id.prompt_additions}"
+
+                    # ═══ REVİZYON TALİMATI (RED SONRASI) ═══
+                    revision_parts = []
+                    if gen.revision_prompt:
+                        revision_parts.append(gen.revision_prompt)
+                    if gen.reject_reason_id and gen.reject_reason_id.suggested_prompt:
+                        revision_parts.append(gen.reject_reason_id.suggested_prompt)
+                    if revision_parts:
+                        revision_instruction = ' '.join(revision_parts)
+                        combined_extra_prompt = (
+                            f"CRITICAL REVISION — FOCUSED EDIT ONLY: {revision_instruction}. "
+                            f"You MUST apply ONLY this specific change. Do NOT alter anything else — "
+                            f"keep the same model, same pose, same shoes, same background, same lighting. "
+                            f"Change ONLY what is described above. "
+                        ) + combined_extra_prompt
+
                         
                     built_prompt = build_generation_prompt(
                         cached_analysis_data or {}, {
@@ -1390,6 +1406,21 @@ class AiStudioSession(models.Model):
                         combined_extra_prompt = session.extra_prompt or ''
                         if session.scene_id and session.scene_id.prompt_additions:
                             combined_extra_prompt += f" {session.scene_id.prompt_additions}"
+
+                        # ═══ REVİZYON TALİMATI (RED SONRASI) ═══
+                        revision_parts = []
+                        if gen.revision_prompt:
+                            revision_parts.append(gen.revision_prompt)
+                        if gen.reject_reason_id and gen.reject_reason_id.suggested_prompt:
+                            revision_parts.append(gen.reject_reason_id.suggested_prompt)
+                        if revision_parts:
+                            revision_instruction = ' '.join(revision_parts)
+                            combined_extra_prompt = (
+                                f"CRITICAL REVISION — FOCUSED EDIT ONLY: {revision_instruction}. "
+                                f"You MUST apply ONLY this specific change. Do NOT alter anything else — "
+                                f"keep the same model, same pose, same shoes, same background, same lighting. "
+                                f"Change ONLY what is described above. "
+                            ) + combined_extra_prompt
                             
                         built_prompt = build_generation_prompt(
                             analysis_data, preset_data, prompt_locks,

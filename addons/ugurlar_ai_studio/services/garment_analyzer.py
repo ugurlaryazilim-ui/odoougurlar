@@ -514,6 +514,17 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
             "or store price tags attached to the garment. Do not generate them. "
         )
 
+        # ═══ KİYAFET SADAKATİ KİLİDİ ═══
+        base_prompt += (
+            "ABSOLUTE GARMENT FIDELITY: You MUST reproduce the garment EXACTLY as shown in the original image. "
+            "Do NOT add, invent, or hallucinate ANY structural detail that does not exist in the original garment photo: "
+            "no belt loops, no belts, no added pockets, no pocket flaps, no suspenders, no extra buttons, "
+            "no extra seams, no added zippers, no decorative elements. "
+            "If the original waistband is clean and flat, the generated waistband MUST be clean and flat — "
+            "no belt loops, no waistband stitching, no hardware of any kind. "
+            "ANY addition that does not exist in the original garment image is a CRITICAL FAILURE. "
+        )
+
         # ═══ YAKA & ASTAR KORUMA (ASKI İÇİ GÖRÜNÜMÜ HALÜSİNASYONU) ═══
         if photo_type in ['front', 'side']:
             base_prompt += (
@@ -527,12 +538,12 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         # ═══ E-TİCARET PROFESYONEL STYLING & AKSESUAR ═══
         if photo_type in ['front', 'side', 'back']:
             base_prompt += (
-                "STYLE INSTRUCTION: Elevate the model's look for a high-end luxury e-commerce aesthetic. "
-                "Decorate the model with elegant, perfectly matching accessories such as a stylish handbag, "
-                "a luxury watch, and elegant earrings or a necklace. The accessories MUST complement the outfit perfectly "
-                "and add a premium feel to the overall look. "
-                "CRITICAL: The accessories (especially the handbag) MUST NOT cover, hide, or obstruct the garment. "
-                "Keep the handbag held low or to the side so the entire garment remains clearly visible. "
+                "STYLE INSTRUCTION: Style the model with ONLY these specific accessories: "
+                "a small elegant handbag held low to the side, a simple watch, and small earrings. "
+                "CRITICAL: Do NOT add any accessories ON the garment itself — no belts, no belt loops, no scarves, "
+                "no brooches, no pins, no hair accessories, no hats, no sunglasses. "
+                "The garment must remain EXACTLY as shown in the original image — no structural modifications. "
+                "The handbag MUST NOT cover, hide, or obstruct the garment. "
             )
 
     # Cift bosluklari temizle
@@ -657,6 +668,8 @@ _VIEW_NEGATIVE_PROMPTS = {
         "wrong fabric texture, wrong button style, modified print, "
         "different pattern, altered graphic, changed logo, "
         "security tag, anti-theft alarm, plastic tag, price tag, store label, hanger clip, hanger strings, "
+        "added belt loops, belt loops, added belt, belt, belt buckle, added pockets, added pocket flaps, "
+        "added suspenders, added buttons, added hardware, added waistband detail, "
         "double collar, inner lining visible, inner back label, back neckline showing, neck hole hallucination, back fabric on front, "
         "double straps, multiple straps on one shoulder, extra strings, thick straps, "
         "altered buttons, missing buttons, changed zipper, modified hardware, "
@@ -673,6 +686,8 @@ _VIEW_NEGATIVE_PROMPTS = {
         "studio equipment, softbox, light stand, flash head, "
         "altered garment design, wrong garment color, wrong fabric texture, "
         "security tag, anti-theft alarm, plastic tag, price tag, store label, hanger clip, hanger strings, "
+        "added belt loops, belt loops, added belt, belt, belt buckle, added pockets, added pocket flaps, "
+        "added suspenders, added buttons, added hardware, added waistband detail, "
         "double straps, multiple straps on one shoulder, extra strings, thick straps, "
         "altered buttons, missing buttons, changed zipper, modified hardware, "
         "stiff pose, rigid standing, arms straight at sides, amateur pose, "
@@ -688,6 +703,8 @@ _VIEW_NEGATIVE_PROMPTS = {
         "studio equipment, softbox, light stand, flash head, "
         "altered garment design, wrong garment color, wrong fabric texture, "
         "security tag, anti-theft alarm, plastic tag, price tag, store label, hanger clip, "
+        "added belt loops, belt loops, added belt, belt, belt buckle, added pockets, added pocket flaps, "
+        "added suspenders, added buttons, added hardware, added waistband detail, "
         "altered buttons, missing buttons, changed zipper, modified hardware, "
         "stiff pose, rigid standing, amateur pose, "
         "bare midriff, bare chest, nude model"
@@ -698,6 +715,8 @@ _VIEW_NEGATIVE_PROMPTS = {
         "altered garment design, wrong garment color, wrong fabric texture, "
         "modified print, different pattern, altered graphic, "
         "security tag, anti-theft alarm, plastic tag, price tag, store label, hanger clip, "
+        "added belt loops, belt loops, added belt, belt, belt buckle, added pockets, added pocket flaps, "
+        "added suspenders, added buttons, added hardware, added waistband detail, "
         "altered buttons, missing buttons, changed zipper, modified hardware, "
         "flat-lay photo, hanger, product-only shot without model"
     ),
