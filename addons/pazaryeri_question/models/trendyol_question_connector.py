@@ -198,29 +198,59 @@ class TrendyolQuestionConnector(models.AbstractModel):
             
             existing.write(vals)
             
-            # Pazaryerinden cevaplandıysa: cevap geçmişine kaydet + chatter bildirimi
-            if old_status == 'waiting' and new_status == 'answered' and vals.get('answer_text'):
-                ext_answer_id = vals.get('external_answer_id', '')
-                AnswerModel = self.env['marketplace.question.answer'].sudo()
-                existing_answer = AnswerModel.search([
-                    ('question_id', '=', existing.id),
-                    ('external_answer_id', '=', ext_answer_id),
-                ], limit=1) if ext_answer_id else False
+            # Cevap geçmişi — yeni veya mevcut cevaplanmış sorular için
+            AnswerModel = self.env['marketplace.question.answer'].sudo()
+            answer_data = data.get('answer')
+            if answer_data and answer_data.get('text'):
+                ext_answer_id = str(answer_data.get('id', ''))
+                # Aynı external_answer_id ile kayıt var mı kontrol et
+                existing_answer = False
+                if ext_answer_id:
+                    existing_answer = AnswerModel.search([
+                        ('question_id', '=', existing.id),
+                        ('external_answer_id', '=', ext_answer_id),
+                    ], limit=1)
                 
                 if not existing_answer:
+                    answer_date = None
+                    if answer_data.get('creationDate'):
+                        answer_date = datetime.fromtimestamp(answer_data['creationDate'] / 1000)
                     AnswerModel.create({
                         'question_id': existing.id,
-                        'answer_text': vals.get('answer_text', ''),
+                        'answer_text': answer_data['text'],
                         'answer_type': 'sent',
                         'external_answer_id': ext_answer_id,
-                        'sent_date': vals.get('answer_date', fields.Datetime.now()),
+                        'sent_date': answer_date or fields.Datetime.now(),
                     })
-                    existing.message_post(
-                        body="📣 Bu soru Trendyol panelinden cevaplanmış ve otomatik güncellendi.",
-                    )
+                    # Sadece waiting→answered geçişinde chatter bildirimi
+                    if old_status == 'waiting' and new_status == 'answered':
+                        existing.message_post(
+                            body="📣 Bu soru Trendyol panelinden cevaplanmış ve otomatik güncellendi.",
+                        )
             
-            # Reddedildiyse de bildirim
-            elif old_status != 'rejected' and new_status == 'rejected':
+            # Reddedilen cevap geçmişi
+            rejected_data = data.get('rejectedAnswer')
+            if rejected_data and rejected_data.get('text'):
+                # Reddedilen cevap kayıt var mı?
+                has_rejected = AnswerModel.search([
+                    ('question_id', '=', existing.id),
+                    ('answer_type', '=', 'rejected'),
+                    ('answer_text', '=', rejected_data['text']),
+                ], limit=1)
+                if not has_rejected:
+                    rejected_date = None
+                    if rejected_data.get('creationDate'):
+                        rejected_date = datetime.fromtimestamp(rejected_data['creationDate'] / 1000)
+                    AnswerModel.create({
+                        'question_id': existing.id,
+                        'answer_text': rejected_data['text'],
+                        'answer_type': 'rejected',
+                        'rejection_reason': rejected_data.get('reason', ''),
+                        'sent_date': rejected_date or fields.Datetime.now(),
+                    })
+            
+            # Reddedildiyse chatter bildirimi
+            if old_status != 'rejected' and new_status == 'rejected':
                 existing.message_post(
                     body="❌ Bu sorunun cevabı Trendyol tarafından reddedildi.\n"
                          f"Sebep: {vals.get('rejection_reason', 'Belirtilmemiş')}",
@@ -231,8 +261,40 @@ class TrendyolQuestionConnector(models.AbstractModel):
             _logger.info("Yeni soru oluşturuluyor: ID=%s, status=%s, ürün=%s", 
                         question_id, mapped_status, data.get('productName', ''))
             new_question = Question.create(vals)
+            
+            # Yeni soru zaten cevaplanmışsa → cevap geçmişine kaydet
+            AnswerModel = self.env['marketplace.question.answer'].sudo()
+            answer = data.get('answer')
+            if answer and answer.get('text'):
+                ext_answer_id = str(answer.get('id', ''))
+                answer_date = None
+                if answer.get('creationDate'):
+                    answer_date = datetime.fromtimestamp(answer['creationDate'] / 1000)
+                AnswerModel.create({
+                    'question_id': new_question.id,
+                    'answer_text': answer['text'],
+                    'answer_type': 'sent',
+                    'external_answer_id': ext_answer_id,
+                    'sent_date': answer_date or fields.Datetime.now(),
+                })
+            
+            # Reddedilen cevap varsa → cevap geçmişine "rejected" olarak kaydet
+            rejected = data.get('rejectedAnswer')
+            if rejected and rejected.get('text'):
+                rejected_date = None
+                if rejected.get('creationDate'):
+                    rejected_date = datetime.fromtimestamp(rejected['creationDate'] / 1000)
+                AnswerModel.create({
+                    'question_id': new_question.id,
+                    'answer_text': rejected['text'],
+                    'answer_type': 'rejected',
+                    'rejection_reason': rejected.get('reason', ''),
+                    'sent_date': rejected_date or fields.Datetime.now(),
+                })
+            
             # Bildirim: seçili müşteri temsilcilerine bildirim gönder
-            self._notify_representatives(new_question)
+            if mapped_status == 'waiting':
+                self._notify_representatives(new_question)
             return 'created'
 
     def send_answer(self, question):
