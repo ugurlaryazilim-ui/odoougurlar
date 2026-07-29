@@ -196,7 +196,20 @@ class TrendyolQuestionConnector(models.AbstractModel):
             if old_status == 'waiting' and existing.answer_text and new_status == 'waiting':
                 vals.pop('answer_text', None)
             
-            existing.write(vals)
+            # Gereksiz update'leri atla — sadece gerçekten değişen alanlar varsa güncelle
+            changed = False
+            for key, new_val in vals.items():
+                old_val = getattr(existing, key, None)
+                if key == 'store_id':
+                    old_val = existing.store_id.id if existing.store_id else False
+                if str(old_val) != str(new_val):
+                    changed = True
+                    break
+            
+            if changed:
+                existing.write(vals)
+                # Hemen flush et — ORM'in dirty record biriktirmesini önle
+                self.env.flush_all()
             
             # Cevap geçmişi — yeni veya mevcut cevaplanmış sorular için
             AnswerModel = self.env['marketplace.question.answer'].sudo()
@@ -222,6 +235,7 @@ class TrendyolQuestionConnector(models.AbstractModel):
                         'external_answer_id': ext_answer_id,
                         'sent_date': answer_date or fields.Datetime.now(),
                     })
+                    self.env.flush_all()
                     # Sadece waiting→answered geçişinde chatter bildirimi
                     if old_status == 'waiting' and new_status == 'answered':
                         existing.message_post(
@@ -248,6 +262,7 @@ class TrendyolQuestionConnector(models.AbstractModel):
                         'rejection_reason': rejected_data.get('reason', ''),
                         'sent_date': rejected_date or fields.Datetime.now(),
                     })
+                    self.env.flush_all()
             
             # Reddedildiyse chatter bildirimi
             if old_status != 'rejected' and new_status == 'rejected':
@@ -261,6 +276,7 @@ class TrendyolQuestionConnector(models.AbstractModel):
             _logger.info("Yeni soru oluşturuluyor: ID=%s, status=%s, ürün=%s", 
                         question_id, mapped_status, data.get('productName', ''))
             new_question = Question.create(vals)
+            self.env.flush_all()
             
             # Yeni soru zaten cevaplanmışsa → cevap geçmişine kaydet
             AnswerModel = self.env['marketplace.question.answer'].sudo()
@@ -291,6 +307,8 @@ class TrendyolQuestionConnector(models.AbstractModel):
                     'rejection_reason': rejected.get('reason', ''),
                     'sent_date': rejected_date or fields.Datetime.now(),
                 })
+            
+            self.env.flush_all()
             
             # Bildirim: seçili müşteri temsilcilerine bildirim gönder
             if mapped_status == 'waiting':
