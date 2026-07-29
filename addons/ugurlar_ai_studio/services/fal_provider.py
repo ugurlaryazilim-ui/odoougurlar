@@ -100,6 +100,21 @@ class FalProvider(AIProviderBase):
                 
             enhanced_prompt = prompt
             
+            # ═══ GARMENT STRUCTURAL FIDELITY (EN YÜKSEK ÖNCELİK) ═══
+            # Bu talimat promptun EN BAŞINA yerleşir — nano-banana-2 bunu ilk okur
+            garment_fidelity = (
+                "GARMENT STRUCTURAL FIDELITY — ABSOLUTE RULE: "
+                "The 1st reference image shows the EXACT garment. You MUST reproduce this garment "
+                "with ZERO modifications. Do NOT add ANY structural element that is not visible "
+                "in the 1st reference image: "
+                "NO belt loops, NO belts, NO added pockets, NO pocket flaps, NO extra seams, "
+                "NO extra stitching, NO waistband hardware, NO decorative elements, NO added buttons, "
+                "NO added zippers, NO suspenders, NO ties, NO scarves. "
+                "If the waistband in the 1st reference image is CLEAN and FLAT with no belt loops, "
+                "the output waistband MUST be CLEAN and FLAT with ABSOLUTELY NO belt loops. "
+                "Reproduce the garment EXACTLY as it appears — nothing added, nothing removed. "
+            )
+
             # Base View Hints
             view_hints = {
                 'back': 'IMPORTANT: Show the BACK view of the model, facing away from camera. ',
@@ -107,7 +122,7 @@ class FalProvider(AIProviderBase):
                 'detail': 'IMPORTANT: Close-up detail shot showing fabric texture and details. ',
             }
             base_hint = view_hints.get(photo_type, '') if photo_type and photo_type != 'front' else ''
-            dynamic_prompt = base_hint
+            dynamic_prompt = garment_fidelity + base_hint
             
             detail_start_idx = 3
             if front_output_url and photo_type in ('back', 'side'):
