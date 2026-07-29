@@ -1,3 +1,4 @@
+from datetime import timedelta
 from odoo import api, fields, models
 
 
@@ -50,8 +51,10 @@ class ResConfigSettings(models.TransientModel):
         cron = self.env.ref('pazaryeri_question.cron_sync_marketplace_questions', raise_if_not_found=False)
         if cron:
             interval = max(self.pq_sync_interval or 5, 1)
+            now = fields.Datetime.now()
             cron.sudo().write({
                 'interval_number': interval,
                 'interval_type': 'minutes',
                 'active': self.pq_auto_sync_enabled,
+                'nextcall': now + timedelta(minutes=interval),
             })

@@ -230,19 +230,40 @@ class MarketplaceQuestion(models.Model):
     @api.model
     def _cron_sync_all_questions(self):
         """Tüm pazaryerlerinden soruları çek (Cron job)."""
+        _logger.info("═══ Pazaryeri Soru Cron Başlatıldı ═══")
+        
         # Trendyol
         TrendyolConnector = self.env['trendyol.question.connector']
         stores = self.env['trendyol.store'].search([
             ('active', '=', True),
             ('question_sync_enabled', '=', True),
         ])
+        
+        _logger.info("Aktif mağaza sayısı (question_sync_enabled=True): %d", len(stores))
+        
+        if not stores:
+            _logger.warning("Soru sync için aktif mağaza bulunamadı! "
+                          "Trendyol mağaza ayarlarından 'Soru Senkronizasyonu' tikini kontrol edin.")
+            return
+        
+        total_results = {'created': 0, 'updated': 0, 'errors': 0}
         for store in stores:
+            _logger.info("Mağaza sync başlıyor: %s (seller_id: %s)", store.name, store.seller_id)
             try:
-                TrendyolConnector.sync_questions_for_store(store)
+                result = TrendyolConnector.sync_questions_for_store(store)
+                total_results['created'] += result.get('created', 0)
+                total_results['updated'] += result.get('updated', 0)
+                _logger.info("Mağaza sync tamamlandı: %s | Yeni: %d | Güncellenen: %d",
+                           store.name, result.get('created', 0), result.get('updated', 0))
             except Exception as e:
-                _logger.error("Trendyol soru sync hatası (mağaza: %s): %s", store.name, e)
+                total_results['errors'] += 1
+                _logger.error("Trendyol soru sync hatası (mağaza: %s): %s", store.name, e, exc_info=True)
+        
         # Kalan süreleri güncelle
         self._cron_update_remaining_time()
+        
+        _logger.info("═══ Pazaryeri Soru Cron Tamamlandı | Yeni: %d | Güncellenen: %d | Hata: %d ═══",
+                     total_results['created'], total_results['updated'], total_results['errors'])
 
     @api.model
     def _cron_update_remaining_time(self):
