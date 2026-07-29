@@ -76,8 +76,26 @@ class TrendyolQuestionConnector(models.AbstractModel):
                 break
             page += 1
         
-        # Update last sync time
-        store.sudo().write({'last_question_sync': fields.Datetime.now()})
+        # last_question_sync — ayrı cursor ile güncelle
+        # Trendyol sipariş sync cron'u da trendyol_store'a yazıyor,
+        # aynı anda çalışınca PostgreSQL serialization hatası oluşuyor
+        # ve tüm transaction (sorular dahil) rollback ediliyor.
+        # Ayrı cursor kullanarak bu çakışmayı önlüyoruz.
+        store_id = store.id
+        try:
+            new_cr = self.pool.cursor()
+            new_cr.execute(
+                "UPDATE trendyol_store SET last_question_sync = %s, write_date = %s WHERE id = %s",
+                (fields.Datetime.now(), fields.Datetime.now(), store_id)
+            )
+            new_cr.commit()
+            new_cr.close()
+        except Exception as e:
+            _logger.warning("last_question_sync güncellenemedi (mağaza: %s): %s", store.name, e)
+            try:
+                new_cr.close()
+            except Exception:
+                pass
         
         _logger.info("Trendyol soru sync tamamlandı (mağaza: %s) | Yeni: %d | Güncellenen: %d",
                      store.name, total_created, total_updated)
