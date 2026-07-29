@@ -100,19 +100,12 @@ class FalProvider(AIProviderBase):
                 
             enhanced_prompt = prompt
             
-            # ═══ GARMENT STRUCTURAL FIDELITY (EN YÜKSEK ÖNCELİK) ═══
-            # Bu talimat promptun EN BAŞINA yerleşir — nano-banana-2 bunu ilk okur
+            # ═══ GARMENT FIDELITY (OLUMLU ÇERÇEVELEME) ═══
             garment_fidelity = (
-                "GARMENT STRUCTURAL FIDELITY — ABSOLUTE RULE: "
-                "The 1st reference image shows the EXACT garment. You MUST reproduce this garment "
-                "with ZERO modifications. Do NOT add ANY structural element that is not visible "
-                "in the 1st reference image: "
-                "NO belt loops, NO belts, NO added pockets, NO pocket flaps, NO extra seams, "
-                "NO extra stitching, NO waistband hardware, NO decorative elements, NO added buttons, "
-                "NO added zippers, NO suspenders, NO ties, NO scarves. "
-                "If the waistband in the 1st reference image is CLEAN and FLAT with no belt loops, "
-                "the output waistband MUST be CLEAN and FLAT with ABSOLUTELY NO belt loops. "
-                "Reproduce the garment EXACTLY as it appears — nothing added, nothing removed. "
+                "GARMENT FIDELITY: The 1st reference image is the EXACT garment. "
+                "Reproduce every visible detail precisely: same waistband construction, "
+                "same seams, same pockets, same hardware. "
+                "The output garment must be a pixel-perfect match of the 1st reference. "
             )
 
             # Base View Hints

@@ -108,7 +108,10 @@ Analyze the garment and return a JSON with these fields:
   "seoTitle": "string — SEO optimized Turkish title",
   "seoDescription": "string — SEO optimized Turkish description (50-100 words)",
   "recommendedBottoms": "string — Describe in English the most matching pants/trousers/jeans style and color to build a stylish outfit with this product (e.g. 'dark blue slim-fit denim jeans', 'beige tailored cotton trousers', 'black cargo pants')",
-  "recommendedShoes": "string — Describe in English the most matching shoes style and color for this outfit (e.g. 'clean white minimalist leather sneakers', 'brown leather loafers', 'black high-top boots')"
+  "recommendedShoes": "string — Describe in English the most matching shoes style and color for this outfit (e.g. 'clean white minimalist leather sneakers', 'brown leather loafers', 'black high-top boots')",
+  "waistbandType": "string — for bottoms: smooth/flat, belted, elasticated, drawstring. For tops: null",
+  "hasBeltLoops": "boolean — true ONLY if belt loops are clearly visible on the garment",
+  "structuralDetails": "string — describe visible structural elements: pleats, darts, pintucks, piping"
 }
 
 Return ONLY valid JSON, no markdown."""
@@ -420,7 +423,7 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
             fit="standard fit",
         )
     else:
-        # fal vb. modeller icin tam detayli prompt
+        # fal vb. modeller icin kisa ve olumlu prompt
         garment_type = analysis.get('garmentType', 'garment')
         color = analysis.get('primaryColor', '')
         fabric = analysis.get('fabricType', '')
@@ -429,6 +432,7 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         fit = analysis.get('fitDetails', 'Regular Fit')
         collar = analysis.get('collarType', '')
         sleeve = analysis.get('sleeveType', '')
+        category = analysis.get('clothingCategory', 'tops')
 
         base_prompt = view_base.format(
             garment_type=garment_type,
@@ -439,112 +443,66 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
             fit=fit,
         )
 
-        if collar:
+        # Yaka/kol bilgisi (sadece ust giyim)
+        if collar and category not in ['bottoms']:
             base_prompt += f"Collar: {collar}. "
-        if sleeve:
+        if sleeve and category not in ['bottoms']:
             base_prompt += f"Sleeves: {sleeve}. "
-            
-            # Strapless / Sleeveless icin Anti-Halusinasyon Kilidi
+
+            # Strapless / Sleeveless — olumlu cerceleme
             sleeve_lower = sleeve.lower()
-            if any(k in sleeve_lower for k in ['strapless', 'askisiz', 'askısız', 'no sleeve', 'sleeveless', 'kolsuz', 'kol yok', 'tube']):
+            if any(k in sleeve_lower for k in ['strapless', 'askisiz', 'askısız', 'sleeveless', 'kolsuz', 'tube']):
                 base_prompt += (
-                    "CRITICAL GARMENT STRUCTURE LOCK: This garment is STRICTLY STRAPLESS / TUBE TOP. "
-                    "The model MUST have completely BARE shoulders and BARE upper arms. "
-                    "DO NOT generate ANY straps, sleeves, arm bands, or shoulder fabric. "
-                    "Any fabric on the shoulders or arms is a hallucination and a FAILURE. "
-                    "Ignore any hanger strings in the input image. "
-                )
-            
-            # Ince askili / Abiye Cift Aski Onleme Kilidi
-            garment_type_lower = garment_type.lower()
-            style_lower = style.lower()
-            if any(k in sleeve_lower for k in ['ince askı', 'ince aski', 'spaghetti', 'thin strap', 'strap', 'askili', 'askılı']) or \
-               any(k in garment_type_lower or k in style_lower for k in ['abiye', 'evening', 'gown']):
-                base_prompt += (
-                    "CRITICAL SHOULDER STRAP LOCK: This garment has SINGLE THIN STRAPS (spaghetti straps). "
-                    "You MUST generate EXACTLY ONE thin strap per shoulder. "
-                    "Do NOT generate double straps, multiple strings, or thick straps. "
-                    "The original image is on a hanger which may show both front and back straps — "
-                    "IGNORE the back straps. Consolidate them into a SINGLE elegant strap over each shoulder. "
+                    "This garment is strapless with completely bare shoulders. "
+                    "The model has bare upper arms with clean, exposed shoulders. "
                 )
 
-        # ═══ BASKI / GRAFIK KORUMA TALIMATLARI ═══
+            # Ince askili — olumlu cerceleme
+            if any(k in sleeve_lower for k in ['ince askı', 'ince aski', 'spaghetti', 'thin strap', 'askili', 'askılı']):
+                base_prompt += (
+                    "This garment has single thin spaghetti straps — exactly one delicate strap per shoulder. "
+                )
+
+        # ═══ BASKI / GRAFIK KORUMA ═══
         has_graphic = analysis.get('hasGraphic', False)
         graphic_desc = analysis.get('graphicDescription', '')
         if has_graphic and graphic_desc:
             base_prompt += (
-                f"CRITICAL GARMENT DETAIL PRESERVATION: "
-                f"This garment has a graphic print/design described as: "
-                f"'{graphic_desc}'. "
-                f"The print MUST be preserved EXACTLY as shown in the input image — "
-                f"same position, same colors, same proportions. "
-                f"Do NOT alter, simplify, remove, or reinterpret ANY part of the design. "
+                f"This garment has a graphic print: '{graphic_desc}'. "
+                f"Preserve the print exactly as shown — same position, colors, proportions. "
             )
         elif has_graphic:
-            base_prompt += (
-                "CRITICAL: This garment has a graphic print/design. "
-                "Preserve the print EXACTLY as shown in the input — "
-                "same position, same colors, same proportions. "
-                "Do NOT alter or remove any part of the design. "
-            )
+            base_prompt += "Preserve the graphic print exactly as shown in the reference. "
 
-        # ═══ DONANIM VE DETAY KORUMA (ALARM YOK SAYMA) ═══
+        # ═══ DONANIM KORUMA ═══
         closure = analysis.get('closureType', '')
         button_count = analysis.get('buttonCount')
         if closure and str(closure).lower() not in ['yok', 'none', 'null', 'false', '']:
-            base_prompt += (
-                f"CRITICAL HARDWARE PRESERVATION: The garment has {closure} details. "
-                "You MUST exactly preserve all visible buttons, zippers, snaps, rivets, and hardware "
-                "from the original image. Do not alter their size, shape, color, or placement. "
-            )
+            base_prompt += f"Hardware: {closure}. Preserve all visible buttons, zippers, snaps exactly. "
             if button_count and str(button_count).isdigit() and int(str(button_count)) > 0:
-                base_prompt += (
-                    f"BUTTON COUNT LOCK: This garment has EXACTLY {button_count} buttons. "
-                    f"You MUST reproduce exactly {button_count} buttons — no more, no fewer. "
-                    "Match their exact size, shape, material, and placement. "
-                )
-        else:
-            base_prompt += (
-                "CRITICAL HARDWARE PRESERVATION: You MUST exactly preserve any visible buttons, "
-                "zippers, snaps, rivets, or hardware from the original image. Do not alter their "
-                "size, shape, color, or placement. "
-            )
-        base_prompt += (
-            "CRITICAL: IGNORE and REMOVE any plastic security tags, anti-theft alarms, "
-            "or store price tags attached to the garment. Do not generate them. "
-        )
+                base_prompt += f"Exactly {button_count} buttons, matched precisely. "
 
-        # ═══ KİYAFET SADAKATİ KİLİDİ ═══
-        base_prompt += (
-            "ABSOLUTE GARMENT FIDELITY: You MUST reproduce the garment EXACTLY as shown in the original image. "
-            "Do NOT add, invent, or hallucinate ANY structural detail that does not exist in the original garment photo: "
-            "no belt loops, no belts, no added pockets, no pocket flaps, no suspenders, no extra buttons, "
-            "no extra seams, no added zippers, no decorative elements. "
-            "If the original waistband is clean and flat, the generated waistband MUST be clean and flat — "
-            "no belt loops, no waistband stitching, no hardware of any kind. "
-            "ANY addition that does not exist in the original garment image is a CRITICAL FAILURE. "
-        )
+        # ═══ WAISTBAND / ALT GİYİM DETAYLARI (Gemini analizinden) ═══
+        if category == 'bottoms':
+            waistband_type = analysis.get('waistbandType', '')
+            has_belt_loops = analysis.get('hasBeltLoops', False)
+            if has_belt_loops:
+                base_prompt += "The waistband has belt loops as visible in the reference image. "
+            elif waistband_type:
+                base_prompt += f"The waistband is {waistband_type}, smooth and uninterrupted. "
+            else:
+                base_prompt += "The waistband is smooth, clean, and continuous as shown in the reference. "
 
-        # ═══ YAKA & ASTAR KORUMA (ASKI İÇİ GÖRÜNÜMÜ HALÜSİNASYONU) ═══
-        if photo_type in ['front', 'side']:
+        # ═══ YAKA KORUMA (sadece ust giyim) ═══
+        if photo_type in ['front', 'side'] and category not in ['bottoms']:
             base_prompt += (
-                "CRITICAL NECKLINE & COLLAR LOCK: Ensure the front neckline is clean and single-layered. "
-                "Because the garment is photographed on a hanger, the inside back lining or inner back neck label "
-                "might be visible through the neck opening. You MUST completely IGNORE this inner back fabric. "
-                "Do NOT hallucinate a double collar, do NOT generate a back layer on the front, and do NOT incorporate "
-                "the inner back lining into the front design. "
+                "The front neckline is clean and single-layered. "
+                "Ignore any inner back lining visible through the neck opening. "
             )
 
-        # ═══ E-TİCARET PROFESYONEL STYLING & AKSESUAR ═══
+        # ═══ AKSESUAR (kisa) ═══
         if photo_type in ['front', 'side', 'back']:
-            base_prompt += (
-                "STYLE INSTRUCTION: Style the model with ONLY these specific accessories: "
-                "a small elegant handbag held low to the side, a simple watch, and small earrings. "
-                "CRITICAL: Do NOT add any accessories ON the garment itself — no belts, no belt loops, no scarves, "
-                "no brooches, no pins, no hair accessories, no hats, no sunglasses. "
-                "The garment must remain EXACTLY as shown in the original image — no structural modifications. "
-                "The handbag MUST NOT cover, hide, or obstruct the garment. "
-            )
+            base_prompt += "Accessories: small handbag at side, simple watch, small earrings. "
 
     # Cift bosluklari temizle
     base_prompt = " ".join(base_prompt.split()) + " "
@@ -559,18 +517,13 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
 
     if photo_type == 'back':
         base_prompt += (
-            "CRITICAL VIEW REFERENCE LOCK: This is the BACK VIEW. "
-            "The provided garment image is the BACK of the product. "
-            "You MUST treat the provided garment image as the ABSOLUTE PRIMARY TRUTH for the back design. "
-            "Do NOT hallucinate, carry over, or invent details, patterns, or pockets from the front view. "
-            "If the provided back garment image is plain and flat, the generated back MUST be completely plain and flat. "
+            "This is the BACK VIEW. The garment reference shows the back of the product. "
+            "Reproduce the back design exactly as shown — same details, same surface. "
         )
     elif photo_type == 'side':
         base_prompt += (
-            "CRITICAL VIEW REFERENCE LOCK: This is the SIDE VIEW. "
-            "The provided garment image is the SIDE of the product. "
-            "You MUST treat the provided garment image as the ABSOLUTE PRIMARY TRUTH for the side design. "
-            "Do NOT hallucinate or carry over details from the front view that are not clearly visible here. "
+            "This is the SIDE VIEW. The garment reference shows the side of the product. "
+            "Reproduce the side design exactly as shown. "
         )
 
     # Preset bilgileri (manken tipi, cinsiyeti)
@@ -610,116 +563,39 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
 
 _VIEW_PROMPT_TEMPLATES = {
     'front': (
-        "Professional e-commerce FRONT VIEW fashion photography. "
-        "Full-body shot of a model facing directly toward the camera. "
-        "The FRONT of the {color} {fabric} {garment_type} is fully visible. "
-        "Clean white/light studio background. Even, shadow-free lighting. "
-        "Style: {style}, Fit: {fit}. Pattern: {pattern}. "
-        "PROFESSIONAL MODEL POSE: Confident, dynamic fashion pose — "
-        "one hand on hip or slightly touching the thigh, weight shifted to one leg, "
-        "slight body angle creating an S-curve silhouette. "
-        "Natural relaxed shoulders, chin slightly lifted. "
-        "NOT a stiff mannequin pose — the model should look alive and editorial. "
-        "Sharp focus on garment details, fabric texture, and construction. "
+        "Professional e-commerce front view photography. "
+        "Full-body model facing camera wearing {color} {fabric} {garment_type}. "
+        "{fit}, {pattern} pattern. Clean white studio background, even lighting. "
+        "Confident fashion pose, one hand on hip, slight S-curve silhouette. "
+        "Sharp focus on garment details and fabric texture. "
     ),
     'back': (
-        "Professional e-commerce BACK VIEW fashion photography. "
-        "Full-body shot of a model facing AWAY from the camera, showing their back. "
-        "The BACK of the {color} {fabric} {garment_type} is fully visible. "
-        "Clean white/light studio background. Even, shadow-free lighting. "
-        "Style: {style}, Fit: {fit}. Pattern: {pattern}. "
-        "PROFESSIONAL MODEL POSE: Elegant back pose — "
-        "slight contrapposto stance with weight on one leg, "
-        "one hand resting naturally on hip or at side with slight bend, "
-        "head turned very slightly to show jawline profile. "
-        "NOT a rigid straight standing pose — the model should convey movement and elegance. "
+        "Professional e-commerce back view photography. "
+        "Full-body model facing AWAY from camera showing the back of {color} {fabric} {garment_type}. "
+        "{fit}, {pattern} pattern. Clean white studio background, even lighting. "
+        "Elegant back pose, slight contrapposto, head turned to show jawline profile. "
         "Sharp focus on back details, seams, and garment shape. "
     ),
     'side': (
-        "Professional e-commerce SIDE/THREE-QUARTER VIEW fashion photography. "
-        "Full-body shot of a model turned approximately 45 degrees, showing profile. "
-        "The SIDE PROFILE of the {color} {fabric} {garment_type} is visible. "
-        "Clean white/light studio background. Even, shadow-free lighting. "
-        "Style: {style}, Fit: {fit}. Pattern: {pattern}. "
-        "PROFESSIONAL MODEL POSE: Elegant three-quarter fashion pose — "
-        "contrapposto stance, one hand on hip, "
-        "body slightly twisted to create dynamic silhouette, "
-        "walking stride or mid-step look for editorial feel. "
-        "Sharp focus on garment side profile and fit on body. "
+        "Professional e-commerce side view photography. "
+        "Full-body model turned 45 degrees showing profile of {color} {fabric} {garment_type}. "
+        "{fit}, {pattern} pattern. Clean white studio background, even lighting. "
+        "Three-quarter fashion pose, contrapposto stance, dynamic silhouette. "
+        "Sharp focus on garment side profile and fit. "
     ),
     'detail': (
-        "Professional CLOSE-UP DETAIL shot of a {color} {fabric} {garment_type} "
-        "WORN ON A MODEL. Tight crop on the chest/torso area showing the garment up close. "
-        "Focus on fabric texture, stitching quality, button/zipper details, and material. "
-        "Pattern: {pattern}. "
-        "Extreme sharp focus, studio macro lighting. "
-        "Show the craftsmanship and material quality AS WORN on a real person. "
+        "Professional close-up detail shot of {color} {fabric} {garment_type} worn on a model. "
+        "Tight crop on chest/torso area. {pattern} pattern. "
+        "Focus on fabric texture, stitching quality, and material details. "
+        "Studio macro lighting, extreme sharp focus. "
     ),
 }
 
 _VIEW_NEGATIVE_PROMPTS = {
-    'front': (
-        "extra arms, extra legs, extra fingers, duplicated face, double head, "
-        "ghosting limbs, warped anatomy, deformed body, mannequin, doll, "
-        "plastic/waxy/porcelain skin, CGI look, beauty filter, airbrushed, "
-        "blurry, low quality, collage, split screen, multi-panel, "
-        "studio equipment, softbox, light stand, flash head, "
-        "altered garment design, changed collar, wrong garment color, "
-        "wrong fabric texture, wrong button style, modified print, "
-        "different pattern, altered graphic, changed logo, "
-        "security tag, anti-theft alarm, plastic tag, price tag, store label, hanger clip, hanger strings, "
-        "added belt loops, belt loops, added belt, belt, belt buckle, added pockets, added pocket flaps, "
-        "added suspenders, added buttons, added hardware, added waistband detail, "
-        "double collar, inner lining visible, inner back label, back neckline showing, neck hole hallucination, back fabric on front, "
-        "double straps, multiple straps on one shoulder, extra strings, thick straps, "
-        "altered buttons, missing buttons, changed zipper, modified hardware, "
-        "stiff pose, rigid standing, arms straight at sides, amateur pose, "
-        "military stance, passport photo pose, "
-        "bare midriff, bare chest, nude model, "
-        "back view, rear view, side view, profile view"
-    ),
-    'back': (
-        "extra arms, extra legs, extra fingers, duplicated face, double head, "
-        "ghosting limbs, warped anatomy, deformed body, mannequin, doll, "
-        "plastic/waxy/porcelain skin, CGI look, beauty filter, airbrushed, "
-        "blurry, low quality, collage, split screen, multi-panel, "
-        "studio equipment, softbox, light stand, flash head, "
-        "altered garment design, wrong garment color, wrong fabric texture, "
-        "security tag, anti-theft alarm, plastic tag, price tag, store label, hanger clip, hanger strings, "
-        "added belt loops, belt loops, added belt, belt, belt buckle, added pockets, added pocket flaps, "
-        "added suspenders, added buttons, added hardware, added waistband detail, "
-        "double straps, multiple straps on one shoulder, extra strings, thick straps, "
-        "altered buttons, missing buttons, changed zipper, modified hardware, "
-        "stiff pose, rigid standing, arms straight at sides, amateur pose, "
-        "military stance, "
-        "front view, facing camera, face visible, "
-        "bare midriff, bare chest, nude model"
-    ),
-    'side': (
-        "extra arms, extra legs, extra fingers, duplicated face, double head, "
-        "ghosting limbs, warped anatomy, deformed body, mannequin, doll, "
-        "plastic/waxy/porcelain skin, CGI look, beauty filter, airbrushed, "
-        "blurry, low quality, collage, split screen, multi-panel, "
-        "studio equipment, softbox, light stand, flash head, "
-        "altered garment design, wrong garment color, wrong fabric texture, "
-        "security tag, anti-theft alarm, plastic tag, price tag, store label, hanger clip, "
-        "added belt loops, belt loops, added belt, belt, belt buckle, added pockets, added pocket flaps, "
-        "added suspenders, added buttons, added hardware, added waistband detail, "
-        "altered buttons, missing buttons, changed zipper, modified hardware, "
-        "stiff pose, rigid standing, amateur pose, "
-        "bare midriff, bare chest, nude model"
-    ),
-    'detail': (
-        "full body shot, wide angle, "
-        "blurry, low quality, out of focus, "
-        "altered garment design, wrong garment color, wrong fabric texture, "
-        "modified print, different pattern, altered graphic, "
-        "security tag, anti-theft alarm, plastic tag, price tag, store label, hanger clip, "
-        "added belt loops, belt loops, added belt, belt, belt buckle, added pockets, added pocket flaps, "
-        "added suspenders, added buttons, added hardware, added waistband detail, "
-        "altered buttons, missing buttons, changed zipper, modified hardware, "
-        "flat-lay photo, hanger, product-only shot without model"
-    ),
+    'front': '',
+    'back': '',
+    'side': '',
+    'detail': '',
 }
 
 
