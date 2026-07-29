@@ -996,6 +996,38 @@ class AiStudioSession(models.Model):
                         'seed': gen_seed,
                     })
 
+                    # ═══ POST-PROCESSING: KONTEXT WAISTBAND TEMİZLEME ═══
+                    # Bottoms + belt loops yoksa → Kontext ile waistband düzeltme
+                    analysis_category = (cached_analysis_data or {}).get('clothingCategory', '')
+                    analysis_belt_loops = (cached_analysis_data or {}).get('hasBeltLoops', False)
+                    if (analysis_category == 'bottoms' and not analysis_belt_loops
+                            and provider_type == 'fal' and photo_type in ('front', 'back', 'side')):
+                        try:
+                            _logger.info(
+                                'Worker: Kontext post-processing baslatiliyor — waistband temizleme (gen=%s, tip=%s)',
+                                gen.id, photo_type,
+                            )
+                            kontext_prompt = (
+                                "This is a fashion e-commerce photo. "
+                                "The pants waistband is perfectly smooth, clean, and uninterrupted. "
+                                "The waistband has a continuous, flat surface with clean tailored edges. "
+                                "Keep everything else in the image exactly the same — "
+                                "same model, same pose, same shoes, same background, same lighting. "
+                            )
+                            fixed_b64 = provider.kontext_edit(gen_b64, kontext_prompt)
+                            if fixed_b64:
+                                gen.write({
+                                    'generated_image': fixed_b64,
+                                    'cost': gen.cost + 0.025,
+                                })
+                                gen_b64 = fixed_b64
+                                _logger.info('Worker: Kontext post-processing basarili (gen=%s)', gen.id)
+                            else:
+                                _logger.warning('Worker: Kontext post-processing sonuc dondurmedi (gen=%s)', gen.id)
+                        except Exception as kx:
+                            _logger.warning('Worker: Kontext post-processing hatasi (gen=%s): %s', gen.id, kx)
+                    cr.commit()
+
                     # ═══ BACK/SIDE POST-PROCESSING: OUTFIT TUTARLILIĞI ═══
                     # DEVRE DIŞI: flux/schnell/image-to-image endpoint'i kaldırıldı.
                     # redux endpoint'i yanlış sonuç üretiyordu.

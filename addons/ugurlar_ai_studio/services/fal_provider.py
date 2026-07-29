@@ -36,6 +36,7 @@ class FalProvider(AIProviderBase):
         'flux_pro': 'fal-ai/flux-pro/v1.1',
         'nano_banana': 'fal-ai/nano-banana-2/edit',
         'any_llm': 'fal-ai/any-llm',
+        'flux_kontext': 'fal-ai/flux-kontext/dev',
     }
 
     # Endpoint basina tahmini maliyet (USD)
@@ -46,6 +47,7 @@ class FalProvider(AIProviderBase):
         'fal-ai/flux-pro/v1.1': 0.05,
         'fal-ai/nano-banana-2/edit': 0.04,
         'fal-ai/any-llm': 0.001,
+        'fal-ai/flux-kontext/dev': 0.025,
     }
 
     def __init__(self, api_key):
@@ -296,3 +298,44 @@ class FalProvider(AIProviderBase):
             image_base64 = image_base64.split(';base64,', 1)[1]
         image_bytes = base64.b64decode(image_base64)
         return fal_client.upload(image_bytes, content_type)
+
+    def kontext_edit(self, image_base64, prompt, **kwargs):
+        """FLUX Kontext ile hedefli gorsel duzenleme.
+
+        Mask gerektirmez — metin komutuyla hedefli duzenleme yapar.
+        Ornek: 'Remove belt loops from the waistband, make it smooth and clean'
+        """
+        self._check_client()
+        image_url = self.upload_image(image_base64)
+
+        import time
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                result = fal_client.subscribe(
+                    self.ENDPOINTS['flux_kontext'],
+                    arguments={
+                        'prompt': prompt,
+                        'image_url': image_url,
+                        'num_images': 1,
+                    },
+                    client_timeout=120,
+                )
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(3)
+                else:
+                    raise
+
+        output_url = ''
+        if 'images' in result and result['images']:
+            output_url = result['images'][0].get('url', '')
+        elif 'image' in result and result['image']:
+            output_url = result['image'].get('url', '')
+
+        if output_url:
+            import requests as req_lib
+            img_data = req_lib.get(output_url, timeout=60).content
+            return base64.b64encode(img_data).decode()
+        return None
