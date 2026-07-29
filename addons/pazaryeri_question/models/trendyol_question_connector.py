@@ -11,7 +11,9 @@ class TrendyolQuestionConnector(models.AbstractModel):
 
     @api.model
     def sync_questions_for_store(self, store):
-        """Belirli bir mağazanın tüm bekleyen sorularını çek."""
+        """Belirli bir mağazanın tüm sorularını çek."""
+        _logger.info("Trendyol soru sync başlıyor — mağaza: %s, seller_id: %s", store.name, store.seller_id)
+        
         api = store.get_api()
         
         # Son 2 haftayı çek (API limiti)
@@ -32,6 +34,9 @@ class TrendyolQuestionConnector(models.AbstractModel):
                 'orderByDirection': 'DESC',
             }
             
+            _logger.info("API çağrısı: page=%d, startDate=%s, endDate=%s", 
+                        page, start_date.isoformat(), now.isoformat())
+            
             result = api._request('GET', f'/qna/sellers/{store.seller_id}/questions/filter', params=params)
             
             if not result.get('success'):
@@ -39,10 +44,20 @@ class TrendyolQuestionConnector(models.AbstractModel):
                 break
             
             data = result.get('data', {})
+            
+            # API yanıt yapısını logla
+            if page == 0:
+                _logger.info("API yanıt anahtarları: %s", list(data.keys()) if isinstance(data, dict) else type(data))
+                _logger.info("totalElements: %s, totalPages: %s", 
+                           data.get('totalElements', 'N/A'), data.get('totalPages', 'N/A'))
+            
             content = data.get('content', [])
             
             if not content:
+                _logger.info("Sayfa %d: İçerik boş, döngü sonlandırılıyor.", page)
                 break
+            
+            _logger.info("Sayfa %d: %d soru işleniyor...", page, len(content))
             
             for question_data in content:
                 try:
@@ -53,7 +68,8 @@ class TrendyolQuestionConnector(models.AbstractModel):
                         elif res == 'updated':
                             total_updated += 1
                 except Exception as e:
-                    _logger.error("Soru işleme hatası (ID: %s): %s", question_data.get('id'), e)
+                    _logger.error("Soru işleme hatası (ID: %s): %s", 
+                                question_data.get('id'), e, exc_info=True)
             
             total_pages = data.get('totalPages', 0)
             if page >= total_pages - 1:
@@ -70,8 +86,12 @@ class TrendyolQuestionConnector(models.AbstractModel):
 
     def _process_question(self, data, store):
         """Tek bir soruyu işle — oluştur veya güncelle."""
-        Question = self.env['marketplace.question']
+        Question = self.env['marketplace.question'].sudo()
         question_id = str(data.get('id', ''))
+        
+        if not question_id:
+            _logger.warning("Soru ID boş, atlanıyor: %s", data)
+            return 'skipped'
         
         existing = Question.search([
             ('marketplace_type', '=', 'trendyol'),
@@ -91,13 +111,15 @@ class TrendyolQuestionConnector(models.AbstractModel):
         customer_name = data.get('userName', '')
         show_user_name = data.get('showUserName', True)
         if not customer_name and not show_user_name:
-            # Ayar: müşteri adı gizliyse varsayılan değer
             show_name_setting = self.env['ir.config_parameter'].sudo().get_param(
                 'pazaryeri_question.show_hidden_customer_name', 'True'
             )
             if show_name_setting == 'True':
                 customer_name = 'Gizli Müşteri'
 
+        raw_status = data.get('status', '')
+        mapped_status = status_map.get(raw_status, 'waiting')
+        
         vals = {
             'marketplace_type': 'trendyol',
             'store_id': store.id,
@@ -109,7 +131,7 @@ class TrendyolQuestionConnector(models.AbstractModel):
             'product_image_url': data.get('imageUrl', ''),
             'product_web_url': data.get('webUrl', ''),
             'product_main_id': data.get('productMainId', ''),
-            'status': status_map.get(data.get('status', ''), 'waiting'),
+            'status': mapped_status,
             'is_public': data.get('public', True),
             'show_user_name': show_user_name,
             'answered_date_message': data.get('answeredDateMessage', ''),
@@ -160,15 +182,15 @@ class TrendyolQuestionConnector(models.AbstractModel):
             
             # Pazaryerinden cevaplandıysa: cevap geçmişine kaydet + chatter bildirimi
             if old_status == 'waiting' and new_status == 'answered' and vals.get('answer_text'):
-                # Daha önce bu cevap kaydedilmemiş mi kontrol et
                 ext_answer_id = vals.get('external_answer_id', '')
-                existing_answer = self.env['marketplace.question.answer'].search([
+                AnswerModel = self.env['marketplace.question.answer'].sudo()
+                existing_answer = AnswerModel.search([
                     ('question_id', '=', existing.id),
                     ('external_answer_id', '=', ext_answer_id),
                 ], limit=1) if ext_answer_id else False
                 
                 if not existing_answer:
-                    self.env['marketplace.question.answer'].sudo().create({
+                    AnswerModel.create({
                         'question_id': existing.id,
                         'answer_text': vals.get('answer_text', ''),
                         'answer_type': 'sent',
@@ -188,6 +210,8 @@ class TrendyolQuestionConnector(models.AbstractModel):
             
             return 'updated'
         else:
+            _logger.info("Yeni soru oluşturuluyor: ID=%s, status=%s, ürün=%s", 
+                        question_id, mapped_status, data.get('productName', ''))
             new_question = Question.create(vals)
             # Bildirim: seçili müşteri temsilcilerine bildirim gönder
             self._notify_representatives(new_question)
