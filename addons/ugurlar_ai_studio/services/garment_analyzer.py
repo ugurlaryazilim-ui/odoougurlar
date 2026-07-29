@@ -502,7 +502,7 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
 
         # ═══ AKSESUAR (kisa) ═══
         if photo_type in ['front', 'side', 'back']:
-            base_prompt += "Accessories: small handbag at side, simple watch, small earrings. "
+            base_prompt += "Accessories: small handbag held at side, small earrings. "
 
     # Cift bosluklari temizle
     base_prompt = " ".join(base_prompt.split()) + " "

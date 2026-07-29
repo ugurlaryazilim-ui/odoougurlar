@@ -119,7 +119,7 @@ class FalProvider(AIProviderBase):
             
             detail_start_idx = 3
             if front_output_url and photo_type in ('back', 'side'):
-                dynamic_prompt += "The THIRD reference image is the FRONT generated view of this model; you MUST use the THIRD image as the absolute source of truth for the model identity, hairstyle, skin, and ALL other outfit parts (like top, bottom, shoes). Do NOT change the model or the rest of the outfit from the THIRD reference image. ONLY rotate the camera to show the view, and apply the new garment. "
+                dynamic_prompt += "The THIRD reference image is the FRONT generated view of this model; use the THIRD image as the source of truth for the model identity, hairstyle, skin, and all other outfit parts (top, bottom, shoes). Keep the same model and outfit, only rotate the camera to show the view and apply the garment. "
                 detail_start_idx = 4
                 
             if detail_urls:
@@ -135,18 +135,14 @@ class FalProvider(AIProviderBase):
                     elif idx % 10 == 3 and idx % 100 != 13:
                         suffix = "rd"
                         
-                    dynamic_prompt += f"The {idx}{suffix} reference image is a MACRO DETAIL shot of the garment (showing fabric texture, buttons, or specific patterns). You MUST accurately apply this exact texture and detail to the garment. DO NOT hallucinate details. DO NOT modify, invent, or change any buttons, patterns, prints, textures, or hardware visible in this reference. Copy them EXACTLY. "
+                    dynamic_prompt += f"The {idx}{suffix} reference image is a MACRO DETAIL shot of the garment showing fabric texture and specific patterns. Apply this exact texture and detail to the garment precisely. Copy the exact pattern, texture, and construction details from this reference. "
                 
-                # CRITICAL: Prevent the AI from hallucinating a macro shot as the main output
+                # Detail shot oldugunda full body ciktisi icin yonlendirme
                 dynamic_prompt += (
-                    "CRITICAL: The final output MUST BE a FULL BODY photograph of the human model wearing the garment. "
-                    "DO NOT generate a macro shot. DO NOT generate a close-up of the detail. "
-                    "The macro detail image is strictly for texture and button reference only. "
-                    "The model (mannequin) must remain fully visible in the shot. "
-                    "GARMENT DETAIL ANTI-HALLUCINATION: The garment in the output MUST be a pixel-perfect match "
-                    "of the 1st reference image (garment photo). Count the buttons — reproduce the EXACT count. "
-                    "Match the pattern — do NOT simplify or reinterpret any print, stripe, or graphic. "
-                    "Match the hardware — same zippers, snaps, rivets. Any deviation is a failure. "
+                    "The final output is a FULL BODY photograph of the model wearing the garment. "
+                    "The detail images are for texture reference only. "
+                    "The garment in the output is a pixel-perfect match of the 1st reference image. "
+                    "Match every pattern, texture, and construction detail exactly as shown. "
                 )
                     
             if dynamic_prompt:
