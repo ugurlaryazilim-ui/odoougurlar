@@ -223,7 +223,11 @@ class AiStudioGeneration(models.Model):
             }
 
     def action_confirm_reject(self):
-        """Reddet ve yeni versiyon oluştur (Popup içinden)."""
+        """Reddet ve yeni versiyon oluştur (Popup içinden).
+        
+        Revizyon talimatı varsa ve önceki görsel mevcutsa FLUX Kontext ile
+        hedefli düzenleme yapılır. Aksi halde sıfırdan üretim yapılır.
+        """
         self.ensure_one()
         if not self.reject_reason_id:
             raise UserError(_('Lütfen bir red sebebi seçin.'))
@@ -233,19 +237,86 @@ class AiStudioGeneration(models.Model):
         self.state = 'done'
         self.session_id.message_post(body=_("%s görseli reddedildi, yeni versiyon üretilecek.") % self.photo_type)
         
-        # Yeni versiyon oluştur
-        new_gen = self.copy({
-            'state': 'pending',
-            'is_approved': False,
-            'generated_image': False,
-            'revision_number': self.revision_number + 1,
-            'parent_generation_id': self.id,
-            'error_message': False,
-            'fal_request_id': False,
-            'cost': 0.0,
-            'quality_score': 0.0,
-        })
-        self.session_id._process_single_generation(new_gen)
+        # Revizyon talimatı var mı?
+        revision_text = ''
+        if self.revision_prompt:
+            revision_text += self.revision_prompt
+        if self.reject_reason_id.suggested_prompt:
+            if revision_text:
+                revision_text += ' '
+            revision_text += self.reject_reason_id.suggested_prompt
+
+        # Önceki görsel ve revizyon talimatı varsa → FLUX Kontext ile hedefli düzenleme
+        use_kontext = bool(revision_text and self.generated_image)
+        kontext_success = False
+        
+        if use_kontext:
+            try:
+                import logging
+                _logger = logging.getLogger(__name__)
+                _logger.info(
+                    'Kontext revizyonu baslatiliyor (gen=%s, tip=%s): %s',
+                    self.id, self.photo_type, revision_text[:100],
+                )
+                
+                session = self.session_id
+                fal_api_key = session.fal_api_key or self.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fal_api_key', '')
+                
+                if fal_api_key:
+                    from ..services.fal_provider import FalProvider
+                    provider = FalProvider(fal_api_key)
+                    
+                    kontext_prompt = (
+                        f"This is a fashion e-commerce photo. "
+                        f"Apply ONLY this specific edit: {revision_text}. "
+                        f"Keep everything else exactly the same — "
+                        f"same model, same pose, same hairstyle, same shoes, same background, same lighting. "
+                        f"Change ONLY what is described above. "
+                    )
+                    
+                    parent_image_b64 = self.generated_image
+                    if isinstance(parent_image_b64, bytes):
+                        parent_image_b64 = parent_image_b64.decode('ascii')
+                    
+                    fixed_b64 = provider.kontext_edit(parent_image_b64, kontext_prompt)
+                    
+                    if fixed_b64:
+                        # Yeni versiyon oluştur — Kontext sonucu ile
+                        new_gen = self.copy({
+                            'state': 'done',
+                            'is_approved': False,
+                            'generated_image': fixed_b64,
+                            'revision_number': self.revision_number + 1,
+                            'parent_generation_id': self.id,
+                            'error_message': False,
+                            'fal_request_id': False,
+                            'cost': 0.025,
+                            'quality_score': 0.0,
+                            'fal_endpoint': 'fal/flux-kontext',
+                        })
+                        kontext_success = True
+                        _logger.info('Kontext revizyonu basarili (gen=%s → new=%s)', self.id, new_gen.id)
+                    else:
+                        _logger.warning('Kontext revizyonu sonuc dondurmedi, sifirdan uretim yapilacak (gen=%s)', self.id)
+            except Exception as e:
+                import logging
+                _logger = logging.getLogger(__name__)
+                _logger.warning('Kontext revizyonu hatasi, sifirdan uretim yapilacak (gen=%s): %s', self.id, e)
+        
+        if not kontext_success:
+            # Fallback: sıfırdan üretim (eski davranış)
+            new_gen = self.copy({
+                'state': 'pending',
+                'is_approved': False,
+                'generated_image': False,
+                'revision_number': self.revision_number + 1,
+                'parent_generation_id': self.id,
+                'error_message': False,
+                'fal_request_id': False,
+                'cost': 0.0,
+                'quality_score': 0.0,
+            })
+            self.session_id._process_single_generation(new_gen)
         
         if self.env.context.get('is_review_popup'):
             return self.action_next_generation()
@@ -386,5 +457,428 @@ class AiStudioGeneration(models.Model):
             recovered, total
         )
         return recovered
+
+    @api.model
+    def action_recover_from_fal_history(self):
+        """fal.ai Platform API üzerinden geçmiş request'leri çekerek
+        kayıp AI görsellerini kurtarır.
+
+        Eşleştirme stratejisi:
+        1. fal.ai'dan tüm nano-banana-2/edit request geçmişini çek
+        2. Her request'in prompt'undan view type (FRONT/BACK/SIDE) tespit et
+        3. Veritabanındaki generation kayıtlarıyla timestamp + photo_type eşle
+        4. Output image URL'den görseli indir ve ir_attachment'a kaydet
+        """
+        import requests as http_requests
+        import base64
+        from datetime import datetime, timedelta
+
+        cr = self.env.cr
+        api_key = self.env['ir.config_parameter'].sudo().get_param(
+            'ugurlar_ai_studio.fal_api_key', ''
+        )
+        if not api_key:
+            _logger.error('fal.ai API key bulunamadı!')
+            return {'error': 'API key yok', 'recovered': 0}
+
+        # 1. Kayıp generation'ları çek (sadece fal endpoint olanlar)
+        cr.execute("""
+            SELECT g.id, g.create_date, g.photo_type, g.session_id
+            FROM ai_studio_generation g
+            WHERE g.state = 'done'
+              AND g.reject_reason_id IS NULL
+              AND g.photo_type IN ('front', 'back', 'side')
+              AND (g.fal_endpoint IS NULL OR g.fal_endpoint LIKE '%%nano-banana%%' OR g.fal_endpoint LIKE '%%fal%%')
+              AND NOT EXISTS (
+                  SELECT 1 FROM ir_attachment a
+                  WHERE a.res_model = 'ai.studio.generation'
+                    AND a.res_field = 'generated_image'
+                    AND a.res_id = g.id
+              )
+            ORDER BY g.create_date
+        """)
+        missing_gens = cr.fetchall()
+        if not missing_gens:
+            _logger.info('Kayıp fal.ai görseli yok.')
+            return {'recovered': 0, 'total': 0}
+
+        _logger.info('Kayıp fal.ai görseli: %d', len(missing_gens))
+
+        # Session bazlı gruplama (aynı session'daki generation'lar yakın zamanlıdır)
+        from collections import defaultdict
+        session_gens = defaultdict(list)
+        for gen_id, create_date, photo_type, session_id in missing_gens:
+            session_gens[session_id].append({
+                'id': gen_id,
+                'create_date': create_date,
+                'photo_type': photo_type,
+            })
+
+        # Tarih aralığını belirle
+        min_date = min(g[1] for g in missing_gens) - timedelta(hours=1)
+        max_date = max(g[1] for g in missing_gens) + timedelta(hours=1)
+
+        # 2. fal.ai Platform API'den request geçmişini çek
+        headers = {
+            'Authorization': f'Key {api_key}',
+            'Content-Type': 'application/json',
+        }
+
+        # nano-banana-2/edit endpoint ID'sini belirle
+        fal_endpoint_ids = [
+            'fal-ai/nano-banana-2/edit',
+        ]
+
+        all_fal_requests = []
+        for endpoint_id in fal_endpoint_ids:
+            cursor = None
+            page = 0
+            while True:
+                params = {
+                    'endpoint_id': endpoint_id,
+                    'start': min_date.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                    'end': max_date.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                    'status': 'success',
+                    'limit': 100,
+                    'expand': 'payloads',
+                }
+                if cursor:
+                    params['cursor'] = cursor
+
+                try:
+                    resp = http_requests.get(
+                        'https://api.fal.ai/v1/models/requests/by-endpoint',
+                        headers=headers,
+                        params=params,
+                        timeout=60,
+                    )
+                    if resp.status_code != 200:
+                        _logger.warning(
+                            'fal.ai API hata (%d): %s — Alternatif endpoint deneniyor...',
+                            resp.status_code, resp.text[:200]
+                        )
+                        # Alternatif endpoint dene
+                        resp = http_requests.get(
+                            'https://api.fal.ai/v1/serverless/requests/by-endpoint',
+                            headers=headers,
+                            params=params,
+                            timeout=60,
+                        )
+                        if resp.status_code != 200:
+                            _logger.error(
+                                'Alternatif fal.ai API de hata (%d): %s',
+                                resp.status_code, resp.text[:200]
+                            )
+                            break
+
+                    data = resp.json()
+                    items = data.get('data', data.get('items', data.get('requests', [])))
+                    if not items:
+                        break
+
+                    all_fal_requests.extend(items)
+                    page += 1
+                    _logger.info(
+                        'fal.ai sayfa %d: %d istek çekildi (toplam: %d)',
+                        page, len(items), len(all_fal_requests)
+                    )
+
+                    # Pagination — fal.ai gerçek key: next_cursor + has_more
+                    has_more = data.get('has_more', False)
+                    cursor = data.get('next_cursor')
+                    if not has_more or not cursor:
+                        break
+
+                except Exception as e:
+                    _logger.error('fal.ai API bağlantı hatası: %s', e)
+                    break
+
+        _logger.info('fal.ai toplam çekilen request: %d', len(all_fal_requests))
+        if not all_fal_requests:
+            return {'error': 'fal.ai geçmişi boş veya erişilemedi', 'recovered': 0}
+
+        # 3. fal.ai request'lerini parse et
+        def detect_view_type(prompt_text):
+            """Prompt'tan view type tespit et"""
+            if not prompt_text:
+                return None
+            prompt_upper = prompt_text.upper()
+            if 'FRONT VIEW' in prompt_upper:
+                return 'front'
+            elif 'BACK VIEW' in prompt_upper or 'BACK view' in prompt_text:
+                return 'back'
+            elif 'SIDE VIEW' in prompt_upper or 'SIDE/THREE-QUARTER' in prompt_upper:
+                return 'side'
+            elif 'MACRO DETAIL' in prompt_upper or 'DETAIL SHOT' in prompt_upper:
+                return 'detail'
+            return None
+
+        def parse_fal_request(req):
+            """fal.ai request'ini parse et (gerçek API yapısı)"""
+            result = {
+                'request_id': req.get('request_id', req.get('id', '')),
+                'timestamp': None,
+                'view_type': None,
+                'output_url': None,
+                'seed': None,
+            }
+
+            # Timestamp — fal.ai gerçek key: ended_at
+            end_time = req.get('ended_at', req.get('started_at', ''))
+            if end_time:
+                try:
+                    if isinstance(end_time, str):
+                        end_time = end_time.replace('Z', '+00:00')
+                        result['timestamp'] = datetime.fromisoformat(end_time).replace(tzinfo=None)
+                    elif isinstance(end_time, (int, float)):
+                        result['timestamp'] = datetime.utcfromtimestamp(end_time / 1000 if end_time > 1e12 else end_time)
+                except Exception:
+                    pass
+
+            # Input payload — fal.ai gerçek key: json_input
+            input_data = req.get('json_input', req.get('input', {}))
+            if isinstance(input_data, dict):
+                prompt = input_data.get('prompt', '')
+                result['view_type'] = detect_view_type(prompt)
+                result['seed'] = input_data.get('seed')
+
+            # Output payload — fal.ai gerçek key: json_output
+            output_data = req.get('json_output', req.get('output', {}))
+            if isinstance(output_data, dict):
+                images = output_data.get('images', [])
+                if images and isinstance(images, list) and len(images) > 0:
+                    img = images[0]
+                    if isinstance(img, dict):
+                        result['output_url'] = img.get('url', '')
+                    elif isinstance(img, str):
+                        result['output_url'] = img
+
+            return result
+
+        parsed_requests = []
+        for req in all_fal_requests:
+            parsed = parse_fal_request(req)
+            if parsed['view_type'] and parsed['output_url'] and parsed['timestamp']:
+                parsed_requests.append(parsed)
+
+        _logger.info('Parse edilen ve eşleştirmeye uygun request: %d', len(parsed_requests))
+
+        # 4. Eşleştirme: timestamp yakınlığı + photo_type
+        recovered = 0
+        already_matched = set()  # Aynı fal request'in iki kere eşlenmesini önle
+
+        for gen_id, create_date, photo_type, session_id in missing_gens:
+            best_match = None
+            best_diff = timedelta(minutes=10)  # Max 10 dakika fark
+
+            for i, fal_req in enumerate(parsed_requests):
+                if i in already_matched:
+                    continue
+                if fal_req['view_type'] != photo_type:
+                    continue
+
+                time_diff = abs(fal_req['timestamp'] - create_date)
+                if time_diff < best_diff:
+                    best_diff = time_diff
+                    best_match = i
+
+            if best_match is None:
+                continue
+
+            fal_req = parsed_requests[best_match]
+            already_matched.add(best_match)
+
+            # Output URL'den görseli indir
+            try:
+                img_resp = http_requests.get(fal_req['output_url'], timeout=60)
+                if img_resp.status_code != 200:
+                    _logger.warning(
+                        'gen_id=%d: Görsel indirilemedi (HTTP %d) URL: %s',
+                        gen_id, img_resp.status_code, fal_req['output_url'][:100]
+                    )
+                    continue
+
+                img_b64 = base64.b64encode(img_resp.content).decode('utf-8')
+
+                # Attachment oluştur
+                content_type = img_resp.headers.get('content-type', 'image/png')
+                self.env['ir.attachment'].sudo().create({
+                    'name': 'generated_image',
+                    'res_model': 'ai.studio.generation',
+                    'res_field': 'generated_image',
+                    'res_id': gen_id,
+                    'type': 'binary',
+                    'datas': img_b64,
+                    'mimetype': content_type,
+                })
+
+                # fal_request_id'yi de kaydet
+                cr.execute("""
+                    UPDATE ai_studio_generation
+                    SET fal_request_id = %s
+                    WHERE id = %s AND (fal_request_id IS NULL OR fal_request_id = '')
+                """, (fal_req['request_id'], gen_id))
+
+                cr.commit()
+                recovered += 1
+
+                if recovered % 10 == 0:
+                    _logger.info(
+                        'fal.ai kurtarma: %d görsel kurtarıldı (fark: %s)',
+                        recovered, best_diff
+                    )
+
+            except Exception as e:
+                cr.rollback()
+                _logger.warning('gen_id=%d kurtarılamadı: %s', gen_id, e)
+
+        _logger.info(
+            'fal.ai kurtarma tamamlandı: %d / %d görsel kurtarıldı.',
+            recovered, len(missing_gens)
+        )
+        return {
+            'recovered': recovered,
+            'total': len(missing_gens),
+            'fal_requests_fetched': len(all_fal_requests),
+            'matched': len(already_matched),
+        }
+
+    @api.model
+    def action_test_session_recovery(self, session_name='AIS/2026/01071'):
+        """Spesifik bir oturum için fal.ai eşleştirmesini test et ve ekrana detay bas."""
+        import requests as http_requests
+        from datetime import datetime, timedelta
+
+        cr = self.env.cr
+        api_key = self.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fal_api_key', '')
+        
+        if not api_key:
+            _logger.error("HATA: fal.ai API key tanımlı değil!")
+            return {"error": "API key yok"}
+
+        # 1. Oturumu bul
+        cr.execute("""
+            SELECT s.id, s.name, s.create_date
+            FROM ai_studio_session s
+            WHERE s.name = %s
+        """, (session_name,))
+        session = cr.fetchone()
+        if not session:
+            _logger.error(f"HATA: {session_name} oturumu bulunamadı!")
+            return {"error": "Oturum bulunamadı"}
+
+        s_id, s_name, s_date = session
+        _logger.info(f"=== OTURUM TESTİ: {s_name} (ID: {s_id}, Tarih: {s_date}) ===")
+
+        # 2. Oturumdaki generation'ları bul
+        cr.execute("""
+            SELECT g.id, g.photo_type, g.create_date
+            FROM ai_studio_generation g
+            WHERE g.session_id = %s AND g.state = 'done' AND g.reject_reason_id IS NULL
+            ORDER BY g.photo_type
+        """, (s_id,))
+        gens = cr.fetchall()
+
+        if not gens:
+            _logger.info("Bu oturumda done durumunda generation bulunamadı.")
+            return {"error": "Generation yok"}
+
+        # 48 saatlik geniş tarih penceresi (zaman dilimi farklarını kapsar)
+        min_date = min(g[2] for g in gens) - timedelta(hours=24)
+        max_date = max(g[2] for g in gens) + timedelta(hours=24)
+
+        # 3. fal.ai API'sinden bu geniş tarih aralığındaki istekleri çek
+        headers = {'Authorization': f'Key {api_key}'}
+        all_requests = []
+        cursor = None
+
+        while True:
+            params = {
+                'endpoint_id': 'fal-ai/nano-banana-2/edit',
+                'start': min_date.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'end': max_date.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'status': 'success',
+                'limit': 100,
+                'expand': 'payloads',
+            }
+            if cursor:
+                params['cursor'] = cursor
+
+            try:
+                resp = http_requests.get('https://api.fal.ai/v1/models/requests/by-endpoint', headers=headers, params=params, timeout=60)
+                data = resp.json()
+                items = data.get('items', [])
+                all_requests.extend(items)
+                if not data.get('has_more') or not data.get('next_cursor'):
+                    break
+                cursor = data.get('next_cursor')
+            except Exception as e:
+                _logger.error(f"API Hatası: {e}")
+                break
+
+        _logger.info(f"fal.ai'dan Çekilen Toplam Request Sayısı: {len(all_requests)}")
+
+        # 4. Request'leri parse et
+        def detect_view(prompt_text):
+            if not prompt_text:
+                return 'front'
+            p = prompt_text.upper()
+            if 'SHOW THE BACK VIEW' in p or 'BACK VIEW' in p:
+                return 'back'
+            elif 'SHOW THE SIDE VIEW' in p or 'SIDE VIEW' in p:
+                return 'side'
+            elif 'MACRO DETAIL' in p or 'CLOSE-UP DETAIL' in p:
+                return 'detail'
+            return 'front'
+
+        parsed = []
+        for req in all_requests:
+            ended_at_str = req.get('ended_at', '')
+            if not ended_at_str:
+                continue
+            try:
+                dt = datetime.fromisoformat(ended_at_str.replace('Z', '+00:00')).replace(tzinfo=None)
+            except Exception:
+                continue
+            
+            inp = req.get('json_input', {})
+            prompt = inp.get('prompt', '') if isinstance(inp, dict) else ''
+            v_type = detect_view(prompt)
+            
+            out = req.get('json_output', {})
+            imgs = out.get('images', []) if isinstance(out, dict) else []
+            url = imgs[0].get('url', '') if imgs else ''
+
+            parsed.append({
+                'req_id': req.get('request_id'),
+                'timestamp': dt,
+                'view_type': v_type,
+                'url': url,
+            })
+
+        # 5. Eşleştirme yap
+        results = []
+        for gen_id, p_type, g_date in gens:
+            best = None
+            best_diff = timedelta(days=1)
+            for req in parsed:
+                if req['view_type'] == p_type:
+                    diff = abs(req['timestamp'] - g_date)
+                    if diff < best_diff:
+                        best_diff = diff
+                        best = req
+
+            if best:
+                res_info = f"✅ Tip: {p_type:<6} (Gen ID: {gen_id}) -> Eşleşti! | Gen Tarih: {g_date} | fal Tarih: {best['timestamp']} | Fark: {best_diff} | URL: {best['url']}"
+                _logger.info(res_info)
+                print(res_info)
+                results.append({'gen_id': gen_id, 'photo_type': p_type, 'matched': True, 'url': best['url'], 'diff': str(best_diff)})
+            else:
+                res_info = f"❌ Tip: {p_type:<6} (Gen ID: {gen_id}) -> Eşleşme Bulunamadı!"
+                _logger.info(res_info)
+                print(res_info)
+                results.append({'gen_id': gen_id, 'photo_type': p_type, 'matched': False})
+
+        return results
 
 
