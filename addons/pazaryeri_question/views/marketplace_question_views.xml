@@ -41,6 +41,13 @@
                     <field name="status" widget="statusbar"/>
                 </header>
                 <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_view_customer_questions" type="object"
+                                class="oe_stat_button" icon="fa-users"
+                                invisible="not customer_id_external">
+                            <field name="customer_question_count" widget="statinfo" string="Müşterinin Diğer Soruları"/>
+                        </button>
+                    </div>
                     <widget name="web_ribbon" title="Bekliyor" bg_color="bg-warning" invisible="status != 'waiting'"/>
                     <widget name="web_ribbon" title="Cevaplandı" bg_color="bg-success" invisible="status != 'answered'"/>
                     
@@ -125,6 +132,7 @@
                 <field name="customer_name"/>
                 <field name="product_name"/>
                 <field name="product_barcode"/>
+                <field name="customer_id_external" string="Müşteri ID"/>
                 <filter name="waiting" string="Cevaplanmayı Bekleyen" domain="[('status','=','waiting')]"/>
                 <filter name="answered" string="Cevaplanmış" domain="[('status','=','answered')]"/>
                 <filter name="rejected" string="Reddedilen" domain="[('status','=','rejected')]"/>
@@ -132,12 +140,15 @@
                 <separator/>
                 <filter name="urgent" string="Acil" domain="[('priority','=','3')]"/>
                 <filter name="today" string="Bugün" domain="[('question_date','&gt;=', (context_today()).strftime('%Y-%m-%d'))]"/>
+                <filter name="last7days" string="Son 7 Gün" domain="[('question_date','&gt;=', (context_today() - datetime.timedelta(days=7)).strftime('%Y-%m-%d'))]"/>
                 <separator/>
                 <filter name="trendyol" string="Trendyol" domain="[('marketplace_type','=','trendyol')]"/>
                 <group>
                     <filter name="group_by_marketplace" string="Pazaryeri" context="{'group_by':'marketplace_type'}"/>
                     <filter name="group_by_status" string="Durum" context="{'group_by':'status'}"/>
                     <filter name="group_by_store" string="Mağaza" context="{'group_by':'store_id'}"/>
+                    <filter name="group_by_customer" string="Müşteri" context="{'group_by':'customer_id_external'}"/>
+                    <filter name="group_by_product" string="Ürün" context="{'group_by':'product_name'}"/>
                     <filter name="group_by_date" string="Tarih" context="{'group_by':'question_date:day'}"/>
                     <filter name="group_by_priority" string="Öncelik" context="{'group_by':'priority'}"/>
                 </group>

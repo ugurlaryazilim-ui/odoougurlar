@@ -70,6 +70,11 @@ class MarketplaceQuestion(models.Model):
     
     ai_enabled = fields.Boolean('AI Cevap Aktif', default=False)
     ai_suggested_answer = fields.Text('AI Önerilen Cevap')
+    
+    customer_question_count = fields.Integer(
+        string='Müşteri Soru Sayısı',
+        compute='_compute_customer_question_count',
+    )
 
 
     
@@ -125,6 +130,18 @@ class MarketplaceQuestion(models.Model):
             else:
                 rec.remaining_hours = 0
                 rec.remaining_time_display = ''
+
+    def _compute_customer_question_count(self):
+        """Aynı müşterinin diğer sorularının sayısını hesapla."""
+        for rec in self:
+            if rec.customer_id_external:
+                rec.customer_question_count = self.search_count([
+                    ('customer_id_external', '=', rec.customer_id_external),
+                    ('marketplace_type', '=', rec.marketplace_type),
+                    ('id', '!=', rec.id),
+                ])
+            else:
+                rec.customer_question_count = 0
 
     @api.depends('marketplace_type', 'external_question_id')
     def _compute_name(self):
@@ -217,6 +234,23 @@ class MarketplaceQuestion(models.Model):
             'type': 'ir.actions.act_url',
             'url': self.product_web_url,
             'target': 'new',
+        }
+
+    def action_view_customer_questions(self):
+        """Aynı müşterinin diğer sorularını göster."""
+        self.ensure_one()
+        if not self.customer_id_external:
+            raise UserError(_('Müşteri ID bulunamadı!'))
+        return {
+            'type': 'ir.actions.act_window',
+            'name': f'Müşteri Soruları ({self.customer_name or self.customer_id_external})',
+            'res_model': 'marketplace.question',
+            'view_mode': 'list,form',
+            'domain': [
+                ('customer_id_external', '=', self.customer_id_external),
+                ('marketplace_type', '=', self.marketplace_type),
+            ],
+            'context': {'search_default_group_by_status': 1},
         }
 
     def _get_connector(self):

@@ -22,7 +22,8 @@
                             <field name="last_question_sync" readonly="1"/>
                         </group>
                     </group>
-                    <button name="action_sync_questions" string="Soruları Senkronize Et" type="object" class="btn-primary"/>
+                    <button name="action_sync_questions" string="Son 14 Gün Senkronize Et" type="object" class="btn-primary"/>
+                    <button name="action_sync_full_history" string="📥 Tüm Geçmişi Çek" type="object" class="btn-secondary ms-2" confirm="Bu işlem tüm geçmiş soruları çekecektir ve uzun sürebilir. Devam etmek istiyor musunuz?"/>
                 </page>
             </xpath>
         </field>
