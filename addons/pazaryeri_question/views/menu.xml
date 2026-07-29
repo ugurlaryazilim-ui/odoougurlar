@@ -13,6 +13,24 @@
               action="action_marketplace_question_dashboard" 
               sequence="5"/>
 
+    <!-- Canlı Sohbetler -->
+    <menuitem id="menu_chat" 
+              name="Canlı Sohbetler" 
+              parent="menu_pazaryeri_question_root" 
+              sequence="7"/>
+              
+    <menuitem id="menu_chat_open" 
+              name="Açık Sohbetler" 
+              parent="menu_chat" 
+              action="action_chat_conversations_open" 
+              sequence="10"/>
+              
+    <menuitem id="menu_chat_all" 
+              name="Tüm Sohbetler" 
+              parent="menu_chat" 
+              action="action_chat_conversations" 
+              sequence="20"/>
+
     <!-- Sorular -->
     <menuitem id="menu_questions" 
               name="Sorular" 

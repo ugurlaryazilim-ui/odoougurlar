@@ -13,6 +13,7 @@
         'views/marketplace_question_views.xml',
         'views/marketplace_answer_views.xml',
         'views/marketplace_template_views.xml',
+        'views/chat_conversation_views.xml',
         'views/dashboard_views.xml',
         'views/trendyol_store_views.xml',
         'views/res_config_settings_views.xml',
