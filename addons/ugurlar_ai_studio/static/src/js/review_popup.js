@@ -85,6 +85,7 @@ async function openReviewPopup(sessionId) {
     let showRejectModal = false;
     let selectedReasonId = null;
     let revisionPrompt = '';
+    let revisionPromptEn = '';
     const userRole = data.user_role || 'operator';
     const canApprove = (userRole === 'reviewer' || userRole === 'manager');
     let revisionPollTimer = null;
@@ -267,7 +268,14 @@ async function openReviewPopup(sessionId) {
                                 </label>
                             `).join('')}
                             <textarea class="ais-rp-textarea" id="ais-rp-revision-prompt" 
-                                      placeholder="Ek revizyon talimatı (opsiyonel)...">${revisionPrompt}</textarea>
+                                      placeholder="Ek revizyon talimatı yazın (Türkçe)...">${revisionPrompt}</textarea>
+                            <div class="ais-rp-en-label" style="margin-top:8px; font-size:12px; color:#9ca3af; display:flex; align-items:center; gap:4px;">
+                                <span>🔤</span> İngilizce Çeviri (AI modeline bu gönderilir):
+                            </div>
+                            <textarea class="ais-rp-textarea ais-rp-textarea-en" id="ais-rp-revision-prompt-en" 
+                                      readonly
+                                      style="background:#f3f4f6; color:#374151; border:1px solid #d1d5db; font-style:italic; min-height:50px;"
+                                      placeholder="Türkçe yazdığınızda otomatik çevrilecek...">${revisionPromptEn}</textarea>
                         </div>
                         <div class="ais-rp-modal-footer">
                             <button class="ais-rp-btn ais-rp-btn-reject" id="ais-rp-submit-reject">
@@ -305,8 +313,34 @@ async function openReviewPopup(sessionId) {
         // Metin yazılırken ana değişkene anlık kaydet (polling render'ında silinmesin)
         const promptInput = document.getElementById('ais-rp-revision-prompt');
         if (promptInput) {
+            let translateTimer = null;
             promptInput.addEventListener('input', (e) => {
                 revisionPrompt = e.target.value;
+                // Debounce: 800ms sonra çeviri yap
+                if (translateTimer) clearTimeout(translateTimer);
+                if (!revisionPrompt.trim()) {
+                    revisionPromptEn = '';
+                    const enEl = document.getElementById('ais-rp-revision-prompt-en');
+                    if (enEl) enEl.value = '';
+                    return;
+                }
+                translateTimer = setTimeout(async () => {
+                    try {
+                        const enEl = document.getElementById('ais-rp-revision-prompt-en');
+                        if (enEl) enEl.value = '⏳ Çevriliyor...';
+                        const result = await _jsonRpc('/ai_studio/translate_revision', {
+                            text: revisionPrompt,
+                        });
+                        if (result && result.translated) {
+                            revisionPromptEn = result.translated;
+                            const enEl2 = document.getElementById('ais-rp-revision-prompt-en');
+                            if (enEl2) enEl2.value = revisionPromptEn;
+                        }
+                    } catch (err) {
+                        console.error('Translation error:', err);
+                        revisionPromptEn = revisionPrompt;
+                    }
+                }, 800);
             });
         }
 
@@ -413,6 +447,7 @@ async function openReviewPopup(sessionId) {
                 generation_id: item.id,
                 reason_id: selectedReasonId,
                 revision_prompt: revisionPrompt,
+                revision_prompt_en: revisionPromptEn || revisionPrompt,
             });
 
             showRejectModal = false;

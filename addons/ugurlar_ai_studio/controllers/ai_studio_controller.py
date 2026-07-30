@@ -406,7 +406,7 @@ class AiStudioController(http.Controller):
             return {'error': str(e)}
 
     @http.route('/ai_studio/reject_generation', type='json', auth='user', methods=['POST'])
-    def reject_generation(self, generation_id, reason_id=None, revision_prompt=''):
+    def reject_generation(self, generation_id, reason_id=None, revision_prompt='', revision_prompt_en=''):
         """AI uretimini reddet ve revizeye gonder. Sadece onaycı ve yönetici."""
         try:
             if not request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'):
@@ -420,6 +420,8 @@ class AiStudioController(http.Controller):
                 vals['reject_reason_id'] = int(reason_id)
             if revision_prompt:
                 vals['revision_prompt'] = revision_prompt
+            if revision_prompt_en:
+                vals['revision_prompt_en'] = revision_prompt_en
             gen.write(vals)
 
             max_rev = int(request.env['ir.config_parameter'].sudo().get_param(
@@ -453,6 +455,59 @@ class AiStudioController(http.Controller):
         except Exception as e:
             _logger.exception('reject_generation hatasi: %s', e)
             return {'error': str(e)}
+
+    @http.route('/ai_studio/translate_revision', type='json', auth='user', methods=['POST'])
+    def translate_revision(self, text=''):
+        """Türkçe revizyon metnini İngilizce'ye çevir.
+        
+        Öncelik: deep-translator (ücretsiz)
+        Fallback: Gemini Flash (~$0.001)
+        """
+        if not text or not text.strip():
+            return {'translated': ''}
+        
+        # YÖNTEM 1: deep-translator (ÜCRETSİZ)
+        try:
+            from deep_translator import GoogleTranslator
+            translated = GoogleTranslator(source='tr', target='en').translate(text)
+            if translated:
+                return {'translated': translated}
+        except ImportError:
+            pass
+        except Exception as e:
+            _logger.warning('deep-translator hatasi: %s', e)
+        
+        # YÖNTEM 2: Gemini Flash (FALLBACK)
+        try:
+            gemini_key = request.env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.gemini_api_key', ''
+            )
+            if not gemini_key:
+                return {'translated': text}
+            
+            import requests as _req
+            prompt = (
+                "Translate this fashion image editing instruction to clear, precise English. "
+                "Context: This is an edit request for a fashion e-commerce photo. "
+                "Return ONLY the English translation, nothing else.\n\n"
+                f"Turkish instruction: {text}"
+            )
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+            resp = _req.post(url, json={
+                'contents': [{'parts': [{'text': prompt}]}],
+            }, headers={'Content-Type': 'application/json'}, timeout=10)
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                candidates = data.get('candidates', [])
+                if candidates:
+                    en_text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '').strip()
+                    if en_text:
+                        return {'translated': en_text}
+        except Exception as e:
+            _logger.warning('Gemini ceviri hatasi: %s', e)
+        
+        return {'translated': text}
 
     @http.route('/ai_studio/retry_generation', type='json', auth='user', methods=['POST'])
     def retry_generation(self, generation_id):
