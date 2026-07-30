@@ -126,8 +126,13 @@ class FalProvider(AIProviderBase):
             # Base View Hints
             if 'seedream' in endpoint:
                 view_hints = {
-                    'back': 'Show the BACK view of the model from Figure 2, facing away from camera, wearing the garment from Figure 1. ',
-                    'side': 'Show the SIDE view of the model from Figure 2, turned 45 degrees, wearing the garment from Figure 1. ',
+                    'back': 'Show the BACK view of the model from Figure 2, facing away from camera, wearing the garment from Figure 1. Copy EVERY detail from Figure 1 exactly — same waistband, same pockets, same surface. ',
+                    'side': (
+                        'Show the SIDE view of the model from Figure 2, turned 45 degrees. '
+                        'The garment is from Figure 1 — Figure 1 is the ONLY source of truth for the garment. '
+                        'Copy EVERY structural detail from Figure 1: same waistband construction, same surface texture, same pockets. '
+                        'The waistband must match Figure 1 exactly — if Figure 1 shows a smooth waistband, the side view must also have a smooth waistband. '
+                    ),
                     'detail': 'Close-up detail shot of the garment from Figure 1 on the model. ',
                 }
             else:

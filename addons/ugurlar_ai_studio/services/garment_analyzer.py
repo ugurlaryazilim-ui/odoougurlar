@@ -504,6 +504,12 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         if photo_type in ['front', 'side', 'back']:
             base_prompt += "Accessories: small handbag held at side, small earrings. "
 
+        # ═══ GÜVENLİK ETİKETİ / ALARM TAGI İGNORE ═══
+        base_prompt += (
+            "Ignore any security tags, alarm tags, price tags, hangers, or store fixtures "
+            "visible on the garment reference. The output garment must be clean and tag-free. "
+        )
+
     # Cift bosluklari temizle
     base_prompt = " ".join(base_prompt.split()) + " "
 

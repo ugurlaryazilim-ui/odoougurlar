@@ -225,7 +225,7 @@ class AiStudioGeneration(models.Model):
     def action_confirm_reject(self):
         """Reddet ve yeni versiyon oluştur (Popup içinden).
         
-        Revizyon talimatı varsa ve önceki görsel mevcutsa FLUX Kontext ile
+        Revizyon talimatı varsa ve önceki görsel mevcutsa Seedream ile
         hedefli düzenleme yapılır. Aksi halde sıfırdan üretim yapılır.
         """
         self.ensure_one()
@@ -266,6 +266,33 @@ class AiStudioGeneration(models.Model):
                     from ..services.fal_provider import FalProvider
                     provider = FalProvider(fal_api_key)
                     
+                    # ═══ TÜRKÇE → İNGİLİZCE ÇEVİRİ (Gemini) ═══
+                    translated_text = revision_text
+                    try:
+                        gemini_key = self.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.gemini_api_key', '')
+                        if gemini_key:
+                            import requests as _req
+                            translate_prompt = (
+                                f"Translate this fashion image editing instruction to clear, precise English. "
+                                f"Context: This is an edit request for a fashion e-commerce photo. "
+                                f"Return ONLY the English translation, nothing else.\n\n"
+                                f"Turkish instruction: {revision_text}"
+                            )
+                            translate_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+                            translate_resp = _req.post(translate_url, json={
+                                'contents': [{'parts': [{'text': translate_prompt}]}],
+                            }, headers={'Content-Type': 'application/json'}, timeout=15)
+                            if translate_resp.status_code == 200:
+                                t_data = translate_resp.json()
+                                t_candidates = t_data.get('candidates', [])
+                                if t_candidates:
+                                    t_text = t_candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '').strip()
+                                    if t_text:
+                                        translated_text = t_text
+                                        _logger.info('Revizyon cevirisi: "%s" → "%s"', revision_text[:50], translated_text[:80])
+                    except Exception as te:
+                        _logger.warning('Revizyon cevirisi basarisiz, orijinal metin kullanilacak: %s', te)
+                    
                     # Önceki görseli fal CDN'e yükle
                     parent_image_b64 = self.generated_image
                     if isinstance(parent_image_b64, bytes):
@@ -276,7 +303,7 @@ class AiStudioGeneration(models.Model):
                     # Seedream ile hedefli düzenleme — Figure 1 referansı
                     seedream_prompt = (
                         f"This is a fashion e-commerce photo (Figure 1). "
-                        f"Apply ONLY this specific edit to Figure 1: {revision_text}. "
+                        f"Apply ONLY this specific edit to Figure 1: {translated_text}. "
                         f"Keep everything else in Figure 1 exactly the same — "
                         f"same model, same pose, same hairstyle, same shoes, same background, same lighting. "
                         f"Change ONLY what is described above. Output one image. "
