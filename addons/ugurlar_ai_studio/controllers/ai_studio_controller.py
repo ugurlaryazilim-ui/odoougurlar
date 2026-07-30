@@ -446,7 +446,8 @@ class AiStudioController(http.Controller):
                 # ═══ REVİZYON BİLGİLERİ — YENİ GEN'E AKTAR ═══
                 'revision_prompt': revision_prompt or '',
                 'revision_prompt_en': revision_prompt_en or '',
-                'reject_reason_id': int(reason_id) if reason_id else False,
+                # NOT: reject_reason_id yeni gen'e EKLENMEZ — review_data
+                # reject_reason_id olan kayıtları filtreler (eski versiyon sayar)
             })
 
             gen.session_id._process_single_generation(new_gen)
