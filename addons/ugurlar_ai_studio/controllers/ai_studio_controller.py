@@ -685,7 +685,6 @@ class AiStudioController(http.Controller):
                         return {
                             'error': f'⚠️ Bu oturum şu an {locker_name} tarafından inceleniyor.'
                         }
-                return {'error': 'Oturum bulunamadi.'}
 
             # Son versiyon generation'lari al (done, failed, pending, processing)
             # Reddedilmis olanlari haric tut (reject_reason_id var = eski versiyon)
