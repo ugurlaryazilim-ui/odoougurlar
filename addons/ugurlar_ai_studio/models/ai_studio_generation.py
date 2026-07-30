@@ -157,11 +157,28 @@ class AiStudioGeneration(models.Model):
 
     @api.onchange('revision_prompt')
     def _onchange_revision_prompt(self):
-        """Türkçe revizyon metnini Gemini ile İngilizce'ye çevir."""
+        """Türkçe revizyon metnini İngilizce'ye çevir.
+        
+        Öncelik: deep-translator (ücretsiz Google Translate)
+        Fallback: Gemini Flash API
+        """
         if not self.revision_prompt or not self.revision_prompt.strip():
             self.revision_prompt_en = ''
             return
         
+        # ═══ YÖNTEM 1: deep-translator (ÜCRETSİZ) ═══
+        try:
+            from deep_translator import GoogleTranslator
+            translated = GoogleTranslator(source='tr', target='en').translate(self.revision_prompt)
+            if translated:
+                self.revision_prompt_en = translated
+                return
+        except ImportError:
+            pass  # deep-translator kurulu değil, Gemini fallback
+        except Exception:
+            pass  # Rate limit veya hata, Gemini fallback
+        
+        # ═══ YÖNTEM 2: Gemini Flash (FALLBACK — ~$0.001) ═══
         try:
             gemini_key = self.env['ir.config_parameter'].sudo().get_param(
                 'ugurlar_ai_studio.gemini_api_key', ''
