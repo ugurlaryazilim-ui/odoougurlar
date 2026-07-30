@@ -26,11 +26,40 @@ def _check_rate_limit(ip):
 def _get_json_body():
     """Request body'den JSON parse et."""
     try:
-        raw = request.httprequest.get_data(as_text=True)
-        if raw:
-            return json.loads(raw)
+        # Yöntem 1: Werkzeug get_json
+        data = request.httprequest.get_json(force=True, silent=True)
+        if data:
+            # Eski JSON-RPC wrapper kontrolü
+            if 'jsonrpc' in data and 'params' in data:
+                _logger.info("JSON-RPC wrapper tespit edildi, params kullanılıyor")
+                return data['params']
+            return data
     except Exception:
         pass
+
+    try:
+        # Yöntem 2: Ham veri
+        raw = request.httprequest.data
+        if raw:
+            data = json.loads(raw)
+            if 'jsonrpc' in data and 'params' in data:
+                return data['params']
+            return data
+    except Exception:
+        pass
+
+    try:
+        # Yöntem 3: get_data
+        raw = request.httprequest.get_data(as_text=True)
+        if raw:
+            data = json.loads(raw)
+            if 'jsonrpc' in data and 'params' in data:
+                return data['params']
+            return data
+    except Exception:
+        pass
+
+    _logger.warning("Chat: Request body boş veya parse edilemedi")
     return {}
 
 
@@ -58,9 +87,9 @@ class ShopifyChatController(http.Controller):
             return _json_error('Çok fazla istek.', 429)
 
         data = _get_json_body()
-        shop_domain = data.get('shop_domain', '')
-        if not shop_domain:
-            return _json_error('shop_domain zorunludur.')
+        _logger.info("Chat START — data keys: %s, ip: %s", list(data.keys()), ip)
+        
+        shop_domain = data.get('shop_domain', '') or request.httprequest.host or 'unknown'
 
         Conversation = request.env['marketplace.chat.conversation'].sudo()
 
@@ -120,6 +149,7 @@ class ShopifyChatController(http.Controller):
             return _json_error('Çok fazla istek.', 429)
 
         data = _get_json_body()
+        _logger.info("Chat SEND — data keys: %s", list(data.keys()))
         conv_uid = data.get('conversation_uid')
         message_text = (data.get('message') or '').strip()
 
