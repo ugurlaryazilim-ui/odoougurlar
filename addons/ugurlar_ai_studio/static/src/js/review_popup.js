@@ -68,13 +68,32 @@ function showToast(message, type = 'error') {
 }
 
 async function openReviewPopup(sessionId) {
+    // ═══ KİLİT KONTROLÜ ═══
+    const lockResult = await _jsonRpc('/ai_studio/acquire_lock', { session_id: sessionId });
+    if (!lockResult.success) {
+        if (lockResult.locked) {
+            showToast(
+                `⚠️ Bu oturum şu an ${lockResult.locked_by_name} tarafından inceleniyor (${lockResult.lock_duration}). ` +
+                `Lütfen tamamlamasını bekleyin veya 5dk sonra otomatik açılacak.`,
+                'error'
+            );
+            return;
+        }
+        if (lockResult.error) {
+            showToast('Kilit hatası: ' + lockResult.error);
+            return;
+        }
+    }
+
     // Veriyi çek
     const data = await _jsonRpc('/ai_studio/review_data', { session_id: sessionId });
     if (data.error) {
+        await _jsonRpc('/ai_studio/release_lock', { session_id: sessionId });
         showToast(data.error);
         return;
     }
     if (!data.items || data.items.length === 0) {
+        await _jsonRpc('/ai_studio/release_lock', { session_id: sessionId });
         showToast('İncelenecek görsel bulunamadı.');
         return;
     }
@@ -89,6 +108,16 @@ async function openReviewPopup(sessionId) {
     const userRole = data.user_role || 'operator';
     const canApprove = (userRole === 'reviewer' || userRole === 'manager');
     let revisionPollTimer = null;
+    let heartbeatTimer = null;
+
+    // ═══ HEARTBEAT — her 2dk'da kilidi canlı tut ═══
+    heartbeatTimer = setInterval(async () => {
+        try {
+            await _jsonRpc('/ai_studio/heartbeat_lock', { session_id: sessionId });
+        } catch(e) {
+            console.error('Heartbeat error:', e);
+        }
+    }, 120000); // 2 dakika
 
     // Overlay oluştur
     const overlay = document.createElement('div');
@@ -625,7 +654,15 @@ async function openReviewPopup(sessionId) {
             clearInterval(revisionPollTimer);
             revisionPollTimer = null;
         }
+        if (heartbeatTimer) {
+            clearInterval(heartbeatTimer);
+            heartbeatTimer = null;
+        }
+        // ═══ KİLİDİ BIRAK ═══
+        _jsonRpc('/ai_studio/release_lock', { session_id: sessionId }).catch(() => {});
         if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        // beforeunload temizle
+        window.removeEventListener('beforeunload', window._aisBeforeUnload);
     }
 
     // İlk render
@@ -644,6 +681,17 @@ async function openReviewPopup(sessionId) {
         }
     };
     document.addEventListener('keydown', onKeyDown);
+
+    // Sayfa kapatılırken kilidi bırak
+    const onBeforeUnload = () => {
+        // navigator.sendBeacon ile senkron bırakma (sayfa kapanırken çalışır)
+        const payload = JSON.stringify({
+            jsonrpc: '2.0', method: 'call',
+            params: { session_id: sessionId },
+        });
+        navigator.sendBeacon('/ai_studio/release_lock', new Blob([payload], { type: 'application/json' }));
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
 }
 
 // Client action olarak kaydet

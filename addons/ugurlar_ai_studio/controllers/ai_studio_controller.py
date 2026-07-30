@@ -566,6 +566,92 @@ class AiStudioController(http.Controller):
             _logger.exception('complete_session hatasi: %s', e)
             return {'success': False, 'error': str(e)}
 
+    # ═══════════════════════════════════════════════════════════
+    # İNCELEME KİLİDİ (Concurrency Control)
+    # ═══════════════════════════════════════════════════════════
+    REVIEW_LOCK_TIMEOUT_MINUTES = 5
+
+    @http.route('/ai_studio/acquire_lock', type='json', auth='user', methods=['POST'])
+    def acquire_review_lock(self, session_id):
+        """Oturumu inceleme için kilitle. Başka kullanıcı inceliyorsa uyarı ver."""
+        try:
+            session = request.env['ai.studio.session'].browse(int(session_id))
+            if not session.exists():
+                return {'success': False, 'error': 'Oturum bulunamadı.'}
+
+            now = fields.Datetime.now()
+            current_user = request.env.user
+
+            # Mevcut kilit kontrolü
+            if session.review_locked_by and session.review_lock_time:
+                # Aynı kullanıcı mı?
+                if session.review_locked_by.id == current_user.id:
+                    # Kilidi yenile
+                    session.sudo().write({'review_lock_time': now})
+                    return {'success': True, 'locked_by_self': True}
+
+                # Kilit süresi dolmuş mu? (5dk)
+                from datetime import timedelta
+                lock_age = now - session.review_lock_time
+                if lock_age < timedelta(minutes=self.REVIEW_LOCK_TIMEOUT_MINUTES):
+                    # Kilit aktif — başka kullanıcı inceliyor
+                    lock_minutes = int(lock_age.total_seconds() // 60)
+                    lock_seconds = int(lock_age.total_seconds() % 60)
+                    return {
+                        'success': False,
+                        'locked': True,
+                        'locked_by_name': session.review_locked_by.name,
+                        'locked_by_id': session.review_locked_by.id,
+                        'lock_duration': f'{lock_minutes}dk {lock_seconds}sn önce açtı',
+                    }
+                # Süresi dolmuş — kilidi al
+            
+            # Kilidi al
+            session.sudo().write({
+                'review_locked_by': current_user.id,
+                'review_lock_time': now,
+            })
+            return {'success': True, 'locked_by_self': True}
+        except Exception as e:
+            _logger.exception('acquire_lock hatasi: %s', e)
+            return {'success': False, 'error': str(e)}
+
+    @http.route('/ai_studio/release_lock', type='json', auth='user', methods=['POST'])
+    def release_review_lock(self, session_id):
+        """İnceleme kilidini bırak."""
+        try:
+            session = request.env['ai.studio.session'].browse(int(session_id))
+            if not session.exists():
+                return {'success': False}
+
+            # Sadece kilitleyen kullanıcı veya yönetici bırakabilir
+            current_user = request.env.user
+            if session.review_locked_by.id == current_user.id or \
+               current_user.has_group('ugurlar_ai_studio.group_ai_studio_manager'):
+                session.sudo().write({
+                    'review_locked_by': False,
+                    'review_lock_time': False,
+                })
+            return {'success': True}
+        except Exception as e:
+            _logger.exception('release_lock hatasi: %s', e)
+            return {'success': False}
+
+    @http.route('/ai_studio/heartbeat_lock', type='json', auth='user', methods=['POST'])
+    def heartbeat_review_lock(self, session_id):
+        """Kilit heartbeat — her 2dk'da çağrılır, kilidi canlı tutar."""
+        try:
+            session = request.env['ai.studio.session'].browse(int(session_id))
+            if not session.exists():
+                return {'success': False}
+
+            if session.review_locked_by.id == request.env.user.id:
+                session.sudo().write({'review_lock_time': fields.Datetime.now()})
+                return {'success': True}
+            return {'success': False, 'error': 'Kilit size ait değil.'}
+        except Exception as e:
+            return {'success': False}
+
     @http.route('/ai_studio/review_data', type='json', auth='user', methods=['POST'])
     def get_review_data(self, session_id):
         """Oturumun tum generation verilerini inceleme popup'i icin dondurur."""

@@ -160,6 +160,19 @@ class AiStudioSession(models.Model):
     date_review_start = fields.Datetime(string='Onaya Düşme', readonly=True)
     date_done = fields.Datetime(string='Tamamlanma', readonly=True)
 
+    # --- İnceleme Kilidi (Concurrency Control) ---
+    review_locked_by = fields.Many2one(
+        'res.users',
+        string='İnceleyen Kullanıcı',
+        readonly=True,
+        copy=False,
+    )
+    review_lock_time = fields.Datetime(
+        string='Kilit Zamanı',
+        readonly=True,
+        copy=False,
+    )
+
     # --- AI Ayarları ---
     model_preset_id = fields.Many2one(
         'ai.studio.model.preset',
