@@ -78,8 +78,10 @@
         body: JSON.stringify(data),
       });
       const json = await resp.json();
-      if (window.UGURLAR_CHAT_DEBUG) debugLog(`← ${endpoint}: ${JSON.stringify(json).substring(0, 200)}`);
-      return json;
+      // JSON-RPC wrapped response: {jsonrpc, result: {...}} veya plain: {...}
+      const result = json.result || json;
+      if (window.UGURLAR_CHAT_DEBUG) debugLog(`← ${endpoint}: ${JSON.stringify(result).substring(0, 200)}`);
+      return result;
     } catch (e) {
       if (window.UGURLAR_CHAT_DEBUG) debugLog(`❌ ${endpoint} HATA: ${e.message}`);
       console.warn('[UgurlarChat] API hatası:', e);

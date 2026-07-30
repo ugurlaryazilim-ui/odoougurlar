@@ -64,13 +64,16 @@ def _get_json_body():
 
 
 def _json_ok(data):
-    """Başarılı JSON response."""
-    return request.make_json_response(data, status=200)
+    """Başarılı JSON response — JSON-RPC uyumlu."""
+    wrapped = {'jsonrpc': '2.0', 'id': None, 'result': data}
+    return request.make_json_response(wrapped, status=200)
 
 
 def _json_error(message, status=400):
-    """Hata JSON response."""
-    return request.make_json_response({'success': False, 'error': message}, status=status)
+    """Hata JSON response — JSON-RPC uyumlu."""
+    error_data = {'success': False, 'error': message}
+    wrapped = {'jsonrpc': '2.0', 'id': None, 'result': error_data}
+    return request.make_json_response(wrapped, status=status)
 
 
 class ShopifyChatController(http.Controller):
