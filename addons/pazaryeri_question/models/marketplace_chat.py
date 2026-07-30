@@ -44,7 +44,7 @@ class MarketplaceChatConversation(models.Model):
     # Mesajlar
     message_ids = fields.One2many('marketplace.chat.message', 'conversation_id', string='Mesajlar')
     message_count = fields.Integer('Mesaj Sayısı', compute='_compute_message_count', store=True)
-    unread_count = fields.Integer('Okunmamış', compute='_compute_unread_count')
+    unread_count = fields.Integer('Okunmamış', compute='_compute_unread_count', store=True)
     last_message_date = fields.Datetime('Son Mesaj', compute='_compute_last_message', store=True)
     last_message_preview = fields.Char('Son Mesaj Önizleme', compute='_compute_last_message', store=True)
     
@@ -99,6 +99,7 @@ class MarketplaceChatConversation(models.Model):
         for rec in self:
             rec.message_count = len(rec.message_ids)
 
+    @api.depends('message_ids.is_read', 'message_ids.sender_type')
     def _compute_unread_count(self):
         for rec in self:
             rec.unread_count = self.env['marketplace.chat.message'].search_count([
