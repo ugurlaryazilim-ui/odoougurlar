@@ -1,5 +1,3 @@
-import hashlib
-import hmac
 import json
 import logging
 import time
@@ -10,16 +8,14 @@ _logger = logging.getLogger(__name__)
 
 # Basit rate limiter — IP bazlı
 _rate_limits = {}
-RATE_LIMIT_WINDOW = 60  # saniye
-RATE_LIMIT_MAX = 60  # pencere başına max istek
+RATE_LIMIT_WINDOW = 60
+RATE_LIMIT_MAX = 120
 
 
 def _check_rate_limit(ip):
-    """IP bazlı basit rate limiter."""
     now = time.time()
     if ip not in _rate_limits:
         _rate_limits[ip] = []
-    # Eski kayıtları temizle
     _rate_limits[ip] = [t for t in _rate_limits[ip] if now - t < RATE_LIMIT_WINDOW]
     if len(_rate_limits[ip]) >= RATE_LIMIT_MAX:
         return False
@@ -27,51 +23,48 @@ def _check_rate_limit(ip):
     return True
 
 
-def _json_response(data, status=200):
-    """Standart JSON response."""
-    return request.make_json_response(data, status=status)
+def _get_json_body():
+    """Request body'den JSON parse et."""
+    try:
+        raw = request.httprequest.get_data(as_text=True)
+        if raw:
+            return json.loads(raw)
+    except Exception:
+        pass
+    return {}
 
 
-def _error_response(message, status=400):
-    """Hata response."""
+def _json_ok(data):
+    """Başarılı JSON response."""
+    return request.make_json_response(data, status=200)
+
+
+def _json_error(message, status=400):
+    """Hata JSON response."""
     return request.make_json_response({'success': False, 'error': message}, status=status)
 
 
 class ShopifyChatController(http.Controller):
-    """Shopify canlı sohbet HTTP controller'ı.
-    
-    Tüm endpoint'ler /shopify/chat/ altındadır.
-    Shopify App Proxy bu URL'leri ugurlar.com/apps/chat/* üzerinden yönlendirir.
-    """
+    """Shopify canlı sohbet HTTP controller'ı — type='http' ile harici JS uyumlu."""
 
     # ─── SOHBET BAŞLAT ──────────────────────────────────────────
-    @http.route('/shopify/chat/start', type='json', auth='public', methods=['POST'], csrf=False, cors='*')
+    @http.route('/shopify/chat/start', type='http', auth='public', methods=['POST', 'OPTIONS'], csrf=False, cors='*')
     def chat_start(self, **kwargs):
-        """Yeni sohbet konuşması başlat veya mevcut olanı döndür.
-        
-        Request body:
-        {
-            "customer_name": "Ali Veli",       // opsiyonel
-            "customer_email": "ali@mail.com",  // opsiyonel
-            "shop_domain": "ugurlar.com",      // zorunlu
-            "page_url": "https://...",         // opsiyonel
-            "page_title": "Ürün Adı",          // opsiyonel
-            "conversation_uid": "xxx"          // opsiyonel — mevcut konuşmayı devam ettir
-        }
-        """
+        if request.httprequest.method == 'OPTIONS':
+            return request.make_response('', headers=self._cors_headers())
+
         ip = request.httprequest.remote_addr
         if not _check_rate_limit(ip):
-            return {'success': False, 'error': 'Çok fazla istek. Lütfen bekleyin.'}
-        
-        data = kwargs
+            return _json_error('Çok fazla istek.', 429)
+
+        data = _get_json_body()
         shop_domain = data.get('shop_domain', '')
-        
         if not shop_domain:
-            return {'success': False, 'error': 'shop_domain zorunludur.'}
-        
+            return _json_error('shop_domain zorunludur.')
+
         Conversation = request.env['marketplace.chat.conversation'].sudo()
-        
-        # Mevcut konuşma var mı?
+
+        # Mevcut konuşma?
         conv_uid = data.get('conversation_uid')
         if conv_uid:
             existing = Conversation.search([
@@ -79,14 +72,15 @@ class ShopifyChatController(http.Controller):
                 ('state', '!=', 'closed'),
             ], limit=1)
             if existing:
-                return {
+                _logger.info("Mevcut sohbet bulundu: %s", conv_uid[:8])
+                return _json_ok({
                     'success': True,
                     'conversation_uid': existing.conversation_uid,
                     'state': existing.state,
                     'operator_name': existing.operator_id.name if existing.operator_id else None,
-                }
-        
-        # Yeni konuşma oluştur
+                })
+
+        # Yeni konuşma
         conv = Conversation.create({
             'marketplace_type': 'shopify',
             'shop_domain': shop_domain,
@@ -95,7 +89,7 @@ class ShopifyChatController(http.Controller):
             'page_url': data.get('page_url', ''),
             'page_title': data.get('page_title', ''),
         })
-        
+
         # Hoşgeldin mesajı
         request.env['marketplace.chat.message'].sudo().create({
             'conversation_id': conv.id,
@@ -103,60 +97,49 @@ class ShopifyChatController(http.Controller):
             'sender_type': 'bot',
             'sender_name': 'Uğurlar Destek',
         })
-        
-        # Operatörlere bildirim
+
         self._notify_operators(conv)
-        
-        _logger.info("Yeni sohbet başladı: %s (müşteri: %s, domain: %s)", 
+
+        _logger.info("✅ Yeni sohbet başladı: %s (müşteri: %s, domain: %s)",
                      conv.conversation_uid[:8], conv.customer_name or 'Anonim', shop_domain)
-        
-        return {
+
+        return _json_ok({
             'success': True,
             'conversation_uid': conv.conversation_uid,
             'state': conv.state,
-        }
+        })
 
     # ─── MESAJ GÖNDER ────────────────────────────────────────────
-    @http.route('/shopify/chat/send', type='json', auth='public', methods=['POST'], csrf=False, cors='*')
+    @http.route('/shopify/chat/send', type='http', auth='public', methods=['POST', 'OPTIONS'], csrf=False, cors='*')
     def chat_send(self, **kwargs):
-        """Müşteri mesaj gönderir.
-        
-        Request body:
-        {
-            "conversation_uid": "xxx",     // zorunlu
-            "message": "Merhaba...",       // zorunlu
-            "customer_name": "Ali",        // opsiyonel — güncelleme
-            "customer_email": "a@b.com"    // opsiyonel — güncelleme
-        }
-        """
+        if request.httprequest.method == 'OPTIONS':
+            return request.make_response('', headers=self._cors_headers())
+
         ip = request.httprequest.remote_addr
         if not _check_rate_limit(ip):
-            return {'success': False, 'error': 'Çok fazla istek.'}
-        
-        data = kwargs
+            return _json_error('Çok fazla istek.', 429)
+
+        data = _get_json_body()
         conv_uid = data.get('conversation_uid')
         message_text = (data.get('message') or '').strip()
-        
+
         if not conv_uid:
-            return {'success': False, 'error': 'conversation_uid zorunludur.'}
+            return _json_error('conversation_uid zorunludur.')
         if not message_text:
-            return {'success': False, 'error': 'Mesaj boş olamaz.'}
+            return _json_error('Mesaj boş olamaz.')
         if len(message_text) > 5000:
-            return {'success': False, 'error': 'Mesaj çok uzun (max 5000 karakter).'}
-        
+            return _json_error('Mesaj çok uzun (max 5000 karakter).')
+
         Conversation = request.env['marketplace.chat.conversation'].sudo()
-        conv = Conversation.search([
-            ('conversation_uid', '=', conv_uid),
-        ], limit=1)
-        
+        conv = Conversation.search([('conversation_uid', '=', conv_uid)], limit=1)
+
         if not conv:
-            return {'success': False, 'error': 'Konuşma bulunamadı.'}
-        
+            return _json_error('Konuşma bulunamadı.')
+
         if conv.state == 'closed':
-            # Kapalı konuşmayı yeniden aç
             conv.write({'state': 'open', 'closed_date': False})
-        
-        # Müşteri bilgilerini güncelle
+
+        # Müşteri bilgi güncelle
         update_vals = {}
         if data.get('customer_name') and not conv.customer_name:
             update_vals['customer_name'] = data['customer_name']
@@ -164,119 +147,102 @@ class ShopifyChatController(http.Controller):
             update_vals['customer_email'] = data['customer_email']
         if update_vals:
             conv.write(update_vals)
-        
-        # Mesaj oluştur
+
         msg = request.env['marketplace.chat.message'].sudo().create({
             'conversation_id': conv.id,
             'message_text': message_text,
             'sender_type': 'customer',
             'sender_name': conv.customer_name or 'Müşteri',
         })
-        
-        return {
+
+        _logger.info("💬 Müşteri mesajı: conv=%s, msg_id=%s", conv_uid[:8], msg.id)
+
+        return _json_ok({
             'success': True,
             'message_id': msg.id,
             'sent_date': msg.sent_date.isoformat() if msg.sent_date else None,
-        }
+        })
 
     # ─── MESAJ POLLING ───────────────────────────────────────────
-    @http.route('/shopify/chat/poll', type='json', auth='public', methods=['POST'], csrf=False, cors='*')
+    @http.route('/shopify/chat/poll', type='http', auth='public', methods=['POST', 'OPTIONS'], csrf=False, cors='*')
     def chat_poll(self, **kwargs):
-        """Yeni mesajları kontrol et (müşteri tarafı polling).
-        
-        Request body:
-        {
-            "conversation_uid": "xxx",
-            "last_message_id": 123    // son alınan mesaj ID'si
-        }
-        """
+        if request.httprequest.method == 'OPTIONS':
+            return request.make_response('', headers=self._cors_headers())
+
         ip = request.httprequest.remote_addr
         if not _check_rate_limit(ip):
-            return {'success': False, 'error': 'Çok fazla istek.'}
-        
-        data = kwargs
+            return _json_error('Çok fazla istek.', 429)
+
+        data = _get_json_body()
         conv_uid = data.get('conversation_uid')
         last_id = int(data.get('last_message_id', 0))
-        
+
         if not conv_uid:
-            return {'success': False, 'error': 'conversation_uid zorunludur.'}
-        
+            return _json_error('conversation_uid zorunludur.')
+
         Conversation = request.env['marketplace.chat.conversation'].sudo()
-        conv = Conversation.search([
-            ('conversation_uid', '=', conv_uid),
-        ], limit=1)
-        
+        conv = Conversation.search([('conversation_uid', '=', conv_uid)], limit=1)
+
         if not conv:
-            return {'success': False, 'error': 'Konuşma bulunamadı.'}
-        
-        # Yeni mesajları getir (sadece operator/bot mesajları — müşteri kendi mesajlarını zaten bilir)
+            return _json_error('Konuşma bulunamadı.')
+
         Message = request.env['marketplace.chat.message'].sudo()
         new_messages = Message.search([
             ('conversation_id', '=', conv.id),
             ('id', '>', last_id),
             ('sender_type', 'in', ['operator', 'bot', 'system']),
         ], order='sent_date asc', limit=50)
-        
-        messages = []
-        for msg in new_messages:
-            messages.append({
-                'id': msg.id,
-                'text': msg.message_text,
-                'sender_type': msg.sender_type,
-                'sender_name': msg.sender_name or '',
-                'sent_date': msg.sent_date.isoformat() if msg.sent_date else None,
-            })
-        
-        return {
+
+        messages = [{
+            'id': m.id,
+            'text': m.message_text,
+            'sender_type': m.sender_type,
+            'sender_name': m.sender_name or '',
+            'sent_date': m.sent_date.isoformat() if m.sent_date else None,
+        } for m in new_messages]
+
+        return _json_ok({
             'success': True,
             'messages': messages,
             'conversation_state': conv.state,
             'operator_name': conv.operator_id.name if conv.operator_id else None,
-            'operator_typing': False,  # TODO: implement typing indicator
-        }
+        })
 
     # ─── SOHBET GEÇMİŞİ ─────────────────────────────────────────
-    @http.route('/shopify/chat/history', type='json', auth='public', methods=['POST'], csrf=False, cors='*')
+    @http.route('/shopify/chat/history', type='http', auth='public', methods=['POST', 'OPTIONS'], csrf=False, cors='*')
     def chat_history(self, **kwargs):
-        """Sohbet geçmişini getir (sayfa yenilendiğinde).
-        
-        Request body:
-        {
-            "conversation_uid": "xxx"
-        }
-        """
+        if request.httprequest.method == 'OPTIONS':
+            return request.make_response('', headers=self._cors_headers())
+
         ip = request.httprequest.remote_addr
         if not _check_rate_limit(ip):
-            return {'success': False, 'error': 'Çok fazla istek.'}
-        
-        conv_uid = kwargs.get('conversation_uid')
+            return _json_error('Çok fazla istek.', 429)
+
+        data = _get_json_body()
+        conv_uid = data.get('conversation_uid')
         if not conv_uid:
-            return {'success': False, 'error': 'conversation_uid zorunludur.'}
-        
+            return _json_error('conversation_uid zorunludur.')
+
         Conversation = request.env['marketplace.chat.conversation'].sudo()
-        conv = Conversation.search([
-            ('conversation_uid', '=', conv_uid),
-        ], limit=1)
-        
+        conv = Conversation.search([('conversation_uid', '=', conv_uid)], limit=1)
+
         if not conv:
-            return {'success': False, 'error': 'Konuşma bulunamadı.'}
-        
+            return _json_error('Konuşma bulunamadı.')
+
         Message = request.env['marketplace.chat.message'].sudo()
         all_messages = Message.search([
             ('conversation_id', '=', conv.id),
         ], order='sent_date asc', limit=200)
-        
-        messages = []
-        for msg in all_messages:
-            messages.append({
-                'id': msg.id,
-                'text': msg.message_text,
-                'sender_type': msg.sender_type,
-                'sender_name': msg.sender_name or '',
-                'sent_date': msg.sent_date.isoformat() if msg.sent_date else None,
-            })
-        
-        return {
+
+        messages = [{
+            'id': m.id,
+            'text': m.message_text,
+            'sender_type': m.sender_type,
+            'sender_name': m.sender_name or '',
+            'sent_date': m.sent_date.isoformat() if m.sent_date else None,
+        } for m in all_messages]
+
+        return _json_ok({
             'success': True,
             'messages': messages,
             'conversation': {
@@ -286,97 +252,75 @@ class ShopifyChatController(http.Controller):
                 'operator_name': conv.operator_id.name if conv.operator_id else None,
                 'started_date': conv.started_date.isoformat() if conv.started_date else None,
             },
-        }
+        })
 
     # ─── SOHBET KAPAT ────────────────────────────────────────────
-    @http.route('/shopify/chat/close', type='json', auth='public', methods=['POST'], csrf=False, cors='*')
+    @http.route('/shopify/chat/close', type='http', auth='public', methods=['POST', 'OPTIONS'], csrf=False, cors='*')
     def chat_close(self, **kwargs):
-        """Müşteri sohbeti kapatır."""
-        conv_uid = kwargs.get('conversation_uid')
+        if request.httprequest.method == 'OPTIONS':
+            return request.make_response('', headers=self._cors_headers())
+
+        data = _get_json_body()
+        conv_uid = data.get('conversation_uid')
         if not conv_uid:
-            return {'success': False, 'error': 'conversation_uid zorunludur.'}
-        
+            return _json_error('conversation_uid zorunludur.')
+
         Conversation = request.env['marketplace.chat.conversation'].sudo()
-        conv = Conversation.search([
-            ('conversation_uid', '=', conv_uid),
-        ], limit=1)
-        
+        conv = Conversation.search([('conversation_uid', '=', conv_uid)], limit=1)
+
         if conv and conv.state != 'closed':
-            conv.write({
-                'state': 'closed',
-                'closed_date': fields.Datetime.now(),
-            })
-            # Kapanış mesajı
+            conv.write({'state': 'closed', 'closed_date': fields.Datetime.now()})
             request.env['marketplace.chat.message'].sudo().create({
                 'conversation_id': conv.id,
                 'message_text': 'Sohbet müşteri tarafından kapatıldı.',
                 'sender_type': 'system',
                 'sender_name': 'Sistem',
             })
-        
-        return {'success': True}
+
+        return _json_ok({'success': True})
 
     # ─── DEĞERLENDİRME ──────────────────────────────────────────
-    @http.route('/shopify/chat/rate', type='json', auth='public', methods=['POST'], csrf=False, cors='*')
+    @http.route('/shopify/chat/rate', type='http', auth='public', methods=['POST', 'OPTIONS'], csrf=False, cors='*')
     def chat_rate(self, **kwargs):
-        """Müşteri değerlendirmesi."""
-        conv_uid = kwargs.get('conversation_uid')
-        rating = kwargs.get('rating')
-        
+        if request.httprequest.method == 'OPTIONS':
+            return request.make_response('', headers=self._cors_headers())
+
+        data = _get_json_body()
+        conv_uid = data.get('conversation_uid')
+        rating = data.get('rating')
         if not conv_uid or not rating:
-            return {'success': False, 'error': 'conversation_uid ve rating zorunludur.'}
+            return _json_error('conversation_uid ve rating zorunludur.')
         if str(rating) not in ('1', '2', '3', '4', '5'):
-            return {'success': False, 'error': 'Rating 1-5 arasında olmalıdır.'}
-        
+            return _json_error('Rating 1-5 arasında olmalıdır.')
+
         Conversation = request.env['marketplace.chat.conversation'].sudo()
-        conv = Conversation.search([
-            ('conversation_uid', '=', conv_uid),
-        ], limit=1)
-        
+        conv = Conversation.search([('conversation_uid', '=', conv_uid)], limit=1)
         if conv:
             conv.write({'rating': str(rating)})
-        
-        return {'success': True}
+
+        return _json_ok({'success': True})
 
     # ─── HIZLI CEVAPLAR ──────────────────────────────────────────
-    @http.route('/shopify/chat/quick-replies', type='json', auth='public', methods=['POST'], csrf=False, cors='*')
+    @http.route('/shopify/chat/quick-replies', type='http', auth='public', methods=['POST', 'OPTIONS'], csrf=False, cors='*')
     def chat_quick_replies(self, **kwargs):
-        """Hızlı cevap butonlarını döndür."""
-        quick_replies = [
-            {'id': 'order_track', 'label': '📦 Sipariş Takibi', 'message': 'Siparişimi takip etmek istiyorum.'},
-            {'id': 'return', 'label': '↩️ İade Talebi', 'message': 'İade işlemi hakkında bilgi almak istiyorum.'},
-            {'id': 'product', 'label': '👗 Ürün Bilgisi', 'message': 'Ürün hakkında bilgi almak istiyorum.'},
-            {'id': 'cargo', 'label': '🚚 Kargo Durumu', 'message': 'Kargom nerede?'},
-            {'id': 'size', 'label': '📏 Beden Bilgisi', 'message': 'Beden tablosu hakkında bilgi istiyorum.'},
-            {'id': 'live', 'label': '💬 Canlı Destek', 'message': 'Canlı destek ile görüşmek istiyorum.'},
-        ]
-        return {'success': True, 'quick_replies': quick_replies}
+        if request.httprequest.method == 'OPTIONS':
+            return request.make_response('', headers=self._cors_headers())
 
-    # ─── YARDIMCI METOTLAR ───────────────────────────────────────
-    def _notify_operators(self, conversation):
-        """Yeni sohbet geldiğinde operatörlere Odoo bildirimi gönder."""
-        try:
-            ICP = request.env['ir.config_parameter'].sudo()
-            user_ids_str = ICP.get_param('pazaryeri_question.representative_user_ids', '[]')
-            user_ids = json.loads(user_ids_str) if user_ids_str else []
-            
-            if user_ids:
-                users = request.env['res.users'].sudo().browse(user_ids)
-                for user in users.exists():
-                    user.partner_id.message_post(
-                        body=f"💬 Yeni Shopify sohbeti!\n"
-                             f"Müşteri: {conversation.customer_name or 'Anonim'}\n"
-                             f"Sayfa: {conversation.page_title or conversation.page_url or '-'}",
-                        message_type='notification',
-                        subtype_xmlid='mail.mt_note',
-                    )
-        except Exception as e:
-            _logger.warning("Operatör bildirimi gönderilemedi: %s", e)
+        return _json_ok({
+            'success': True,
+            'quick_replies': [
+                {'id': 'order_track', 'label': '📦 Sipariş Takibi', 'message': 'Siparişimi takip etmek istiyorum.'},
+                {'id': 'return', 'label': '↩️ İade Talebi', 'message': 'İade işlemi hakkında bilgi almak istiyorum.'},
+                {'id': 'product', 'label': '👗 Ürün Bilgisi', 'message': 'Ürün hakkında bilgi almak istiyorum.'},
+                {'id': 'cargo', 'label': '🚚 Kargo Durumu', 'message': 'Kargom nerede?'},
+                {'id': 'size', 'label': '📏 Beden Bilgisi', 'message': 'Beden tablosu hakkında bilgi istiyorum.'},
+                {'id': 'live', 'label': '💬 Canlı Destek', 'message': 'Canlı destek ile görüşmek istiyorum.'},
+            ],
+        })
 
-    # ─── WİDGET TEST SAYFASI ─────────────────────────────────────
+    # ─── TEST SAYFASI ────────────────────────────────────────────
     @http.route('/shopify/chat/test', type='http', auth='public', csrf=False, cors='*')
     def chat_test_page(self, **kwargs):
-        """Widget test sayfası — geliştirme sırasında test etmek için."""
         html = """<!DOCTYPE html>
 <html lang="tr">
 <head>
@@ -390,29 +334,64 @@ class ShopifyChatController(http.Controller):
         p { color: #666; line-height: 1.6; }
         .card { background: #fff; padding: 24px; border-radius: 12px; margin: 20px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
         code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+        .status { padding: 8px 16px; border-radius: 8px; background: #d4edda; color: #155724; display: inline-block; }
+        #debug { font-family: monospace; font-size: 12px; background: #1a1a2e; color: #4ade80; padding: 16px; border-radius: 8px; max-height: 300px; overflow-y: auto; white-space: pre-wrap; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>💬 Uğurlar Chat Widget Test Sayfası</h1>
         <div class="card">
-            <h3>Durum: Aktif ✅</h3>
-            <p>Chat widget sağ alt köşede görünmelidir. Tıklayarak test edebilirsiniz.</p>
+            <div class="status">✅ Aktif</div>
+            <p style="margin-top:12px">Chat widget sağ alt köşede görünmelidir. Tıklayarak test edin.</p>
+        </div>
+        <div class="card">
+            <h3>Debug Log</h3>
+            <div id="debug">Widget yükleniyor...\n</div>
         </div>
         <div class="card">
             <h3>Shopify Tema Entegrasyonu</h3>
-            <p>Aşağıdaki kodu Shopify tema dosyasına (<code>theme.liquid</code>) <code>&lt;/body&gt;</code> etiketinden önce ekleyin:</p>
+            <p>Aşağıdaki kodu <code>theme.liquid</code> dosyasına <code>&lt;/body&gt;</code> etiketinden önce ekleyin:</p>
             <pre><code>&lt;script&gt;
   window.UGURLAR_CHAT_SERVER = 'https://odoo.ugurlar.com';
-  window.UGURLAR_CHAT_BRAND = 'Uğurlar Destek';
 &lt;/script&gt;
 &lt;script src="https://odoo.ugurlar.com/pazaryeri_question/static/src/js/shopify_chat_widget.js"&gt;&lt;/script&gt;</code></pre>
         </div>
     </div>
     <script>
+        // Debug logger
+        window.UGURLAR_CHAT_DEBUG = true;
         window.UGURLAR_CHAT_SERVER = window.location.origin;
     </script>
     <script src="/pazaryeri_question/static/src/js/shopify_chat_widget.js"></script>
 </body>
 </html>"""
         return request.make_response(html, headers=[('Content-Type', 'text/html')])
+
+    # ─── CORS HEADERS ────────────────────────────────────────────
+    def _cors_headers(self):
+        return [
+            ('Access-Control-Allow-Origin', '*'),
+            ('Access-Control-Allow-Methods', 'POST, OPTIONS'),
+            ('Access-Control-Allow-Headers', 'Content-Type'),
+            ('Access-Control-Max-Age', '86400'),
+        ]
+
+    # ─── BİLDİRİM ───────────────────────────────────────────────
+    def _notify_operators(self, conversation):
+        try:
+            ICP = request.env['ir.config_parameter'].sudo()
+            user_ids_str = ICP.get_param('pazaryeri_question.representative_user_ids', '[]')
+            user_ids = json.loads(user_ids_str) if user_ids_str else []
+            if user_ids:
+                users = request.env['res.users'].sudo().browse(user_ids)
+                for user in users.exists():
+                    user.partner_id.message_post(
+                        body=f"💬 Yeni Shopify sohbeti!\n"
+                             f"Müşteri: {conversation.customer_name or 'Anonim'}\n"
+                             f"Sayfa: {conversation.page_title or conversation.page_url or '-'}",
+                        message_type='notification',
+                        subtype_xmlid='mail.mt_note',
+                    )
+        except Exception as e:
+            _logger.warning("Operatör bildirimi gönderilemedi: %s", e)

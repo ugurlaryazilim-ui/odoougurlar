@@ -69,18 +69,31 @@
 
   // ─── API ────────────────────────────────────────────────────
   async function apiCall(endpoint, data = {}) {
+    const url = `${CONFIG.serverUrl}/shopify/chat/${endpoint}`;
     try {
-      const resp = await fetch(`${CONFIG.serverUrl}/shopify/chat/${endpoint}`, {
+      if (window.UGURLAR_CHAT_DEBUG) debugLog(`→ POST ${endpoint}: ${JSON.stringify(data).substring(0, 200)}`);
+      const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', method: 'call', params: data }),
+        body: JSON.stringify(data),
       });
       const json = await resp.json();
-      return json.result || { success: false, error: 'Bağlantı hatası' };
+      if (window.UGURLAR_CHAT_DEBUG) debugLog(`← ${endpoint}: ${JSON.stringify(json).substring(0, 200)}`);
+      return json;
     } catch (e) {
+      if (window.UGURLAR_CHAT_DEBUG) debugLog(`❌ ${endpoint} HATA: ${e.message}`);
       console.warn('[UgurlarChat] API hatası:', e);
       return { success: false, error: 'Sunucuya bağlanılamadı' };
     }
+  }
+
+  function debugLog(msg) {
+    const el = document.getElementById('debug');
+    if (el) {
+      el.textContent += `[${new Date().toLocaleTimeString('tr-TR')}] ${msg}\n`;
+      el.scrollTop = el.scrollHeight;
+    }
+    console.log('[UgurlarChat]', msg);
   }
 
   // ─── SOHBET BAŞLAT ──────────────────────────────────────────
