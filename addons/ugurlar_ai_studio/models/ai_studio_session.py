@@ -996,36 +996,55 @@ class AiStudioSession(models.Model):
                         'seed': gen_seed,
                     })
 
-                    # ═══ POST-PROCESSING: KONTEXT WAISTBAND TEMİZLEME ═══
-                    # Bottoms + belt loops yoksa → Kontext ile waistband düzeltme
+                    # ═══ POST-PROCESSING: SEEDREAM WAISTBAND TEMİZLEME ═══
+                    # Bottoms + belt loops yoksa → Seedream ile waistband düzeltme
                     analysis_category = (cached_analysis_data or {}).get('clothingCategory', '')
                     analysis_belt_loops = (cached_analysis_data or {}).get('hasBeltLoops', False)
                     if (analysis_category == 'bottoms' and not analysis_belt_loops
                             and provider_type == 'fal' and photo_type in ('front', 'back', 'side')):
                         try:
                             _logger.info(
-                                'Worker: Kontext post-processing baslatiliyor — waistband temizleme (gen=%s, tip=%s)',
+                                'Worker: Seedream post-processing baslatiliyor — waistband temizleme (gen=%s, tip=%s)',
                                 gen.id, photo_type,
                             )
-                            kontext_prompt = (
-                                "This is a fashion e-commerce photo. "
-                                "The pants waistband is perfectly smooth, clean, and uninterrupted. "
+                            pp_image_url = provider.upload_image(gen_b64)
+                            pp_prompt = (
+                                "This is a fashion e-commerce photo (Figure 1). "
+                                "The pants waistband in Figure 1 is perfectly smooth, clean, and uninterrupted. "
                                 "The waistband has a continuous, flat surface with clean tailored edges. "
-                                "Keep everything else in the image exactly the same — "
+                                "Keep everything else in Figure 1 exactly the same — "
                                 "same model, same pose, same shoes, same background, same lighting. "
+                                "Output one image. "
                             )
-                            fixed_b64 = provider.kontext_edit(gen_b64, kontext_prompt)
-                            if fixed_b64:
+                            import fal_client as _fal_pp
+                            pp_result = _fal_pp.subscribe(
+                                'bytedance/seedream/v5/pro/edit',
+                                arguments={
+                                    'prompt': pp_prompt,
+                                    'image_urls': [pp_image_url],
+                                    'aspect_ratio': '2:3',
+                                    'output_format': 'png',
+                                    'resolution': '2k',
+                                },
+                                client_timeout=120,
+                            )
+                            pp_url = ''
+                            if 'images' in pp_result and pp_result['images']:
+                                pp_url = pp_result['images'][0].get('url', '')
+                            if pp_url:
+                                import requests as req_pp
+                                pp_data = req_pp.get(pp_url, timeout=60).content
+                                fixed_b64 = base64.b64encode(pp_data).decode()
                                 gen.write({
                                     'generated_image': fixed_b64,
-                                    'cost': gen.cost + 0.025,
+                                    'cost': gen.cost + 0.05,
                                 })
                                 gen_b64 = fixed_b64
-                                _logger.info('Worker: Kontext post-processing basarili (gen=%s)', gen.id)
+                                _logger.info('Worker: Seedream post-processing basarili (gen=%s)', gen.id)
                             else:
-                                _logger.warning('Worker: Kontext post-processing sonuc dondurmedi (gen=%s)', gen.id)
+                                _logger.warning('Worker: Seedream post-processing sonuc dondurmedi (gen=%s)', gen.id)
                         except Exception as kx:
-                            _logger.warning('Worker: Kontext post-processing hatasi (gen=%s): %s', gen.id, kx)
+                            _logger.warning('Worker: Seedream post-processing hatasi (gen=%s): %s', gen.id, kx)
                     cr.commit()
 
                     # ═══ BACK/SIDE POST-PROCESSING: OUTFIT TUTARLILIĞI ═══

@@ -246,16 +246,16 @@ class AiStudioGeneration(models.Model):
                 revision_text += ' '
             revision_text += self.reject_reason_id.suggested_prompt
 
-        # Önceki görsel ve revizyon talimatı varsa → FLUX Kontext ile hedefli düzenleme
-        use_kontext = bool(revision_text and self.generated_image)
-        kontext_success = False
+        # Önceki görsel ve revizyon talimatı varsa → Seedream ile hedefli düzenleme
+        use_seedream_edit = bool(revision_text and self.generated_image)
+        revision_success = False
         
-        if use_kontext:
+        if use_seedream_edit:
             try:
                 import logging
                 _logger = logging.getLogger(__name__)
                 _logger.info(
-                    'Kontext revizyonu baslatiliyor (gen=%s, tip=%s): %s',
+                    'Seedream revizyonu baslatiliyor (gen=%s, tip=%s): %s',
                     self.id, self.photo_type, revision_text[:100],
                 )
                 
@@ -266,22 +266,49 @@ class AiStudioGeneration(models.Model):
                     from ..services.fal_provider import FalProvider
                     provider = FalProvider(fal_api_key)
                     
-                    kontext_prompt = (
-                        f"This is a fashion e-commerce photo. "
-                        f"Apply ONLY this specific edit: {revision_text}. "
-                        f"Keep everything else exactly the same — "
-                        f"same model, same pose, same hairstyle, same shoes, same background, same lighting. "
-                        f"Change ONLY what is described above. "
-                    )
-                    
+                    # Önceki görseli fal CDN'e yükle
                     parent_image_b64 = self.generated_image
                     if isinstance(parent_image_b64, bytes):
                         parent_image_b64 = parent_image_b64.decode('ascii')
                     
-                    fixed_b64 = provider.kontext_edit(parent_image_b64, kontext_prompt)
+                    parent_image_url = provider.upload_image(parent_image_b64)
                     
-                    if fixed_b64:
-                        # Yeni versiyon oluştur — Kontext sonucu ile
+                    # Seedream ile hedefli düzenleme — Figure 1 referansı
+                    seedream_prompt = (
+                        f"This is a fashion e-commerce photo (Figure 1). "
+                        f"Apply ONLY this specific edit to Figure 1: {revision_text}. "
+                        f"Keep everything else in Figure 1 exactly the same — "
+                        f"same model, same pose, same hairstyle, same shoes, same background, same lighting. "
+                        f"Change ONLY what is described above. Output one image. "
+                    )
+                    
+                    import fal_client as _fal_client
+                    result = _fal_client.subscribe(
+                        'bytedance/seedream/v5/pro/edit',
+                        arguments={
+                            'prompt': seedream_prompt,
+                            'image_urls': [parent_image_url],
+                            'aspect_ratio': '2:3',
+                            'output_format': 'png',
+                            'resolution': '2k',
+                        },
+                        client_timeout=120,
+                    )
+                    
+                    # Sonucu al
+                    output_url = ''
+                    if 'images' in result and result['images']:
+                        output_url = result['images'][0].get('url', '')
+                    elif 'image' in result and result['image']:
+                        output_url = result['image'].get('url', '')
+                    
+                    if output_url:
+                        import requests as req_lib
+                        import base64
+                        img_data = req_lib.get(output_url, timeout=60).content
+                        fixed_b64 = base64.b64encode(img_data).decode()
+                        
+                        # Yeni versiyon oluştur — Seedream sonucu ile
                         new_gen = self.copy({
                             'state': 'done',
                             'is_approved': False,
@@ -290,20 +317,20 @@ class AiStudioGeneration(models.Model):
                             'parent_generation_id': self.id,
                             'error_message': False,
                             'fal_request_id': False,
-                            'cost': 0.025,
+                            'cost': 0.05,
                             'quality_score': 0.0,
-                            'fal_endpoint': 'fal/flux-kontext',
+                            'fal_endpoint': 'fal/seedream-revision',
                         })
-                        kontext_success = True
-                        _logger.info('Kontext revizyonu basarili (gen=%s → new=%s)', self.id, new_gen.id)
+                        revision_success = True
+                        _logger.info('Seedream revizyonu basarili (gen=%s → new=%s)', self.id, new_gen.id)
                     else:
-                        _logger.warning('Kontext revizyonu sonuc dondurmedi, sifirdan uretim yapilacak (gen=%s)', self.id)
+                        _logger.warning('Seedream revizyonu sonuc dondurmedi, sifirdan uretim yapilacak (gen=%s)', self.id)
             except Exception as e:
                 import logging
                 _logger = logging.getLogger(__name__)
-                _logger.warning('Kontext revizyonu hatasi, sifirdan uretim yapilacak (gen=%s): %s', self.id, e)
+                _logger.warning('Seedream revizyonu hatasi, sifirdan uretim yapilacak (gen=%s): %s', self.id, e)
         
-        if not kontext_success:
+        if not revision_success:
             # Fallback: sıfırdan üretim (eski davranış)
             new_gen = self.copy({
                 'state': 'pending',
