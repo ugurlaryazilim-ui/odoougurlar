@@ -35,6 +35,7 @@ class FalProvider(AIProviderBase):
         'flux_schnell': 'fal-ai/flux/schnell',
         'flux_pro': 'fal-ai/flux-pro/v1.1',
         'nano_banana': 'fal-ai/nano-banana-2/edit',
+        'seedream': 'bytedance/seedream/v5/pro/edit',
         'any_llm': 'fal-ai/any-llm',
         'flux_kontext': 'fal-ai/flux-kontext/dev',
     }
@@ -46,6 +47,7 @@ class FalProvider(AIProviderBase):
         'fal-ai/flux/schnell': 0.003,
         'fal-ai/flux-pro/v1.1': 0.05,
         'fal-ai/nano-banana-2/edit': 0.04,
+        'bytedance/seedream/v5/pro/edit': 0.05,
         'fal-ai/any-llm': 0.001,
         'fal-ai/flux-kontext/dev': 0.025,
     }
@@ -75,7 +77,9 @@ class FalProvider(AIProviderBase):
         model_name = kwargs.get('model_name') or 'tryon-v1.6'
         endpoint = kwargs.get('endpoint')
         if not endpoint:
-            if 'nano-banana' in model_name:
+            if 'seedream' in model_name:
+                endpoint = self.ENDPOINTS['seedream']
+            elif 'nano-banana' in model_name:
                 endpoint = self.ENDPOINTS['nano_banana']
             elif 'max' in model_name:
                 endpoint = 'fal-ai/fashn/tryon-max'
@@ -86,7 +90,7 @@ class FalProvider(AIProviderBase):
 
         prompt = kwargs.get('prompt', '')
 
-        if 'nano-banana' in endpoint:
+        if 'nano-banana' in endpoint or 'seedream' in endpoint:
             # nano-banana-2/edit formatı
             # View-spesifik prompt bilgisini ekle
             photo_type = kwargs.get('photo_type', 'front')
@@ -103,25 +107,44 @@ class FalProvider(AIProviderBase):
             enhanced_prompt = prompt
             
             # ═══ GARMENT FIDELITY (OLUMLU ÇERÇEVELEME) ═══
-            garment_fidelity = (
-                "GARMENT FIDELITY: The 1st reference image is the EXACT garment. "
-                "Reproduce every visible detail precisely: same waistband construction, "
-                "same seams, same pockets, same hardware. "
-                "The output garment must be a pixel-perfect match of the 1st reference. "
-            )
+            if 'seedream' in endpoint:
+                # Seedream uses Figure references
+                garment_fidelity = (
+                    "Dress the model in Figure 2 with the exact garment shown in Figure 1. "
+                    "Reproduce every visible detail of Figure 1 garment precisely: same waistband, "
+                    "same seams, same pockets, same hardware, same fabric texture. "
+                    "The output garment must be a pixel-perfect match of Figure 1. "
+                )
+            else:
+                garment_fidelity = (
+                    "GARMENT FIDELITY: The 1st reference image is the EXACT garment. "
+                    "Reproduce every visible detail precisely: same waistband construction, "
+                    "same seams, same pockets, same hardware. "
+                    "The output garment must be a pixel-perfect match of the 1st reference. "
+                )
 
             # Base View Hints
-            view_hints = {
-                'back': 'IMPORTANT: Show the BACK view of the model, facing away from camera. ',
-                'side': 'IMPORTANT: Show the SIDE view of the model, turned 45 degrees. ',
-                'detail': 'IMPORTANT: Close-up detail shot showing fabric texture and details. ',
-            }
+            if 'seedream' in endpoint:
+                view_hints = {
+                    'back': 'Show the BACK view of the model from Figure 2, facing away from camera, wearing the garment from Figure 1. ',
+                    'side': 'Show the SIDE view of the model from Figure 2, turned 45 degrees, wearing the garment from Figure 1. ',
+                    'detail': 'Close-up detail shot of the garment from Figure 1 on the model. ',
+                }
+            else:
+                view_hints = {
+                    'back': 'IMPORTANT: Show the BACK view of the model, facing away from camera. ',
+                    'side': 'IMPORTANT: Show the SIDE view of the model, turned 45 degrees. ',
+                    'detail': 'IMPORTANT: Close-up detail shot showing fabric texture and details. ',
+                }
             base_hint = view_hints.get(photo_type, '') if photo_type and photo_type != 'front' else ''
             dynamic_prompt = garment_fidelity + base_hint
             
             detail_start_idx = 3
             if front_output_url and photo_type in ('back', 'side'):
-                dynamic_prompt += "The THIRD reference image is the FRONT generated view of this model; use the THIRD image as the source of truth for the model identity, hairstyle, skin, and all other outfit parts (top, bottom, shoes). Keep the same model and outfit, only rotate the camera to show the view and apply the garment. "
+                if 'seedream' in endpoint:
+                    dynamic_prompt += "Figure 3 is the FRONT generated view of this model. Use Figure 3 as the source of truth for model identity, hairstyle, skin, and all outfit parts. Keep the same model and outfit, only rotate the camera to show the view and apply the garment from Figure 1. "
+                else:
+                    dynamic_prompt += "The THIRD reference image is the FRONT generated view of this model; use the THIRD image as the source of truth for the model identity, hairstyle, skin, and all other outfit parts (top, bottom, shoes). Keep the same model and outfit, only rotate the camera to show the view and apply the garment. "
                 detail_start_idx = 4
                 
             if detail_urls:
@@ -137,15 +160,24 @@ class FalProvider(AIProviderBase):
                     elif idx % 10 == 3 and idx % 100 != 13:
                         suffix = "rd"
                         
-                    dynamic_prompt += f"The {idx}{suffix} reference image is a MACRO DETAIL shot of the garment showing fabric texture and specific patterns. Apply this exact texture and detail to the garment precisely. Copy the exact pattern, texture, and construction details from this reference. "
+                    if 'seedream' in endpoint:
+                        dynamic_prompt += f"Figure {idx} is a MACRO DETAIL shot of the garment showing fabric texture and patterns. Apply this exact texture and detail precisely. "
+                    else:
+                        dynamic_prompt += f"The {idx}{suffix} reference image is a MACRO DETAIL shot of the garment showing fabric texture and specific patterns. Apply this exact texture and detail to the garment precisely. Copy the exact pattern, texture, and construction details from this reference. "
                 
                 # Detail shot oldugunda full body ciktisi icin yonlendirme
-                dynamic_prompt += (
-                    "The final output is a FULL BODY photograph of the model wearing the garment. "
-                    "The detail images are for texture reference only. "
-                    "The garment in the output is a pixel-perfect match of the 1st reference image. "
-                    "Match every pattern, texture, and construction detail exactly as shown. "
-                )
+                if 'seedream' in endpoint:
+                    dynamic_prompt += (
+                        "The final output is a FULL BODY photograph of the model wearing the garment from Figure 1. "
+                        "Detail figures are for texture reference only. "
+                    )
+                else:
+                    dynamic_prompt += (
+                        "The final output is a FULL BODY photograph of the model wearing the garment. "
+                        "The detail images are for texture reference only. "
+                        "The garment in the output is a pixel-perfect match of the 1st reference image. "
+                        "Match every pattern, texture, and construction detail exactly as shown. "
+                    )
                     
             if dynamic_prompt:
                 enhanced_prompt = dynamic_prompt + "\n" + enhanced_prompt
@@ -153,14 +185,15 @@ class FalProvider(AIProviderBase):
             arguments = {
                 'prompt': enhanced_prompt,
                 'image_urls': image_urls_list,
-                'num_images': kwargs.get('num_samples', 1),
                 'aspect_ratio': '2:3',
                 'output_format': 'png',
-                'safety_tolerance': '4',
-                'resolution': kwargs.get('resolution', '2K'),
-                'limit_generations': True,
-                'enable_watermark': False,
+                'resolution': kwargs.get('resolution', '2k'),
             }
+            if 'nano-banana' in endpoint:
+                arguments['num_images'] = kwargs.get('num_samples', 1)
+                arguments['safety_tolerance'] = '4'
+                arguments['limit_generations'] = True
+                arguments['enable_watermark'] = False
             if 'negative_prompt' in kwargs and kwargs['negative_prompt']:
                 arguments['negative_prompt'] = kwargs['negative_prompt']
             if 'seed' in kwargs and kwargs['seed']:

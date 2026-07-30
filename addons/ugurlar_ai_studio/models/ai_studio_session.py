@@ -881,8 +881,8 @@ class AiStudioSession(models.Model):
                     except Exception:
                         pass
 
-                # ⚠️ DOKUNMA! nano-banana-2/edit sabit kalmalı — redux/image-to-image gibi alternatifleri KULLANMA
-                tryon_model = 'nano-banana-2/edit' if provider_type == 'fal' else 'tryon-v1.6'
+                # Seedream v5 Pro — region-precise editing, kiafet sadakati icin
+                tryon_model = 'seedream/v5/pro/edit' if provider_type == 'fal' else 'tryon-v1.6'
                 tryon_resolution = '2K'  # Detay korumasi icin 2K zorunlu
                 if provider_type == 'fashn':
                     tryon_model = preset.fashn_model_side if photo_type == 'side' else (preset.fashn_model_back if photo_type == 'back' else preset.fashn_model_front)
@@ -1031,7 +1031,7 @@ class AiStudioSession(models.Model):
                     # ═══ BACK/SIDE POST-PROCESSING: OUTFIT TUTARLILIĞI ═══
                     # DEVRE DIŞI: flux/schnell/image-to-image endpoint'i kaldırıldı.
                     # redux endpoint'i yanlış sonuç üretiyordu.
-                    # nano-banana-2 zaten yeterli kalitede sonuç veriyor.
+                    # seedream/nano-banana zaten yeterli kalitede sonuç veriyor.
                     if False and front_result_b64 and outfit_consistency:
                         consistency_prompt = outfit_consistency.get('fullOutfitPrompt', '')
                         if consistency_prompt:
@@ -1407,8 +1407,8 @@ class AiStudioSession(models.Model):
                     else:
                         garment_url = provider.upload_image(processed_b64)
 
-                    # ⚠️ DOKUNMA! nano-banana-2/edit sabit kalmalı — redux/image-to-image gibi alternatifleri KULLANMA
-                    tryon_model = 'nano-banana-2/edit' if provider_type == 'fal' else 'tryon-v1.6'
+                    # Seedream v5 Pro — region-precise editing, kiafet sadakati icin
+                    tryon_model = 'seedream/v5/pro/edit' if provider_type == 'fal' else 'tryon-v1.6'
                     tryon_resolution = '2K'  # Detay korumasi icin 2K zorunlu
                     if provider_type == 'fashn':
                         tryon_model = getattr(preset, f'fashn_model_{photo_type}', False) or preset.fashn_model_front or 'tryon-v1.6'
@@ -1995,8 +1995,8 @@ class AiStudioSession(models.Model):
                     _logger.warning('Failed to build retry prompt: %s', pe)
 
                 if provider_type == 'fal':
-                    # ⚠️ DOKUNMA! nano-banana-2/edit sabit kalmalı — redux/image-to-image gibi alternatifleri KULLANMA
-                    tryon_model = 'nano-banana-2/edit'
+                    # Seedream v5 Pro — region-precise editing, kiafet sadakati icin
+                    tryon_model = 'seedream/v5/pro/edit'
                 elif provider_type == 'fashn':
                     tryon_model = getattr(preset, f'fashn_model_{photo_type}', False) or preset.fashn_model_front or 'tryon-v1.6'
 
