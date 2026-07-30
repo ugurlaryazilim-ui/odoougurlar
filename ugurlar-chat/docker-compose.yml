@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  chat:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - db
+      - redis
+    networks:
+      - chat-network
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    networks:
+      - chat-network
+    restart: always
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: chat
+      POSTGRES_PASSWORD: chatpass
+      POSTGRES_DB: ugurlar_chat
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - chat-network
+    restart: always
+
+networks:
+  chat-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
