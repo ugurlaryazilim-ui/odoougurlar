@@ -68,8 +68,11 @@ function showToast(message, type = 'error') {
 }
 
 async function openReviewPopup(sessionId) {
+    // Unique lock token for this specific popup window
+    const lockToken = 'lock_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+
     // ═══ KİLİT KONTROLÜ ═══
-    const lockResult = await _jsonRpc('/ai_studio/acquire_lock', { session_id: sessionId });
+    const lockResult = await _jsonRpc('/ai_studio/acquire_lock', { session_id: sessionId, lock_token: lockToken });
     if (!lockResult.success) {
         if (lockResult.locked) {
             showToast(
@@ -86,14 +89,14 @@ async function openReviewPopup(sessionId) {
     }
 
     // Veriyi çek
-    const data = await _jsonRpc('/ai_studio/review_data', { session_id: sessionId });
+    const data = await _jsonRpc('/ai_studio/review_data', { session_id: sessionId, lock_token: lockToken });
     if (data.error) {
-        await _jsonRpc('/ai_studio/release_lock', { session_id: sessionId });
+        await _jsonRpc('/ai_studio/release_lock', { session_id: sessionId, lock_token: lockToken });
         showToast(data.error);
         return;
     }
     if (!data.items || data.items.length === 0) {
-        await _jsonRpc('/ai_studio/release_lock', { session_id: sessionId });
+        await _jsonRpc('/ai_studio/release_lock', { session_id: sessionId, lock_token: lockToken });
         showToast('İncelenecek görsel bulunamadı.');
         return;
     }
@@ -113,7 +116,7 @@ async function openReviewPopup(sessionId) {
     // ═══ HEARTBEAT — her 2dk'da kilidi canlı tut ═══
     heartbeatTimer = setInterval(async () => {
         try {
-            await _jsonRpc('/ai_studio/heartbeat_lock', { session_id: sessionId });
+            await _jsonRpc('/ai_studio/heartbeat_lock', { session_id: sessionId, lock_token: lockToken });
         } catch(e) {
             console.error('Heartbeat error:', e);
         }
@@ -659,7 +662,7 @@ async function openReviewPopup(sessionId) {
             heartbeatTimer = null;
         }
         // ═══ KİLİDİ BIRAK ═══
-        _jsonRpc('/ai_studio/release_lock', { session_id: sessionId }).catch(() => {});
+        _jsonRpc('/ai_studio/release_lock', { session_id: sessionId, lock_token: lockToken }).catch(() => {});
         if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
         // beforeunload temizle
         window.removeEventListener('beforeunload', window._aisBeforeUnload);
@@ -687,7 +690,7 @@ async function openReviewPopup(sessionId) {
         // navigator.sendBeacon ile senkron bırakma (sayfa kapanırken çalışır)
         const payload = JSON.stringify({
             jsonrpc: '2.0', method: 'call',
-            params: { session_id: sessionId },
+            params: { session_id: sessionId, lock_token: lockToken },
         });
         navigator.sendBeacon('/ai_studio/release_lock', new Blob([payload], { type: 'application/json' }));
     };

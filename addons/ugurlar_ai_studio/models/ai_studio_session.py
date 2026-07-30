@@ -172,6 +172,11 @@ class AiStudioSession(models.Model):
         readonly=True,
         copy=False,
     )
+    review_lock_token = fields.Char(
+        string='Kilit Jetonu',
+        readonly=True,
+        copy=False,
+    )
 
     # --- AI Ayarları ---
     model_preset_id = fields.Many2one(
@@ -220,6 +225,18 @@ class AiStudioSession(models.Model):
     def action_review_generations(self):
         """Profesyonel inceleme popup'ini acar."""
         self.ensure_one()
+        now = fields.Datetime.now()
+        from datetime import timedelta
+        if self.review_locked_by and self.review_lock_time:
+            lock_age = now - self.review_lock_time
+            if lock_age < timedelta(minutes=5) and self.review_locked_by.id != self.env.uid:
+                lock_minutes = int(lock_age.total_seconds() // 60)
+                lock_seconds = int(lock_age.total_seconds() % 60)
+                raise UserError(_(
+                    "⚠️ Bu oturum şu an %s tarafından inceleniyor (%ddk %dsn önce açtı).\n"
+                    "Lütfen tamamlamasını bekleyin veya 5 dakika sonra tekrar deneyin."
+                ) % (self.review_locked_by.name, lock_minutes, lock_seconds))
+
         return {
             'type': 'ir.actions.client',
             'tag': 'ugurlar_ai_studio.review_popup',
