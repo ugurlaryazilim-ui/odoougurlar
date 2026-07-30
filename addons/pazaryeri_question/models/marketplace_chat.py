@@ -41,8 +41,8 @@ class MarketplaceChatConversation(models.Model):
     # Operatör
     operator_id = fields.Many2one('res.users', string='Operatör', tracking=True)
     
-    # Mesajlar
-    message_ids = fields.One2many('marketplace.chat.message', 'conversation_id', string='Mesajlar')
+    # Sohbet Mesajları (mail.thread'in message_ids'i ile çakışmamak için chat_message_ids)
+    chat_message_ids = fields.One2many('marketplace.chat.message', 'conversation_id', string='Sohbet Mesajları')
     message_count = fields.Integer('Mesaj Sayısı', compute='_compute_message_count', store=True)
     unread_count = fields.Integer('Okunmamış', compute='_compute_unread_count', store=True)
     last_message_date = fields.Datetime('Son Mesaj', compute='_compute_last_message', store=True)
@@ -94,12 +94,12 @@ class MarketplaceChatConversation(models.Model):
             else:
                 rec.partner_id = False
 
-    @api.depends('message_ids')
+    @api.depends('chat_message_ids')
     def _compute_message_count(self):
         for rec in self:
-            rec.message_count = len(rec.message_ids)
+            rec.message_count = len(rec.chat_message_ids)
 
-    @api.depends('message_ids.is_read', 'message_ids.sender_type')
+    @api.depends('chat_message_ids.is_read', 'chat_message_ids.sender_type')
     def _compute_unread_count(self):
         for rec in self:
             rec.unread_count = self.env['marketplace.chat.message'].search_count([
@@ -108,7 +108,7 @@ class MarketplaceChatConversation(models.Model):
                 ('is_read', '=', False),
             ])
 
-    @api.depends('message_ids.sent_date', 'message_ids.message_text')
+    @api.depends('chat_message_ids.sent_date', 'chat_message_ids.message_text')
     def _compute_last_message(self):
         for rec in self:
             last = self.env['marketplace.chat.message'].search([

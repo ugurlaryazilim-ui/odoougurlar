@@ -106,11 +106,13 @@ class TrendyolOrderSync(models.Model):
                         try:
                             with self.env.cr.savepoint():
                                 res = self._process_package(package, store)
+                                self.env.flush_all()
                                 if res == 'created':
                                     created_count += 1
                                 elif res == 'updated':
                                     updated_count += 1
                         except Exception as e:
+                            self.env.invalidate_all()
                             error_count += 1
                             pkg_id = package.get('orderNumber', '?')
                             err_msg = f"Sipariş {pkg_id}: {str(e)}"
@@ -126,8 +128,10 @@ class TrendyolOrderSync(models.Model):
             try:
                 with self.env.cr.savepoint():
                     cancel_result = self._sync_cancelled_orders(api, store, start_date)
+                    self.env.flush_all()
                     updated_count += cancel_result.get('updated', 0)
             except Exception as e:
+                self.env.invalidate_all()
                 error_details.append(f"İptal sync: {e}")
                 _logger.exception("İptal sync hatası [%s]", store.name)
 

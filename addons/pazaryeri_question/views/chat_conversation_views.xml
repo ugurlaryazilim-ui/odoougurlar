@@ -88,7 +88,7 @@
                     
                     <notebook>
                         <page name="messages" string="💬 Mesajlar">
-                            <field name="message_ids" readonly="1">
+                            <field name="chat_message_ids" readonly="1">
                                 <list create="0" delete="0" 
                                       decoration-info="sender_type == 'customer'"
                                       decoration-success="sender_type == 'operator'"
