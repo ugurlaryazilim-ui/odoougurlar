@@ -524,9 +524,10 @@ class AiStudioGeneration(models.Model):
             'Content-Type': 'application/json',
         }
 
-        # nano-banana-2/edit endpoint ID'sini belirle
+        # fal endpoint ID'lerini belirle (eski + yeni)
         fal_endpoint_ids = [
             'fal-ai/nano-banana-2/edit',
+            'bytedance/seedream/v5/pro/edit',
         ]
 
         all_fal_requests = []
@@ -794,7 +795,7 @@ class AiStudioGeneration(models.Model):
 
         while True:
             params = {
-                'endpoint_id': 'fal-ai/nano-banana-2/edit',
+                'endpoint_id': 'bytedance/seedream/v5/pro/edit',
                 'start': min_date.strftime('%Y-%m-%dT%H:%M:%SZ'),
                 'end': max_date.strftime('%Y-%m-%dT%H:%M:%SZ'),
                 'status': 'success',
