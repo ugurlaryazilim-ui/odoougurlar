@@ -69,8 +69,12 @@ class AiStudioGeneration(models.Model):
         string='Red Sebebi',
     )
     revision_prompt = fields.Text(
-        string='Revizyon Talimatı',
-        help='Red durumunda ek prompt talimatı',
+        string='Revizyon Talimati',
+        help='Red durumunda ek prompt talimati (Turkce)',
+    )
+    revision_prompt_en = fields.Text(
+        string='Revision (EN)',
+        help='Ingilizce ceviri — AI modeline bu gonderilir',
     )
 
     # --- Revizyon Zinciri ---
@@ -150,6 +154,46 @@ class AiStudioGeneration(models.Model):
                     'ver': gen.revision_number,
                 },
             )
+
+    @api.onchange('revision_prompt')
+    def _onchange_revision_prompt(self):
+        """Türkçe revizyon metnini Gemini ile İngilizce'ye çevir."""
+        if not self.revision_prompt or not self.revision_prompt.strip():
+            self.revision_prompt_en = ''
+            return
+        
+        try:
+            gemini_key = self.env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.gemini_api_key', ''
+            )
+            if not gemini_key:
+                self.revision_prompt_en = self.revision_prompt
+                return
+            
+            import requests as _req
+            prompt = (
+                "Translate this fashion image editing instruction to clear, precise English. "
+                "Context: This is an edit request for a fashion e-commerce photo. "
+                "Return ONLY the English translation, nothing else.\n\n"
+                f"Turkish instruction: {self.revision_prompt}"
+            )
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+            resp = _req.post(url, json={
+                'contents': [{'parts': [{'text': prompt}]}],
+            }, headers={'Content-Type': 'application/json'}, timeout=10)
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                candidates = data.get('candidates', [])
+                if candidates:
+                    en_text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '').strip()
+                    if en_text:
+                        self.revision_prompt_en = en_text
+                        return
+            
+            self.revision_prompt_en = self.revision_prompt
+        except Exception:
+            self.revision_prompt_en = self.revision_prompt
 
     def action_reject(self):
         """Red dialog'u aç — revize için."""
@@ -237,9 +281,12 @@ class AiStudioGeneration(models.Model):
         self.state = 'done'
         self.session_id.message_post(body=_("%s görseli reddedildi, yeni versiyon üretilecek.") % self.photo_type)
         
-        # Revizyon talimatı var mı?
+        # Revizyon talimatı var mı? — İngilizce çeviri varsa onu kullan
         revision_text = ''
-        if self.revision_prompt:
+        # Önce İngilizce çeviriyi kontrol et (UI'da @api.onchange ile çevrildi)
+        if self.revision_prompt_en:
+            revision_text += self.revision_prompt_en
+        elif self.revision_prompt:
             revision_text += self.revision_prompt
         if self.reject_reason_id.suggested_prompt:
             if revision_text:
@@ -266,33 +313,6 @@ class AiStudioGeneration(models.Model):
                     from ..services.fal_provider import FalProvider
                     provider = FalProvider(fal_api_key)
                     
-                    # ═══ TÜRKÇE → İNGİLİZCE ÇEVİRİ (Gemini) ═══
-                    translated_text = revision_text
-                    try:
-                        gemini_key = self.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.gemini_api_key', '')
-                        if gemini_key:
-                            import requests as _req
-                            translate_prompt = (
-                                f"Translate this fashion image editing instruction to clear, precise English. "
-                                f"Context: This is an edit request for a fashion e-commerce photo. "
-                                f"Return ONLY the English translation, nothing else.\n\n"
-                                f"Turkish instruction: {revision_text}"
-                            )
-                            translate_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
-                            translate_resp = _req.post(translate_url, json={
-                                'contents': [{'parts': [{'text': translate_prompt}]}],
-                            }, headers={'Content-Type': 'application/json'}, timeout=15)
-                            if translate_resp.status_code == 200:
-                                t_data = translate_resp.json()
-                                t_candidates = t_data.get('candidates', [])
-                                if t_candidates:
-                                    t_text = t_candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '').strip()
-                                    if t_text:
-                                        translated_text = t_text
-                                        _logger.info('Revizyon cevirisi: "%s" → "%s"', revision_text[:50], translated_text[:80])
-                    except Exception as te:
-                        _logger.warning('Revizyon cevirisi basarisiz, orijinal metin kullanilacak: %s', te)
-                    
                     # Önceki görseli fal CDN'e yükle
                     parent_image_b64 = self.generated_image
                     if isinstance(parent_image_b64, bytes):
@@ -303,7 +323,7 @@ class AiStudioGeneration(models.Model):
                     # Seedream ile hedefli düzenleme — Figure 1 referansı
                     seedream_prompt = (
                         f"This is a fashion e-commerce photo (Figure 1). "
-                        f"Apply ONLY this specific edit to Figure 1: {translated_text}. "
+                        f"Apply ONLY this specific edit to Figure 1: {revision_text}. "
                         f"Keep everything else in Figure 1 exactly the same — "
                         f"same model, same pose, same hairstyle, same shoes, same background, same lighting. "
                         f"Change ONLY what is described above. Output one image. "

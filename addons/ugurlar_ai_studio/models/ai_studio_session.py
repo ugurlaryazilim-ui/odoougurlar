@@ -911,7 +911,9 @@ class AiStudioSession(models.Model):
 
                     # ═══ REVİZYON TALİMATI (RED SONRASI) ═══
                     revision_parts = []
-                    if gen.revision_prompt:
+                    if gen.revision_prompt_en:
+                        revision_parts.append(gen.revision_prompt_en)
+                    elif gen.revision_prompt:
                         revision_parts.append(gen.revision_prompt)
                     if gen.reject_reason_id and gen.reject_reason_id.suggested_prompt:
                         revision_parts.append(gen.reject_reason_id.suggested_prompt)
@@ -1460,7 +1462,9 @@ class AiStudioSession(models.Model):
 
                         # ═══ REVİZYON TALİMATI (RED SONRASI) ═══
                         revision_parts = []
-                        if gen.revision_prompt:
+                        if gen.revision_prompt_en:
+                            revision_parts.append(gen.revision_prompt_en)
+                        elif gen.revision_prompt:
                             revision_parts.append(gen.revision_prompt)
                         if gen.reject_reason_id and gen.reject_reason_id.suggested_prompt:
                             revision_parts.append(gen.reject_reason_id.suggested_prompt)

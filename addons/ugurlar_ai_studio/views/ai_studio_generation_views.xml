@@ -85,6 +85,7 @@
                 <group>
                     <field name="reject_reason_id" required="1"/>
                     <field name="revision_prompt" placeholder="Yapay zekaya bu versiyon için ek bir talimat vermek isterseniz yazın... (Örn: Ceketin düğmelerini kapat)"/>
+                    <field name="revision_prompt_en" readonly="1" string="🔤 İngilizce Çeviri (AI'a bu gönderilir)"/>
                 </group>
                 <footer>
                     <button name="action_confirm_reject" string="Reddet ve Yeni Üret" type="object" class="btn-danger"/>

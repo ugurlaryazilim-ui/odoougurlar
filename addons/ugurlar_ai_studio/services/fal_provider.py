@@ -111,9 +111,12 @@ class FalProvider(AIProviderBase):
                 # Seedream uses Figure references
                 garment_fidelity = (
                     "Dress the model in Figure 2 with the exact garment shown in Figure 1. "
-                    "Reproduce every visible detail of Figure 1 garment precisely: same waistband, "
+                    "IMPORTANT: Ignore any security tags, alarm tags, price tags, hangers, or store fixtures "
+                    "visible on Figure 1 — these are store artifacts, NOT part of the garment. "
+                    "The output garment must be completely clean and tag-free. "
+                    "Reproduce every visible garment detail of Figure 1 precisely: same waistband, "
                     "same seams, same pockets, same hardware, same fabric texture. "
-                    "The output garment must be a pixel-perfect match of Figure 1. "
+                    "The output garment must be a pixel-perfect match of Figure 1 (minus any store tags). "
                 )
             else:
                 garment_fidelity = (
