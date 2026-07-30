@@ -125,14 +125,84 @@
     border-color: #adb5bd;
 }
 
-/* ─── Tabs ────────────────────────────────────────────── */
+/* ─── Tabs Container & Session Badge ──────────────────── */
+.ais-rp-tabs-container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background: #ffffff;
+    border-bottom: 1px solid #dee2e6;
+    gap: 12px;
+}
+
 .ais-rp-tabs {
     display: flex;
-    padding: 8px 16px;
     gap: 6px;
-    background: #fff;
-    border-bottom: 1px solid #dee2e6;
     overflow-x: auto;
+    border-bottom: none;
+    padding: 0;
+}
+
+.ais-rp-session-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    color: #334155;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    user-select: none;
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
+.ais-rp-session-badge:hover {
+    background: #e2e8f0;
+    border-color: #94a3b8;
+    color: #0f172a;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.ais-rp-session-badge.copied {
+    background: #dcfce7;
+    border-color: #86efac;
+    color: #166534;
+}
+
+.ais-rp-sb-icon {
+    font-size: 14px;
+}
+
+.ais-rp-sb-text {
+    font-family: monospace;
+    letter-spacing: 0.5px;
+}
+
+.ais-rp-sb-copy-hint {
+    font-size: 11px;
+    font-weight: 600;
+    background: #e2e8f0;
+    color: #475569;
+    padding: 2px 8px;
+    border-radius: 10px;
+    transition: all 0.2s ease;
+}
+
+.ais-rp-session-badge:hover .ais-rp-sb-copy-hint {
+    background: #cbd5e1;
+    color: #1e293b;
+}
+
+.ais-rp-session-badge.copied .ais-rp-sb-copy-hint {
+    background: #bbf7d0;
+    color: #15803d;
 }
 
 .ais-rp-tab {

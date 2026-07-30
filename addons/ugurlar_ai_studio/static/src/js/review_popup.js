@@ -176,19 +176,26 @@ async function openReviewPopup(sessionId) {
                     <button class="ais-rp-close" id="ais-rp-close">✕</button>
                 </div>
 
-                <!-- Tabs -->
-                <div class="ais-rp-tabs">
-                    ${items.map((it, idx) => `
-                        <button class="ais-rp-tab ${idx === currentIndex ? 'active' : ''} ${it.is_approved ? 'approved' : ''} ${it.pending_revision ? 'pending' : ''}"
-                                data-idx="${idx}">
-                            <span class="ais-rp-tab-icon">${getPhotoTypeIcon(it.photo_type)}</span>
-                            <span class="ais-rp-tab-label">${it.photo_type_label}</span>
-                            ${it.is_approved ? '<span class="ais-rp-tab-check">✓</span>' : ''}
-                            ${it.pending_revision ? '<span class="ais-rp-tab-check" style="color:#f59e0b">⏳</span>' : ''}
-                            ${it.state === 'failed' ? '<span class="ais-rp-tab-check" style="color:#ef4444">✗</span>' : ''}
-                            ${it.revision_number > 1 ? '<span class="ais-rp-tab-version">v' + it.revision_number + '</span>' : ''}
-                        </button>
-                    `).join('')}
+                <!-- Tabs & Session Badge -->
+                <div class="ais-rp-tabs-container">
+                    <div class="ais-rp-tabs">
+                        ${items.map((it, idx) => `
+                            <button class="ais-rp-tab ${idx === currentIndex ? 'active' : ''} ${it.is_approved ? 'approved' : ''} ${it.pending_revision ? 'pending' : ''}"
+                                    data-idx="${idx}">
+                                <span class="ais-rp-tab-icon">${getPhotoTypeIcon(it.photo_type)}</span>
+                                <span class="ais-rp-tab-label">${it.photo_type_label}</span>
+                                ${it.is_approved ? '<span class="ais-rp-tab-check">✓</span>' : ''}
+                                ${it.pending_revision ? '<span class="ais-rp-tab-check" style="color:#f59e0b">⏳</span>' : ''}
+                                ${it.state === 'failed' ? '<span class="ais-rp-tab-check" style="color:#ef4444">✗</span>' : ''}
+                                ${it.revision_number > 1 ? '<span class="ais-rp-tab-version">v' + it.revision_number + '</span>' : ''}
+                            </button>
+                        `).join('')}
+                    </div>
+                    <div class="ais-rp-session-badge" id="ais-rp-copy-session-btn" title="Tıklayıp Oturum Numarasını Kopyalayın">
+                        <span class="ais-rp-sb-icon">📋</span>
+                        <span class="ais-rp-sb-text">${data.session_name}</span>
+                        <span class="ais-rp-sb-copy-hint">Kopyala</span>
+                    </div>
                 </div>
 
                 <!-- İçerik -->
@@ -341,6 +348,38 @@ async function openReviewPopup(sessionId) {
         document.getElementById('ais-rp-modal-close')?.addEventListener('click', () => { showRejectModal = false; render(); });
         document.getElementById('ais-rp-submit-reject')?.addEventListener('click', submitReject);
         document.getElementById('ais-rp-retry')?.addEventListener('click', retryFailed);
+
+        // Oturum Numarası Kopyalama
+        document.getElementById('ais-rp-copy-session-btn')?.addEventListener('click', async () => {
+            const sessionName = data.session_name;
+            if (!sessionName) return;
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(sessionName);
+                } else {
+                    const tempInput = document.createElement('input');
+                    tempInput.value = sessionName;
+                    document.body.appendChild(tempInput);
+                    tempInput.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(tempInput);
+                }
+                const btn = document.getElementById('ais-rp-copy-session-btn');
+                if (btn) {
+                    btn.classList.add('copied');
+                    const hint = btn.querySelector('.ais-rp-sb-copy-hint');
+                    if (hint) hint.textContent = '✓ Kopyalandı!';
+                    setTimeout(() => {
+                        btn.classList.remove('copied');
+                        if (hint) hint.textContent = 'Kopyala';
+                    }, 2000);
+                }
+                showToast(`📋 Oturum No kopyalandı: ${sessionName}`, 'success');
+            } catch (err) {
+                console.error('Kopyalama hatasi:', err);
+                showToast(`Oturum No: ${sessionName}`, 'success');
+            }
+        });
 
         // Metin yazılırken ana değişkene anlık kaydet (polling render'ında silinmesin)
         const promptInput = document.getElementById('ais-rp-revision-prompt');
