@@ -75,9 +75,6 @@
             'ugurlar_ai_studio/static/src/css/review_popup.css',
         ],
     },
-    'external_dependencies': {
-        'python': ['deep_translator'],
-    },
     'installable': True,
     'application': True,
     'auto_install': False,
