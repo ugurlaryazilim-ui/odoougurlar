@@ -372,3 +372,47 @@ class ShopifyChatController(http.Controller):
                     )
         except Exception as e:
             _logger.warning("Operatör bildirimi gönderilemedi: %s", e)
+
+    # ─── WİDGET TEST SAYFASI ─────────────────────────────────────
+    @http.route('/shopify/chat/test', type='http', auth='public', csrf=False, cors='*')
+    def chat_test_page(self, **kwargs):
+        """Widget test sayfası — geliştirme sırasında test etmek için."""
+        html = """<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Uğurlar Chat Widget Test</title>
+    <style>
+        body { font-family: 'Inter', sans-serif; background: #f5f5f5; margin: 0; padding: 40px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        h1 { color: #1a1a2e; }
+        p { color: #666; line-height: 1.6; }
+        .card { background: #fff; padding: 24px; border-radius: 12px; margin: 20px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>💬 Uğurlar Chat Widget Test Sayfası</h1>
+        <div class="card">
+            <h3>Durum: Aktif ✅</h3>
+            <p>Chat widget sağ alt köşede görünmelidir. Tıklayarak test edebilirsiniz.</p>
+        </div>
+        <div class="card">
+            <h3>Shopify Tema Entegrasyonu</h3>
+            <p>Aşağıdaki kodu Shopify tema dosyasına (<code>theme.liquid</code>) <code>&lt;/body&gt;</code> etiketinden önce ekleyin:</p>
+            <pre><code>&lt;script&gt;
+  window.UGURLAR_CHAT_SERVER = 'https://odoo.ugurlar.com';
+  window.UGURLAR_CHAT_BRAND = 'Uğurlar Destek';
+&lt;/script&gt;
+&lt;script src="https://odoo.ugurlar.com/pazaryeri_question/static/src/js/shopify_chat_widget.js"&gt;&lt;/script&gt;</code></pre>
+        </div>
+    </div>
+    <script>
+        window.UGURLAR_CHAT_SERVER = window.location.origin;
+    </script>
+    <script src="/pazaryeri_question/static/src/js/shopify_chat_widget.js"></script>
+</body>
+</html>"""
+        return request.make_response(html, headers=[('Content-Type', 'text/html')])
