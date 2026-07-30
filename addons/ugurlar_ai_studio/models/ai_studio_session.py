@@ -1791,6 +1791,58 @@ class AiStudioSession(models.Model):
 
                 _safe_write_and_commit(cr, gen, {'state': 'processing'})
 
+                # ═══ SEEDREAM REVİZYON EDIT (revision_prompt varsa) ═══
+                revision_text = gen.revision_prompt_en or gen.revision_prompt or ''
+                parent_gen = gen.parent_generation_id
+                if revision_text and parent_gen and parent_gen.generated_image and fal_api_key:
+                    try:
+                        _logger.info('Seedream EDIT revizyonu baslatiliyor (gen=%s): %s', gen_id, revision_text[:80])
+                        from ..services.fal_provider import FalProvider
+                        edit_provider = FalProvider(fal_api_key)
+
+                        # Parent görseli CDN'e yükle
+                        parent_b64 = parent_gen.generated_image
+                        if isinstance(parent_b64, bytes):
+                            parent_b64 = parent_b64.decode('ascii')
+                        parent_url = edit_provider.upload_image(parent_b64)
+
+                        # Seedream edit prompt
+                        seedream_prompt = (
+                            f"This is a fashion e-commerce photo (Figure 1). "
+                            f"Apply ONLY this specific edit to Figure 1: {revision_text}. "
+                            f"Keep everything else in Figure 1 exactly the same — "
+                            f"same model, same pose, same hairstyle, same shoes, same background, same lighting. "
+                            f"Change ONLY what is described above. Output one image. "
+                        )
+
+                        import fal_client as _fal_client
+                        edit_result = _fal_client.subscribe(
+                            'bytedance/seedream/v5/pro/edit',
+                            arguments={
+                                'prompt': seedream_prompt,
+                                'image_urls': [parent_url],
+                                'resolution': '2k',
+                            },
+                        )
+
+                        edit_images = edit_result.get('images', [])
+                        if edit_images:
+                            import requests as req_lib
+                            import base64 as b64_lib
+                            img_url = edit_images[0].get('url', '')
+                            img_resp = req_lib.get(img_url, timeout=30)
+                            if img_resp.status_code == 200:
+                                result_b64 = b64_lib.b64encode(img_resp.content).decode('ascii')
+                                _safe_write_and_commit(cr, gen, {
+                                    'generated_image': result_b64,
+                                    'state': 'done',
+                                    'error_message': '',
+                                })
+                                _logger.info('Seedream EDIT revizyonu basarili (gen=%s)', gen_id)
+                                return  # Seedream edit başarılı
+                    except Exception as edit_err:
+                        _logger.warning('Seedream EDIT basarisiz, sifirdan uretim yapilacak: %s', edit_err)
+
                 source_image = gen.original_image
                 preset = session.model_preset_id
 

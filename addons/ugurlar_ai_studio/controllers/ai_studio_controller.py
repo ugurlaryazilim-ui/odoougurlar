@@ -443,6 +443,10 @@ class AiStudioController(http.Controller):
                 'revision_number': gen.revision_number + 1,
                 'parent_generation_id': gen.id,
                 'provider': gen.provider,
+                # ═══ REVİZYON BİLGİLERİ — YENİ GEN'E AKTAR ═══
+                'revision_prompt': revision_prompt or '',
+                'revision_prompt_en': revision_prompt_en or '',
+                'reject_reason_id': int(reason_id) if reason_id else False,
             })
 
             gen.session_id._process_single_generation(new_gen)
