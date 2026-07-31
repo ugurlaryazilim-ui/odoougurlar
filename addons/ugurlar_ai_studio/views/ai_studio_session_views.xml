@@ -151,6 +151,7 @@
             <search>
                 <field name="name"/>
                 <field name="product_id"/>
+                <field name="product_barcode" string="Barkod"/>
                 <field name="user_id"/>
                 <field name="brand_value_ids"/>
                 <field name="season_value_ids"/>

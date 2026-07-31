@@ -61,6 +61,8 @@ class AiStudioSession(models.Model):
     product_barcode = fields.Char(
         related='product_id.barcode',
         string='Barkod',
+        store=True,
+        index=True,
     )
     product_image = fields.Image(
         related='product_id.image_128',
