@@ -112,7 +112,7 @@ class TrendyolOrderSync(models.Model):
                                 elif res == 'updated':
                                     updated_count += 1
                         except Exception as e:
-                            self.env.invalidate_all()
+                            self.env.invalidate_all(flush=False)
                             error_count += 1
                             pkg_id = package.get('orderNumber', '?')
                             err_msg = f"Sipariş {pkg_id}: {str(e)}"

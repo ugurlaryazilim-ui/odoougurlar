@@ -2642,10 +2642,37 @@ class AiStudioSession(models.Model):
 
     @api.model
     def _cron_check_stuck_generations(self):
-        """Processing durumunda 10 dakikadan uzun kalmış üretimleri kontrol et."""
+        """Processing durumunda 10 dakikadan uzun kalmış üretimleri kontrol et ve yarım kalan toplu AI işlemlerini otomatik sürdür."""
         from datetime import timedelta
         cutoff = fields.Datetime.now() - timedelta(minutes=10)
 
+        # 1. Sunucu yeniden başlatıldıysa/redeploy edildiyse yarım kalan toplu AI işleme oturumlarını otomatik olarak kaldığı yerden devam ettir
+        stuck_preprocessing = self.search([
+            ('state', '=', 'preprocessing'),
+        ])
+        if stuck_preprocessing:
+            unprocessed_sessions = stuck_preprocessing.filtered(
+                lambda s: any(g.state == 'pending' for g in s.generation_ids)
+            )
+            if unprocessed_sessions:
+                provider_type = self.env['ir.config_parameter'].sudo().get_param(
+                    'ugurlar_ai_studio.default_provider', 'fashn'
+                )
+                api_key = self.env['ir.config_parameter'].sudo().get_param(
+                    'ugurlar_ai_studio.fashn_api_key' if provider_type == 'fashn' else 'ugurlar_ai_studio.fal_api_key'
+                )
+                if api_key:
+                    _logger.info('Cron: Sunucu/Modül güncellemesi sonrası yarım kalan %d oturum otomatik devam ettiriliyor...', len(unprocessed_sessions))
+                    session_ids = unprocessed_sessions.ids
+                    uid = self.env.uid or 1
+                    thread = threading.Thread(
+                        target=self._process_batch_ai_thread,
+                        args=(session_ids, api_key, uid),
+                    )
+                    thread.daemon = True
+                    thread.start()
+
+        # 2. 10 dakikadan uzun kalmış takılmış işlemleri temizle
         stuck_sessions = self.search([
             ('state', 'in', ['preprocessing', 'processing']),
             ('write_date', '<', cutoff),
