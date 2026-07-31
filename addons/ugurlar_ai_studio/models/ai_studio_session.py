@@ -840,6 +840,7 @@ class AiStudioSession(models.Model):
             if not api_key:
                 raise UserError(_('fal.ai API anahtarı ayarlanmamış. Ayarlar → AI Stüdyo menüsünden girin.'))
 
+        gen_vals_list = []
         for session in valid_sessions:
             session.write({
                 'state': 'preprocessing',
@@ -856,39 +857,38 @@ class AiStudioSession(models.Model):
             side_photo = photos_by_type.get('side')
             detail_photo = photos_by_type.get('detail')
 
-            self.env['ai.studio.generation'].create({
+            gen_vals_list.append({
                 'session_id': session.id,
                 'source_photo_id': front_photo.id,
                 'photo_type': 'front',
-                'original_image': front_photo.image_original,
                 'state': 'pending',
                 'provider': provider_type,
             })
             if back_photo:
-                self.env['ai.studio.generation'].create({
+                gen_vals_list.append({
                     'session_id': session.id,
                     'source_photo_id': back_photo.id,
                     'photo_type': 'back',
-                    'original_image': back_photo.image_original,
                     'state': 'pending',
                     'provider': provider_type,
                 })
-            self.env['ai.studio.generation'].create({
+            gen_vals_list.append({
                 'session_id': session.id,
                 'source_photo_id': (side_photo or front_photo).id,
                 'photo_type': 'side',
-                'original_image': (side_photo or front_photo).image_original,
                 'state': 'pending',
                 'provider': provider_type,
             })
-            self.env['ai.studio.generation'].create({
+            gen_vals_list.append({
                 'session_id': session.id,
                 'source_photo_id': (detail_photo or front_photo).id,
                 'photo_type': 'detail',
-                'original_image': (detail_photo or front_photo).image_original,
                 'state': 'pending',
                 'provider': provider_type,
             })
+
+        if gen_vals_list:
+            self.env['ai.studio.generation'].create(gen_vals_list)
 
         # Ana veritabanı işlemini commit et ki arka plan thread'i yeni generation verilerini görebilsin
         self.env.cr.commit()
@@ -960,7 +960,7 @@ class AiStudioSession(models.Model):
                 cr.commit()
 
                 start_time = time.time()
-                source_image = gen.original_image
+                source_image = gen.original_image or (gen.source_photo_id and gen.source_photo_id.image_original)
                 photo_type = gen.photo_type or 'front'
 
                 # ═══ GÖRSEL ÖN İŞLEME PIPELINE ═══
@@ -1388,9 +1388,10 @@ class AiStudioSession(models.Model):
             cached_analysis = None
             try:
                 front_gen = generations.filtered(lambda g: g.photo_type == 'front')
-                if front_gen and front_gen[0].original_image:
+                front_img = front_gen and (front_gen[0].original_image or (front_gen[0].source_photo_id and front_gen[0].source_photo_id.image_original))
+                if front_gen and front_img:
                     from ..services.garment_preprocessor import preprocess_garment_image
-                    _pre = preprocess_garment_image(front_gen[0].original_image, target_long_edge=1200)
+                    _pre = preprocess_garment_image(front_img, target_long_edge=1200)
                     _pre_url = provider.upload_image(_pre['image_base64'])
 
                     from ..services.garment_analyzer import analyze_garment
@@ -2040,7 +2041,7 @@ class AiStudioSession(models.Model):
                     except Exception as edit_err:
                         _logger.warning('Seedream EDIT basarisiz, sifirdan uretim yapilacak: %s', edit_err)
 
-                source_image = gen.original_image
+                source_image = gen.original_image or (gen.source_photo_id and gen.source_photo_id.image_original)
                 preset = session.model_preset_id
 
                 # ═══ DETAY İŞLEMİ ═══
