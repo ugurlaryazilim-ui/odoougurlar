@@ -697,6 +697,12 @@ class AiStudioController(http.Controller):
 
             items = []
             for gen in generations:
+                orig_url = ''
+                if gen.source_photo_id:
+                    orig_url = '/web/image/ai.studio.photo/%d/image_original' % gen.source_photo_id.id
+                else:
+                    orig_url = '/web/image/ai.studio.generation/%d/original_image' % gen.id
+
                 items.append({
                     'id': gen.id,
                     'photo_type': gen.photo_type,
@@ -705,7 +711,7 @@ class AiStudioController(http.Controller):
                     'is_approved': gen.is_approved,
                     'is_primary': gen.is_primary,
                     'revision_number': gen.revision_number,
-                    'original_url': '/web/image/ai.studio.generation/%d/original_image' % gen.id,
+                    'original_url': orig_url,
                     'generated_url': '/web/image/ai.studio.generation/%d/generated_image' % gen.id,
                     'error_message': gen.error_message or '',
                     'pending_revision': gen.state in ('pending', 'processing'),

@@ -35,12 +35,20 @@ class AiStudioGeneration(models.Model):
         ('detail', 'Detay'),
     ], string='Fotoğraf Tipi')
 
-    # --- Görseller ---
     original_image = fields.Image(
         string='Orijinal',
         max_width=1920, max_height=1920,
+        compute='_compute_original_image',
         help='Karşılaştırma için orijinal fotoğraf',
     )
+
+    @api.depends('source_photo_id.image_original')
+    def _compute_original_image(self):
+        for gen in self:
+            if gen.source_photo_id and gen.source_photo_id.image_original:
+                gen.original_image = gen.source_photo_id.image_original
+            else:
+                gen.original_image = False
     generated_image = fields.Image(
         string='AI Sonucu',
         max_width=1920, max_height=1920,
