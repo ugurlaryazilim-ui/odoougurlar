@@ -149,7 +149,8 @@
         <field name="model">ai.studio.session</field>
         <field name="arch" type="xml">
             <search>
-                <field name="name"/>
+                <field name="name" string="Oturum No / Barkod"
+                       filter_domain="['|', '|', ('name', 'ilike', self), ('product_barcode', 'ilike', self), ('product_id', 'ilike', self)]"/>
                 <field name="product_id"/>
                 <field name="product_barcode" string="Barkod"/>
                 <field name="user_id"/>
