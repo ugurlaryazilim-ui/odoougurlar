@@ -1,0 +1,209 @@
+{% set active_page = 'chats' %}
+{% extends "base.html" %}
+
+{% block page_title %}Sohbet Detayı{% endblock %}
+
+{% block extra_css %}
+<style>
+    .chat-layout { display: flex; gap: 24px; height: calc(100vh - 120px); }
+    .chat-info-sidebar { width: 300px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
+    
+    .info-group { margin-bottom: 12px; }
+    .info-label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+    .info-value { font-size: 14px; font-weight: 500; word-break: break-all; }
+    
+    .chat-main { flex: 1; display: flex; flex-direction: column; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; overflow: hidden; }
+    
+    .messages-area { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+    
+    .message { max-width: 75%; display: flex; flex-direction: column; }
+    .msg-customer { align-self: flex-start; }
+    .msg-operator { align-self: flex-end; }
+    .msg-system { align-self: center; align-items: center; max-width: 90%; }
+    
+    .bubble { padding: 12px 16px; border-radius: 16px; font-size: 14px; line-height: 1.5; }
+    .msg-customer .bubble { background: rgba(255,255,255,0.1); border-bottom-left-radius: 4px; }
+    .msg-operator .bubble { background: var(--gradient); color: white; border-bottom-right-radius: 4px; }
+    .msg-system .bubble { background: rgba(0,0,0,0.3); color: var(--text-muted); font-size: 12px; text-align: center; border-radius: 8px; }
+    
+    .msg-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+    .msg-operator .msg-meta { text-align: right; }
+    
+    .input-area { padding: 16px; border-top: 1px solid var(--card-border); display: flex; gap: 12px; background: rgba(0,0,0,0.2); }
+    .input-area input { flex: 1; background: var(--bg-color); border: 1px solid var(--card-border); padding: 12px 16px; border-radius: 24px; color: white; }
+    .input-area input:focus { outline: none; border-color: var(--accent-primary); }
+    .btn-send { background: var(--gradient); color: white; border: none; border-radius: 50%; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: opacity 0.2s; }
+    .btn-send:hover { opacity: 0.9; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="chat-layout">
+    <div class="chat-info-sidebar">
+        <h3>Sohbet Bilgileri</h3>
+        <div class="info-group">
+            <div class="info-label">Durum</div>
+            <div class="info-value"><span class="badge" id="info-state">-</span></div>
+        </div>
+        <div class="info-group">
+            <div class="info-label">Müşteri</div>
+            <div class="info-value" id="info-customer">-</div>
+        </div>
+        <div class="info-group">
+            <div class="info-label">E-posta</div>
+            <div class="info-value" id="info-email">-</div>
+        </div>
+        <div class="info-group">
+            <div class="info-label">Mağaza</div>
+            <div class="info-value" id="info-store">-</div>
+        </div>
+        <div class="info-group">
+            <div class="info-label">Sayfa</div>
+            <div class="info-value"><a href="#" id="info-url" target="_blank" style="color: var(--accent-primary);">-</a></div>
+        </div>
+        <div class="info-group">
+            <div class="info-label">Başlangıç</div>
+            <div class="info-value" id="info-created">-</div>
+        </div>
+        <button class="btn btn-primary" style="width: 100%; margin-top: auto;" id="btn-assign" onclick="assignChat()">Bana Ata</button>
+        <button class="btn" style="width: 100%; background: var(--card-border); color: white; margin-top: 8px;" id="btn-close" onclick="closeChat()">Sohbeti Kapat</button>
+    </div>
+    
+    <div class="chat-main">
+        <div class="messages-area" id="messages-container">
+            <!-- Messages will be loaded here -->
+        </div>
+        <form class="input-area" id="reply-form">
+            <input type="text" id="reply-input" placeholder="Mesajınızı yazın..." required autocomplete="off">
+            <button type="submit" class="btn-send">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            </button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const token = localStorage.getItem('token');
+    const pathParts = window.location.pathname.split('/');
+    const uid = pathParts[pathParts.length - 1];
+    
+    let ws = null;
+
+    async function loadChatData() {
+        try {
+            const res = await fetch(`/api/dashboard/conversations/${uid}`, { headers: { 'Authorization': `Bearer ${token}` } });
+            if(res.ok) {
+                const data = await res.json();
+                
+                document.getElementById('info-customer').textContent = data.customer_name || 'İsimsiz';
+                document.getElementById('info-email').textContent = data.customer_email || '-';
+                document.getElementById('info-store').textContent = data.store_name || '-';
+                document.getElementById('info-url').textContent = data.current_url || '-';
+                document.getElementById('info-url').href = data.current_url || '#';
+                document.getElementById('info-created').textContent = new Date(data.created_at).toLocaleString('tr-TR');
+                
+                const stateBadge = document.getElementById('info-state');
+                if(data.state === 'open') { stateBadge.className = 'badge badge-success'; stateBadge.textContent = 'Açık'; }
+                else if(data.state === 'assigned') { stateBadge.className = 'badge badge-info'; stateBadge.textContent = 'Atanmış'; }
+                else { stateBadge.className = 'badge badge-secondary'; stateBadge.textContent = 'Kapalı'; }
+                
+                renderMessages(data.messages);
+            }
+        } catch(e) { console.error(e); }
+    }
+    
+    function renderMessages(messages) {
+        const container = document.getElementById('messages-container');
+        container.innerHTML = '';
+        
+        messages.forEach(msg => {
+            appendMessage(msg);
+        });
+        scrollToBottom();
+    }
+    
+    function appendMessage(msg) {
+        const container = document.getElementById('messages-container');
+        const el = document.createElement('div');
+        
+        let typeClass = 'msg-customer';
+        if(msg.sender_type === 'operator') typeClass = 'msg-operator';
+        else if(msg.sender_type === 'system') typeClass = 'msg-system';
+        
+        el.className = `message ${typeClass}`;
+        
+        const time = msg.created_at ? new Date(msg.created_at).toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'}) : '';
+        
+        let metaHtml = `<div class="msg-meta">${time}</div>`;
+        if(msg.sender_type === 'operator' && msg.sender_name) {
+            metaHtml = `<div class="msg-meta">${msg.sender_name} • ${time}</div>`;
+        }
+        
+        el.innerHTML = `
+            <div class="bubble">${msg.content}</div>
+            ${msg.sender_type !== 'system' ? metaHtml : ''}
+        `;
+        
+        container.appendChild(el);
+        scrollToBottom();
+    }
+    
+    function scrollToBottom() {
+        const container = document.getElementById('messages-container');
+        container.scrollTop = container.scrollHeight;
+    }
+    
+    document.getElementById('reply-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const input = document.getElementById('reply-input');
+        const content = input.value.trim();
+        if(!content) return;
+        
+        input.value = '';
+        
+        try {
+            const res = await fetch(`/api/dashboard/conversations/${uid}/reply`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ content })
+            });
+            if(res.ok) {
+                // The message will come back via WS, or we can Optimistically append
+            }
+        } catch(e) { console.error(e); }
+    });
+    
+    function connectWebSocket() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/api/ws/dashboard?token=${token}`;
+        
+        ws = new WebSocket(wsUrl);
+        
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if(data.type === 'new_message' && data.conversation_uid === uid) {
+                appendMessage(data.message);
+            }
+        };
+        
+        ws.onclose = () => {
+            setTimeout(connectWebSocket, 3000); // Reconnect
+        };
+    }
+    
+    async function assignChat() {
+        // Implementation for assigning chat
+    }
+    
+    async function closeChat() {
+        // Implementation for closing chat
+    }
+    
+    document.addEventListener('DOMContentLoaded', () => {
+        loadChatData();
+        connectWebSocket();
+    });
+</script>
+{% endblock %}

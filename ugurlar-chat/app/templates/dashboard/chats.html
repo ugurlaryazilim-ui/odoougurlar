@@ -1,0 +1,92 @@
+{% set active_page = 'chats' %}
+{% extends "base.html" %}
+
+{% block page_title %}Sohbetler{% endblock %}
+
+{% block extra_css %}
+<style>
+    .filters { display: flex; gap: 16px; margin-bottom: 24px; }
+    .filters select, .filters input { padding: 10px 12px; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; color: white; }
+    .filters input { flex: 1; }
+    .chat-row { cursor: pointer; transition: background 0.2s; }
+    .chat-row:hover { background: rgba(99, 102, 241, 0.05); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="filters">
+    <select id="filter-state" onchange="loadChats()">
+        <option value="">Tüm Durumlar</option>
+        <option value="open">Açık</option>
+        <option value="assigned">Atanmış</option>
+        <option value="closed">Kapalı</option>
+    </select>
+    <input type="text" id="filter-search" placeholder="İsim veya e-posta ara..." onkeyup="if(event.key === 'Enter') loadChats()">
+    <button class="btn btn-primary" onclick="loadChats()">Ara</button>
+</div>
+
+<div class="card table-container">
+    <table>
+        <thead>
+            <tr>
+                <th>Müşteri</th>
+                <th>Mağaza</th>
+                <th>Durum</th>
+                <th>Son Mesaj</th>
+                <th>Tarih</th>
+            </tr>
+        </thead>
+        <tbody id="chats-list">
+            <!-- Loaded via JS -->
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const token = localStorage.getItem('token');
+    
+    async function loadChats() {
+        const state = document.getElementById('filter-state').value;
+        const search = document.getElementById('filter-search').value;
+        
+        let url = '/api/dashboard/conversations?limit=50';
+        if(state) url += `&state=${state}`;
+        if(search) url += `&search=${search}`;
+        
+        try {
+            const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+            if(res.ok) {
+                const data = await res.json();
+                const tbody = document.getElementById('chats-list');
+                tbody.innerHTML = '';
+                
+                data.items.forEach(c => {
+                    let badgeClass = 'badge-secondary';
+                    let statusText = 'Kapalı';
+                    if(c.state === 'open') { badgeClass = 'badge-success'; statusText = 'Açık'; }
+                    else if(c.state === 'assigned') { badgeClass = 'badge-info'; statusText = 'Atanmış'; }
+                    
+                    const tr = document.createElement('tr');
+                    tr.className = 'chat-row';
+                    tr.onclick = () => window.location.href = `/dashboard/chats/${c.uid}`;
+                    tr.innerHTML = `
+                        <td>
+                            <div style="font-weight: 500;">${c.customer_name || 'İsimsiz'}</div>
+                            <div style="font-size: 12px; color: var(--text-muted);">${c.customer_email || ''}</div>
+                        </td>
+                        <td>${c.store_name || '-'}</td>
+                        <td><span class="badge ${badgeClass}">${statusText}</span></td>
+                        <td style="max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${c.last_message || '-'}</td>
+                        <td>${new Date(c.updated_at).toLocaleString('tr-TR')}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+        } catch(e) { console.error(e); }
+    }
+    
+    document.addEventListener('DOMContentLoaded', loadChats);
+</script>
+{% endblock %}

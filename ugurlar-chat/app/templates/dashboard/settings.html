@@ -1,0 +1,74 @@
+{% set active_page = 'settings' %}
+{% extends "base.html" %}
+
+{% block page_title %}Ayarlar{% endblock %}
+
+{% block extra_css %}
+<style>
+    .settings-section { margin-bottom: 32px; max-width: 600px; }
+    .settings-section h3 { margin-bottom: 16px; font-size: 18px; color: var(--text-main); }
+    .settings-card { padding: 24px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="settings-section">
+    <h3>Profil Bilgileri</h3>
+    <div class="card settings-card">
+        <div class="input-group">
+            <label>Ad Soyad</label>
+            <input type="text" id="profile-name" class="input-control">
+        </div>
+        <div class="input-group">
+            <label>E-posta</label>
+            <input type="email" id="profile-email" class="input-control" readonly style="opacity: 0.7;">
+        </div>
+        <button class="btn btn-primary" onclick="saveProfile()">Kaydet</button>
+    </div>
+</div>
+
+<div class="settings-section">
+    <h3>Şifre Değiştir</h3>
+    <div class="card settings-card">
+        <div class="input-group">
+            <label>Mevcut Şifre</label>
+            <input type="password" id="current-password" class="input-control">
+        </div>
+        <div class="input-group">
+            <label>Yeni Şifre</label>
+            <input type="password" id="new-password" class="input-control">
+        </div>
+        <button class="btn btn-primary" onclick="changePassword()">Şifreyi Güncelle</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const token = localStorage.getItem('token');
+    
+    async function loadProfile() {
+        try {
+            const res = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
+            if(res.ok) {
+                const data = await res.json();
+                document.getElementById('profile-name').value = data.full_name || '';
+                document.getElementById('profile-email').value = data.email || '';
+                document.getElementById('user-name').textContent = data.full_name || data.email;
+            }
+        } catch(e) { console.error(e); }
+    }
+    
+    async function saveProfile() {
+        // Implementation
+        alert('Kaydedildi (Mock)');
+    }
+    
+    async function changePassword() {
+        // Implementation
+        alert('Şifre güncellendi (Mock)');
+    }
+    
+    document.addEventListener('DOMContentLoaded', loadProfile);
+</script>
+{% endblock %}

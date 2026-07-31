@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kayıt Ol - Uğurlar Chat</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0a0a1a;
+            --card-bg: rgba(255,255,255,0.04);
+            --card-border: rgba(255,255,255,0.1);
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --accent-primary: #6366f1;
+            --accent-secondary: #8b5cf6;
+            --gradient: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            --danger: #ef4444;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg-color); color: var(--text-main); display: flex; align-items: center; justify-content: center; height: 100vh; }
+        .auth-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px; padding: 40px; width: 100%; max-width: 400px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        .auth-header { text-align: center; margin-bottom: 30px; }
+        .auth-header h1 { font-size: 28px; background: var(--gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 8px; }
+        .input-group { margin-bottom: 20px; }
+        .input-group label { display: block; margin-bottom: 8px; color: var(--text-muted); font-size: 14px; }
+        .input-control { width: 100%; padding: 12px; background: rgba(0,0,0,0.2); border: 1px solid var(--card-border); border-radius: 8px; color: white; font-family: inherit; }
+        .input-control:focus { outline: none; border-color: var(--accent-primary); }
+        .btn-submit { width: 100%; padding: 12px; background: var(--gradient); color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 10px; transition: opacity 0.2s; }
+        .btn-submit:hover { opacity: 0.9; }
+        .auth-links { text-align: center; margin-top: 20px; font-size: 14px; color: var(--text-muted); }
+        .auth-links a { color: var(--accent-primary); text-decoration: none; }
+        #error-msg { color: var(--danger); font-size: 14px; margin-bottom: 15px; text-align: center; display: none; }
+    </style>
+</head>
+<body>
+    <div class="auth-card">
+        <div class="auth-header">
+            <h1>Uğurlar Chat</h1>
+            <p style="color: var(--text-muted);">Yeni hesap oluşturun</p>
+        </div>
+        <div id="error-msg"></div>
+        <form id="register-form">
+            <div class="input-group">
+                <label for="name">Ad Soyad</label>
+                <input type="text" id="name" class="input-control" required>
+            </div>
+            <div class="input-group">
+                <label for="email">E-posta</label>
+                <input type="email" id="email" class="input-control" required>
+            </div>
+            <div class="input-group">
+                <label for="password">Şifre</label>
+                <input type="password" id="password" class="input-control" required>
+            </div>
+            <div class="input-group">
+                <label for="password_confirm">Şifre Tekrar</label>
+                <input type="password" id="password_confirm" class="input-control" required>
+            </div>
+            <button type="submit" class="btn-submit">Kayıt Ol</button>
+        </form>
+        <div class="auth-links">
+            Zaten hesabınız var mı? <a href="/login">Giriş Yap</a>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('register-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const name = document.getElementById('name').value;
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const password_confirm = document.getElementById('password_confirm').value;
+            const errorMsg = document.getElementById('error-msg');
+            
+            if(password !== password_confirm) {
+                errorMsg.textContent = 'Şifreler eşleşmiyor.';
+                errorMsg.style.display = 'block';
+                return;
+            }
+            
+            try {
+                const res = await fetch('/api/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password, full_name: name })
+                });
+                
+                const data = await res.json();
+                if(res.ok) {
+                    const formData = new URLSearchParams();
+                    formData.append('username', email);
+                    formData.append('password', password);
+                    const loginRes = await fetch('/api/auth/login', { 
+                        method: 'POST', 
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: formData 
+                    });
+                    const loginData = await loginRes.json();
+                    if(loginRes.ok) {
+                        localStorage.setItem('token', loginData.access_token);
+                        window.location.href = '/dashboard';
+                    } else {
+                        window.location.href = '/login';
+                    }
+                } else {
+                    errorMsg.textContent = data.detail || 'Kayıt başarısız.';
+                    errorMsg.style.display = 'block';
+                }
+            } catch (err) {
+                errorMsg.textContent = 'Bir hata oluştu.';
+                errorMsg.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>

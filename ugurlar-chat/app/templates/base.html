@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Uğurlar Chat</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0a0a1a;
+            --card-bg: rgba(255,255,255,0.04);
+            --card-border: rgba(255,255,255,0.1);
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --accent-primary: #6366f1;
+            --accent-secondary: #8b5cf6;
+            --gradient: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            --success: #10b981;
+            --info: #3b82f6;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+        }
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        a { text-decoration: none; color: inherit; }
+        ul { list-style: none; }
+        
+        /* Sidebar */
+        .sidebar {
+            width: 250px;
+            background: var(--card-bg);
+            border-right: 1px solid var(--card-border);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .sidebar-header {
+            padding: 24px;
+            font-size: 20px;
+            font-weight: 700;
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            border-bottom: 1px solid var(--card-border);
+        }
+        
+        .nav-menu { flex: 1; padding: 16px 0; }
+        
+        .nav-item {
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--text-muted);
+            transition: all 0.2s;
+        }
+        
+        .nav-item:hover, .nav-item.active {
+            background: rgba(99, 102, 241, 0.1);
+            color: var(--text-main);
+            border-right: 3px solid var(--accent-primary);
+        }
+        
+        .nav-item.logout { margin-top: auto; color: var(--danger); }
+        .nav-item.logout:hover { background: rgba(239, 68, 68, 0.1); border-right-color: var(--danger); }
+        
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .topbar {
+            height: 70px;
+            border-bottom: 1px solid var(--card-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 24px;
+        }
+        
+        .user-info { display: flex; align-items: center; gap: 16px; }
+        
+        .content-area {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+        }
+        
+        /* Common UI Elements */
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.3s ease;
+        }
+        
+        .card:hover {
+            border-color: rgba(99, 102, 241, 0.3);
+            box-shadow: 0 0 15px rgba(99, 102, 241, 0.1);
+        }
+        
+        .btn {
+            padding: 10px 16px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-weight: 500;
+            font-family: inherit;
+            transition: opacity 0.2s;
+        }
+        .btn:hover { opacity: 0.9; }
+        
+        .btn-primary {
+            background: var(--gradient);
+            color: white;
+        }
+        
+        .badge {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .badge-success { background: rgba(16, 185, 129, 0.2); color: var(--success); }
+        .badge-info { background: rgba(59, 130, 246, 0.2); color: var(--info); }
+        .badge-secondary { background: rgba(156, 163, 175, 0.2); color: var(--text-muted); }
+        
+        .table-container {
+            width: 100%;
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--card-border);
+        }
+        th { color: var(--text-muted); font-weight: 500; }
+        tr:hover { background: rgba(255,255,255,0.02); }
+        
+        .input-group { margin-bottom: 16px; }
+        .input-group label { display: block; margin-bottom: 8px; color: var(--text-muted); font-size: 14px; }
+        .input-control {
+            width: 100%;
+            padding: 10px 12px;
+            background: rgba(0,0,0,0.2);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            color: white;
+            font-family: inherit;
+        }
+        .input-control:focus { outline: none; border-color: var(--accent-primary); }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            Uğurlar Chat
+        </div>
+        <ul class="nav-menu">
+            <li><a href="/dashboard" class="nav-item {% if active_page == 'dashboard' %}active{% endif %}">📊 Dashboard</a></li>
+            <li><a href="/dashboard/stores" class="nav-item {% if active_page == 'stores' %}active{% endif %}">🏪 Mağazalar</a></li>
+            <li><a href="/dashboard/chats" class="nav-item {% if active_page == 'chats' %}active{% endif %}">💬 Sohbetler</a></li>
+            <li><a href="/dashboard/settings" class="nav-item {% if active_page == 'settings' %}active{% endif %}">⚙️ Ayarlar</a></li>
+        </ul>
+        <a href="#" class="nav-item logout" onclick="logout()">🚪 Çıkış</a>
+    </aside>
+    
+    <main class="main-content">
+        <header class="topbar">
+            <div class="page-title">
+                <h2>{% block page_title %}Dashboard{% endblock %}</h2>
+            </div>
+            <div class="user-info">
+                <span id="user-name">Kullanıcı Adı</span>
+                <span style="cursor: pointer;">🔔</span>
+            </div>
+        </header>
+        <div class="content-area">
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+
+    <script>
+        function logout() {
+            localStorage.removeItem('token');
+            window.location.href = '/login';
+        }
+        
+        const token = localStorage.getItem('token');
+        if(!token && !window.location.pathname.includes('login') && !window.location.pathname.includes('register')) {
+            window.location.href = '/login';
+        }
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

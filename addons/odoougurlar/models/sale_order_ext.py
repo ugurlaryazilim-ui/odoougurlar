@@ -537,7 +537,13 @@ class SaleOrder(models.Model):
         return res
 
     def _auto_nebim_sync(self, order):
-        """Sipariş onayında otomatik Cari ve Sipariş Nebim'e gönder."""
+        """Sipariş onayında otomatik Cari ve Sipariş Nebim'e gönder.
+        
+        Duplikasyon Koruması:
+        - Bağımsız cursor ile committed DB state kontrolü (rollback-proof)
+        - Email-bazlı cari dedup (aynı email ile mevcut cari kodu varsa yeniden kullanır)
+        - API sonuçları bağımsız cursor ile kaydedilir (ana transaction rollback yapsa bile kalıcı)
+        """
         ICP = self.env['ir.config_parameter'].sudo()
         customer_enabled = ICP.get_param('odoougurlar.nebim_sync_customer_enabled', 'False') == 'True'
         order_enabled = ICP.get_param('odoougurlar.nebim_sync_order_enabled', 'False') == 'True'
@@ -566,6 +572,34 @@ class SaleOrder(models.Model):
         if not marketplace_name:
             return
 
+        order_id = order.id
+
+        # ═══════════════════════════════════════════════════════════════════
+        # DUPLIKASYON KORUMASI: Bağımsız cursor ile committed state kontrolü
+        # ORM cache ana transaction'a bağlıdır — rollback'te sıfırlanır.
+        # Bağımsız cursor ile gerçek DB state'ini okuyarak, aynı siparişin
+        # tekrar gönderilmesini engelliyoruz.
+        # ═══════════════════════════════════════════════════════════════════
+        try:
+            db_customer_sent = False
+            db_order_sent = False
+            with self.env.registry.cursor() as chk_cr:
+                chk_cr.execute(
+                    "SELECT nebim_customer_sent, nebim_order_sent FROM sale_order WHERE id = %s",
+                    [order_id]
+                )
+                row = chk_cr.fetchone()
+                if row:
+                    db_customer_sent, db_order_sent = row
+        except Exception as e:
+            _logger.warning("Nebim duplikasyon kontrolü başarısız (%s): %s", order.name, e)
+            db_customer_sent, db_order_sent = order.nebim_customer_sent, order.nebim_order_sent
+
+        # Sipariş zaten Nebim'e gönderilmişse (committed state), atla
+        if db_order_sent and (db_customer_sent or not customer_enabled):
+            _logger.info("Duplikasyon koruması: %s zaten Nebim'e gönderilmiş (DB committed), atlanıyor.", order.name)
+            return
+
         try:
             mapping = self.env['odoougurlar.marketplace.mapping'].sudo().find_mapping(
                 marketplace_name, order.partner_id.country_id.id
@@ -584,24 +618,50 @@ class SaleOrder(models.Model):
                     pass
                 return
 
-            # Cari (savepoint korumalı)
-            if customer_enabled and not order.nebim_customer_sent:
+            # ─── CARİ ───
+            if customer_enabled and not db_customer_sent:
                 try:
-                    with self.env.cr.savepoint():
-                        customer_proc = self.env['odoougurlar.customer.processor'].sudo()
-                        cust_code, addr_id = customer_proc.sync_customer(
-                            order.partner_id, mapping, sale_order=order
+                    # Email-bazlı cari dedup: mevcut cari kodu var mı?
+                    existing_code = self._find_existing_nebim_customer(order)
+                    
+                    if existing_code:
+                        cust_code = existing_code
+                        addr_id = ''
+                        _logger.info(
+                            "Email dedup: %s → mevcut Nebim cari kodu kullanılıyor: %s",
+                            order.name, cust_code
                         )
-                        order.write({
-                            'nebim_customer_sent': True,
-                            'nebim_customer_code': cust_code or '',
-                            'nebim_address_id': addr_id or ''
-                        })
-                        _logger.info("Auto-sync Cari başarılı: %s → %s", order.name, cust_code)
+                    else:
+                        with self.env.cr.savepoint():
+                            customer_proc = self.env['odoougurlar.customer.processor'].sudo()
+                            cust_code, addr_id = customer_proc.sync_customer(
+                                order.partner_id, mapping, sale_order=order
+                            )
+
+                    # Bağımsız cursor ile cari bilgisini kaydet (rollback-proof)
+                    try:
+                        with self.env.registry.cursor() as save_cr:
+                            save_cr.execute("""
+                                UPDATE sale_order 
+                                SET nebim_customer_sent = TRUE, 
+                                    nebim_customer_code = %s,
+                                    nebim_address_id = %s
+                                WHERE id = %s
+                            """, [cust_code or '', addr_id or '', order_id])
+                    except Exception as save_e:
+                        _logger.warning("Cari bilgisi bağımsız kayıt hatası: %s", save_e)
+
+                    # ORM ile de yaz (in-memory tutarlılık)
+                    order.write({
+                        'nebim_customer_sent': True,
+                        'nebim_customer_code': cust_code or '',
+                        'nebim_address_id': addr_id or ''
+                    })
+                    _logger.info("Auto-sync Cari başarılı: %s → %s", order.name, cust_code)
+
                 except Exception as e:
                     _logger.error("Auto-sync Cari hatası (%s): %s", order.name, e)
                     try:
-                        # NebimCustomerError taşıyorsa request JSON'u da kaydet
                         request_json = getattr(e, 'request_json', '')
                         write_vals = {'nebim_customer_response': f'[Auto-Sync] CARİ HATA: {str(e)}'}
                         if request_json:
@@ -610,13 +670,26 @@ class SaleOrder(models.Model):
                     except Exception:
                         pass
 
-            # Sipariş (savepoint korumalı)
-            if order_enabled and not order.nebim_order_sent:
+            # ─── SİPARİŞ ───
+            if order_enabled and not db_order_sent:
                 try:
                     with self.env.cr.savepoint():
                         order_proc = self.env['odoougurlar.order.processor'].sudo()
                         order_proc.sync_order(order, mapping)
-                        _logger.info("Auto-sync Sipariş başarılı: %s", order.name)
+                    
+                    # Bağımsız cursor ile sipariş bayrağını kaydet (rollback-proof)
+                    try:
+                        with self.env.registry.cursor() as save_cr:
+                            save_cr.execute("""
+                                UPDATE sale_order 
+                                SET nebim_order_sent = TRUE
+                                WHERE id = %s
+                            """, [order_id])
+                    except Exception as save_e:
+                        _logger.warning("Sipariş bayrağı bağımsız kayıt hatası: %s", save_e)
+
+                    _logger.info("Auto-sync Sipariş başarılı: %s", order.name)
+
                 except Exception as e:
                     _logger.error("Auto-sync Sipariş hatası (%s): %s", order.name, e)
                     try:
@@ -626,6 +699,50 @@ class SaleOrder(models.Model):
 
         except Exception as e:
             _logger.error("Auto-sync Nebim genel hata (%s): %s", order.name, e)
+
+    def _find_existing_nebim_customer(self, order):
+        """Email adresi ile mevcut Nebim cari kodu bul (duplikasyon önleme).
+        
+        Aynı email adresiyle daha önce Nebim'e gönderilmiş bir sipariş varsa,
+        o siparişin cari kodunu döndür. Bu sayede Nebim'de yeni cari açılmaz,
+        mevcut cariye sipariş ve fatura atılır (Hamurlabs yöntemi).
+        
+        Returns:
+            str: Mevcut CurrAccCode veya False
+        """
+        partner = order.partner_id
+        email = (partner.email or '').strip().lower()
+        
+        if not email:
+            return False
+        
+        # Bağımsız cursor ile committed state'ten oku
+        # (ana transaction rollback yapsa bile doğru sonuç döner)
+        try:
+            with self.env.registry.cursor() as dedup_cr:
+                dedup_cr.execute("""
+                    SELECT so.nebim_customer_code 
+                    FROM sale_order so
+                    JOIN res_partner rp ON rp.id = so.partner_id
+                    WHERE so.id != %s
+                      AND so.nebim_customer_sent = TRUE
+                      AND so.nebim_customer_code IS NOT NULL
+                      AND so.nebim_customer_code != ''
+                      AND LOWER(TRIM(rp.email)) = %s
+                    ORDER BY so.id DESC
+                    LIMIT 1
+                """, [order.id, email])
+                row = dedup_cr.fetchone()
+                if row and row[0]:
+                    _logger.info(
+                        "Email dedup bulundu: %s (%s) → mevcut cari: %s",
+                        partner.name, email, row[0]
+                    )
+                    return row[0]
+        except Exception as e:
+            _logger.warning("Email dedup sorgusu hatası: %s", e)
+        
+        return False
 
 
 class SaleOrderLine(models.Model):

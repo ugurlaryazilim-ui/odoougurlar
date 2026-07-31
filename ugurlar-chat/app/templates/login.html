@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Giriş Yap - Uğurlar Chat</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0a0a1a;
+            --card-bg: rgba(255,255,255,0.04);
+            --card-border: rgba(255,255,255,0.1);
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --accent-primary: #6366f1;
+            --accent-secondary: #8b5cf6;
+            --gradient: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            --danger: #ef4444;
+        }
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+
+        .auth-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 40px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+        
+        .auth-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .auth-header h1 {
+            font-size: 28px;
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+        
+        .input-group { margin-bottom: 20px; }
+        .input-group label { display: block; margin-bottom: 8px; color: var(--text-muted); font-size: 14px; }
+        .input-control {
+            width: 100%;
+            padding: 12px;
+            background: rgba(0,0,0,0.2);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            color: white;
+            font-family: inherit;
+        }
+        .input-control:focus { outline: none; border-color: var(--accent-primary); }
+        
+        .btn-submit {
+            width: 100%;
+            padding: 12px;
+            background: var(--gradient);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 10px;
+            transition: opacity 0.2s;
+        }
+        .btn-submit:hover { opacity: 0.9; }
+        
+        .auth-links { text-align: center; margin-top: 20px; font-size: 14px; color: var(--text-muted); }
+        .auth-links a { color: var(--accent-primary); text-decoration: none; }
+        
+        #error-msg { color: var(--danger); font-size: 14px; margin-bottom: 15px; text-align: center; display: none; }
+    </style>
+</head>
+<body>
+    <div class="auth-card">
+        <div class="auth-header">
+            <h1>Uğurlar Chat</h1>
+            <p style="color: var(--text-muted);">Hesabınıza giriş yapın</p>
+        </div>
+        <div id="error-msg"></div>
+        <form id="login-form">
+            <div class="input-group">
+                <label for="email">E-posta</label>
+                <input type="email" id="email" class="input-control" required>
+            </div>
+            <div class="input-group">
+                <label for="password">Şifre</label>
+                <input type="password" id="password" class="input-control" required>
+            </div>
+            <button type="submit" class="btn-submit">Giriş Yap</button>
+        </form>
+        <div class="auth-links">
+            Hesabınız yok mu? <a href="/register">Kayıt Ol</a>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const errorMsg = document.getElementById('error-msg');
+            
+            try {
+                const formData = new URLSearchParams();
+                formData.append('username', email);
+                formData.append('password', password);
+                
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: formData
+                });
+                
+                const data = await res.json();
+                if(res.ok) {
+                    localStorage.setItem('token', data.access_token);
+                    window.location.href = '/dashboard';
+                } else {
+                    errorMsg.textContent = data.detail || 'Giriş başarısız.';
+                    errorMsg.style.display = 'block';
+                }
+            } catch (err) {
+                errorMsg.textContent = 'Bir hata oluştu.';
+                errorMsg.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Integer, String, Enum, DateTime, func
+from sqlalchemy import Integer, String, Enum, DateTime, func, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -37,3 +37,7 @@ class Conversation(Base):
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
+    
+    # Store relationship
+    store_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('stores.id'), nullable=True)
+    store = relationship('Store', back_populates='conversations')

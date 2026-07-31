@@ -1,0 +1,200 @@
+{% set active_page = 'stores' %}
+{% extends "base.html" %}
+
+{% block page_title %}Mağazalar{% endblock %}
+
+{% block extra_css %}
+<style>
+    .header-actions { display: flex; justify-content: flex-end; margin-bottom: 24px; }
+    .store-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 24px; }
+    .store-card { display: flex; flex-direction: column; gap: 16px; }
+    .store-header { display: flex; justify-content: space-between; align-items: flex-start; }
+    .store-title { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+    .store-domain { font-size: 14px; color: var(--text-muted); }
+    .store-stats { display: flex; gap: 16px; font-size: 14px; color: var(--text-muted); }
+    .store-actions { display: flex; gap: 8px; margin-top: auto; padding-top: 16px; border-top: 1px solid var(--card-border); }
+    
+    /* Modal */
+    .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; z-index: 100; }
+    .modal { background: var(--bg-color); border: 1px solid var(--card-border); border-radius: 12px; width: 100%; max-width: 500px; padding: 24px; }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+    .modal-title { font-size: 18px; font-weight: 600; }
+    .btn-close { background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+    
+    .code-block { background: rgba(0,0,0,0.3); padding: 16px; border-radius: 8px; font-family: monospace; font-size: 14px; color: var(--text-muted); word-break: break-all; margin-bottom: 16px; border: 1px solid var(--card-border); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="header-actions">
+    <button class="btn btn-primary" onclick="openAddModal()">+ Yeni Mağaza Ekle</button>
+</div>
+
+<div class="store-grid" id="store-list">
+    <!-- Loaded via JS -->
+</div>
+
+<!-- Add/Edit Modal -->
+<div class="modal-overlay" id="store-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title" id="modal-title">Yeni Mağaza Ekle</div>
+            <button class="btn-close" onclick="closeModal('store-modal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="store-form">
+                <input type="hidden" id="store-id">
+                <div class="input-group">
+                    <label>Mağaza Adı</label>
+                    <input type="text" id="store-name" class="input-control" required>
+                </div>
+                <div class="input-group">
+                    <label>Alan Adı (Domain)</label>
+                    <input type="text" id="store-domain" class="input-control" placeholder="example.com" required>
+                </div>
+                <div class="input-group">
+                    <label>Platform</label>
+                    <select id="store-platform" class="input-control">
+                        <option value="shopify">Shopify</option>
+                        <option value="woocommerce">WooCommerce</option>
+                        <option value="custom">Özel</option>
+                    </select>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button class="btn" style="background: var(--card-bg); border: 1px solid var(--card-border); color: white;" onclick="closeModal('store-modal')">İptal</button>
+            <button class="btn btn-primary" onclick="saveStore()">Kaydet</button>
+        </div>
+    </div>
+</div>
+
+<!-- Embed Modal -->
+<div class="modal-overlay" id="embed-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title">Embed Kodu</div>
+            <button class="btn-close" onclick="closeModal('embed-modal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p style="margin-bottom: 12px; color: var(--text-muted);">Bu kodu web sitenizin <code>&lt;head&gt;</code> etiketleri arasına ekleyin.</p>
+            <div class="code-block" id="embed-code-content"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-primary" onclick="copyEmbedCode()">Kopyala</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const token = localStorage.getItem('token');
+    
+    async function loadStores() {
+        try {
+            const res = await fetch('/api/stores', { headers: { 'Authorization': `Bearer ${token}` } });
+            if(res.ok) {
+                const data = await res.json();
+                const container = document.getElementById('store-list');
+                container.innerHTML = '';
+                
+                data.forEach(store => {
+                    const el = document.createElement('div');
+                    el.className = 'card store-card';
+                    el.innerHTML = `
+                        <div class="store-header">
+                            <div>
+                                <div class="store-title">${store.name}</div>
+                                <div class="store-domain">${store.domain}</div>
+                            </div>
+                            <span class="badge badge-info">${store.platform}</span>
+                        </div>
+                        <div class="store-stats">
+                            <div>API Key: <span style="font-family:monospace;">${store.api_key.substring(0,8)}...</span></div>
+                        </div>
+                        <div class="store-actions">
+                            <button class="btn" style="background: rgba(99, 102, 241, 0.2); color: var(--accent-primary); flex: 1;" onclick="showEmbed('${store.api_key}')">Embed</button>
+                            <button class="btn" style="background: rgba(255,255,255,0.1); color: white; flex: 1;" onclick="editStore(${store.id}, '${store.name}', '${store.domain}', '${store.platform}')">Düzenle</button>
+                            <button class="btn" style="background: rgba(239, 68, 68, 0.2); color: var(--danger);" onclick="deleteStore(${store.id})">Sil</button>
+                        </div>
+                    `;
+                    container.appendChild(el);
+                });
+            }
+        } catch(e) { console.error(e); }
+    }
+    
+    function openAddModal() {
+        document.getElementById('modal-title').textContent = 'Yeni Mağaza Ekle';
+        document.getElementById('store-id').value = '';
+        document.getElementById('store-form').reset();
+        document.getElementById('store-modal').style.display = 'flex';
+    }
+    
+    function editStore(id, name, domain, platform) {
+        document.getElementById('modal-title').textContent = 'Mağazayı Düzenle';
+        document.getElementById('store-id').value = id;
+        document.getElementById('store-name').value = name;
+        document.getElementById('store-domain').value = domain;
+        document.getElementById('store-platform').value = platform;
+        document.getElementById('store-modal').style.display = 'flex';
+    }
+    
+    function closeModal(id) {
+        document.getElementById(id).style.display = 'none';
+    }
+    
+    async function saveStore() {
+        const id = document.getElementById('store-id').value;
+        const payload = {
+            name: document.getElementById('store-name').value,
+            domain: document.getElementById('store-domain').value,
+            platform: document.getElementById('store-platform').value
+        };
+        
+        try {
+            const url = id ? `/api/stores/${id}` : '/api/stores';
+            const method = id ? 'PUT' : 'POST';
+            
+            const res = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify(payload)
+            });
+            
+            if(res.ok) {
+                closeModal('store-modal');
+                loadStores();
+            } else {
+                alert('Hata oluştu');
+            }
+        } catch(e) { console.error(e); }
+    }
+    
+    async function deleteStore(id) {
+        if(!confirm('Bu mağazayı silmek istediğinize emin misiniz?')) return;
+        try {
+            const res = await fetch(`/api/stores/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+            if(res.ok) loadStores();
+        } catch(e) { console.error(e); }
+    }
+    
+    function showEmbed(apiKey) {
+        const baseUrl = window.location.origin;
+        const code = `<script src="${baseUrl}/static/widget.js" data-api-key="${apiKey}"><\/script>`;
+        document.getElementById('embed-code-content').textContent = code;
+        document.getElementById('embed-modal').style.display = 'flex';
+    }
+    
+    function copyEmbedCode() {
+        const code = document.getElementById('embed-code-content').textContent;
+        navigator.clipboard.writeText(code).then(() => {
+            alert('Kopyalandı!');
+        });
+    }
+    
+    document.addEventListener('DOMContentLoaded', loadStores);
+</script>
+{% endblock %}

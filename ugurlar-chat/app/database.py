@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy.orm import declarative_base
 from typing import AsyncGenerator
 from app.config import get_settings
+from app.models.base import Base
 
 settings = get_settings()
 
@@ -23,8 +23,7 @@ AsyncSessionLocal = async_sessionmaker(
     autoflush=False
 )
 
-# Temel model sınıfı
-Base = declarative_base()
+# Base dışarıdan import edildi (app.models.base)
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI bağımlılığı (dependency) olarak kullanılacak veritabanı oturumu."""

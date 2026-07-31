@@ -1,0 +1,117 @@
+{% set active_page = 'dashboard' %}
+{% extends "base.html" %}
+
+{% block page_title %}Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 24px; margin-bottom: 30px; }
+    .stat-card { border-left: 4px solid var(--accent-primary); display: flex; align-items: center; gap: 16px; }
+    .stat-icon { font-size: 32px; }
+    .stat-info h3 { font-size: 14px; color: var(--text-muted); font-weight: 500; margin-bottom: 4px; }
+    .stat-info p { font-size: 28px; font-weight: 700; color: white; }
+    
+    .recent-section h2 { font-size: 18px; margin-bottom: 16px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="stats-grid">
+    <div class="card stat-card" style="border-left-color: var(--accent-primary);">
+        <div class="stat-icon">💬</div>
+        <div class="stat-info">
+            <h3>Toplam Sohbet</h3>
+            <p id="stat-total">0</p>
+        </div>
+    </div>
+    <div class="card stat-card" style="border-left-color: var(--success);">
+        <div class="stat-icon">🟢</div>
+        <div class="stat-info">
+            <h3>Açık</h3>
+            <p id="stat-open">0</p>
+        </div>
+    </div>
+    <div class="card stat-card" style="border-left-color: var(--info);">
+        <div class="stat-icon">👤</div>
+        <div class="stat-info">
+            <h3>Atanmış</h3>
+            <p id="stat-assigned">0</p>
+        </div>
+    </div>
+    <div class="card stat-card" style="border-left-color: var(--text-muted);">
+        <div class="stat-icon">⚪</div>
+        <div class="stat-info">
+            <h3>Kapalı</h3>
+            <p id="stat-closed">0</p>
+        </div>
+    </div>
+</div>
+
+<div class="recent-section">
+    <h2>Son Sohbetler</h2>
+    <div class="card table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Müşteri</th>
+                    <th>Mağaza</th>
+                    <th>Durum</th>
+                    <th>Son Mesaj</th>
+                    <th>Tarih</th>
+                </tr>
+            </thead>
+            <tbody id="recent-chats">
+                <!-- Data will be loaded via JS -->
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    async function loadDashboard() {
+        const token = localStorage.getItem('token');
+        try {
+            const statsRes = await fetch('/api/dashboard/stats', { headers: { 'Authorization': `Bearer ${token}` } });
+            if(statsRes.ok) {
+                const stats = await statsRes.json();
+                document.getElementById('stat-total').textContent = stats.total || 0;
+                document.getElementById('stat-open').textContent = stats.open || 0;
+                document.getElementById('stat-assigned').textContent = stats.assigned || 0;
+                document.getElementById('stat-closed').textContent = stats.closed || 0;
+            }
+            
+            const convRes = await fetch('/api/dashboard/conversations?limit=5', { headers: { 'Authorization': `Bearer ${token}` } });
+            if(convRes.ok) {
+                const data = await convRes.json();
+                const tbody = document.getElementById('recent-chats');
+                tbody.innerHTML = '';
+                
+                data.items.forEach(c => {
+                    let badgeClass = 'badge-secondary';
+                    let statusText = 'Kapalı';
+                    if(c.state === 'open') { badgeClass = 'badge-success'; statusText = 'Açık'; }
+                    else if(c.state === 'assigned') { badgeClass = 'badge-info'; statusText = 'Atanmış'; }
+                    
+                    const tr = document.createElement('tr');
+                    tr.style.cursor = 'pointer';
+                    tr.onclick = () => window.location.href = `/dashboard/chats/${c.uid}`;
+                    tr.innerHTML = `
+                        <td>${c.customer_name || 'İsimsiz'}</td>
+                        <td>${c.store_name || '-'}</td>
+                        <td><span class="badge ${badgeClass}">${statusText}</span></td>
+                        <td style="max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${c.last_message || '-'}</td>
+                        <td>${new Date(c.updated_at).toLocaleString('tr-TR')}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+        } catch(e) {
+            console.error('Error loading dashboard', e);
+        }
+    }
+    
+    document.addEventListener('DOMContentLoaded', loadDashboard);
+</script>
+{% endblock %}

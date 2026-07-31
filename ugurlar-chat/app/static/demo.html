@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Uğurlar Chat — Canlı Demo</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #f8f9fa;
+            min-height: 100vh;
+        }
+
+        /* Fake store header */
+        .store-header {
+            background: white;
+            padding: 16px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+        }
+        .store-logo { font-size: 24px; font-weight: 700; color: #1a1a2e; }
+        .store-nav { display: flex; gap: 28px; }
+        .store-nav a { color: #666; text-decoration: none; font-size: 14px; }
+
+        /* Fake store content */
+        .store-content {
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 0 40px;
+        }
+        .store-hero {
+            background: linear-gradient(135deg, #f0f0ff, #e8e8ff);
+            border-radius: 16px;
+            padding: 60px 40px;
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .store-hero h1 { font-size: 36px; color: #1a1a2e; margin-bottom: 12px; }
+        .store-hero p { color: #666; font-size: 16px; }
+
+        .products {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+        .product {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .product-img {
+            height: 200px;
+            background: linear-gradient(135deg, #e8e8ff, #d8d8ff);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 48px;
+        }
+        .product-info { padding: 16px; }
+        .product-info h3 { font-size: 16px; margin-bottom: 4px; }
+        .product-info p { color: #888; font-size: 14px; }
+        .product-price { font-size: 18px; font-weight: 700; color: #6366f1; margin-top: 8px; }
+
+        /* Demo notice */
+        .demo-banner {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            color: white;
+            text-align: center;
+            padding: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            z-index: 1000000;
+        }
+        .demo-banner a { color: #ffd700; text-decoration: none; }
+
+        .store-header { margin-top: 38px; }
+    </style>
+</head>
+<body>
+
+<div class="demo-banner">
+    🎯 Bu bir demo mağazadır — Sağ alttaki 💬 butonuna tıklayarak chat'i test edin!
+    <a href="/">← Ana Sayfa</a>
+</div>
+
+<div class="store-header">
+    <div class="store-logo">🛍 Demo Mağaza</div>
+    <div class="store-nav">
+        <a href="#">Yeni Ürünler</a>
+        <a href="#">Kadın</a>
+        <a href="#">Erkek</a>
+        <a href="#">İletişim</a>
+    </div>
+</div>
+
+<div class="store-content">
+    <div class="store-hero">
+        <h1>Yaz Koleksiyonu 2026</h1>
+        <p>En yeni modeller şimdi indirimde</p>
+    </div>
+
+    <div class="products">
+        <div class="product">
+            <div class="product-img">👗</div>
+            <div class="product-info">
+                <h3>Yazlık Elbise</h3>
+                <p>Pamuklu, rahat kesim</p>
+                <div class="product-price">₺499</div>
+            </div>
+        </div>
+        <div class="product">
+            <div class="product-img">👜</div>
+            <div class="product-info">
+                <h3>Deri Çanta</h3>
+                <p>Hakiki deri, el yapımı</p>
+                <div class="product-price">₺899</div>
+            </div>
+        </div>
+        <div class="product">
+            <div class="product-img">👟</div>
+            <div class="product-info">
+                <h3>Spor Ayakkabı</h3>
+                <p>Hafif, ergonomik taban</p>
+                <div class="product-price">₺649</div>
+            </div>
+        </div>
+        <div class="product">
+            <div class="product-img">🕶</div>
+            <div class="product-info">
+                <h3>Güneş Gözlüğü</h3>
+                <p>UV400 korumalı</p>
+                <div class="product-price">₺299</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Chat Widget -->
+<script>
+    window.UGURLAR_CHAT_SERVER = window.location.origin;
+</script>
+<script src="/static/widget.js" defer></script>
+
+</body>
+</html>
