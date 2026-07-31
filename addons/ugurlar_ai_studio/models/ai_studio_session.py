@@ -890,6 +890,9 @@ class AiStudioSession(models.Model):
                 'provider': provider_type,
             })
 
+        # Ana veritabanı işlemini commit et ki arka plan thread'i yeni generation verilerini görebilsin
+        self.env.cr.commit()
+
         session_ids = valid_sessions.ids
         uid = self.env.uid
 
@@ -1306,6 +1309,7 @@ class AiStudioSession(models.Model):
     def _process_batch_ai_thread(self, session_ids, api_key, uid):
         """Toplu seçilen oturumları sırayla arka planda AI ile işler."""
         _logger.info("Toplu AI İşleme Thread başlatıldı. Toplam oturum sayısı: %d", len(session_ids))
+        time.sleep(2.0)  # Ana veritabanı işleminin Postgres'e tamamen commit edilmesini bekle
         for session_id in session_ids:
             try:
                 self._process_ai_thread_body(session_id, api_key, uid)
@@ -1426,7 +1430,17 @@ class AiStudioSession(models.Model):
                     cr.commit()
 
                     start_time = time.time()
-                    source_image = gen.original_image
+                    source_image = gen.original_image or (gen.source_photo_id and gen.source_photo_id.image_original)
+                    if not source_image:
+                        _logger.error('Orijinal fotoğraf bulunamadı (gen_id=%s, session=%s)', gen.id, session.name)
+                        gen.write({
+                            'state': 'failed',
+                            'error_message': _('Orijinal fotoğraf verisi bulunamadı (görsel boş veya silinmiş).'),
+                        })
+                        if photo_type == 'front':
+                            front_failed = True
+                        cr.commit()
+                        continue
 
                     from ..services.garment_preprocessor import (
                         preprocess_garment_image,
