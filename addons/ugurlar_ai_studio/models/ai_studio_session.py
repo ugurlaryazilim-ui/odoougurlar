@@ -819,6 +819,103 @@ class AiStudioSession(models.Model):
             },
         }
 
+    def action_batch_reprocess(self):
+        """Seçili oturumları toplu olarak sırayla yeniden AI işlemeye gönderir."""
+        valid_sessions = self.filtered(
+            lambda s: s.model_preset_id and any(p.photo_type == 'front' for p in s.photo_ids)
+        )
+        if not valid_sessions:
+            raise UserError(_('Seçili oturumlar arasında işlenebilir durumda olan (Ön yüz fotoğrafı ve Manken Preseti olan) oturum bulunamadı.'))
+
+        # API key kontrolü
+        provider_type = self.env['ir.config_parameter'].sudo().get_param(
+            'ugurlar_ai_studio.default_provider', 'fashn'
+        )
+        if provider_type == 'fashn':
+            api_key = self.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fashn_api_key')
+            if not api_key:
+                raise UserError(_('FASHN API anahtarı ayarlanmamış. Ayarlar → AI Stüdyo menüsünden girin.'))
+        else:
+            api_key = self.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fal_api_key')
+            if not api_key:
+                raise UserError(_('fal.ai API anahtarı ayarlanmamış. Ayarlar → AI Stüdyo menüsünden girin.'))
+
+        for session in valid_sessions:
+            session.write({
+                'state': 'preprocessing',
+                'date_processing_start': fields.Datetime.now(),
+                'review_locked_by': False,
+                'review_lock_time': False,
+                'review_lock_token': False,
+            })
+            session.generation_ids.unlink()
+
+            photos_by_type = {p.photo_type: p for p in session.photo_ids}
+            front_photo = photos_by_type.get('front')
+            back_photo = photos_by_type.get('back')
+            side_photo = photos_by_type.get('side')
+            detail_photo = photos_by_type.get('detail')
+
+            self.env['ai.studio.generation'].create({
+                'session_id': session.id,
+                'source_photo_id': front_photo.id,
+                'photo_type': 'front',
+                'original_image': front_photo.image_original,
+                'state': 'pending',
+                'provider': provider_type,
+            })
+            if back_photo:
+                self.env['ai.studio.generation'].create({
+                    'session_id': session.id,
+                    'source_photo_id': back_photo.id,
+                    'photo_type': 'back',
+                    'original_image': back_photo.image_original,
+                    'state': 'pending',
+                    'provider': provider_type,
+                })
+            self.env['ai.studio.generation'].create({
+                'session_id': session.id,
+                'source_photo_id': (side_photo or front_photo).id,
+                'photo_type': 'side',
+                'original_image': (side_photo or front_photo).image_original,
+                'state': 'pending',
+                'provider': provider_type,
+            })
+            self.env['ai.studio.generation'].create({
+                'session_id': session.id,
+                'source_photo_id': (detail_photo or front_photo).id,
+                'photo_type': 'detail',
+                'original_image': (detail_photo or front_photo).image_original,
+                'state': 'pending',
+                'provider': provider_type,
+            })
+
+        session_ids = valid_sessions.ids
+        uid = self.env.uid
+
+        thread = threading.Thread(
+            target=self._process_batch_ai_thread,
+            args=(session_ids, api_key, uid),
+        )
+        thread.daemon = True
+        thread.start()
+
+        skipped_count = len(self) - len(valid_sessions)
+        msg = _("%d adet oturum yeniden AI işlemeye gönderildi ve arka planda sırayla işleniyor.") % len(valid_sessions)
+        if skipped_count > 0:
+            msg += _(" (%d adet eksik fotoğraflı/presetsiz oturum atlandı.)") % skipped_count
+
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Toplu AI İşleme Başlatıldı'),
+                'message': msg,
+                'type': 'success',
+                'sticky': False,
+            },
+        }
+
     @staticmethod
     def _create_provider(api_key, provider_type='fashn'):
         """Ayardaki secime gore provider olustur."""
@@ -1205,6 +1302,24 @@ class AiStudioSession(models.Model):
                         _logger.error("AI Thread message_post hatası: %s", msg_err)
             except Exception:
                 pass
+
+    def _process_batch_ai_thread(self, session_ids, api_key, uid):
+        """Toplu seçilen oturumları sırayla arka planda AI ile işler."""
+        _logger.info("Toplu AI İşleme Thread başlatıldı. Toplam oturum sayısı: %d", len(session_ids))
+        for session_id in session_ids:
+            try:
+                self._process_ai_thread_body(session_id, api_key, uid)
+            except Exception as e:
+                _logger.error("Toplu AI işleme hatası (session_id=%s): %s", session_id, e, exc_info=True)
+                try:
+                    with self.pool.cursor() as cr:
+                        env = api.Environment(cr, uid, {})
+                        sess = env['ai.studio.session'].browse(session_id)
+                        sess.write({'state': 'failed'})
+                        cr.commit()
+                except Exception:
+                    pass
+            time.sleep(1)
 
     def _process_ai_thread_body(self, session_id, api_key, uid):
         """Thread içinde tüm generation'ları işle (body)."""
