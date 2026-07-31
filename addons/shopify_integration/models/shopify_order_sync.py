@@ -313,14 +313,16 @@ class ShopifyOrderSync(models.Model):
             # Tireler çıkarıldığında eşleşir
             final_missing = [s for s in skus if not product_map.get(s)]
             if final_missing:
-                # İlk 6 karakter ürün kodu — bunla başlayan tüm varyantları çek
+                # İlk 4 karakter ürün kodu — bunla başlayan tüm varyantları çek
                 prefix_set = set()
                 for sku in final_missing:
-                    if len(sku) >= 6:
-                        prefix_set.add(sku[:6])
+                    clean_s = sku.replace('-', '').replace(' ', '')
+                    if len(clean_s) >= 4:
+                        prefix_set.add(clean_s[:4])
                 for prefix in prefix_set:
+                    # 'B692%' veya 'B692-%' eşleşmesi için SQL/ilike arama
                     candidates = Product.search([
-                        ('default_code', '=like', f'{prefix}%')
+                        ('default_code', 'ilike', f'{prefix}')
                     ])
                     for p in candidates:
                         if p.default_code:

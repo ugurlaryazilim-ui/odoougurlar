@@ -1357,8 +1357,15 @@ class AiStudioSession(models.Model):
         with self.pool.cursor() as cr:
             env = api.Environment(cr, uid, {})
             session = env['ai.studio.session'].browse(session_id)
-            session.write({'state': 'processing'})
-            cr.commit()
+            for attempt in range(3):
+                try:
+                    session.write({'state': 'processing'})
+                    cr.commit()
+                    break
+                except Exception as start_err:
+                    cr.rollback()
+                    _logger.warning('Oturum processing durumu kilit çakışması (session_id=%s, deneme %d/3): %s', session_id, attempt + 1, start_err)
+                    time.sleep(1.5)
 
             preset = session.model_preset_id
             generations = session.generation_ids.filtered(
@@ -1851,6 +1858,28 @@ class AiStudioSession(models.Model):
 
                 except Exception as e:
                     cr.rollback()
+                    err_str = str(e).lower()
+                    if 'concurrent update' in err_str or 'serialization' in err_str or 'could not serialize' in err_str or 'lock' in err_str:
+                        _logger.warning('AI Üretim sırasında veritabanı kilit çakışması (gen=%s), 1.5s beklenip tekrar denenecek: %s', gen.id, e)
+                        time.sleep(1.5)
+                        try:
+                            with self.pool.cursor() as retry_cr:
+                                retry_env = api.Environment(retry_cr, uid, {})
+                                r_gen = retry_env['ai.studio.generation'].browse(gen.id)
+                                if 'gen_b64' in locals() and gen_b64:
+                                    r_gen.write({
+                                        'generated_image': gen_b64,
+                                        'state': 'done',
+                                        'fal_endpoint': tryon_endpoint if 'tryon_endpoint' in locals() else ('%s/%s' % (provider_type, tryon_model)),
+                                        'generation_time_seconds': elapsed if 'elapsed' in locals() else 0.0,
+                                        'cost': tryon_result.get('cost', 0.05) if 'tryon_result' in locals() else 0.05,
+                                    })
+                                    retry_cr.commit()
+                                    _logger.info('Veritabanı çakışması sonrası AI sonucu başarıyla kaydedildi (gen=%s)', gen.id)
+                                    continue
+                        except Exception as retry_err:
+                            _logger.error('Veritabanı çakışması kurtarma denemesi başarısız oldu: %s', retry_err)
+
                     from ..services.fal_error_handler import parse_fal_error
                     parsed = parse_fal_error(e)
                     _logger.error('AI üretim hatası (gen=%s): %s', gen.id, e)
@@ -1870,15 +1899,22 @@ class AiStudioSession(models.Model):
             has_failed = any(g.state == 'failed' for g in session.generation_ids)
             final_state = 'failed' if has_failed else 'review'
             
-            session.write({
-                'state': final_state,
-                'date_review_start': fields.Datetime.now()
-            })
-            if has_failed:
-                session.message_post(body=_('AI üretimi tamamlandı ancak BAZI GÖRSELLER BAŞARISIZ oldu. İncele butonuna basarak başarısız olanları tekrar deneyebilirsiniz.'))
-            else:
-                session.message_post(body=_('AI üretimi tamamlandı. %d görsel onay bekliyor.') % len(session.generation_ids))
-            cr.commit()
+            for attempt in range(3):
+                try:
+                    session.write({
+                        'state': final_state,
+                        'date_review_start': fields.Datetime.now()
+                    })
+                    if has_failed:
+                        session.message_post(body=_('AI üretimi tamamlandı ancak BAZI GÖRSELLER BAŞARISIZ oldu. İncele butonuna basarak başarısız olanları tekrar deneyebilirsiniz.'))
+                    else:
+                        session.message_post(body=_('AI üretimi tamamlandı. %d görsel onay bekliyor.') % len(session.generation_ids))
+                    cr.commit()
+                    break
+                except Exception as final_write_err:
+                    cr.rollback()
+                    _logger.warning('Oturum son durum güncellemesi kilit çakışması (session_id=%s, deneme %d/3): %s', session_id, attempt + 1, final_write_err)
+                    time.sleep(1.5)
 
     def _process_single_generation(self, generation):
         """Tek bir generation'ı yeniden işle (retry için)."""

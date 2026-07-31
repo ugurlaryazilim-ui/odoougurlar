@@ -89,6 +89,27 @@ class ProductProduct(models.Model):
         if not product:
             product = self.search([('default_code', '=', code)], limit=1)
 
+        # 3b. Tire ve boşluk temizlenmiş eşleşme (Örn: B692696944 <-> B6926-969-44)
+        if not product:
+            clean_code = code.replace('-', '').replace(' ', '')
+            if clean_code:
+                self.env.cr.execute("""
+                    SELECT id FROM product_product 
+                    WHERE active = True AND (
+                        REPLACE(REPLACE(default_code, '-', ''), ' ', '') = %s
+                        OR REPLACE(REPLACE(barcode, '-', ''), ' ', '') = %s
+                        OR REPLACE(REPLACE(nebim_barcode, '-', ''), ' ', '') = %s
+                    )
+                    LIMIT 1
+                """, [clean_code, clean_code, clean_code])
+                row = self.env.cr.fetchone()
+                if row:
+                    product = self.browse(row[0])
+                    _logger.info(
+                        "Tiresiz barkod/SKU eşleşti: %s → %s (%s)",
+                        code, product.display_name, product.default_code
+                    )
+
         # 4. İkame kontrolü
         if product and product.substitute_product_id:
             _logger.info(
