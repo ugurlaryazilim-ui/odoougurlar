@@ -197,6 +197,7 @@ class TrendyolOrderSync(models.Model):
     @api.private
     def _sync_cancelled_orders(self, api, store, start_date=None):
         """İptal edilen siparişleri senkronize et (sayfalama ile)."""
+        created = 0
         updated = 0
         page = 0
         while True:
@@ -212,17 +213,37 @@ class TrendyolOrderSync(models.Model):
             for package in content:
                 package_id = str(package.get('id') or package.get('shipmentPackageId', ''))
                 existing = self.search([('shipment_package_id', '=', package_id)], limit=1)
-                if existing and existing.trendyol_status != 'cancelled':
-                    existing.write({'trendyol_status': 'cancelled'})
-                    self._cancel_odoo_order(existing, store)
-                    updated += 1
+                if not existing:
+                    order_num = str(package.get('orderNumber') or '')
+                    if order_num:
+                        existing = self.search([('trendyol_order_number', '=', order_num)], limit=1)
+
+                if existing:
+                    if existing.trendyol_status != 'cancelled':
+                        existing.write({'trendyol_status': 'cancelled'})
+                        self._cancel_odoo_order(existing, store)
+                        updated += 1
+                else:
+                    # Odoo'ya önceden düşmeden doğrudan Trendyol'da iptal edilmiş siparişi Odoo'ya aktar ve iptal durumuna al
+                    try:
+                        with self.env.cr.savepoint():
+                            res = self._process_package(package, store)
+                            self.env.flush_all()
+                            if res in ('created', 'updated'):
+                                created += 1
+                                new_rec = self.search([('shipment_package_id', '=', package_id)], limit=1)
+                                if new_rec:
+                                    new_rec.write({'trendyol_status': 'cancelled'})
+                                    self._cancel_odoo_order(new_rec, store)
+                    except Exception as e:
+                        _logger.warning("İptal olan sipariş Odoo'ya aktarılırken hata (%s): %s", package_id, e)
 
             total_pages = data.get('totalPages', 1)
             page += 1
             if page >= total_pages:
                 break
 
-        return {'updated': updated}
+        return {'created': created, 'updated': updated}
 
     @api.private
     def _sync_returned_orders(self, api, store, start_date=None):
