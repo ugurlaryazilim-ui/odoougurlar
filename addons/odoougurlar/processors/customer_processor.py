@@ -57,7 +57,8 @@ class CustomerProcessor(models.AbstractModel):
         email = (partner.email or '').strip().lower()
         vat_raw = partner.vat or ''
         vat_clean = ''.join(filter(str.isdigit, vat_raw))
-        phone_digits = ''.join(filter(str.isdigit, partner.phone or partner.mobile or ''))
+        phone_raw = partner.phone or getattr(partner, 'mobile', '') or ''
+        phone_digits = ''.join(filter(str.isdigit, phone_raw))
 
         existing_code = False
         existing_addr = False
