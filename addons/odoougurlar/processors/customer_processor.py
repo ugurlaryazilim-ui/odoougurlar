@@ -86,6 +86,33 @@ class CustomerProcessor(models.AbstractModel):
 
         connector = self.env['odoougurlar.nebim.connector']
 
+        # ─── 3. KONTROL: Nebim SP (usp_GetCustomer_ent) ile Nebim'de Mail Sorgulama ───
+        if email:
+            try:
+                sp_name = connector._get_sp_name('customer') or 'usp_GetCustomer_ent'
+                sp_params = [
+                    {'Name': 'pCommValue', 'Value': email},
+                    {'Name': 'pCommType', 'Value': 3},
+                    {'Name': 'pCustomerType', 'Value': 4}
+                ]
+                sp_res = connector.run_proc(sp_name, sp_params)
+                if sp_res and isinstance(sp_res, list) and len(sp_res) > 0:
+                    first = sp_res[0]
+                    if isinstance(first, dict):
+                        found_code = first.get('customerCode') or first.get('CurrAccCode')
+                        found_addr = first.get('BillingAddressID') or first.get('PostalAddressID') or ''
+                        if found_code:
+                            _logger.info("Nebim SP (%s) mail eşleşti (%s): partner %s -> Nebim Cari: %s",
+                                         sp_name, email, partner.name, found_code)
+                            partner.sudo().write({
+                                'nebim_customer_sent': True,
+                                'nebim_customer_code': found_code,
+                                'nebim_address_id': found_addr or ''
+                            })
+                            return found_code, found_addr or ''
+            except Exception as e:
+                _logger.warning("Nebim SP cari sorgu uyarısı (POST ile devam edilecek): %s", e)
+
         # ─── İl/İlçe/Bölge Kodu Çözümleme ───
         nebim_codes = self._resolve_nebim_address_codes(partner)
         
