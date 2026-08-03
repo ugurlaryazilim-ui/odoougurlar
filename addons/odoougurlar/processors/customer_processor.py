@@ -95,7 +95,39 @@ class CustomerProcessor(models.AbstractModel):
             return existing_code, existing_addr or ''
 
         connector = self.env['odoougurlar.nebim.connector']
-        
+
+        # ─── 3. KONTROL: Nebim SP (sp_GetCustomer_Hamurlabs) ile Nebim Veritabanında Mail Sorgulama ───
+        if email:
+            for comm_type in [1, 3, 7]:
+                try:
+                    sp_params = [
+                        {'Name': 'CommunicationTypeCode', 'Value': str(comm_type)},
+                        {'Name': 'CommAddress', 'Value': email},
+                        {'Name': 'TypeCode', 'Value': '3'},
+                        {'Name': 'CustomerType', 'Value': '1'}
+                    ]
+                    sp_res = connector.run_proc('sp_GetCustomer_Hamurlabs', sp_params)
+                    if sp_res and isinstance(sp_res, list) and len(sp_res) > 0:
+                        first = sp_res[0]
+                        if isinstance(first, dict) and first.get('CurrAccCode'):
+                            existing_code = first.get('CurrAccCode')
+                            existing_addr = first.get('BillingAddressID') or first.get('PostalAddressID') or ''
+                            _logger.info("Nebim SP (sp_GetCustomer_Hamurlabs) mail eşleşti (%s, comm_type=%s): %s -> %s",
+                                         email, comm_type, partner.name, existing_code)
+                            try:
+                                partner.write({
+                                    'nebim_customer_sent': True,
+                                    'nebim_customer_code': existing_code,
+                                    'nebim_address_id': existing_addr or ''
+                                })
+                                self.env.flush_all()
+                            except Exception:
+                                pass
+                            self._save_partner_nebim_code(partner.id, existing_code, existing_addr or '')
+                            return existing_code, existing_addr or ''
+                except Exception as e:
+                    _logger.warning("sp_GetCustomer_Hamurlabs sorgu hatası: %s", e)
+
         # ─── İl/İlçe/Bölge Kodu Çözümleme ───
         nebim_codes = self._resolve_nebim_address_codes(partner)
         
