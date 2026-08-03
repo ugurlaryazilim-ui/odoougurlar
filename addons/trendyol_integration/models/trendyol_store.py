@@ -230,23 +230,36 @@ class TrendyolStore(models.Model):
             raise UserError(_('❌ Bağlantı hatası:\n\n%s') % str(e))
 
     def action_sync_now(self):
-        """Manuel senkronizasyon butonu — sadece bu mağaza."""
+        """Manuel senkronizasyon butonu — senkronizasyonu arka planda kesintisiz çalıştırır."""
         self.ensure_one()
-        TrendyolOrder = self.env['trendyol.order']
-        result = TrendyolOrder.sync_orders_for_store(self)
-        if result.get('error'):
-            raise UserError(_('❌ Senkronizasyon hatası:\n\n%s') % result['error'])
+        store_id = self.id
+        db_name = self.env.cr.dbname
+        uid = self.env.uid
+
+        def _bg_sync():
+            try:
+                import odoo.modules.registry
+                registry = odoo.modules.registry.Registry(db_name)
+                with registry.cursor() as new_cr:
+                    new_env = api.Environment(new_cr, uid, {})
+                    store = new_env['trendyol.store'].browse(store_id)
+                    if store.exists():
+                        new_env['trendyol.order'].sync_orders_for_store(store)
+                        new_cr.commit()
+            except Exception as e:
+                _logger.error("Arka plan Trendyol senkronizasyon hatası (store_id=%s): %s", store_id, e)
+
+        import threading
+        thread = threading.Thread(target=_bg_sync, daemon=True)
+        thread.start()
 
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
                 'title': 'Trendyol Senkronizasyon',
-                'message': f'✅ Senkronizasyon tamamlandı! Mağaza: {self.name} | '
-                           f'Yeni: {result.get("created", 0)} | '
-                           f'Güncellenen: {result.get("updated", 0)} | '
-                           f'Hatalı: {result.get("errors", 0)}',
-                'type': 'success',
+                'message': f'🚀 {self.name} için sipariş senkronizasyonu arka planda başlatıldı! Siparişler birkaç saniye içinde güncellenecektir.',
+                'type': 'info',
                 'sticky': False,
             },
         }
