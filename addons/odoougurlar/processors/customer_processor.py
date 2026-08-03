@@ -53,17 +53,13 @@ class CustomerProcessor(models.AbstractModel):
             _logger.info("Partner %s zaten Nebim cari koduna sahip: %s", partner.name, partner_code)
             return partner_code, partner_addr or ''
 
-        # ─── 2. KONTROL: Email / VKN / TCKN / Telefon Dedup (Başka bir partner'da cari kodu var mı?) ───
+        # ─── 2. KONTROL: Sadece Email Dedup (Başka bir partner'da aynı mailli cari kodu var mı?) ───
         email = (partner.email or '').strip().lower()
-        vat_raw = partner.vat or ''
-        vat_clean = ''.join(filter(str.isdigit, vat_raw))
-        phone_raw = partner.phone or getattr(partner, 'mobile', '') or ''
-        phone_digits = ''.join(filter(str.isdigit, phone_raw))
 
         existing_code = False
         existing_addr = False
 
-        if email or (vat_clean and len(vat_clean) >= 10) or (phone_digits and len(phone_digits) >= 10):
+        if email:
             try:
                 with self.env.registry.cursor() as dedup_cr:
                     query = """
@@ -73,36 +69,29 @@ class CustomerProcessor(models.AbstractModel):
                           AND nebim_customer_sent = TRUE
                           AND nebim_customer_code IS NOT NULL
                           AND nebim_customer_code != ''
+                          AND LOWER(TRIM(email)) = %s
+                        ORDER BY id DESC LIMIT 1
                     """
-                    params = [partner.id]
-                    conds = []
-                    if email:
-                        conds.append("LOWER(TRIM(email)) = %s")
-                        params.append(email)
-                    if vat_clean and len(vat_clean) >= 10:
-                        conds.append("REPLACE(REPLACE(vat, '-', ''), ' ', '') = %s")
-                        params.append(vat_clean)
-                    if phone_digits and len(phone_digits) >= 10:
-                        conds.append("RIGHT(REGEXP_REPLACE(phone, '[^0-9]', '', 'g'), 10) = %s")
-                        params.append(phone_digits[-10:])
-                    if conds:
-                        query += " AND (" + " OR ".join(conds) + ") ORDER BY id DESC LIMIT 1"
-                        dedup_cr.execute(query, params)
-                        row = dedup_cr.fetchone()
-                        if row and row[0]:
-                            existing_code, existing_addr = row[0], row[1]
+                    dedup_cr.execute(query, [partner.id, email])
+                    row = dedup_cr.fetchone()
+                    if row and row[0]:
+                        existing_code, existing_addr = row[0], row[1]
             except Exception as e:
-                _logger.warning("Partner dedup sorgusu hatası: %s", e)
+                _logger.warning("Partner email dedup sorgusu hatası: %s", e)
 
         if existing_code:
-            _logger.info("Email/TCKN/Phone dedup bulundu (%s): partner %s -> Nebim Cari: %s",
-                         email or vat_clean, partner.name, existing_code)
+            _logger.info("Email dedup bulundu (%s): partner %s -> Nebim Cari: %s",
+                         email, partner.name, existing_code)
+            try:
+                partner.write({
+                    'nebim_customer_sent': True,
+                    'nebim_customer_code': existing_code,
+                    'nebim_address_id': existing_addr or ''
+                })
+                self.env.flush_all()
+            except Exception:
+                pass
             self._save_partner_nebim_code(partner.id, existing_code, existing_addr or '')
-            partner.write({
-                'nebim_customer_sent': True,
-                'nebim_customer_code': existing_code,
-                'nebim_address_id': existing_addr or ''
-            })
             return existing_code, existing_addr or ''
 
         connector = self.env['odoougurlar.nebim.connector']
@@ -410,16 +399,19 @@ class CustomerProcessor(models.AbstractModel):
                 
             _logger.info("Oluşan Nebim Müşteri Kodu: %s, Adres ID: %s", customer_code, address_id)
 
-            # Bağımsız DB cursor ile res.partner'a kalıcı (rollback-proof) kaydet!
-            self._save_partner_nebim_code(partner.id, customer_code, address_id)
+            # ORM üzerinde res.partner'ı güncelle
             try:
                 partner.write({
                     'nebim_customer_sent': True,
                     'nebim_customer_code': customer_code,
                     'nebim_address_id': address_id or ''
                 })
-            except Exception:
-                pass
+                self.env.flush_all()
+            except Exception as e:
+                _logger.warning("Partner ORM yazma uyarısı: %s", e)
+
+            # Bağımsız DB cursor ile res.partner'a kalıcı (rollback-proof) kaydet!
+            self._save_partner_nebim_code(partner.id, customer_code, address_id)
 
             return customer_code, address_id
         except NebimCustomerError:
@@ -432,17 +424,22 @@ class CustomerProcessor(models.AbstractModel):
         """Partner'a nebim_customer_code ve nebim_customer_sent değerini kalıcı (independent cursor) olarak yazar."""
         if not partner_id or not customer_code:
             return
-        try:
-            with self.env.registry.cursor() as save_cr:
-                save_cr.execute("""
-                    UPDATE res_partner
-                    SET nebim_customer_sent = TRUE,
-                        nebim_customer_code = %s,
-                        nebim_address_id = %s
-                    WHERE id = %s
-                """, [customer_code, address_id or '', partner_id])
-        except Exception as e:
-            _logger.warning("Partner Nebim cari kodu bağımsız kayıt hatası: %s", e)
+        import time
+        for attempt in range(3):
+            try:
+                with self.env.registry.cursor() as save_cr:
+                    save_cr.execute("""
+                        UPDATE res_partner
+                        SET nebim_customer_sent = TRUE,
+                            nebim_customer_code = %s,
+                            nebim_address_id = %s
+                        WHERE id = %s
+                    """, [customer_code, address_id or '', partner_id])
+                    save_cr.commit()
+                break
+            except Exception as e:
+                _logger.warning("Partner Nebim cari kodu bağımsız kayıt hatası (deneme %s): %s", attempt + 1, e)
+                time.sleep(0.1)
 
     def _resolve_nebim_address_codes(self, partner):
         """
