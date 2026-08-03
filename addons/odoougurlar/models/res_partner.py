@@ -16,6 +16,18 @@ class ResPartner(models.Model):
         """)
         return super()._auto_init()
 
+    def _register_hook(self):
+        res = super()._register_hook()
+        try:
+            self.env.cr.execute("""
+                ALTER TABLE res_partner ADD COLUMN IF NOT EXISTS nebim_customer_code VARCHAR;
+                ALTER TABLE res_partner ADD COLUMN IF NOT EXISTS nebim_customer_sent BOOLEAN DEFAULT FALSE;
+                ALTER TABLE res_partner ADD COLUMN IF NOT EXISTS nebim_address_id VARCHAR;
+            """)
+        except Exception as e:
+            _logger.warning("res_partner sütun kontrol hatası: %s", e)
+        return res
+
     nebim_customer_code = fields.Char(
         string='Nebim Cari Kodu',
         index=True,
