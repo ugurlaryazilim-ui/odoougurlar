@@ -101,10 +101,10 @@ class CustomerProcessor(models.AbstractModel):
             for comm_type in [1, 3, 7]:
                 try:
                     sp_params = [
-                        {'Name': 'CommunicationTypeCode', 'Value': str(comm_type)},
+                        {'Name': 'CommunicationTypeCode', 'Value': comm_type},
                         {'Name': 'CommAddress', 'Value': email},
-                        {'Name': 'TypeCode', 'Value': '3'},
-                        {'Name': 'CustomerType', 'Value': '1'}
+                        {'Name': 'TypeCode', 'Value': 3},
+                        {'Name': 'CustomerType', 'Value': 1}
                     ]
                     sp_res = connector.run_proc('sp_GetCustomer_Hamurlabs', sp_params)
                     if sp_res and isinstance(sp_res, list) and len(sp_res) > 0:
