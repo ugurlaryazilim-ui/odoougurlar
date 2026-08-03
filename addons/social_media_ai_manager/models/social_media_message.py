@@ -185,6 +185,7 @@ class SocialMediaMessage(models.Model):
                     batches_to_process.append(list(dm_msgs))
                     
                 for batch in batches_to_process:
+                    last_msg = batch[-1]
                     # Combine user messages into one paragraph for this batch
                     user_message = "\n".join([m.content.replace("[YORUM]:", "").strip() for m in batch])
                     
@@ -192,7 +193,7 @@ class SocialMediaMessage(models.Model):
                     # For comments: only fetch history from the SAME post to avoid context confusion
                     is_comment = any(m.content and m.content.startswith('[YORUM]:') for m in batch)
                     
-                    if is_comment and last_msg.post_id:
+                    if is_comment and getattr(last_msg, 'post_id', None):
                         # Only get past messages from the same post
                         past_messages = self.search([
                             ('conversation_id', '=', conversation.id),
@@ -216,9 +217,6 @@ class SocialMediaMessage(models.Model):
                             for m in reversed(past_messages)
                         ])
                         system_context += f"\n\nÖNCEKİ KONUŞMA GEÇMİŞİ (Bu konuşma geçmişine göre yanıt ver):\n{history_text}\n"
-                    
-                    # We use the LAST message in the batch for context (like which post they commented on)
-                    last_msg = batch[-1]
                     
                     system_context += f"\n\nKullanıcı {account.platform.capitalize()} üzerinden yazıyor. ÖNEMLİ KURAL: Mesajlarında KESİNLİKLE '**' veya '*' gibi markdown kalınlaştırma işaretleri KULLANMA. Bunun yerine maddeleri ayırmak için şık emojiler (👗, 💳, 📦, 🛍️ vb.) ve temiz satır boşlukları kullanarak çok profesyonel ve zarif bir görünüm sağla."
                     
