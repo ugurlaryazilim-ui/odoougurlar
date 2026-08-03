@@ -150,11 +150,7 @@ class TrendyolOrderSync(models.Model):
                     _logger.exception("İade sync hatası [%s]", store.name)
 
             try:
-                with self.env.registry.cursor() as safe_cr:
-                    safe_cr.execute(
-                        "UPDATE trendyol_store SET last_sync = %s WHERE id = %s",
-                        [fields.Datetime.now(), store.id]
-                    )
+                store.sudo().write({'last_sync': fields.Datetime.now()})
             except Exception as store_e:
                 _logger.warning("Mağaza last_sync güncelleme atlandı (%s): %s", store.name, store_e)
 

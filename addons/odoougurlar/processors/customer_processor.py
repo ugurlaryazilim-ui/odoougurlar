@@ -33,21 +33,9 @@ class CustomerProcessor(models.AbstractModel):
         if not partner:
             return False
 
-        # ─── 1. KONTROL: Partner'ın kendi nebim_customer_code bilgisi (ORM / committed DB state) ───
-        partner_code = partner.nebim_customer_code
-        partner_addr = partner.nebim_address_id or ''
-        if not partner_code:
-            try:
-                with self.env.registry.cursor() as chk_cr:
-                    chk_cr.execute(
-                        "SELECT nebim_customer_code, nebim_address_id FROM res_partner WHERE id = %s",
-                        [partner.id]
-                    )
-                    row = chk_cr.fetchone()
-                    if row and row[0]:
-                        partner_code, partner_addr = row[0], row[1]
-            except Exception:
-                pass
+        # ─── 1. KONTROL: Partner'ın kendi nebim_customer_code bilgisi ───
+        partner_code = partner.sudo().nebim_customer_code
+        partner_addr = partner.sudo().nebim_address_id or ''
 
         if partner_code:
             _logger.info("Partner %s zaten Nebim cari koduna sahip: %s", partner.name, partner_code)

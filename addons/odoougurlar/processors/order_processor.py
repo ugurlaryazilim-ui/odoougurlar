@@ -12,19 +12,7 @@ class OrderProcessor(models.AbstractModel):
         if not sale_order:
             return False
             
-        # Bağımsız cursor ile committed state kontrol et (transaction rollback'ten korunmak için)
-        order_sent_committed = sale_order.nebim_order_sent
-        if not order_sent_committed:
-            try:
-                with self.env.registry.cursor() as chk_cr:
-                    chk_cr.execute("SELECT nebim_order_sent FROM sale_order WHERE id = %s", [sale_order.id])
-                    row = chk_cr.fetchone()
-                    if row and row[0]:
-                        order_sent_committed = True
-            except Exception:
-                pass
-
-        if order_sent_committed:
+        if sale_order.sudo().nebim_order_sent:
             _logger.info("Sipariş zaten Nebim'e gönderilmiş: %s", sale_order.name)
             return True
 
@@ -185,21 +173,7 @@ class OrderProcessor(models.AbstractModel):
                 result.get('HeaderID') or result.get('ApplicationID') or ''
             ) if isinstance(result, dict) else ''
 
-            # Bağımsız DB cursor ile kalıcı (rollback-proof) kaydet!
-            try:
-                with self.env.registry.cursor() as save_cr:
-                    save_cr.execute("""
-                        UPDATE sale_order
-                        SET nebim_order_sent = TRUE,
-                            nebim_order_response = %s,
-                            nebim_export_file_number = %s,
-                            nebim_header_id = %s
-                        WHERE id = %s
-                    """, [str(result), export_file_number or '', header_id, sale_order.id])
-            except Exception as save_e:
-                _logger.warning("Sale order Nebim bağımsız kayıt hatası: %s", save_e)
-
-            sale_order.write({
+            sale_order.sudo().write({
                 'nebim_order_sent': True,
                 'nebim_order_response': str(result),
                 'nebim_export_file_number': export_file_number or '',

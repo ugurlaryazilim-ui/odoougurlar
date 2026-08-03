@@ -577,23 +577,8 @@ class SaleOrder(models.Model):
         # ═══════════════════════════════════════════════════════════════════
         # DUPLIKASYON KORUMASI: Bağımsız cursor ile committed state kontrolü
         # ORM cache ana transaction'a bağlıdır — rollback'te sıfırlanır.
-        # Bağımsız cursor ile gerçek DB state'ini okuyarak, aynı siparişin
-        # tekrar gönderilmesini engelliyoruz.
-        # ═══════════════════════════════════════════════════════════════════
-        try:
-            db_customer_sent = False
-            db_order_sent = False
-            with self.env.registry.cursor() as chk_cr:
-                chk_cr.execute(
-                    "SELECT nebim_customer_sent, nebim_order_sent FROM sale_order WHERE id = %s",
-                    [order_id]
-                )
-                row = chk_cr.fetchone()
-                if row:
-                    db_customer_sent, db_order_sent = row
-        except Exception as e:
-            _logger.warning("Nebim duplikasyon kontrolü başarısız (%s): %s", order.name, e)
-            db_customer_sent, db_order_sent = order.nebim_customer_sent, order.nebim_order_sent
+        db_customer_sent = order.sudo().nebim_customer_sent
+        db_order_sent = order.sudo().nebim_order_sent
 
         # Sipariş zaten Nebim'e gönderilmişse (committed state), atla
         if db_order_sent and (db_customer_sent or not customer_enabled):
@@ -638,21 +623,7 @@ class SaleOrder(models.Model):
                                 order.partner_id, mapping, sale_order=order
                             )
 
-                    # Bağımsız cursor ile cari bilgisini kaydet (rollback-proof)
-                    try:
-                        with self.env.registry.cursor() as save_cr:
-                            save_cr.execute("""
-                                UPDATE sale_order 
-                                SET nebim_customer_sent = TRUE, 
-                                    nebim_customer_code = %s,
-                                    nebim_address_id = %s
-                                WHERE id = %s
-                            """, [cust_code or '', addr_id or '', order_id])
-                    except Exception as save_e:
-                        _logger.warning("Cari bilgisi bağımsız kayıt hatası: %s", save_e)
-
-                    # ORM ile de yaz (in-memory tutarlılık)
-                    order.write({
+                    order.sudo().write({
                         'nebim_customer_sent': True,
                         'nebim_customer_code': cust_code or '',
                         'nebim_address_id': addr_id or ''
@@ -677,17 +648,7 @@ class SaleOrder(models.Model):
                         order_proc = self.env['odoougurlar.order.processor'].sudo()
                         order_proc.sync_order(order, mapping)
                     
-                    # Bağımsız cursor ile sipariş bayrağını kaydet (rollback-proof)
-                    try:
-                        with self.env.registry.cursor() as save_cr:
-                            save_cr.execute("""
-                                UPDATE sale_order 
-                                SET nebim_order_sent = TRUE
-                                WHERE id = %s
-                            """, [order_id])
-                    except Exception as save_e:
-                        _logger.warning("Sipariş bayrağı bağımsız kayıt hatası: %s", save_e)
-
+                    order.sudo().write({'nebim_order_sent': True})
                     _logger.info("Auto-sync Sipariş başarılı: %s", order.name)
 
                 except Exception as e:
@@ -718,50 +679,31 @@ class SaleOrder(models.Model):
         vat_raw = partner.vat or ''
         vat_clean = ''.join(filter(str.isdigit, vat_raw))
         
-        try:
-            with self.env.registry.cursor() as dedup_cr:
-                # 1. res_partner üzerinde committed arama
-                dedup_cr.execute("""
-                    SELECT nebim_customer_code 
-                    FROM res_partner 
-                    WHERE nebim_customer_sent = TRUE 
-                      AND nebim_customer_code IS NOT NULL 
-                      AND nebim_customer_code != ''
-                      AND (
-                          (LOWER(TRIM(email)) = %s AND %s != '')
-                          OR (REPLACE(REPLACE(vat, '-', ''), ' ', '') = %s AND %s != '')
-                      )
-                    ORDER BY id DESC LIMIT 1
-                """, [email, email, vat_clean, vat_clean])
-                row = dedup_cr.fetchone()
-                if row and row[0]:
-                    _logger.info("Partner dedup bulundu (res_partner): %s → mevcut cari: %s", partner.name, row[0])
-                    return row[0]
+        if email:
+            try:
+                existing_partner = self.env['res.partner'].sudo().search([
+                    ('nebim_customer_sent', '=', True),
+                    ('nebim_customer_code', '!=', False),
+                    ('nebim_customer_code', '!=', ''),
+                    ('email', '=ilike', email)
+                ], limit=1, order='id desc')
+                if existing_partner:
+                    _logger.info("Partner dedup bulundu (res_partner): %s → mevcut cari: %s", partner.name, existing_partner.nebim_customer_code)
+                    return existing_partner.nebim_customer_code
 
-                # 2. sale_order üzerinde committed arama
-                if email:
-                    dedup_cr.execute("""
-                        SELECT so.nebim_customer_code 
-                        FROM sale_order so
-                        JOIN res_partner rp ON rp.id = so.partner_id
-                        WHERE so.id != %s
-                          AND so.nebim_customer_sent = TRUE
-                          AND so.nebim_customer_code IS NOT NULL
-                          AND so.nebim_customer_code != ''
-                          AND LOWER(TRIM(rp.email)) = %s
-                        ORDER BY so.id DESC
-                        LIMIT 1
-                    """, [order.id, email])
-                    row = dedup_cr.fetchone()
-                    if row and row[0]:
-                        _logger.info(
-                            "Email dedup bulundu (sale_order): %s (%s) → mevcut cari: %s",
-                            partner.name, email, row[0]
-                        )
-                        return row[0]
-        except Exception as e:
-            _logger.warning("Email dedup sorgusu hatası: %s", e)
-        
+                existing_so = self.env['sale.order'].sudo().search([
+                    ('id', '!=', order.id),
+                    ('nebim_customer_sent', '=', True),
+                    ('nebim_customer_code', '!=', False),
+                    ('nebim_customer_code', '!=', ''),
+                    ('partner_id.email', '=ilike', email)
+                ], limit=1, order='id desc')
+                if existing_so:
+                    _logger.info("Email dedup bulundu (sale_order): %s (%s) → mevcut cari: %s", partner.name, email, existing_so.nebim_customer_code)
+                    return existing_so.nebim_customer_code
+            except Exception as e:
+                _logger.warning("Email dedup sorgusu hatası: %s", e)
+
         return False
 
 
