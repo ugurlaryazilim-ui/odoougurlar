@@ -12,14 +12,30 @@ class OrderProcessor(models.AbstractModel):
         if not sale_order:
             return False
             
-        if sale_order.nebim_order_sent:
+        # Bağımsız cursor ile committed state kontrol et (transaction rollback'ten korunmak için)
+        order_sent_committed = sale_order.nebim_order_sent
+        if not order_sent_committed:
+            try:
+                with self.env.registry.cursor() as chk_cr:
+                    chk_cr.execute("SELECT nebim_order_sent FROM sale_order WHERE id = %s", [sale_order.id])
+                    row = chk_cr.fetchone()
+                    if row and row[0]:
+                        order_sent_committed = True
+            except Exception:
+                pass
+
+        if order_sent_committed:
             _logger.info("Sipariş zaten Nebim'e gönderilmiş: %s", sale_order.name)
             return True
 
         connector = self.env['odoougurlar.nebim.connector']
         
-        # Mapping veya kayıtlı Cari Kodu al
-        customer_code = sale_order.nebim_customer_code or (mapping.nebim_customer_code if mapping else (sale_order.partner_id.vat or 'B2C'))
+        # Mapping veya kayıtlı Cari Kodu al (önce partner.nebim_customer_code)
+        customer_code = (
+            sale_order.nebim_customer_code
+            or sale_order.partner_id.nebim_customer_code
+            or (mapping.nebim_customer_code if mapping else (sale_order.partner_id.vat or 'B2C'))
+        )
         model_type = int(mapping.nebim_order_model_type) if mapping and mapping.nebim_order_model_type else 13
         is_export = int(mapping.nebim_invoice_model_type) == 24 if mapping else False
         
@@ -67,7 +83,7 @@ class OrderProcessor(models.AbstractModel):
         m_sales_url = (mapping.sales_url if mapping and mapping.sales_url else 'www.trendyol.com')
         
         # Adres ID — siparişe ekleniyor (Hamurlabs yöntemi)
-        addr_id = sale_order.nebim_address_id or (mapping.nebim_address_id if mapping else '') or 'adc3d09b-897b-4b74-a29f-b42600863ec3'
+        addr_id = sale_order.nebim_address_id or sale_order.partner_id.nebim_address_id or (mapping.nebim_address_id if mapping else '') or 'adc3d09b-897b-4b74-a29f-b42600863ec3'
 
         # ShipmentMethodCode: 1=İhracat, 2=Yurtiçi Kargo
         if is_export:
@@ -132,7 +148,6 @@ class OrderProcessor(models.AbstractModel):
             payload['ExportFileNumber'] = export_file_number
             payload['TaxExemptionCode'] = (mapping.tax_exemption_code if mapping and mapping.tax_exemption_code else '301')
 
-
         try:
             import json
             sale_order.write({'nebim_order_request': json.dumps(payload, ensure_ascii=False, indent=2, default=str)})
@@ -143,7 +158,6 @@ class OrderProcessor(models.AbstractModel):
                 raise Exception(result['ExceptionMessage'])
                 
             # Nebim sipariş yanıtı dict olarak döner, Lines içinde her satırın LineID'si bulunur
-            # Örnek: {'ModelType': 6, ..., 'Lines': [{'LineID': 'guid-xxx', ...}], ...}
             response_lines = []
             if isinstance(result, dict):
                 response_lines = result.get('Lines', [])
@@ -166,18 +180,33 @@ class OrderProcessor(models.AbstractModel):
                     if order_line_id:
                         ol.write({'nebim_order_line_id': order_line_id})
                         _logger.info("  Satır %d: OrderLineID = %s", idx, order_line_id)
-                        
+            
+            header_id = (
+                result.get('HeaderID') or result.get('ApplicationID') or ''
+            ) if isinstance(result, dict) else ''
+
+            # Bağımsız DB cursor ile kalıcı (rollback-proof) kaydet!
+            try:
+                with self.env.registry.cursor() as save_cr:
+                    save_cr.execute("""
+                        UPDATE sale_order
+                        SET nebim_order_sent = TRUE,
+                            nebim_order_response = %s,
+                            nebim_export_file_number = %s,
+                            nebim_header_id = %s
+                        WHERE id = %s
+                    """, [str(result), export_file_number or '', header_id, sale_order.id])
+            except Exception as save_e:
+                _logger.warning("Sale order Nebim bağımsız kayıt hatası: %s", save_e)
+
             sale_order.write({
                 'nebim_order_sent': True,
                 'nebim_order_response': str(result),
                 'nebim_export_file_number': export_file_number or '',
-                'nebim_header_id': (
-                    result.get('HeaderID') or result.get('ApplicationID') or ''
-                ) if isinstance(result, dict) else '',
+                'nebim_header_id': header_id,
             })
             _logger.info("Sipariş başarıyla Nebim'e aktarıldı: %s (HeaderID: %s)", 
-                        sale_order.name,
-                        result.get('HeaderID', '') if isinstance(result, dict) else '')
+                        sale_order.name, header_id)
             return True
             
         except Exception as e:

@@ -33,6 +33,77 @@ class CustomerProcessor(models.AbstractModel):
         if not partner:
             return False
 
+        # ─── 1. KONTROL: Partner'ın kendi nebim_customer_code bilgisi (ORM / committed DB state) ───
+        partner_code = partner.nebim_customer_code
+        partner_addr = partner.nebim_address_id or ''
+        if not partner_code:
+            try:
+                with self.env.registry.cursor() as chk_cr:
+                    chk_cr.execute(
+                        "SELECT nebim_customer_code, nebim_address_id FROM res_partner WHERE id = %s",
+                        [partner.id]
+                    )
+                    row = chk_cr.fetchone()
+                    if row and row[0]:
+                        partner_code, partner_addr = row[0], row[1]
+            except Exception:
+                pass
+
+        if partner_code:
+            _logger.info("Partner %s zaten Nebim cari koduna sahip: %s", partner.name, partner_code)
+            return partner_code, partner_addr or ''
+
+        # ─── 2. KONTROL: Email / VKN / TCKN / Telefon Dedup (Başka bir partner'da cari kodu var mı?) ───
+        email = (partner.email or '').strip().lower()
+        vat_raw = partner.vat or ''
+        vat_clean = ''.join(filter(str.isdigit, vat_raw))
+        phone_digits = ''.join(filter(str.isdigit, partner.phone or partner.mobile or ''))
+
+        existing_code = False
+        existing_addr = False
+
+        if email or (vat_clean and len(vat_clean) >= 10) or (phone_digits and len(phone_digits) >= 10):
+            try:
+                with self.env.registry.cursor() as dedup_cr:
+                    query = """
+                        SELECT nebim_customer_code, nebim_address_id
+                        FROM res_partner
+                        WHERE id != %s
+                          AND nebim_customer_sent = TRUE
+                          AND nebim_customer_code IS NOT NULL
+                          AND nebim_customer_code != ''
+                    """
+                    params = [partner.id]
+                    conds = []
+                    if email:
+                        conds.append("LOWER(TRIM(email)) = %s")
+                        params.append(email)
+                    if vat_clean and len(vat_clean) >= 10:
+                        conds.append("REPLACE(REPLACE(vat, '-', ''), ' ', '') = %s")
+                        params.append(vat_clean)
+                    if phone_digits and len(phone_digits) >= 10:
+                        conds.append("RIGHT(REGEXP_REPLACE(phone, '[^0-9]', '', 'g'), 10) = %s")
+                        params.append(phone_digits[-10:])
+                    if conds:
+                        query += " AND (" + " OR ".join(conds) + ") ORDER BY id DESC LIMIT 1"
+                        dedup_cr.execute(query, params)
+                        row = dedup_cr.fetchone()
+                        if row and row[0]:
+                            existing_code, existing_addr = row[0], row[1]
+            except Exception as e:
+                _logger.warning("Partner dedup sorgusu hatası: %s", e)
+
+        if existing_code:
+            _logger.info("Email/TCKN/Phone dedup bulundu (%s): partner %s -> Nebim Cari: %s",
+                         email or vat_clean, partner.name, existing_code)
+            self._save_partner_nebim_code(partner.id, existing_code, existing_addr or '')
+            partner.write({
+                'nebim_customer_sent': True,
+                'nebim_customer_code': existing_code,
+                'nebim_address_id': existing_addr or ''
+            })
+            return existing_code, existing_addr or ''
+
         connector = self.env['odoougurlar.nebim.connector']
         
         # ─── İl/İlçe/Bölge Kodu Çözümleme ───
@@ -98,6 +169,22 @@ class CustomerProcessor(models.AbstractModel):
                              partner.name, first_name, last_name)
             else:
                 # ─── TÜZEL KİŞİ (10 hane VKN veya diğer) ───
+                tax_office_name = ''
+                if sale_order:
+                    for attr in ('trendyol_order_id', 'n11_order_id', 'hb_order_id'):
+                        obj = getattr(sale_order, attr, None)
+                        if obj:
+                            tax_office_name = getattr(obj, 'tax_office', '') or ''
+                            if tax_office_name:
+                                break
+                
+                tax_office_code = ''
+                if tax_office_name:
+                    tax_mapping = self.env['odoougurlar.tax.mapping'].sudo().search(
+                        [('name', '=ilike', tax_office_name.strip())], limit=1
+                    )
+                    tax_office_code = tax_mapping.nebim_tax_office_code if tax_mapping else ''
+
                 payload = {
                     'ModelType': cari_model_type,
                     'CurrAccDescription': partner.name[:50],
@@ -106,10 +193,10 @@ class CustomerProcessor(models.AbstractModel):
                     'OfficeCode': 'M',
                     'CurrencyCode': 'TRY',
                 }
-                if len(vat_clean) == 10:
-                    _logger.info("KURUMSAL (TÜZEL KİŞİ): %s | VKN → TaxNumber (10 hane)", partner.name)
-                else:
-                    _logger.warning("KURUMSAL: %s | Vergi no uzunluğu beklenmeyen: %d hane", partner.name, len(vat_clean))
+                if tax_office_code:
+                    payload['TaxOfficeCode'] = tax_office_code
+                _logger.info("KURUMSAL (TÜZEL KİŞİ): %s | TaxNumber=%s, TaxOfficeCode=%s",
+                             partner.name, vat_clean, tax_office_code)
 
             # E-fatura bayrağı — SADECE tüzel kişi (10h VKN) için
             # Şahıs firmalarında (11h TCKN) e-fatura ayrımı FATURA seviyesinde yapılır
@@ -321,12 +408,40 @@ class CustomerProcessor(models.AbstractModel):
                 address_id = address_tmp.get('ShippingAddressID') or address_tmp.get('BillingAddressID') or address_tmp.get('PostalAddressID') or result.get('PostalAddressID') or result.get('AddressID') or ''
                 
             _logger.info("Oluşan Nebim Müşteri Kodu: %s, Adres ID: %s", customer_code, address_id)
+
+            # Bağımsız DB cursor ile res.partner'a kalıcı (rollback-proof) kaydet!
+            self._save_partner_nebim_code(partner.id, customer_code, address_id)
+            try:
+                partner.write({
+                    'nebim_customer_sent': True,
+                    'nebim_customer_code': customer_code,
+                    'nebim_address_id': address_id or ''
+                })
+            except Exception:
+                pass
+
             return customer_code, address_id
         except NebimCustomerError:
             raise  # Zaten request_json taşıyor
         except Exception as e:
             _logger.error("Cari Nebim'e gönderilemedi. Hata: %s", e)
             raise NebimCustomerError(f"Cari oluşturma başarısız: {str(e)}", request_json=request_json)
+
+    def _save_partner_nebim_code(self, partner_id, customer_code, address_id=''):
+        """Partner'a nebim_customer_code ve nebim_customer_sent değerini kalıcı (independent cursor) olarak yazar."""
+        if not partner_id or not customer_code:
+            return
+        try:
+            with self.env.registry.cursor() as save_cr:
+                save_cr.execute("""
+                    UPDATE res_partner
+                    SET nebim_customer_sent = TRUE,
+                        nebim_customer_code = %s,
+                        nebim_address_id = %s
+                    WHERE id = %s
+                """, [customer_code, address_id or '', partner_id])
+        except Exception as e:
+            _logger.warning("Partner Nebim cari kodu bağımsız kayıt hatası: %s", e)
 
     def _resolve_nebim_address_codes(self, partner):
         """

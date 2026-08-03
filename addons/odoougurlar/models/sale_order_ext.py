@@ -701,44 +701,64 @@ class SaleOrder(models.Model):
             _logger.error("Auto-sync Nebim genel hata (%s): %s", order.name, e)
 
     def _find_existing_nebim_customer(self, order):
-        """Email adresi ile mevcut Nebim cari kodu bul (duplikasyon önleme).
+        """Partner veya email/TCKN adresi ile mevcut Nebim cari kodu bul (duplikasyon önleme).
         
-        Aynı email adresiyle daha önce Nebim'e gönderilmiş bir sipariş varsa,
-        o siparişin cari kodunu döndür. Bu sayede Nebim'de yeni cari açılmaz,
-        mevcut cariye sipariş ve fatura atılır (Hamurlabs yöntemi).
+        1. Partner'ın kendi nebim_customer_code alanını kontrol eder.
+        2. Aynı email/TCKN ile daha önce Nebim'e gönderilmiş res_partner arar.
+        3. Aynı email ile daha önce Nebim'e gönderilmiş sale_order arar.
         
         Returns:
             str: Mevcut CurrAccCode veya False
         """
         partner = order.partner_id
+        if partner.nebim_customer_code:
+            return partner.nebim_customer_code
+
         email = (partner.email or '').strip().lower()
+        vat_raw = partner.vat or ''
+        vat_clean = ''.join(filter(str.isdigit, vat_raw))
         
-        if not email:
-            return False
-        
-        # Bağımsız cursor ile committed state'ten oku
-        # (ana transaction rollback yapsa bile doğru sonuç döner)
         try:
             with self.env.registry.cursor() as dedup_cr:
+                # 1. res_partner üzerinde committed arama
                 dedup_cr.execute("""
-                    SELECT so.nebim_customer_code 
-                    FROM sale_order so
-                    JOIN res_partner rp ON rp.id = so.partner_id
-                    WHERE so.id != %s
-                      AND so.nebim_customer_sent = TRUE
-                      AND so.nebim_customer_code IS NOT NULL
-                      AND so.nebim_customer_code != ''
-                      AND LOWER(TRIM(rp.email)) = %s
-                    ORDER BY so.id DESC
-                    LIMIT 1
-                """, [order.id, email])
+                    SELECT nebim_customer_code 
+                    FROM res_partner 
+                    WHERE nebim_customer_sent = TRUE 
+                      AND nebim_customer_code IS NOT NULL 
+                      AND nebim_customer_code != ''
+                      AND (
+                          (LOWER(TRIM(email)) = %s AND %s != '')
+                          OR (REPLACE(REPLACE(vat, '-', ''), ' ', '') = %s AND %s != '')
+                      )
+                    ORDER BY id DESC LIMIT 1
+                """, [email, email, vat_clean, vat_clean])
                 row = dedup_cr.fetchone()
                 if row and row[0]:
-                    _logger.info(
-                        "Email dedup bulundu: %s (%s) → mevcut cari: %s",
-                        partner.name, email, row[0]
-                    )
+                    _logger.info("Partner dedup bulundu (res_partner): %s → mevcut cari: %s", partner.name, row[0])
                     return row[0]
+
+                # 2. sale_order üzerinde committed arama
+                if email:
+                    dedup_cr.execute("""
+                        SELECT so.nebim_customer_code 
+                        FROM sale_order so
+                        JOIN res_partner rp ON rp.id = so.partner_id
+                        WHERE so.id != %s
+                          AND so.nebim_customer_sent = TRUE
+                          AND so.nebim_customer_code IS NOT NULL
+                          AND so.nebim_customer_code != ''
+                          AND LOWER(TRIM(rp.email)) = %s
+                        ORDER BY so.id DESC
+                        LIMIT 1
+                    """, [order.id, email])
+                    row = dedup_cr.fetchone()
+                    if row and row[0]:
+                        _logger.info(
+                            "Email dedup bulundu (sale_order): %s (%s) → mevcut cari: %s",
+                            partner.name, email, row[0]
+                        )
+                        return row[0]
         except Exception as e:
             _logger.warning("Email dedup sorgusu hatası: %s", e)
         

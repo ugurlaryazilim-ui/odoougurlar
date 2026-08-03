@@ -149,26 +149,39 @@ class TrendyolOrderSync(models.Model):
                     error_details.append(f"İade sync: {e}")
                     _logger.exception("İade sync hatası [%s]", store.name)
 
-            store.sudo().write({'last_sync': fields.Datetime.now()})
+            try:
+                with self.env.registry.cursor() as safe_cr:
+                    safe_cr.execute(
+                        "UPDATE trendyol_store SET last_sync = %s WHERE id = %s",
+                        [fields.Datetime.now(), store.id]
+                    )
+            except Exception as store_e:
+                _logger.warning("Mağaza last_sync güncelleme atlandı (%s): %s", store.name, store_e)
 
-            log.write({
-                'state': 'error' if error_count else 'done',
-                'end_date': fields.Datetime.now(),
-                'records_processed': created_count + updated_count + error_count,
-                'records_created': created_count,
-                'records_updated': updated_count,
-                'records_failed': error_count,
-                'log_details': f"[{store.name}] Yeni: {created_count}, Güncellenen: {updated_count}, Hata: {error_count}",
-                'error_details': '\n'.join(error_details) if error_details else '',
-            })
+            try:
+                log.write({
+                    'state': 'error' if error_count else 'done',
+                    'end_date': fields.Datetime.now(),
+                    'records_processed': created_count + updated_count + error_count,
+                    'records_created': created_count,
+                    'records_updated': updated_count,
+                    'records_failed': error_count,
+                    'log_details': f"[{store.name}] Yeni: {created_count}, Güncellenen: {updated_count}, Hata: {error_count}",
+                    'error_details': '\n'.join(error_details) if error_details else '',
+                })
+            except Exception as log_e:
+                _logger.warning("SyncLog güncelleme atlandı (%s): %s", store.name, log_e)
 
         except Exception as e:
-            log.write({
-                'state': 'error',
-                'end_date': fields.Datetime.now(),
-                'error_details': str(e),
-            })
-            raise
+            try:
+                log.write({
+                    'state': 'error',
+                    'end_date': fields.Datetime.now(),
+                    'error_details': str(e),
+                })
+            except Exception:
+                pass
+            _logger.error("Trendyol senkronizasyon genel hatası [%s]: %s", store.name, e)
 
         _logger.info(
             "Trendyol senkronizasyon [%s] tamamlandı: %s yeni, %s güncellenen, %s hata",
