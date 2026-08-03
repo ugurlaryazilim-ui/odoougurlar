@@ -7,6 +7,15 @@ _logger = logging.getLogger(__name__)
 class ResPartner(models.Model):
     _inherit = 'res.partner'
 
+    def _auto_init(self):
+        # Modül güncellemesi (-u) henüz yapılmamışsa web arayüzünün çökmesini engellemek için sütunları DB'ye doğrudan ekle
+        self.env.cr.execute("""
+            ALTER TABLE res_partner ADD COLUMN IF NOT EXISTS nebim_customer_code VARCHAR;
+            ALTER TABLE res_partner ADD COLUMN IF NOT EXISTS nebim_customer_sent BOOLEAN DEFAULT FALSE;
+            ALTER TABLE res_partner ADD COLUMN IF NOT EXISTS nebim_address_id VARCHAR;
+        """)
+        return super()._auto_init()
+
     nebim_customer_code = fields.Char(
         string='Nebim Cari Kodu',
         index=True,
