@@ -36,6 +36,40 @@ class CustomerProcessor(models.AbstractModel):
         email = (partner.email or '').strip().lower()
 
         # ═══════════════════════════════════════════════════════════════════
+        # CONCURRENCY KORUMASI: Partner bazlı BLOCKING advisory lock
+        # Aynı müşteri için eş zamanlı sync_customer çağrılarını SERİLEŞTİRİR.
+        # 2. çağrı BEKLER → lock aldığında committed state görür.
+        # ═══════════════════════════════════════════════════════════════════
+        partner_lock_id = partner.id + 700000000
+        self.env.cr.execute("SELECT pg_advisory_xact_lock(%s)", [partner_lock_id])
+
+        # Lock aldıktan sonra committed state kontrol:
+        # Önceki transaction bu partner için cari kodu yazmış olabilir.
+        self.env.cr.execute(
+            "SELECT nebim_customer_code, nebim_customer_sent FROM res_partner WHERE id = %s",
+            [partner.id]
+        )
+        committed_row = self.env.cr.fetchone()
+        if committed_row and committed_row[0] and committed_row[1]:
+            committed_code = committed_row[0]
+            committed_addr = ''
+            # Address ID'yi de oku
+            try:
+                self.env.cr.execute(
+                    "SELECT nebim_address_id FROM res_partner WHERE id = %s",
+                    [partner.id]
+                )
+                addr_row = self.env.cr.fetchone()
+                committed_addr = (addr_row[0] if addr_row else '') or ''
+            except Exception:
+                pass
+            _logger.info(
+                "Cari kodu DB'den taze okundu (lock sonrası): %s -> %s",
+                partner.name, committed_code
+            )
+            return committed_code, committed_addr
+
+        # ═══════════════════════════════════════════════════════════════════
         # NEBİM = TEK GERÇEK KAYNAK (Source of Truth)
         # Sıra: 1. Nebim SP → 2. Odoo partner/email dedup → 3. Yeni POST
         # Nebim SP bulamazsa → Odoo'daki eski kodları TEMİZLE

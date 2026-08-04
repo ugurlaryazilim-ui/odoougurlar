@@ -589,23 +589,43 @@ class SaleOrder(models.Model):
             return
 
         order_id = order.id
+        doc_ref = (order.client_order_ref or order.name or '').strip()
+        partner_id = order.partner_id.id
 
         # ═══════════════════════════════════════════════════════════════════
-        # CONCURRENCY KORUMASI: PostgreSQL Advisory Lock
-        # Aynı sale.order için eş zamanlı _auto_nebim_sync çağrılarını engeller.
-        # pg_try_advisory_xact_lock → transaction sonuna kadar tutar.
+        # CONCURRENCY KORUMASI: 2 katmanlı PostgreSQL Advisory Lock
+        #
+        # SORUN: Aynı Trendyol siparişi (ör. 11474007523) için:
+        #   - Manuel "Senkronize Et" butonu → sale.order S03340 oluşturur
+        #   - 1dk cron job                 → sale.order S03341 oluşturur
+        #   - Başka tetikleyici            → sale.order S03342 oluşturur
+        #   Her biri farklı order_id → eski lock birbirini ENGELLEMİYORDU!
+        #
+        # ÇÖZÜM: Lock'u sipariş NUMARASI + partner üzerinden yap:
+        #   1. client_order_ref hash → aynı Trendyol sipariş no = aynı lock
+        #   2. partner_id            → aynı müşteri = aynı lock
+        #   BLOCKING lock: 2. çağrı BEKLER, sonra committed state görür.
         # ═══════════════════════════════════════════════════════════════════
-        lock_id = order_id + 800000000  # advisory lock namespace offset (order_proc'dan farklı)
-        self.env.cr.execute("SELECT pg_try_advisory_xact_lock(%s)", [lock_id])
-        got_lock = self.env.cr.fetchone()[0]
-        if not got_lock:
-            _logger.info("Auto-sync %s: Eş zamanlı çağrı engellendi (advisory lock).", order.name)
-            return
+        import hashlib
+
+        # Lock 1: Sipariş referans numarası bazlı (aynı TY sipariş = aynı lock)
+        ref_hash = int(hashlib.md5(doc_ref.encode()).hexdigest()[:15], 16) % (2**31)
+        order_ref_lock = ref_hash + 600000000
+        _logger.debug("Advisory lock bekleniyor: ref=%s, lock_id=%s", doc_ref, order_ref_lock)
+        self.env.cr.execute("SELECT pg_advisory_xact_lock(%s)", [order_ref_lock])
+
+        # Lock 2: Partner bazlı (aynı müşteri = aynı customer POST lock)
+        partner_lock = partner_id + 700000000
+        self.env.cr.execute("SELECT pg_advisory_xact_lock(%s)", [partner_lock])
+
+        _logger.info("Advisory lock alındı: %s (ref=%s, partner=%s)", order.name, doc_ref, partner_id)
 
         # ═══════════════════════════════════════════════════════════════════
-        # DUPLIKASYON KORUMASI: DB'den taze committed state kontrolü
-        # ORM cache yerine doğrudan SQL ile kontrol → transaction-safe
+        # DUPLIKASYON KORUMASI: Lock alındıktan sonra TÜM committed state kontrolü
+        # Artık önceki transaction commit etmiş olabilir → taze veri görürüz.
         # ═══════════════════════════════════════════════════════════════════
+
+        # 1. Bu siparişin kendisi zaten gönderilmiş mi?
         self.env.cr.execute(
             "SELECT nebim_customer_sent, nebim_order_sent FROM sale_order WHERE id = %s",
             [order_id]
@@ -613,6 +633,33 @@ class SaleOrder(models.Model):
         db_row = self.env.cr.fetchone()
         db_customer_sent = db_row[0] if db_row else False
         db_order_sent = db_row[1] if db_row else False
+
+        # 2. Aynı client_order_ref ile BAŞKA bir sale.order zaten Nebim'e gönderilmiş mi?
+        if doc_ref and not db_order_sent:
+            self.env.cr.execute("""
+                SELECT id, name, nebim_order_sent, nebim_customer_code
+                FROM sale_order
+                WHERE id != %s
+                  AND nebim_order_sent = true
+                  AND (client_order_ref = %s OR name = %s)
+                LIMIT 1
+            """, [order_id, doc_ref, doc_ref])
+            dup_row = self.env.cr.fetchone()
+            if dup_row:
+                dup_name = dup_row[1]
+                dup_cust_code = dup_row[3] or ''
+                _logger.info(
+                    "DUPLIKASYON: %s (%s) zaten %s tarafından Nebim'e gönderilmiş. Atlanıyor.",
+                    order.name, doc_ref, dup_name
+                )
+                # Bu siparişi de "gönderilmiş" işaretle (tekrar denemesin)
+                order.sudo().write({
+                    'nebim_order_sent': True,
+                    'nebim_customer_sent': True,
+                    'nebim_customer_code': dup_cust_code,
+                    'nebim_order_response': f'[Auto-Sync] Duplikasyon: {dup_name} tarafından zaten gönderilmiş.'
+                })
+                return
 
         # Sipariş zaten Nebim'e gönderilmişse (committed state), atla
         if db_order_sent and (db_customer_sent or not customer_enabled):
