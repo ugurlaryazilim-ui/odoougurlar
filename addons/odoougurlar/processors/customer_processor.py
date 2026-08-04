@@ -137,7 +137,7 @@ class CustomerProcessor(models.AbstractModel):
 
                 payload = {
                     'ModelType': cari_model_type,  # Cari API için 3 (perakende müşteri)
-                    'CurrAccCode': preset_code or '',
+                    'CurrAccCode': '',
                     'CurrAccDescription': partner.name[:50],
                     'FirstName': first_name[:50],
                     'LastName': last_name[:50],
@@ -169,7 +169,7 @@ class CustomerProcessor(models.AbstractModel):
 
                 payload = {
                     'ModelType': cari_model_type,
-                    'CurrAccCode': preset_code or '',
+                    'CurrAccCode': '',
                     'CurrAccDescription': partner.name[:50],
                     'IsIndividualAcc': False,
                     'TaxNumber': vat_clean if len(vat_clean) == 10 else vat_raw,
@@ -230,7 +230,7 @@ class CustomerProcessor(models.AbstractModel):
                 # Partner bireysel kaydedilmiş ama VKN'si var
                 payload = {
                     'ModelType': cari_model_type,
-                    'CurrAccCode': preset_code or '',
+                    'CurrAccCode': '',
                     'CurrAccDescription': (partner.name or 'KURUMSAL')[:50],
                     'IsIndividualAcc': False,
                     'TaxNumber': vat_clean,
@@ -245,7 +245,7 @@ class CustomerProcessor(models.AbstractModel):
                 # ─── 11 HANELİ TCKN → BİREYSEL (ŞAHIS) ───
                 payload = {
                     'ModelType': cari_model_type,
-                    'CurrAccCode': preset_code or '',
+                    'CurrAccCode': '',
                     'CurrAccDescription': (partner.name or 'BIREYSEL')[:50],
                     'IsIndividualAcc': True,
                     'FirstName': first_name[:50],
@@ -258,7 +258,7 @@ class CustomerProcessor(models.AbstractModel):
                 # ─── VKN/TCKN YOK veya geçersiz → BİREYSEL (varsayılan) ───
                 payload = {
                     'ModelType': cari_model_type,
-                    'CurrAccCode': preset_code or '',
+                    'CurrAccCode': '',
                     'CurrAccDescription': (partner.name or 'BIREYSEL')[:50],
                     'IsIndividualAcc': True,
                     'FirstName': first_name[:50],
