@@ -36,7 +36,6 @@
                                 type="object"
                                 class="btn-primary"
                                 icon="fa-refresh"/>
-                        <field name="status_display" widget="statusbar"/>
                     </header>
                     <sheet>
                         <div class="oe_title">
@@ -49,6 +48,7 @@
                                 <field name="store_id" readonly="1"/>
                                 <field name="order_date" readonly="1"/>
                                 <field name="order_status" readonly="1"/>
+                                <field name="status_display" readonly="1"/>
                                 <field name="fulfillment_channel" readonly="1"/>
                                 <field name="sale_order_id" readonly="1"/>
                             </group>
@@ -84,7 +84,7 @@
                                 </field>
                             </page>
                             <page string="Raw JSON Payload" name="raw_json">
-                                <field name="raw_payload" widget="text" style="font-family: monospace; font-size: 12px; background-color: #f8f9fa;" readonly="1"/>
+                                <field name="raw_payload" widget="text" readonly="1"/>
                             </page>
                         </notebook>
                     </sheet>
@@ -97,7 +97,7 @@
             <field name="name">amazon.order.search</field>
             <field name="model">amazon.order</field>
             <field name="arch" type="xml">
-                <search string="Amazon Siparişlerinde Ara">
+                <search>
                     <field name="amazon_order_number"/>
                     <field name="customer_name"/>
                     <field name="store_id"/>
@@ -105,7 +105,8 @@
                     <filter string="Kargolanacak (Unshipped)" name="unshipped" domain="[('order_status', '=', 'Unshipped')]"/>
                     <filter string="Kargolandı (Shipped)" name="shipped" domain="[('order_status', '=', 'Shipped')]"/>
                     <filter string="İptal Edilenler" name="canceled" domain="[('order_status', '=', 'Canceled')]"/>
-                    <group expand="0" string="Grupla">
+                    <separator/>
+                    <group>
                         <filter string="Mağaza" name="group_store" context="{'group_by': 'store_id'}"/>
                         <filter string="Durum" name="group_status" context="{'group_by': 'order_status'}"/>
                     </group>
@@ -124,7 +125,7 @@
                     Henüz Amazon siparişi bulunamadı.
                 </p>
                 <p>
-                    Mağazalar menüsünden "Siparişleri Senkronize Et" butonuna basarak siparişleri çekebilirsiniz.
+                    Mağazalar bölümünden senkronizasyonu çalıştırarak siparişleri çekebilirsiniz.
                 </p>
             </field>
         </record>
