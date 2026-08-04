@@ -591,14 +591,32 @@ class SaleOrder(models.Model):
         order_id = order.id
 
         # ═══════════════════════════════════════════════════════════════════
-        # DUPLIKASYON KORUMASI: Bağımsız cursor ile committed state kontrolü
-        # ORM cache ana transaction'a bağlıdır — rollback'te sıfırlanır.
-        db_customer_sent = order.sudo().nebim_customer_sent
-        db_order_sent = order.sudo().nebim_order_sent
+        # CONCURRENCY KORUMASI: PostgreSQL Advisory Lock
+        # Aynı sale.order için eş zamanlı _auto_nebim_sync çağrılarını engeller.
+        # pg_try_advisory_xact_lock → transaction sonuna kadar tutar.
+        # ═══════════════════════════════════════════════════════════════════
+        lock_id = order_id + 800000000  # advisory lock namespace offset (order_proc'dan farklı)
+        self.env.cr.execute("SELECT pg_try_advisory_xact_lock(%s)", [lock_id])
+        got_lock = self.env.cr.fetchone()[0]
+        if not got_lock:
+            _logger.info("Auto-sync %s: Eş zamanlı çağrı engellendi (advisory lock).", order.name)
+            return
+
+        # ═══════════════════════════════════════════════════════════════════
+        # DUPLIKASYON KORUMASI: DB'den taze committed state kontrolü
+        # ORM cache yerine doğrudan SQL ile kontrol → transaction-safe
+        # ═══════════════════════════════════════════════════════════════════
+        self.env.cr.execute(
+            "SELECT nebim_customer_sent, nebim_order_sent FROM sale_order WHERE id = %s",
+            [order_id]
+        )
+        db_row = self.env.cr.fetchone()
+        db_customer_sent = db_row[0] if db_row else False
+        db_order_sent = db_row[1] if db_row else False
 
         # Sipariş zaten Nebim'e gönderilmişse (committed state), atla
         if db_order_sent and (db_customer_sent or not customer_enabled):
-            _logger.info("Duplikasyon koruması: %s zaten Nebim'e gönderilmiş (DB committed), atlanıyor.", order.name)
+            _logger.info("Duplikasyon koruması: %s zaten Nebim'e gönderilmiş (DB taze), atlanıyor.", order.name)
             return
 
         try:
@@ -622,11 +640,6 @@ class SaleOrder(models.Model):
             # ─── CARİ ───
             if customer_enabled and not db_customer_sent:
                 try:
-                    # Email-bazlı cari dedup: mevcut cari kodu var mı?
-                    existing_code = self._find_existing_nebim_customer(order)
-                    if existing_code and not order.partner_id.nebim_customer_code:
-                        order.partner_id.sudo().write({'nebim_customer_code': existing_code})
-
                     with self.env.cr.savepoint():
                         customer_proc = self.env['odoougurlar.customer.processor'].sudo()
                         cust_code, addr_id = customer_proc.sync_customer(
@@ -654,7 +667,14 @@ class SaleOrder(models.Model):
             # ─── SİPARİŞ ───
             if order_enabled and not db_order_sent:
                 try:
-                    cust_code = order.nebim_customer_code or order.partner_id.nebim_customer_code
+                    # Cari kodunu taze oku (yukarıda yeni yazılmış olabilir)
+                    self.env.cr.execute(
+                        "SELECT nebim_customer_code FROM sale_order WHERE id = %s",
+                        [order_id]
+                    )
+                    fresh_row = self.env.cr.fetchone()
+                    cust_code = (fresh_row[0] if fresh_row and fresh_row[0] else '') or order.partner_id.nebim_customer_code
+
                     if not cust_code:
                         _logger.warning("Auto-sync Sipariş ertelendi (%s): Cari kodu henüz hazır değil.", order.name)
                         order.write({

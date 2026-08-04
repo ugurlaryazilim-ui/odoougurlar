@@ -11,10 +11,28 @@ class OrderProcessor(models.AbstractModel):
         """Siparişi Nebim'e atar ve dönen OrderLineID'leri kaydeder."""
         if not sale_order:
             return False
-            
-        # 1. Bu sipariş nesnesi zaten Nebim'e gönderildi mi?
-        if sale_order.sudo().nebim_order_sent:
-            _logger.info("Sipariş zaten Nebim'e gönderilmiş: %s", sale_order.name)
+
+        # ═══════════════════════════════════════════════════════════════════
+        # CONCURRENCY KORUMASI: PostgreSQL Advisory Lock
+        # Aynı sale.order için eş zamanlı sync_order çağrılarını engeller.
+        # pg_try_advisory_xact_lock → transaction sonuna kadar tutar,
+        # savepoint rollback'ten etkilenmez.
+        # ═══════════════════════════════════════════════════════════════════
+        lock_id = sale_order.id + 900000000  # advisory lock namespace offset
+        self.env.cr.execute("SELECT pg_try_advisory_xact_lock(%s)", [lock_id])
+        got_lock = self.env.cr.fetchone()[0]
+        if not got_lock:
+            _logger.warning("Sipariş %s için eş zamanlı sync_order çağrısı engellendi (advisory lock).", sale_order.name)
+            return True  # Diğer transaction zaten işliyor
+
+        # 1. Bu sipariş nesnesi zaten Nebim'e gönderildi mi? (DB'den taze oku)
+        self.env.cr.execute(
+            "SELECT nebim_order_sent FROM sale_order WHERE id = %s",
+            [sale_order.id]
+        )
+        row = self.env.cr.fetchone()
+        if row and row[0]:
+            _logger.info("Sipariş zaten Nebim'e gönderilmiş (DB taze): %s", sale_order.name)
             return True
 
         # 2. Aynı sipariş numarasına/referansına sahip başka bir sipariş Nebim'e gönderilmiş mi?
@@ -48,6 +66,27 @@ class OrderProcessor(models.AbstractModel):
                     'nebim_header_id': existing_sent_so.nebim_header_id or 'DEDUP'
                 })
                 return True
+
+        # 3. Nebim SQL Server'da bu sipariş belgesi zaten var mı? (InternalDescription ile canlı kontrol)
+        if doc_ref:
+            try:
+                connector_check = self.env['odoougurlar.nebim.connector']
+                sp_params = [
+                    {'Name': 'InternalDescription', 'Value': doc_ref}
+                ]
+                sp_res = connector_check.run_proc('usp_CheckOrderExists_ent', sp_params)
+                if sp_res and isinstance(sp_res, list) and len(sp_res) > 0:
+                    first = sp_res[0]
+                    if isinstance(first, dict) and first.get('OrderExists'):
+                        _logger.info("Nebim SQL'de sipariş zaten mevcut (InternalDescription=%s). Çift aktarım engellendi.", doc_ref)
+                        sale_order.sudo().write({
+                            'nebim_order_sent': True,
+                            'nebim_header_id': 'NEBIM_DEDUP'
+                        })
+                        return True
+            except Exception as e:
+                # SP yoksa veya hata olursa sessizce devam et (POST ile devam)
+                _logger.debug("Nebim sipariş canlı kontrol SP çalıştırılamadı: %s", e)
 
         connector = self.env['odoougurlar.nebim.connector']
         

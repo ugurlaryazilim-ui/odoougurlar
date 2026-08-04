@@ -32,11 +32,51 @@ class CustomerProcessor(models.AbstractModel):
         """Müşteriyi Nebim'e aktarır. B2C için genelde sadece TCKN/isim gönderilmesi yeterli olur."""
         if not partner:
             return False
-
         connector = self.env['odoougurlar.nebim.connector']
         email = (partner.email or '').strip().lower()
 
-        # ─── 1. NEBİM CANLI SORGU: Nebim SQL Server'da bu e-posta adresi var mı? ───
+        # ═══════════════════════════════════════════════════════════════════
+        # 3 KATMANLI CARİ DEDUP (en hızlıdan en yavaşa):
+        #   1. Partner kendi kodu → anında return
+        #   2. Odoo email dedup  → anında return
+        #   3. Nebim SP canlı    → anında return
+        #   Hiçbiri bulamadıysa → yeni cari POST et
+        # ═══════════════════════════════════════════════════════════════════
+
+        # ─── KATMAN 1: Partner'ın kendi Nebim Cari Kodu var mı? ───
+        partner_code = partner.sudo().nebim_customer_code
+        if partner_code:
+            partner_addr = partner.sudo().nebim_address_id or ''
+            _logger.info("Cari kodu partner'da mevcut: %s -> %s", partner.name, partner_code)
+            if not partner.nebim_customer_sent:
+                partner.sudo().write({'nebim_customer_sent': True})
+            return partner_code, partner_addr
+
+        # ─── KATMAN 2: Aynı email ile Odoo'da başka bir partner'da Nebim kodu var mı? ───
+        if email:
+            try:
+                existing_partner = self.env['res.partner'].sudo().search([
+                    ('id', '!=', partner.id),
+                    ('nebim_customer_sent', '=', True),
+                    ('nebim_customer_code', '!=', False),
+                    ('nebim_customer_code', '!=', ''),
+                    ('email', '=ilike', email)
+                ], limit=1, order='id desc')
+                if existing_partner:
+                    found_code = existing_partner.nebim_customer_code
+                    found_addr = existing_partner.nebim_address_id or ''
+                    _logger.info("Cari kodu Odoo email dedup ile bulundu (%s): %s -> %s",
+                                 email, partner.name, found_code)
+                    partner.sudo().write({
+                        'nebim_customer_sent': True,
+                        'nebim_customer_code': found_code,
+                        'nebim_address_id': found_addr
+                    })
+                    return found_code, found_addr
+            except Exception as e:
+                _logger.warning("Partner email dedup sorgusu hatası: %s", e)
+
+        # ─── KATMAN 3: Nebim SQL Server'da bu e-posta adresi ile cari var mı? ───
         if email:
             try:
                 sp_name = connector._get_sp_name('customer') or 'usp_GetCustomer_ent'
@@ -52,7 +92,7 @@ class CustomerProcessor(models.AbstractModel):
                         found_code = first.get('customerCode') or first.get('CurrAccCode')
                         found_addr = first.get('BillingAddressID') or first.get('PostalAddressID') or ''
                         if found_code:
-                            _logger.info("Nebim SP (%s) CANLI EŞLEŞTİ (%s): partner %s -> Nebim Cari: %s",
+                            _logger.info("Nebim SP (%s) cari eşleşti (%s): %s -> %s",
                                          sp_name, email, partner.name, found_code)
                             partner.sudo().write({
                                 'nebim_customer_sent': True,
@@ -61,50 +101,10 @@ class CustomerProcessor(models.AbstractModel):
                             })
                             return found_code, found_addr or ''
             except Exception as e:
-                _logger.warning("Nebim SP cari canlı sorgu uyarısı: %s", e)
+                _logger.warning("Nebim SP cari sorgu uyarısı (yeni cari POST edilecek): %s", e)
 
-        # ─── 2. DEDUP / YEREL KONTROL: Partner veya Odoo İçi Email Dedup ───
-        partner_code = partner.sudo().nebim_customer_code
-        preset_code = partner_code or ''
-        preset_addr = partner.sudo().nebim_address_id or ''
-
-        # NOT: Nebim canlı sorgusu e-posta ile boş döndüyse (ör: Nebim'den cariler silindiyse), Odoo'daki eski silinmiş cari kodunu kullanma!
-        if email and preset_code:
-            _logger.warning("Nebim SQL'de %s e-postalı cari bulunamadı. Odoo'daki eski silinmiş cari kodu (%s) temizleniyor ve yeni cari POST ediliyor.",
-                           email, preset_code)
-            partner.sudo().write({
-                'nebim_customer_sent': False,
-                'nebim_customer_code': False,
-                'nebim_address_id': False
-            })
-            preset_code = ''
-            preset_addr = ''
-
-        if not preset_code and email:
-            try:
-                existing_partner = self.env['res.partner'].sudo().search([
-                    ('id', '!=', partner.id),
-                    ('nebim_customer_sent', '=', True),
-                    ('nebim_customer_code', '!=', False),
-                    ('nebim_customer_code', '!=', ''),
-                    ('email', '=ilike', email)
-                ], limit=1, order='id desc')
-                if existing_partner:
-                    preset_code = existing_partner.nebim_customer_code
-                    preset_addr = existing_partner.nebim_address_id or ''
-            except Exception as e:
-                _logger.warning("Partner email dedup sorgusu hatası: %s", e)
-
-        if preset_code:
-            _logger.info("Cari kodu yerel olarak bulundu (%s): partner %s -> Nebim Cari: %s",
-                         email, partner.name, preset_code)
-            if not partner.nebim_customer_code or partner.nebim_customer_code != preset_code:
-                partner.sudo().write({
-                    'nebim_customer_sent': True,
-                    'nebim_customer_code': preset_code,
-                    'nebim_address_id': preset_addr or ''
-                })
-            return preset_code, preset_addr or ''
+        # ─── Hiçbir katmanda bulunamadı → Nebim V3 API ile yeni cari POST et ───
+        _logger.info("Cari 3 katmanda da bulunamadı (%s / %s), yeni cari POST edilecek.", partner.name, email)
 
         # ─── İl/İlçe/Bölge Kodu Çözümleme ───
         nebim_codes = self._resolve_nebim_address_codes(partner)
