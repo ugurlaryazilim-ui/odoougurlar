@@ -460,6 +460,12 @@ class InvoiceProcessor(models.AbstractModel):
                 'Address':       (inv_partner.street or '')[:200],
             }
 
+        # DocumentDate for Payments
+        import time
+        payment_epoch_sec = int(sale_order.date_order.timestamp()) if (sale_order and sale_order.date_order) else int(time.time())
+        payment_doc_date = f"\\/Date({payment_epoch_sec})\\/"
+        m_cc_type = mapping.credit_card_type_code if mapping and mapping.credit_card_type_code else 'TRD'
+
         # ── PAYLOAD — Hamurlabs alan sırası birebir ──
         payload = {
             'IsCompleted':       True,
@@ -467,6 +473,15 @@ class InvoiceProcessor(models.AbstractModel):
             'POSTerminalID':     '1',
             'Lines':             lines,
             'OfficeCode':        'M',
+            'Payments': [{
+                'CreditCardTypeCode': m_cc_type,
+                'Code':               '',
+                'InstallmentCount':   1,
+                'DocumentDate':       payment_doc_date,
+                'PaymentType':        '2',
+                'Amount':             float(invoice.amount_total),
+                'CurrencyCode':       'TRY',
+            }],
             'SalesViaInternetInfo': {
                 'PaymentTypeDescription': 'KREDIKARTI/BANKAKARTI',
                 'SendDate':    now_str,

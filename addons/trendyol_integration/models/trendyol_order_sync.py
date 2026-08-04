@@ -43,6 +43,9 @@ class TrendyolOrderSync(models.Model):
             'errors': total_errors,
         }
 
+    @api.model
+    def sync_orders_for_store(self, store):
+        """Tek bir mağazadan siparişleri senkronize et."""
         store_name = store.name or ''
         store_id = store.id
 
