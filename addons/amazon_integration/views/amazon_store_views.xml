@@ -23,6 +23,7 @@
                     <header>
                         <button name="test_connection" string="Bağlantıyı Test Et" type="object" class="oe_highlight"/>
                         <button name="action_sync_orders" string="Siparişleri Senkronize Et" type="object" class="oe_highlight"/>
+                        <button name="action_refetch_all_missing_customers" string="Müşteri Bilgilerini Yenile" type="object" class="btn-info" icon="fa-user"/>
                     </header>
                     <sheet>
                         <div class="oe_button_box" name="button_box">

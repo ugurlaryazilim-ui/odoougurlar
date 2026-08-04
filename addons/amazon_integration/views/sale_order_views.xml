@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="view_order_form_amazon" model="ir.ui.view">
+            <field name="name">sale.order.form.amazon</field>
+            <field name="model">sale.order</field>
+            <field name="inherit_id" ref="sale.view_order_form"/>
+            <field name="arch" type="xml">
+                <xpath expr="//field[@name='payment_term_id']" position="after">
+                    <field name="amazon_store_id" readonly="1" invisible="not amazon_store_id"/>
+                    <field name="amazon_order_id" readonly="1" invisible="not amazon_order_id"/>
+                </xpath>
+            </field>
+        </record>
+    </data>
+</odoo>

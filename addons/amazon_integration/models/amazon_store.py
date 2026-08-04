@@ -139,6 +139,31 @@ class AmazonStore(models.Model):
         except Exception as e:
             raise UserError(str(e))
 
+    def action_refetch_all_missing_customers(self):
+        """Eksik veya 'Amazon Müşterisi' adıyla kaydolmuş siparişleri Amazon SP-API'den yeniden çekip günceller."""
+        self.ensure_one()
+        orders = self.env['sale.order'].search([
+            ('amazon_store_id', '=', self.id),
+        ])
+        updated_count = 0
+        for order in orders:
+            if order.client_order_ref:
+                try:
+                    self._refetch_single_amazon_order(order.client_order_ref)
+                    updated_count += 1
+                except Exception as e:
+                    _logger.warning("Order refetch hatası (%s): %s", order.client_order_ref, e)
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Müşteri Bilgileri Güncellendi'),
+                'message': _("%d adet siparişin müşteri bilgileri Amazon'dan yenilendi.") % updated_count,
+                'type': 'success',
+                'sticky': False,
+            }
+        }
+
     def write(self, vals):
         res = super().write(vals)
         if 'sync_interval' in vals or 'auto_sync' in vals:

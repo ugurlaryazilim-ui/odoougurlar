@@ -11,6 +11,7 @@
         <menuitem id="menu_amazon_orders"
                   name="Siparişler"
                   parent="menu_amazon_root"
+                  action="action_amazon_order"
                   sequence="10"/>
 
         <menuitem id="menu_amazon_config"

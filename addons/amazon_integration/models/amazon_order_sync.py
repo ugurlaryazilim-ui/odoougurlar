@@ -141,14 +141,12 @@ class AmazonOrderSync(models.Model):
                     
                 start_dt = datetime.utcnow() - timedelta(days=days)
                 for order in orders:
-                    # ── Client-side tarih filtresi ──
+                    # Client-side tarih filtresi
                     purchase_date = order.get('PurchaseDate')
                     if purchase_date:
                         try:
                             order_dt = date_parser.parse(purchase_date).replace(tzinfo=None)
                             if order_dt < start_dt:
-                                _logger.debug("Eski sipariş atlandı (orderDate=%s < startDate=%s): %s",
-                                              order_dt, start_dt, order.get('AmazonOrderId', '?'))
                                 continue
                         except Exception:
                             pass
@@ -190,9 +188,30 @@ class AmazonOrderSync(models.Model):
         except Exception as e:
             sync_log.mark_error(str(e))
             raise UserError(str(e))
-            
+
+    def _refetch_single_amazon_order(self, amazon_order_id):
+        """Amazon'dan tek bir siparişi ve müşteri detaylarını yenile."""
+        self.ensure_one()
+        access_token = self.generate_access_token()
+        session = requests.Session()
+        session.headers.update({
+            'x-amz-access-token': access_token,
+            'User-Agent': 'OdooUgurlar/1.0',
+            'Content-Type': 'application/json'
+        })
+        auth = self._get_aws_auth()
+        base_url = self.get_api_endpoint()
+
+        endpoint = f"{base_url}/orders/v0/orders/{amazon_order_id}"
+        res = session.get(endpoint, auth=auth, timeout=20)
+        if res.status_code != 200:
+            raise UserError(_("Amazon sipariş bilgisi alınamadı (HTTP %s): %s") % (res.status_code, res.text))
+
+        order_data = res.json().get('payload', {})
+        self._process_single_order(order_data, session, auth, base_url, force_update=True)
+
     @api.private
-    def _process_single_order(self, order_data, session, auth, base_url):
+    def _process_single_order(self, order_data, session, auth, base_url, force_update=False):
         processed = 1
         created = 0
         failed = 0
@@ -206,31 +225,126 @@ class AmazonOrderSync(models.Model):
             ('client_order_ref', '=', str(amazon_order_id)),
             ('amazon_store_id', '=', self.id)
         ], limit=1)
-        
-        if existing_order:
+
+        # İptal durumu kontrolü
+        if existing_order and not force_update:
             if existing_order.state not in ['done', 'cancel']:
                 if status == 'Canceled' and existing_order.state != 'cancel':
                     existing_order.action_cancel()
-            return processed, 0, 0, msgs
+            # Eğer müşteri bilgisi "Amazon Müşterisi" kalmışsa güncellemeyi zorla
+            if existing_order.partner_id and existing_order.partner_id.name == 'Amazon Müşterisi':
+                force_update = True
+            else:
+                return processed, 0, 0, msgs
 
         # Canceled ise ve ERP'de yoksa alma
-        if status == 'Canceled':
+        if status == 'Canceled' and not existing_order:
             return processed, 0, 0, msgs
 
-        buyer_info = order_data.get('BuyerInfo', {})
-        shipping_address = order_data.get('ShippingAddress', {})
+        # ─── PII (Adres ve Müşteri) Detaylarını Çek ───
+        buyer_info = dict(order_data.get('BuyerInfo') or {})
+        shipping_address = dict(order_data.get('ShippingAddress') or {})
         
+        # Eğer liste endpoint'inde adres veya müşteri adı eksikse özel PII endpoint'lerini çağır
+        if not shipping_address or not shipping_address.get('Name') or not shipping_address.get('AddressLine1'):
+            fetched_address = self._fetch_order_address(amazon_order_id, session, auth, base_url)
+            if fetched_address:
+                shipping_address.update(fetched_address)
+
+        if not buyer_info or not buyer_info.get('BuyerName') or not buyer_info.get('BuyerEmail'):
+            fetched_buyer = self._fetch_order_buyer_info(amazon_order_id, session, auth, base_url)
+            if fetched_buyer:
+                buyer_info.update(fetched_buyer)
+
         buyer_name = buyer_info.get('BuyerName') or shipping_address.get('Name') or 'Amazon Müşterisi'
         
-        # Müşteri Yarat/Bul
+        # Müşteri Yarat / Güncelle
         partner = self._get_or_create_partner(buyer_name, buyer_info, shipping_address)
         
-        # Order Items'ları çek (session ile — connection pooling)
+        # Order Items'ları çek
         items_val = self._fetch_order_items(amazon_order_id, session, auth, base_url)
+        if items_val is None:
+            items_val = []
+
+        # Raw JSON payload hazırlığı
+        raw_data = {
+            'Order': order_data,
+            'BuyerInfo': buyer_info,
+            'ShippingAddress': shipping_address,
+            'OrderItems': items_val,
+        }
+        raw_json_str = json.dumps(raw_data, ensure_ascii=False, indent=2)
+
+        total_order_amount = float(order_data.get('OrderTotal', {}).get('Amount', 0.0))
+
+        # ─── amazon.order Kaydını Oluştur veya Güncelle ───
+        amazon_order = self.env['amazon.order'].search([
+            ('amazon_order_number', '=', str(amazon_order_id))
+        ], limit=1)
+
+        # Tarih dönüşümü
+        order_date_raw = order_data.get('PurchaseDate')
+        order_date = fields.Datetime.now()
+        if order_date_raw:
+            try:
+                order_date = date_parser.parse(order_date_raw).replace(tzinfo=None)
+            except Exception:
+                order_date = fields.Datetime.now()
+
+        amz_line_vals = []
+        for item in items_val:
+            amz_line_vals.append((0, 0, {
+                'order_item_id': item.get('OrderItemId', ''),
+                'sku': item.get('SellerSKU', ''),
+                'product_name': item.get('Title', ''),
+                'quantity': item.get('QuantityOrdered', 1),
+                'price': float(item.get('ItemPrice', {}).get('Amount', 0.0)),
+                'item_tax': float(item.get('ItemTax', {}).get('Amount', 0.0)),
+            }))
+
+        amz_order_vals = {
+            'amazon_order_number': str(amazon_order_id),
+            'store_id': self.id,
+            'order_date': order_date,
+            'order_status': status,
+            'fulfillment_channel': order_data.get('FulfillmentChannel', 'MFN'),
+            'customer_name': buyer_name,
+            'customer_email': buyer_info.get('BuyerEmail', ''),
+            'customer_phone': shipping_address.get('Phone', ''),
+            'shipping_address': shipping_address.get('AddressLine1', ''),
+            'shipping_city': shipping_address.get('City', ''),
+            'shipping_district': shipping_address.get('StateOrRegion', '') or shipping_address.get('County', ''),
+            'postal_code': shipping_address.get('PostalCode', ''),
+            'total_price': total_order_amount,
+            'currency': order_data.get('OrderTotal', {}).get('CurrencyCode', 'TRY'),
+            'raw_payload': raw_json_str,
+        }
+
+        if amazon_order:
+            amazon_order.line_ids.unlink()
+            amz_order_vals['line_ids'] = amz_line_vals
+            amazon_order.write(amz_order_vals)
+        else:
+            amz_order_vals['line_ids'] = amz_line_vals
+            amazon_order = self.env['amazon.order'].create(amz_order_vals)
+
+        # Mevcut sipariş güncelleniyorsa partner ve amazon_order bağını tazele
+        if existing_order:
+            existing_order.sudo().write({
+                'partner_id': partner.id,
+                'partner_invoice_id': partner.id,
+                'partner_shipping_id': partner.id,
+                'amazon_order_id': amazon_order.id,
+                'amazon_store_id': self.id,
+            })
+            amazon_order.write({'sale_order_id': existing_order.id})
+            return processed, 0, 0, msgs
+
+        # ─── Odoo Siparişi Oluştur ───
         if not items_val:
             return processed, 0, 1, [f"{amazon_order_id} ürün detayları alınamadı, atlandı."]
 
-        # Batch ürün arama (merkezi metod)
+        # Batch ürün arama
         Product = self.env['product.product'].sudo()
         all_skus = [item.get('SellerSKU') for item in items_val if item.get('SellerSKU')]
         product_map = Product.batch_find_by_marketplace_barcodes(all_skus) if all_skus else {}
@@ -243,7 +357,6 @@ class AmazonOrderSync(models.Model):
             
             product = product_map.get(sku)
             if not product:
-                # Ürün bulunamazsa loglayıp devam et — rastgele ürün atama TEHLİKELİ
                 msgs.append(f"{amazon_order_id} siparişinde {sku} SKU'lu ürün Odoo'da BULUNAMADI. Satır atlandı.")
                 _logger.warning("Amazon ürün bulunamadı: %s (Sipariş: %s)", sku, amazon_order_id)
                 continue
@@ -260,15 +373,6 @@ class AmazonOrderSync(models.Model):
         if not order_lines:
             return processed, 0, 1, [f"{amazon_order_id} hiçbir ürün eşleştirilemedi, sipariş oluşturulmadı."]
 
-        # Tarih dönüşümü — tzinfo=None (False DEĞİL!)
-        order_date_raw = order_data.get('PurchaseDate')
-        order_date = fields.Datetime.now()
-        if order_date_raw:
-            try:
-                order_date = date_parser.parse(order_date_raw).replace(tzinfo=None)
-            except Exception:
-                order_date = fields.Datetime.now()
-        
         sale_order = self.env['sale.order'].create({
             'partner_id': partner.id,
             'partner_invoice_id': partner.id,
@@ -276,10 +380,13 @@ class AmazonOrderSync(models.Model):
             'date_order': order_date,
             'client_order_ref': amazon_order_id,
             'amazon_store_id': self.id,
+            'amazon_order_id': amazon_order.id,
             'warehouse_id': self.default_warehouse_id.id,
             'pricelist_id': self.default_pricelist_id.id if self.default_pricelist_id else False,
             'order_line': order_lines,
         })
+
+        amazon_order.write({'sale_order_id': sale_order.id})
         
         # MFN (satıcı kargosu) ise otomatik onayla
         if order_data.get('FulfillmentChannel') == 'MFN':
@@ -289,32 +396,64 @@ class AmazonOrderSync(models.Model):
         return processed, created, failed, msgs
 
     @api.private
+    def _fetch_order_address(self, amazon_order_id, session, auth, base_url):
+        endpoint = f"{base_url}/orders/v0/orders/{amazon_order_id}/address"
+        try:
+            res = session.get(endpoint, auth=auth, timeout=20)
+            if res.status_code == 200:
+                return res.json().get('payload', {}).get('ShippingAddress', {})
+        except Exception as e:
+            _logger.error("Amazon Address fetch hatası (%s): %s", amazon_order_id, e)
+        return {}
+
+    @api.private
+    def _fetch_order_buyer_info(self, amazon_order_id, session, auth, base_url):
+        endpoint = f"{base_url}/orders/v0/orders/{amazon_order_id}/buyerInfo"
+        try:
+            res = session.get(endpoint, auth=auth, timeout=20)
+            if res.status_code == 200:
+                return res.json().get('payload', {})
+        except Exception as e:
+            _logger.error("Amazon BuyerInfo fetch hatası (%s): %s", amazon_order_id, e)
+        return {}
+
+    @api.private
     def _get_or_create_partner(self, name, buyer_info, address_info):
         ResPartner = self.env['res.partner']
         email = buyer_info.get('BuyerEmail', '')
         phone = address_info.get('Phone', '')
         city = address_info.get('City', '')
         
-        # Müşteri eşleştirme — önce email, sonra phone, sonra name
         partner = False
-        if email:
+        if email and email != 'Amazon Müşterisi':
             partner = ResPartner.search([('email', '=', email)], limit=1)
         if not partner and phone:
             partner = ResPartner.search([('phone', '=', phone)], limit=1)
-        if not partner:
+        if not partner and name and name != 'Amazon Müşterisi':
             partner = ResPartner.search([('name', '=ilike', name)], limit=1)
             
-        if not partner:
-            partner = ResPartner.create({
-                'name': name,
-                'email': email,
-                'phone': phone,
-                'city': city,
-                'street': address_info.get('AddressLine1', ''),
-                'street2': address_info.get('AddressLine2', ''),
-                'zip': address_info.get('PostalCode', ''),
-                'customer_rank': 1,
-            })
+        street = address_info.get('AddressLine1', '')
+        if address_info.get('AddressLine2'):
+            street = (street + ' ' + address_info.get('AddressLine2')).strip()
+        if address_info.get('AddressLine3'):
+            street = (street + ' ' + address_info.get('AddressLine3')).strip()
+
+        vals = {
+            'name': name if name else 'Amazon Müşterisi',
+            'email': email or '',
+            'phone': phone or '',
+            'city': city or '',
+            'street': street or '',
+            'zip': address_info.get('PostalCode', ''),
+            'customer_rank': 1,
+        }
+
+        if partner:
+            if partner.name == 'Amazon Müşterisi' and name != 'Amazon Müşterisi':
+                partner.write(vals)
+        else:
+            partner = ResPartner.create(vals)
+
         return partner
 
     @api.private

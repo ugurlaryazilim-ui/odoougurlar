@@ -96,6 +96,8 @@ class SaleOrder(models.Model):
                     store_name = store.name or ''
                     if seller_field and hasattr(store, seller_field):
                         seller_id = getattr(store, seller_field, '') or ''
+                    if not mp_name:
+                        mp_name = mp
                     break
 
             # Shopify özel: sale.order → shopify_order_id → store_id
@@ -229,9 +231,13 @@ class SaleOrder(models.Model):
                     category = 'warning'
 
             # Amazon
-            elif 'amazon_order_id' in order._fields and order.amazon_order_id:
-                display = 'Amazon'
+            elif ('amazon_order_id' in order._fields and order.amazon_order_id) or ('amazon_store_id' in order._fields and order.amazon_store_id):
+                if 'amazon_order_id' in order._fields and order.amazon_order_id and order.amazon_order_id.status_display:
+                    display = order.amazon_order_id.status_display
+                else:
+                    display = 'Amazon'
                 category = 'info'
+
 
             # Shopify
             elif 'shopify_order_id' in order._fields and order.shopify_order_id:
