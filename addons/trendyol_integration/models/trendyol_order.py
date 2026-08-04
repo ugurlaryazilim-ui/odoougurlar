@@ -131,7 +131,11 @@ class TrendyolOrder(models.Model):
         status_raw = (package_data.get('status') or package_data.get('shipmentPackageStatus', '')).lower()
 
         # Mevcut kayıt var mı?
-        existing = self.search([('shipment_package_id', '=', package_id)], limit=1)
+        existing = False
+        if package_id:
+            existing = self.search([('shipment_package_id', '=', package_id)], limit=1)
+        if not existing and order_number:
+            existing = self.search([('trendyol_order_number', '=', order_number)], limit=1)
 
         if existing:
             vals = {}
@@ -345,6 +349,27 @@ class TrendyolOrder(models.Model):
     def _create_sale_order(self, package_data, store):
         """Trendyol siparişinden Odoo sale.order oluştur."""
         self.ensure_one()
+
+        # ── 0. DEDUPLICATION: Aynı referanslı Odoo siparişi var mı? ──
+        package_id = str(package_data.get('id') or package_data.get('shipmentPackageId', ''))
+        order_number = str(package_data.get('orderNumber', ''))
+        ref_names = list(filter(None, [
+            f"TY-{package_id}", f"TY-{order_number}",
+            order_number, package_id, self.name, self.trendyol_order_number
+        ]))
+
+        existing_so = self.env['sale.order'].sudo().search([
+            '|', '|',
+            ('client_order_ref', 'in', ref_names),
+            ('origin', 'in', ref_names),
+            ('name', 'in', ref_names)
+        ], limit=1)
+
+        if existing_so:
+            _logger.info("Odoo'da %s sipariş referanslı kayıt (%s) zaten var. Tekrar oluşturulmayacak.",
+                         self.trendyol_order_number, existing_so.name)
+            return existing_so
+
         ICP = self.env['ir.config_parameter'].sudo()
 
         # Müşteri bul/oluştur (Adresleri ayrıştırılmış olarak döner)

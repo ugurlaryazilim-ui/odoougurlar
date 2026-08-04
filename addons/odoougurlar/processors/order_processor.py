@@ -12,9 +12,42 @@ class OrderProcessor(models.AbstractModel):
         if not sale_order:
             return False
             
+        # 1. Bu sipariş nesnesi zaten Nebim'e gönderildi mi?
         if sale_order.sudo().nebim_order_sent:
             _logger.info("Sipariş zaten Nebim'e gönderilmiş: %s", sale_order.name)
             return True
+
+        # 2. Aynı sipariş numarasına/referansına sahip başka bir sipariş Nebim'e gönderilmiş mi?
+        doc_ref = (sale_order.client_order_ref or sale_order.name or '').strip()
+        order_num_clean = doc_ref.replace('TY-', '').replace('HB-', '').replace('SHP-', '').strip()
+        
+        if doc_ref:
+            ref_search = list(set(filter(None, [
+                doc_ref,
+                order_num_clean,
+                f"TY-{order_num_clean}",
+                f"HB-{order_num_clean}",
+                sale_order.name,
+                sale_order.origin
+            ])))
+            
+            existing_sent_so = self.env['sale.order'].sudo().search([
+                ('id', '!=', sale_order.id),
+                ('nebim_order_sent', '=', True),
+                '|', '|',
+                ('client_order_ref', 'in', ref_search),
+                ('name', 'in', ref_search),
+                ('origin', 'in', ref_search)
+            ], limit=1)
+            
+            if existing_sent_so:
+                _logger.info("Sipariş referansı (%s) Nebim'e %s numaralı siparişle zaten aktarılmış! Çift aktarım engellendi.",
+                             doc_ref, existing_sent_so.name)
+                sale_order.sudo().write({
+                    'nebim_order_sent': True,
+                    'nebim_header_id': existing_sent_so.nebim_header_id or 'DEDUP'
+                })
+                return True
 
         connector = self.env['odoougurlar.nebim.connector']
         

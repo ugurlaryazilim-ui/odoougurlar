@@ -662,6 +662,19 @@ class HepsiburadaOrderSync(models.AbstractModel):
         if warehouse_id:
             sale_vals['warehouse_id'] = warehouse_id
 
+        # Dedup kontrolü
+        ref_names = list(filter(None, [hb_order.hb_order_number, f"HB-{hb_order.hb_order_number}"]))
+        existing_so = SaleOrder.search([
+            '|', '|',
+            ('client_order_ref', 'in', ref_names),
+            ('origin', 'in', ref_names),
+            ('name', 'in', ref_names)
+        ], limit=1)
+        if existing_so:
+            _logger.info("HB: Odoo'da %s sipariş referanslı kayıt (%s) zaten var. Tekrar oluşturulmayacak.",
+                         hb_order.hb_order_number, existing_so.name)
+            return existing_so
+
         sale_order = SaleOrder.create(sale_vals)
         if store.auto_confirm:
             sale_order.action_confirm()
