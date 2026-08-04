@@ -451,7 +451,9 @@ class TrendyolOrder(models.Model):
                     _tax_cache[vat_rate] = tax
                 include_tax = _tax_cache[vat_rate]
                 if include_tax:
-                    ol_vals['tax_id'] = [(6, 0, [include_tax.id])]
+                    tax_field = 'tax_ids' if 'tax_ids' in self.env['sale.order.line']._fields else ('tax_id' if 'tax_id' in self.env['sale.order.line']._fields else False)
+                    if tax_field:
+                        ol_vals[tax_field] = [(6, 0, [include_tax.id])]
                 else:
                     # KDV dahil vergi bulunamadı — manuel dönüşüm (KDV hariç yaz)
                     ol_vals['price_unit'] = unit_price / (1 + vat_rate / 100)

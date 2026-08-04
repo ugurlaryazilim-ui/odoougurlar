@@ -336,6 +336,9 @@ class ShopifyOrderSync(models.Model):
                                         "Shopify SKU eşleşti (tireli dönüşüm): %s → %s",
                                         sku, p.default_code)
 
+        # Odoo 19 / Odoo 18 uyumluluğu için vergi alan adı tespiti (tax_ids / tax_id)
+        tax_field = 'tax_ids' if 'tax_ids' in self.env['sale.order.line']._fields else ('tax_id' if 'tax_id' in self.env['sale.order.line']._fields else False)
+
         # Sipariş satırları
         for line in shopify_order.line_ids:
             product = product_map.get(line.sku)
@@ -356,8 +359,8 @@ class ShopifyOrderSync(models.Model):
                     ('amount', '=', line.tax_rate),
                     ('company_id', '=', self.env.company.id),
                 ], limit=1)
-                if tax:
-                    line_vals['tax_id'] = [(6, 0, [tax.id])]
+                if tax and tax_field:
+                    line_vals[tax_field] = [(6, 0, [tax.id])]
 
             so_vals['order_line'].append((0, 0, line_vals))
 
@@ -451,15 +454,15 @@ class ShopifyOrderSync(models.Model):
                 else:
                     shipping_price_unit = shipping_total
                 ship_vals['price_unit'] = round(shipping_price_unit, 2)
-                ship_vals['tax_id'] = [(6, 0, [tax.id])]
+                if tax_field:
+                    ship_vals[tax_field] = [(6, 0, [tax.id])]
             else:
-                # Vergi eşleşmediyse tam tutar yaz ve vergi ekleme
+                # Vergi eşleşmediyse tam tutar yaz
                 ship_vals['price_unit'] = shipping_total
-                ship_vals['tax_id'] = [(6, 0, [])]
 
             so_vals['order_line'].append((0, 0, ship_vals))
             _logger.info("Shopify siparişine kargo satırı eklendi (%s): Tutar=%s TL (KDV Hariç=%s TL)",
-                         shopify_order.order_number, shipping_total, round(shipping_price_unit, 2))
+                         shopify_order.order_number, shipping_total, round(ship_vals['price_unit'], 2))
 
         if not so_vals['order_line']:
             _logger.error("Shopify %s: Eşleşen ürün bulunamadı! SKUs=%s",
