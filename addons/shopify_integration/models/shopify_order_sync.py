@@ -413,26 +413,49 @@ class ShopifyOrderSync(models.Model):
             if not shipping_tax_rate and shopify_order.line_ids:
                 shipping_tax_rate = shopify_order.line_ids[0].tax_rate or 0.0
 
-            if order_json and order_json.get('taxes_included', True) and shipping_tax_rate > 0:
-                shipping_price_unit = shipping_total / (1 + shipping_tax_rate / 100)
-            else:
-                shipping_price_unit = shipping_total
-
-            ship_vals = {
-                'product_id': shipping_product.id,
-                'product_uom_qty': 1,
-                'price_unit': round(shipping_price_unit, 2),
-                'name': 'Shopify Kargo Ücreti',
-            }
-
+            # ── KDV Dahil Vergi Bul ── (Odoo'nun kargonun üstüne tekrar KDV eklemesini engeller)
+            tax = None
             if shipping_tax_rate > 0:
                 tax = self.env['account.tax'].sudo().search([
                     ('type_tax_use', '=', 'sale'),
                     ('amount', '=', shipping_tax_rate),
+                    ('price_include', '=', True),
                     ('company_id', '=', self.env.company.id),
                 ], limit=1)
-                if tax:
-                    ship_vals['tax_id'] = [(6, 0, [tax.id])]
+                if not tax:
+                    tax = self.env['account.tax'].sudo().search([
+                        ('type_tax_use', '=', 'sale'),
+                        ('amount', '=', shipping_tax_rate),
+                        ('company_id', '=', self.env.company.id),
+                    ], limit=1)
+
+            if not tax:
+                # KDV Dahil satış vergisini bul (örn %10 Dahil veya %20 Dahil)
+                tax = self.env['account.tax'].sudo().search([
+                    ('type_tax_use', '=', 'sale'),
+                    ('price_include', '=', True),
+                    ('company_id', '=', self.env.company.id),
+                ], limit=1, order='amount desc')
+
+            ship_vals = {
+                'product_id': shipping_product.id,
+                'product_uom_qty': 1,
+                'name': 'Shopify Kargo Ücreti',
+            }
+
+            if tax:
+                tax_rate_num = tax.amount
+                if tax.price_include:
+                    # KDV Dahil: Fiyatı KDV hariçe böl ki Odoo KDV ekleyince tam 100 TL yapsın
+                    shipping_price_unit = shipping_total / (1 + tax_rate_num / 100)
+                else:
+                    shipping_price_unit = shipping_total
+                ship_vals['price_unit'] = round(shipping_price_unit, 2)
+                ship_vals['tax_id'] = [(6, 0, [tax.id])]
+            else:
+                # Vergi eşleşmediyse tam tutar yaz ve vergi ekleme
+                ship_vals['price_unit'] = shipping_total
+                ship_vals['tax_id'] = [(6, 0, [])]
 
             so_vals['order_line'].append((0, 0, ship_vals))
             _logger.info("Shopify siparişine kargo satırı eklendi (%s): Tutar=%s TL (KDV Hariç=%s TL)",
