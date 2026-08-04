@@ -18,6 +18,9 @@ class OrderProcessor(models.AbstractModel):
         # pg_try_advisory_xact_lock → transaction sonuna kadar tutar,
         # savepoint rollback'ten etkilenmez.
         # ═══════════════════════════════════════════════════════════════════
+        # Önce ORM cache'deki bekleyen write'ları DB'ye yaz (caller'dan gelen)
+        self.env.flush_all()
+
         lock_id = sale_order.id + 900000000  # advisory lock namespace offset
         self.env.cr.execute("SELECT pg_try_advisory_xact_lock(%s)", [lock_id])
         got_lock = self.env.cr.fetchone()[0]

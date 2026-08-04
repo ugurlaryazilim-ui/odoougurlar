@@ -651,6 +651,8 @@ class SaleOrder(models.Model):
                         'nebim_customer_code': cust_code or '',
                         'nebim_address_id': addr_id or ''
                     })
+                    # ORM write'ı DB'ye yaz — sonraki raw SQL sorguları taze veri görsün
+                    self.env.flush_all()
                     _logger.info("Auto-sync Cari başarılı: %s → %s", order.name, cust_code)
 
                 except Exception as e:
@@ -667,13 +669,9 @@ class SaleOrder(models.Model):
             # ─── SİPARİŞ ───
             if order_enabled and not db_order_sent:
                 try:
-                    # Cari kodunu taze oku (yukarıda yeni yazılmış olabilir)
-                    self.env.cr.execute(
-                        "SELECT nebim_customer_code FROM sale_order WHERE id = %s",
-                        [order_id]
-                    )
-                    fresh_row = self.env.cr.fetchone()
-                    cust_code = (fresh_row[0] if fresh_row and fresh_row[0] else '') or order.partner_id.nebim_customer_code
+                    # ORM cache'den oku — CARİ adımında yazılan değer burada güncel
+                    # (raw SQL KULLANMA: ORM flush henüz DB'ye yazmamış olabilir!)
+                    cust_code = order.nebim_customer_code or order.partner_id.nebim_customer_code
 
                     if not cust_code:
                         _logger.warning("Auto-sync Sipariş ertelendi (%s): Cari kodu henüz hazır değil.", order.name)
@@ -681,9 +679,6 @@ class SaleOrder(models.Model):
                             'nebim_order_response': '[Auto-Sync] Cari hesabı henüz Nebim\'de oluşturulmadı, sipariş aktarımı ertelendi.'
                         })
                     else:
-                        if not order.nebim_customer_code:
-                            order.sudo().write({'nebim_customer_code': cust_code})
-
                         with self.env.cr.savepoint():
                             order_proc = self.env['odoougurlar.order.processor'].sudo()
                             order_proc.sync_order(order, mapping)
