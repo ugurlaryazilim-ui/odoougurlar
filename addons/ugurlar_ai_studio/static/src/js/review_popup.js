@@ -141,17 +141,21 @@ async function openReviewPopup(sessionId) {
         const item = items[currentIndex];
         if (!item) return;
 
-        const approvedCount = items.filter(i => i.is_approved).length;
-        const pendingCount = items.filter(i => i.pending_revision).length;
-        const failedCount = items.filter(i => i.state === 'failed').length;
+        const activeItems = items.filter(i => !i.is_excluded);
+        const excludedCount = items.filter(i => i.is_excluded).length;
+        const approvedCount = items.filter(i => i.is_approved && !i.is_excluded).length;
+        const pendingCount = items.filter(i => i.pending_revision && !i.is_excluded).length;
+        const failedCount = items.filter(i => i.state === 'failed' && !i.is_excluded).length;
         const totalCount = items.length;
-        const allResolved = items.every(i => i.is_approved || i.pending_revision === false || i.pending_revision === undefined);
         const hasPending = pendingCount > 0;
         const hasFailed = failedCount > 0;
         const canComplete = canApprove && approvedCount > 0 && !hasPending && !hasFailed;
 
         // Progress text
-        let progressText = `${approvedCount}/${totalCount} onaylandı`;
+        let progressText = `${approvedCount}/${activeItems.length} onaylandı`;
+        if (excludedCount > 0) {
+            progressText += ` · 🚫 ${excludedCount} hariç`;
+        }
         if (hasPending) {
             progressText += ` · ⏳ ${pendingCount} revize bekleniyor`;
         }
@@ -169,7 +173,7 @@ async function openReviewPopup(sessionId) {
                     </div>
                     <div class="ais-rp-progress">
                         <div class="ais-rp-progress-bar">
-                            <div class="ais-rp-progress-fill" style="width: ${(approvedCount / totalCount) * 100}%"></div>
+                            <div class="ais-rp-progress-fill" style="width: ${(activeItems.length > 0 ? (approvedCount / activeItems.length) : 0) * 100}%"></div>
                         </div>
                         <span class="ais-rp-progress-text">${progressText}</span>
                     </div>
@@ -180,13 +184,14 @@ async function openReviewPopup(sessionId) {
                 <div class="ais-rp-tabs-container">
                     <div class="ais-rp-tabs">
                         ${items.map((it, idx) => `
-                            <button class="ais-rp-tab ${idx === currentIndex ? 'active' : ''} ${it.is_approved ? 'approved' : ''} ${it.pending_revision ? 'pending' : ''}"
+                            <button class="ais-rp-tab ${idx === currentIndex ? 'active' : ''} ${it.is_approved ? 'approved' : ''} ${it.pending_revision ? 'pending' : ''} ${it.is_excluded ? 'excluded' : ''}"
                                     data-idx="${idx}">
                                 <span class="ais-rp-tab-icon">${getPhotoTypeIcon(it.photo_type)}</span>
-                                <span class="ais-rp-tab-label">${it.photo_type_label}</span>
-                                ${it.is_approved ? '<span class="ais-rp-tab-check">✓</span>' : ''}
-                                ${it.pending_revision ? '<span class="ais-rp-tab-check" style="color:#f59e0b">⏳</span>' : ''}
-                                ${it.state === 'failed' ? '<span class="ais-rp-tab-check" style="color:#ef4444">✗</span>' : ''}
+                                <span class="ais-rp-tab-label ${it.is_excluded ? 'ais-rp-strikethrough' : ''}">${it.photo_type_label}</span>
+                                ${it.is_approved && !it.is_excluded ? '<span class="ais-rp-tab-check">✓</span>' : ''}
+                                ${it.is_excluded ? '<span class="ais-rp-tab-check" style="color:#9ca3af">🚫</span>' : ''}
+                                ${it.pending_revision && !it.is_excluded ? '<span class="ais-rp-tab-check" style="color:#f59e0b">⏳</span>' : ''}
+                                ${it.state === 'failed' && !it.is_excluded ? '<span class="ais-rp-tab-check" style="color:#ef4444">✗</span>' : ''}
                                 ${it.revision_number > 1 ? '<span class="ais-rp-tab-version">v' + it.revision_number + '</span>' : ''}
                             </button>
                         `).join('')}
@@ -225,7 +230,7 @@ async function openReviewPopup(sessionId) {
                         </div>
                     ` : `
                         <!-- Yan yana görseller -->
-                        <div class="ais-rp-comparison">
+                        <div class="ais-rp-comparison ${item.is_excluded ? 'ais-rp-comparison-excluded' : ''}">
                             <div class="ais-rp-panel">
                                 <div class="ais-rp-panel-label">ORJİNAL</div>
                                 <div class="ais-rp-img-wrap ais-rp-zoomable" data-zoom-src="${item.original_url}">
@@ -246,7 +251,14 @@ async function openReviewPopup(sessionId) {
                 <!-- Alt butonlar -->
                 <div class="ais-rp-footer">
                     <div class="ais-rp-actions">
-                        ${item.pending_revision ? `
+                        ${item.is_excluded ? `
+                            <div class="ais-rp-pending-badge" style="background:#f3f4f6; color:#4b5563; border:1px solid #d1d5db;">🚫 Bu yön ürüne kaydedilirken hariç tutulacak</div>
+                            ${canApprove ? `
+                                <button class="ais-rp-btn ais-rp-btn-include" id="ais-rp-toggle-exclude" style="background:#4b5563; color:white;">
+                                    ✅ Tekrar Dahil Et
+                                </button>
+                            ` : ''}
+                        ` : item.pending_revision ? `
                             <div class="ais-rp-pending-badge">⏳ Revize üretiliyor — diğer görselleri inceleyebilirsiniz</div>
                         ` : item.state === 'failed' ? `
                             <div class="ais-rp-pending-badge" style="background:rgba(239,68,68,0.15); color:#ef4444;">❌ Bu görsel başarısız oldu${canApprove ? ' — Tekrar Dene butonunu kullanın' : ''}</div>
@@ -262,6 +274,9 @@ async function openReviewPopup(sessionId) {
                             <button class="ais-rp-btn ais-rp-btn-unapprove" id="ais-rp-unapprove" style="background:#f59e0b; color:white;">
                                 ↩️ Onayı Geri Al
                             </button>
+                            <button class="ais-rp-btn ais-rp-btn-exclude" id="ais-rp-toggle-exclude" style="background:#6b7280; color:white;" title="Bu yönü ürüne kaydetme">
+                                🚫 Dahil Etme
+                            </button>
                         ` : `
                             <button class="ais-rp-btn ais-rp-btn-reject" id="ais-rp-reject">
                                 ❌ Reddet
@@ -271,6 +286,9 @@ async function openReviewPopup(sessionId) {
                             </button>
                             <button class="ais-rp-btn ais-rp-btn-approve" id="ais-rp-approve">
                                 ✅ Onayla
+                            </button>
+                            <button class="ais-rp-btn ais-rp-btn-exclude" id="ais-rp-toggle-exclude" style="background:#6b7280; color:white;" title="Bu yönü ürüne kaydetme">
+                                🚫 Dahil Etme
                             </button>
                         `}
                     </div>
@@ -330,6 +348,7 @@ async function openReviewPopup(sessionId) {
         document.getElementById('ais-rp-close')?.addEventListener('click', close);
         document.getElementById('ais-rp-approve')?.addEventListener('click', approve);
         document.getElementById('ais-rp-unapprove')?.addEventListener('click', unapprove);
+        document.getElementById('ais-rp-toggle-exclude')?.addEventListener('click', toggleExclude);
         document.getElementById('ais-rp-star')?.addEventListener('click', () => {
             // Önce tüm item'ların primary'sini kaldır, sonra bu item'ı primary yap
             items.forEach(it => it.is_primary = false);
@@ -470,14 +489,48 @@ async function openReviewPopup(sessionId) {
             });
             item.is_approved = true;
 
-            // Sonraki onaylanmamış ve revize beklenmeyen görsele geç
-            const nextIdx = items.findIndex((it, idx) => idx > currentIndex && !it.is_approved && !it.pending_revision);
+            // Sonraki onaylanmamış, revize beklenmeyen ve hariç tutulmamış görsele geç
+            const nextIdx = items.findIndex((it, idx) => idx > currentIndex && !it.is_approved && !it.pending_revision && !it.is_excluded);
             if (nextIdx >= 0) {
                 currentIndex = nextIdx;
             }
             render();
         } catch(e) {
             showToast('Onay hatası: ' + e.message);
+            render();
+        }
+    }
+
+    async function toggleExclude() {
+        const item = items[currentIndex];
+        const btn = document.getElementById('ais-rp-toggle-exclude');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳...'; }
+
+        try {
+            const res = await _jsonRpc('/ai_studio/toggle_exclude', {
+                generation_id: item.id,
+            });
+            if (res.error) {
+                showToast('Hata: ' + res.error);
+                render();
+                return;
+            }
+            item.is_excluded = res.is_excluded;
+            if (item.is_excluded) {
+                item.is_approved = false;
+                item.is_primary = false;
+                showToast(`🚫 ${item.photo_type_label} ürüne kaydedilirken hariç tutulacak.`, 'success');
+                // Sonraki onaylanmamış ve hariç tutulmamış görsele geç
+                const nextIdx = items.findIndex((it, idx) => idx > currentIndex && !it.is_approved && !it.pending_revision && !it.is_excluded);
+                if (nextIdx >= 0) {
+                    currentIndex = nextIdx;
+                }
+            } else {
+                showToast(`✅ ${item.photo_type_label} tekrar dahil edildi.`, 'success');
+            }
+            render();
+        } catch(e) {
+            showToast('Hata: ' + e.message);
             render();
         }
     }

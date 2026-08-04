@@ -243,6 +243,23 @@
     color: #1e7e34;
 }
 
+.ais-rp-tab.excluded:not(.active) {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+    color: #94a3b8;
+    opacity: 0.75;
+}
+
+.ais-rp-strikethrough {
+    text-decoration: line-through;
+    opacity: 0.85;
+}
+
+.ais-rp-comparison-excluded {
+    opacity: 0.7;
+    filter: grayscale(35%);
+}
+
 .ais-rp-tab-icon {
     font-size: 15px;
 }

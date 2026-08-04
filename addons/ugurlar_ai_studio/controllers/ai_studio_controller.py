@@ -405,6 +405,22 @@ class AiStudioController(http.Controller):
             _logger.exception('unapprove_generation hatasi: %s', e)
             return {'error': str(e)}
 
+    @http.route('/ai_studio/toggle_exclude', type='json', auth='user', methods=['POST'])
+    def toggle_exclude(self, generation_id):
+        """AI uretimini haric tut / tekrar dahil et (toggle). Sadece onaycı ve yönetici."""
+        try:
+            if not request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'):
+                return {'error': 'Bu işlemi yapmaya yetkiniz yok. Onaycı veya yönetici rolü gerekli.'}
+            gen = request.env['ai.studio.generation'].browse(int(generation_id))
+            if not gen.exists():
+                return {'error': 'Uretim bulunamadi.'}
+
+            gen.action_toggle_exclude()
+            return {'success': True, 'is_excluded': gen.is_excluded}
+        except Exception as e:
+            _logger.exception('toggle_exclude hatasi: %s', e)
+            return {'error': str(e)}
+
     @http.route('/ai_studio/reject_generation', type='json', auth='user', methods=['POST'])
     def reject_generation(self, generation_id, reason_id=None, revision_prompt='', revision_prompt_en=''):
         """AI uretimini reddet ve revizeye gonder. Sadece onaycı ve yönetici."""
@@ -715,6 +731,7 @@ class AiStudioController(http.Controller):
                     'generated_url': '/web/image/ai.studio.generation/%d/generated_image' % gen.id,
                     'error_message': gen.error_message or '',
                     'pending_revision': gen.state in ('pending', 'processing'),
+                    'is_excluded': gen.is_excluded,
                 })
 
             # Red sebepleri

@@ -66,6 +66,11 @@ class AiStudioGeneration(models.Model):
 
     # --- Onay ---
     is_approved = fields.Boolean(string='Onaylandı', default=False)
+    is_excluded = fields.Boolean(
+        string='Hariç Tutuldu',
+        default=False,
+        help='Bu yön ürün kartına kaydedilirken hariç tutulacak',
+    )
     is_exported_to_local = fields.Boolean(string='Klasöre Aktarıldı', default=False, index=True)
     is_primary = fields.Boolean(
         string='Ana Resim',
@@ -162,6 +167,28 @@ class AiStudioGeneration(models.Model):
                     'ver': gen.revision_number,
                 },
             )
+
+    def action_toggle_exclude(self):
+        """Hariç tutma durumunu değiştir (toggle)."""
+        for gen in self:
+            gen.is_excluded = not gen.is_excluded
+            if gen.is_excluded:
+                gen.is_approved = False
+                gen.is_primary = False
+                gen.session_id.message_post(
+                    body=_('%(type)s görseli ürüne kaydedilirken hariç tutulacak (v%(ver)s).') % {
+                        'type': dict(gen._fields['photo_type'].selection).get(gen.photo_type, ''),
+                        'ver': gen.revision_number,
+                    },
+                )
+            else:
+                gen.session_id.message_post(
+                    body=_('%(type)s görseli tekrar ürüne eklendi (v%(ver)s).') % {
+                        'type': dict(gen._fields['photo_type'].selection).get(gen.photo_type, ''),
+                        'ver': gen.revision_number,
+                    },
+                )
+        return True
 
     @api.onchange('revision_prompt')
     def _onchange_revision_prompt(self):

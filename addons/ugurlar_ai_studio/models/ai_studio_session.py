@@ -2468,7 +2468,7 @@ class AiStudioSession(models.Model):
         """Asenkron olarak ürüne kaydetme işlemini cron ile başlatır."""
         self.ensure_one()
         approved = self.generation_ids.filtered(
-            lambda g: g.is_approved and g.state == 'done'
+            lambda g: g.is_approved and g.state == 'done' and not g.is_excluded
         )
         if not approved:
             raise UserError(_('En az bir görsel onaylanmalı.'))
@@ -2498,7 +2498,7 @@ class AiStudioSession(models.Model):
             _logger.info("CRON: %s numaralı oturum ürünlere kaydediliyor...", session.id)
             try:
                 approved = session.generation_ids.filtered(
-                    lambda g: g.is_approved and g.state == 'done'
+                    lambda g: g.is_approved and g.state == 'done' and not g.is_excluded
                 )
                 if not approved:
                     session.state = 'photos_ready'
