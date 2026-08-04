@@ -215,6 +215,7 @@ class OrderProcessor(models.AbstractModel):
             'ModelType':            model_type,
             'OrderDate':            order_date_str,
             'CustomerCode':         customer_code,
+            'CurrAccCode':          customer_code,
             'ShippingPostalAddressID': addr_id,
         }
 
