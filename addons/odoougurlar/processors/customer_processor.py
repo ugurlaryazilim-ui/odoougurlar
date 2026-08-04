@@ -125,6 +125,56 @@ class CustomerProcessor(models.AbstractModel):
                 except Exception as e:
                     _logger.warning("Nebim SP (usp_GetCustomer_ent) sorgu hatası: %s", e)
 
+        cust_phone = (partner.phone or getattr(partner, 'mobile', '') or '').strip()
+        cust_phone_clean = ''.join(filter(str.isdigit, cust_phone))
+
+        # Telefon ile de Nebim SP'de canlı ara (CommunicationTypeCode 7 = Telefon)
+        if not nebim_verified_code and cust_phone_clean:
+            try:
+                sp_res_p = connector.run_proc('sp_GetCustomer_Hamurlabs', [
+                    {'Name': 'CommunicationTypeCode', 'Value': 7},   # 7 = Telefon
+                    {'Name': 'CommAddress', 'Value': cust_phone},
+                    {'Name': 'TypeCode', 'Value': 4},                # 4 = Perakende
+                    {'Name': 'CustomerType', 'Value': 4}
+                ])
+                if sp_res_p and isinstance(sp_res_p, list) and len(sp_res_p) > 0:
+                    first_p = sp_res_p[0]
+                    if isinstance(first_p, dict):
+                        found_code = first_p.get('CurrAccCode') or ''
+                        found_addr = first_p.get('BillingAddressID') or ''
+                        if found_code:
+                            nebim_verified_code = found_code
+                            nebim_verified_addr = found_addr
+                            _logger.info(
+                                "NEBİM CANLI (Telefon): Cari bulundu (%s): %s -> %s (AddrID=%s)",
+                                cust_phone, partner.name, found_code, found_addr
+                            )
+            except Exception as e:
+                _logger.warning("Nebim SP telefon sorgu hatası: %s", e)
+
+        # ─── Odoo DB: Aynı email veya telefon ile daha önce Nebim cari kodu almış partner var mı? ───
+        if not nebim_verified_code:
+            search_conds = []
+            if email:
+                search_conds.append(('email', '=ilike', email))
+            if cust_phone:
+                search_conds.append(('phone', '=', cust_phone))
+            if search_conds:
+                db_cond = ['|'] * (len(search_conds) - 1) + search_conds
+                other_p = self.env['res.partner'].sudo().search([
+                    ('id', '!=', partner.id),
+                    ('nebim_customer_sent', '=', True),
+                    ('nebim_customer_code', '!=', False),
+                    ('nebim_customer_code', '!=', ''),
+                ] + db_cond, limit=1)
+                if other_p and other_p.nebim_customer_code:
+                    nebim_verified_code = other_p.nebim_customer_code
+                    nebim_verified_addr = other_p.nebim_address_id or ''
+                    _logger.info(
+                        "ODOO DB: Benzer partner'dan mevcut Nebim cari kodu alındı (%s): %s -> %s",
+                        partner.name, other_p.name, nebim_verified_code
+                    )
+
         # ─── Nebim cariyi BULDU → partner'ı güncelle ve dön ───
         if nebim_verified_code:
             partner.sudo().write({

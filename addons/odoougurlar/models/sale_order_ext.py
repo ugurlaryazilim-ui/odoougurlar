@@ -589,40 +589,34 @@ class SaleOrder(models.Model):
             return
 
         order_id = order.id
-        doc_ref = (order.client_order_ref or order.name or '').strip()
+        raw_ref = (order.client_order_ref or order.origin or order.name or '').strip()
+        
+        # ── Ref Normalizasyonu ── (TY-, HB-, N11- vb. eklerini temizle)
+        import re
+        import hashlib
+        clean_ref = re.sub(r'^(TY|HB|N11|PZR|FLO|AMZ|SHP|IDE|PTT|PTTAVM)-', '', raw_ref, flags=re.IGNORECASE).strip()
         partner_id = order.partner_id.id
 
         # ═══════════════════════════════════════════════════════════════════
         # CONCURRENCY KORUMASI: 2 katmanlı PostgreSQL Advisory Lock
         #
-        # SORUN: Aynı Trendyol siparişi (ör. 11474007523) için:
-        #   - Manuel "Senkronize Et" butonu → sale.order S03340 oluşturur
-        #   - 1dk cron job                 → sale.order S03341 oluşturur
-        #   - Başka tetikleyici            → sale.order S03342 oluşturur
-        #   Her biri farklı order_id → eski lock birbirini ENGELLEMİYORDU!
-        #
-        # ÇÖZÜM: Lock'u sipariş NUMARASI + partner üzerinden yap:
-        #   1. client_order_ref hash → aynı Trendyol sipariş no = aynı lock
-        #   2. partner_id            → aynı müşteri = aynı lock
-        #   BLOCKING lock: 2. çağrı BEKLER, sonra committed state görür.
+        # Lock 1: Temizlenmiş sipariş numarası bazlı (TY-11474971637 ve 11474971637 AYNI LOCK!)
+        # Lock 2: Partner bazlı (aynı müşteri = aynı customer POST lock)
+        # BLOCKING lock: 2. çağrı BEKLER, sonra committed state görür.
         # ═══════════════════════════════════════════════════════════════════
-        import hashlib
-
-        # Lock 1: Sipariş referans numarası bazlı (aynı TY sipariş = aynı lock)
-        ref_hash = int(hashlib.md5(doc_ref.encode()).hexdigest()[:15], 16) % (2**31)
+        ref_hash = int(hashlib.md5(clean_ref.encode()).hexdigest()[:15], 16) % (2**31)
         order_ref_lock = ref_hash + 600000000
-        _logger.debug("Advisory lock bekleniyor: ref=%s, lock_id=%s", doc_ref, order_ref_lock)
+        _logger.debug("Advisory lock bekleniyor: ref=%s (raw=%s), lock_id=%s", clean_ref, raw_ref, order_ref_lock)
         self.env.cr.execute("SELECT pg_advisory_xact_lock(%s)", [order_ref_lock])
 
         # Lock 2: Partner bazlı (aynı müşteri = aynı customer POST lock)
         partner_lock = partner_id + 700000000
         self.env.cr.execute("SELECT pg_advisory_xact_lock(%s)", [partner_lock])
 
-        _logger.info("Advisory lock alındı: %s (ref=%s, partner=%s)", order.name, doc_ref, partner_id)
+        _logger.info("Advisory lock alındı: %s (clean_ref=%s, raw_ref=%s, partner=%s)", order.name, clean_ref, raw_ref, partner_id)
 
         # ═══════════════════════════════════════════════════════════════════
         # DUPLIKASYON KORUMASI: Lock alındıktan sonra TÜM committed state kontrolü
-        # Artık önceki transaction commit etmiş olabilir → taze veri görürüz.
         # ═══════════════════════════════════════════════════════════════════
 
         # 1. Bu siparişin kendisi zaten gönderilmiş mi?
@@ -634,25 +628,40 @@ class SaleOrder(models.Model):
         db_customer_sent = db_row[0] if db_row else False
         db_order_sent = db_row[1] if db_row else False
 
-        # 2. Aynı client_order_ref ile BAŞKA bir sale.order zaten Nebim'e gönderilmiş mi?
-        if doc_ref and not db_order_sent:
+        # Referans varyasyonları (Odoo DB araması için)
+        ref_variations = list(set(filter(None, [
+            clean_ref,
+            f"TY-{clean_ref}",
+            f"HB-{clean_ref}",
+            f"N11-{clean_ref}",
+            f"PZR-{clean_ref}",
+            f"FLO-{clean_ref}",
+            f"SHP-{clean_ref}",
+            f"IDE-{clean_ref}",
+            f"PTT-{clean_ref}",
+            order.client_order_ref,
+            order.origin,
+            order.name,
+        ])))
+
+        # 2. Aynı sipariş referansı ile BAŞKA bir sale.order zaten Nebim'e gönderilmiş mi?
+        if clean_ref and not db_order_sent and ref_variations:
             self.env.cr.execute("""
                 SELECT id, name, nebim_order_sent, nebim_customer_code
                 FROM sale_order
                 WHERE id != %s
                   AND nebim_order_sent = true
-                  AND (client_order_ref = %s OR name = %s)
+                  AND (client_order_ref IN %s OR name IN %s OR origin IN %s)
                 LIMIT 1
-            """, [order_id, doc_ref, doc_ref])
+            """, [order_id, tuple(ref_variations), tuple(ref_variations), tuple(ref_variations)])
             dup_row = self.env.cr.fetchone()
             if dup_row:
                 dup_name = dup_row[1]
                 dup_cust_code = dup_row[3] or ''
                 _logger.info(
-                    "DUPLIKASYON: %s (%s) zaten %s tarafından Nebim'e gönderilmiş. Atlanıyor.",
-                    order.name, doc_ref, dup_name
+                    "DUPLIKASYON: %s (ref=%s) zaten %s tarafından Nebim'e gönderilmiş. Atlanıyor.",
+                    order.name, clean_ref, dup_name
                 )
-                # Bu siparişi de "gönderilmiş" işaretle (tekrar denemesin)
                 order.sudo().write({
                     'nebim_order_sent': True,
                     'nebim_customer_sent': True,

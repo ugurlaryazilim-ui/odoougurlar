@@ -46,17 +46,24 @@ class OrderProcessor(models.AbstractModel):
             return True
 
         # 2. Aynı sipariş numarasına/referansına sahip başka bir sipariş Nebim'e gönderilmiş mi?
-        doc_ref = (sale_order.client_order_ref or sale_order.name or '').strip()
-        order_num_clean = doc_ref.replace('TY-', '').replace('HB-', '').replace('SHP-', '').strip()
+        raw_ref = (sale_order.client_order_ref or sale_order.origin or sale_order.name or '').strip()
+        import re
+        clean_ref = re.sub(r'^(TY|HB|N11|PZR|FLO|AMZ|SHP|IDE|PTT|PTTAVM)-', '', raw_ref, flags=re.IGNORECASE).strip()
         
-        if doc_ref:
+        if clean_ref:
             ref_search = list(set(filter(None, [
-                doc_ref,
-                order_num_clean,
-                f"TY-{order_num_clean}",
-                f"HB-{order_num_clean}",
-                sale_order.name,
-                sale_order.origin
+                clean_ref,
+                f"TY-{clean_ref}",
+                f"HB-{clean_ref}",
+                f"N11-{clean_ref}",
+                f"PZR-{clean_ref}",
+                f"FLO-{clean_ref}",
+                f"SHP-{clean_ref}",
+                f"IDE-{clean_ref}",
+                f"PTT-{clean_ref}",
+                sale_order.client_order_ref,
+                sale_order.origin,
+                sale_order.name
             ])))
             
             existing_sent_so = self.env['sale.order'].sudo().search([
@@ -70,32 +77,30 @@ class OrderProcessor(models.AbstractModel):
             
             if existing_sent_so:
                 _logger.info("Sipariş referansı (%s) Nebim'e %s numaralı siparişle zaten aktarılmış! Çift aktarım engellendi.",
-                             doc_ref, existing_sent_so.name)
+                             clean_ref, existing_sent_so.name)
                 sale_order.sudo().write({
                     'nebim_order_sent': True,
                     'nebim_header_id': existing_sent_so.nebim_header_id or 'DEDUP'
                 })
                 return True
 
-        # 3. Nebim SQL Server'da bu sipariş belgesi zaten var mı? (InternalDescription ile canlı kontrol)
-        if doc_ref:
+            # 3. Nebim SQL Server'da bu sipariş belgesi zaten var mı? (Tüm ref varyasyonları ile canlı kontrol)
             try:
                 connector_check = self.env['odoougurlar.nebim.connector']
-                sp_params = [
-                    {'Name': 'InternalDescription', 'Value': doc_ref}
-                ]
-                sp_res = connector_check.run_proc('usp_CheckOrderExists_ent', sp_params)
-                if sp_res and isinstance(sp_res, list) and len(sp_res) > 0:
-                    first = sp_res[0]
-                    if isinstance(first, dict) and first.get('OrderExists'):
-                        _logger.info("Nebim SQL'de sipariş zaten mevcut (InternalDescription=%s). Çift aktarım engellendi.", doc_ref)
-                        sale_order.sudo().write({
-                            'nebim_order_sent': True,
-                            'nebim_header_id': 'NEBIM_DEDUP'
-                        })
-                        return True
+                for check_val in ref_search:
+                    if not check_val:
+                        continue
+                    sp_res = connector_check.run_proc('usp_CheckOrderExists_ent', [{'Name': 'InternalDescription', 'Value': check_val}])
+                    if sp_res and isinstance(sp_res, list) and len(sp_res) > 0:
+                        first = sp_res[0]
+                        if isinstance(first, dict) and first.get('OrderExists'):
+                            _logger.info("Nebim SQL'de sipariş zaten mevcut (InternalDescription=%s). Çift aktarım engellendi.", check_val)
+                            sale_order.sudo().write({
+                                'nebim_order_sent': True,
+                                'nebim_header_id': 'NEBIM_DEDUP'
+                            })
+                            return True
             except Exception as e:
-                # SP yoksa veya hata olursa sessizce devam et (POST ile devam)
                 _logger.debug("Nebim sipariş canlı kontrol SP çalıştırılamadı: %s", e)
 
         connector = self.env['odoougurlar.nebim.connector']
