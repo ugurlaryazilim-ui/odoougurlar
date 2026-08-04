@@ -157,7 +157,37 @@ class OrderProcessor(models.AbstractModel):
         m_sales_url = (mapping.sales_url if mapping and mapping.sales_url else 'www.trendyol.com')
         
         # Adres ID — siparişe ekleniyor (Hamurlabs yöntemi)
-        addr_id = sale_order.nebim_address_id or sale_order.partner_id.nebim_address_id or (mapping.nebim_address_id if mapping else '') or 'adc3d09b-897b-4b74-a29f-b42600863ec3'
+        addr_id = sale_order.nebim_address_id or sale_order.partner_id.nebim_address_id or (mapping.nebim_address_id if mapping else '') or ''
+
+        # addr_id boş veya geçersiz ise → Nebim SP ile cari kartının gerçek adres ID'sini çek
+        if not addr_id or addr_id == 'adc3d09b-897b-4b74-a29f-b42600863ec3':
+            cust_email = (sale_order.partner_id.email or '').strip().lower()
+            if cust_email and customer_code:
+                try:
+                    sp_res = connector.run_proc('sp_GetCustomer_Hamurlabs', [
+                        {'Name': 'CommunicationTypeCode', 'Value': 3},
+                        {'Name': 'CommAddress', 'Value': cust_email},
+                        {'Name': 'TypeCode', 'Value': 4},
+                        {'Name': 'CustomerType', 'Value': 4}
+                    ])
+                    if sp_res and isinstance(sp_res, list) and len(sp_res) > 0:
+                        first = sp_res[0]
+                        if isinstance(first, dict):
+                            sp_addr = first.get('BillingAddressID') or ''
+                            if sp_addr:
+                                addr_id = sp_addr
+                                _logger.info("Adres ID Nebim SP'den çekildi: %s → %s", customer_code, addr_id)
+                                # Partner'ı da güncelle (gelecek siparişler için)
+                                try:
+                                    sale_order.partner_id.sudo().write({'nebim_address_id': addr_id})
+                                    sale_order.sudo().write({'nebim_address_id': addr_id})
+                                except Exception:
+                                    pass
+                except Exception as e:
+                    _logger.warning("Adres ID SP sorgusu hatası: %s", e)
+        
+        if not addr_id:
+            addr_id = 'adc3d09b-897b-4b74-a29f-b42600863ec3'  # Ultimum fallback
 
         # ShipmentMethodCode: 1=İhracat, 2=Yurtiçi Kargo
         if is_export:

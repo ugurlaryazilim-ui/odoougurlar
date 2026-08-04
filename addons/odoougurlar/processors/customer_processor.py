@@ -363,14 +363,24 @@ class CustomerProcessor(models.AbstractModel):
                         _logger.info("BİREYSEL→KURUMSAL Vergi Dairesi: '%s' → %s",
                                      tax_office_name, tax_mapping.nebim_tax_office_code)
 
-        payload['PostalAddresses'] = [{
-            'AddressTypeCode': "2",  # Hamurlabs "2" gönderiyor (Teslimat)
-            'CountryCode': country_code,
-            'StateCode': state_code,
-            'CityCode': city_code,
-            'DistrictCode': district_code,
-            'Address': (partner.street or 'Adres bilgisi yok')[:200],
-        }]
+        payload['PostalAddresses'] = [
+            {
+                'AddressTypeCode': "1",  # 1 = Fatura Adresi (Billing) — Nebim CurrAccCode için ZORUNLU!
+                'CountryCode': country_code,
+                'StateCode': state_code,
+                'CityCode': city_code,
+                'DistrictCode': district_code,
+                'Address': (partner.street or 'Adres bilgisi yok')[:200],
+            },
+            {
+                'AddressTypeCode': "2",  # 2 = Teslimat Adresi (Shipping) — Sipariş için ZORUNLU!
+                'CountryCode': country_code,
+                'StateCode': state_code,
+                'CityCode': city_code,
+                'DistrictCode': district_code,
+                'Address': (partner.street or 'Adres bilgisi yok')[:200],
+            }
+        ]
         
         # İletişim bilgileri (Telefon + Email)
         # Nebim referansı: CommunicationTypeCode 7=Telefon, 3=Email
