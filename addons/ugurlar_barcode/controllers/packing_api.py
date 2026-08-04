@@ -74,15 +74,16 @@ def _extract_marketplace_info(sale_order):
 
     if hasattr(sale_order, 'amazon_store_id') and sale_order.amazon_store_id:
         amazon_order = getattr(sale_order, 'amazon_order_id', None)
-        cargo_tracking = getattr(amazon_order, 'cargo_tracking_number', '') if amazon_order else ''
-        cargo_provider = getattr(amazon_order, 'cargo_provider', '') if amazon_order else ''
+        order_num = (getattr(amazon_order, 'amazon_order_number', '') if amazon_order else '') or sale_order.client_order_ref or ''
+        cargo_tracking = (getattr(amazon_order, 'cargo_tracking_number', '') if amazon_order else '') or order_num
+        cargo_provider = (getattr(amazon_order, 'cargo_provider', '') if amazon_order else '') or 'MNGTR'
         cust_name = getattr(amazon_order, 'customer_name', '') if amazon_order else (sale_order.partner_id.name or '')
         return {
             'marketplace_name': 'Amazon',
             'cargo_tracking': cargo_tracking,
             'cargo_provider': cargo_provider,
             'customer_name': cust_name,
-            'order_number': getattr(amazon_order, 'amazon_order_number', '') or sale_order.client_order_ref or '',
+            'order_number': order_num,
         }
 
     return {

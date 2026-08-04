@@ -385,6 +385,8 @@ class AmazonOrderSync(models.Model):
             'shipping_city': shipping_address.get('City', ''),
             'shipping_district': shipping_address.get('Municipality', '') or shipping_address.get('County', '') or shipping_address.get('StateOrRegion', ''),
             'postal_code': shipping_address.get('PostalCode', ''),
+            'cargo_provider': 'MNGTR',
+            'cargo_tracking_number': str(amazon_order_id),
             'total_price': total_order_amount,
             'currency': order_data.get('OrderTotal', {}).get('CurrencyCode', 'TRY'),
             'raw_payload': raw_json_str,
