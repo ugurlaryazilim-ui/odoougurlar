@@ -407,62 +407,46 @@ class ShopifyOrderSync(models.Model):
                 _logger.info("Shopify Kargo Ürünü otomatik oluşturuldu: %s / %s",
                              shipping_product.default_code, shipping_product.barcode)
 
-            shipping_tax_rate = 0.0
-            if shipping_lines and shipping_lines[0].get('tax_lines'):
-                try:
-                    shipping_tax_rate = float(shipping_lines[0]['tax_lines'][0].get('rate', 0)) * 100
-                except Exception:
-                    pass
-            if not shipping_tax_rate and shopify_order.line_ids:
+            if shipping_tax_rate <= 0 and shopify_order.line_ids:
                 shipping_tax_rate = shopify_order.line_ids[0].tax_rate or 0.0
 
-            # ── KDV Dahil Vergi Bul ── (Odoo'nun kargonun üstüne tekrar KDV eklemesini engeller)
-            tax = None
-            if shipping_tax_rate > 0:
-                tax = self.env['account.tax'].sudo().search([
-                    ('type_tax_use', '=', 'sale'),
-                    ('amount', '=', shipping_tax_rate),
-                    ('price_include', '=', True),
-                    ('company_id', '=', self.env.company.id),
-                ], limit=1)
-                if not tax:
-                    tax = self.env['account.tax'].sudo().search([
-                        ('type_tax_use', '=', 'sale'),
-                        ('amount', '=', shipping_tax_rate),
-                        ('company_id', '=', self.env.company.id),
-                    ], limit=1)
+            if shipping_tax_rate <= 0:
+                shipping_tax_rate = 10.0  # Türkiye varsayılan KDV %10
+
+            # ── KDV Dahil/Hariç Vergi Bul ──
+            tax = self.env['account.tax'].sudo().search([
+                ('type_tax_use', '=', 'sale'),
+                ('amount', '=', shipping_tax_rate),
+                ('company_id', '=', self.env.company.id),
+            ], limit=1)
 
             if not tax:
-                # KDV Dahil satış vergisini bul (örn %10 Dahil veya %20 Dahil)
                 tax = self.env['account.tax'].sudo().search([
                     ('type_tax_use', '=', 'sale'),
-                    ('price_include', '=', True),
                     ('company_id', '=', self.env.company.id),
                 ], limit=1, order='amount desc')
+
+            # ── KDV Hariç Birim Fiyat Hesaplama ──
+            # Kargo tutarı (100 TL) KDV Dahil müşteriden alınan tutardır.
+            # Birim fiyat = 100 / 1.10 = 90.91 TL (Odoo %10 KDV ekleyince tam 100.00 TL yapar)
+            if tax and tax.price_include:
+                shipping_price_unit = shipping_total
+            else:
+                shipping_price_unit = shipping_total / (1 + shipping_tax_rate / 100)
 
             ship_vals = {
                 'product_id': shipping_product.id,
                 'product_uom_qty': 1,
+                'price_unit': round(shipping_price_unit, 2),
                 'name': 'Shopify Kargo Ücreti',
             }
 
-            if tax:
-                tax_rate_num = tax.amount
-                if tax.price_include:
-                    # KDV Dahil: Fiyatı KDV hariçe böl ki Odoo KDV ekleyince tam 100 TL yapsın
-                    shipping_price_unit = shipping_total / (1 + tax_rate_num / 100)
-                else:
-                    shipping_price_unit = shipping_total
-                ship_vals['price_unit'] = round(shipping_price_unit, 2)
-                if tax_field:
-                    ship_vals[tax_field] = [(6, 0, [tax.id])]
-            else:
-                # Vergi eşleşmediyse tam tutar yaz
-                ship_vals['price_unit'] = shipping_total
+            if tax and tax_field:
+                ship_vals[tax_field] = [(6, 0, [tax.id])]
 
             so_vals['order_line'].append((0, 0, ship_vals))
-            _logger.info("Shopify siparişine kargo satırı eklendi (%s): Tutar=%s TL (KDV Hariç=%s TL)",
-                         shopify_order.order_number, shipping_total, round(ship_vals['price_unit'], 2))
+            _logger.info("Shopify siparişine kargo satırı eklendi (%s): Tutar=%s TL (KDV Hariç Birim Fiyat=%s TL)",
+                         shopify_order.order_number, shipping_total, round(shipping_price_unit, 2))
 
         if not so_vals['order_line']:
             _logger.error("Shopify %s: Eşleşen ürün bulunamadı! SKUs=%s",
