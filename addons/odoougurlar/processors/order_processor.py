@@ -7,12 +7,14 @@ class OrderProcessor(models.AbstractModel):
     _name = 'odoougurlar.order.processor'
     _description = 'Nebim Sipariş Processor (Packing anında)'
 
-    def sync_order(self, sale_order, mapping, customer_code=None):
+    def sync_order(self, sale_order, mapping, customer_code=None, address_id=None):
         """Siparişi Nebim'e atar ve dönen OrderLineID'leri kaydeder.
         
         Args:
             customer_code: Direkt cari kodu. ORM cache sorunlarını bypass etmek için
                           caller'dan explicit olarak geçirilmeli.
+            address_id: Direkt adres ID. ORM cache sorunlarını bypass etmek için
+                       caller'dan explicit olarak geçirilmeli.
         """
         if not sale_order:
             return False
@@ -156,8 +158,8 @@ class OrderProcessor(models.AbstractModel):
         m_payment_agent = (mapping.payment_agent if mapping and mapping.payment_agent else 'TrendyolMp')
         m_sales_url = (mapping.sales_url if mapping and mapping.sales_url else 'www.trendyol.com')
         
-        # Adres ID — siparişe ekleniyor (Hamurlabs yöntemi)
-        addr_id = sale_order.nebim_address_id or sale_order.partner_id.nebim_address_id or (mapping.nebim_address_id if mapping else '') or ''
+        # Adres ID — caller'dan gelen > siparişte > partner'da > mapping'de > SP fallback
+        addr_id = address_id or sale_order.nebim_address_id or sale_order.partner_id.nebim_address_id or (mapping.nebim_address_id if mapping else '') or ''
 
         # addr_id boş veya geçersiz ise → Nebim SP ile cari kartının gerçek adres ID'sini çek
         if not addr_id or addr_id == 'adc3d09b-897b-4b74-a29f-b42600863ec3':

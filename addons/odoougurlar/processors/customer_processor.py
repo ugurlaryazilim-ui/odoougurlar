@@ -459,16 +459,57 @@ class CustomerProcessor(models.AbstractModel):
                 raise NebimCustomerError(f"Nebim Cari Hatası: {error_msg}", request_json=request_json)
                 
             # Eğer Nebim kendi yarattığı bir kodu döndürüyorsa JSON içinden al (isteğe bağlı)
+            result_item = None
             if isinstance(result, list) and len(result) > 0 and isinstance(result[0], dict):
-                customer_code = result[0].get('CurrAccCode', result[0].get('CustomerCode', customer_code))
-                address_tmp = result[0].get('CurrAccDefault', {})
-                address_id = address_tmp.get('ShippingAddressID') or address_tmp.get('BillingAddressID') or address_tmp.get('PostalAddressID') or ''
+                result_item = result[0]
             elif isinstance(result, dict):
-                customer_code = result.get('CurrAccCode', result.get('CustomerCode', customer_code))
-                address_tmp = result.get('CurrAccDefault', {})
-                address_id = address_tmp.get('ShippingAddressID') or address_tmp.get('BillingAddressID') or address_tmp.get('PostalAddressID') or result.get('PostalAddressID') or result.get('AddressID') or ''
+                result_item = result
+            
+            if result_item:
+                customer_code = result_item.get('CurrAccCode', result_item.get('CustomerCode', customer_code))
+                
+                # Adres ID çekme — birden fazla kaynaktan dene
+                address_tmp = result_item.get('CurrAccDefault', {})
+                address_id = (
+                    address_tmp.get('ShippingAddressID')
+                    or address_tmp.get('BillingAddressID')
+                    or address_tmp.get('PostalAddressID')
+                    or result_item.get('PostalAddressID')
+                    or result_item.get('AddressID')
+                    or ''
+                )
+                
+                # PostalAddresses array'inden de kontrol et (Nebim bazen burada döndürür)
+                if not address_id:
+                    postal_addrs = result_item.get('PostalAddresses', [])
+                    for pa in (postal_addrs or []):
+                        if isinstance(pa, dict):
+                            pa_id = pa.get('PostalAddressID') or pa.get('AddressID') or ''
+                            if pa_id:
+                                address_id = pa_id
+                                break
                 
             _logger.info("Oluşan Nebim Müşteri Kodu: %s, Adres ID: %s", customer_code, address_id)
+            
+            # Adres ID hala boşsa → Nebim SP ile çek
+            if customer_code and not address_id:
+                try:
+                    cust_email = (partner.email or '').strip().lower()
+                    if cust_email:
+                        sp_res = connector.run_proc('sp_GetCustomer_Hamurlabs', [
+                            {'Name': 'CommunicationTypeCode', 'Value': 3},
+                            {'Name': 'CommAddress', 'Value': cust_email},
+                            {'Name': 'TypeCode', 'Value': 4},
+                            {'Name': 'CustomerType', 'Value': 4}
+                        ])
+                        if sp_res and isinstance(sp_res, list) and len(sp_res) > 0:
+                            first = sp_res[0]
+                            if isinstance(first, dict):
+                                address_id = first.get('BillingAddressID') or first.get('ShippingAddressID') or ''
+                                if address_id:
+                                    _logger.info("Adres ID Nebim SP ile çekildi: %s → %s", customer_code, address_id)
+                except Exception as e:
+                    _logger.warning("Cari sonrası Adres ID SP hatası: %s", e)
 
             # ORM üzerinde res.partner'ı güncelle
             try:

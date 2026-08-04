@@ -690,6 +690,7 @@ class SaleOrder(models.Model):
             # CARİ adımından SİPARİŞ adımına doğrudan geçirilir.
             # ═══════════════════════════════════════════════════════════════
             resolved_cust_code = None
+            resolved_addr_id = None  # Adres ID de doğrudan değişken olarak taşınacak!
 
             # ─── CARİ ───
             if customer_enabled and not db_customer_sent:
@@ -701,13 +702,14 @@ class SaleOrder(models.Model):
                         )
 
                     resolved_cust_code = cust_code  # Python değişkeni — ORM cache değil!
+                    resolved_addr_id = addr_id      # Adres ID — ORM cache değil!
 
                     order.sudo().write({
                         'nebim_customer_sent': True,
                         'nebim_customer_code': cust_code or '',
                         'nebim_address_id': addr_id or ''
                     })
-                    _logger.info("Auto-sync Cari başarılı: %s → %s", order.name, cust_code)
+                    _logger.info("Auto-sync Cari başarılı: %s → %s (AddrID=%s)", order.name, cust_code, addr_id)
 
                 except Exception as e:
                     _logger.error("Auto-sync Cari hatası (%s): %s", order.name, e)
@@ -722,6 +724,7 @@ class SaleOrder(models.Model):
             else:
                 # CARİ zaten gönderilmiş — mevcut kodu al
                 resolved_cust_code = order.nebim_customer_code or order.partner_id.nebim_customer_code
+                resolved_addr_id = order.nebim_address_id or order.partner_id.nebim_address_id or ''
 
             # ─── SİPARİŞ ───
             if order_enabled and not db_order_sent:
@@ -732,11 +735,11 @@ class SaleOrder(models.Model):
                             'nebim_order_response': '[Auto-Sync] Cari hesabı henüz Nebim\'de oluşturulmadı, sipariş aktarımı ertelendi.'
                         })
                     else:
-                        _logger.info("Auto-sync Sipariş başlatılıyor: %s — CurrAccCode=%s (direkt değişken)", order.name, resolved_cust_code)
+                        _logger.info("Auto-sync Sipariş başlatılıyor: %s — CurrAccCode=%s, AddrID=%s (direkt değişken)", order.name, resolved_cust_code, resolved_addr_id)
                         with self.env.cr.savepoint():
                             order_proc = self.env['odoougurlar.order.processor'].sudo()
-                            # customer_code'u DOĞRUDAN geçir — ORM cache bypass!
-                            order_proc.sync_order(order, mapping, customer_code=resolved_cust_code)
+                            # customer_code VE addr_id'yi DOĞRUDAN geçir — ORM cache bypass!
+                            order_proc.sync_order(order, mapping, customer_code=resolved_cust_code, address_id=resolved_addr_id)
                         
                         order.sudo().write({'nebim_order_sent': True})
                         _logger.info("Auto-sync Sipariş başarılı: %s", order.name)
