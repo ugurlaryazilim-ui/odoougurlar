@@ -407,16 +407,20 @@ class ShopifyOrderSync(models.Model):
                 _logger.info("Shopify Kargo Ürünü otomatik oluşturuldu: %s / %s",
                              shipping_product.default_code, shipping_product.barcode)
 
-            if shipping_tax_rate <= 0 and shopify_order.line_ids:
-                shipping_tax_rate = shopify_order.line_ids[0].tax_rate or 0.0
+            # ── Kargo KDV Oranı: Türkiye standartlarında %20 ──
+            cargo_tax_rate = 20.0
+            if shipping_lines and shipping_lines[0].get('tax_lines'):
+                try:
+                    line_rate = float(shipping_lines[0]['tax_lines'][0].get('rate', 0)) * 100
+                    if line_rate > 0:
+                        cargo_tax_rate = line_rate
+                except Exception:
+                    pass
 
-            if shipping_tax_rate <= 0:
-                shipping_tax_rate = 10.0  # Türkiye varsayılan KDV %10
-
-            # ── KDV Dahil/Hariç Vergi Bul ──
+            # Odoo'da %20 KDV vergisini bul
             tax = self.env['account.tax'].sudo().search([
                 ('type_tax_use', '=', 'sale'),
-                ('amount', '=', shipping_tax_rate),
+                ('amount', '=', cargo_tax_rate),
                 ('company_id', '=', self.env.company.id),
             ], limit=1)
 
@@ -426,13 +430,13 @@ class ShopifyOrderSync(models.Model):
                     ('company_id', '=', self.env.company.id),
                 ], limit=1, order='amount desc')
 
-            # ── KDV Hariç Birim Fiyat Hesaplama ──
-            # Kargo tutarı (100 TL) KDV Dahil müşteriden alınan tutardır.
-            # Birim fiyat = 100 / 1.10 = 90.91 TL (Odoo %10 KDV ekleyince tam 100.00 TL yapar)
+            tax_rate_num = tax.amount if tax else cargo_tax_rate
+
+            # ── KDV Hariç Birim Fiyat Hesaplama (%20 KDV Dahil 100 TL → KDV Hariç 83.33 TL) ──
             if tax and tax.price_include:
                 shipping_price_unit = shipping_total
             else:
-                shipping_price_unit = shipping_total / (1 + shipping_tax_rate / 100)
+                shipping_price_unit = shipping_total / (1 + tax_rate_num / 100)
 
             ship_vals = {
                 'product_id': shipping_product.id,
