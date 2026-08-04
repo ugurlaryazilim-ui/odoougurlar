@@ -324,7 +324,9 @@ class AmazonOrderSync(models.Model):
             if fetched_buyer:
                 buyer_info.update(fetched_buyer)
 
-        buyer_name = buyer_info.get('BuyerName') or shipping_address.get('Name') or 'Amazon Müşterisi'
+        # Müşteri Ad Soyad Tespiti: ShippingAddress.Name teslimat alıcısının tam adıdır (örn: "özgür karter").
+        # BuyerInfo.BuyerName ise Amazon tarafından bazen sadece soyad (örn: "Karter") olarak verilebilir.
+        buyer_name = shipping_address.get('Name') or buyer_info.get('BuyerName') or 'Amazon Müşterisi'
         
         # Müşteri Yarat / Güncelle
         partner = self._get_or_create_partner(buyer_name, buyer_info, shipping_address)
@@ -505,8 +507,9 @@ class AmazonOrderSync(models.Model):
         }
 
         if partner:
-            if partner.name == 'Amazon Müşterisi' and name != 'Amazon Müşterisi':
-                partner.write(vals)
+            if name and name != 'Amazon Müşterisi':
+                if partner.name == 'Amazon Müşterisi' or len(name.split()) > len((partner.name or '').split()):
+                    partner.write(vals)
         else:
             partner = ResPartner.create(vals)
 
