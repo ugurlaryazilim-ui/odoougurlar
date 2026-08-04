@@ -415,7 +415,7 @@ class SaleOrder(models.Model):
             
             # Sonra Siparişi Nebim V3'e gönder
             order_proc = self.env['odoougurlar.order.processor'].sudo()
-            order_proc.sync_order(self, mapping)
+            order_proc.sync_order(self, mapping, customer_code=cust_code)
             order_msg = '✅ Güncel cari ve sipariş Nebim\'e gönderildi.'
             _logger.info("Nebim cari ve sipariş tekrar gönderildi: %s", self.name)
             
@@ -637,6 +637,13 @@ class SaleOrder(models.Model):
                     pass
                 return
 
+            # ═══════════════════════════════════════════════════════════════
+            # CARİ + SİPARİŞ — TEK AKIŞ, DOĞRUDAN DEĞİŞKEN AKTARIMI
+            # ORM cache'e GÜVENMİYORUZ! cust_code Python değişkeni olarak
+            # CARİ adımından SİPARİŞ adımına doğrudan geçirilir.
+            # ═══════════════════════════════════════════════════════════════
+            resolved_cust_code = None
+
             # ─── CARİ ───
             if customer_enabled and not db_customer_sent:
                 try:
@@ -646,13 +653,13 @@ class SaleOrder(models.Model):
                             order.partner_id, mapping, sale_order=order
                         )
 
+                    resolved_cust_code = cust_code  # Python değişkeni — ORM cache değil!
+
                     order.sudo().write({
                         'nebim_customer_sent': True,
                         'nebim_customer_code': cust_code or '',
                         'nebim_address_id': addr_id or ''
                     })
-                    # ORM write'ı DB'ye yaz — sonraki raw SQL sorguları taze veri görsün
-                    self.env.flush_all()
                     _logger.info("Auto-sync Cari başarılı: %s → %s", order.name, cust_code)
 
                 except Exception as e:
@@ -665,23 +672,24 @@ class SaleOrder(models.Model):
                         order.write(write_vals)
                     except Exception:
                         pass
+            else:
+                # CARİ zaten gönderilmiş — mevcut kodu al
+                resolved_cust_code = order.nebim_customer_code or order.partner_id.nebim_customer_code
 
             # ─── SİPARİŞ ───
             if order_enabled and not db_order_sent:
                 try:
-                    # ORM cache'den oku — CARİ adımında yazılan değer burada güncel
-                    # (raw SQL KULLANMA: ORM flush henüz DB'ye yazmamış olabilir!)
-                    cust_code = order.nebim_customer_code or order.partner_id.nebim_customer_code
-
-                    if not cust_code:
+                    if not resolved_cust_code:
                         _logger.warning("Auto-sync Sipariş ertelendi (%s): Cari kodu henüz hazır değil.", order.name)
                         order.write({
                             'nebim_order_response': '[Auto-Sync] Cari hesabı henüz Nebim\'de oluşturulmadı, sipariş aktarımı ertelendi.'
                         })
                     else:
+                        _logger.info("Auto-sync Sipariş başlatılıyor: %s — CurrAccCode=%s (direkt değişken)", order.name, resolved_cust_code)
                         with self.env.cr.savepoint():
                             order_proc = self.env['odoougurlar.order.processor'].sudo()
-                            order_proc.sync_order(order, mapping)
+                            # customer_code'u DOĞRUDAN geçir — ORM cache bypass!
+                            order_proc.sync_order(order, mapping, customer_code=resolved_cust_code)
                         
                         order.sudo().write({'nebim_order_sent': True})
                         _logger.info("Auto-sync Sipariş başarılı: %s", order.name)

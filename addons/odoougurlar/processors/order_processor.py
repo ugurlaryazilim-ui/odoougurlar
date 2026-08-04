@@ -7,8 +7,13 @@ class OrderProcessor(models.AbstractModel):
     _name = 'odoougurlar.order.processor'
     _description = 'Nebim Sipariş Processor (Packing anında)'
 
-    def sync_order(self, sale_order, mapping):
-        """Siparişi Nebim'e atar ve dönen OrderLineID'leri kaydeder."""
+    def sync_order(self, sale_order, mapping, customer_code=None):
+        """Siparişi Nebim'e atar ve dönen OrderLineID'leri kaydeder.
+        
+        Args:
+            customer_code: Direkt cari kodu. ORM cache sorunlarını bypass etmek için
+                          caller'dan explicit olarak geçirilmeli.
+        """
         if not sale_order:
             return False
 
@@ -93,12 +98,18 @@ class OrderProcessor(models.AbstractModel):
 
         connector = self.env['odoougurlar.nebim.connector']
         
-        # Mapping veya kayıtlı Cari Kodu al (önce partner.nebim_customer_code)
-        customer_code = (
-            sale_order.nebim_customer_code
-            or sale_order.partner_id.nebim_customer_code
-            or (mapping.nebim_customer_code if mapping else (sale_order.partner_id.vat or 'B2C'))
-        )
+        # Cari Kodu: caller'dan gelen > order > partner > mapping > fallback
+        if not customer_code:
+            customer_code = (
+                sale_order.nebim_customer_code
+                or sale_order.partner_id.nebim_customer_code
+                or (mapping.nebim_customer_code if mapping else (sale_order.partner_id.vat or 'B2C'))
+            )
+        
+        if not customer_code:
+            raise Exception("Cari Hesap Kodu Boş Olamaz — sync_order'a customer_code geçirilmedi ve ORM'de de bulunamadı.")
+        
+        _logger.info("Sipariş %s için kullanılan CurrAccCode: %s", sale_order.name, customer_code)
         model_type = int(mapping.nebim_order_model_type) if mapping and mapping.nebim_order_model_type else 13
         is_export = int(mapping.nebim_invoice_model_type) == 24 if mapping else False
         
