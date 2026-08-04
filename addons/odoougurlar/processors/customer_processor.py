@@ -56,8 +56,15 @@ class CustomerProcessor(models.AbstractModel):
                 _logger.warning("Partner email dedup sorgusu hatası: %s", e)
 
         if preset_code:
-            _logger.info("Cari kodu bulundu (%s): partner %s -> Nebim Cari: %s (Nebim V3 POST işlemi yapılacak)",
+            _logger.info("Cari kodu bulundu (%s): partner %s -> Nebim Cari: %s",
                          email, partner.name, preset_code)
+            if not partner.nebim_customer_code or partner.nebim_customer_code != preset_code:
+                partner.sudo().write({
+                    'nebim_customer_sent': True,
+                    'nebim_customer_code': preset_code,
+                    'nebim_address_id': preset_addr or ''
+                })
+            return preset_code, preset_addr or ''
 
         connector = self.env['odoougurlar.nebim.connector']
 

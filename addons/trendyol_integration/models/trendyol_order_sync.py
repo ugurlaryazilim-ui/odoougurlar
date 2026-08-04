@@ -43,9 +43,9 @@ class TrendyolOrderSync(models.Model):
             'errors': total_errors,
         }
 
-    @api.model
-    def sync_orders_for_store(self, store):
-        """Tek bir mağazadan siparişleri senkronize et."""
+        store_name = store.name or ''
+        store_id = store.id
+
         try:
             api = store.get_api()
         except Exception as e:
@@ -56,7 +56,7 @@ class TrendyolOrderSync(models.Model):
             'sync_type': 'order',
             'state': 'running',
             'start_date': fields.Datetime.now(),
-            'store_id': store.id,
+            'store_id': store_id,
         })
         # Log kaydı transaction sonunda otomatik commit edilir
 
@@ -77,7 +77,7 @@ class TrendyolOrderSync(models.Model):
                     result = api.get_orders(status=status, page=page, size=50, start_date=start_date)
                     if not result['success']:
                         err_msg = f"API hatası ({status}): {result.get('error')}"
-                        _logger.error("Trendyol sipariş çekme hatası [%s] (%s): %s", store.name, status, result.get('error'))
+                        _logger.error("Trendyol sipariş çekme hatası [%s] (%s): %s", store_name, status, result.get('error'))
                         error_details.append(err_msg)
                         break
 
@@ -88,10 +88,6 @@ class TrendyolOrderSync(models.Model):
 
                     for package in content:
                         # ── Client-side orderDate filtresi ──
-                        # Trendyol API startDate parametresi PackageLastModifiedDate'e
-                        # göre filtreliyor, orderDate'e göre değil. Bu yüzden eski
-                        # siparişler paketin son güncellenme tarihine göre gelebiliyor.
-                        # Burada gerçek sipariş tarihini kontrol ediyoruz.
                         if start_date:
                             order_date_ts = package.get('orderDate', 0)
                             if order_date_ts:
@@ -117,7 +113,7 @@ class TrendyolOrderSync(models.Model):
                             pkg_id = package.get('orderNumber', '?')
                             err_msg = f"Sipariş {pkg_id}: {str(e)}"
                             error_details.append(err_msg)
-                            _logger.exception("Sipariş işleme hatası [%s]: %s", store.name, e)
+                            _logger.error("Sipariş işleme hatası [%s]: %s", store_name, str(e))
 
                     total_pages = data.get('totalPages', 1)
                     page += 1
@@ -131,9 +127,9 @@ class TrendyolOrderSync(models.Model):
                     self.env.flush_all()
                     updated_count += cancel_result.get('updated', 0)
             except Exception as e:
-                self.env.invalidate_all()
-                error_details.append(f"İptal sync: {e}")
-                _logger.exception("İptal sync hatası [%s]", store.name)
+                self.env.invalidate_all(flush=False)
+                error_details.append(f"İptal sync: {str(e)}")
+                _logger.error("İptal sync hatası [%s]: %s", store_name, str(e))
 
             # ── İade işleme ──
             if store.process_returns:
@@ -146,13 +142,14 @@ class TrendyolOrderSync(models.Model):
                         created_count += return_result.get('created', 0)
                         updated_count += return_result.get('updated', 0)
                 except Exception as e:
-                    error_details.append(f"İade sync: {e}")
-                    _logger.exception("İade sync hatası [%s]", store.name)
+                    self.env.invalidate_all(flush=False)
+                    error_details.append(f"İade sync: {str(e)}")
+                    _logger.error("İade sync hatası [%s]: %s", store_name, str(e))
 
             try:
                 store.sudo().write({'last_sync': fields.Datetime.now()})
             except Exception as store_e:
-                _logger.warning("Mağaza last_sync güncelleme atlandı (%s): %s", store.name, store_e)
+                _logger.warning("Mağaza last_sync güncelleme atlandı (%s): %s", store_name, str(store_e))
 
             try:
                 log.write({
@@ -162,11 +159,11 @@ class TrendyolOrderSync(models.Model):
                     'records_created': created_count,
                     'records_updated': updated_count,
                     'records_failed': error_count,
-                    'log_details': f"[{store.name}] Yeni: {created_count}, Güncellenen: {updated_count}, Hata: {error_count}",
+                    'log_details': f"[{store_name}] Yeni: {created_count}, Güncellenen: {updated_count}, Hata: {error_count}",
                     'error_details': '\n'.join(error_details) if error_details else '',
                 })
             except Exception as log_e:
-                _logger.warning("SyncLog güncelleme atlandı (%s): %s", store.name, log_e)
+                _logger.warning("SyncLog güncelleme atlandı (%s): %s", store_name, str(log_e))
 
         except Exception as e:
             try:
@@ -177,11 +174,11 @@ class TrendyolOrderSync(models.Model):
                 })
             except Exception:
                 pass
-            _logger.error("Trendyol senkronizasyon genel hatası [%s]: %s", store.name, e)
+            _logger.error("Trendyol senkronizasyon genel hatası [%s]: %s", store_name, str(e))
 
         _logger.info(
             "Trendyol senkronizasyon [%s] tamamlandı: %s yeni, %s güncellenen, %s hata",
-            store.name, created_count, updated_count, error_count,
+            store_name, created_count, updated_count, error_count,
         )
 
         return {
