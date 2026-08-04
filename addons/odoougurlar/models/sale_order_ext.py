@@ -654,12 +654,22 @@ class SaleOrder(models.Model):
             # ─── SİPARİŞ ───
             if order_enabled and not db_order_sent:
                 try:
-                    with self.env.cr.savepoint():
-                        order_proc = self.env['odoougurlar.order.processor'].sudo()
-                        order_proc.sync_order(order, mapping)
-                    
-                    order.sudo().write({'nebim_order_sent': True})
-                    _logger.info("Auto-sync Sipariş başarılı: %s", order.name)
+                    cust_code = order.nebim_customer_code or order.partner_id.nebim_customer_code
+                    if not cust_code:
+                        _logger.warning("Auto-sync Sipariş ertelendi (%s): Cari kodu henüz hazır değil.", order.name)
+                        order.write({
+                            'nebim_order_response': '[Auto-Sync] Cari hesabı henüz Nebim\'de oluşturulmadı, sipariş aktarımı ertelendi.'
+                        })
+                    else:
+                        if not order.nebim_customer_code:
+                            order.sudo().write({'nebim_customer_code': cust_code})
+
+                        with self.env.cr.savepoint():
+                            order_proc = self.env['odoougurlar.order.processor'].sudo()
+                            order_proc.sync_order(order, mapping)
+                        
+                        order.sudo().write({'nebim_order_sent': True})
+                        _logger.info("Auto-sync Sipariş başarılı: %s", order.name)
 
                 except Exception as e:
                     _logger.error("Auto-sync Sipariş hatası (%s): %s", order.name, e)
