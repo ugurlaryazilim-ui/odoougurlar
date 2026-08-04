@@ -381,9 +381,9 @@ class AmazonOrderSync(models.Model):
             'customer_name': buyer_name,
             'customer_email': buyer_info.get('BuyerEmail', ''),
             'customer_phone': shipping_address.get('Phone', ''),
-            'shipping_address': shipping_address.get('AddressLine1', ''),
+            'shipping_address': partner.street or shipping_address.get('AddressLine1', ''),
             'shipping_city': shipping_address.get('City', ''),
-            'shipping_district': shipping_address.get('StateOrRegion', '') or shipping_address.get('County', ''),
+            'shipping_district': shipping_address.get('Municipality', '') or shipping_address.get('County', '') or shipping_address.get('StateOrRegion', ''),
             'postal_code': shipping_address.get('PostalCode', ''),
             'total_price': total_order_amount,
             'currency': order_data.get('OrderTotal', {}).get('CurrencyCode', 'TRY'),
@@ -476,12 +476,55 @@ class AmazonOrderSync(models.Model):
         return {}
 
     @api.private
+    def _resolve_country_state(self, country_code, city_name):
+        """Ülke ve İl (res.country.state) nesnesini çözer."""
+        code = (country_code or 'TR').upper()
+        country = self.env['res.country'].sudo().search([('code', '=', code)], limit=1)
+        state_id = False
+        if country and city_name and country.code == 'TR':
+            search_city = city_name.strip()
+            if search_city.upper() in ('MERSIN', 'MERSİN'):
+                search_city = 'İçel'
+            state = self.env['res.country.state'].sudo().search([
+                ('country_id', '=', country.id),
+                ('name', '=ilike', search_city)
+            ], limit=1)
+            if not state and search_city == 'İçel':
+                state = self.env['res.country.state'].sudo().search([
+                    ('country_id', '=', country.id),
+                    ('name', '=ilike', 'Mersin')
+                ], limit=1)
+            if state:
+                state_id = state.id
+        return country, state_id
+
+    @api.private
     def _get_or_create_partner(self, name, buyer_info, address_info):
-        ResPartner = self.env['res.partner']
+        ResPartner = self.env['res.partner'].sudo()
         email = buyer_info.get('BuyerEmail', '')
         phone = address_info.get('Phone', '')
-        city = address_info.get('City', '')
+
+        country_code = address_info.get('CountryCode', 'TR') or 'TR'
+        amazon_city = address_info.get('City', '')  # İl (örn: "izmir")
+        amazon_district = address_info.get('Municipality', '')  # İlçe (örn: "karşıyaka")
+        amazon_county = address_info.get('County', '') or address_info.get('StateOrRegion', '')  # Mahalle (örn: "Aksoy mah.")
+
+        country, state_id = self._resolve_country_state(country_code, amazon_city)
+
+        # İlçe (city): Municipality öncelikli, yoksa County, yoksa amazon_city
+        district_name = amazon_district or amazon_county or amazon_city
+
+        # Açık adres: AddressLine1 + AddressLine2 + Mahalle
+        street_parts = []
+        if address_info.get('AddressLine1') and address_info.get('AddressLine1') != 'null':
+            street_parts.append(address_info.get('AddressLine1').strip())
+        if address_info.get('AddressLine2') and address_info.get('AddressLine2') != 'null':
+            street_parts.append(address_info.get('AddressLine2').strip())
+        if amazon_county and amazon_county != amazon_district and amazon_county != amazon_city:
+            street_parts.append(amazon_county.strip())
         
+        street = ' '.join(street_parts).strip()
+
         partner = False
         if email and email != 'Amazon Müşterisi':
             partner = ResPartner.search([('email', '=', email)], limit=1)
@@ -489,27 +532,24 @@ class AmazonOrderSync(models.Model):
             partner = ResPartner.search([('phone', '=', phone)], limit=1)
         if not partner and name and name != 'Amazon Müşterisi':
             partner = ResPartner.search([('name', '=ilike', name)], limit=1)
-            
-        street = address_info.get('AddressLine1', '')
-        if address_info.get('AddressLine2'):
-            street = (street + ' ' + address_info.get('AddressLine2')).strip()
-        if address_info.get('AddressLine3'):
-            street = (street + ' ' + address_info.get('AddressLine3')).strip()
 
         vals = {
             'name': name if name else 'Amazon Müşterisi',
             'email': email or '',
             'phone': phone or '',
-            'city': city or '',
+            'city': district_name or '',
             'street': street or '',
             'zip': address_info.get('PostalCode', ''),
+            'country_id': country.id if country else False,
+            'state_id': state_id if state_id else False,
             'customer_rank': 1,
         }
 
         if partner:
             if name and name != 'Amazon Müşterisi':
                 if partner.name == 'Amazon Müşterisi' or len(name.split()) > len((partner.name or '').split()):
-                    partner.write(vals)
+                    vals['name'] = name
+            partner.write(vals)
         else:
             partner = ResPartner.create(vals)
 
