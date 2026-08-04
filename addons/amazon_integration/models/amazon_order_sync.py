@@ -211,6 +211,73 @@ class AmazonOrderSync(models.Model):
         self._process_single_order(order_data, session, auth, base_url, force_update=True)
 
     @api.private
+    def _prepare_sale_order_lines(self, items_val, product_map, amazon_order_id, msgs):
+        """Odoo Sale Order satırlarını KDV DAHİL tutar esasına göre hazırlar.
+
+        Amazon fiyatları KDV DAHİL (price_include=True) fiyattır.
+        Odoo varsayılan vergisi KDV HARIÇ ise, Odoo üzerine tekrar KDV ekleyecektir.
+        Bunu önlemek için price_include=True olan vergi aranır, bulunamazsa birim fiyat
+        KDV Hariç tutara çevrilerek yazılır. Böylece Genel Toplam Amazon ile birebir tutar.
+        """
+        order_lines = []
+        _tax_cache = {}
+
+        for item in items_val:
+            sku = item.get('SellerSKU')
+            qty = float(item.get('QuantityOrdered', 1))
+            item_price = float(item.get('ItemPrice', {}).get('Amount', 0.0))
+            item_tax = float(item.get('ItemTax', {}).get('Amount', 0.0))
+
+            product = product_map.get(sku)
+            if not product:
+                msgs.append(f"{amazon_order_id} siparişinde {sku} SKU'lu ürün Odoo'da BULUNAMADI. Satır atlandı.")
+                _logger.warning("Amazon ürün bulunamadı: %s (Sipariş: %s)", sku, amazon_order_id)
+                continue
+
+            unit_price_incl = item_price / qty if qty > 0 else item_price
+
+            ol_vals = {
+                'product_id': product.id,
+                'product_uom_qty': qty,
+                'price_unit': unit_price_incl,
+                'name': item.get('Title', product.name)
+            }
+
+            # ─── KDV Dahil Vergi Tespiti & Fiyat Ayarlaması ───
+            product_taxes = product.taxes_id.filtered(
+                lambda t: t.company_id.id in [self.company_id.id, self.env.company.id]
+            )
+            vat_rate = 0.0
+            if item_tax > 0 and item_price > 0:
+                vat_rate = round((item_tax / item_price) * 100)
+            elif product_taxes:
+                vat_rate = product_taxes[0].amount
+
+            if vat_rate > 0:
+                if vat_rate not in _tax_cache:
+                    tax = self.env['account.tax'].sudo().search([
+                        ('type_tax_use', '=', 'sale'),
+                        ('amount', '=', vat_rate),
+                        ('price_include', '=', True),
+                        ('company_id', 'in', [self.company_id.id, self.env.company.id]),
+                    ], limit=1)
+                    _tax_cache[vat_rate] = tax
+                include_tax = _tax_cache[vat_rate]
+                if include_tax:
+                    ol_vals['tax_id'] = [(6, 0, [include_tax.id])]
+                else:
+                    # KDV dahil vergi bulunamadı — price_unit'i KDV Hariç tutara dönüştür
+                    ol_vals['price_unit'] = unit_price_incl / (1.0 + (vat_rate / 100.0))
+                    _logger.info(
+                        "Amazon: %%%s KDV dahil vergi bulunamadı, birim fiyat KDV hariç (%s) olarak ayarlandı.",
+                        vat_rate, ol_vals['price_unit']
+                    )
+
+            order_lines.append((0, 0, ol_vals))
+
+        return order_lines
+
+    @api.private
     def _process_single_order(self, order_data, session, auth, base_url, force_update=False):
         processed = 1
         created = 0
@@ -231,8 +298,10 @@ class AmazonOrderSync(models.Model):
             if existing_order.state not in ['done', 'cancel']:
                 if status == 'Canceled' and existing_order.state != 'cancel':
                     existing_order.action_cancel()
-            # Eğer müşteri bilgisi "Amazon Müşterisi" kalmışsa güncellemeyi zorla
-            if existing_order.partner_id and existing_order.partner_id.name == 'Amazon Müşterisi':
+            # Müşteri bilgisi "Amazon Müşterisi" kalmışsa veya fiyat tutmuyorsa güncellemeyi zorla
+            total_order_amount = float(order_data.get('OrderTotal', {}).get('Amount', 0.0))
+            if (existing_order.partner_id and existing_order.partner_id.name == 'Amazon Müşterisi') or \
+               (total_order_amount > 0 and abs(existing_order.amount_total - total_order_amount) > 0.01):
                 force_update = True
             else:
                 return processed, 0, 0, msgs
@@ -245,7 +314,6 @@ class AmazonOrderSync(models.Model):
         buyer_info = dict(order_data.get('BuyerInfo') or {})
         shipping_address = dict(order_data.get('ShippingAddress') or {})
         
-        # Eğer liste endpoint'inde adres veya müşteri adı eksikse özel PII endpoint'lerini çağır
         if not shipping_address or not shipping_address.get('Name') or not shipping_address.get('AddressLine1'):
             fetched_address = self._fetch_order_address(amazon_order_id, session, auth, base_url)
             if fetched_address:
@@ -328,7 +396,12 @@ class AmazonOrderSync(models.Model):
             amz_order_vals['line_ids'] = amz_line_vals
             amazon_order = self.env['amazon.order'].create(amz_order_vals)
 
-        # Mevcut sipariş güncelleniyorsa partner ve amazon_order bağını tazele
+        # Batch ürün arama
+        Product = self.env['product.product'].sudo()
+        all_skus = [item.get('SellerSKU') for item in items_val if item.get('SellerSKU')]
+        product_map = Product.batch_find_by_marketplace_barcodes(all_skus) if all_skus else {}
+
+        # Mevcut sipariş güncelleniyorsa partner, amazon_order ve fiyatları tazele
         if existing_order:
             existing_order.sudo().write({
                 'partner_id': partner.id,
@@ -338,38 +411,21 @@ class AmazonOrderSync(models.Model):
                 'amazon_store_id': self.id,
             })
             amazon_order.write({'sale_order_id': existing_order.id})
+
+            # Fiyat ve KDV düzeltmesi (eğer tutar Amazon ile tutmuyorsa veya force_update ise)
+            if items_val and (abs(existing_order.amount_total - total_order_amount) > 0.01 or force_update):
+                new_lines = self._prepare_sale_order_lines(items_val, product_map, amazon_order_id, msgs)
+                if new_lines:
+                    existing_order.order_line.sudo().unlink()
+                    existing_order.sudo().write({'order_line': new_lines})
+
             return processed, 0, 0, msgs
 
         # ─── Odoo Siparişi Oluştur ───
         if not items_val:
             return processed, 0, 1, [f"{amazon_order_id} ürün detayları alınamadı, atlandı."]
 
-        # Batch ürün arama
-        Product = self.env['product.product'].sudo()
-        all_skus = [item.get('SellerSKU') for item in items_val if item.get('SellerSKU')]
-        product_map = Product.batch_find_by_marketplace_barcodes(all_skus) if all_skus else {}
-
-        order_lines = []
-        for item in items_val:
-            sku = item.get('SellerSKU')
-            qty = item.get('QuantityOrdered', 1)
-            item_price = item.get('ItemPrice', {}).get('Amount', '0.0')
-            
-            product = product_map.get(sku)
-            if not product:
-                msgs.append(f"{amazon_order_id} siparişinde {sku} SKU'lu ürün Odoo'da BULUNAMADI. Satır atlandı.")
-                _logger.warning("Amazon ürün bulunamadı: %s (Sipariş: %s)", sku, amazon_order_id)
-                continue
-            
-            unit_price = float(item_price) / float(qty) if qty > 0 else float(item_price)
-                    
-            order_lines.append((0, 0, {
-                'product_id': product.id,
-                'product_uom_qty': qty,
-                'price_unit': unit_price,
-                'name': item.get('Title', product.name)
-            }))
-
+        order_lines = self._prepare_sale_order_lines(items_val, product_map, amazon_order_id, msgs)
         if not order_lines:
             return processed, 0, 1, [f"{amazon_order_id} hiçbir ürün eşleştirilemedi, sipariş oluşturulmadı."]
 
