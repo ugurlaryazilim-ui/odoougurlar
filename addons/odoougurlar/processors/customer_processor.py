@@ -36,75 +36,91 @@ class CustomerProcessor(models.AbstractModel):
         email = (partner.email or '').strip().lower()
 
         # ═══════════════════════════════════════════════════════════════════
-        # 3 KATMANLI CARİ DEDUP (en hızlıdan en yavaşa):
-        #   1. Partner kendi kodu → anında return
-        #   2. Odoo email dedup  → anında return
-        #   3. Nebim SP canlı    → anında return
-        #   Hiçbiri bulamadıysa → yeni cari POST et
+        # NEBİM = TEK GERÇEK KAYNAK (Source of Truth)
+        # Sıra: 1. Nebim SP → 2. Odoo partner/email dedup → 3. Yeni POST
+        # Nebim SP bulamazsa → Odoo'daki eski kodları TEMİZLE
         # ═══════════════════════════════════════════════════════════════════
 
-        # ─── KATMAN 1: Partner'ın kendi Nebim Cari Kodu var mı? ───
-        partner_code = partner.sudo().nebim_customer_code
-        if partner_code:
-            partner_addr = partner.sudo().nebim_address_id or ''
-            _logger.info("Cari kodu partner'da mevcut: %s -> %s", partner.name, partner_code)
-            if not partner.nebim_customer_sent:
-                partner.sudo().write({'nebim_customer_sent': True})
-            return partner_code, partner_addr
+        # ─── KATMAN 1: NEBİM SQL SERVER CANLI SORGU (sp_GetCustomer_Hamurlabs) ───
+        # Bu SP BillingAddressID döndürür — sipariş için kritik!
+        nebim_verified_code = None
+        nebim_verified_addr = ''
 
-        # ─── KATMAN 2: Aynı email ile Odoo'da başka bir partner'da Nebim kodu var mı? ───
         if email:
             try:
-                existing_partner = self.env['res.partner'].sudo().search([
-                    ('id', '!=', partner.id),
-                    ('nebim_customer_sent', '=', True),
-                    ('nebim_customer_code', '!=', False),
-                    ('nebim_customer_code', '!=', ''),
-                    ('email', '=ilike', email)
-                ], limit=1, order='id desc')
-                if existing_partner:
-                    found_code = existing_partner.nebim_customer_code
-                    found_addr = existing_partner.nebim_address_id or ''
-                    _logger.info("Cari kodu Odoo email dedup ile bulundu (%s): %s -> %s",
-                                 email, partner.name, found_code)
-                    partner.sudo().write({
-                        'nebim_customer_sent': True,
-                        'nebim_customer_code': found_code,
-                        'nebim_address_id': found_addr
-                    })
-                    return found_code, found_addr
-            except Exception as e:
-                _logger.warning("Partner email dedup sorgusu hatası: %s", e)
-
-        # ─── KATMAN 3: Nebim SQL Server'da bu e-posta adresi ile cari var mı? ───
-        if email:
-            try:
-                sp_name = connector._get_sp_name('customer') or 'usp_GetCustomer_ent'
-                sp_params = [
-                    {'Name': 'pCommValue', 'Value': email},
-                    {'Name': 'pCommType', 'Value': 3},
-                    {'Name': 'pCustomerType', 'Value': 4}
-                ]
-                sp_res = connector.run_proc(sp_name, sp_params)
+                sp_res = connector.run_proc('sp_GetCustomer_Hamurlabs', [
+                    {'Name': 'CommunicationTypeCode', 'Value': 3},   # 3 = Email
+                    {'Name': 'CommAddress', 'Value': email},
+                    {'Name': 'TypeCode', 'Value': 4},                # 4 = Perakende
+                    {'Name': 'CustomerType', 'Value': 4}
+                ])
                 if sp_res and isinstance(sp_res, list) and len(sp_res) > 0:
                     first = sp_res[0]
                     if isinstance(first, dict):
-                        found_code = first.get('customerCode') or first.get('CurrAccCode')
-                        found_addr = first.get('BillingAddressID') or first.get('PostalAddressID') or ''
+                        found_code = first.get('CurrAccCode') or ''
+                        found_addr = first.get('BillingAddressID') or ''
                         if found_code:
-                            _logger.info("Nebim SP (%s) cari eşleşti (%s): %s -> %s",
-                                         sp_name, email, partner.name, found_code)
-                            partner.sudo().write({
-                                'nebim_customer_sent': True,
-                                'nebim_customer_code': found_code,
-                                'nebim_address_id': found_addr or ''
-                            })
-                            return found_code, found_addr or ''
+                            nebim_verified_code = found_code
+                            nebim_verified_addr = found_addr
+                            _logger.info(
+                                "NEBİM CANLI: Cari bulundu (%s): %s -> %s (AddrID=%s)",
+                                email, partner.name, found_code, found_addr
+                            )
             except Exception as e:
-                _logger.warning("Nebim SP cari sorgu uyarısı (yeni cari POST edilecek): %s", e)
+                _logger.warning("Nebim SP (sp_GetCustomer_Hamurlabs) sorgu hatası: %s", e)
+
+            # sp_GetCustomer_Hamurlabs bulamadıysa, usp_GetCustomer_ent ile de dene
+            if not nebim_verified_code:
+                try:
+                    sp_name2 = connector._get_sp_name('customer') or 'usp_GetCustomer_ent'
+                    sp_res2 = connector.run_proc(sp_name2, [
+                        {'Name': 'pCommValue', 'Value': email},
+                        {'Name': 'pCommType', 'Value': 3},
+                        {'Name': 'pCustomerType', 'Value': 4}
+                    ])
+                    if sp_res2 and isinstance(sp_res2, list) and len(sp_res2) > 0:
+                        first2 = sp_res2[0]
+                        if isinstance(first2, dict):
+                            found_code2 = first2.get('customerCode') or first2.get('CurrAccCode') or ''
+                            if found_code2:
+                                nebim_verified_code = found_code2
+                                _logger.info(
+                                    "NEBİM CANLI (yedek SP): Cari bulundu (%s): %s -> %s",
+                                    email, partner.name, found_code2
+                                )
+                except Exception as e:
+                    _logger.warning("Nebim SP (usp_GetCustomer_ent) sorgu hatası: %s", e)
+
+        # ─── Nebim cariyi BULDU → partner'ı güncelle ve dön ───
+        if nebim_verified_code:
+            partner.sudo().write({
+                'nebim_customer_sent': True,
+                'nebim_customer_code': nebim_verified_code,
+                'nebim_address_id': nebim_verified_addr or ''
+            })
+            return nebim_verified_code, nebim_verified_addr
+
+        # ─── Nebim cariyi BULAMADI → Odoo'daki eski kodları TEMİZLE ───
+        old_code = partner.sudo().nebim_customer_code
+        if old_code:
+            _logger.warning(
+                "NEBİM CANLI: %s e-postalı cari Nebim'de BULUNAMADI! "
+                "Odoo'daki eski kod '%s' TEMİZLENİYOR.",
+                email, old_code
+            )
+            partner.sudo().write({
+                'nebim_customer_sent': False,
+                'nebim_customer_code': False,
+                'nebim_address_id': False
+            })
+
+        # ─── KATMAN 2: Odoo'da aynı email ile başka bir partner'da Nebim kodu var mı? ───
+        # NOT: Bu kodlar da eski olabilir, ama Nebim SP yukarıda zaten kontrol etti.
+        # Buraya sadece Nebim SP'nin email ile bulamadığı durumlarda gelinir.
 
         # ─── Hiçbir katmanda bulunamadı → Nebim V3 API ile yeni cari POST et ───
-        _logger.info("Cari 3 katmanda da bulunamadı (%s / %s), yeni cari POST edilecek.", partner.name, email)
+        _logger.info("Cari Nebim'de bulunamadı (%s / %s), yeni cari POST edilecek.", partner.name, email)
+
 
         # ─── İl/İlçe/Bölge Kodu Çözümleme ───
         nebim_codes = self._resolve_nebim_address_codes(partner)
