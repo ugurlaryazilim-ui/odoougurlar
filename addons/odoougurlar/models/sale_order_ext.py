@@ -376,7 +376,7 @@ class SaleOrder(models.Model):
             self.name, cancelled_count, deleted_count
         )
         
-        # ── 3. Güncel siparişi hemen Nebim'e gönder ──
+        # ── 3. Güncel cari ve siparişi hemen Nebim'e gönder ──
         order_msg = ''
         try:
             # Pazaryeri tespiti
@@ -403,11 +403,21 @@ class SaleOrder(models.Model):
             mapping = self.env['odoougurlar.marketplace.mapping'].sudo().find_mapping(
                 marketplace_name, self.partner_id.country_id.id
             )
+
+            # Önce Cariyi Nebim V3'e gönder/güncelle
+            customer_proc = self.env['odoougurlar.customer.processor'].sudo()
+            cust_code, addr_id = customer_proc.sync_customer(self.partner_id, mapping, sale_order=self)
+            self.write({
+                'nebim_customer_sent': True,
+                'nebim_customer_code': cust_code or '',
+                'nebim_address_id': addr_id or ''
+            })
             
+            # Sonra Siparişi Nebim V3'e gönder
             order_proc = self.env['odoougurlar.order.processor'].sudo()
             order_proc.sync_order(self, mapping)
-            order_msg = '✅ Güncel sipariş Nebim\'e gönderildi.'
-            _logger.info("Nebim sipariş tekrar gönderildi: %s", self.name)
+            order_msg = '✅ Güncel cari ve sipariş Nebim\'e gönderildi.'
+            _logger.info("Nebim cari ve sipariş tekrar gönderildi: %s", self.name)
             
         except Exception as e:
             order_msg = f'⚠️ Sipariş gönderilemedi: {str(e)}'
@@ -614,20 +624,14 @@ class SaleOrder(models.Model):
                 try:
                     # Email-bazlı cari dedup: mevcut cari kodu var mı?
                     existing_code = self._find_existing_nebim_customer(order)
-                    
-                    if existing_code:
-                        cust_code = existing_code
-                        addr_id = ''
-                        _logger.info(
-                            "Email dedup: %s → mevcut Nebim cari kodu kullanılıyor: %s",
-                            order.name, cust_code
+                    if existing_code and not order.partner_id.nebim_customer_code:
+                        order.partner_id.sudo().write({'nebim_customer_code': existing_code})
+
+                    with self.env.cr.savepoint():
+                        customer_proc = self.env['odoougurlar.customer.processor'].sudo()
+                        cust_code, addr_id = customer_proc.sync_customer(
+                            order.partner_id, mapping, sale_order=order
                         )
-                    else:
-                        with self.env.cr.savepoint():
-                            customer_proc = self.env['odoougurlar.customer.processor'].sudo()
-                            cust_code, addr_id = customer_proc.sync_customer(
-                                order.partner_id, mapping, sale_order=order
-                            )
 
                     order.sudo().write({
                         'nebim_customer_sent': True,

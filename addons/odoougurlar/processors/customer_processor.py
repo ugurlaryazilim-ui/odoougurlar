@@ -33,21 +33,14 @@ class CustomerProcessor(models.AbstractModel):
         if not partner:
             return False
 
-        # ─── 1. KONTROL: Partner'ın kendi nebim_customer_code bilgisi ───
+        # ─── 1. KONTROL: Partner veya Email Dedup ile Cari Kodu Tespiti ───
         partner_code = partner.sudo().nebim_customer_code
-        partner_addr = partner.sudo().nebim_address_id or ''
-
-        if partner_code:
-            _logger.info("Partner %s zaten Nebim cari koduna sahip: %s", partner.name, partner_code)
-            return partner_code, partner_addr or ''
-
-        # ─── 2. KONTROL: Sadece Email Dedup (Başka bir partner'da aynı mailli cari kodu var mı?) ───
         email = (partner.email or '').strip().lower()
 
-        existing_code = False
-        existing_addr = False
+        preset_code = partner_code or ''
+        preset_addr = partner.sudo().nebim_address_id or ''
 
-        if email:
+        if not preset_code and email:
             try:
                 existing_partner = self.env['res.partner'].sudo().search([
                     ('id', '!=', partner.id),
@@ -57,20 +50,14 @@ class CustomerProcessor(models.AbstractModel):
                     ('email', '=ilike', email)
                 ], limit=1, order='id desc')
                 if existing_partner:
-                    existing_code = existing_partner.nebim_customer_code
-                    existing_addr = existing_partner.nebim_address_id or ''
+                    preset_code = existing_partner.nebim_customer_code
+                    preset_addr = existing_partner.nebim_address_id or ''
             except Exception as e:
                 _logger.warning("Partner email dedup sorgusu hatası: %s", e)
 
-        if existing_code:
-            _logger.info("Email dedup bulundu (%s): partner %s -> Nebim Cari: %s",
-                         email, partner.name, existing_code)
-            partner.sudo().write({
-                'nebim_customer_sent': True,
-                'nebim_customer_code': existing_code,
-                'nebim_address_id': existing_addr or ''
-            })
-            return existing_code, existing_addr or ''
+        if preset_code:
+            _logger.info("Cari kodu bulundu (%s): partner %s -> Nebim Cari: %s (Nebim V3 POST işlemi yapılacak)",
+                         email, partner.name, preset_code)
 
         connector = self.env['odoougurlar.nebim.connector']
 
@@ -145,12 +132,12 @@ class CustomerProcessor(models.AbstractModel):
             if is_sahis:
                 # ─── ŞAHIS FİRMASI (11 hane TCKN) ───
                 name_parts = (partner.name or '').strip().split()
-                first_name = name_parts[0] if name_parts else ''
-                last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
+                first_name = name_parts[0] if name_parts else (partner.name or 'Müşteri')
+                last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else first_name
 
                 payload = {
                     'ModelType': cari_model_type,  # Cari API için 3 (perakende müşteri)
-                    'CurrAccCode': '',
+                    'CurrAccCode': preset_code or '',
                     'CurrAccDescription': partner.name[:50],
                     'FirstName': first_name[:50],
                     'LastName': last_name[:50],
@@ -182,6 +169,7 @@ class CustomerProcessor(models.AbstractModel):
 
                 payload = {
                     'ModelType': cari_model_type,
+                    'CurrAccCode': preset_code or '',
                     'CurrAccDescription': partner.name[:50],
                     'IsIndividualAcc': False,
                     'TaxNumber': vat_clean if len(vat_clean) == 10 else vat_raw,
@@ -227,8 +215,8 @@ class CustomerProcessor(models.AbstractModel):
             _logger.info("KURUMSAL MÜŞTERİ: %s | VKN/TCKN: %s | Hane: %d | Şahıs: %s", partner.name, masked_vat, len(vat_clean), is_sahis)
         else:
             name_parts = (partner.name or '').strip().split()
-            first_name = name_parts[0] if name_parts else ''
-            last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
+            first_name = name_parts[0] if name_parts else (partner.name or 'Müşteri')
+            last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else first_name
 
             # ─── Bireysel müşteride VKN kontrolü ───
             # Pazaryerleri bazen commercial=False gönderir ama partner.vat
@@ -242,7 +230,7 @@ class CustomerProcessor(models.AbstractModel):
                 # Partner bireysel kaydedilmiş ama VKN'si var
                 payload = {
                     'ModelType': cari_model_type,
-                    'CurrAccCode': '',
+                    'CurrAccCode': preset_code or '',
                     'CurrAccDescription': (partner.name or 'KURUMSAL')[:50],
                     'IsIndividualAcc': False,
                     'TaxNumber': vat_clean,
@@ -257,7 +245,7 @@ class CustomerProcessor(models.AbstractModel):
                 # ─── 11 HANELİ TCKN → BİREYSEL (ŞAHIS) ───
                 payload = {
                     'ModelType': cari_model_type,
-                    'CurrAccCode': '',
+                    'CurrAccCode': preset_code or '',
                     'CurrAccDescription': (partner.name or 'BIREYSEL')[:50],
                     'IsIndividualAcc': True,
                     'FirstName': first_name[:50],
@@ -270,7 +258,7 @@ class CustomerProcessor(models.AbstractModel):
                 # ─── VKN/TCKN YOK veya geçersiz → BİREYSEL (varsayılan) ───
                 payload = {
                     'ModelType': cari_model_type,
-                    'CurrAccCode': '',
+                    'CurrAccCode': preset_code or '',
                     'CurrAccDescription': (partner.name or 'BIREYSEL')[:50],
                     'IsIndividualAcc': True,
                     'FirstName': first_name[:50],
