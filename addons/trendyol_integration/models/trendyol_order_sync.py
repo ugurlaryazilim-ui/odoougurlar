@@ -212,7 +212,10 @@ class TrendyolOrderSync(models.Model):
                 if not existing:
                     order_num = str(package.get('orderNumber') or '')
                     if order_num:
-                        existing = self.search([('trendyol_order_number', '=', order_num)], limit=1)
+                        existing = self.search([
+                            ('trendyol_order_number', '=', order_num),
+                            ('store_id', '=', store.id),
+                        ], limit=1)
 
                 if existing:
                     if existing.trendyol_status != 'cancelled':

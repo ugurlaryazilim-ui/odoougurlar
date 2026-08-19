@@ -135,7 +135,10 @@ class TrendyolOrder(models.Model):
         if package_id:
             existing = self.search([('shipment_package_id', '=', package_id)], limit=1)
         if not existing and order_number:
-            existing = self.search([('trendyol_order_number', '=', order_number)], limit=1)
+            existing = self.search([
+                ('trendyol_order_number', '=', order_number),
+                ('store_id', '=', store.id),
+            ], limit=1)
 
         if existing:
             vals = {}
@@ -359,6 +362,7 @@ class TrendyolOrder(models.Model):
         ]))
 
         existing_so = self.env['sale.order'].sudo().search([
+            ('trendyol_store_id', '=', store.id),
             '|', '|',
             ('client_order_ref', 'in', ref_names),
             ('origin', 'in', ref_names),
