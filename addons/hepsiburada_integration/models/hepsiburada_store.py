@@ -301,7 +301,7 @@ class HepsiburadaStore(models.Model):
         if not clean_merchant or not clean_user or not clean_pass:
             raise UserError(_('Mağaza API ayarları eksik!'))
 
-        session, _ = self._get_session()
+        session, _unused = self._get_session()
         domain = self._get_api_domain()
 
         # Sipariş detay API

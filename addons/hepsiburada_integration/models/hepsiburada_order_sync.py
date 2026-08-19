@@ -49,7 +49,7 @@ class HepsiburadaOrderSync(models.AbstractModel):
         base_url = f"https://{domain}/packages/merchantid/{clean_merchant}"
         
         # Connection pooling — tek session ile tüm istekler
-        session, _ = store._get_session()
+        session, _unused = store._get_session()
         
         limit = 50
         total_fetched = 0
