@@ -1379,8 +1379,18 @@ class PackingApiController(BarcodeApiBase):
         
         nebim_errors = []
         
+        # ═══ DB'den taze okuma — ORM cache güncel olmayabilir ═══
+        # (cron veya başka HTTP request henüz commit etmemiş olabilir)
+        picking.env.cr.execute(
+            "SELECT nebim_customer_sent, nebim_order_sent FROM sale_order WHERE id = %s",
+            [sale_order.id]
+        )
+        _db_row = picking.env.cr.fetchone() or (False, False)
+        _db_customer_sent = _db_row[0]
+        _db_order_sent = _db_row[1]
+
         # ═══ Aşama A: Cari Aktarımı (savepoint korumalı) ═══
-        if customer_enabled and not sale_order.nebim_customer_sent:
+        if customer_enabled and not _db_customer_sent:
             try:
                 with picking.env.cr.savepoint():
                     customer_proc = picking.env['odoougurlar.customer.processor'].sudo()
@@ -1400,7 +1410,7 @@ class PackingApiController(BarcodeApiBase):
             _logger.info("Nebim Cari toggle kapalı: %s", sale_order.name)
             
         # ═══ Aşama B: Sipariş Aktarımı (savepoint korumalı) ═══
-        if order_enabled and not sale_order.nebim_order_sent:
+        if order_enabled and not _db_order_sent:
             try:
                 with picking.env.cr.savepoint():
                     order_proc = picking.env['odoougurlar.order.processor'].sudo()

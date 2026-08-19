@@ -28,21 +28,19 @@ class OrderProcessor(models.AbstractModel):
         # Önce ORM cache'deki bekleyen write'ları DB'ye yaz (caller'dan gelen)
         self.env.flush_all()
 
+        # BLOCKING lock — aynı sipariş için eş zamanlı çağrılar birbirini BEKLER
+        # (farklı HTTP request/transaction'lardan gelen çağrıları sıraya sokar)
         lock_id = sale_order.id + 900000000  # advisory lock namespace offset
-        self.env.cr.execute("SELECT pg_try_advisory_xact_lock(%s)", [lock_id])
-        got_lock = self.env.cr.fetchone()[0]
-        if not got_lock:
-            _logger.warning("Sipariş %s için eş zamanlı sync_order çağrısı engellendi (advisory lock).", sale_order.name)
-            return True  # Diğer transaction zaten işliyor
+        self.env.cr.execute("SELECT pg_advisory_xact_lock(%s)", [lock_id])
 
-        # 1. Bu sipariş nesnesi zaten Nebim'e gönderildi mi? (DB'den taze oku)
+        # SELECT FOR UPDATE — satır seviyesinde lock + en güncel committed değeri okur
         self.env.cr.execute(
-            "SELECT nebim_order_sent FROM sale_order WHERE id = %s",
+            "SELECT nebim_order_sent FROM sale_order WHERE id = %s FOR UPDATE",
             [sale_order.id]
         )
         row = self.env.cr.fetchone()
         if row and row[0]:
-            _logger.info("Sipariş zaten Nebim'e gönderilmiş (DB taze): %s", sale_order.name)
+            _logger.info("Sipariş zaten Nebim'e gönderilmiş (DB taze/FOR UPDATE): %s", sale_order.name)
             return True
 
         # 2. Aynı sipariş numarasına/referansına sahip başka bir sipariş Nebim'e gönderilmiş mi?
