@@ -646,8 +646,11 @@ class HepsiburadaOrderSync(models.AbstractModel):
 
             order_lines.append((0, 0, ol_vals))
 
-        warehouse_id_str = self.env['ir.config_parameter'].sudo().get_param('hepsiburada_integration.warehouse_id')
+        ICP = self.env['ir.config_parameter'].sudo()
+        warehouse_id_str = ICP.get_param('hepsiburada_integration.warehouse_id')
         warehouse_id = int(warehouse_id_str) if warehouse_id_str else False
+        backup_wh_str = ICP.get_param('hepsiburada_integration.backup_warehouse_id')
+        backup_warehouse_id = int(backup_wh_str) if backup_wh_str else False
 
         # Parametre yoksa şirketin varsayılan deposunu kullan
         if not warehouse_id:
@@ -684,15 +687,38 @@ class HepsiburadaOrderSync(models.AbstractModel):
 
         sale_order = SaleOrder.create(sale_vals)
         if store.auto_confirm:
+            confirmed = False
+            # 1. Ana depo ile dene
             try:
                 with self.env.cr.savepoint():
                     sale_order.action_confirm()
-            except Exception as e:
-                # Onay başarısız — sipariş draft kalır, transaction korunur
+                    confirmed = True
+            except Exception as e1:
                 self.env.invalidate_all(flush=False)
                 _logger.warning(
-                    "HB sipariş %s oluşturuldu ama otomatik onay başarısız (draft kalacak): %s",
-                    hb_order.hb_order_number, e)
+                    "HB sipariş %s: ana depo (id=%s) ile onay başarısız: %s",
+                    hb_order.hb_order_number, warehouse_id, e1)
+
+            # 2. Ana depo başarısızsa yedek depo ile dene
+            if not confirmed and backup_warehouse_id and backup_warehouse_id != warehouse_id:
+                try:
+                    with self.env.cr.savepoint():
+                        sale_order.write({'warehouse_id': backup_warehouse_id})
+                        sale_order.action_confirm()
+                        confirmed = True
+                        _logger.info(
+                            "HB sipariş %s: yedek depo (id=%s) ile onaylandı.",
+                            hb_order.hb_order_number, backup_warehouse_id)
+                except Exception as e2:
+                    self.env.invalidate_all(flush=False)
+                    _logger.warning(
+                        "HB sipariş %s: yedek depo (id=%s) ile de onay başarısız (draft kalacak): %s",
+                        hb_order.hb_order_number, backup_warehouse_id, e2)
+
+            if not confirmed:
+                _logger.warning(
+                    "HB sipariş %s: hiçbir depo ile onaylanamadı, draft olarak bırakıldı.",
+                    hb_order.hb_order_number)
         return sale_order
 
     # ═════════════════════════════════════════════════════════════
