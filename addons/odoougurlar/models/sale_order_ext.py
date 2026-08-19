@@ -600,13 +600,16 @@ class SaleOrder(models.Model):
         # ═══════════════════════════════════════════════════════════════════
         # CONCURRENCY KORUMASI: 2 katmanlı PostgreSQL Advisory Lock
         #
-        # Lock 1: Temizlenmiş sipariş numarası bazlı (TY-11474971637 ve 11474971637 AYNI LOCK!)
+        # Lock 1: Temizlenmiş sipariş numarası + mağaza bazlı
+        #          (farklı mağazadan gelen aynı sipariş no → farklı lock)
         # Lock 2: Partner bazlı (aynı müşteri = aynı customer POST lock)
         # BLOCKING lock: 2. çağrı BEKLER, sonra committed state görür.
         # ═══════════════════════════════════════════════════════════════════
-        ref_hash = int(hashlib.md5(clean_ref.encode()).hexdigest()[:15], 16) % (2**31)
+        _store_id = order.trendyol_store_id.id if hasattr(order, 'trendyol_store_id') and order.trendyol_store_id else 0
+        lock_key = f"{clean_ref}:{_store_id}"
+        ref_hash = int(hashlib.md5(lock_key.encode()).hexdigest()[:15], 16) % (2**31)
         order_ref_lock = ref_hash + 600000000
-        _logger.debug("Advisory lock bekleniyor: ref=%s (raw=%s), lock_id=%s", clean_ref, raw_ref, order_ref_lock)
+        _logger.debug("Advisory lock bekleniyor: ref=%s (raw=%s, store=%s), lock_id=%s", clean_ref, raw_ref, _store_id, order_ref_lock)
         self.env.cr.execute("SELECT pg_advisory_xact_lock(%s)", [order_ref_lock])
 
         # Lock 2: Partner bazlı (aynı müşteri = aynı customer POST lock)
@@ -645,15 +648,29 @@ class SaleOrder(models.Model):
         ])))
 
         # 2. Aynı sipariş referansı ile BAŞKA bir sale.order zaten Nebim'e gönderilmiş mi?
+        #    NOT: Farklı mağazalardan gelen aynı sipariş numaralı siparişler duplikasyon DEĞİLDİR.
+        #    trendyol_store_id kontrolü eklendi — farklı mağaza = farklı sipariş.
+        trendyol_store_id = order.trendyol_store_id.id if hasattr(order, 'trendyol_store_id') and order.trendyol_store_id else None
         if clean_ref and not db_order_sent and ref_variations:
-            self.env.cr.execute("""
-                SELECT id, name, nebim_order_sent, nebim_customer_code
-                FROM sale_order
-                WHERE id != %s
-                  AND nebim_order_sent = true
-                  AND (client_order_ref IN %s OR name IN %s OR origin IN %s)
-                LIMIT 1
-            """, [order_id, tuple(ref_variations), tuple(ref_variations), tuple(ref_variations)])
+            if trendyol_store_id:
+                self.env.cr.execute("""
+                    SELECT id, name, nebim_order_sent, nebim_customer_code
+                    FROM sale_order
+                    WHERE id != %s
+                      AND nebim_order_sent = true
+                      AND trendyol_store_id = %s
+                      AND (client_order_ref IN %s OR name IN %s OR origin IN %s)
+                    LIMIT 1
+                """, [order_id, trendyol_store_id, tuple(ref_variations), tuple(ref_variations), tuple(ref_variations)])
+            else:
+                self.env.cr.execute("""
+                    SELECT id, name, nebim_order_sent, nebim_customer_code
+                    FROM sale_order
+                    WHERE id != %s
+                      AND nebim_order_sent = true
+                      AND (client_order_ref IN %s OR name IN %s OR origin IN %s)
+                    LIMIT 1
+                """, [order_id, tuple(ref_variations), tuple(ref_variations), tuple(ref_variations)])
             dup_row = self.env.cr.fetchone()
             if dup_row:
                 dup_name = dup_row[1]
