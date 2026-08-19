@@ -473,15 +473,6 @@ class InvoiceProcessor(models.AbstractModel):
             'POSTerminalID':     '1',
             'Lines':             lines,
             'OfficeCode':        'M',
-            'Payments': [{
-                'CreditCardTypeCode': m_cc_type,
-                'Code':               '',
-                'InstallmentCount':   1,
-                'DocumentDate':       payment_doc_date,
-                'PaymentType':        '2',
-                'Amount':             float(invoice.amount_total),
-                'CurrencyCode':       'TRY',
-            }],
             'SalesViaInternetInfo': {
                 'PaymentTypeDescription': 'KREDIKARTI/BANKAKARTI',
                 'SendDate':    now_str,
@@ -504,6 +495,20 @@ class InvoiceProcessor(models.AbstractModel):
             'ModelType':           model_type,
             'CustomerCode':        customer_code,
         }
+
+        # Sipariş bazlı faturalarda Payments bloğu GÖNDERİLMEZ.
+        # Ödeme zaten sipariş kaydında (order_processor) Nebim'e aktarılmıştır.
+        # Tekrar gönderilirse Nebim fazladan "Peşin Satış" kaydı oluşturur.
+        if not is_order_base:
+            payload['Payments'] = [{
+                'CreditCardTypeCode': m_cc_type,
+                'Code':               '',
+                'InstallmentCount':   1,
+                'DocumentDate':       payment_doc_date,
+                'PaymentType':        '2',
+                'Amount':             float(invoice.amount_total),
+                'CurrencyCode':       'TRY',
+            }]
 
         _logger.info("Perakende fatura payload hazırlandı: %s (MT%s) | Email=%s | TaxOffice=%s",
                      invoice.name, model_type, email_address or 'YOK', inv_tax_office_code or '-')
