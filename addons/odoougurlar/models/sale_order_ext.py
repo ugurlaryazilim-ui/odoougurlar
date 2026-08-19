@@ -547,7 +547,11 @@ class SaleOrder(models.Model):
         res = super().action_confirm()
         for order in self:
             try:
-                self._auto_nebim_sync(order)
+                # Savepoint ile sarmalı — _auto_nebim_sync içindeki SQL hataları
+                # (advisory lock, Nebim bağlantı vb.) transaction'ı zehirlemesin
+                # ve cron'daki sonraki siparişler etkilenmesin.
+                with self.env.cr.savepoint():
+                    self._auto_nebim_sync(order)
             except Exception as e:
                 _logger.warning("Sipariş onayında Nebim auto-sync hatası (sipariş yine de onaylandı): %s", e)
         return res
