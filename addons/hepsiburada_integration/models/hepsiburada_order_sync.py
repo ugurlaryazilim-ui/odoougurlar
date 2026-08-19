@@ -684,7 +684,15 @@ class HepsiburadaOrderSync(models.AbstractModel):
 
         sale_order = SaleOrder.create(sale_vals)
         if store.auto_confirm:
-            sale_order.action_confirm()
+            try:
+                with self.env.cr.savepoint():
+                    sale_order.action_confirm()
+            except Exception as e:
+                # Onay başarısız — sipariş draft kalır, transaction korunur
+                self.env.invalidate_all(flush=False)
+                _logger.warning(
+                    "HB sipariş %s oluşturuldu ama otomatik onay başarısız (draft kalacak): %s",
+                    hb_order.hb_order_number, e)
         return sale_order
 
     # ═════════════════════════════════════════════════════════════
