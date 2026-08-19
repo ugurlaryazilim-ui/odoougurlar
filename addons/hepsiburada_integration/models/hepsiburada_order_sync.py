@@ -649,6 +649,13 @@ class HepsiburadaOrderSync(models.AbstractModel):
         warehouse_id_str = self.env['ir.config_parameter'].sudo().get_param('hepsiburada_integration.warehouse_id')
         warehouse_id = int(warehouse_id_str) if warehouse_id_str else False
 
+        # Parametre yoksa şirketin varsayılan deposunu kullan
+        if not warehouse_id:
+            default_wh = self.env['stock.warehouse'].search(
+                [('company_id', '=', self.env.company.id)], limit=1)
+            if default_wh:
+                warehouse_id = default_wh.id
+
         sale_vals = {
             'partner_id': partner.id,
             'client_order_ref': hb_order.hb_order_number,
