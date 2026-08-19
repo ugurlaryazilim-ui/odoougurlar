@@ -66,14 +66,20 @@ class OrderProcessor(models.AbstractModel):
                 sale_order.name
             ])))
             
-            existing_sent_so = self.env['sale.order'].sudo().search([
+            # Farklı mağazalardan gelen aynı sipariş numarası duplikasyon DEĞİLDİR
+            store_id = sale_order.trendyol_store_id.id if hasattr(sale_order, 'trendyol_store_id') and sale_order.trendyol_store_id else None
+            dedup_domain = [
                 ('id', '!=', sale_order.id),
                 ('nebim_order_sent', '=', True),
                 '|', '|',
                 ('client_order_ref', 'in', ref_search),
                 ('name', 'in', ref_search),
                 ('origin', 'in', ref_search)
-            ], limit=1)
+            ]
+            if store_id:
+                dedup_domain.insert(2, ('trendyol_store_id', '=', store_id))
+
+            existing_sent_so = self.env['sale.order'].sudo().search(dedup_domain, limit=1)
             
             if existing_sent_so:
                 _logger.info("Sipariş referansı (%s) Nebim'e %s numaralı siparişle zaten aktarılmış! Çift aktarım engellendi.",
