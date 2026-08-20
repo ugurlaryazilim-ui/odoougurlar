@@ -2,7 +2,7 @@
 
 import { Component, useState, useRef, xml, onWillUnmount, onMounted } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
-import { vibrate, vibrateError, speak } from "../sound_utils";
+import { vibrate, vibrateError } from "../sound_utils";
 
 
 export class PutawayScreen extends Component {
@@ -338,7 +338,7 @@ export class PutawayScreen extends Component {
             const result = await BarcodeService.shelfControl(this.state.shelfBarcode.trim());
             if (result.error) {
                 this.state.error = result.error;
-                speak('putaway_shelf_not_found');
+
             } else {
                 this.state.shelfInfo = {
                     ...result.location,
@@ -346,13 +346,13 @@ export class PutawayScreen extends Component {
                 };
                 this.state.shelfProducts = result.products || [];
                 this.state.step = 2;
-                speak('putaway_shelf_found');
+
                 // Ürün inputuna focus
                 this._focusCurrentInput();
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-            speak('putaway_error');
+
         }
         this.state.loading = false;
     }
@@ -401,7 +401,7 @@ export class PutawayScreen extends Component {
                 const msg = `Yetersiz stok! Rafta ${existingProduct.quantity} adet var, ${qty} adet kaldıramazsınız.`;
                 this.state.error = msg;
                 this._showToast('error', msg);
-                speak('putaway_product_not_found');
+
                 vibrateError();
                 return;
             }
@@ -425,7 +425,7 @@ export class PutawayScreen extends Component {
             if (res.error) {
                 this.state.error = res.error;
                 this._showToast('error', res.error);
-                speak('putaway_product_not_found');
+
                 vibrateError();
             } else {
                 const actionText = mode === 'putaway' ? '✅ Raflama başarılı' : '✅ Raftan kaldırıldı';
@@ -434,9 +434,9 @@ export class PutawayScreen extends Component {
                 this._showToast('success', msg);
 
                 if (mode === 'putaway') {
-                    speak('putaway_product_shelved');
+
                 } else {
-                    speak('putaway_product_removed');
+
                 }
                 vibrate();
 
@@ -458,7 +458,7 @@ export class PutawayScreen extends Component {
         } catch (e) {
             this.state.error = 'Hata: ' + (e.message || e);
             this._showToast('error', 'Hata: ' + (e.message || e));
-            speak('putaway_error');
+
         }
 
         this.state.loading = false;

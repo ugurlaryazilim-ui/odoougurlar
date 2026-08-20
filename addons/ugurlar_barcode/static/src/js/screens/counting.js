@@ -3,7 +3,7 @@
 import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
 import { useService } from "@web/core/utils/hooks";
 import { BarcodeService } from "../barcode_service";
-import { vibrate, vibrateError, speak } from "../sound_utils";
+import { vibrate, vibrateError } from "../sound_utils";
 
 export class CountingScreen extends Component {
     static template = xml`
@@ -330,7 +330,7 @@ export class CountingScreen extends Component {
             const result = await BarcodeService.shelfControl(this.state.shelfBarcode.trim());
             if (result.error) {
                 this.state.error = result.error;
-                speak('count_error');
+
                 vibrateError();
             } else {
                 this.state.shelfInfo = {
@@ -347,13 +347,13 @@ export class CountingScreen extends Component {
                     isNew: false,
                 }));
                 this.state.step = 2;
-                speak('count_shelf_found');
+
                 vibrate();
                 this._focusCurrentInput();
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-            speak('count_error');
+
         }
         this.state.loading = false;
     }
@@ -396,7 +396,7 @@ export class CountingScreen extends Component {
             });
         }
         this.state.productInput = '';
-        speak('count_product_added');
+
         vibrate();
         this._focusCurrentInput();
     }
@@ -432,11 +432,11 @@ export class CountingScreen extends Component {
                 this.state.results = res.results || [];
                 this.state.resultMsg = `${res.location}: ${res.total_counted} ürün sayıldı`;
                 this.state.step = 3;
-                speak('count_saved');
+
             }
         } catch (e) {
             this.state.error = 'Kaydetme hatası: ' + (e.message || e);
-            speak('count_error');
+
         }
         this.state.loading = false;
     }
