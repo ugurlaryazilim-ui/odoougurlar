@@ -280,8 +280,8 @@ export class PutawayScreen extends Component {
             const el = this.state.step === 1
                 ? this.shelfInputRef.el
                 : this.productInputRef.el;
-            if (el) el.focus();
-        }, 100);
+            if (el) { el.focus(); el.select(); }
+        }, 50);
     }
 
     onQuantityInput(ev) {
@@ -305,11 +305,15 @@ export class PutawayScreen extends Component {
 
     // ─── BARKOD OKUYUCU CALLBACK ─────────────────
     onScanDetected(bc) {
-        if (this.state.processing) return; // Kilit varsa atla
         if (this.state.step === 1) {
             this.state.shelfBarcode = bc;
             this.onShelfConfirm();
         } else if (this.state.step === 2) {
+            if (this.state.processing) {
+                // Kilit varsa kuyruğa al, kilit kalktığında çalışacak
+                this._pendingScan = bc;
+                return;
+            }
             this.state.productBarcode = bc;
             this.onExecute();
         }
@@ -318,8 +322,7 @@ export class PutawayScreen extends Component {
     // ─── ADIM 1: RAF TARA ─────────────────────────
     onShelfInput(ev) {
         this.state.shelfBarcode = ev.target.value;
-        // _detectScan KALDIRILDI — scanner callback yeterli
-        // Manuel giriş için sadece Enter kullanılır
+        this._detectScan(ev.target.value, 'shelf');
     }
 
     onShelfKey(ev) {
@@ -369,8 +372,7 @@ export class PutawayScreen extends Component {
     // ─── ADIM 2: ÜRÜN TARA + İŞLEM ───────────────
     onProductInput(ev) {
         this.state.productBarcode = ev.target.value;
-        // _detectScan KALDIRILDI — scanner callback yeterli
-        // Manuel giriş için sadece Enter kullanılır
+        this._detectScan(ev.target.value, 'product');
     }
 
     onProductKey(ev) {
@@ -460,10 +462,17 @@ export class PutawayScreen extends Component {
         }
 
         this.state.loading = false;
-        // Kilidi kısa bir gecikme ile kaldır — scanner debounce
+        // Kilidi kısa gecikme ile kaldır + kuyrukta barkod varsa çalıştır
         setTimeout(() => {
             this.state.processing = false;
-        }, 600);
+            // Kilit sırasında gelen barkodu işle
+            if (this._pendingScan) {
+                const pending = this._pendingScan;
+                this._pendingScan = null;
+                this.state.productBarcode = pending;
+                this.onExecute();
+            }
+        }, 150);
     }
 
     async _refreshShelf() {
@@ -509,6 +518,23 @@ export class PutawayScreen extends Component {
 
     closeHistoryModal() {
         this.state.historyModal = null;
+    }
+
+    // ─── AUTO-SCAN (hızlı tuş basımı algılama) ────
+    _detectScan(val, target) {
+        const now = Date.now();
+        const key = '_rapid_' + target;
+        if (this[key + '_time'] && (now - this[key + '_time']) < 80) {
+            this[key + '_count'] = (this[key + '_count'] || 0) + 1;
+        } else { this[key + '_count'] = 0; }
+        this[key + '_time'] = now;
+        if (this[key + '_timer']) clearTimeout(this[key + '_timer']);
+        if (this[key + '_count'] >= 6 && val.trim().length >= 4) {
+            this[key + '_timer'] = setTimeout(() => {
+                if (target === 'shelf') this.onShelfConfirm();
+                else this.onExecute();
+            }, 300);
+        }
     }
 
     // ─── KAMERA TARAYICI (iOS + Android) ──────────────────────────
