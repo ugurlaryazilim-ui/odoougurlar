@@ -687,15 +687,55 @@ class HepsiburadaOrderSync(models.AbstractModel):
             hb_order.hb_order_number, sale_order.name,
             sale_order.warehouse_id.name if sale_order.warehouse_id else 'Odoo default')
 
-        # ── Otomatik onayla — Trendyol modeli: tek deneme ──
+        # ── Otomatik onayla — savepoint korumalı ──
         if store.auto_confirm:
+            confirmed = False
+
+            # 1. Yapılandırılmış depo ile dene (savepoint ile)
             try:
-                sale_order.action_confirm()
-                _logger.info("HB sipariş %s: sipariş onaylandı (%s).",
-                             hb_order.hb_order_number, sale_order.name)
-            except Exception as e:
-                _logger.warning("HB sipariş %s: onay hatası (draft kalacak): %s",
-                                hb_order.hb_order_number, e)
+                with self.env.cr.savepoint():
+                    sale_order.action_confirm()
+                    confirmed = True
+                    _logger.info("HB sipariş %s: sipariş onaylandı (%s).",
+                                 hb_order.hb_order_number, sale_order.name)
+            except Exception as e1:
+                self.env.invalidate_all(flush=False)
+                _logger.warning(
+                    "HB sipariş %s: [1/2] depo '%s' ile onay başarısız: %s",
+                    hb_order.hb_order_number,
+                    sale_order.warehouse_id.name if sale_order.warehouse_id else '?', e1)
+
+            # 2. Başarısızsa siparişi sil, varsayılan depo ile yeniden oluştur
+            if not confirmed and warehouse_id:
+                try:
+                    with self.env.cr.savepoint():
+                        # Mevcut siparişi sil
+                        sale_order.unlink()
+                        # warehouse_id olmadan yeniden oluştur → Odoo default depo
+                        new_vals = dict(sale_vals)
+                        new_vals.pop('warehouse_id', None)
+                        sale_order = SaleOrder.create(new_vals)
+                        _logger.info(
+                            "HB sipariş %s: varsayılan depo ile yeniden oluşturuldu (%s, warehouse=%s)",
+                            hb_order.hb_order_number, sale_order.name,
+                            sale_order.warehouse_id.name if sale_order.warehouse_id else 'default')
+                        sale_order.action_confirm()
+                        confirmed = True
+                        # hb_order linkini güncelle
+                        hb_order.write({'sale_order_id': sale_order.id})
+                        _logger.info("HB sipariş %s: varsayılan depo ile onaylandı (%s).",
+                                     hb_order.hb_order_number, sale_order.name)
+                except Exception as e2:
+                    self.env.invalidate_all(flush=False)
+                    _logger.warning(
+                        "HB sipariş %s: [2/2] varsayılan depo ile de başarısız: %s",
+                        hb_order.hb_order_number, e2)
+
+            if not confirmed:
+                _logger.error(
+                    "HB sipariş %s: onaylanamadı, draft bırakıldı. "
+                    "Depo rota yapılandırmasını kontrol edin.",
+                    hb_order.hb_order_number)
 
         return sale_order
 
