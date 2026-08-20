@@ -647,6 +647,8 @@ class HepsiburadaOrderSync(models.AbstractModel):
             order_lines.append((0, 0, ol_vals))
 
         ICP = self.env['ir.config_parameter'].sudo()
+        Warehouse = self.env['stock.warehouse']
+
         warehouse_id_str = ICP.get_param('hepsiburada_integration.warehouse_id')
         warehouse_id = int(warehouse_id_str) if warehouse_id_str else False
         backup_wh_str = ICP.get_param('hepsiburada_integration.backup_warehouse_id')
@@ -654,10 +656,19 @@ class HepsiburadaOrderSync(models.AbstractModel):
 
         # Parametre yoksa şirketin varsayılan deposunu kullan
         if not warehouse_id:
-            default_wh = self.env['stock.warehouse'].search(
+            default_wh = Warehouse.search(
                 [('company_id', '=', self.env.company.id)], limit=1)
             if default_wh:
                 warehouse_id = default_wh.id
+
+        # ── Deponun teslimat rotasını sipariş satırlarına ata ──
+        # Bu, ürünün kendi rotası bozuk/eksik olsa bile doğru rotayı kullanmasını sağlar.
+        if warehouse_id:
+            wh = Warehouse.browse(warehouse_id)
+            if wh.exists() and hasattr(wh, 'delivery_route_id') and wh.delivery_route_id:
+                for ol in order_lines:
+                    if len(ol) == 3 and isinstance(ol[2], dict):
+                        ol[2]['route_id'] = wh.delivery_route_id.id
 
         sale_vals = {
             'partner_id': partner.id,
@@ -686,8 +697,13 @@ class HepsiburadaOrderSync(models.AbstractModel):
             return existing_so
 
         sale_order = SaleOrder.create(sale_vals)
+        _logger.info(
+            "HB sipariş %s: sale.order oluşturuldu (%s), warehouse_id=%s, backup=%s",
+            hb_order.hb_order_number, sale_order.name, warehouse_id, backup_warehouse_id)
+
         if store.auto_confirm:
             confirmed = False
+
             # 1. Ana depo ile dene
             try:
                 with self.env.cr.savepoint():
@@ -703,7 +719,11 @@ class HepsiburadaOrderSync(models.AbstractModel):
             if not confirmed and backup_warehouse_id and backup_warehouse_id != warehouse_id:
                 try:
                     with self.env.cr.savepoint():
+                        backup_wh = Warehouse.browse(backup_warehouse_id)
                         sale_order.write({'warehouse_id': backup_warehouse_id})
+                        # Sipariş satırlarının rotasını yedek deponun teslimat rotasına güncelle
+                        if backup_wh.exists() and hasattr(backup_wh, 'delivery_route_id') and backup_wh.delivery_route_id:
+                            sale_order.order_line.write({'route_id': backup_wh.delivery_route_id.id})
                         sale_order.action_confirm()
                         confirmed = True
                         _logger.info(
