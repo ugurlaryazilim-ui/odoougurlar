@@ -235,7 +235,7 @@ class HepsiburadaOrderSync(models.AbstractModel):
         return None
 
     @api.private
-    def _process_orders(self, packages, store):
+    def _process_orders(self, packages, store, skip_date_filter=False):
         """API'den gelen paket listesini sipariş numarasına göre gruplayıp kaydeder."""
         _logger.info("Hepsiburada _process_orders called with %s packages.", len(packages))
         orders_dict = {}
@@ -269,18 +269,19 @@ class HepsiburadaOrderSync(models.AbstractModel):
         day_limit = store.order_day_range if store.order_day_range else 14
         cutoff_date = datetime.utcnow() - timedelta(days=day_limit)
         for order_no, line_items in orders_dict.items():
-            # ── Client-side tarih filtresi ──
-            first_pkg = line_items[0] if line_items else {}
-            order_date_str = first_pkg.get('orderDate')
-            if order_date_str:
-                try:
-                    order_dt = datetime.strptime(order_date_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
-                    if order_dt < cutoff_date:
-                        _logger.debug("Eski sipariş atlandı (orderDate=%s < startDate=%s): %s",
-                                      order_dt, cutoff_date, order_no)
-                        continue
-                except Exception:
-                    pass
+            # ── Client-side tarih filtresi (tekil çekimde devre dışı) ──
+            if not skip_date_filter:
+                first_pkg = line_items[0] if line_items else {}
+                order_date_str = first_pkg.get('orderDate')
+                if order_date_str:
+                    try:
+                        order_dt = datetime.strptime(order_date_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
+                        if order_dt < cutoff_date:
+                            _logger.info("Eski sipariş atlandı (orderDate=%s < startDate=%s): %s",
+                                          order_dt, cutoff_date, order_no)
+                            continue
+                    except Exception:
+                        pass
 
             try:
                 with self.env.cr.savepoint():

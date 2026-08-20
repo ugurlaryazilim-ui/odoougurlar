@@ -328,7 +328,7 @@ class HepsiburadaStore(models.Model):
         packages = [data] if isinstance(data, dict) else data
 
         try:
-            processed, created, errors, msgs = OrderSync._process_orders(packages, self)
+            processed, created, errors, msgs = OrderSync._process_orders(packages, self, skip_date_filter=True)
         except Exception as e:
             raise UserError(_('❌ Sipariş işleme hatası:\n\n%s') % str(e))
 

@@ -376,7 +376,7 @@ class PazaramaOrderSync(models.Model):
             bill_city_name = bill_addr.get('cityName', '')
             bill_district_name = bill_addr.get('districtName', '')
             bill_state = self._find_turkey_state(bill_city_name)
-            invoice_partner = partner_env.create({
+            invoice_vals = {
                 'name': bill_addr.get('companyName') or p_order.customer_name,
                 'type': 'invoice',
                 'parent_id': partner.id,
@@ -385,9 +385,11 @@ class PazaramaOrderSync(models.Model):
                 'state_id': bill_state.id if bill_state else False,  # İl
                 'country_id': country_tr,
                 'vat': bill_addr.get('taxNumber') or bill_addr.get('identityNumber'),
-                'is_subject_to_einvoice': bill_addr.get('isEInvoiceObliged', False),
                 'ref': customer_ref,
-            })
+            }
+            if 'is_subject_to_einvoice' in self.env['res.partner']._fields:
+                invoice_vals['is_subject_to_einvoice'] = bill_addr.get('isEInvoiceObliged', False)
+            invoice_partner = partner_env.create(invoice_vals)
 
         # Sipariş oluştur
         # Depo ayarını config'den al — Ayarlar > Pazarama > Depo Ayarları
