@@ -2,7 +2,7 @@
 
 import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
 import { useService } from "@web/core/utils/hooks";
-import { BarcodeService } from "../barcode_service";
+import { BarcodeService, AudioFeedback } from "../barcode_service";
 import { vibrate, vibrateError } from "../sound_utils";
 
 export class CountingScreen extends Component {
@@ -330,7 +330,7 @@ export class CountingScreen extends Component {
             const result = await BarcodeService.shelfControl(this.state.shelfBarcode.trim());
             if (result.error) {
                 this.state.error = result.error;
-
+                AudioFeedback.playError();
                 vibrateError();
             } else {
                 this.state.shelfInfo = {
@@ -347,13 +347,13 @@ export class CountingScreen extends Component {
                     isNew: false,
                 }));
                 this.state.step = 2;
-
+                AudioFeedback.playSuccess();
                 vibrate();
                 this._focusCurrentInput();
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-
+            AudioFeedback.playError();
         }
         this.state.loading = false;
     }
@@ -396,7 +396,7 @@ export class CountingScreen extends Component {
             });
         }
         this.state.productInput = '';
-
+        AudioFeedback.playSuccess();
         vibrate();
         this._focusCurrentInput();
     }
@@ -428,15 +428,16 @@ export class CountingScreen extends Component {
             const res = await BarcodeService.countSave(this.state.shelfBarcode.trim(), payload);
             if (res.error) {
                 this.state.error = res.error;
+                AudioFeedback.playError();
             } else {
                 this.state.results = res.results || [];
                 this.state.resultMsg = `${res.location}: ${res.total_counted} ürün sayıldı`;
                 this.state.step = 3;
-
+                AudioFeedback.playSuccess();
             }
         } catch (e) {
             this.state.error = 'Kaydetme hatası: ' + (e.message || e);
-
+            AudioFeedback.playError();
         }
         this.state.loading = false;
     }

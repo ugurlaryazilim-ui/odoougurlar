@@ -1,7 +1,7 @@
 /** @odoo-module **/
 
 import { Component, useState, useRef, xml, onWillUnmount, onMounted } from "@odoo/owl";
-import { BarcodeService } from "../barcode_service";
+import { BarcodeService, AudioFeedback } from "../barcode_service";
 import { vibrate, vibrateError } from "../sound_utils";
 
 
@@ -338,7 +338,7 @@ export class PutawayScreen extends Component {
             const result = await BarcodeService.shelfControl(this.state.shelfBarcode.trim());
             if (result.error) {
                 this.state.error = result.error;
-
+                AudioFeedback.playError();
             } else {
                 this.state.shelfInfo = {
                     ...result.location,
@@ -346,13 +346,13 @@ export class PutawayScreen extends Component {
                 };
                 this.state.shelfProducts = result.products || [];
                 this.state.step = 2;
-
+                AudioFeedback.playSuccess();
                 // Ürün inputuna focus
                 this._focusCurrentInput();
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-
+            AudioFeedback.playError();
         }
         this.state.loading = false;
     }
@@ -401,7 +401,7 @@ export class PutawayScreen extends Component {
                 const msg = `Yetersiz stok! Rafta ${existingProduct.quantity} adet var, ${qty} adet kaldıramazsınız.`;
                 this.state.error = msg;
                 this._showToast('error', msg);
-
+                AudioFeedback.playError();
                 vibrateError();
                 return;
             }
@@ -425,19 +425,14 @@ export class PutawayScreen extends Component {
             if (res.error) {
                 this.state.error = res.error;
                 this._showToast('error', res.error);
-
+                AudioFeedback.playError();
                 vibrateError();
             } else {
                 const actionText = mode === 'putaway' ? '✅ Raflama başarılı' : '✅ Raftan kaldırıldı';
                 const msg = `${actionText}: ${res.message || barcode}`;
                 this.state.success = msg;
                 this._showToast('success', msg);
-
-                if (mode === 'putaway') {
-
-                } else {
-
-                }
+                AudioFeedback.playSuccess();
                 vibrate();
 
                 this.state.history.unshift({
@@ -458,7 +453,7 @@ export class PutawayScreen extends Component {
         } catch (e) {
             this.state.error = 'Hata: ' + (e.message || e);
             this._showToast('error', 'Hata: ' + (e.message || e));
-
+            AudioFeedback.playError();
         }
 
         this.state.loading = false;
