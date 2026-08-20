@@ -63,11 +63,51 @@ class CustomerProcessor(models.AbstractModel):
                 committed_addr = (addr_row[0] if addr_row else '') or ''
             except Exception:
                 pass
-            _logger.info(
-                "Cari kodu DB'den taze okundu (lock sonrası): %s -> %s",
-                partner.name, committed_code
-            )
-            return committed_code, committed_addr
+
+            # ─── NEBİM CANLI DOĞRULAMA ───
+            # Partner'da kayıtlı kod Nebim'de gerçekten var mı?
+            # Kullanıcı Nebim'den cariyi silmiş olabilir → stale code
+            nebim_still_exists = False
+            try:
+                connector = self.env['odoougurlar.nebim.connector']
+                email = (partner.email or '').strip().lower()
+                if email:
+                    sp_res = connector.run_proc('sp_GetCustomer_Hamurlabs', [
+                        {'Name': 'CommunicationTypeCode', 'Value': 3},
+                        {'Name': 'CommAddress', 'Value': email},
+                        {'Name': 'TypeCode', 'Value': 4},
+                        {'Name': 'CustomerType', 'Value': 4}
+                    ])
+                    if sp_res and isinstance(sp_res, list) and len(sp_res) > 0:
+                        first = sp_res[0]
+                        if isinstance(first, dict) and first.get('CurrAccCode'):
+                            nebim_still_exists = True
+                            # Nebim'deki kod farklı olabilir — güncellenmiş olabilir
+                            committed_code = first.get('CurrAccCode')
+                            committed_addr = first.get('BillingAddressID') or committed_addr
+            except Exception as e:
+                _logger.warning("Nebim cari doğrulama hatası (committed code %s): %s", committed_code, e)
+                # SP çalışmadıysa mevcut kodu kabul et (bağlantı hatası olabilir)
+                nebim_still_exists = True
+
+            if nebim_still_exists:
+                _logger.info(
+                    "Cari kodu DB'den taze okundu ve Nebim'de doğrulandı: %s -> %s",
+                    partner.name, committed_code
+                )
+                return committed_code, committed_addr
+            else:
+                # Nebim'de bu cari artık YOK — Odoo'daki eski kodu TEMİZLE
+                _logger.warning(
+                    "Partner %s için kayıtlı cari kodu '%s' Nebim'de BULUNAMADI! Stale code temizleniyor.",
+                    partner.name, committed_row[0]
+                )
+                partner.sudo().write({
+                    'nebim_customer_sent': False,
+                    'nebim_customer_code': False,
+                    'nebim_address_id': False
+                })
+                # Devam et — yeni cari oluşturulacak (aşağıdaki bloklar)
 
         # ═══════════════════════════════════════════════════════════════════
         # NEBİM = TEK GERÇEK KAYNAK (Source of Truth)
