@@ -348,11 +348,13 @@ class PazaramaOrderSync(models.Model):
             
             # Eğer kurumsalsa fatura adresi bilgilerine göre vergi bilgilerini güncelle
             if bill_addr.get('invoiceType') == 2:
-                partner.write({
+                corp_vals = {
                     'name': bill_addr.get('companyName') or p_order.customer_name,
                     'vat': bill_addr.get('taxNumber') or bill_addr.get('identityNumber'),
-                    'is_subject_to_einvoice': bill_addr.get('isEInvoiceObliged', False)
-                })
+                }
+                if 'is_subject_to_einvoice' in self.env['res.partner']._fields:
+                    corp_vals['is_subject_to_einvoice'] = bill_addr.get('isEInvoiceObliged', False)
+                partner.write(corp_vals)
         else:
             # Mevcut partner'ın il/ilçe bilgilerini güncelle
             update_vals = {}

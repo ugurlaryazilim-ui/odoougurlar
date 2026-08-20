@@ -638,7 +638,9 @@ class HepsiburadaOrderSync(models.AbstractModel):
                     tax_cache[vat_rate] = tax
                 include_tax = tax_cache[vat_rate]
                 if include_tax:
-                    ol_vals['tax_id'] = [(6, 0, [include_tax.id])]
+                    tax_field = 'tax_ids' if 'tax_ids' in self.env['sale.order.line']._fields else ('tax_id' if 'tax_id' in self.env['sale.order.line']._fields else False)
+                    if tax_field:
+                        ol_vals[tax_field] = [(6, 0, [include_tax.id])]
                 else:
                     # KDV dahil vergi bulunamadı — manuel dönüşüm
                     ol_vals['price_unit'] = unit_price / (1 + vat_rate / 100)
@@ -647,19 +649,9 @@ class HepsiburadaOrderSync(models.AbstractModel):
             order_lines.append((0, 0, ol_vals))
 
         ICP = self.env['ir.config_parameter'].sudo()
-        Warehouse = self.env['stock.warehouse']
 
-        warehouse_id_str = ICP.get_param('hepsiburada_integration.warehouse_id')
-        warehouse_id = int(warehouse_id_str) if warehouse_id_str else False
-        backup_wh_str = ICP.get_param('hepsiburada_integration.backup_warehouse_id')
-        backup_warehouse_id = int(backup_wh_str) if backup_wh_str else False
-
-        # Parametre yoksa şirketin varsayılan deposunu kullan
-        if not warehouse_id:
-            default_wh = Warehouse.search(
-                [('company_id', '=', self.env.company.id)], limit=1)
-            if default_wh:
-                warehouse_id = default_wh.id
+        # ── Depo — Trendyol modeli: parametre varsa set et, yoksa Odoo default ──
+        warehouse_id = int(ICP.get_param('hepsiburada_integration.warehouse_id', 0))
 
         sale_vals = {
             'partner_id': partner.id,
@@ -671,130 +663,39 @@ class HepsiburadaOrderSync(models.AbstractModel):
         }
         if hb_order.order_date:
             sale_vals['date_order'] = hb_order.order_date
-        if warehouse_id:
+        # Sadece geçerli bir warehouse_id varsa set et; yoksa Odoo native default kullanır
+        if warehouse_id and 'warehouse_id' in self.env['sale.order']._fields:
             sale_vals['warehouse_id'] = warehouse_id
 
         # Dedup kontrolü
         ref_names = list(filter(None, [hb_order.hb_order_number, f"HB-{hb_order.hb_order_number}"]))
-        existing_so = SaleOrder.search([
+        existing_so = self.env['sale.order'].search([
             '|', '|',
             ('client_order_ref', 'in', ref_names),
             ('origin', 'in', ref_names),
             ('name', 'in', ref_names)
         ], limit=1)
         if existing_so:
-            _logger.info("HB: Odoo'da %s sipariş referanslı kayıt (%s) zaten var. Tekrar oluşturulmayacak.",
+            _logger.info("HB: Odoo'da %s sipariş referanslı kayıt (%s) zaten var.",
                          hb_order.hb_order_number, existing_so.name)
             return existing_so
 
         sale_order = SaleOrder.create(sale_vals)
-
-        # ── Depo diagnostik logları ──
-        wh_rec = sale_order.warehouse_id
         _logger.info(
-            "HB sipariş %s: sale.order oluşturuldu (%s), "
-            "warehouse_id=%s (name=%s, lot_stock_id=%s, lot_stock_name=%s), backup=%s",
+            "HB sipariş %s: sale.order oluşturuldu (%s), warehouse=%s",
             hb_order.hb_order_number, sale_order.name,
-            wh_rec.id if wh_rec else None,
-            wh_rec.name if wh_rec else None,
-            wh_rec.lot_stock_id.id if wh_rec and wh_rec.lot_stock_id else None,
-            wh_rec.lot_stock_id.display_name if wh_rec and wh_rec.lot_stock_id else None,
-            backup_warehouse_id)
+            sale_order.warehouse_id.name if sale_order.warehouse_id else 'Odoo default')
 
+        # ── Otomatik onayla — Trendyol modeli: tek deneme ──
         if store.auto_confirm:
-            confirmed = False
-
-            # 1. Yapılandırılmış depo ile dene
             try:
-                with self.env.cr.savepoint():
-                    sale_order.action_confirm()
-                    confirmed = True
-            except Exception as e1:
-                self.env.invalidate_all(flush=False)
-                _logger.warning(
-                    "HB sipariş %s: [1/4] depo id=%s ile onay başarısız: %s",
-                    hb_order.hb_order_number, warehouse_id, e1)
+                sale_order.action_confirm()
+                _logger.info("HB sipariş %s: sipariş onaylandı (%s).",
+                             hb_order.hb_order_number, sale_order.name)
+            except Exception as e:
+                _logger.warning("HB sipariş %s: onay hatası (draft kalacak): %s",
+                                hb_order.hb_order_number, e)
 
-            # 2. Yedek depo ile dene
-            if not confirmed and backup_warehouse_id and backup_warehouse_id != warehouse_id:
-                try:
-                    with self.env.cr.savepoint():
-                        sale_order.write({'warehouse_id': backup_warehouse_id})
-                        sale_order.action_confirm()
-                        confirmed = True
-                        _logger.info(
-                            "HB sipariş %s: [2/4] yedek depo (id=%s) ile onaylandı.",
-                            hb_order.hb_order_number, backup_warehouse_id)
-                except Exception as e2:
-                    self.env.invalidate_all(flush=False)
-                    _logger.warning(
-                        "HB sipariş %s: [2/4] yedek depo id=%s ile onay başarısız: %s",
-                        hb_order.hb_order_number, backup_warehouse_id, e2)
-
-            # 3. Şirketin ana/varsayılan deposu ile dene (Trendyol gibi)
-            if not confirmed:
-                try:
-                    with self.env.cr.savepoint():
-                        default_wh = Warehouse.search(
-                            [('company_id', '=', self.env.company.id)],
-                            order='id asc', limit=1)
-                        if default_wh and default_wh.id not in (warehouse_id, backup_warehouse_id):
-                            _logger.info(
-                                "HB sipariş %s: [3/4] şirket ana deposu deneniyor: "
-                                "id=%s, name=%s, lot_stock_id=%s",
-                                hb_order.hb_order_number, default_wh.id, default_wh.name,
-                                default_wh.lot_stock_id.id if default_wh.lot_stock_id else None)
-                            sale_order.write({'warehouse_id': default_wh.id})
-                            sale_order.action_confirm()
-                            confirmed = True
-                            _logger.info(
-                                "HB sipariş %s: [3/4] şirket ana deposu ile onaylandı (id=%s).",
-                                hb_order.hb_order_number, default_wh.id)
-                except Exception as e3:
-                    self.env.invalidate_all(flush=False)
-                    _logger.warning(
-                        "HB sipariş %s: [3/4] şirket ana deposu ile onay başarısız: %s",
-                        hb_order.hb_order_number, e3)
-
-            # 4. Ürün rotalarını temizleyip varsayılan depo ile dene
-            if not confirmed:
-                try:
-                    with self.env.cr.savepoint():
-                        products_with_routes = sale_order.order_line.mapped('product_id').filtered('route_ids')
-                        if products_with_routes:
-                            _logger.info(
-                                "HB sipariş %s: [4/4] %d ürünün rotaları temizlenerek deneniyor.",
-                                hb_order.hb_order_number, len(products_with_routes))
-                            for p in products_with_routes:
-                                p.sudo().write({'route_ids': [(5, 0, 0)]})
-                        # Varsayılan depo ile dene
-                        default_wh = Warehouse.search(
-                            [('company_id', '=', self.env.company.id)],
-                            order='id asc', limit=1)
-                        if default_wh:
-                            sale_order.write({'warehouse_id': default_wh.id})
-                        sale_order.action_confirm()
-                        confirmed = True
-                        _logger.info(
-                            "HB sipariş %s: [4/4] rota temizleme + varsayılan depo ile onaylandı.",
-                            hb_order.hb_order_number)
-                except Exception as e4:
-                    self.env.invalidate_all(flush=False)
-                    _logger.warning(
-                        "HB sipariş %s: [4/4] son yöntem de başarısız (draft kalacak): %s",
-                        hb_order.hb_order_number, e4)
-
-            if not confirmed:
-                # Sipariş draft kalacak — orijinal depoyu geri yaz
-                if warehouse_id:
-                    try:
-                        sale_order.write({'warehouse_id': warehouse_id})
-                    except Exception:
-                        pass
-                _logger.error(
-                    "HB sipariş %s: 4 yöntem de başarısız, draft bırakıldı. "
-                    "Ürünün/deponun rota yapılandırmasını kontrol edin.",
-                    hb_order.hb_order_number)
         return sale_order
 
     # ═════════════════════════════════════════════════════════════
