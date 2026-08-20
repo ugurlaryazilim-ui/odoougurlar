@@ -75,7 +75,9 @@ def _extract_marketplace_info(sale_order):
     if hasattr(sale_order, 'amazon_store_id') and sale_order.amazon_store_id:
         amazon_order = getattr(sale_order, 'amazon_order_id', None)
         order_num = (getattr(amazon_order, 'amazon_order_number', '') if amazon_order else '') or sale_order.client_order_ref or ''
-        cargo_tracking = (getattr(amazon_order, 'cargo_tracking_number', '') if amazon_order else '') or order_num
+        # EasyShip tracking (ZA8156127) > cargo_tracking_number > Amazon Order ID fallback
+        easyship_tid = (getattr(amazon_order, 'easyship_tracking_id', '') if amazon_order else '') or ''
+        cargo_tracking = easyship_tid or (getattr(amazon_order, 'cargo_tracking_number', '') if amazon_order else '') or order_num
         cargo_provider = (getattr(amazon_order, 'cargo_provider', '') if amazon_order else '') or 'MNGTR'
         cust_name = getattr(amazon_order, 'customer_name', '') if amazon_order else (sale_order.partner_id.name or '')
         return {

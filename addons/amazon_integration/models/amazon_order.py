@@ -47,6 +47,10 @@ class AmazonOrder(models.Model):
     # Kargo
     cargo_provider = fields.Char(string='Kargo Firması')
     cargo_tracking_number = fields.Char(string='Kargo Takip No')
+    easyship_tracking_id = fields.Char(
+        string='EasyShip Takip Kodu',
+        help='Amazon EasyShip API üzerinden çekilen gerçek kargo takip kodu (örn: ZA8156127)'
+    )
 
     # Tutarlar
     total_price = fields.Float(string='Toplam Tutar', digits=(12, 2))

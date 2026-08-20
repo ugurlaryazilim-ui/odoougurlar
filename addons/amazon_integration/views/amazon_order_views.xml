@@ -68,6 +68,7 @@
                                 <field name="currency" readonly="1"/>
                                 <field name="cargo_provider" readonly="1"/>
                                 <field name="cargo_tracking_number" readonly="1"/>
+                                <field name="easyship_tracking_id" readonly="1"/>
                             </group>
                         </group>
 

@@ -388,6 +388,17 @@ class AmazonOrderSync(models.Model):
                 'item_tax': float(item.get('ItemTax', {}).get('Amount', 0.0)),
             }))
 
+        # ─── EasyShip Kargo Takip Kodu Çekimi ───
+        easyship_tracking = ''
+        easyship_status = order_data.get('EasyShipShipmentStatus', '')
+        if status in ('Shipped', 'Unshipped') or easyship_status:
+            easyship_tracking = self._fetch_easyship_tracking(
+                amazon_order_id, session, auth, base_url
+            )
+
+        # Kargo takip: EasyShip tracking > Amazon Order ID fallback
+        cargo_tracking = easyship_tracking or str(amazon_order_id)
+
         amz_order_vals = {
             'amazon_order_number': str(amazon_order_id),
             'store_id': self.id,
@@ -402,7 +413,8 @@ class AmazonOrderSync(models.Model):
             'shipping_district': shipping_address.get('Municipality', '') or shipping_address.get('County', '') or shipping_address.get('StateOrRegion', ''),
             'postal_code': shipping_address.get('PostalCode', ''),
             'cargo_provider': 'MNGTR',
-            'cargo_tracking_number': str(amazon_order_id),
+            'cargo_tracking_number': cargo_tracking,
+            'easyship_tracking_id': easyship_tracking,
             'total_price': total_order_amount,
             'currency': order_data.get('OrderTotal', {}).get('CurrencyCode', 'TRY'),
             'raw_payload': raw_json_str,
@@ -439,6 +451,17 @@ class AmazonOrderSync(models.Model):
                     existing_order.order_line.sudo().unlink()
                     existing_order.sudo().write({'order_line': new_lines})
 
+            # ─── Pending→Unshipped/Shipped geçişi: Sipariş hâlâ draft ise onayla ───
+            # Sipariş ilk geldiğinde Pending idi ve action_confirm yapılmadı.
+            # Şimdi PII tamamlandı ve sipariş draft durumunda → onayla (Nebim'e de gider)
+            if existing_order.state == 'draft' and status not in ('Pending', 'Canceled'):
+                if order_data.get('FulfillmentChannel') == 'MFN':
+                    _logger.info(
+                        "Amazon sipariş %s Pending→%s geçişi: PII tamamlandı, action_confirm çağrılıyor.",
+                        amazon_order_id, status
+                    )
+                    existing_order.action_confirm()
+
             return processed, 0, 0, msgs
 
         # ─── Odoo Siparişi Oluştur ───
@@ -464,12 +487,75 @@ class AmazonOrderSync(models.Model):
 
         amazon_order.write({'sale_order_id': sale_order.id})
         
-        # MFN (satıcı kargosu) ise otomatik onayla
-        if order_data.get('FulfillmentChannel') == 'MFN':
+        # ─── Pending Sipariş → Onaylama ───
+        # Pending siparişlerde PII yok → action_confirm YAPMA (Nebim'e yanlış bilgi gider)
+        # Unshipped/Shipped siparişlerde PII mevcut → action_confirm YAP
+        if order_data.get('FulfillmentChannel') == 'MFN' and status != 'Pending':
             sale_order.action_confirm()
+        elif status == 'Pending':
+            _logger.info(
+                "Amazon sipariş %s Pending durumunda — draft olarak bırakılıyor (PII henüz mevcut değil).",
+                amazon_order_id
+            )
 
         created = 1
         return processed, created, failed, msgs
+
+    @api.private
+    def _fetch_easyship_tracking(self, amazon_order_id, session, auth, base_url):
+        """Amazon EasyShip API'den gerçek kargo takip kodunu çeker (örn: ZA8156127).
+        
+        Endpoint: GET /easyShip/2022-03-23/package
+        Bu endpoint 'Direct-to-Consumer Shipping' rolü gerektirir.
+        Başarısız olursa boş string döner ve fallback olarak Amazon Order ID kullanılır.
+        """
+        endpoint = f"{base_url}/easyShip/2022-03-23/package"
+        params = {
+            'amazonOrderId': amazon_order_id,
+            'marketplaceId': self.marketplace_id,
+        }
+        try:
+            res = session.get(endpoint, auth=auth, params=params, timeout=20)
+            if res.status_code == 200:
+                payload = res.json().get('payload', {}) or res.json()
+                # trackingDetails.trackingId formatı
+                tracking_details = payload.get('trackingDetails', {})
+                tracking_id = tracking_details.get('trackingId', '')
+                if tracking_id:
+                    _logger.info(
+                        "Amazon EasyShip tracking çekildi: %s → %s",
+                        amazon_order_id, tracking_id
+                    )
+                    return tracking_id
+                # Alternatif response yapısı: scheduledPackageId altında olabilir
+                packages = payload.get('packages', [])
+                if packages:
+                    for pkg in packages:
+                        tid = (pkg.get('trackingDetails', {}) or {}).get('trackingId', '')
+                        if tid:
+                            _logger.info(
+                                "Amazon EasyShip tracking (packages) çekildi: %s → %s",
+                                amazon_order_id, tid
+                            )
+                            return tid
+            elif res.status_code == 403:
+                _logger.warning(
+                    "Amazon EasyShip API 403 Forbidden (%s) — 'Direct-to-Consumer Shipping' rolü kontrol edin.",
+                    amazon_order_id
+                )
+            elif res.status_code == 404:
+                _logger.info(
+                    "Amazon EasyShip paketi bulunamadı (%s) — sipariş henüz zamanlanmamış olabilir.",
+                    amazon_order_id
+                )
+            else:
+                _logger.warning(
+                    "Amazon EasyShip API HTTP %s (%s): %s",
+                    res.status_code, amazon_order_id, res.text[:500]
+                )
+        except Exception as e:
+            _logger.error("Amazon EasyShip fetch hatası (%s): %s", amazon_order_id, e)
+        return ''
 
     @api.private
     def _fetch_order_address(self, amazon_order_id, session, auth, base_url):
