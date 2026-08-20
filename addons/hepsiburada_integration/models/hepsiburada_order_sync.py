@@ -688,14 +688,23 @@ class HepsiburadaOrderSync(models.AbstractModel):
             return existing_so
 
         sale_order = SaleOrder.create(sale_vals)
+
+        # ── Depo diagnostik logları ──
+        wh_rec = sale_order.warehouse_id
         _logger.info(
-            "HB sipariş %s: sale.order oluşturuldu (%s), warehouse_id=%s, backup=%s",
-            hb_order.hb_order_number, sale_order.name, warehouse_id, backup_warehouse_id)
+            "HB sipariş %s: sale.order oluşturuldu (%s), "
+            "warehouse_id=%s (name=%s, lot_stock_id=%s, lot_stock_name=%s), backup=%s",
+            hb_order.hb_order_number, sale_order.name,
+            wh_rec.id if wh_rec else None,
+            wh_rec.name if wh_rec else None,
+            wh_rec.lot_stock_id.id if wh_rec and wh_rec.lot_stock_id else None,
+            wh_rec.lot_stock_id.display_name if wh_rec and wh_rec.lot_stock_id else None,
+            backup_warehouse_id)
 
         if store.auto_confirm:
             confirmed = False
 
-            # 1. Ana depo ile dene
+            # 1. Yapılandırılmış depo ile dene
             try:
                 with self.env.cr.savepoint():
                     sale_order.action_confirm()
@@ -703,10 +712,10 @@ class HepsiburadaOrderSync(models.AbstractModel):
             except Exception as e1:
                 self.env.invalidate_all(flush=False)
                 _logger.warning(
-                    "HB sipariş %s: ana depo (id=%s) ile onay başarısız: %s",
+                    "HB sipariş %s: [1/4] depo id=%s ile onay başarısız: %s",
                     hb_order.hb_order_number, warehouse_id, e1)
 
-            # 2. Ana depo başarısızsa yedek depo ile dene
+            # 2. Yedek depo ile dene
             if not confirmed and backup_warehouse_id and backup_warehouse_id != warehouse_id:
                 try:
                     with self.env.cr.savepoint():
@@ -714,45 +723,77 @@ class HepsiburadaOrderSync(models.AbstractModel):
                         sale_order.action_confirm()
                         confirmed = True
                         _logger.info(
-                            "HB sipariş %s: yedek depo (id=%s) ile onaylandı.",
+                            "HB sipariş %s: [2/4] yedek depo (id=%s) ile onaylandı.",
                             hb_order.hb_order_number, backup_warehouse_id)
                 except Exception as e2:
                     self.env.invalidate_all(flush=False)
                     _logger.warning(
-                        "HB sipariş %s: yedek depo (id=%s) ile de onay başarısız: %s",
+                        "HB sipariş %s: [2/4] yedek depo id=%s ile onay başarısız: %s",
                         hb_order.hb_order_number, backup_warehouse_id, e2)
 
-            # 3. Her iki depo da başarısızsa, ürünlerin rotalarını temizleyip tekrar dene
+            # 3. Şirketin ana/varsayılan deposu ile dene (Trendyol gibi)
             if not confirmed:
                 try:
                     with self.env.cr.savepoint():
-                        # Ürün rotalarını geçici olarak temizle (kırık/eksik rota düzeltmesi)
-                        products_with_routes = sale_order.order_line.mapped('product_id').filtered('route_ids')
-                        saved_routes = {p.id: p.route_ids.ids for p in products_with_routes}
-                        if saved_routes:
+                        default_wh = Warehouse.search(
+                            [('company_id', '=', self.env.company.id)],
+                            order='id asc', limit=1)
+                        if default_wh and default_wh.id not in (warehouse_id, backup_warehouse_id):
                             _logger.info(
-                                "HB sipariş %s: %d ürünün rotaları temizlenerek tekrar denenecek.",
-                                hb_order.hb_order_number, len(saved_routes))
-                        for p in products_with_routes:
-                            p.sudo().write({'route_ids': [(5, 0, 0)]})
-                        # Ana depo ile tekrar dene
-                        if warehouse_id and sale_order.warehouse_id.id != warehouse_id:
-                            sale_order.write({'warehouse_id': warehouse_id})
+                                "HB sipariş %s: [3/4] şirket ana deposu deneniyor: "
+                                "id=%s, name=%s, lot_stock_id=%s",
+                                hb_order.hb_order_number, default_wh.id, default_wh.name,
+                                default_wh.lot_stock_id.id if default_wh.lot_stock_id else None)
+                            sale_order.write({'warehouse_id': default_wh.id})
+                            sale_order.action_confirm()
+                            confirmed = True
+                            _logger.info(
+                                "HB sipariş %s: [3/4] şirket ana deposu ile onaylandı (id=%s).",
+                                hb_order.hb_order_number, default_wh.id)
+                except Exception as e3:
+                    self.env.invalidate_all(flush=False)
+                    _logger.warning(
+                        "HB sipariş %s: [3/4] şirket ana deposu ile onay başarısız: %s",
+                        hb_order.hb_order_number, e3)
+
+            # 4. Ürün rotalarını temizleyip varsayılan depo ile dene
+            if not confirmed:
+                try:
+                    with self.env.cr.savepoint():
+                        products_with_routes = sale_order.order_line.mapped('product_id').filtered('route_ids')
+                        if products_with_routes:
+                            _logger.info(
+                                "HB sipariş %s: [4/4] %d ürünün rotaları temizlenerek deneniyor.",
+                                hb_order.hb_order_number, len(products_with_routes))
+                            for p in products_with_routes:
+                                p.sudo().write({'route_ids': [(5, 0, 0)]})
+                        # Varsayılan depo ile dene
+                        default_wh = Warehouse.search(
+                            [('company_id', '=', self.env.company.id)],
+                            order='id asc', limit=1)
+                        if default_wh:
+                            sale_order.write({'warehouse_id': default_wh.id})
                         sale_order.action_confirm()
                         confirmed = True
                         _logger.info(
-                            "HB sipariş %s: ürün rotaları temizlendikten sonra onaylandı.",
+                            "HB sipariş %s: [4/4] rota temizleme + varsayılan depo ile onaylandı.",
                             hb_order.hb_order_number)
-                except Exception as e3:
+                except Exception as e4:
                     self.env.invalidate_all(flush=False)
-                    # Savepoint geri alındı → ürün rotaları da eski haline döndü
                     _logger.warning(
-                        "HB sipariş %s: rota temizlemesinden sonra da onay başarısız (draft kalacak): %s",
-                        hb_order.hb_order_number, e3)
+                        "HB sipariş %s: [4/4] son yöntem de başarısız (draft kalacak): %s",
+                        hb_order.hb_order_number, e4)
 
             if not confirmed:
-                _logger.warning(
-                    "HB sipariş %s: hiçbir yöntemle onaylanamadı, draft olarak bırakıldı.",
+                # Sipariş draft kalacak — orijinal depoyu geri yaz
+                if warehouse_id:
+                    try:
+                        sale_order.write({'warehouse_id': warehouse_id})
+                    except Exception:
+                        pass
+                _logger.error(
+                    "HB sipariş %s: 4 yöntem de başarısız, draft bırakıldı. "
+                    "Ürünün/deponun rota yapılandırmasını kontrol edin.",
                     hb_order.hb_order_number)
         return sale_order
 
