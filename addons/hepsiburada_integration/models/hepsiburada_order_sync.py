@@ -661,15 +661,6 @@ class HepsiburadaOrderSync(models.AbstractModel):
             if default_wh:
                 warehouse_id = default_wh.id
 
-        # ── Deponun teslimat rotasını sipariş satırlarına ata ──
-        # Bu, ürünün kendi rotası bozuk/eksik olsa bile doğru rotayı kullanmasını sağlar.
-        if warehouse_id:
-            wh = Warehouse.browse(warehouse_id)
-            if wh.exists() and hasattr(wh, 'delivery_route_id') and wh.delivery_route_id:
-                for ol in order_lines:
-                    if len(ol) == 3 and isinstance(ol[2], dict):
-                        ol[2]['route_id'] = wh.delivery_route_id.id
-
         sale_vals = {
             'partner_id': partner.id,
             'client_order_ref': hb_order.hb_order_number,
@@ -719,11 +710,7 @@ class HepsiburadaOrderSync(models.AbstractModel):
             if not confirmed and backup_warehouse_id and backup_warehouse_id != warehouse_id:
                 try:
                     with self.env.cr.savepoint():
-                        backup_wh = Warehouse.browse(backup_warehouse_id)
                         sale_order.write({'warehouse_id': backup_warehouse_id})
-                        # Sipariş satırlarının rotasını yedek deponun teslimat rotasına güncelle
-                        if backup_wh.exists() and hasattr(backup_wh, 'delivery_route_id') and backup_wh.delivery_route_id:
-                            sale_order.order_line.write({'route_id': backup_wh.delivery_route_id.id})
                         sale_order.action_confirm()
                         confirmed = True
                         _logger.info(
@@ -732,12 +719,40 @@ class HepsiburadaOrderSync(models.AbstractModel):
                 except Exception as e2:
                     self.env.invalidate_all(flush=False)
                     _logger.warning(
-                        "HB sipariş %s: yedek depo (id=%s) ile de onay başarısız (draft kalacak): %s",
+                        "HB sipariş %s: yedek depo (id=%s) ile de onay başarısız: %s",
                         hb_order.hb_order_number, backup_warehouse_id, e2)
+
+            # 3. Her iki depo da başarısızsa, ürünlerin rotalarını temizleyip tekrar dene
+            if not confirmed:
+                try:
+                    with self.env.cr.savepoint():
+                        # Ürün rotalarını geçici olarak temizle (kırık/eksik rota düzeltmesi)
+                        products_with_routes = sale_order.order_line.mapped('product_id').filtered('route_ids')
+                        saved_routes = {p.id: p.route_ids.ids for p in products_with_routes}
+                        if saved_routes:
+                            _logger.info(
+                                "HB sipariş %s: %d ürünün rotaları temizlenerek tekrar denenecek.",
+                                hb_order.hb_order_number, len(saved_routes))
+                        for p in products_with_routes:
+                            p.sudo().write({'route_ids': [(5, 0, 0)]})
+                        # Ana depo ile tekrar dene
+                        if warehouse_id and sale_order.warehouse_id.id != warehouse_id:
+                            sale_order.write({'warehouse_id': warehouse_id})
+                        sale_order.action_confirm()
+                        confirmed = True
+                        _logger.info(
+                            "HB sipariş %s: ürün rotaları temizlendikten sonra onaylandı.",
+                            hb_order.hb_order_number)
+                except Exception as e3:
+                    self.env.invalidate_all(flush=False)
+                    # Savepoint geri alındı → ürün rotaları da eski haline döndü
+                    _logger.warning(
+                        "HB sipariş %s: rota temizlemesinden sonra da onay başarısız (draft kalacak): %s",
+                        hb_order.hb_order_number, e3)
 
             if not confirmed:
                 _logger.warning(
-                    "HB sipariş %s: hiçbir depo ile onaylanamadı, draft olarak bırakıldı.",
+                    "HB sipariş %s: hiçbir yöntemle onaylanamadı, draft olarak bırakıldı.",
                     hb_order.hb_order_number)
         return sale_order
 
