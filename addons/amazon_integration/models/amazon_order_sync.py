@@ -293,14 +293,30 @@ class AmazonOrderSync(models.Model):
             ('amazon_store_id', '=', self.id)
         ], limit=1)
 
+        amazon_order_rec = self.env['amazon.order'].search([
+            ('amazon_order_number', '=', str(amazon_order_id)),
+            ('store_id', '=', self.id)
+        ], limit=1)
+
+        # Müşteri veya adres bilgisi eksik mi, yoksa statü Pending'den çıktı mı?
+        is_missing_pii = False
+        if amazon_order_rec:
+            if not amazon_order_rec.shipping_address or not amazon_order_rec.customer_email or amazon_order_rec.customer_name in ('', 'Amazon Müşterisi'):
+                is_missing_pii = True
+            if amazon_order_rec.order_status == 'Pending' and status != 'Pending':
+                is_missing_pii = True
+
         # İptal durumu kontrolü
         if existing_order and not force_update:
             if existing_order.state not in ['done', 'cancel']:
                 if status == 'Canceled' and existing_order.state != 'cancel':
                     existing_order.action_cancel()
-            # Müşteri bilgisi "Amazon Müşterisi" kalmışsa veya fiyat tutmuyorsa güncellemeyi zorla
+            
             total_order_amount = float(order_data.get('OrderTotal', {}).get('Amount', 0.0))
-            if (existing_order.partner_id and existing_order.partner_id.name == 'Amazon Müşterisi') or \
+            partner_name = existing_order.partner_id.name if existing_order.partner_id else ''
+
+            # Müşteri bilgisi eksikse, statü Pending'den çıktıysa veya fiyat tutmuyorsa güncellemeyi zorla
+            if is_missing_pii or partner_name in ('', 'Amazon Müşterisi') or \
                (total_order_amount > 0 and abs(existing_order.amount_total - total_order_amount) > 0.01):
                 force_update = True
             else:

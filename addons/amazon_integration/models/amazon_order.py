@@ -73,13 +73,20 @@ class AmazonOrder(models.Model):
         if not self.store_id:
             raise UserError(_("Bu siparişe bağlı bir Amazon mağazası bulunamadı."))
         self.store_id._refetch_single_amazon_order(self.amazon_order_number)
+        
+        msg = _('Sipariş ve müşteri bilgileri Amazon SP-API üzerinden yenilendi.')
+        msg_type = 'success'
+        if self.order_status == 'Pending' and not self.shipping_address:
+            msg = _('Bu sipariş Amazon tarafında henüz "Pending" (Ödeme Bekliyor) durumundadır. Amazon PII politikası gereği ödeme onaylanana kadar adres ve müşteri bilgileri API üzerinden verilmeyebilir. Ödeme onaylandığında bilgiler otomatik olarak aktarılacaktır.')
+            msg_type = 'warning'
+
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
-                'title': _('Başarılı'),
-                'message': _('Sipariş ve müşteri bilgileri Amazon SP-API üzerinden yenilendi.'),
-                'type': 'success',
+                'title': _('Bilgi'),
+                'message': msg,
+                'type': msg_type,
                 'sticky': False,
             }
         }
