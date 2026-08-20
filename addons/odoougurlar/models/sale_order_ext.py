@@ -758,6 +758,21 @@ class SaleOrder(models.Model):
 
             # ─── SİPARİŞ ───
             if order_enabled and not db_order_sent:
+                # Ek güvenlik: resolved_cust_code boşsa DB'den taze oku
+                if not resolved_cust_code:
+                    self.env.cr.execute(
+                        "SELECT nebim_customer_code FROM sale_order WHERE id = %s",
+                        [order_id]
+                    )
+                    _fresh = self.env.cr.fetchone()
+                    if _fresh and _fresh[0]:
+                        resolved_cust_code = _fresh[0]
+                        _logger.info("resolved_cust_code DB fallback: %s → %s", order.name, resolved_cust_code)
+                if not resolved_cust_code:
+                    resolved_cust_code = order.partner_id.nebim_customer_code or ''
+                    if resolved_cust_code:
+                        _logger.info("resolved_cust_code partner fallback: %s → %s", order.name, resolved_cust_code)
+
                 try:
                     if not resolved_cust_code:
                         _logger.warning("Auto-sync Sipariş ertelendi (%s): Cari kodu henüz hazır değil.", order.name)
