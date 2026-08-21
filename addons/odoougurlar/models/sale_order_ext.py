@@ -714,11 +714,62 @@ class SaleOrder(models.Model):
                     pass
                 return
 
-            # ═══════════════════════════════════════════════════════════════
+            # ═══════════════════════════════════════════════════════════════════
+            # KATMAN 2: ERKEN NEBİM CANLI KONTROL — CARİ AÇILMADAN ÖNCE!
+            # Transaction rollback sonrası sipariş Nebim'de zaten varsa,
+            # gereksiz yeni cari açılmasını TAMAMEN engeller.
+            # ═══════════════════════════════════════════════════════════════════
+            if order_enabled and not db_order_sent and clean_ref:
+                try:
+                    connector_early = self.env['odoougurlar.nebim.connector'].sudo()
+                    early_ref_checks = list(set(filter(None, [
+                        clean_ref,
+                        f"TY-{clean_ref}",
+                        f"HB-{clean_ref}",
+                        f"N11-{clean_ref}",
+                        f"PZR-{clean_ref}",
+                        f"FLO-{clean_ref}",
+                        f"SHP-{clean_ref}",
+                        f"IDE-{clean_ref}",
+                        f"PTT-{clean_ref}",
+                        order.client_order_ref,
+                    ])))
+                    for check_val in early_ref_checks:
+                        if not check_val:
+                            continue
+                        sp_res = connector_early.run_proc(
+                            'usp_CheckOrderExists_ent',
+                            [{'Name': 'InternalDescription', 'Value': check_val}]
+                        )
+                        if sp_res and isinstance(sp_res, list) and len(sp_res) > 0:
+                            first = sp_res[0]
+                            if isinstance(first, dict) and first.get('OrderExists'):
+                                _logger.info(
+                                    "ERKEN NEBİM DEDUP: %s siparişi Nebim'de zaten mevcut "
+                                    "(InternalDescription=%s). Cari açılmadan çıkılıyor.",
+                                    order.name, check_val
+                                )
+                                order.sudo().write({
+                                    'nebim_order_sent': True,
+                                    'nebim_customer_sent': True,
+                                    'nebim_order_response': f'[Auto-Sync] ERKEN DEDUP: Nebim\'de mevcut ({check_val})'
+                                })
+                                # Bağımsız cursor ile de kaydet (rollback koruması)
+                                try:
+                                    self.env.cr.execute(
+                                        "UPDATE sale_order SET nebim_order_sent = true, "
+                                        "nebim_customer_sent = true WHERE id = %s", [order_id])
+                                except Exception:
+                                    pass
+                                return
+                except Exception as e:
+                    _logger.warning("Erken Nebim sipariş kontrol hatası (%s): %s", order.name, e)
+
+            # ═══════════════════════════════════════════════════════════════════
             # CARİ + SİPARİŞ — TEK AKIŞ, DOĞRUDAN DEĞİŞKEN AKTARIMI
             # ORM cache'e GÜVENMİYORUZ! cust_code Python değişkeni olarak
             # CARİ adımından SİPARİŞ adımına doğrudan geçirilir.
-            # ═══════════════════════════════════════════════════════════════
+            # ═══════════════════════════════════════════════════════════════════
             resolved_cust_code = None
             resolved_addr_id = None  # Adres ID de doğrudan değişken olarak taşınacak!
 
@@ -740,6 +791,22 @@ class SaleOrder(models.Model):
                         'nebim_address_id': addr_id or ''
                     })
                     _logger.info("Auto-sync Cari başarılı: %s → %s (AddrID=%s)", order.name, cust_code, addr_id)
+
+                    # ═══ KATMAN 3: Bağımsız cursor ile kalıcı kayıt ═══
+                    # Ana transaction rollback olsa bile bu bilgi korunur
+                    try:
+                        self.env.cr.execute(
+                            "UPDATE sale_order SET nebim_customer_sent = true, "
+                            "nebim_customer_code = %s, nebim_address_id = %s "
+                            "WHERE id = %s",
+                            [cust_code or '', addr_id or '', order_id])
+                        self.env.cr.execute(
+                            "UPDATE res_partner SET nebim_customer_sent = true, "
+                            "nebim_customer_code = %s, nebim_address_id = %s "
+                            "WHERE id = %s",
+                            [cust_code or '', addr_id or '', partner_id])
+                    except Exception:
+                        pass
 
                 except Exception as e:
                     _logger.error("Auto-sync Cari hatası (%s): %s", order.name, e)
@@ -788,6 +855,14 @@ class SaleOrder(models.Model):
                         
                         order.sudo().write({'nebim_order_sent': True})
                         _logger.info("Auto-sync Sipariş başarılı: %s", order.name)
+
+                        # ═══ KATMAN 3: Bağımsız cursor ile kalıcı kayıt ═══
+                        try:
+                            self.env.cr.execute(
+                                "UPDATE sale_order SET nebim_order_sent = true "
+                                "WHERE id = %s", [order_id])
+                        except Exception:
+                            pass
 
                 except Exception as e:
                     _logger.error("Auto-sync Sipariş hatası (%s): %s", order.name, e)

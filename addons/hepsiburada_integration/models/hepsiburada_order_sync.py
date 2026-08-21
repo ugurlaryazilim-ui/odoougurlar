@@ -118,14 +118,22 @@ class HepsiburadaOrderSync(models.AbstractModel):
         except Exception as e:
             _logger.exception("HB iptal tarama hatası: %s", e)
 
-        store.write({'last_sync': fields.Datetime.now()})
+        try:
+            with self.env.cr.savepoint():
+                store.write({'last_sync': fields.Datetime.now()})
+        except Exception as _e:
+            _logger.warning("HB mağaza last_sync güncelleme atlandı: %s", _e)
         details_txt = "\n".join(log_msgs) if log_msgs else "Tüm kayıtlar sorunsuz aktarıldı."
-        sync_log.mark_done(
-            processed=total_fetched, 
-            created=success_count, 
-            failed=error_count, 
-            details=details_txt
-        )
+        try:
+            with self.env.cr.savepoint():
+                sync_log.mark_done(
+                    processed=total_fetched, 
+                    created=success_count, 
+                    failed=error_count, 
+                    details=details_txt
+                )
+        except Exception as _e:
+            _logger.warning("HB sync log güncelleme atlandı: %s", _e)
         _logger.info("[%s] Sipariş Senk. tamamlandı. Toplam: %s", store.name, total_fetched)
         return True
 

@@ -150,21 +150,23 @@ class TrendyolOrderSync(models.Model):
                     _logger.error("İade sync hatası [%s]: %s", store_name, str(e))
 
             try:
-                store.sudo().write({'last_sync': fields.Datetime.now()})
+                with self.env.cr.savepoint():
+                    store.sudo().write({'last_sync': fields.Datetime.now()})
             except Exception as store_e:
                 _logger.warning("Mağaza last_sync güncelleme atlandı (%s): %s", store_name, str(store_e))
 
             try:
-                log.write({
-                    'state': 'error' if error_count else 'done',
-                    'end_date': fields.Datetime.now(),
-                    'records_processed': created_count + updated_count + error_count,
-                    'records_created': created_count,
-                    'records_updated': updated_count,
-                    'records_failed': error_count,
-                    'log_details': f"[{store_name}] Yeni: {created_count}, Güncellenen: {updated_count}, Hata: {error_count}",
-                    'error_details': '\n'.join(error_details) if error_details else '',
-                })
+                with self.env.cr.savepoint():
+                    log.write({
+                        'state': 'error' if error_count else 'done',
+                        'end_date': fields.Datetime.now(),
+                        'records_processed': created_count + updated_count + error_count,
+                        'records_created': created_count,
+                        'records_updated': updated_count,
+                        'records_failed': error_count,
+                        'log_details': f"[{store_name}] Yeni: {created_count}, Güncellenen: {updated_count}, Hata: {error_count}",
+                        'error_details': '\n'.join(error_details) if error_details else '',
+                    })
             except Exception as log_e:
                 _logger.warning("SyncLog güncelleme atlandı (%s): %s", store_name, str(log_e))
 

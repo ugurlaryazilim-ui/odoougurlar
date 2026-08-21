@@ -105,7 +105,7 @@ class OrderProcessor(models.AbstractModel):
                             })
                             return True
             except Exception as e:
-                _logger.debug("Nebim sipariş canlı kontrol SP çalıştırılamadı: %s", e)
+                _logger.warning("Nebim sipariş canlı kontrol SP çalıştırılamadı (dedup atlandı): %s", e)
 
         connector = self.env['odoougurlar.nebim.connector']
         

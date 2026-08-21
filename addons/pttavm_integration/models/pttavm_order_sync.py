@@ -63,7 +63,11 @@ class PttavmOrderSync(models.Model):
         if not data_list or not isinstance(data_list, list):
             _logger.info("PttAVM [%s] Sipariş bulunamadı. API yanıt: %s",
                          store.name, str(raw_data)[:500])
-            store.sudo().write({'last_sync': fields.Datetime.now()})
+            try:
+                with self.env.cr.savepoint():
+                    store.sudo().write({'last_sync': fields.Datetime.now()})
+            except Exception as _e:
+                _logger.warning("Mağaza last_sync güncelleme atlandı: %s", _e)
             return {'created': 0, 'updated': 0, 'errors': 0}
         
         _logger.info("PttAVM [%s] %d sipariş bulundu", store.name, len(data_list))
@@ -93,7 +97,11 @@ class PttavmOrderSync(models.Model):
                 error_count += 1
                 _logger.exception("Pttavm Sipariş İşleme Hatası: %s", e)
         
-        store.sudo().write({'last_sync': fields.Datetime.now()})
+        try:
+            with self.env.cr.savepoint():
+                store.sudo().write({'last_sync': fields.Datetime.now()})
+        except Exception as _e:
+            _logger.warning("Mağaza last_sync güncelleme atlandı: %s", _e)
 
         # ── Veritabanındaki iptal siparişleri tara ──
         try:

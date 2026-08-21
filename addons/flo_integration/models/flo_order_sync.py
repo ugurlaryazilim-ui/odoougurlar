@@ -93,7 +93,11 @@ class FloOrderSync(models.Model):
             
             page += 1
         
-        store.sudo().write({'last_sync': fields.Datetime.now()})
+        try:
+            with self.env.cr.savepoint():
+                store.sudo().write({'last_sync': fields.Datetime.now()})
+        except Exception as _e:
+            _logger.warning("Mağaza last_sync güncelleme atlandı: %s", _e)
         return {'created': created_count, 'updated': updated_count, 'errors': error_count}
 
     @api.private

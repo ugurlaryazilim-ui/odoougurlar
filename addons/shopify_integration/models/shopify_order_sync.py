@@ -83,7 +83,11 @@ class ShopifyOrderSync(models.Model):
                 _logger.error("Shopify sipariş işleme hatası (order=%s): %s",
                               order_json.get('name', '?'), e, exc_info=True)
 
-        store.sudo().write({'last_sync': fields.Datetime.now()})
+        try:
+            with self.env.cr.savepoint():
+                store.sudo().write({'last_sync': fields.Datetime.now()})
+        except Exception as _e:
+            _logger.warning("Mağaza last_sync güncelleme atlandı: %s", _e)
         return {'created': created_count, 'updated': updated_count, 'errors': error_count}
 
     # ─── Process Single Order ────────────────────────────
