@@ -133,8 +133,9 @@ export class PutawayScreen extends Component {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <t t-foreach="state.shelfProducts" t-as="p" t-key="p.id">
-                                        <tr style="cursor:pointer" t-on-click="() => this.showProductHistory(p)" title="Stok geçmişini gör">
+                                    <t t-foreach="this.sortedShelfProducts" t-as="p" t-key="p.id">
+                                        <tr t-attf-style="cursor:pointer; {{p.barcode === state.lastScannedBarcode || p.code === state.lastScannedBarcode ? 'background: #d4edda; font-weight: bold; border-left: 4px solid #28a745;' : ''}}"
+                                            t-on-click="() => this.showProductHistory(p)" title="Stok geçmişini gör">
                                             <td t-esc="p.code || '-'"/>
                                             <td><strong t-esc="p.name"/></td>
                                             <td class="ub-barcode-cell" t-esc="p.barcode || '-'"/>
@@ -253,6 +254,7 @@ export class PutawayScreen extends Component {
             shelfBarcode: '',
             shelfInfo: {},
             shelfProducts: [],
+            lastScannedBarcode: '',
             productBarcode: '',
             quantity: 1,
             loading: false,
@@ -292,6 +294,17 @@ export class PutawayScreen extends Component {
         this.state.error = null;
         this.state.success = null;
         this.state.toast = null;
+    }
+
+    // Son okutulan ürünü en üste çıkar
+    get sortedShelfProducts() {
+        const bc = this.state.lastScannedBarcode;
+        if (!bc || !this.state.shelfProducts.length) return this.state.shelfProducts;
+        return [...this.state.shelfProducts].sort((a, b) => {
+            const aMatch = (a.barcode === bc || a.code === bc) ? 1 : 0;
+            const bMatch = (b.barcode === bc || b.code === bc) ? 1 : 0;
+            return bMatch - aMatch;
+        });
     }
 
     _showToast(type, message) {
@@ -445,6 +458,7 @@ export class PutawayScreen extends Component {
                 const msg = `${actionText}: ${res.message || barcode} [${barcode}]`;
                 this.state.success = msg;
                 this._showToast('success', msg);
+                this.state.lastScannedBarcode = barcode;
                 AudioFeedback.playSuccess();
                 vibrate();
 
