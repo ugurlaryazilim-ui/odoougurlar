@@ -271,7 +271,6 @@ export class PutawayScreen extends Component {
 
         onWillUnmount(() => {
             if (this._unsub) this._unsub();
-            if (this._toastTimer) clearTimeout(this._toastTimer);
         });
     }
 
@@ -297,10 +296,8 @@ export class PutawayScreen extends Component {
 
     _showToast(type, message) {
         this.state.toast = { type, message };
-        if (this._toastTimer) clearTimeout(this._toastTimer);
-        this._toastTimer = setTimeout(() => {
-            this.state.toast = null;
-        }, 4000);
+        // Timer yok — toast sonraki okutmaya kadar kalır
+        // _executeScan başında temizlenir
     }
 
     // ─── BARKOD OKUYUCU CALLBACK ─────────────────
@@ -445,7 +442,7 @@ export class PutawayScreen extends Component {
                 vibrateError();
             } else {
                 const actionText = mode === 'putaway' ? '✅ Raflama başarılı' : '✅ Raftan kaldırıldı';
-                const msg = `${actionText}: ${res.message || barcode}`;
+                const msg = `${actionText}: ${res.message || barcode} [${barcode}]`;
                 this.state.success = msg;
                 this._showToast('success', msg);
                 AudioFeedback.playSuccess();
