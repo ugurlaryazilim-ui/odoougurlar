@@ -309,13 +309,19 @@ export class PutawayScreen extends Component {
             this.state.shelfBarcode = bc;
             this.onShelfConfirm();
         } else if (this.state.step === 2) {
+            // ── DOM input'u ANINDA temizle ──
+            // Scanner keyboard wedge olarak yazdığı çöpü kaldır
+            this.state.productBarcode = '';
+            if (this.productInputRef.el) {
+                this.productInputRef.el.value = '';
+            }
+
             if (this.state.processing) {
                 // Kilit varsa kuyruğa al, kilit kalktığında çalışacak
                 this._pendingScan = bc;
                 return;
             }
-            this.state.productBarcode = bc;
-            this.onExecute();
+            this._executeScan(bc);
         }
     }
 
@@ -372,22 +378,26 @@ export class PutawayScreen extends Component {
     // ─── ADIM 2: ÜRÜN TARA + İŞLEM ───────────────
     onProductInput(ev) {
         this.state.productBarcode = ev.target.value;
-        this._detectScan(ev.target.value, 'product');
+        // _detectScan KULLANILMIYOR — BarcodeScanner callback yeterli
+        // İkisi birden aktif olunca çift tetikleme yapıyor
     }
 
     onProductKey(ev) {
         if (ev.key === 'Enter') {
             ev.preventDefault();
-            this.onExecute();
+            // Manuel giriş: state'den barkod al
+            const bc = this.state.productBarcode.trim();
+            if (bc) this._executeScan(bc);
         }
     }
 
-    async onExecute() {
-        const barcode = this.state.productBarcode.trim();
+    // ─── BARKOD İŞLEME (parametre ile) ───────────
+    async _executeScan(barcode) {
         if (!barcode) return;
 
-        // ─── ÇIFT TETİKLENME KİLİDİ ───
+        // ─── ÇİFT TETİKLENME KİLİDİ ───
         if (this.state.processing) {
+            this._pendingScan = barcode;
             return;
         }
 
@@ -412,6 +422,12 @@ export class PutawayScreen extends Component {
         this.state.error = null;
         this.state.success = null;
         this.state.toast = null;
+
+        // Input'u hemen temizle — yeni okutmaya hazır
+        this.state.productBarcode = '';
+        if (this.productInputRef.el) {
+            this.productInputRef.el.value = '';
+        }
 
         try {
             const qty = this.state.quantity;
@@ -445,8 +461,6 @@ export class PutawayScreen extends Component {
                 // Raf bilgisini güncelle
                 this._refreshShelf();
 
-                // Barkod alanını temizle, yeni okutmaya hazır
-                this.state.productBarcode = '';
                 this.state.quantity = 1;
                 this._focusCurrentInput();
             }
@@ -464,10 +478,9 @@ export class PutawayScreen extends Component {
             if (this._pendingScan) {
                 const pending = this._pendingScan;
                 this._pendingScan = null;
-                this.state.productBarcode = pending;
-                this.onExecute();
+                this._executeScan(pending);
             }
-        }, 150);
+        }, 100);
     }
 
     async _refreshShelf() {
