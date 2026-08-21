@@ -11,7 +11,6 @@ export class BarcodeScanner {
         this._listeners = [];
         this._keyHandler = this._onKeyDown.bind(this);
         this._isActive = false;
-        this._isScanning = false; // Mükerrer okutma kilidi
     }
 
     /**
@@ -75,7 +74,14 @@ export class BarcodeScanner {
                 // Hızlı giriş algılandı (terminal/okuyucu) → emit et
                 ev.preventDefault();
                 ev.stopPropagation();
-                this._emit(this._buffer.trim());
+                const barcode = this._buffer.trim();
+                this._buffer = '';
+                // Input alanını temizle — scanner tarafından yazılan çöp
+                if (isBarcodeInput) {
+                    ev.target.value = '';
+                }
+                this._emit(barcode);
+                return;
             }
             // Barkod input alanında Enter → stock_search.js onKeyDown'a bırak
             this._buffer = '';
@@ -85,8 +91,8 @@ export class BarcodeScanner {
         // Kontrol tuşlarını yoksay
         if (ev.key.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
             this._buffer += ev.key;
-            // Eğer input alanında değilse tuşu yut
-            if (!isBarcodeInput) {
+            // Hızlı tuş basımı (scanner) → input'a yazma, sadece buffer'a ekle
+            if (!isBarcodeInput || timeDiff < 200) {
                 ev.preventDefault();
                 ev.stopPropagation();
             }
@@ -102,27 +108,13 @@ export class BarcodeScanner {
         }
     }
 
-    async _emit(barcode) {
-        if (this._isScanning) {
-            console.warn("Scanner locked, ignoring double scan:", barcode);
-            return;
-        }
-        
-        this._isScanning = true;
-        try {
-            for (const cb of this._listeners) {
-                try { 
-                    const res = cb(barcode); 
-                    if (res instanceof Promise) {
-                        await res;
-                    }
-                } catch (e) { console.error(e); }
-            }
-        } finally {
-            // Küçük bir bekleme süresi koyarak art arda (spagetti) tuş basımlarını engelle
-            setTimeout(() => {
-                this._isScanning = false;
-            }, 150);
+    _emit(barcode) {
+        // Senkron emit — callback'leri beklemeden çağır
+        // Bu sayede _isScanning kilidi sonraki barkodları bloklamaz
+        for (const cb of this._listeners) {
+            try {
+                cb(barcode);
+            } catch (e) { console.error(e); }
         }
     }
 }
