@@ -102,17 +102,30 @@ export const BarcodeService = {
     },
 };
 
+// Tek paylaşımlı AudioContext — mobil tarayıcılar ~6 context sonra ses kesiyor
+let _audioCtx = null;
+
+function _getAudioContext() {
+    if (!_audioCtx) {
+        _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    // Mobil tarayıcılarda context 'suspended' olabilir (kullanıcı etkileşimi gerekir)
+    if (_audioCtx.state === 'suspended') {
+        _audioCtx.resume();
+    }
+    return _audioCtx;
+}
+
 export const AudioFeedback = {
     playSuccess() {
         try {
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const ctx = _getAudioContext();
             const osc = ctx.createOscillator();
             const gainNode = ctx.createGain();
             osc.connect(gainNode);
             gainNode.connect(ctx.destination);
             
             osc.type = 'sine';
-            // 800'den 1200'e hızlı bir çıkış (kısa, tatlı bip)
             osc.frequency.setValueAtTime(800, ctx.currentTime);
             osc.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.1);
             
@@ -122,18 +135,19 @@ export const AudioFeedback = {
             
             osc.start(ctx.currentTime);
             osc.stop(ctx.currentTime + 0.15);
+            // Oscillator bitince node'ları temizle
+            osc.onended = () => { osc.disconnect(); gainNode.disconnect(); };
         } catch (e) { console.warn("Audio not supported"); }
     },
     playError() {
         try {
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const ctx = _getAudioContext();
             const osc = ctx.createOscillator();
             const gainNode = ctx.createGain();
             osc.connect(gainNode);
             gainNode.connect(ctx.destination);
             
             osc.type = 'sawtooth';
-            // 150 Hz kalın, rahatsız edici bir uyarı (Buzzer)
             osc.frequency.setValueAtTime(150, ctx.currentTime);
             
             gainNode.gain.setValueAtTime(0, ctx.currentTime);
@@ -142,6 +156,7 @@ export const AudioFeedback = {
             
             osc.start(ctx.currentTime);
             osc.stop(ctx.currentTime + 0.4);
+            osc.onended = () => { osc.disconnect(); gainNode.disconnect(); };
         } catch (e) { console.warn("Audio not supported"); }
     }
 };
