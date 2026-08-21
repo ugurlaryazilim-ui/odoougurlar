@@ -212,11 +212,8 @@ class ShelfApiController(BarcodeApiBase):
         shelf_barcode = shelf_barcode.strip()
         quantity = float(quantity or 1)
 
-        # Duplicate request koruması (500ms)
-        if self._check_duplicate_request('putaway', product_barcode, shelf_barcode, quantity):
-            _logger.warning("Raflama: Duplicate istek atlandı — %s → %s (%s adet)",
-                            product_barcode, shelf_barcode, quantity)
-            return {'error': 'İşlem zaten yapılıyor, lütfen bekleyin'}
+        # Duplicate request koruması kaldırıldı — peş peşe aynı ürünü raflamak kasıtlı işlem
+        # Frontend zaten processing kilidi ile çift tetiklemeyi engelliyor
 
         product = self._find_product(product_barcode)
         if not product:
@@ -267,10 +264,7 @@ class ShelfApiController(BarcodeApiBase):
         quantity = float(quantity or 1)
 
         # Duplicate request koruması (500ms)
-        if self._check_duplicate_request('remove_from_shelf', product_barcode, shelf_barcode, quantity):
-            _logger.warning("Raftan Kaldırma: Duplicate istek atlandı — %s, %s (%s adet)",
-                            product_barcode, shelf_barcode, quantity)
-            return {'error': 'İşlem zaten yapılıyor, lütfen bekleyin'}
+        # Duplicate request koruması kaldırıldı — frontend processing kilidi yeterli
 
         product = self._find_product(product_barcode)
         if not product:
