@@ -229,29 +229,37 @@ class AmazonOrderSync(models.Model):
             item_tax = float(item.get('ItemTax', {}).get('Amount', 0.0))
 
             product = product_map.get(sku)
+            if not product and sku:
+                # Batch'te bulunamadı, tek tek dene (fallback — Trendyol ile aynı mantık)
+                Product = self.env['product.product'].sudo()
+                if hasattr(Product, 'find_by_marketplace_barcode'):
+                    product = Product.find_by_marketplace_barcode(sku)
             if not product:
-                msgs.append(f"{amazon_order_id} siparişinde {sku} SKU'lu ürün Odoo'da BULUNAMADI. Satır atlandı.")
-                _logger.warning("Amazon ürün bulunamadı: %s (Sipariş: %s)", sku, amazon_order_id)
-                continue
+                msgs.append(f"{amazon_order_id} siparişinde {sku} SKU'lu ürün Odoo'da bulunamadı — ürünsüz satır oluşturuluyor.")
+                _logger.warning("Amazon ürün bulunamadı: %s (Sipariş: %s) — satır ürünsüz oluşturulacak.", sku, amazon_order_id)
 
             unit_price_incl = item_price / qty if qty > 0 else item_price
 
             ol_vals = {
-                'product_id': product.id,
                 'product_uom_qty': qty,
                 'price_unit': unit_price_incl,
-                'name': item.get('Title', product.name)
+                'name': item.get('Title', sku or 'Amazon Ürünü'),
             }
+            if product:
+                ol_vals['product_id'] = product.id
 
             # ─── KDV Dahil Vergi Tespiti & Fiyat Ayarlaması ───
-            product_taxes = product.taxes_id.filtered(
-                lambda t: t.company_id.id in [self.company_id.id, self.env.company.id]
-            )
             vat_rate = 0.0
-            if item_tax > 0 and item_price > 0:
+            if product:
+                product_taxes = product.taxes_id.filtered(
+                    lambda t: t.company_id.id in [self.company_id.id, self.env.company.id]
+                )
+                if item_tax > 0 and item_price > 0:
+                    vat_rate = round((item_tax / item_price) * 100)
+                elif product_taxes:
+                    vat_rate = product_taxes[0].amount
+            elif item_tax > 0 and item_price > 0:
                 vat_rate = round((item_tax / item_price) * 100)
-            elif product_taxes:
-                vat_rate = product_taxes[0].amount
 
             if vat_rate > 0:
                 if vat_rate not in _tax_cache:
