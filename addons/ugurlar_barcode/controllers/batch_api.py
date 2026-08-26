@@ -299,7 +299,7 @@ class BatchApiController(BarcodeApiBase):
             picking_lines = []
             for move in p.move_ids:
                 product = move.product_id
-                barcode = product.barcode or ''
+                barcode = self._get_physical_barcode(product)
 
                 # Ürün raf konumunu toplu dict üzerinden al
                 location = location_dict.get(product.id, '')
@@ -552,6 +552,9 @@ class BatchApiController(BarcodeApiBase):
                         if not size_name:
                             size_name = dc_parts[-1]     # Son parça → beden
 
+                    # Barkod: fiziksel barkod (nebim_barcode) varsa onu göster
+                    display_barcode = self._get_physical_barcode(product)
+
                     route_items.append({
                         'move_id': move.id,
                         'picking_id': picking.id,
@@ -561,7 +564,7 @@ class BatchApiController(BarcodeApiBase):
                         'product_name': product.name or product.display_name,
                         'display_name': product.display_name,
                         'default_code': product.default_code or '',
-                        'barcode': product.barcode or '',
+                        'barcode': display_barcode,
                         'variant_info': variant_info,
                         'brand': brand_name,
                         'category': product.categ_id.name if product.categ_id else '',

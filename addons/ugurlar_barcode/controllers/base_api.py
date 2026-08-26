@@ -119,6 +119,17 @@ class BarcodeApiBase(http.Controller):
             product = Product.search([('default_code', '=', barcode)], limit=1)
         return product
 
+    def _get_physical_barcode(self, product):
+        """Ürünün fiziksel barkodunu döndür (okutulabilir barkod).
+
+        Öncelik: nebim_barcode > barcode > default_code
+        Paket ürünlerde barcode alanı default_code formatında olabilir,
+        fiziksel barkod nebim_barcode alanında tutuluyor.
+        """
+        if hasattr(product, 'nebim_barcode') and product.nebim_barcode:
+            return (product.nebim_barcode or '').split(',')[0].strip()
+        return product.barcode or ''
+
     def _find_location(self, barcode):
         """Barkod veya isim ile stok lokasyonu bul."""
         Location = request.env['stock.location'].sudo()
