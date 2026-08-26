@@ -627,12 +627,18 @@ class BatchApiController(BarcodeApiBase):
         if not product:
             return {'error': f'Ürün bulunamadı: {barcode}'}
 
+        # Bu ürünü ikame olarak kullanan paket ürünlerin ID'lerini de topla
+        # (Fiziksel barkod okutulunca move'daki paket ürünle eşleşsin diye)
+        match_product_ids = {product.id}
+        if hasattr(product, 'substituted_by_ids') and product.substituted_by_ids:
+            match_product_ids |= set(product.substituted_by_ids.ids)
+
         # Batch'teki move'larda bu ürünü bul (henüz tamamlanmamış)
         target_move = None
         target_picking = None
         for picking in batch.picking_ids:
             for move in picking.move_ids:
-                if (move.product_id.id == product.id and
+                if (move.product_id.id in match_product_ids and
                         move.state != 'cancel' and
                         (move.wave_collected_qty or 0) < move.product_uom_qty):
                     target_move = move
@@ -647,7 +653,7 @@ class BatchApiController(BarcodeApiBase):
                 for move in picking.move_ids:
                     if move.state == 'cancel':
                         continue
-                    if move.product_id.id == product.id:
+                    if move.product_id.id in match_product_ids:
                         return {
                             'warning': True,
                             'message': f'{product.display_name} zaten toplandı ✓',

@@ -122,13 +122,20 @@ class BarcodeApiBase(http.Controller):
     def _get_physical_barcode(self, product):
         """Ürünün fiziksel barkodunu döndür (okutulabilir barkod).
 
-        Öncelik: nebim_barcode > barcode > default_code
-        Paket ürünlerde barcode alanı default_code formatında olabilir,
-        fiziksel barkod nebim_barcode alanında tutuluyor.
+        Öncelik:
+        1. Paket ürünse → ikame ürünün barkodunu kullan
+        2. nebim_barcode varsa → onu kullan
+        3. product.barcode → fallback
         """
-        if hasattr(product, 'nebim_barcode') and product.nebim_barcode:
-            return (product.nebim_barcode or '').split(',')[0].strip()
-        return product.barcode or ''
+        # Paket ürünse (substitute_product_id varsa), ikame ürünün barkodunu al
+        target = product
+        if hasattr(product, 'substitute_product_id') and product.substitute_product_id:
+            target = product.substitute_product_id
+
+        # nebim_barcode fiziksel barkod
+        if hasattr(target, 'nebim_barcode') and target.nebim_barcode:
+            return (target.nebim_barcode or '').split(',')[0].strip()
+        return target.barcode or ''
 
     def _find_location(self, barcode):
         """Barkod veya isim ile stok lokasyonu bul."""

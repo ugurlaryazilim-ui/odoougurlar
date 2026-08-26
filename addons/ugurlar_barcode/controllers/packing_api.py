@@ -344,13 +344,18 @@ class PackingApiController(BarcodeApiBase):
         if not product:
             return {'error': f'Ürün bulunamadı: {barcode}'}
 
+        # İkame desteği: bu ürünü ikame olarak kullanan paket ürünlerle de eşleştir
+        match_product_ids = {product.id}
+        if hasattr(product, 'substituted_by_ids') and product.substituted_by_ids:
+            match_product_ids |= set(product.substituted_by_ids.ids)
+
         # Batch'teki picking'lerde bu ürünü bul (henüz eşleştirilmemiş)
         target_move = None
         target_picking = None
         all_pickings = self._get_all_pickings(batch)
         for picking in all_pickings:
             for move in picking.move_ids:
-                if (move.product_id.id == product.id and
+                if (move.product_id.id in match_product_ids and
                         move.state != 'cancel' and
                         move.packing_scanned_qty < move.product_uom_qty):
                     target_move = move
@@ -367,7 +372,7 @@ class PackingApiController(BarcodeApiBase):
             cancelled_picking = None
             for picking in all_pickings:
                 for move in picking.move_ids:
-                    if move.product_id.id == product.id and move.state == 'cancel':
+                    if move.product_id.id in match_product_ids and move.state == 'cancel':
                         cancelled_move = move
                         cancelled_picking = picking
                         break
@@ -385,7 +390,7 @@ class PackingApiController(BarcodeApiBase):
                     if rp.id in (all_pickings.ids if hasattr(all_pickings, 'ids') else []):
                         continue
                     for move in rp.move_ids:
-                        if (move.product_id.id == product.id and
+                        if (move.product_id.id in match_product_ids and
                                 move.state not in ('cancel', 'done') and
                                 move.quantity < move.product_uom_qty):
                             target_move = move
@@ -407,7 +412,7 @@ class PackingApiController(BarcodeApiBase):
                     done_replacement_picking = None
                     for rp in replacement_pickings:
                         for move in rp.move_ids:
-                            if move.product_id.id == product.id and move.state == 'done':
+                            if move.product_id.id in match_product_ids and move.state == 'done':
                                 done_replacement = move
                                 done_replacement_picking = rp
                                 break
@@ -500,7 +505,7 @@ class PackingApiController(BarcodeApiBase):
             # Belki paketlemede zaten tamamlanmış — bilgi ver
             for picking in all_pickings:
                 for move in picking.move_ids:
-                    if move.product_id.id == product.id and move.state != 'cancel':
+                    if move.product_id.id in match_product_ids and move.state != 'cancel':
                         if move.packing_scanned_qty >= move.product_uom_qty:
                             # Bu ürün paketlemede zaten okutulmuş
                             picking_completed = all(
@@ -688,9 +693,14 @@ class PackingApiController(BarcodeApiBase):
         if not product:
             return {'error': 'Ürün bulunamadı'}
 
+        # İkame desteği
+        match_product_ids = {product.id}
+        if hasattr(product, 'substituted_by_ids') and product.substituted_by_ids:
+            match_product_ids |= set(product.substituted_by_ids.ids)
+
         target_move = None
         for move in picking.move_ids:
-            if move.product_id.id == product.id:
+            if move.product_id.id in match_product_ids:
                 target_move = move
                 break
 
