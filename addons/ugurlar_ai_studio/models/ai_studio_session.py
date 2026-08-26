@@ -224,6 +224,17 @@ class AiStudioSession(models.Model):
         string='AI Üretimler',
     )
 
+    # --- Takım (Set) Çekimi ---
+    session_type = fields.Selection([
+        ('single', 'Tekli Çekim'),
+        ('set', 'Takım Çekimi'),
+    ], string='Çekim Tipi', default='single', tracking=True)
+    set_line_ids = fields.One2many(
+        'ai.studio.set.line',
+        'session_id',
+        string='Takım Parçaları',
+    )
+
     def action_review_generations(self):
         """Profesyonel inceleme popup'ini acar."""
         self.ensure_one()
@@ -784,6 +795,37 @@ class AiStudioSession(models.Model):
             'state': 'pending',
             'provider': provider_type,
         })
+
+        # ═══ TAKIM ÇEKİMİ GENERATION'LARI ═══
+        if self.session_type == 'set' and self.set_line_ids:
+            # Her takım parçası için tekli ön generation oluştur
+            for set_line in self.set_line_ids.filtered(lambda l: l.role == 'companion'):
+                sl_photos = set_line.photo_ids
+                sl_front = sl_photos.filtered(lambda p: p.photo_type == 'front')[:1]
+                if sl_front:
+                    self.env['ai.studio.generation'].create({
+                        'session_id': self.id,
+                        'source_photo_id': sl_front.id,
+                        'photo_type': 'front',
+                        'original_image': sl_front.image_original,
+                        'state': 'pending',
+                        'provider': provider_type,
+                        'generation_mode': 'single',
+                        'set_line_id': set_line.id,
+                    })
+            
+            # Kombin generation'ları: ön, arka, yan, detay
+            for combo_type in ['front', 'back', 'side', 'detail']:
+                combo_source = front_photo  # Kombin için ana ürünün ön fotoğrafını referans al
+                self.env['ai.studio.generation'].create({
+                    'session_id': self.id,
+                    'source_photo_id': combo_source.id,
+                    'photo_type': combo_type,
+                    'original_image': combo_source.image_original,
+                    'state': 'pending',
+                    'provider': provider_type,
+                    'generation_mode': 'set_combo',
+                })
 
         # Eşzamanlı istek limiti kontrolü
         concurrent_limit = int(self.env['ir.config_parameter'].sudo().get_param(
@@ -2525,109 +2567,171 @@ class AiStudioSession(models.Model):
                 )
                 self.env.cr.commit()
     def _save_to_product(self, approved_generations):
-        """Onaylanmış görselleri ürün kartına aktar.
+        """Onaylı görselleri ürün kartına aktar.
 
-        - is_primary olan → ürünün ana resmi (image_1920)
-        - Diğerleri → product.image alternatif resimler
-
-        Savepoint kullanarak hata durumunda transaction'ın
-        abort olmasını engeller.
+        Tekli mod: Mevcut davranış (primary → ana resim, diğerleri → product.image)
+        Takım modu: Her ürüne tekli ön + kombin görselleri
         """
+        import logging
+        _logger = logging.getLogger(__name__)
+
+        if self.session_type == 'set' and self.set_line_ids:
+            return self._save_to_product_set_mode(approved_generations)
+
+        # ═══ TEKLİ MOD (mevcut davranış) ═══
         product = self.product_id
         if not product:
-            raise UserError(_('Oturuma bağlı ürün bulunamadı.'))
+            raise UserError(_('Ürün bulunamadı.'))
 
         products = product
         if self.apply_to_siblings and self.sibling_product_ids:
             products |= self.sibling_product_ids
 
-        # Ana resmi bul — tek kayıt garanti
         primary = approved_generations.filtered('is_primary')[:1]
         if not primary:
-            # Primary seçilmemişse ilk onaylananı primary yap
             primary = approved_generations[0]
             primary.is_primary = True
-
-        import logging
-        _logger = logging.getLogger(__name__)
-        _logger.warning("AI_STUDIO_PRIMARY_IMAGE_SIZE: %s", len(primary.generated_image) if primary.generated_image else 0)
 
         others = approved_generations - primary
         tmpl = product.product_tmpl_id
 
-        # Kilit al: Aynı anda birden fazla oturum aynı ürünü güncellemeye çalışırsa beklet.
-        # Bu sayede InFailedSqlTransaction (current transaction is aborted) hatasını kökünden çözer!
         self.env.cr.execute("SELECT id FROM product_template WHERE id = %s FOR NO KEY UPDATE", (tmpl.id,))
 
-        import logging
-        _logger = logging.getLogger(__name__)
-
-        def _check_tx(step_name):
-            try:
-                self.env.cr.execute("SELECT 1")
-                _logger.info("TX CHECK %s: OK", step_name)
-            except Exception as e:
-                _logger.error("TX CHECK %s: FAILED - %s", step_name, e)
-                raise e
-
-        _check_tx("After Lock")
-
-        # 1. MEVCUT AI GÖRSELLERİNİ TEMİZLE (Template bazında TEK SEFER)
+        # 1. Eski AI görsellerini temizle
         existing_ai_images = self.env['product.image'].search([
             ('product_tmpl_id', '=', tmpl.id),
-            ('name', 'like', '% - AI (%'),
+            ('name', 'like', '%% - AI (%%'),
         ])
         if existing_ai_images:
             existing_ai_images.unlink()
-            
-        _check_tx("After Unlink")
-        
-        # 2. ANA RESMİ TEMPLATE'E ATA (Ürünler listesinde görünsün diye)
-        try:
-            tmpl.image_1920 = primary.generated_image
-            tmpl.flush_recordset()
-        except Exception as e:
-            _logger.error("Template Write ERROR: %s", e)
-            raise e
-            
-        _check_tx("After Template Write")
 
-        # 3. VARYANTLARA ÖZEL ATAMALAR VE EKSTRA RESİMLER
+        # 2. Ana resmi template'e ata
+        tmpl.image_1920 = primary.generated_image
+        tmpl.flush_recordset()
+
+        # 3. Varyantlara ata
         for prod in products:
-            # Varyanta özel ana resim
             if hasattr(prod, 'image_variant_1920'):
-                try:
-                    prod.image_variant_1920 = primary.generated_image
-                    prod.flush_recordset()
-                except Exception as e:
-                    _logger.error("Variant Write ERROR: %s", e)
-                    raise e
-            
-            _check_tx("After Variant Write")
-            
-            # Alternatif resimleri bu varyanta özel oluştur
+                prod.image_variant_1920 = primary.generated_image
+                prod.flush_recordset()
+
             sequence = 10
             for gen in others:
                 type_label = dict(
                     gen._fields['photo_type'].selection
                 ).get(gen.photo_type, 'Görsel')
+                self.env['product.image'].create({
+                    'product_tmpl_id': tmpl.id,
+                    'product_variant_id': prod.id,
+                    'name': f'{type_label} - AI ({gen.revision_number})',
+                    'image_1920': gen.generated_image,
+                    'sequence': sequence,
+                })
+                self.env['product.image'].flush_model()
+                sequence += 10
+
+    def _save_to_product_set_mode(self, approved_generations):
+        """Takım modu: Her ürüne tekli ön + kombin görselleri kaydet.
+        
+        Sıralama (her ürün için):
+          _1: Tekli ön görsel (ANA GÖRSEL) — müşteri bunu görür
+          _2: Kombin ön
+          _3: Kombin arka  
+          _4: Kombin yan
+          _5: Kombin detay
+        """
+        import logging
+        _logger = logging.getLogger(__name__)
+        
+        # Kombin görselleri (tüm ürünlere aynı gidecek)
+        combo_gens = approved_generations.filtered(
+            lambda g: g.generation_mode == 'set_combo'
+        ).sorted(key=lambda g: ['front', 'back', 'side', 'detail'].index(g.photo_type) if g.photo_type in ['front', 'back', 'side', 'detail'] else 99)
+        
+        # Her takım parçası için
+        for set_line in self.set_line_ids:
+            product = set_line.product_id
+            if not product:
+                continue
                 
-                try:
+            tmpl = product.product_tmpl_id
+            
+            # Row lock
+            self.env.cr.execute("SELECT id FROM product_template WHERE id = %s FOR NO KEY UPDATE", (tmpl.id,))
+            
+            # Renk kardeşleri
+            products = product
+            if self.apply_to_siblings:
+                products |= self._get_set_line_siblings(set_line)
+            
+            # Bu parçanın tekli ön görseli
+            if set_line.role == 'primary':
+                # Ana ürünün tekli görselleri = oturumun normal generation'ları
+                single_front = approved_generations.filtered(
+                    lambda g: g.generation_mode == 'single' and g.photo_type == 'front' and not g.set_line_id
+                )[:1]
+            else:
+                # Takım parçasının tekli ön görseli
+                single_front = approved_generations.filtered(
+                    lambda g: g.generation_mode == 'single' and g.photo_type == 'front' and g.set_line_id.id == set_line.id
+                )[:1]
+            
+            if not single_front:
+                _logger.warning('Takım parçası %s için tekli ön görsel bulunamadı, atlanıyor.', set_line.product_name)
+                continue
+            
+            # Eski AI görsellerini temizle
+            existing_ai = self.env['product.image'].search([
+                ('product_tmpl_id', '=', tmpl.id),
+                ('name', 'like', '%% - AI (%%'),
+            ])
+            if existing_ai:
+                existing_ai.unlink()
+            
+            # _1: Tekli ön → Ana görsel
+            tmpl.image_1920 = single_front.generated_image
+            tmpl.flush_recordset()
+            
+            for prod in products:
+                if hasattr(prod, 'image_variant_1920'):
+                    prod.image_variant_1920 = single_front.generated_image
+                    prod.flush_recordset()
+                
+                # _2, _3, _4, _5: Kombin görselleri
+                sequence = 10
+                for gen in combo_gens:
+                    type_label = dict(
+                        gen._fields['photo_type'].selection
+                    ).get(gen.photo_type, 'Görsel')
                     self.env['product.image'].create({
                         'product_tmpl_id': tmpl.id,
                         'product_variant_id': prod.id,
-                        'name': f'{type_label} - AI ({gen.revision_number})',
+                        'name': f'Takım {type_label} - AI ({self.name})',
                         'image_1920': gen.generated_image,
                         'sequence': sequence,
                     })
                     self.env['product.image'].flush_model()
-                except Exception as e:
-                    _logger.error("Product Image Create ERROR: %s", e)
-                    raise e
-                    
-                sequence += 10
-                
-        _check_tx("After Everything")
+                    sequence += 10
+            
+            _logger.info('Takım görselleri kaydedildi: %s (%d varyant)', set_line.product_name, len(products))
+
+    def _get_set_line_siblings(self, set_line):
+        """Takım parçasının renk kardeşlerini bul."""
+        product = set_line.product_id
+        color_attr_names = {'renk', 'color', 'colour'}
+        current_color_id = None
+        for ptav in product.product_template_attribute_value_ids:
+            attr_name = ptav.attribute_id.name.lower().strip()
+            if any(c in attr_name for c in color_attr_names):
+                current_color_id = ptav.id
+                break
+        
+        if not current_color_id:
+            return self.env['product.product']
+        
+        return product.product_tmpl_id.product_variant_ids.filtered(
+            lambda v: v.id != product.id and current_color_id in v.product_template_attribute_value_ids.ids
+        )
 
     def action_cancel(self):
         """Oturumu iptal et."""

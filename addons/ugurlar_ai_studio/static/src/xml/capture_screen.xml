@@ -87,6 +87,43 @@
                             t-on-click="() => this.setTab('detail')">
                         <span class="plus-icon">+</span> Detay (<t t-out="state.detailCount"/>)
                     </button>
+                    <!-- Takım Parçaları Tabları -->
+                    <t t-foreach="state.setPieces" t-as="piece" t-key="piece_index">
+                        <div class="ais-set-piece-divider">
+                            <span class="ais-set-piece-label">
+                                🧥 <t t-out="piece.product_name"/>
+                            </span>
+                            <button class="ais-set-remove-btn" t-on-click="() => this.removeSetPiece(piece_index)">✕</button>
+                        </div>
+                        <button t-attf-class="ais-tab-glass {{ state.activeTab === 'set_' + piece_index + '_front' ? 'active' : '' }}"
+                                t-on-click="() => this.setTab('set_' + piece_index + '_front')">
+                            <span class="status-indicator" t-att-class="{ active: piece.hasFront }"></span> Ön
+                        </button>
+                        <button t-attf-class="ais-tab-glass {{ state.activeTab === 'set_' + piece_index + '_back' ? 'active' : '' }}"
+                                t-on-click="() => this.setTab('set_' + piece_index + '_back')">
+                            <span class="status-indicator" t-att-class="{ active: piece.hasBack }"></span> Arka
+                        </button>
+                    </t>
+                </div>
+
+                <!-- Takım Parçası Ekleme -->
+                <div class="ais-set-add-section">
+                    <t t-if="!state.showSetBarcodeInput">
+                        <button class="ais-btn-add-set" t-on-click="toggleSetBarcodeInput">
+                            ➕ Takım Parçası Ekle
+                        </button>
+                    </t>
+                    <t t-else="">
+                        <div class="ais-set-barcode-input">
+                            <input type="text" class="ais-set-input" 
+                                   placeholder="Barkod veya SKU girin..."
+                                   t-att-value="state.setBarcodeQuery"
+                                   t-on-input="(ev) => this.state.setBarcodeQuery = ev.target.value"
+                                   t-on-keydown="(ev) => { if(ev.key === 'Enter') this.addSetPiece(); }"/>
+                            <button class="ais-btn-set-search" t-on-click="addSetPiece">🔍</button>
+                            <button class="ais-btn-set-cancel" t-on-click="toggleSetBarcodeInput">✕</button>
+                        </div>
+                    </t>
                 </div>
 
                 <!-- Çekilmiş Fotoğraf Önizleme -->

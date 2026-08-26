@@ -22,6 +22,11 @@ class AiStudioPhoto(models.Model):
         ondelete='cascade',
         index=True,
     )
+    set_line_id = fields.Many2one(
+        'ai.studio.set.line',
+        string='Takım Parçası',
+        index=True,
+    )
     photo_type = fields.Selection([
         ('front', 'Ön Yüz'),
         ('back', 'Arka Yüz'),

@@ -23,6 +23,16 @@ class AiStudioGeneration(models.Model):
         ondelete='cascade',
         index=True,
     )
+    generation_mode = fields.Selection([
+        ('single', 'Tekli'),
+        ('set_combo', 'Kombin'),
+    ], string='Üretim Modu', default='single')
+    
+    set_line_id = fields.Many2one(
+        'ai.studio.set.line',
+        string='Takım Parçası',
+        index=True,
+    )
     source_photo_id = fields.Many2one(
         'ai.studio.photo',
         string='Kaynak Fotoğraf',

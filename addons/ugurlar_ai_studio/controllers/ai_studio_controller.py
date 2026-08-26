@@ -12,7 +12,7 @@ class AiStudioController(http.Controller):
     """AI Studio REST API endpointleri."""
 
     @http.route('/ai_studio/upload_photo', type='json', auth='user', methods=['POST'])
-    def upload_photo(self, session_id, photo_type, image_data, detail_placement=None):
+    def upload_photo(self, session_id, photo_type, image_data, detail_placement=None, **kwargs):
         """Mobil cihazdan fotograf yukle."""
         try:
             session = request.env['ai.studio.session'].browse(int(session_id))
@@ -50,6 +50,10 @@ class AiStudioController(http.Controller):
             # Detay fotoğraflarında konum bilgisi
             if photo_type == 'detail' and detail_placement in ('front', 'back'):
                 photo_vals['detail_placement'] = detail_placement
+
+            set_line_id = kwargs.get('set_line_id')
+            if set_line_id:
+                photo_vals['set_line_id'] = int(set_line_id)
 
             photo = request.env['ai.studio.photo'].create(photo_vals)
 
@@ -110,10 +114,39 @@ class AiStudioController(http.Controller):
                 'product_id': product.id,
             })
 
+            # Takım çekimi destegi
+            session_type = kwargs.get('session_type', 'single')
+            set_lines_data = kwargs.get('set_lines', [])
+            set_line_map = {}  # index -> set_line_id mapping for frontend
+
+            if session_type == 'set' and set_lines_data:
+                session.write({'session_type': 'set'})
+                
+                # Ana ürünü primary olarak ekle
+                primary_line = request.env['ai.studio.set.line'].create({
+                    'session_id': session.id,
+                    'product_id': product.id,
+                    'role': 'primary',
+                    'sequence': 1,
+                })
+                
+                # Takım parçalarını ekle
+                for idx, sl_data in enumerate(set_lines_data):
+                    companion_product_id = int(sl_data.get('product_id', 0))
+                    if companion_product_id:
+                        companion_line = request.env['ai.studio.set.line'].create({
+                            'session_id': session.id,
+                            'product_id': companion_product_id,
+                            'role': 'companion',
+                            'sequence': 10 + (idx * 10),
+                        })
+                        set_line_map[idx] = companion_line.id
+
             return {
                 'success': True,
                 'session_id': session.id,
                 'session_name': session.name,
+                'set_line_map': set_line_map,
             }
         except Exception as e:
             _logger.exception('create_session hatasi: %s', e)

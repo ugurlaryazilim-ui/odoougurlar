@@ -5,6 +5,7 @@ from . import ai_studio_scene
 from . import ai_studio_model_preset
 from . import ai_studio_photo
 from . import ai_studio_generation
+from . import ai_studio_set_line
 from . import ai_studio_session
 from . import ai_studio_imageless
 from . import ai_studio_dashboard

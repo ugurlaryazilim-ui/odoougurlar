@@ -30,6 +30,9 @@ export class CaptureScreen extends Component {
             detailCount: 0,
             stream: null,
             facingMode: "environment", // Arka kamera
+            setPieces: [],
+            showSetBarcodeInput: false,
+            setBarcodeQuery: '',
         });
 
         onMounted(() => this.startCamera());
@@ -80,6 +83,45 @@ export class CaptureScreen extends Component {
         this.stopCamera();
         this.state.facingMode = this.state.facingMode === "environment" ? "user" : "environment";
         await this.startCamera();
+    }
+
+    toggleSetBarcodeInput() {
+        this.state.showSetBarcodeInput = !this.state.showSetBarcodeInput;
+        this.state.setBarcodeQuery = '';
+    }
+
+    async addSetPiece() {
+        const query = this.state.setBarcodeQuery.trim();
+        if (!query) return;
+        
+        try {
+            const res = await this.env.services.rpc('/ai_studio/find_product', {
+                query: query,
+            });
+            if (res.found && res.products && res.products.length > 0) {
+                const product = res.products[0];
+                this.state.setPieces.push({
+                    product_id: product.id,
+                    product_name: product.name,
+                    barcode: product.barcode,
+                    photos: { front: null, back: null },
+                    hasFront: false,
+                    hasBack: false,
+                });
+                this.state.showSetBarcodeInput = false;
+                this.state.setBarcodeQuery = '';
+                this.state.activeTab = `set_${this.state.setPieces.length - 1}_front`;
+            } else {
+                this.env.services.notification.add('Ürün bulunamadı!', { type: 'danger' });
+            }
+        } catch (e) {
+            this.env.services.notification.add('Arama hatası: ' + e.message, { type: 'danger' });
+        }
+    }
+
+    removeSetPiece(index) {
+        this.state.setPieces.splice(index, 1);
+        this.state.activeTab = 'front';
     }
 
     capturePhoto() {
@@ -139,6 +181,17 @@ export class CaptureScreen extends Component {
                 placement: this.state.detailPlacement,
             });
             this.state.detailCount = this.state.photos.details.length;
+        } else {
+            const setMatch = tab.match(/^set_(\d+)_(front|back)$/);
+            if (setMatch) {
+                const idx = parseInt(setMatch[1]);
+                const side = setMatch[2];
+                if (this.state.setPieces[idx]) {
+                    this.state.setPieces[idx].photos[side] = { data: base64Data, preview: dataUrl };
+                    if (side === 'front') this.state.setPieces[idx].hasFront = true;
+                    if (side === 'back') this.state.setPieces[idx].hasBack = true;
+                }
+            }
         }
     }
 
@@ -150,6 +203,17 @@ export class CaptureScreen extends Component {
         } else if (tab === "back") {
             this.state.photos.back = null;
             this.state.hasBack = false;
+        } else {
+            const setMatch = tab.match(/^set_(\d+)_(front|back)$/);
+            if (setMatch) {
+                const idx = parseInt(setMatch[1]);
+                const side = setMatch[2];
+                if (this.state.setPieces[idx]) {
+                    this.state.setPieces[idx].photos[side] = null;
+                    if (side === 'front') this.state.setPieces[idx].hasFront = false;
+                    if (side === 'back') this.state.setPieces[idx].hasBack = false;
+                }
+            }
         }
     }
 
@@ -174,6 +238,14 @@ export class CaptureScreen extends Component {
         const tab = this.state.activeTab;
         if (tab === "front") return this.state.photos.front;
         if (tab === "back") return this.state.photos.back;
+        const setMatch = tab.match(/^set_(\d+)_(front|back)$/);
+        if (setMatch) {
+            const idx = parseInt(setMatch[1]);
+            const side = setMatch[2];
+            if (this.state.setPieces[idx]) {
+                return this.state.setPieces[idx].photos[side];
+            }
+        }
         return null;
     }
 
@@ -191,6 +263,13 @@ export class CaptureScreen extends Component {
             return;
         }
 
+        for (let i = 0; i < this.state.setPieces.length; i++) {
+            if (!this.state.setPieces[i].hasFront) {
+                this.env.services.notification.add(`Lütfen ${this.state.setPieces[i].product_name} için Ön Yüzü Çekiniz!`, { type: "danger", sticky: false });
+                return;
+            }
+        }
+
         const photos = [];
         if (this.state.photos.front) {
             photos.push({ type: "front", data: this.state.photos.front.data });
@@ -206,7 +285,17 @@ export class CaptureScreen extends Component {
             });
         }
 
+        const setLines = this.state.setPieces.map((piece, idx) => ({
+            product_id: piece.product_id,
+            product_name: piece.product_name,
+            barcode: piece.barcode,
+            photos: [
+                piece.photos.front ? { type: 'front', data: piece.photos.front.data } : null,
+                piece.photos.back ? { type: 'back', data: piece.photos.back.data } : null,
+            ].filter(Boolean),
+        }));
+
         this.stopCamera();
-        this.props.onPhotosReady(photos);
+        this.props.onPhotosReady(photos, setLines);
     }
 }
