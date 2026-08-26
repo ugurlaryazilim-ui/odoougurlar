@@ -1753,6 +1753,76 @@ class AiStudioSession(models.Model):
                             'seed': gen_seed,
                         })
 
+                        # ═══ 2. AŞAMA: COMPANION ÜRÜNÜ GİYDİRME (ZİNCİRLEME TRY-ON) ═══
+                        if gen.generation_mode == 'set_combo' and session.session_type == 'set':
+                            companion_line = session.set_line_ids.filtered(lambda l: l.role == 'companion')[:1]
+                            if companion_line:
+                                companion_front = companion_line.photo_ids.filtered(lambda p: p.photo_type == 'front')[:1]
+                                if companion_front:
+                                    _logger.info('Worker: set_combo 2. Asama (Companion Giydirme) baslatiliyor... (gen=%s)', gen.id)
+                                    try:
+                                        # Companion giysisini hazırla
+                                        comp_source = companion_front.image_original
+                                        comp_preprocessed = preprocess_garment_image(comp_source, target_long_edge=1200)
+                                        comp_b64 = comp_preprocessed['image_base64']
+                                        if auto_bg and comp_b64:
+                                            try:
+                                                comp_bg_rm = provider.remove_background(comp_b64)
+                                                comp_rgb = convert_birefnet_output_to_rgb(base64.b64decode(comp_bg_rm))
+                                                comp_clean = session._remove_hanger_hook(base64.b64encode(comp_rgb))
+                                            except Exception:
+                                                comp_clean = comp_b64
+                                        else:
+                                            comp_clean = comp_b64
+                                            
+                                        comp_garment_url = provider.upload_image(comp_clean)
+                                        
+                                        # 1. aşamanın sonucunu manken olarak yükle
+                                        new_model_url = provider.upload_image(gen_b64)
+                                        
+                                        # Ceketin kategorisi genellikle tops'tur. 
+                                        # Pantolon primary, ceket companion olarak ayarlanır genelde.
+                                        comp_category = 'tops'
+                                        
+                                        # İkinci Try-on çağrısı
+                                        start_time_2 = time.time()
+                                        tryon_result_2 = provider.virtual_tryon(
+                                            model_image_url=new_model_url,
+                                            garment_image_url=comp_garment_url,
+                                            category=comp_category,
+                                            mode=session.quality_mode or 'quality',
+                                            model_name=tryon_model,
+                                            num_samples=1,
+                                            garment_photo_type='auto',
+                                            output_format='jpeg',
+                                            prompt=prompt_text,
+                                            negative_prompt=negative_prompt_text,
+                                            front_output_url=None,
+                                            detail_urls=[],
+                                            resolution=tryon_resolution,
+                                            photo_type=photo_type,
+                                            seed=gen_seed or front_seed,
+                                        )
+                                        
+                                        out2_url = tryon_result_2.get('image_url') or (tryon_result_2.get('image_urls') or [''])[0]
+                                        if out2_url:
+                                            if out2_url.startswith('data:'):
+                                                img2_data = base64.b64decode(out2_url.split(';base64,', 1)[1])
+                                            else:
+                                                img2_data = req_lib.get(out2_url, timeout=60).content
+                                                
+                                            gen_b64 = base64.b64encode(img2_data)
+                                            elapsed_2 = time.time() - start_time_2
+                                            
+                                            gen.write({
+                                                'generated_image': gen_b64,
+                                                'generation_time_seconds': gen.generation_time_seconds + elapsed_2,
+                                                'cost': gen.cost + tryon_result_2.get('cost', 0.05),
+                                            })
+                                            _logger.info('Worker: set_combo 2. Asama basariyla tamamlandi. (gen=%s)', gen.id)
+                                    except Exception as combo_err:
+                                        _logger.error('Worker: set_combo 2. Asama hatasi (gen=%s): %s', gen.id, combo_err)
+
                         # ═══ FRONT SONRASI: REFERANS CACHE + OUTFIT ANALİZİ ═══
                         if photo_type == 'front':
                             if gen_seed:
