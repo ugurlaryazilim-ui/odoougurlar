@@ -3,6 +3,7 @@
 import { Component, useState, useRef, onMounted, onWillUnmount } from "@odoo/owl";
 import { _t } from "@web/core/l10n/translation";
 import { openCameraScanner } from "@ugurlar_barcode/js/camera_scanner";
+import { useService } from "@web/core/utils/hooks";
 
 export class CaptureScreen extends Component {
     static template = "ugurlar_ai_studio.CaptureScreen";
@@ -13,6 +14,7 @@ export class CaptureScreen extends Component {
     };
 
     setup() {
+        this.notification = useService("notification");
         this.videoRef = useRef("cameraVideo");
         this.canvasRef = useRef("captureCanvas");
 
@@ -109,9 +111,18 @@ export class CaptureScreen extends Component {
         if (!query) return;
         
         try {
-            const res = await this.env.services.rpc('/ai_studio/find_product', {
-                query: query,
+            const response = await fetch('/ai_studio/find_product', {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ jsonrpc: "2.0", method: "call", params: { query: query } }),
             });
+            const data = await response.json();
+            
+            if (data.error) {
+                throw new Error(data.error.data?.message || data.error.message || "RPC Error");
+            }
+            const res = data.result;
+
             if (res.found && res.products && res.products.length > 0) {
                 const product = res.products[0];
                 this.state.setPieces.push({
@@ -126,10 +137,10 @@ export class CaptureScreen extends Component {
                 this.state.setBarcodeQuery = '';
                 this.state.activeTab = `set_${this.state.setPieces.length - 1}_front`;
             } else {
-                this.env.services.notification.add('Ürün bulunamadı!', { type: 'danger' });
+                this.notification.add(_t('Ürün bulunamadı!'), { type: 'danger' });
             }
         } catch (e) {
-            this.env.services.notification.add('Arama hatası: ' + e.message, { type: 'danger' });
+            this.notification.add(_t('Arama hatası: ') + e.message, { type: 'danger' });
         }
     }
 
