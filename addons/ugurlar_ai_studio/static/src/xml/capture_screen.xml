@@ -119,7 +119,7 @@
                                    placeholder="Barkod veya SKU girin..."
                                    t-att-value="state.setBarcodeQuery"
                                    t-on-input="(ev) => this.state.setBarcodeQuery = ev.target.value"
-                                   t-on-keydown="(ev) => { if(ev.key === 'Enter') this.addSetPiece(); }"/>
+                                   t-on-keydown="onBarcodeKeyDown"/>
                             <button class="ais-btn-set-search" t-on-click="addSetPiece">🔍</button>
                             <button class="ais-btn-set-cancel" t-on-click="toggleSetBarcodeInput">✕</button>
                         </div>

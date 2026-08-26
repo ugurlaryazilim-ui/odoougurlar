@@ -90,6 +90,12 @@ export class CaptureScreen extends Component {
         this.state.setBarcodeQuery = '';
     }
 
+    onBarcodeKeyDown(ev) {
+        if (ev.key === 'Enter') {
+            this.addSetPiece();
+        }
+    }
+
     async addSetPiece() {
         const query = this.state.setBarcodeQuery.trim();
         if (!query) return;
