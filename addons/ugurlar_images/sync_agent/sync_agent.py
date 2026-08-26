@@ -661,7 +661,17 @@ class OdooImageSync:
                         os.utime(fpath, (float(file_mtime), float(file_mtime)))
                         
                         new_size = os.path.getsize(fpath)
+                        new_mtime = str(int(os.stat(fpath).st_mtime))
                         _logger.info("✅ Sıkıştırma tamamlandı: %s (%.2f MB -> %.2f MB)", f, file_size / (1024*1024), new_size / (1024*1024))
+                        
+                        # SQLite cache'i güncelle: yeni boyut ve tarihi kaydet
+                        # Böylece process_folder "dosya değişmiş" zannedip tekrar yüklemez!
+                        self._db.execute(
+                            '''UPDATE processed_files SET file_size = ?, file_mtime = ?
+                               WHERE filename = ?''',
+                            (new_size, new_mtime, f)
+                        )
+                        self._db.commit()
                         
                         # Her dosyadan sonra nefes al
                         time.sleep(0.1)

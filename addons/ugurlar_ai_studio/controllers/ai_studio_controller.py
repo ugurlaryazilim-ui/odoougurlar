@@ -170,8 +170,12 @@ class AiStudioController(http.Controller):
                         'representative_variant': None
                     }
 
-                # Resim veya aktif oturum varsa tüm renk grubu tamamlanmış sayılır
-                if bool(variant.image_variant_1920) or template_has_image:
+                # Resim varsa tüm renk grubu tamamlanmış sayılır
+                # NOT: Sadece varyantın KENDI resmini kontrol et (image_variant_1920).
+                # Template'ten miras alınan resme (image_1920) bakma!
+                # Böylece Siyah rengin resimleri template'e yazıldığında
+                # Ekru/Biru gibi diğer renkler hâlâ "görselsiz" sayılır.
+                if bool(variant.image_variant_1920):
                     color_groups[key]['has_image'] = True
                     
                 active_session = request.env['ai.studio.session'].sudo().search([
@@ -311,8 +315,20 @@ class AiStudioController(http.Controller):
                     ('state', 'in', ['draft', 'photos_ready', 'processing', 'review', 'failed', 'saving'])
                 ], limit=1)
 
-                # Resim var mı kontrol et (Aynı renkteki TÜM bedenler taranır)
-                has_image = any(bool(v.image_variant_1920) for v in color_variants) or bool(p.product_tmpl_id.image_1920)
+                # Resim var mı kontrol et — aynı renkteki varyantların KENDİ resmine bak
+                # Template'ten veya başka renkten miras alınan resme bakma!
+                has_image = any(bool(v.image_variant_1920) for v in color_variants)
+                
+                # DEBUG: Hangi varyant has_image'ı tetikledi?
+                if has_image:
+                    for v in color_variants:
+                        if bool(v.image_variant_1920):
+                            _logger.info(
+                                "AI Studio DEBUG: has_image=True tetiklendi! "
+                                "Aranan barkod=%s, renk_grubu_id=%s, "
+                                "image sahibi varyant: id=%d, barkod=%s, name=%s",
+                                p.barcode, current_color_id, v.id, v.barcode, v.display_name
+                            )
 
                 result.append({
                     'id': p.id,

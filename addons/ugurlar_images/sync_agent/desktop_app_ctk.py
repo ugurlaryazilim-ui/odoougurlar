@@ -199,9 +199,9 @@ class OdooSyncApp(ctk.CTk):
                 if self.agent is None:
                     self.agent = OdooImageSync(self.config)
                     
-                self.agent.process_folder()
-                self.agent.download_ai_exports()
-                self.agent.optimize_large_local_images()
+                self.agent.optimize_large_local_images()  # Önce büyük dosyaları küçült
+                self.agent.process_folder()                # Sonra Odoo'ya yükle
+                self.agent.download_ai_exports()           # AI görsellerini indir
                 
                 # Her döngüde 3 saniye bekle (event set edilirse anında çıkar)
                 self.stop_event.wait(3.0)
