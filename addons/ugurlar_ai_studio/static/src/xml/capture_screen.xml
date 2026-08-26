@@ -73,37 +73,44 @@
 
             <!-- Alt Arayüz Katmanı (Tablar + Önizlemeler + Çekim Butonları) -->
             <div class="ais-ui-bottom">
-                <!-- Fotoğraf Modu / Tab Bar -->
-                <div class="ais-photo-tabs-glass">
-                    <button t-attf-class="ais-tab-glass {{ state.activeTab === 'front' ? 'active' : '' }}"
-                            t-on-click="() => this.setTab('front')">
-                        <span class="status-indicator" t-att-class="{ active: state.hasFront }"></span> Ön
-                    </button>
-                    <button t-attf-class="ais-tab-glass {{ state.activeTab === 'back' ? 'active' : '' }}"
-                            t-on-click="() => this.setTab('back')">
-                        <span class="status-indicator" t-att-class="{ active: state.hasBack }"></span> Arka
-                    </button>
-                    <button t-attf-class="ais-tab-glass {{ state.activeTab === 'detail' ? 'active' : '' }}"
-                            t-on-click="() => this.setTab('detail')">
-                        <span class="plus-icon">+</span> Detay (<t t-out="state.detailCount"/>)
-                    </button>
+                <div class="ais-photo-tabs-container">
+                    <!-- Ana Ürün Tabları -->
+                    <div class="ais-photo-tabs-glass">
+                        <button t-attf-class="ais-tab-glass {{ state.activeTab === 'front' ? 'active' : '' }}"
+                                t-on-click="() => this.setTab('front')">
+                            <span class="status-indicator" t-att-class="{ active: state.hasFront }"></span> Ön
+                        </button>
+                        <button t-attf-class="ais-tab-glass {{ state.activeTab === 'back' ? 'active' : '' }}"
+                                t-on-click="() => this.setTab('back')">
+                            <span class="status-indicator" t-att-class="{ active: state.hasBack }"></span> Arka
+                        </button>
+                        <button t-attf-class="ais-tab-glass {{ state.activeTab === 'detail' ? 'active' : '' }}"
+                                t-on-click="() => this.setTab('detail')">
+                            <span class="plus-icon">+</span> Detay (<t t-out="state.detailCount"/>)
+                        </button>
+                    </div>
+
                     <!-- Takım Parçaları Tabları -->
-                    <t t-foreach="state.setPieces" t-as="piece" t-key="piece_index">
-                        <div class="ais-set-piece-divider">
-                            <span class="ais-set-piece-label">
-                                🧥 <t t-out="piece.product_name"/>
-                            </span>
-                            <button class="ais-set-remove-btn" t-on-click="() => this.removeSetPiece(piece_index)">✕</button>
-                        </div>
-                        <button t-attf-class="ais-tab-glass {{ state.activeTab === 'set_' + piece_index + '_front' ? 'active' : '' }}"
-                                t-on-click="() => this.setTab('set_' + piece_index + '_front')">
-                            <span class="status-indicator" t-att-class="{ active: piece.hasFront }"></span> Ön
-                        </button>
-                        <button t-attf-class="ais-tab-glass {{ state.activeTab === 'set_' + piece_index + '_back' ? 'active' : '' }}"
-                                t-on-click="() => this.setTab('set_' + piece_index + '_back')">
-                            <span class="status-indicator" t-att-class="{ active: piece.hasBack }"></span> Arka
-                        </button>
-                    </t>
+                    <div class="ais-set-tabs-wrapper" t-if="state.setPieces.length > 0">
+                        <t t-foreach="state.setPieces" t-as="piece" t-key="piece_index">
+                            <div class="ais-set-piece-row">
+                                <div class="ais-set-piece-info">
+                                    <span class="ais-set-piece-label" t-out="piece.product_name"></span>
+                                    <button class="ais-set-remove-btn" t-on-click="() => this.removeSetPiece(piece_index)">✕</button>
+                                </div>
+                                <div class="ais-photo-tabs-glass ais-set-tabs-glass">
+                                    <button t-attf-class="ais-tab-glass {{ state.activeTab === 'set_' + piece_index + '_front' ? 'active' : '' }}"
+                                            t-on-click="() => this.setTab('set_' + piece_index + '_front')">
+                                        <span class="status-indicator" t-att-class="{ active: piece.hasFront }"></span> Ön
+                                    </button>
+                                    <button t-attf-class="ais-tab-glass {{ state.activeTab === 'set_' + piece_index + '_back' ? 'active' : '' }}"
+                                            t-on-click="() => this.setTab('set_' + piece_index + '_back')">
+                                        <span class="status-indicator" t-att-class="{ active: piece.hasBack }"></span> Arka
+                                    </button>
+                                </div>
+                            </div>
+                        </t>
+                    </div>
                 </div>
 
                 <!-- Takım Parçası Ekleme -->

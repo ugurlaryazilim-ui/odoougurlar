@@ -227,10 +227,6 @@
     border-radius: 30px;
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    margin-bottom: 18px;
-    width: 100%;
-    max-width: 440px;
-    align-self: center;
 }
 
 .ais-tab-glass {
@@ -562,36 +558,89 @@
 }
 
 /* Takım Parçası UI */
-.ais-set-piece-divider {
+.ais-photo-tabs-container {
     display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 18px;
     align-items: center;
-    gap: 6px;
-    padding: 4px 8px;
-    margin-top: 4px;
-    border-top: 1px solid rgba(255,255,255,0.2);
+    width: 100%;
 }
+
+.ais-photo-tabs-glass {
+    display: flex;
+    gap: 6px;
+    background: rgba(0, 0, 0, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 4px;
+    border-radius: 30px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    width: 100%;
+    max-width: 440px;
+}
+
+.ais-set-tabs-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    max-width: 440px;
+}
+
+.ais-set-piece-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 6px 8px;
+}
+
+.ais-set-piece-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 4px;
+}
+
 .ais-set-piece-label {
     font-size: 11px;
-    color: rgba(255,255,255,0.8);
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 200px;
+    max-width: 250px;
 }
+
 .ais-set-remove-btn {
-    background: rgba(255,80,80,0.6);
+    background: rgba(239, 68, 68, 0.8);
     border: none;
     color: white;
     border-radius: 50%;
-    width: 20px;
-    height: 20px;
-    font-size: 10px;
+    width: 22px;
+    height: 22px;
+    font-size: 11px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    transition: background 0.2s;
 }
+
+.ais-set-remove-btn:hover {
+    background: rgba(239, 68, 68, 1);
+}
+
+.ais-set-tabs-glass {
+    margin-bottom: 0 !important;
+    background: rgba(0, 0, 0, 0.4);
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
 .ais-set-add-section {
     padding: 6px 12px;
 }
