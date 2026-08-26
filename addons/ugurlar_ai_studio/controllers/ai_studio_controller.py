@@ -768,10 +768,24 @@ class AiStudioController(http.Controller):
                 else:
                     orig_url = '/web/image/ai.studio.generation/%d/original_image' % gen.id
 
+                # Sekme İsmini Özelleştir
+                base_label = dict(gen._fields['photo_type'].selection).get(gen.photo_type, gen.photo_type)
+                
+                if gen.generation_mode == 'set_combo':
+                    label = f"Kombin - {base_label}"
+                elif gen.set_line_id:
+                    # Companion (Ek Takım Parçası)
+                    label = f"{gen.set_line_id.product_name} ({base_label})"
+                elif session.session_type == 'set':
+                    # Ana Ürün (Takım oturumunda)
+                    label = f"Tekli - {base_label}"
+                else:
+                    label = base_label
+
                 items.append({
                     'id': gen.id,
                     'photo_type': gen.photo_type,
-                    'photo_type_label': dict(gen._fields['photo_type'].selection).get(gen.photo_type, gen.photo_type),
+                    'photo_type_label': label,
                     'state': gen.state,
                     'is_approved': gen.is_approved,
                     'is_primary': gen.is_primary,
