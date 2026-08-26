@@ -2,6 +2,7 @@
 
 import { Component, useState, useRef, onMounted, onWillUnmount } from "@odoo/owl";
 import { _t } from "@web/core/l10n/translation";
+import { openCameraScanner } from "@ugurlar_barcode/js/camera_scanner";
 
 export class CaptureScreen extends Component {
     static template = "ugurlar_ai_studio.CaptureScreen";
@@ -88,6 +89,13 @@ export class CaptureScreen extends Component {
     toggleSetBarcodeInput() {
         this.state.showSetBarcodeInput = !this.state.showSetBarcodeInput;
         this.state.setBarcodeQuery = '';
+        if (this.state.showSetBarcodeInput) {
+            // Otomatik olarak kamera barkod okuyucuyu (veya gizli input yakalayıcıyı) başlat
+            openCameraScanner(async (barcode) => {
+                this.state.setBarcodeQuery = barcode;
+                await this.addSetPiece();
+            });
+        }
     }
 
     onBarcodeKeyDown(ev) {
