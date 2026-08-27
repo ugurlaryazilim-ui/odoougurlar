@@ -62,7 +62,7 @@ class PttavmStore(models.Model):
 
     # ─── Tek Sipariş Çek ─────────────────────────────────
     fetch_order_number = fields.Char(
-        string='Sipariş No', store=False,
+        string='Sipariş No', copy=False,
         help='PttAVM sipariş numarası girin (ör: PTTEM-2PR6Q3F2V-270626)'
     )
 
