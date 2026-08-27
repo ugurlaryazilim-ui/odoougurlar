@@ -294,10 +294,12 @@ class PttavmOrderSync(models.Model):
             })
             
             if is_commercial:
-                partner.write({
+                write_vals = {
                     'vat': bill_addr.get('tax_number') or bill_addr.get('tckn'),
-                    'is_subject_to_einvoice': raw_json.get('isInvoice', False)
-                })
+                }
+                if 'is_subject_to_einvoice' in partner_env._fields:
+                    write_vals['is_subject_to_einvoice'] = raw_json.get('isInvoice', False)
+                partner.write(write_vals)
         
         invoice_partner = partner
         farkli_adres = str(bill_addr.get('farkliAdres', '0')).strip()
@@ -311,7 +313,7 @@ class PttavmOrderSync(models.Model):
             if not invoice_name:
                 invoice_name = partner.name
 
-            invoice_partner = partner_env.create({
+            inv_vals = {
                 'name': invoice_name,
                 'type': 'invoice',
                 'parent_id': partner.id,
@@ -319,10 +321,12 @@ class PttavmOrderSync(models.Model):
                 'city': bill_addr.get('city', ''),
                 'country_id': country_tr,
                 'vat': bill_addr.get('tax_number') or bill_addr.get('tckn'),
-                'is_subject_to_einvoice': raw_json.get('isInvoice', False),
                 'company_type': 'company' if is_commercial else 'person',
                 'ref': customer_ref,
-            })
+            }
+            if 'is_subject_to_einvoice' in partner_env._fields:
+                inv_vals['is_subject_to_einvoice'] = raw_json.get('isInvoice', False)
+            invoice_partner = partner_env.create(inv_vals)
 
         # Depo ayarını config'den al — Ayarlar > PttAVM > Depo Ayarları
         warehouse_id_str = self.env['ir.config_parameter'].sudo().get_param(
