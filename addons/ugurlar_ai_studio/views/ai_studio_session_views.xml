@@ -18,6 +18,7 @@
                 <field name="size_value_ids" widget="many2many_tags" optional="hide"/>
                 <field name="gender_value_ids" widget="many2many_tags" optional="hide"/>
                 <field name="qty_available" optional="hide"/>
+                <field name="review_status_display" optional="show" width="180px"/>
                 <!-- Onayıcı/Yönetici: İncele butonu -->
                 <button name="action_review_generations" type="object" string="İncele" class="btn-primary"
                         invisible="state not in ('review', 'failed')"

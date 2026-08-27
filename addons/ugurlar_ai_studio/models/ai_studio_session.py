@@ -293,6 +293,11 @@ class AiStudioSession(models.Model):
         store=True,
         digits=(5, 1),
     )
+    review_status_display = fields.Char(
+        string='İnceleme Durumu',
+        compute='_compute_review_status',
+        store=True,
+    )
     photo_count = fields.Integer(
         string='Fotoğraf Sayısı',
         compute='_compute_photo_count',
@@ -378,6 +383,55 @@ class AiStudioSession(models.Model):
         for session in self:
             session.photo_count = len(session.photo_ids)
             session.generation_count = len(session.generation_ids)
+
+    @api.depends('generation_ids.state', 'generation_ids.is_approved',
+                 'generation_ids.revision_number', 'generation_ids.is_excluded',
+                 'state')
+    def _compute_review_status(self):
+        """İnceleme durumu özeti hesapla.
+        
+        Örnekler:
+          - "✅ 4/4 Onaylı"
+          - "🔄 Revize Ediliyor (1)"
+          - "⏳ Revizeden Döndü"
+          - "3/5 Onaylı · 🔄 1 Revizede"
+        """
+        for session in self:
+            if session.state not in ('review', 'processing', 'failed'):
+                session.review_status_display = ''
+                continue
+
+            gens = session.generation_ids.filtered(lambda g: not g.is_excluded)
+            if not gens:
+                session.review_status_display = ''
+                continue
+
+            total = len(gens)
+            approved = len(gens.filtered('is_approved'))
+            in_revision = len(gens.filtered(
+                lambda g: g.state in ('pending', 'processing') and g.revision_number > 1
+            ))
+            returned_from_revision = len(gens.filtered(
+                lambda g: g.state == 'done' and g.revision_number > 1 and not g.is_approved
+            ))
+            failed = len(gens.filtered(lambda g: g.state == 'failed'))
+
+            parts = []
+
+            if approved == total and total > 0:
+                parts.append(f'✅ {approved}/{total} Onaylı')
+            elif approved > 0:
+                parts.append(f'{approved}/{total} Onaylı')
+
+            if in_revision > 0:
+                parts.append(f'🔄 {in_revision} Revizede')
+            elif returned_from_revision > 0:
+                parts.append('⏳ Revizeden Döndü')
+
+            if failed > 0:
+                parts.append(f'❌ {failed} Başarısız')
+
+            session.review_status_display = ' · '.join(parts) if parts else ''
 
     def _detect_garment_type(self):
         """Ürünün gerçek tipini otomatik algılar.
