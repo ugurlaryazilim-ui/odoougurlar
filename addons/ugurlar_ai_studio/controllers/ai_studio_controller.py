@@ -114,39 +114,10 @@ class AiStudioController(http.Controller):
                 'product_id': product.id,
             })
 
-            # Takım çekimi destegi
-            session_type = kwargs.get('session_type', 'single')
-            set_lines_data = kwargs.get('set_lines', [])
-            set_line_map = {}  # index -> set_line_id mapping for frontend
-
-            if session_type == 'set' and set_lines_data:
-                session.write({'session_type': 'set'})
-                
-                # Ana ürünü primary olarak ekle
-                primary_line = request.env['ai.studio.set.line'].create({
-                    'session_id': session.id,
-                    'product_id': product.id,
-                    'role': 'primary',
-                    'sequence': 1,
-                })
-                
-                # Takım parçalarını ekle
-                for idx, sl_data in enumerate(set_lines_data):
-                    companion_product_id = int(sl_data.get('product_id', 0))
-                    if companion_product_id:
-                        companion_line = request.env['ai.studio.set.line'].create({
-                            'session_id': session.id,
-                            'product_id': companion_product_id,
-                            'role': 'companion',
-                            'sequence': 10 + (idx * 10),
-                        })
-                        set_line_map[idx] = companion_line.id
-
             return {
                 'success': True,
                 'session_id': session.id,
                 'session_name': session.name,
-                'set_line_map': set_line_map,
             }
         except Exception as e:
             _logger.exception('create_session hatasi: %s', e)
@@ -768,24 +739,11 @@ class AiStudioController(http.Controller):
                 else:
                     orig_url = '/web/image/ai.studio.generation/%d/original_image' % gen.id
 
-                # Sekme İsmini Özelleştir
-                base_label = dict(gen._fields['photo_type'].selection).get(gen.photo_type, gen.photo_type)
-                
-                if gen.generation_mode == 'set_combo':
-                    label = f"Kombin - {base_label}"
-                elif gen.set_line_id:
-                    # Companion (Ek Takım Parçası)
-                    label = f"{gen.set_line_id.product_name} ({base_label})"
-                elif session.session_type == 'set':
-                    # Ana Ürün (Takım oturumunda)
-                    label = f"Tekli - {base_label}"
-                else:
-                    label = base_label
 
                 items.append({
                     'id': gen.id,
                     'photo_type': gen.photo_type,
-                    'photo_type_label': label,
+                    'photo_type_label': dict(gen._fields['photo_type'].selection).get(gen.photo_type, gen.photo_type),
                     'state': gen.state,
                     'is_approved': gen.is_approved,
                     'is_primary': gen.is_primary,

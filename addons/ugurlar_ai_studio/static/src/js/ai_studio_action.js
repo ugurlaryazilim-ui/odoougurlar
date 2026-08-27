@@ -136,13 +136,11 @@ export class AiStudioAction extends Component {
         this.navigateTo("capture");
     }
 
-    async onPhotosReady(photos, setLines = []) {
+    async onPhotosReady(photos) {
         this.state.photos = photos;
         try {
             const res = await this._jsonRpc("/ai_studio/create_session", {
                 product_id: this.state.productId,
-                session_type: setLines.length > 0 ? 'set' : 'single',
-                set_lines: setLines,
             });
             if (res.error) {
                 this.notification.add(res.error, { type: "danger", sticky: false });
@@ -167,27 +165,6 @@ export class AiStudioAction extends Component {
                         await this._jsonRpc("/ai_studio/upload_photo", uploadParams);
                     } catch (uploadErr) {
                         console.error("Photo upload error:", uploadErr);
-                    }
-                }
-
-                // Upload set piece photos
-                if (setLines.length > 0 && res.set_line_map) {
-                    for (const [idx, setLine] of setLines.entries()) {
-                        const setLineId = res.set_line_map[idx];
-                        if (setLineId && setLine.photos) {
-                            for (const photo of setLine.photos) {
-                                try {
-                                    await this._jsonRpc("/ai_studio/upload_photo", {
-                                        session_id: res.session_id,
-                                        photo_type: photo.type,
-                                        image_data: photo.data,
-                                        set_line_id: setLineId,
-                                    });
-                                } catch (uploadErr) {
-                                    console.error("Set piece photo upload error:", uploadErr);
-                                }
-                            }
-                        }
                     }
                 }
 
