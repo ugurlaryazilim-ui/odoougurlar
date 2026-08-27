@@ -384,8 +384,14 @@ class InvoiceProcessor(models.AbstractModel):
             elif hasattr(sale_order, 'n11_order_id') and sale_order.n11_order_id:
                 email_address = getattr(sale_order.n11_order_id, 'buyer_email', '') or ''
                 payment_agent = 'N11Mp'
+            elif hasattr(sale_order, 'pttavm_order_id') and sale_order.pttavm_order_id:
+                email_address = getattr(sale_order.pttavm_order_id, 'customer_email', '') or ''
+                payment_agent = 'PttAvmMp'
         if not email_address and invoice.partner_id.email:
             email_address = invoice.partner_id.email or ''
+        # PttAVM fatura partneri e-postası yoksa fallback
+        if not email_address and sale_order and hasattr(sale_order, 'pttavm_order_id') and sale_order.pttavm_order_id:
+            email_address = 'muhasebe@pttem.com'
         m_agent = mapping.payment_agent if mapping and mapping.payment_agent else payment_agent
 
         # Sipariş ref

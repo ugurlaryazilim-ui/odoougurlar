@@ -778,8 +778,13 @@ class SaleOrder(models.Model):
                 try:
                     with self.env.cr.savepoint():
                         customer_proc = self.env['odoougurlar.customer.processor'].sudo()
+                        # Fatura partneri farklıysa (ör: PTTEM siparişleri), Nebim cariyi
+                        # fatura partnerine göre aç (kurumsal/bireysel doğru tespit edilsin)
+                        nebim_partner = order.partner_id
+                        if order.partner_invoice_id and order.partner_invoice_id != order.partner_id:
+                            nebim_partner = order.partner_invoice_id
                         cust_code, addr_id = customer_proc.sync_customer(
-                            order.partner_id, mapping, sale_order=order
+                            nebim_partner, mapping, sale_order=order
                         )
 
                     resolved_cust_code = cust_code  # Python değişkeni — ORM cache değil!

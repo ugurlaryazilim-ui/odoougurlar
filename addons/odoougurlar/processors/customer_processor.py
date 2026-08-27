@@ -482,6 +482,14 @@ class CustomerProcessor(models.AbstractModel):
         comm_list = []
         cust_phone = (partner.phone or getattr(partner, 'mobile', '') or '').strip()
         cust_email = (partner.email or '').strip()
+        # PttAVM fatura partneri (type=invoice, child) e-postası yoksa:
+        # 1. Ana partnerin (parent) e-postasını dene
+        # 2. PttAVM siparişiyse muhasebe@pttem.com fallback kullan
+        if not cust_email and partner.parent_id:
+            cust_email = (partner.parent_id.email or '').strip()
+        if not cust_email and sale_order and hasattr(sale_order, 'pttavm_order_id') and sale_order.pttavm_order_id:
+            cust_email = 'muhasebe@pttem.com'
+            _logger.info("PttAVM fatura partneri e-posta yok, fallback: muhasebe@pttem.com")
         if cust_email:
             comm_list.append({
                 'CommunicationTypeCode': 3,
