@@ -389,8 +389,10 @@ class InvoiceProcessor(models.AbstractModel):
                 payment_agent = 'PttAvmMp'
         if not email_address and invoice.partner_id.email:
             email_address = invoice.partner_id.email or ''
-        # PttAVM fatura partneri e-postası yoksa fallback
-        if not email_address and sale_order and hasattr(sale_order, 'pttavm_order_id') and sale_order.pttavm_order_id:
+        # PTTEM modeli: fatura partneri farklı VE PttAVM VE e-posta yoksa
+        if (not email_address and sale_order
+                and hasattr(sale_order, 'pttavm_order_id') and sale_order.pttavm_order_id
+                and sale_order.partner_invoice_id and sale_order.partner_invoice_id != sale_order.partner_id):
             email_address = 'muhasebe@pttem.com'
         m_agent = mapping.payment_agent if mapping and mapping.payment_agent else payment_agent
 

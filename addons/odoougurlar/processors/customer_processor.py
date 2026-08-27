@@ -487,9 +487,12 @@ class CustomerProcessor(models.AbstractModel):
         # 2. PttAVM siparişiyse muhasebe@pttem.com fallback kullan
         if not cust_email and partner.parent_id:
             cust_email = (partner.parent_id.email or '').strip()
-        if not cust_email and sale_order and hasattr(sale_order, 'pttavm_order_id') and sale_order.pttavm_order_id:
+        # PTTEM modeli: fatura partneri farklı (farkliAdres=1) VE PttAVM siparişi VE e-posta yoksa
+        if (not cust_email and sale_order
+                and hasattr(sale_order, 'pttavm_order_id') and sale_order.pttavm_order_id
+                and sale_order.partner_invoice_id and sale_order.partner_invoice_id != sale_order.partner_id):
             cust_email = 'muhasebe@pttem.com'
-            _logger.info("PttAVM fatura partneri e-posta yok, fallback: muhasebe@pttem.com")
+            _logger.info("PTTEM fatura partneri e-posta yok, fallback: muhasebe@pttem.com")
         if cust_email:
             comm_list.append({
                 'CommunicationTypeCode': 3,
