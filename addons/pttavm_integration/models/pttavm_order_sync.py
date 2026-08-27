@@ -157,9 +157,12 @@ class PttavmOrderSync(models.Model):
         customer_email = order_json.get('eposta', '')
         phone_number = order_json.get('telefonNo', '')
 
-        # Fatura Tipi
+        # Fatura Tipi — PttAVM bazen faturaTip="Bireysel" gönderir ama VKN 10 hanedir (kurumsal).
+        # Örnek: PTTEM siparişlerinde faturaTip="Bireysel" + vergiNo="7330638410" (10 hane VKN)
+        # Bu yüzden VKN hane kontrolü ek güvenlik olarak eklendi.
         fatura_tipi = order_json.get('faturaTip') # Bireysel, Kurumsal
-        is_commercial = True if fatura_tipi == 'Kurumsal' else False
+        vergi_no = ''.join(filter(str.isdigit, order_json.get('vergiNo') or ''))
+        is_commercial = fatura_tipi == 'Kurumsal' or len(vergi_no) == 10
 
         # FarkliAdres = 1 ise fatura ve teslimat farkli demektir
         
@@ -199,6 +202,7 @@ class PttavmOrderSync(models.Model):
             'billing_address': json.dumps(billing_addr, ensure_ascii=False),
             'shipping_city': shipment_addr.get('city', ''),
             'shipping_district': shipment_addr.get('district', ''),
+            'tax_office': order_json.get('vergiDaire', ''),
             'total_price': 0.0,
             'currency': 'TRY',
             'raw_data': json.dumps(order_json, ensure_ascii=False),
@@ -296,16 +300,27 @@ class PttavmOrderSync(models.Model):
                 })
         
         invoice_partner = partner
-        if bill_addr and bill_addr.get('farkliAdres') == 1:
+        farkli_adres = str(bill_addr.get('farkliAdres', '0')).strip()
+        if bill_addr and farkli_adres == '1':
             bill_display = bill_addr.get('address', '')
+            # Fatura adı: kurumsal ise firma ünvanı (faturaMusteriAdi), bireysel ise kişi adı
+            if is_commercial:
+                invoice_name = bill_addr.get('company_name') or raw_json.get('faturaMusteriAdi', '')
+            else:
+                invoice_name = f"{raw_json.get('faturaMusteriAdi','')} {raw_json.get('faturaMusteriSoyadi','')}".strip()
+            if not invoice_name:
+                invoice_name = partner.name
+
             invoice_partner = partner_env.create({
-                'name': bill_addr.get('company_name') if is_commercial else f"{raw_json.get('faturaMusteriAdi','')} {raw_json.get('faturaMusteriSoyadi','')}".strip(),
+                'name': invoice_name,
                 'type': 'invoice',
                 'parent_id': partner.id,
                 'street': bill_display,
                 'city': bill_addr.get('city', ''),
+                'country_id': country_tr,
                 'vat': bill_addr.get('tax_number') or bill_addr.get('tckn'),
                 'is_subject_to_einvoice': raw_json.get('isInvoice', False),
+                'company_type': 'company' if is_commercial else 'person',
                 'ref': customer_ref,
             })
 

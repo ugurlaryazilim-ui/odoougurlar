@@ -30,6 +30,9 @@ class PttavmOrder(models.Model):
     shipping_city = fields.Char(string='Teslimat İl')
     shipping_district = fields.Char(string='Teslimat İlçe')
     
+    # Fatura Bilgileri
+    tax_office = fields.Char(string='Vergi Dairesi')
+    
     # Kargo ve Paketleme için ana takip bilgileri
     cargo_tracking_number = fields.Char(string='Kargo Takip No')
     cargo_provider = fields.Char(string='Kargo Firması')
