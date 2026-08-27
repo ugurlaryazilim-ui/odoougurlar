@@ -111,6 +111,11 @@ class PttavmAPIClient:
         _logger.info("PttAVM API isteği: /orders/search params=%s", params)
         return self._request('GET', '/orders/search', params=params)
 
+    def get_order_detail(self, order_id):
+        """Tek siparişin detayını çek. (orderId = siparisNo)"""
+        _logger.info("PttAVM API isteği: /orders/%s", order_id)
+        return self._request('GET', f'/orders/{order_id}')
+
     def send_invoice(self, order_id, line_item_ids, pdf_base64=None, url=None):
         """PDF Fatura Gönderimi."""
         data = {

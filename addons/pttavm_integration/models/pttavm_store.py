@@ -60,6 +60,12 @@ class PttavmStore(models.Model):
     order_ids = fields.One2many('pttavm.order', 'store_id', string='Siparişler')
     settlement_ids = fields.One2many('pttavm.settlement', 'store_id', string='Finansal İşlemler')
 
+    # ─── Tek Sipariş Çek ─────────────────────────────────
+    fetch_order_number = fields.Char(
+        string='Sipariş No', store=False,
+        help='PttAVM sipariş numarası girin (ör: PTTEM-2PR6Q3F2V-270626)'
+    )
+
     # ─── Counts ──────────────────────────────────────────
     order_count = fields.Integer(string='Sipariş Sayısı', compute='_compute_order_count')
     settlement_count = fields.Integer(string='Finansal Kayıt', compute='_compute_counts')
@@ -161,6 +167,75 @@ class PttavmStore(models.Model):
                 'type': 'success' if res.get('errors') == 0 else 'warning',
             }
         }
+
+    def action_fetch_single_order(self):
+        """Sipariş numarası ile tek sipariş çek."""
+        self.ensure_one()
+        order_number = self.fetch_order_number
+        if not order_number:
+            raise UserError(_('Lütfen bir sipariş numarası girin!'))
+
+        order_number = order_number.strip()
+        _logger.info("PttAVM Tek sipariş çekiliyor: %s (mağaza: %s)", order_number, self.name)
+
+        try:
+            api = self.get_api()
+            result = api.get_order_detail(order_number)
+
+            if not result.get('success'):
+                raise UserError(_('❌ PttAVM API hatası:\n\n%s') % result.get('error', 'Bilinmeyen hata'))
+
+            data = result.get('data', [])
+
+            # API list veya dict dönebilir
+            if isinstance(data, dict):
+                order_list = [data]
+            elif isinstance(data, list):
+                order_list = data
+            else:
+                order_list = []
+
+            if not order_list:
+                raise UserError(_('❌ Sipariş bulunamadı: %s\n\nBu numarada sipariş PttAVM\'de mevcut değil.') % order_number)
+
+            PttavmOrder = self.env['pttavm.order']
+            created = 0
+            updated = 0
+
+            for order_json in order_list:
+                try:
+                    with self.env.cr.savepoint():
+                        res = PttavmOrder._process_order_json(order_json, self)
+                        if res == 'created':
+                            created += 1
+                        elif res == 'updated':
+                            updated += 1
+                except Exception as e:
+                    raise UserError(_('❌ Sipariş işleme hatası:\n\n%s') % str(e))
+
+            # Sipariş çekildikten sonra input temizle
+            self.fetch_order_number = False
+
+            msg = f'✅ Sipariş başarıyla çekildi! ({order_number})'
+            if created:
+                msg += ' | Yeni oluşturuldu'
+            elif updated:
+                msg += ' | Güncellendi'
+
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'PttAVM Sipariş Çek',
+                    'message': msg,
+                    'type': 'success',
+                    'sticky': False,
+                },
+            }
+        except UserError:
+            raise
+        except Exception as e:
+            raise UserError(_('❌ Sipariş çekme hatası:\n\n%s') % str(e))
 
     def action_sync_financials(self):
         self.ensure_one()
