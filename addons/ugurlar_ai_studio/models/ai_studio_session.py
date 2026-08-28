@@ -150,6 +150,7 @@ class AiStudioSession(models.Model):
         ('photos_ready', 'Fotoğraflar Hazır'),
         ('preprocessing', 'Ön İşlem'),
         ('processing', 'AI İşliyor'),
+        ('failed', 'Başarısız'),
         ('review', 'Onay Bekliyor'),
         ('saving', 'Ürüne Kaydediliyor'),
         ('done', 'Tamamlandı'),
@@ -430,6 +431,10 @@ class AiStudioSession(models.Model):
 
             if failed > 0:
                 parts.append(f'❌ {failed} Başarısız')
+
+            pending = len(gens.filtered(lambda g: g.state in ('pending', 'processing')))
+            if pending > 0 and session.state in ('failed', 'processing'):
+                parts.append(f'⏸️ {pending} Bekliyor')
 
             session.review_status_display = ' · '.join(parts) if parts else ''
 
@@ -761,6 +766,82 @@ class AiStudioSession(models.Model):
                 
             session.state = 'photos_ready'
             session.date_photos_ready = fields.Datetime.now()
+
+    def action_force_review(self):
+        """Takılmış oturumları 'Onay Bekliyor' durumuna al.
+        
+        photos_ready'de kalmış ama AI üretimleri tamamlanmış oturumlar için.
+        Genellikle ürüne kaydetme sırasında concurrent update hatası alan
+        oturumları kurtarır.
+        """
+        for session in self:
+            if session.generation_ids:
+                session.state = 'review'
+                session.message_post(
+                    body=_('⚠️ Oturum manuel olarak inceleme durumuna alındı (önceki kaydetme hatası nedeniyle).'),
+                )
+
+    def action_retry_failed(self):
+        """Başarısız ve bekleyen üretimleri kaldığı yerden devam ettir.
+        
+        - 'failed' ve 'pending' durumdaki generation'ları sıfırlayıp tekrar kuyruğa alır
+        - Tamamlanmış ('done') olanlara dokunmaz
+        - AI thread'ini yeniden başlatır
+        """
+        self.ensure_one()
+
+        retryable = self.generation_ids.filtered(
+            lambda g: g.state in ('failed', 'pending')
+        )
+        if not retryable:
+            raise UserError(_('Tekrar denenecek başarısız veya bekleyen üretim yok.'))
+
+        # Failed olanları pending'e çevir, error mesajını temizle
+        for gen in retryable:
+            gen.write({
+                'state': 'pending',
+                'error_message': False,
+            })
+
+        # API anahtarını al
+        provider_type = self.env['ir.config_parameter'].sudo().get_param(
+            'ugurlar_ai_studio.default_provider', 'fashn'
+        )
+        if provider_type == 'fashn':
+            api_key = self.env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.fashn_api_key'
+            )
+        else:
+            api_key = self.env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.fal_api_key'
+            )
+
+        if not api_key:
+            raise UserError(_('API anahtarı bulunamadı. Lütfen Yapılandırma ayarlarını kontrol edin.'))
+
+        self.state = 'processing'
+        self.message_post(
+            body=_('🔄 Kaldığı yerden devam ediliyor: %d başarısız/bekleyen üretim yeniden kuyruğa alındı.') % len(retryable),
+        )
+
+        # Thread'i tekrar başlat
+        thread = threading.Thread(
+            target=self._process_ai_thread,
+            args=(self.id, api_key, self.env.uid),
+        )
+        thread.daemon = True
+        thread.start()
+
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('AI İşleme Devam Ediyor'),
+                'message': _('%d üretim yeniden başlatıldı. Tamamlandığında bildirim alacaksınız.') % len(retryable),
+                'type': 'info',
+                'sticky': False,
+            },
+        }
 
     def action_start_processing(self):
         """AI işlemeyi başlat."""
@@ -1452,7 +1533,13 @@ class AiStudioSession(models.Model):
             # ═══ KIYAFET ANALIZINI CACHE'LE (tek API cagrisi) ═══
             cached_analysis = None
             try:
+                # Retry durumunda front zaten done olabilir, tüm generation'lara bak
                 front_gen = generations.filtered(lambda g: g.photo_type == 'front')
+                if not front_gen:
+                    # Front pending değilse (zaten done), tüm session generation'larından al
+                    front_gen = session.generation_ids.filtered(
+                        lambda g: g.photo_type == 'front' and g.state == 'done'
+                    )
                 front_img = front_gen and (front_gen[0].original_image or (front_gen[0].source_photo_id and front_gen[0].source_photo_id.image_original))
                 if front_gen and front_img:
                     from ..services.garment_preprocessor import preprocess_garment_image
@@ -1670,7 +1757,7 @@ class AiStudioSession(models.Model):
                         tryon_resolution = '2K' if 'max' in tryon_model else '1K'
 
                     from ..services.garment_analyzer import map_to_fashn_category
-                    category_to_send = map_to_fashn_category(cached_analysis)
+                    category_to_send = map_to_fashn_category(cached_analysis or {})
 
                     # VIEW-SPESİFİK PROMPT OLUŞTURMA
                     prompt_text = ""
@@ -1972,7 +2059,12 @@ class AiStudioSession(models.Model):
                         'date_review_start': fields.Datetime.now()
                     })
                     if has_failed:
-                        session.message_post(body=_('AI üretimi tamamlandı ancak BAZI GÖRSELLER BAŞARISIZ oldu. İncele butonuna basarak başarısız olanları tekrar deneyebilirsiniz.'))
+                        done_count = len(session.generation_ids.filtered(lambda g: g.state == 'done'))
+                        fail_count = len(session.generation_ids.filtered(lambda g: g.state == 'failed'))
+                        session.message_post(body=_(
+                            'AI üretimi tamamlandı: ✅ %d başarılı, ❌ %d başarısız. '
+                            '"🔄 Kaldığı Yerden Devam Et" butonu ile başarısız olanları tekrar deneyebilirsiniz.'
+                        ) % (done_count, fail_count))
                     else:
                         session.message_post(body=_('AI üretimi tamamlandı. %d görsel onay bekliyor.') % len(session.generation_ids))
                     cr.commit()
@@ -2566,8 +2658,8 @@ class AiStudioSession(models.Model):
                     lambda g: g.is_approved and g.state == 'done' and not g.is_excluded
                 )
                 if not approved:
-                    session.state = 'photos_ready'
-                    session.message_post(body=_('Hiç onaylı görsel bulunamadı, taslağa döndürüldü.'))
+                    session.state = 'review'
+                    session.message_post(body=_('Hiç onaylı görsel bulunamadı, incelemeye döndürüldü.'))
                     continue
                 
                 # Resimleri ürüne ekle
@@ -2584,9 +2676,9 @@ class AiStudioSession(models.Model):
             except Exception as e:
                 self.env.cr.rollback()
                 _logger.exception("CRON Hatası (session=%s): %s", session.id, e)
-                session.state = 'photos_ready'
+                session.state = 'review'
                 session.message_post(
-                    body=_('Arka planda ürüne kaydederken hata oluştu. Lütfen tekrar deneyin. Hata: %s') % str(e)[:200],
+                    body=_('⚠️ Ürüne kaydederken hata oluştu. Lütfen tekrar "Tamamla ve Kaydet" butonuna basın. Hata: %s') % str(e)[:200],
                 )
                 self.env.cr.commit()
     def _save_to_product(self, approved_generations):
@@ -2892,15 +2984,12 @@ class AiStudioSession(models.Model):
 
     def _generate_seo_content_gemini_threaded(self, session_id):
         """Yeni bir Odoo Environment'i açarak Gemini API çağrısını yapar."""
-        import odoo
-        from odoo import api, SUPERUSER_ID, registry
+        from odoo import api, SUPERUSER_ID
         import logging
         _logger = logging.getLogger(__name__)
         
         try:
-            db_name = self.env.cr.dbname
-            reg = registry(db_name)
-            with reg.cursor() as cr:
+            with self.pool.cursor() as cr:
                 env = api.Environment(cr, SUPERUSER_ID, {})
                 session = env['ai.studio.session'].browse(session_id)
                 session._generate_seo_content_gemini()
