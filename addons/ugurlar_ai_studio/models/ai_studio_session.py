@@ -150,6 +150,7 @@ class AiStudioSession(models.Model):
         ('photos_ready', 'Fotoğraflar Hazır'),
         ('preprocessing', 'Ön İşlem'),
         ('processing', 'AI İşliyor'),
+        ('failed', 'Başarısız'),
         ('review', 'Onay Bekliyor'),
         ('saving', 'Ürüne Kaydediliyor'),
         ('done', 'Tamamlandı'),
@@ -1532,7 +1533,13 @@ class AiStudioSession(models.Model):
             # ═══ KIYAFET ANALIZINI CACHE'LE (tek API cagrisi) ═══
             cached_analysis = None
             try:
+                # Retry durumunda front zaten done olabilir, tüm generation'lara bak
                 front_gen = generations.filtered(lambda g: g.photo_type == 'front')
+                if not front_gen:
+                    # Front pending değilse (zaten done), tüm session generation'larından al
+                    front_gen = session.generation_ids.filtered(
+                        lambda g: g.photo_type == 'front' and g.state == 'done'
+                    )
                 front_img = front_gen and (front_gen[0].original_image or (front_gen[0].source_photo_id and front_gen[0].source_photo_id.image_original))
                 if front_gen and front_img:
                     from ..services.garment_preprocessor import preprocess_garment_image
@@ -1750,7 +1757,7 @@ class AiStudioSession(models.Model):
                         tryon_resolution = '2K' if 'max' in tryon_model else '1K'
 
                     from ..services.garment_analyzer import map_to_fashn_category
-                    category_to_send = map_to_fashn_category(cached_analysis)
+                    category_to_send = map_to_fashn_category(cached_analysis or {})
 
                     # VIEW-SPESİFİK PROMPT OLUŞTURMA
                     prompt_text = ""
