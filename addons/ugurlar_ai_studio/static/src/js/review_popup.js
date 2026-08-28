@@ -737,14 +737,21 @@ async function openReviewPopup(sessionId) {
 
     async function complete() {
         const approvedItems = items.filter(i => i.is_approved);
-        if (approvedItems.length > 0 && !approvedItems.some(i => i.is_primary)) {
-            showToast('Lütfen onayladığınız görsellerden birini "Ana Görsel" (yıldız ikonuna tıklayarak) olarak seçin!', 'error');
+        if (approvedItems.length === 0) {
+            showToast('Lütfen en az bir görseli onaylayın!', 'error');
             return;
+        }
+
+        // Eğer hiçbir görsel ana görsel olarak işaretlenmemişse otomatik olarak Ön Görseli (veya ilk onaylıyı) ana görsel yap
+        if (!approvedItems.some(i => i.is_primary)) {
+            const frontItem = approvedItems.find(i => i.photo_type === 'front') || approvedItems[0];
+            frontItem.is_primary = true;
         }
 
         const btn = document.getElementById('ais-rp-complete');
         if (btn) { btn.disabled = true; btn.textContent = '⏳ Kaydediliyor...'; }
 
+        const previousSessionName = data.session_name;
         const payload = {
             session_id: data.session_id,
             approved_items: approvedItems.map(i => ({ id: i.id, is_primary: i.is_primary }))
@@ -759,7 +766,7 @@ async function openReviewPopup(sessionId) {
                 currentIndex = 0;
                 const nextData = await _jsonRpc('/ai_studio/review_data', { session_id: data.next_session_id });
                 if (nextData.error || !nextData.items || nextData.items.length === 0) {
-                    showToast('✅ Tamamlandı! İncelenecek başka oturum yok.', 'success');
+                    showToast(`✅ ${previousSessionName} başarıyla kaydedildi! İncelenecek başka oturum yok.`, 'success');
                     close();
                     window.location.reload();
                     return;
@@ -772,9 +779,10 @@ async function openReviewPopup(sessionId) {
                 data.reject_reasons = nextData.reject_reasons || rejectReasons;
                 items = nextData.items;
                 currentIndex = 0;
+                showToast(`✅ ${previousSessionName} kaydedildi. Sıradaki oturuma geçildi (${nextData.session_name}).`, 'success');
                 render();
             } else {
-                showToast('✅ Tamamlandı! İncelenecek başka oturum yok.', 'success');
+                showToast(`✅ ${previousSessionName} başarıyla kaydedildi!`, 'success');
                 close();
                 window.location.reload();
             }

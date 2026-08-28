@@ -887,7 +887,7 @@ class AiStudioSession(models.Model):
         self.generation_ids.unlink()
 
         # 4 görsel çıktısı için generation kayıtlarını oluştur
-        # 1. Ön Görsel
+        # 1. Ön Görsel (Varsayılan olarak Ana Görsel)
         self.env['ai.studio.generation'].create({
             'session_id': self.id,
             'source_photo_id': front_photo.id,
@@ -895,6 +895,7 @@ class AiStudioSession(models.Model):
             'original_image': front_photo.image_original,
             'state': 'pending',
             'provider': provider_type,
+            'is_primary': True,
         })
 
         # 2. Arka Görsel (varsa)
@@ -2632,7 +2633,10 @@ class AiStudioSession(models.Model):
             
         has_primary = approved.filtered(lambda g: g.is_primary)
         if not has_primary:
-            raise UserError(_('Lütfen onayladığınız görsellerden birini "Ana Görsel" (Yıldızlı ikon) olarak seçin!'))
+            # Otomatik olarak ön görseli veya ilk onaylı görseli ana görsel yap
+            front = approved.filtered(lambda g: g.photo_type == 'front')[:1]
+            primary = front or approved[0]
+            primary.is_primary = True
             
         self.state = 'saving'
         
@@ -2661,6 +2665,12 @@ class AiStudioSession(models.Model):
                     session.state = 'review'
                     session.message_post(body=_('Hiç onaylı görsel bulunamadı, incelemeye döndürüldü.'))
                     continue
+                
+                # Primary kontrolü & otomatik tamamlama
+                if not approved.filtered(lambda g: g.is_primary):
+                    front = approved.filtered(lambda g: g.photo_type == 'front')[:1]
+                    primary = front or approved[0]
+                    primary.is_primary = True
                 
                 # Resimleri ürüne ekle
                 session._save_to_product(approved)

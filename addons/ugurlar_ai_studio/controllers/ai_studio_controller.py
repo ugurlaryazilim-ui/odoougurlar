@@ -763,6 +763,12 @@ class AiStudioController(http.Controller):
                 g.revision_number
             ))
 
+            # Eğer hiçbir görsel ana görsel değilse varsayılan olarak ön görseli işaretle
+            if generations and not any(g.is_primary for g in generations):
+                front_gen = generations.filtered(lambda g: g.photo_type == 'front')[:1] or generations[:1]
+                if front_gen:
+                    front_gen.write({'is_primary': True})
+
             items = []
             for gen in generations:
                 orig_url = ''
