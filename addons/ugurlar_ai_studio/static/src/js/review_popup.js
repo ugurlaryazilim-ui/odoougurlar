@@ -213,6 +213,11 @@ async function openReviewPopup(sessionId) {
                             <p>Bu görsel reddedildi ve yeni versiyon AI tarafından üretiliyor.</p>
                             <p class="ais-rp-pending-hint">Hazır olduğunda otomatik olarak yüklenecek.</p>
                             <div class="ais-rp-pending-spinner"></div>
+                            ${canApprove ? `
+                                <button class="ais-rp-btn" id="ais-rp-cancel-revision" style="margin-top:20px; background:#ef4444; border-color:#ef4444; font-size:13px; padding:6px 12px;">
+                                    🛑 İptal Et & Geri Dön
+                                </button>
+                            ` : ''}
                         </div>
                     ` : item.state === 'failed' ? `
                         <!-- Başarısız Ekranı -->
@@ -431,6 +436,31 @@ async function openReviewPopup(sessionId) {
                         revisionPromptEn = revisionPrompt;
                     }
                 }, 800);
+            });
+        }
+        
+        // Revize İptal Butonu
+        const cancelRevisionBtn = overlay.querySelector('#ais-rp-cancel-revision');
+        if (cancelRevisionBtn) {
+            cancelRevisionBtn.addEventListener('click', async () => {
+                const item = items[currentIndex];
+                cancelRevisionBtn.disabled = true;
+                cancelRevisionBtn.textContent = 'İptal Ediliyor...';
+                try {
+                    const res = await _jsonRpc('/ai_studio/cancel_revision', {
+                        generation_id: item.new_generation_id || item.id, // eger result'tan gelmisse new_generation_id, normal gelmisse id
+                    });
+                    if (res.error) {
+                        showToast(res.error);
+                    } else {
+                        // polling'i manuel refresh etmesi icin
+                        showToast('Revize iptal edildi.', 'success');
+                    }
+                    fetchData(true);
+                } catch(e) {
+                    showToast('İptal hatası: ' + e.message);
+                    fetchData(true);
+                }
             });
         }
 

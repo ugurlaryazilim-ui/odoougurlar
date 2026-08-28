@@ -497,6 +497,38 @@ class AiStudioController(http.Controller):
             _logger.exception('reject_generation hatasi: %s', e)
             return {'error': str(e)}
 
+    @http.route('/ai_studio/cancel_revision', type='json', auth='user', methods=['POST'])
+    def cancel_revision(self, generation_id):
+        """Devam eden veya takılı kalan bir revizyonu iptal et ve önceki haline döndür."""
+        try:
+            if not request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'):
+                return {'error': 'Bu işlemi yapmaya yetkiniz yok. Onaycı veya yönetici rolü gerekli.'}
+            
+            gen = request.env['ai.studio.generation'].browse(int(generation_id))
+            if not gen.exists():
+                return {'error': 'Üretim bulunamadı.'}
+            
+            if gen.state not in ('pending', 'processing'):
+                return {'error': 'Sadece bekleyen veya işlenen revizyonlar iptal edilebilir.'}
+
+            parent = gen.parent_generation_id
+            
+            # Yeni üretimi sil
+            gen.unlink()
+            
+            # Ebeveyni geri getir
+            if parent.exists():
+                parent.write({
+                    'reject_reason_id': False,
+                    'revision_prompt': False,
+                    'revision_prompt_en': False,
+                })
+                
+            return {'success': True}
+        except Exception as e:
+            _logger.exception('cancel_revision hatasi: %s', e)
+            return {'error': str(e)}
+
     @http.route('/ai_studio/translate_revision', type='json', auth='user', methods=['POST'])
     def translate_revision(self, text=''):
         """Türkçe revizyon metnini İngilizce'ye çevir.
