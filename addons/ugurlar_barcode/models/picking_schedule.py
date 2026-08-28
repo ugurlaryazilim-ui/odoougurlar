@@ -392,6 +392,24 @@ class PickingSchedule(models.Model):
         ]
         pickings = Picking.search(domain)
 
+        # ─── ORPHAN PİCKİNG: Zaman penceresini kaçırmış picking'ler ───
+        # Geçmiş pencerelerden kalan ama batch'e hiç girmemiş picking'leri
+        # de bu pencereye dahil et. Bu durum Amazon gibi farklı cron
+        # sürelerine sahip entegrasyonlarda veya cron sarkmasında oluşabilir.
+        orphan_domain = [
+            ('picking_type_id', '=', picking_type.id),
+            ('state', 'in', ['confirmed', 'waiting', 'assigned']),
+            ('batch_id', '=', False),
+            ('create_date', '<', window_start_utc),
+        ]
+        orphan_pickings = Picking.search(orphan_domain)
+        if orphan_pickings:
+            _logger.info(
+                "Toplama [%s] %s — %d orphan picking dahil ediliyor "
+                "(önceki pencerelerden kalan, batch'siz)",
+                self.name, window_label, len(orphan_pickings))
+            pickings |= orphan_pickings
+
         # ─── OTOMATİK BATCH SORUNU: Odoo'nun auto_batch'i picking'lere
         # otomatik tekli batch oluşturmuş olabilir. Bu tekli batch'leri
         # de yakala ve gruplanan batch'e taşı ───
