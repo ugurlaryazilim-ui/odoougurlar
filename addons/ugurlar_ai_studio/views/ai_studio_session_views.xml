@@ -56,6 +56,11 @@
                             type="object" class="btn-warning"
                             invisible="state != 'photos_ready' or generation_count == 0"
                             groups="ugurlar_ai_studio.group_ai_studio_reviewer"/>
+                    <button name="action_start_processing" string="Yeniden AI Gönder"
+                            type="object" class="btn-danger"
+                            invisible="state != 'photos_ready' or generation_count == 0"
+                            confirm="DİKKAT: Mevcut AI üretimleri silinecek ve işlem baştan başlayacaktır. Emin misiniz?"
+                            groups="ugurlar_ai_studio.group_ai_studio_reviewer"/>
                     <!-- Onayıcı/Yönetici: İnceleme ve tamamlama -->
                     <button name="action_review_generations" string="Gorselleri Incele"
                             type="object" class="btn-primary"
