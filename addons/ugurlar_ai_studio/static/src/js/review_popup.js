@@ -453,13 +453,15 @@ async function openReviewPopup(sessionId) {
                     if (res.error) {
                         showToast(res.error);
                     } else {
-                        // polling'i manuel refresh etmesi icin
                         showToast('Revize iptal edildi.', 'success');
                     }
-                    fetchData(true);
+                    const freshData = await _jsonRpc('/ai_studio/review_data', { session_id: data.session_id });
+                    if (!freshData.error && freshData.items) {
+                        items = freshData.items;
+                        render();
+                    }
                 } catch(e) {
                     showToast('İptal hatası: ' + e.message);
-                    fetchData(true);
                 }
             });
         }
