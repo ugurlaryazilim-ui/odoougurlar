@@ -19,9 +19,14 @@
                 <field name="gender_value_ids" widget="many2many_tags" optional="hide"/>
                 <field name="qty_available" optional="hide"/>
                 <field name="review_status_display" optional="show" width="180px"/>
+                <field name="generation_count" column_invisible="1"/>
                 <!-- Onayıcı/Yönetici: İncele butonu -->
                 <button name="action_review_generations" type="object" string="İncele" class="btn-primary"
                         invisible="state not in ('review', 'failed')"
+                        groups="ugurlar_ai_studio.group_ai_studio_reviewer"/>
+                <!-- Takılmış oturum kurtarma -->
+                <button name="action_force_review" type="object" string="⚠️ İncelemeye Al" class="btn-warning"
+                        invisible="state != 'photos_ready' or generation_count == 0"
                         groups="ugurlar_ai_studio.group_ai_studio_reviewer"/>
             </list>
         </field>
@@ -40,8 +45,13 @@
                             invisible="state != 'draft'"/>
                     <button name="action_start_processing" string="AI islemeyi Baslat"
                             type="object" class="btn-primary"
-                            invisible="state != 'photos_ready'"
+                            invisible="state != 'photos_ready' or generation_count > 0"
                             confirm="AI isleme baslatilsin mi?"/>
+                    <!-- Takılı kalmış oturumları kurtarma: photos_ready ama üretimler var -->
+                    <button name="action_force_review" string="İncelemeye Al"
+                            type="object" class="btn-warning"
+                            invisible="state != 'photos_ready' or generation_count == 0"
+                            groups="ugurlar_ai_studio.group_ai_studio_reviewer"/>
                     <!-- Onayıcı/Yönetici: İnceleme ve tamamlama -->
                     <button name="action_review_generations" string="Gorselleri Incele"
                             type="object" class="btn-primary"

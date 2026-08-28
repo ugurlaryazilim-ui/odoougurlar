@@ -762,6 +762,20 @@ class AiStudioSession(models.Model):
             session.state = 'photos_ready'
             session.date_photos_ready = fields.Datetime.now()
 
+    def action_force_review(self):
+        """Takılmış oturumları 'Onay Bekliyor' durumuna al.
+        
+        photos_ready'de kalmış ama AI üretimleri tamamlanmış oturumlar için.
+        Genellikle ürüne kaydetme sırasında concurrent update hatası alan
+        oturumları kurtarır.
+        """
+        for session in self:
+            if session.generation_ids:
+                session.state = 'review'
+                session.message_post(
+                    body=_('⚠️ Oturum manuel olarak inceleme durumuna alındı (önceki kaydetme hatası nedeniyle).'),
+                )
+
     def action_start_processing(self):
         """AI işlemeyi başlat."""
         self.ensure_one()
@@ -2566,8 +2580,8 @@ class AiStudioSession(models.Model):
                     lambda g: g.is_approved and g.state == 'done' and not g.is_excluded
                 )
                 if not approved:
-                    session.state = 'photos_ready'
-                    session.message_post(body=_('Hiç onaylı görsel bulunamadı, taslağa döndürüldü.'))
+                    session.state = 'review'
+                    session.message_post(body=_('Hiç onaylı görsel bulunamadı, incelemeye döndürüldü.'))
                     continue
                 
                 # Resimleri ürüne ekle
@@ -2584,9 +2598,9 @@ class AiStudioSession(models.Model):
             except Exception as e:
                 self.env.cr.rollback()
                 _logger.exception("CRON Hatası (session=%s): %s", session.id, e)
-                session.state = 'photos_ready'
+                session.state = 'review'
                 session.message_post(
-                    body=_('Arka planda ürüne kaydederken hata oluştu. Lütfen tekrar deneyin. Hata: %s') % str(e)[:200],
+                    body=_('⚠️ Ürüne kaydederken hata oluştu. Lütfen tekrar "Tamamla ve Kaydet" butonuna basın. Hata: %s') % str(e)[:200],
                 )
                 self.env.cr.commit()
     def _save_to_product(self, approved_generations):
