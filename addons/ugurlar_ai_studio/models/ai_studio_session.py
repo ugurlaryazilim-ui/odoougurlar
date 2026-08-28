@@ -2984,15 +2984,12 @@ class AiStudioSession(models.Model):
 
     def _generate_seo_content_gemini_threaded(self, session_id):
         """Yeni bir Odoo Environment'i açarak Gemini API çağrısını yapar."""
-        import odoo
-        from odoo import api, SUPERUSER_ID, registry
+        from odoo import api, SUPERUSER_ID
         import logging
         _logger = logging.getLogger(__name__)
         
         try:
-            db_name = self.env.cr.dbname
-            reg = registry(db_name)
-            with reg.cursor() as cr:
+            with self.pool.cursor() as cr:
                 env = api.Environment(cr, SUPERUSER_ID, {})
                 session = env['ai.studio.session'].browse(session_id)
                 session._generate_seo_content_gemini()
