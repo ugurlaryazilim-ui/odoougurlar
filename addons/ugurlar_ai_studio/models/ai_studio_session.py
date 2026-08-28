@@ -431,6 +431,10 @@ class AiStudioSession(models.Model):
             if failed > 0:
                 parts.append(f'❌ {failed} Başarısız')
 
+            pending = len(gens.filtered(lambda g: g.state in ('pending', 'processing')))
+            if pending > 0 and session.state in ('failed', 'processing'):
+                parts.append(f'⏸️ {pending} Bekliyor')
+
             session.review_status_display = ' · '.join(parts) if parts else ''
 
     def _detect_garment_type(self):
@@ -775,6 +779,68 @@ class AiStudioSession(models.Model):
                 session.message_post(
                     body=_('⚠️ Oturum manuel olarak inceleme durumuna alındı (önceki kaydetme hatası nedeniyle).'),
                 )
+
+    def action_retry_failed(self):
+        """Başarısız ve bekleyen üretimleri kaldığı yerden devam ettir.
+        
+        - 'failed' ve 'pending' durumdaki generation'ları sıfırlayıp tekrar kuyruğa alır
+        - Tamamlanmış ('done') olanlara dokunmaz
+        - AI thread'ini yeniden başlatır
+        """
+        self.ensure_one()
+
+        retryable = self.generation_ids.filtered(
+            lambda g: g.state in ('failed', 'pending')
+        )
+        if not retryable:
+            raise UserError(_('Tekrar denenecek başarısız veya bekleyen üretim yok.'))
+
+        # Failed olanları pending'e çevir, error mesajını temizle
+        for gen in retryable:
+            gen.write({
+                'state': 'pending',
+                'error_message': False,
+            })
+
+        # API anahtarını al
+        provider_type = self.env['ir.config_parameter'].sudo().get_param(
+            'ugurlar_ai_studio.default_provider', 'fashn'
+        )
+        if provider_type == 'fashn':
+            api_key = self.env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.fashn_api_key'
+            )
+        else:
+            api_key = self.env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.fal_api_key'
+            )
+
+        if not api_key:
+            raise UserError(_('API anahtarı bulunamadı. Lütfen Yapılandırma ayarlarını kontrol edin.'))
+
+        self.state = 'processing'
+        self.message_post(
+            body=_('🔄 Kaldığı yerden devam ediliyor: %d başarısız/bekleyen üretim yeniden kuyruğa alındı.') % len(retryable),
+        )
+
+        # Thread'i tekrar başlat
+        thread = threading.Thread(
+            target=self._process_ai_thread,
+            args=(self.id, api_key, self.env.uid),
+        )
+        thread.daemon = True
+        thread.start()
+
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('AI İşleme Devam Ediyor'),
+                'message': _('%d üretim yeniden başlatıldı. Tamamlandığında bildirim alacaksınız.') % len(retryable),
+                'type': 'info',
+                'sticky': False,
+            },
+        }
 
     def action_start_processing(self):
         """AI işlemeyi başlat."""
@@ -1986,7 +2052,12 @@ class AiStudioSession(models.Model):
                         'date_review_start': fields.Datetime.now()
                     })
                     if has_failed:
-                        session.message_post(body=_('AI üretimi tamamlandı ancak BAZI GÖRSELLER BAŞARISIZ oldu. İncele butonuna basarak başarısız olanları tekrar deneyebilirsiniz.'))
+                        done_count = len(session.generation_ids.filtered(lambda g: g.state == 'done'))
+                        fail_count = len(session.generation_ids.filtered(lambda g: g.state == 'failed'))
+                        session.message_post(body=_(
+                            'AI üretimi tamamlandı: ✅ %d başarılı, ❌ %d başarısız. '
+                            '"🔄 Kaldığı Yerden Devam Et" butonu ile başarısız olanları tekrar deneyebilirsiniz.'
+                        ) % (done_count, fail_count))
                     else:
                         session.message_post(body=_('AI üretimi tamamlandı. %d görsel onay bekliyor.') % len(session.generation_ids))
                     cr.commit()
