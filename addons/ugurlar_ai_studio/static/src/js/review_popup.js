@@ -163,6 +163,9 @@ async function openReviewPopup(sessionId) {
             progressText += ` · ❌ ${failedCount} başarısız`;
         }
 
+        const hasPrimaryImage = items.some(i => i.is_primary);
+        const showStarBtn = !hasPrimaryImage || item.is_primary;
+
         overlay.innerHTML = `
             <div class="ais-rp" onclick="event.stopPropagation()">
                 <!-- Header -->
@@ -273,9 +276,11 @@ async function openReviewPopup(sessionId) {
                             </div>
                         ` : item.is_approved ? `
                             <div class="ais-rp-approved-badge">✅ Bu görsel onaylandı</div>
+                            ${showStarBtn ? `
                             <button class="ais-rp-btn ais-rp-btn-star ${item.is_primary ? 'active' : ''}" id="ais-rp-star">
                                 ⭐ Ana Görsel
                             </button>
+                            ` : ''}
                             <button class="ais-rp-btn ais-rp-btn-unapprove" id="ais-rp-unapprove" style="background:#f59e0b; color:white;">
                                 ↩️ Onayı Geri Al
                             </button>
@@ -286,9 +291,11 @@ async function openReviewPopup(sessionId) {
                             <button class="ais-rp-btn ais-rp-btn-reject" id="ais-rp-reject">
                                 ❌ Reddet
                             </button>
+                            ${showStarBtn ? `
                             <button class="ais-rp-btn ais-rp-btn-star ${item.is_primary ? 'active' : ''}" id="ais-rp-star">
                                 ⭐ Ana Görsel
                             </button>
+                            ` : ''}
                             <button class="ais-rp-btn ais-rp-btn-approve" id="ais-rp-approve">
                                 ✅ Onayla
                             </button>
@@ -355,9 +362,10 @@ async function openReviewPopup(sessionId) {
         document.getElementById('ais-rp-unapprove')?.addEventListener('click', unapprove);
         document.getElementById('ais-rp-toggle-exclude')?.addEventListener('click', toggleExclude);
         document.getElementById('ais-rp-star')?.addEventListener('click', () => {
-            // Önce tüm item'ların primary'sini kaldır, sonra bu item'ı primary yap
+            // Önce tüm item'ların primary'sini kaldır, sonra bu item'ı toggle yap
+            const wasPrimary = items[currentIndex].is_primary;
             items.forEach(it => it.is_primary = false);
-            items[currentIndex].is_primary = true;
+            items[currentIndex].is_primary = !wasPrimary;
             render();
         });
         document.getElementById('ais-rp-reject')?.addEventListener('click', () => {
