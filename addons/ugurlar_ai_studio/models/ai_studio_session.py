@@ -4,11 +4,58 @@ import threading
 import time
 import json
 import uuid
+import io
 
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
+
+
+def _convert_to_jpeg(img_data_bytes, quality=92):
+    """PNG/WebP gibi büyük formatları JPEG'e çevir.
+    
+    AI üretilen görseller genelde PNG formatında gelir (2-5 MB).
+    JPEG'e çevirmek boyutu 5-10x küçültür (~200-400 KB).
+    Zaten JPEG ise dokunmaz.
+    
+    Args:
+        img_data_bytes: Ham görsel verisi (bytes)
+        quality: JPEG kalitesi (1-100), 92 fotoğraf için ideal
+    Returns:
+        bytes: JPEG formatında görsel verisi
+    """
+    try:
+        from PIL import Image as PILImage
+        img = PILImage.open(io.BytesIO(img_data_bytes))
+        
+        # Zaten JPEG ise dokunma
+        if img.format == 'JPEG':
+            return img_data_bytes
+        
+        # RGBA → RGB dönüşümü (JPEG alfa kanalı desteklemez)
+        if img.mode in ('RGBA', 'LA', 'P'):
+            background = PILImage.new('RGB', img.size, (255, 255, 255))
+            if img.mode == 'P':
+                img = img.convert('RGBA')
+            background.paste(img, mask=img.split()[-1] if 'A' in img.mode else None)
+            img = background
+        elif img.mode != 'RGB':
+            img = img.convert('RGB')
+        
+        buf = io.BytesIO()
+        img.save(buf, format='JPEG', quality=quality, optimize=True)
+        result = buf.getvalue()
+        
+        _logger.info(
+            "Görsel JPEG'e çevrildi: %s → JPEG, %d KB → %d KB (%%%.0f küçülme)",
+            'PNG', len(img_data_bytes) // 1024, len(result) // 1024,
+            (1 - len(result) / len(img_data_bytes)) * 100 if img_data_bytes else 0
+        )
+        return result
+    except Exception as e:
+        _logger.warning("JPEG dönüşümü başarısız, orijinal kullanılıyor: %s", e)
+        return img_data_bytes
 
 def _safe_write_and_commit(cr, record, vals, max_retries=5):
     """Concurrent update (SerializationFailure) hatalarını önlemek için güvenli DB yazma."""
@@ -1265,6 +1312,7 @@ class AiStudioSession(models.Model):
                     else:
                         img_data = req_lib.get(output_url, timeout=60).content
 
+                    img_data = _convert_to_jpeg(img_data)
                     gen_b64 = base64.b64encode(img_data)
                     gen_seed = tryon_result.get('seed') or False
 
@@ -1393,6 +1441,7 @@ class AiStudioSession(models.Model):
                                         edit_url = edit_images[0].get('url', '')
                                         if edit_url:
                                             edit_data = req_lib.get(edit_url, timeout=60).content
+                                            edit_data = _convert_to_jpeg(edit_data)
                                             edited_b64 = base64.b64encode(edit_data)
                                             gen.write({
                                                 'generated_image': edited_b64,
@@ -1852,6 +1901,7 @@ class AiStudioSession(models.Model):
                         else:
                             img_data = req_lib.get(output_url, timeout=60).content
 
+                        img_data = _convert_to_jpeg(img_data)
                         gen_b64 = base64.b64encode(img_data)
                         gen_seed = tryon_result.get('seed') or False
                         
@@ -1978,6 +2028,7 @@ class AiStudioSession(models.Model):
                                             edit_url = edit_images[0].get('url', '')
                                             if edit_url:
                                                 edit_data = req_lib.get(edit_url, timeout=60).content
+                                                edit_data = _convert_to_jpeg(edit_data)
                                                 edited_b64 = base64.b64encode(edit_data)
                                                 gen.write({
                                                     'generated_image': edited_b64,
@@ -2188,7 +2239,8 @@ class AiStudioSession(models.Model):
                             img_url = edit_images[0].get('url', '')
                             img_resp = req_lib.get(img_url, timeout=30)
                             if img_resp.status_code == 200:
-                                result_b64 = b64_lib.b64encode(img_resp.content).decode('ascii')
+                                img_content = _convert_to_jpeg(img_resp.content)
+                                result_b64 = b64_lib.b64encode(img_content).decode('ascii')
                                 _safe_write_and_commit(cr, gen, {
                                     'generated_image': result_b64,
                                     'state': 'done',
@@ -2462,6 +2514,7 @@ class AiStudioSession(models.Model):
                         import requests
                         img_data = requests.get(output_url, timeout=60).content
 
+                    img_data = _convert_to_jpeg(img_data)
                     gen_b64 = base64.b64encode(img_data)
                     gen_seed = tryon_result.get('seed') or False
                     
@@ -2562,6 +2615,7 @@ class AiStudioSession(models.Model):
                                         if edit_url:
                                             import requests as req_lib
                                             edit_data = req_lib.get(edit_url, timeout=60).content
+                                            edit_data = _convert_to_jpeg(edit_data)
                                             edited_b64 = base64.b64encode(edit_data)
                                             gen_vals['generated_image'] = edited_b64
                                             gen_b64 = edited_b64

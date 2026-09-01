@@ -802,16 +802,12 @@ class AiStudioController(http.Controller):
             items = []
             for gen in generations:
                 orig_url = ''
-                orig_url_full = ''
                 if gen.source_photo_id:
-                    orig_url = '/web/image/ai.studio.photo/%d/image_original_1024' % gen.source_photo_id.id
-                    orig_url_full = '/web/image/ai.studio.photo/%d/image_original' % gen.source_photo_id.id
+                    orig_url = '/web/image/ai.studio.photo/%d/image_original' % gen.source_photo_id.id
                 else:
-                    orig_url = '/web/image/ai.studio.generation/%d/original_image?width=1024' % gen.id
-                    orig_url_full = '/web/image/ai.studio.generation/%d/original_image' % gen.id
+                    orig_url = '/web/image/ai.studio.generation/%d/original_image' % gen.id
 
-                gen_url_preview = '/web/image/ai.studio.generation/%d/generated_image_1024' % gen.id
-                gen_url_full = '/web/image/ai.studio.generation/%d/generated_image' % gen.id
+                gen_url = '/web/image/ai.studio.generation/%d/generated_image' % gen.id
 
                 items.append({
                     'id': gen.id,
@@ -822,9 +818,9 @@ class AiStudioController(http.Controller):
                     'is_primary': gen.is_primary,
                     'revision_number': gen.revision_number,
                     'original_url': orig_url,
-                    'original_url_full': orig_url_full,
-                    'generated_url': gen_url_preview,
-                    'generated_url_full': gen_url_full,
+                    'original_url_full': orig_url,
+                    'generated_url': gen_url,
+                    'generated_url_full': gen_url,
                     'error_message': gen.error_message or '',
                     'pending_revision': gen.state in ('pending', 'processing'),
                     'is_excluded': gen.is_excluded,

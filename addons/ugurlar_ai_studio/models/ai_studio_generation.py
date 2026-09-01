@@ -415,6 +415,8 @@ class AiStudioGeneration(models.Model):
                         import requests as req_lib
                         import base64
                         img_data = req_lib.get(output_url, timeout=60).content
+                        from odoo.addons.ugurlar_ai_studio.models.ai_studio_session import _convert_to_jpeg
+                        img_data = _convert_to_jpeg(img_data)
                         fixed_b64 = base64.b64encode(img_data).decode()
                         
                         # Yeni versiyon oluştur — Seedream sonucu ile
