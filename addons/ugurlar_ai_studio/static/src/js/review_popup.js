@@ -241,14 +241,14 @@ async function openReviewPopup(sessionId) {
                         <div class="ais-rp-comparison ${item.is_excluded ? 'ais-rp-comparison-excluded' : ''}">
                             <div class="ais-rp-panel">
                                 <div class="ais-rp-panel-label">ORJİNAL</div>
-                                <div class="ais-rp-img-wrap ais-rp-zoomable" data-zoom-src="${item.original_url}">
+                                <div class="ais-rp-img-wrap ais-rp-zoomable" data-zoom-src="${item.original_url_full}">
                                     <img src="${item.original_url}" class="ais-rp-img" alt="Orijinal"/>
                                 </div>
                             </div>
                             <div class="ais-rp-vs">VS</div>
                             <div class="ais-rp-panel">
                                 <div class="ais-rp-panel-label ais-rp-ai-label">AI SONUÇ</div>
-                                <div class="ais-rp-img-wrap ais-rp-zoomable" data-zoom-src="${item.generated_url}">
+                                <div class="ais-rp-img-wrap ais-rp-zoomable" data-zoom-src="${item.generated_url_full}">
                                     <img src="${item.generated_url}" class="ais-rp-img" alt="AI Sonucu"/>
                                 </div>
                             </div>

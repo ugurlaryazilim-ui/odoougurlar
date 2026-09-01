@@ -807,6 +807,7 @@ class AiStudioController(http.Controller):
                 else:
                     orig_url = '/web/image/ai.studio.generation/%d/original_image' % gen.id
 
+                gen_url = '/web/image/ai.studio.generation/%d/generated_image' % gen.id
 
                 items.append({
                     'id': gen.id,
@@ -816,8 +817,10 @@ class AiStudioController(http.Controller):
                     'is_approved': gen.is_approved,
                     'is_primary': gen.is_primary,
                     'revision_number': gen.revision_number,
-                    'original_url': orig_url,
-                    'generated_url': '/web/image/ai.studio.generation/%d/generated_image' % gen.id,
+                    'original_url': orig_url + '?width=800',
+                    'original_url_full': orig_url,
+                    'generated_url': gen_url + '?width=800',
+                    'generated_url_full': gen_url,
                     'error_message': gen.error_message or '',
                     'pending_revision': gen.state in ('pending', 'processing'),
                     'is_excluded': gen.is_excluded,
