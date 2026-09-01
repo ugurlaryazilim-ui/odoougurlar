@@ -2,7 +2,7 @@ import base64
 import json
 import logging
 
-from odoo import fields, http
+from odoo import _, fields, http
 from odoo.http import request
 
 _logger = logging.getLogger(__name__)
