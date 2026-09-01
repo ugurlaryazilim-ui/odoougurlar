@@ -8,7 +8,6 @@
     'data': [
         'security/ir.model.access.csv',
         'data/cron_data.xml',
-        'data/product_data.xml',
         'views/amazon_store_views.xml',
         'views/amazon_order_views.xml',
         'views/sale_order_views.xml',
