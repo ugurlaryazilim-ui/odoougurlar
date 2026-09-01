@@ -310,29 +310,44 @@ class AmazonOrderSync(models.Model):
     @api.private
     def _get_fallback_product(self):
         """Varsayılan Amazon fallback ürününü getirir, yoksa güvenli bir şekilde oluşturur."""
-        fallback = self.env.ref('amazon_integration.product_amazon_unknown', raise_if_not_found=False)
-        if not fallback:
-            fallback = self.env['product.product'].sudo().search([('default_code', '=', 'AMAZON-UNKNOWN')], limit=1)
-        if not fallback:
-            try:
-                vals = {
-                    'name': 'Amazon Ürünü (Eşleştirilmemiş)',
-                    'default_code': 'AMAZON-UNKNOWN',
-                    'type': 'consu',
-                    'is_storable': True,
-                    'sale_ok': True,
-                    'purchase_ok': False,
-                    'list_price': 0,
-                    'standard_price': 0,
-                    'tracking': 'none',
-                }
-                # DB schema bazında base_unit_count alanı varsa not-null hatasını önle
-                if 'base_unit_count' in self.env['product.product']._fields:
-                    vals['base_unit_count'] = 0
-                fallback = self.env['product.product'].sudo().create(vals)
-            except Exception as e:
-                _logger.error("Amazon fallback ürün oluşturma hatası: %s", e)
-        return fallback
+        # 1. XML ref ile arama (product.template)
+        tmpl = self.env.ref('amazon_integration.product_template_amazon_unknown', raise_if_not_found=False)
+        if tmpl:
+            product = tmpl.product_variant_id or self.env['product.product'].sudo().search([('product_tmpl_id', '=', tmpl.id)], limit=1)
+            if product:
+                return product
+
+        # 2. Eski XML ref ile arama (product.product)
+        product = self.env.ref('amazon_integration.product_amazon_unknown', raise_if_not_found=False)
+        if product and product._name == 'product.product':
+            return product
+
+        # 3. default_code ile arama
+        product = self.env['product.product'].sudo().search([('default_code', '=', 'AMAZON-UNKNOWN')], limit=1)
+        if product:
+            return product
+
+        # 4. Bulunamazsa product.template üzerinden oluştur
+        try:
+            tmpl_vals = {
+                'name': 'Amazon Ürünü (Eşleştirilmemiş)',
+                'default_code': 'AMAZON-UNKNOWN',
+                'type': 'consu',
+                'is_storable': True,
+                'sale_ok': True,
+                'purchase_ok': False,
+                'list_price': 0,
+                'standard_price': 0,
+                'tracking': 'none',
+            }
+            if 'base_unit_count' in self.env['product.template']._fields:
+                tmpl_vals['base_unit_count'] = 0
+            
+            tmpl = self.env['product.template'].sudo().create(tmpl_vals)
+            return tmpl.product_variant_id or self.env['product.product'].sudo().search([('product_tmpl_id', '=', tmpl.id)], limit=1)
+        except Exception as e:
+            _logger.error("Amazon fallback ürün oluşturma hatası: %s", e)
+        return False
 
     @api.private
     def _prepare_sale_order_lines(self, items_val, product_map, amazon_order_id, msgs,
