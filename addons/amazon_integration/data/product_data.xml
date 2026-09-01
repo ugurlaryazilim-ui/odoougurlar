@@ -12,6 +12,7 @@
             <field name="purchase_ok" eval="False"/>
             <field name="list_price">0</field>
             <field name="standard_price">0</field>
+            <field name="base_unit_count">0</field>
             <field name="tracking">none</field>
         </record>
     </data>

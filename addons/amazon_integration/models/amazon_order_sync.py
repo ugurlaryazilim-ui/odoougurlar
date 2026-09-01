@@ -100,8 +100,7 @@ class AmazonOrderSync(models.Model):
         """
         self.ensure_one()
         Product = self.env['product.product'].sudo()
-        fallback_product = self.env.ref(
-            'amazon_integration.product_amazon_unknown', raise_if_not_found=False)
+        fallback_product = self._get_fallback_product()
         fallback_id = fallback_product.id if fallback_product else 0
 
         # Picking'i olmayan veya ürünsüz satırı olan Amazon siparişlerini bul
@@ -309,6 +308,33 @@ class AmazonOrderSync(models.Model):
         self._process_single_order(order_data, session, auth, base_url, force_update=True)
 
     @api.private
+    def _get_fallback_product(self):
+        """Varsayılan Amazon fallback ürününü getirir, yoksa güvenli bir şekilde oluşturur."""
+        fallback = self.env.ref('amazon_integration.product_amazon_unknown', raise_if_not_found=False)
+        if not fallback:
+            fallback = self.env['product.product'].sudo().search([('default_code', '=', 'AMAZON-UNKNOWN')], limit=1)
+        if not fallback:
+            try:
+                vals = {
+                    'name': 'Amazon Ürünü (Eşleştirilmemiş)',
+                    'default_code': 'AMAZON-UNKNOWN',
+                    'type': 'consu',
+                    'is_storable': True,
+                    'sale_ok': True,
+                    'purchase_ok': False,
+                    'list_price': 0,
+                    'standard_price': 0,
+                    'tracking': 'none',
+                }
+                # DB schema bazında base_unit_count alanı varsa not-null hatasını önle
+                if 'base_unit_count' in self.env['product.product']._fields:
+                    vals['base_unit_count'] = 0
+                fallback = self.env['product.product'].sudo().create(vals)
+            except Exception as e:
+                _logger.error("Amazon fallback ürün oluşturma hatası: %s", e)
+        return fallback
+
+    @api.private
     def _prepare_sale_order_lines(self, items_val, product_map, amazon_order_id, msgs,
                                   session=None, auth=None, base_url=None):
         """Odoo Sale Order satırlarını KDV DAHİL tutar esasına göre hazırlar.
@@ -362,10 +388,7 @@ class AmazonOrderSync(models.Model):
                 # Ürün bulunamadı — varsayılan fallback ürünü kullan.
                 # product_id OLMADAN satır oluşturulursa Odoo picking (teslimat)
                 # oluşturmaz → sipariş toplama listesine GİREMEZ.
-                fallback = self.env.ref(
-                    'amazon_integration.product_amazon_unknown',
-                    raise_if_not_found=False,
-                )
+                fallback = self._get_fallback_product()
                 if fallback:
                     product = fallback
                     msgs.append(
