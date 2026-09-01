@@ -88,6 +88,104 @@ class AmazonOrderSync(models.Model):
         except Exception as e:
             _logger.exception("Amazon cron senkronizasyon hatası: %s", e)
 
+    def action_fix_orphan_orders(self):
+        """Picking'i olmayan Amazon siparişlerini düzelt.
+
+        Mevcut sale.order'larda:
+        1. Ürünsüz satırları tespit et → tiresiz eşleşme ile ürün bul
+        2. Picking'i olmayan siparişleri tespit et → action_confirm tekrar çağır
+        3. Fallback ürünü olan satırları düzelt → gerçek ürünü bul ve ata
+
+        Bu metod Amazon Mağaza formundaki butondan çağrılır.
+        """
+        self.ensure_one()
+        Product = self.env['product.product'].sudo()
+        fallback_product = self.env.ref(
+            'amazon_integration.product_amazon_unknown', raise_if_not_found=False)
+        fallback_id = fallback_product.id if fallback_product else 0
+
+        # Picking'i olmayan veya ürünsüz satırı olan Amazon siparişlerini bul
+        orders = self.env['sale.order'].sudo().search([
+            ('amazon_store_id', '=', self.id),
+            ('state', 'in', ['sale', 'draft']),
+        ])
+
+        fixed_count = 0
+        for order in orders:
+            needs_fix = False
+            lines_updated = 0
+
+            for line in order.order_line:
+                # Ürünsüz veya fallback ürünlü satırları tespit et
+                if not line.product_id or (fallback_id and line.product_id.id == fallback_id):
+                    # Satır adından SKU çıkarmayı dene
+                    sku = ''
+                    # Amazon sipariş kaydından SKU'yu al
+                    if order.amazon_order_id and order.amazon_order_id.line_ids:
+                        for amz_line in order.amazon_order_id.line_ids:
+                            if amz_line.sku:
+                                sku = amz_line.sku
+                                break
+                    if not sku:
+                        # Satır adından (Title) çıkarma — genelde SKU name'de olmaz
+                        continue
+
+                    # Ürün eşleşmesini tekrar dene
+                    if hasattr(Product, 'find_by_marketplace_barcode'):
+                        product = Product.find_by_marketplace_barcode(sku)
+                        if product and product.id != fallback_id:
+                            line.sudo().write({'product_id': product.id})
+                            lines_updated += 1
+                            _logger.info(
+                                "Amazon orphan fix: %s satırında SKU %s → %s eşleştirildi",
+                                order.name, sku, product.display_name)
+                            needs_fix = True
+
+            # Picking yoksa ve sipariş onaylıysa → picking oluştur
+            if order.state == 'sale' and not order.picking_ids:
+                try:
+                    order._action_launch_stock_rule()
+                    _logger.info(
+                        "Amazon orphan fix: %s için picking oluşturuldu",
+                        order.name)
+                    needs_fix = True
+                except Exception as e:
+                    _logger.warning(
+                        "Amazon orphan fix: %s picking oluşturulamadı: %s",
+                        order.name, e)
+
+            # Draft sipariş ve ürünler atandıysa → onayla
+            if order.state == 'draft' and lines_updated > 0:
+                has_product = any(
+                    l.product_id and l.product_id.id != fallback_id
+                    for l in order.order_line
+                )
+                if has_product:
+                    try:
+                        order.action_confirm()
+                        _logger.info(
+                            "Amazon orphan fix: %s onaylandı (picking oluşacak)",
+                            order.name)
+                        needs_fix = True
+                    except Exception as e:
+                        _logger.warning(
+                            "Amazon orphan fix: %s onaylanamadı: %s",
+                            order.name, e)
+
+            if needs_fix:
+                fixed_count += 1
+
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Amazon Orphan Fix'),
+                'message': f"{fixed_count} sipariş düzeltildi.",
+                'type': 'success' if fixed_count else 'info',
+                'sticky': False,
+            },
+        }
+
     def action_sync_orders(self):
         self.ensure_one()
         sync_log = self.env['amazon.sync.log'].create({
