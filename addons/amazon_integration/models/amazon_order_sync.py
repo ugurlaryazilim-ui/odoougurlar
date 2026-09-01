@@ -235,8 +235,28 @@ class AmazonOrderSync(models.Model):
                 if hasattr(Product, 'find_by_marketplace_barcode'):
                     product = Product.find_by_marketplace_barcode(sku)
             if not product:
-                msgs.append(f"{amazon_order_id} siparişinde {sku} SKU'lu ürün Odoo'da bulunamadı — ürünsüz satır oluşturuluyor.")
-                _logger.warning("Amazon ürün bulunamadı: %s (Sipariş: %s) — satır ürünsüz oluşturulacak.", sku, amazon_order_id)
+                # Ürün bulunamadı — varsayılan fallback ürünü kullan.
+                # product_id OLMADAN satır oluşturulursa Odoo picking (teslimat)
+                # oluşturmaz → sipariş toplama listesine GİREMEZ.
+                fallback = self.env.ref(
+                    'amazon_integration.product_amazon_unknown',
+                    raise_if_not_found=False,
+                )
+                if fallback:
+                    product = fallback
+                    msgs.append(
+                        f"{amazon_order_id} siparişinde {sku} SKU'lu ürün "
+                        f"Odoo'da bulunamadı — 'Amazon Ürünü (Eşleştirilmemiş)' ile oluşturuluyor."
+                    )
+                else:
+                    msgs.append(
+                        f"{amazon_order_id} siparişinde {sku} SKU'lu ürün bulunamadı, "
+                        f"fallback ürünü de yok — ürünsüz satır oluşturuluyor."
+                    )
+                _logger.warning(
+                    "Amazon ürün bulunamadı: %s (Sipariş: %s) — fallback ürünü kullanılıyor.",
+                    sku, amazon_order_id,
+                )
 
             unit_price_incl = item_price / qty if qty > 0 else item_price
 
@@ -480,7 +500,7 @@ class AmazonOrderSync(models.Model):
         if not order_lines:
             return processed, 0, 1, [f"{amazon_order_id} hiçbir ürün eşleştirilemedi, sipariş oluşturulmadı."]
 
-        sale_order = self.env['sale.order'].create({
+        sale_order = self.env['sale.order'].sudo().create({
             'partner_id': partner.id,
             'partner_invoice_id': partner.id,
             'partner_shipping_id': partner.id,
