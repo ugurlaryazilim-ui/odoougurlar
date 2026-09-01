@@ -309,29 +309,55 @@ class AmazonOrderSync(models.Model):
         self._process_single_order(order_data, session, auth, base_url, force_update=True)
 
     @api.private
-    def _prepare_sale_order_lines(self, items_val, product_map, amazon_order_id, msgs):
+    def _prepare_sale_order_lines(self, items_val, product_map, amazon_order_id, msgs,
+                                  session=None, auth=None, base_url=None):
         """Odoo Sale Order satırlarını KDV DAHİL tutar esasına göre hazırlar.
 
         Amazon fiyatları KDV DAHİL (price_include=True) fiyattır.
         Odoo varsayılan vergisi KDV HARIÇ ise, Odoo üzerine tekrar KDV ekleyecektir.
         Bunu önlemek için price_include=True olan vergi aranır, bulunamazsa birim fiyat
         KDV Hariç tutara çevrilerek yazılır. Böylece Genel Toplam Amazon ile birebir tutar.
+
+        Ürün Eşleşme Sırası:
+            1. SellerSKU ile arama (barcode, nebim_barcode, default_code, tiresiz eşleşme)
+            2. ASIN → Catalog Items API → EAN/UPC → barkod ile arama
+            3. Fallback ürün: 'Amazon Ürünü (Eşleştirilmemiş)'
         """
         order_lines = []
         _tax_cache = {}
+        _ean_cache = {}  # ASIN → EAN cache (aynı siparişte aynı ASIN'i tekrar çekme)
 
         for item in items_val:
             sku = item.get('SellerSKU')
+            asin = item.get('ASIN', '')
             qty = float(item.get('QuantityOrdered', 1))
             item_price = float(item.get('ItemPrice', {}).get('Amount', 0.0))
             item_tax = float(item.get('ItemTax', {}).get('Amount', 0.0))
 
+            # ─── ADIM 1: SellerSKU ile ürün ara (tiresiz eşleşme dahil) ───
             product = product_map.get(sku)
             if not product and sku:
                 # Batch'te bulunamadı, tek tek dene (fallback — Trendyol ile aynı mantık)
                 Product = self.env['product.product'].sudo()
                 if hasattr(Product, 'find_by_marketplace_barcode'):
                     product = Product.find_by_marketplace_barcode(sku)
+
+            # ─── ADIM 2: ASIN → Catalog API → EAN/UPC ile ara ───
+            if not product and asin and session and auth and base_url:
+                ean = _ean_cache.get(asin)
+                if ean is None:
+                    ean = self._fetch_catalog_ean(asin, session, auth, base_url)
+                    _ean_cache[asin] = ean
+                if ean:
+                    Product = self.env['product.product'].sudo()
+                    if hasattr(Product, 'find_by_marketplace_barcode'):
+                        product = Product.find_by_marketplace_barcode(ean)
+                    if product:
+                        _logger.info(
+                            "Amazon ASIN→EAN eşleşme başarılı: %s → EAN %s → %s (%s)",
+                            asin, ean, product.display_name, product.default_code)
+
+            # ─── ADIM 3: Fallback ürünü ───
             if not product:
                 # Ürün bulunamadı — varsayılan fallback ürünü kullan.
                 # product_id OLMADAN satır oluşturulursa Odoo picking (teslimat)
@@ -508,6 +534,7 @@ class AmazonOrderSync(models.Model):
             amz_line_vals.append((0, 0, {
                 'order_item_id': item.get('OrderItemId', ''),
                 'sku': item.get('SellerSKU', ''),
+                'asin': item.get('ASIN', ''),
                 'product_name': item.get('Title', ''),
                 'quantity': item.get('QuantityOrdered', 1),
                 'price': float(item.get('ItemPrice', {}).get('Amount', 0.0)),
@@ -572,7 +599,9 @@ class AmazonOrderSync(models.Model):
 
             # Fiyat ve KDV düzeltmesi (eğer tutar Amazon ile tutmuyorsa veya force_update ise)
             if items_val and (abs(existing_order.amount_total - total_order_amount) > 0.01 or force_update):
-                new_lines = self._prepare_sale_order_lines(items_val, product_map, amazon_order_id, msgs)
+                new_lines = self._prepare_sale_order_lines(
+                    items_val, product_map, amazon_order_id, msgs,
+                    session=session, auth=auth, base_url=base_url)
                 if new_lines:
                     existing_order.order_line.sudo().unlink()
                     existing_order.sudo().write({'order_line': new_lines})
@@ -594,7 +623,9 @@ class AmazonOrderSync(models.Model):
         if not items_val:
             return processed, 0, 1, [f"{amazon_order_id} ürün detayları alınamadı, atlandı."]
 
-        order_lines = self._prepare_sale_order_lines(items_val, product_map, amazon_order_id, msgs)
+        order_lines = self._prepare_sale_order_lines(
+            items_val, product_map, amazon_order_id, msgs,
+            session=session, auth=auth, base_url=base_url)
         if not order_lines:
             return processed, 0, 1, [f"{amazon_order_id} hiçbir ürün eşleştirilemedi, sipariş oluşturulmadı."]
 
@@ -795,3 +826,48 @@ class AmazonOrderSync(models.Model):
         except Exception as e:
             _logger.error("Amazon OrderItems fetch hatası (%s): %s", amazon_order_id, e)
         return None
+
+    @api.private
+    def _fetch_catalog_ean(self, asin, session, auth, base_url):
+        """ASIN ile Amazon Catalog Items API'den EAN/UPC barkodu çeker.
+
+        Endpoint: GET /catalog/2022-04-01/items/{asin}
+        Params: marketplaceIds, includedData=identifiers
+        Gereksinim: SP-API uygulamasında 'Product Listing' rolü aktif olmalı.
+
+        Döndürür: EAN/UPC string veya boş string.
+        """
+        marketplace_id = self.marketplace_id or 'A33AVAJ2PDY3EV'
+        endpoint = f"{base_url}/catalog/2022-04-01/items/{asin}"
+        params = {
+            'marketplaceIds': marketplace_id,
+            'includedData': 'identifiers',
+        }
+        try:
+            res = session.get(endpoint, auth=auth, params=params, timeout=20)
+            if res.status_code == 200:
+                data = res.json()
+                # identifiers → [{marketplaceId, identifiers: [{identifierType, identifier}]}]
+                for marketplace in data.get('identifiers', []):
+                    for ident in marketplace.get('identifiers', []):
+                        id_type = ident.get('identifierType', '').upper()
+                        id_val = ident.get('identifier', '').strip()
+                        if id_type in ('EAN', 'UPC', 'GTIN') and id_val:
+                            _logger.info(
+                                "Amazon Catalog: ASIN %s → %s: %s",
+                                asin, id_type, id_val)
+                            return id_val
+                _logger.info(
+                    "Amazon Catalog: ASIN %s için EAN/UPC bulunamadı.",
+                    asin)
+            elif res.status_code == 403:
+                _logger.warning(
+                    "Amazon Catalog API 403 — 'Product Listing' rolü aktif olmayabilir.")
+            else:
+                _logger.warning(
+                    "Amazon Catalog API hatası ASIN %s: HTTP %s",
+                    asin, res.status_code)
+        except Exception as e:
+            _logger.error("Amazon Catalog API fetch hatası (ASIN %s): %s", asin, e)
+        return ''
+

@@ -103,6 +103,7 @@ class AmazonOrderLine(models.Model):
     order_id = fields.Many2one('amazon.order', string='Amazon Siparişi', ondelete='cascade', index=True)
     order_item_id = fields.Char(string='Item ID', index=True)
     sku = fields.Char(string='Satıcı SKU', index=True)
+    asin = fields.Char(string='ASIN', index=True, help='Amazon Standard Identification Number')
     product_name = fields.Char(string='Ürün Adı')
     quantity = fields.Integer(string='Miktar', default=1)
     price = fields.Float(string='Birim Fiyat', digits=(12, 2))
