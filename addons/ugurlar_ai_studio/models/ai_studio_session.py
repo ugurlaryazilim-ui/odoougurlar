@@ -2607,23 +2607,43 @@ class AiStudioSession(models.Model):
                 _logger.warning("Retry sonrasi session state guncellenirken hata: %s", se)
 
     def action_mark_done(self):
-        """Onaylanmış görselleri ürüne kaydet ve oturumu tamamla (Asenkron)."""
+        """Onaylanmış görselleri ürüne kaydet ve oturumu tamamla (Senkron)."""
         self.ensure_one()
-        self.action_mark_done_async()
-        
+        approved = self.generation_ids.filtered(
+            lambda g: g.is_approved and g.state == 'done' and not g.is_excluded
+        )
+        if not approved:
+            raise UserError(_('En az bir görsel onaylanmalı.'))
+
+        has_primary = approved.filtered(lambda g: g.is_primary)
+        if not has_primary:
+            front = approved.filtered(lambda g: g.photo_type == 'front')[:1]
+            primary = front or approved[0]
+            primary.is_primary = True
+
+        # Doğrudan ürüne kaydet
+        self._save_to_product(approved)
+
+        self.reviewer_id = self.env.user
+        self.state = 'done'
+        self.date_done = fields.Datetime.now()
+        self.message_post(
+            body=_('%d onaylı görsel ürüne başarıyla kaydedildi.') % len(approved),
+        )
+
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
-                'title': _('Bilgi'),
-                'message': _('Görseller arka planda ürüne kaydediliyor...'),
+                'title': _('Başarılı'),
+                'message': _('%d görsel ürüne kaydedildi.') % len(approved),
                 'type': 'success',
                 'sticky': False,
             }
         }
 
     def action_mark_done_async(self):
-        """Asenkron olarak ürüne kaydetme işlemini cron ile başlatır."""
+        """Geriye uyumluluk: Artık doğrudan senkron kaydetme yapar."""
         self.ensure_one()
         approved = self.generation_ids.filtered(
             lambda g: g.is_approved and g.state == 'done' and not g.is_excluded
@@ -2633,20 +2653,18 @@ class AiStudioSession(models.Model):
             
         has_primary = approved.filtered(lambda g: g.is_primary)
         if not has_primary:
-            # Otomatik olarak ön görseli veya ilk onaylı görseli ana görsel yap
             front = approved.filtered(lambda g: g.photo_type == 'front')[:1]
             primary = front or approved[0]
             primary.is_primary = True
-            
-        self.state = 'saving'
-        
-        # Odoo'nun cron sistemini tetikle ki güvenli bir environment'te asenkron işlesin
-        cron = self.env.ref('ugurlar_ai_studio.cron_save_sessions', raise_if_not_found=False)
-        if cron:
-            cron._trigger()
-        else:
-            import logging
-            logging.getLogger(__name__).error("cron_save_sessions bulunamadı! Lütfen modülü güncelleyin.")
+
+        self._save_to_product(approved)
+
+        self.reviewer_id = self.env.user
+        self.state = 'done'
+        self.date_done = fields.Datetime.now()
+        self.message_post(
+            body=_('%d onaylı görsel ürüne başarıyla kaydedildi.') % len(approved),
+        )
 
     @api.model
     def _cron_process_saving_sessions(self):

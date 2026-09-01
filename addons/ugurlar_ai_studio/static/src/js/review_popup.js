@@ -758,7 +758,14 @@ async function openReviewPopup(sessionId) {
         };
 
         try {
-            await _jsonRpc('/ai_studio/complete_session', payload);
+            const result = await _jsonRpc('/ai_studio/complete_session', payload);
+
+            // Sunucu hatası kontrolü
+            if (result && result.success === false) {
+                showToast('❌ Kaydetme hatası: ' + (result.error || 'Bilinmeyen hata'), 'error');
+                if (btn) { btn.disabled = false; btn.textContent = `✅ Tamamla ve Kaydet (${approvedItems.length} görsel)`; }
+                return;
+            }
 
             // Sonraki review session var mı?
             if (data.next_session_id) {
@@ -787,8 +794,8 @@ async function openReviewPopup(sessionId) {
                 window.location.reload();
             }
         } catch(e) {
-            showToast('Kaydetme hatası: ' + e.message);
-            render();
+            showToast('❌ Kaydetme hatası: ' + e.message, 'error');
+            if (btn) { btn.disabled = false; btn.textContent = `✅ Tamamla ve Kaydet (${approvedItems.length} görsel)`; }
         }
     }
 

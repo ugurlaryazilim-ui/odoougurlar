@@ -606,15 +606,19 @@ class AiStudioController(http.Controller):
 
     @http.route('/ai_studio/complete_session', type='json', auth='user', methods=['POST'])
     def complete_session(self, session_id, approved_items=None):
-        """Oturumu tamamla ve gorselleri urune kaydet. Sadece onaycı ve yönetici."""
+        """Oturumu tamamla ve gorselleri urune kaydet. Sadece onaycı ve yönetici.
+        
+        Doğrudan senkron kaydetme yapar (cron'a bırakmaz).
+        """
         import psycopg2
         try:
             if not request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'):
-                return {'error': 'Bu i\u015flemi yapmaya yetkiniz yok. Onayc\u0131 veya y\u00f6netici rol\u00fc gerekli.'}
+                return {'success': False, 'error': 'Bu işlemi yapmaya yetkiniz yok. Onaycı veya yönetici rolü gerekli.'}
             session = request.env['ai.studio.session'].browse(int(session_id))
             if not session.exists():
-                return {'error': 'Oturum bulunamadi.'}
+                return {'success': False, 'error': 'Oturum bulunamadı.'}
 
+            # 1. is_primary değerlerini güncelle
             if approved_items:
                 for item in approved_items:
                     gen_id = item.get('id')
@@ -623,16 +627,42 @@ class AiStudioController(http.Controller):
                     if gen.exists() and gen.session_id.id == session.id:
                         gen.write({'is_primary': is_primary})
 
-            session.action_mark_done_async()
+            # 2. Onaylı görselleri bul
+            approved = session.generation_ids.filtered(
+                lambda g: g.is_approved and g.state == 'done' and not g.is_excluded
+            )
+            if not approved:
+                return {'success': False, 'error': 'En az bir görsel onaylanmalı.'}
+
+            # 3. Primary kontrolü & otomatik atama
+            if not approved.filtered(lambda g: g.is_primary):
+                front = approved.filtered(lambda g: g.photo_type == 'front')[:1]
+                primary = front or approved[0]
+                primary.is_primary = True
+
+            # 4. Doğrudan ürüne kaydet (senkron)
+            session._save_to_product(approved)
+
+            # 5. Oturumu tamamlandı olarak işaretle
+            session.reviewer_id = request.env.user
+            session.state = 'done'
+            session.date_done = fields.Datetime.now()
+            session.message_post(
+                body=_('%d onaylı görsel ürüne başarıyla kaydedildi.') % len(approved),
+            )
+
+            _logger.info("complete_session: %s (%s) başarıyla tamamlandı, %d görsel kaydedildi.",
+                         session.name, session.id, len(approved))
             return {'success': True}
+
         except psycopg2.Error as e:
             if getattr(e, 'pgcode', '') in ('40001', '25P02'):
                 raise
-            _logger.exception('complete_session veritabanı hatası: %s', e)
-            return {'success': False, 'error': str(e)}
+            _logger.exception('complete_session veritabanı hatası (session=%s): %s', session_id, e)
+            return {'success': False, 'error': 'Veritabanı hatası: %s' % str(e)[:200]}
         except Exception as e:
-            _logger.exception('complete_session hatasi: %s', e)
-            return {'success': False, 'error': str(e)}
+            _logger.exception('complete_session hatasi (session=%s): %s', session_id, e)
+            return {'success': False, 'error': 'Kaydetme hatası: %s' % str(e)[:200]}
 
     # ═══════════════════════════════════════════════════════════
     # İNCELEME KİLİDİ (Concurrency Control)
