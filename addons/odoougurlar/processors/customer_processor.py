@@ -168,8 +168,30 @@ class CustomerProcessor(models.AbstractModel):
         cust_phone = (partner.phone or getattr(partner, 'mobile', '') or '').strip()
         cust_phone_clean = ''.join(filter(str.isdigit, cust_phone))
 
+        # ─── Maskeli / sahte telefon tespiti ───
+        # N11 gibi pazaryerleri tüm müşterilere aynı maskeli numara verir (örn: 5XXXXXXXXX).
+        # Bu numaralarla Nebim'de arama yapmak, yanlış müşteriye eşleşme yaratır!
+        _is_masked_phone = False
+        if cust_phone:
+            # X, * gibi maskeleme karakterleri içeriyorsa
+            if any(c in cust_phone.upper() for c in ('X', '*')):
+                _is_masked_phone = True
+            # Tüm rakamlar aynıysa (5555555555, 0000000000 vb.)
+            elif cust_phone_clean and len(set(cust_phone_clean)) <= 1:
+                _is_masked_phone = True
+            # Gerçek rakam sayısı 10'dan azsa (505XXX gibi kısmi maskeleme)
+            elif len(cust_phone_clean) < 10:
+                _is_masked_phone = True
+        if _is_masked_phone:
+            _logger.info(
+                "MASKELİ TELEFON TESPİT EDİLDİ: '%s' (partner=%s). "
+                "Telefon ile Nebim eşleştirmesi ATLANACAK, sadece e-posta kullanılacak.",
+                cust_phone, partner.name
+            )
+
         # Telefon ile de Nebim SP'de canlı ara (CommunicationTypeCode 7 = Telefon)
-        if not nebim_verified_code and cust_phone_clean:
+        # NOT: Maskeli telefon tespit edildiyse bu adım ATLANIR!
+        if not nebim_verified_code and cust_phone_clean and not _is_masked_phone:
             try:
                 sp_res_p = connector.run_proc('sp_GetCustomer_Hamurlabs', [
                     {'Name': 'CommunicationTypeCode', 'Value': 7},   # 7 = Telefon
@@ -193,11 +215,12 @@ class CustomerProcessor(models.AbstractModel):
                 _logger.warning("Nebim SP telefon sorgu hatası: %s", e)
 
         # ─── Odoo DB: Aynı email veya telefon ile daha önce Nebim cari kodu almış partner var mı? ───
+        # NOT: Maskeli telefon varsa telefon koşulu eklenmez!
         if not nebim_verified_code:
             search_conds = []
             if email:
                 search_conds.append(('email', '=ilike', email))
-            if cust_phone:
+            if cust_phone and not _is_masked_phone:
                 search_conds.append(('phone', '=', cust_phone))
             if search_conds:
                 db_cond = ['|'] * (len(search_conds) - 1) + search_conds
@@ -500,11 +523,24 @@ class CustomerProcessor(models.AbstractModel):
                 'CanSendAdvert': False,
             })
         if cust_phone:
-            comm_list.append({
-                'CommunicationTypeCode': 7,
-                'CommAddress': cust_phone,
-                'CanSendAdvert': False,
-            })
+            # Maskeli telefon tespiti (N11 gibi platformlar 5XXXXXXXXX gönderir)
+            _phone_clean = ''.join(filter(str.isdigit, cust_phone))
+            _phone_masked = (
+                any(c in cust_phone.upper() for c in ('X', '*'))
+                or (_phone_clean and len(set(_phone_clean)) <= 1)
+                or len(_phone_clean) < 10
+            )
+            if not _phone_masked:
+                comm_list.append({
+                    'CommunicationTypeCode': 7,
+                    'CommAddress': cust_phone,
+                    'CanSendAdvert': False,
+                })
+            else:
+                _logger.info(
+                    "MASKELİ TELEFON Nebim'e GÖNDERİLMEDİ: '%s' (partner=%s)",
+                    cust_phone, partner.name
+                )
         if comm_list:
             payload['Communications'] = comm_list
         
