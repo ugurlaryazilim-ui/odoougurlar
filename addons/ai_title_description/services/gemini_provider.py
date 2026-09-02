@@ -91,7 +91,7 @@ class GeminiContentProvider:
                 "responseMimeType": "application/json",
                 "responseSchema": self.RESPONSE_SCHEMA,
                 "temperature": 0.2,
-                "maxOutputTokens": 2048,
+                "maxOutputTokens": 8192,
             }
         }
 
@@ -107,7 +107,7 @@ class GeminiContentProvider:
         last_error = None
         for attempt in range(self.MAX_RETRIES + 1):
             try:
-                response = requests.post(url, json=payload, timeout=60)
+                response = requests.post(url, json=payload, timeout=90)
 
                 # Handle 429 Rate Limit with retry
                 if response.status_code == 429:
@@ -134,6 +134,11 @@ class GeminiContentProvider:
                 if not candidates:
                     _logger.error("Gemini API boş yanıt: %s", json.dumps(result)[:500])
                     raise ValueError("Gemini API boş yanıt döndürdü.")
+
+                # Check if response was truncated
+                finish_reason = candidates[0].get('finishReason', '')
+                if finish_reason == 'MAX_TOKENS':
+                    _logger.warning("Gemini yanıtı MAX_TOKENS nedeniyle kesildi!")
 
                 text = candidates[0]['content']['parts'][0]['text']
                 parsed = self._parse_json_response(text)
@@ -179,12 +184,13 @@ class GeminiContentProvider:
 
     @staticmethod
     def _parse_json_response(text):
-        """Gemini yanıtından JSON çıkar — markdown fence ve ekstra metin toleranslı.
+        """Gemini yanıtından JSON çıkar — markdown fence, ekstra metin ve kesik JSON toleranslı.
         
         Gemini bazen şunları döndürebilir:
         - Düz JSON: {"key": "value"}
         - Markdown fence: ```json\n{"key": "value"}\n```
         - Ekstra metin + JSON karışımı
+        - Kesik JSON (maxOutputTokens aşılınca)
         """
         if not text:
             raise json.JSONDecodeError("Boş yanıt", text or "", 0)
@@ -215,11 +221,87 @@ class GeminiContentProvider:
             except json.JSONDecodeError:
                 pass
 
-        # 4. Hiçbiri çalışmadı — log ve hata
+        # 4. Kesik JSON tamiri — maxOutputTokens aşılınca JSON yarıda kesilir
+        if first_brace != -1:
+            json_str = text[first_brace:]
+            repaired = GeminiContentProvider._repair_truncated_json(json_str)
+            if repaired:
+                try:
+                    parsed = json.loads(repaired)
+                    _logger.warning("Kesik JSON başarıyla tamir edildi")
+                    return parsed
+                except json.JSONDecodeError:
+                    pass
+
+        # 5. Hiçbiri çalışmadı — log ve hata
         _logger.error(
-            "Gemini yanıtı JSON olarak ayrıştırılamadı. Ham yanıt (ilk 1000 karakter): %s",
-            text[:1000]
+            "Gemini yanıtı JSON olarak ayrıştırılamadı. Ham yanıt (ilk 2000 karakter): %s",
+            text[:2000]
         )
         raise json.JSONDecodeError(
             "Gemini yanıtı geçerli JSON içermiyor", text[:200], 0
         )
+
+    @staticmethod
+    def _repair_truncated_json(text):
+        """Kesik JSON'ı tamir etmeye çalış.
+        
+        maxOutputTokens aşılınca JSON yarıda kesilir:
+        {"key": "val... → tamamla
+        """
+        if not text:
+            return None
+
+        # Açık string'i kapat
+        in_string = False
+        escape = False
+        for char in text:
+            if escape:
+                escape = False
+                continue
+            if char == '\\':
+                escape = True
+                continue
+            if char == '"':
+                in_string = not in_string
+
+        # Eğer string açıksa, kapat
+        if in_string:
+            text = text + '"'
+
+        # Açık bracket/brace'leri kapat
+        stack = []
+        in_str = False
+        esc = False
+        for char in text:
+            if esc:
+                esc = False
+                continue
+            if char == '\\':
+                esc = True
+                continue
+            if char == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if char in ('{', '['):
+                stack.append(char)
+            elif char == '}' and stack and stack[-1] == '{':
+                stack.pop()
+            elif char == ']' and stack and stack[-1] == '[':
+                stack.pop()
+
+        # Son virgülü temizle (trailing comma)
+        text = text.rstrip()
+        if text.endswith(','):
+            text = text[:-1]
+
+        # Stack'teki açık bracket/brace'leri kapat
+        for opener in reversed(stack):
+            if opener == '{':
+                text += '}'
+            elif opener == '[':
+                text += ']'
+
+        return text
