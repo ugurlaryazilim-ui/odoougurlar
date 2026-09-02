@@ -270,6 +270,34 @@ class ResConfigSettings(models.TransientModel):
         help='Aktifleştirildiğinde, tamamlanmış loglar 1 gün, hatalı loglar 7 gün sonra otomatik silinir.',
     )
 
+    # -----------------------------------------------------------------
+    #  Ürün Güncelleme Alan Korumaları (AI / Manuel Veri Koruma)
+    # -----------------------------------------------------------------
+    nebim_prevent_name_update = fields.Boolean(
+        string='Ürün Adı Güncellenmesin',
+        config_parameter='odoougurlar.nebim_prevent_name_update',
+        default=True,
+        help='Açık olduğunda, mevcut ürünler Nebim senkronizasyonu ile güncellenirken Odoo\'daki ürün adı (AI başlığı) korunur ve Nebim adı ile ezilmez.',
+    )
+    nebim_prevent_description_update = fields.Boolean(
+        string='Açıklama Güncellenmesin',
+        config_parameter='odoougurlar.nebim_prevent_description_update',
+        default=True,
+        help='Açık olduğunda, mevcut ürünler Nebim senkronizasyonu ile güncellenirken Odoo\'daki ürün açıklaması (AI açıklaması) korunur ve Nebim notları ile ezilmez.',
+    )
+    nebim_prevent_price_update = fields.Boolean(
+        string='Satış Fiyatı Güncellenmesin',
+        config_parameter='odoougurlar.nebim_prevent_price_update',
+        default=False,
+        help='Açık olduğunda, mevcut ürünler Nebim senkronizasyonu ile güncellenirken Odoo\'daki satış fiyatı korunur ve Nebim fiyatı ile ezilmez.',
+    )
+    nebim_prevent_category_update = fields.Boolean(
+        string='Kategori Güncellenmesin',
+        config_parameter='odoougurlar.nebim_prevent_category_update',
+        default=False,
+        help='Açık olduğunda, mevcut ürünler Nebim senkronizasyonu ile güncellenirken Odoo\'daki ürün kategorisi korunur ve Nebim ürün grubu ile ezilmez.',
+    )
+
     def set_values(self):
         """Ayarlar kaydedildiğinde cron'ları aktif/pasif yap ve aralığı güncelle."""
         super().set_values()

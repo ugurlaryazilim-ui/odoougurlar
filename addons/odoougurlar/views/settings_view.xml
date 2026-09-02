@@ -186,6 +186,20 @@
                                 <field name="nebim_log_auto_cleanup"/>
                             </setting>
                         </block>
+                        <block title="Ürün Güncelleme Alan Korumaları (AI / Manuel Bilgi Koruma)" name="nebim_product_protection">
+                            <setting string="Ürün Adı Güncellenmesin" help="Açık olduğunda, mevcut ürünler Nebim senkronizasyonu ile güncellenirken Odoo'daki ürün adı (AI başlığı) korunur ve Nebim adı ile ezilmez.">
+                                <field name="nebim_prevent_name_update"/>
+                            </setting>
+                            <setting string="Açıklama Güncellenmesin" help="Açık olduğunda, mevcut ürünler Nebim senkronizasyonu ile güncellenirken Odoo'daki ürün açıklaması (AI açıklaması) korunur ve Nebim notları ile ezilmez.">
+                                <field name="nebim_prevent_description_update"/>
+                            </setting>
+                            <setting string="Satış Fiyatı Güncellenmesin" help="Açık olduğunda, mevcut ürünler Nebim senkronizasyonu ile güncellenirken Odoo'daki satış fiyatı korunur ve Nebim fiyatı ile ezilmez.">
+                                <field name="nebim_prevent_price_update"/>
+                            </setting>
+                            <setting string="Kategori Güncellenmesin" help="Açık olduğunda, mevcut ürünler Nebim senkronizasyonu ile güncellenirken Odoo'daki ürün kategorisi korunur ve Nebim ürün grubu ile ezilmez.">
+                                <field name="nebim_prevent_category_update"/>
+                            </setting>
+                        </block>
                     </app>
                 </xpath>
             </field>

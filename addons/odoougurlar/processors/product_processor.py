@@ -90,13 +90,27 @@ class ProductProcessor(models.AbstractModel):
         _CACHE['barcodes'] = {r[0] for r in self.env.cr.fetchall()}
 
         _CACHE['lines'] = {}
+
+        # Alan koruma ayarları (AI / Manuel başlık, açıklama, fiyat, kategori koruması)
+        ICP = self.env['ir.config_parameter'].sudo()
+        p_name = ICP.get_param('odoougurlar.nebim_prevent_name_update', 'True')
+        p_desc = ICP.get_param('odoougurlar.nebim_prevent_description_update', 'True')
+        p_price = ICP.get_param('odoougurlar.nebim_prevent_price_update', 'False')
+        p_categ = ICP.get_param('odoougurlar.nebim_prevent_category_update', 'False')
+
+        _CACHE['prevent_name'] = str(p_name).lower() in ('true', '1')
+        _CACHE['prevent_desc'] = str(p_desc).lower() in ('true', '1')
+        _CACHE['prevent_price'] = str(p_price).lower() in ('true', '1')
+        _CACHE['prevent_categ'] = str(p_categ).lower() in ('true', '1')
+
         _CACHE['loaded'] = True
 
         _logger.info(
-            "Cache yüklendi: %d attr, %d val, %d categ, %d tax, %d barcode",
+            "Cache yüklendi: %d attr, %d val, %d categ, %d tax, %d barcode | Koruma: name=%s, desc=%s, price=%s, categ=%s",
             len(_CACHE['attrs']), len(_CACHE['vals']),
             len(_CACHE['categs']), len(_CACHE['taxes']),
             len(_CACHE['barcodes']),
+            _CACHE['prevent_name'], _CACHE['prevent_desc'], _CACHE['prevent_price'], _CACHE['prevent_categ']
         )
 
     @api.private
@@ -195,9 +209,21 @@ class ProductProcessor(models.AbstractModel):
                 template_vals['supplier_taxes_id'] = [(6, 0, [purchase_tax.id])]
 
         if template:
+            # ─── Alan Koruma Kontrolleri (Var Olan Ürün Güncellemesi) ───
+            # Ayarlarda koruma işaretli ise Odoo'daki başlık / açıklama / fiyat / kategori korunur
+            if _CACHE.get('prevent_name', True):
+                template_vals.pop('name', None)
+            if _CACHE.get('prevent_desc', True):
+                template_vals.pop('description', None)
+            if _CACHE.get('prevent_price', False):
+                template_vals.pop('list_price', None)
+            if _CACHE.get('prevent_categ', False):
+                template_vals.pop('categ_id', None)
+
             template.write(template_vals)
             result = 'updated'
         else:
+            # Yeni ürün: İlk kez oluşturulurken tüm alanlar Nebim'den atanır
             template = ProductTemplate.create(template_vals)
             result = 'created'
 
