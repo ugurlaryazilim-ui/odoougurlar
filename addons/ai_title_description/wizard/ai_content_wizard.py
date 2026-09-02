@@ -174,11 +174,21 @@ class AIContentWizard(models.TransientModel):
             vals['ai_ecommerce_title'] = self.preview_ecommerce_title
             vals['ai_meta_title'] = self.preview_meta_title
             vals['ai_seo_keywords'] = self.preview_seo_keywords
+            # Odoo ana ürün adını güncelle
+            if self.preview_ecommerce_title:
+                vals['name'] = self.preview_ecommerce_title
+            elif self.preview_trendyol_title:
+                vals['name'] = self.preview_trendyol_title
 
         if description:
             vals['ai_short_description'] = self.preview_short_description
             vals['ai_html_description'] = self.preview_html_description
             vals['ai_meta_description'] = self.preview_meta_description
+            # Odoo ana iç notlar (description) ve satış açıklaması (description_sale) alanlarını güncelle
+            if self.preview_short_description:
+                vals['description'] = self.preview_short_description
+            if self.preview_html_description:
+                vals['description_sale'] = self.preview_html_description
 
         product.write(vals)
 

@@ -122,11 +122,13 @@ class AIContentQueue(models.Model):
                 }
 
                 if record.mode in ('title', 'both'):
+                    ecommerce_title = result.get('ecommerce_title', '')
                     product_vals.update({
                         'ai_trendyol_title': fixed_title,
-                        'ai_ecommerce_title': result.get('ecommerce_title', ''),
+                        'ai_ecommerce_title': ecommerce_title,
                         'ai_meta_title': result.get('meta_title', ''),
                         'ai_seo_keywords': ', '.join(result.get('seo_keywords', [])),
+                        'name': ecommerce_title or fixed_title,
                     })
 
                 if record.mode in ('description', 'both'):
@@ -137,10 +139,13 @@ class AIContentQueue(models.Model):
                         features_html = '<ul>' + ''.join(f'<li>{f}</li>' for f in key_features) + '</ul>'
                         html_desc = features_html + html_desc
 
+                    short_summary = result.get('short_summary', '')
                     product_vals.update({
-                        'ai_short_description': result.get('short_summary', ''),
+                        'ai_short_description': short_summary,
                         'ai_html_description': html_desc,
                         'ai_meta_description': result.get('meta_description', ''),
+                        'description': short_summary,
+                        'description_sale': html_desc,
                     })
 
                 product.write(product_vals)
