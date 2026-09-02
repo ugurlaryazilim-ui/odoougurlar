@@ -144,9 +144,36 @@ class AIContentQueue(models.Model):
                         'ai_short_description': short_summary,
                         'ai_html_description': html_desc,
                         'ai_meta_description': result.get('meta_description', ''),
-                        'description': short_summary,
+                        'description': html_desc or short_summary,
                         'description_sale': html_desc,
                     })
+
+                # SEO anahtar kelimelerini E-Ticaret etiketlerine otomatik bağla
+                seo_kws_str = product_vals.get('ai_seo_keywords') or ', '.join(result.get('seo_keywords', []))
+                if seo_kws_str:
+                    keywords = [k.strip() for k in seo_kws_str.split(',') if k.strip()]
+                    if keywords:
+                        tag_field = False
+                        for fname in ['product_tag_ids', 'website_tag_ids', 'tag_ids']:
+                            if fname in product._fields:
+                                tag_field = fname
+                                break
+                        if tag_field:
+                            target_model = product._fields[tag_field].comodel_name
+                            TagModel = self.env[target_model]
+                            tag_commands = []
+                            for kw in keywords:
+                                tag = TagModel.sudo().search([('name', '=ilike', kw)], limit=1)
+                                if not tag:
+                                    try:
+                                        tag = TagModel.sudo().create({'name': kw})
+                                    except Exception as e:
+                                        _logger.warning("Kuyruk etiket oluşturulamadı '%s': %s", kw, e)
+                                        continue
+                                if tag:
+                                    tag_commands.append((4, tag.id))
+                            if tag_commands:
+                                product_vals[tag_field] = tag_commands
 
                 product.write(product_vals)
 

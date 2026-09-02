@@ -184,11 +184,38 @@ class AIContentWizard(models.TransientModel):
             vals['ai_short_description'] = self.preview_short_description
             vals['ai_html_description'] = self.preview_html_description
             vals['ai_meta_description'] = self.preview_meta_description
-            # Odoo ana iç notlar (description) ve satış açıklaması (description_sale) alanlarını güncelle
-            if self.preview_short_description:
-                vals['description'] = self.preview_short_description
+            # Odoo ana iç notlar (description) ve satış açıklaması (description_sale) alanlarını ZENGİN AÇIKLAMA ile güncelle
             if self.preview_html_description:
+                vals['description'] = self.preview_html_description
                 vals['description_sale'] = self.preview_html_description
+            elif self.preview_short_description:
+                vals['description'] = self.preview_short_description
+
+        # SEO anahtar kelimelerini E-Ticaret ürün etiketlerine ekle
+        if self.preview_seo_keywords:
+            keywords = [k.strip() for k in self.preview_seo_keywords.split(',') if k.strip()]
+            if keywords:
+                tag_field = False
+                for fname in ['product_tag_ids', 'website_tag_ids', 'tag_ids']:
+                    if fname in product._fields:
+                        tag_field = fname
+                        break
+                if tag_field:
+                    target_model = product._fields[tag_field].comodel_name
+                    TagModel = self.env[target_model]
+                    tag_commands = []
+                    for kw in keywords:
+                        tag = TagModel.sudo().search([('name', '=ilike', kw)], limit=1)
+                        if not tag:
+                            try:
+                                tag = TagModel.sudo().create({'name': kw})
+                            except Exception as e:
+                                _logger.warning("Etiket oluşturulamadı '%s': %s", kw, e)
+                                continue
+                        if tag:
+                            tag_commands.append((4, tag.id))
+                    if tag_commands:
+                        vals[tag_field] = tag_commands
 
         product.write(vals)
 
