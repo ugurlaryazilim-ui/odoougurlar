@@ -12,6 +12,8 @@
                     <field name="priority"/>
                     <field name="attempts"/>
                     <field name="create_date"/>
+                    <button name="action_process_now" string="Şimdi İşle" type="object" icon="fa-bolt" class="btn-link" invisible="state == 'done'"/>
+                    <button name="action_reset_to_pending" string="Sıfırla" type="object" icon="fa-refresh" class="btn-link" invisible="state == 'pending'"/>
                 </list>
             </field>
         </record>
@@ -21,18 +23,26 @@
             <field name="model">ai.content.queue</field>
             <field name="arch" type="xml">
                 <form string="AI Kuyruk Kaydı">
+                    <header>
+                        <button name="action_process_now" string="Şimdi İşle" type="object" class="btn-primary" invisible="state == 'done'"/>
+                        <button name="action_reset_to_pending" string="Sıfırla / Yeniden Dene" type="object" class="btn-secondary" invisible="state == 'pending'"/>
+                        <field name="state" widget="statusbar" statusbar_visible="pending,processing,done,error"/>
+                    </header>
                     <sheet>
                         <group>
                             <group>
                                 <field name="product_tmpl_id"/>
                                 <field name="mode"/>
-                                <field name="state"/>
                             </group>
                             <group>
                                 <field name="priority"/>
                                 <field name="attempts"/>
+                                <field name="max_attempts"/>
                                 <field name="create_date"/>
                             </group>
+                        </group>
+                        <group string="Hata Detayı" invisible="not error_message">
+                            <field name="error_message" readonly="1"/>
                         </group>
                     </sheet>
                 </form>

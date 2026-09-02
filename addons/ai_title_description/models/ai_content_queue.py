@@ -32,6 +32,23 @@ class AIContentQueue(models.Model):
     @api.model
     def _cron_process_queue(self, batch_size=10):
         """Kuyruktan batch_size kadar ürün alıp AI içerik üretir."""
+        from datetime import timedelta
+        # 0. 5 dakikadan fazla 'processing' kalan takılı kayıtları sıfırla
+        stuck_threshold = fields.Datetime.now() - timedelta(minutes=5)
+        stuck_records = self.search([
+            ('state', '=', 'processing'),
+            ('write_date', '<', stuck_threshold)
+        ])
+        for stuck in stuck_records:
+            stuck.attempts += 1
+            if stuck.attempts >= stuck.max_attempts:
+                stuck.state = 'error'
+                stuck.error_message = 'İşlem zaman aşımına uğradı veya durduruldu.'
+            else:
+                stuck.state = 'pending'
+        if stuck_records:
+            self.env.cr.commit()
+
         records = self.search(
             [('state', '=', 'pending')],
             limit=batch_size,
@@ -234,3 +251,18 @@ class AIContentQueue(models.Model):
             self.env.cr.commit()
 
         _logger.info("AI Kuyruk: %s/%s ürün başarıyla işlendi.", processed, len(records))
+
+    def action_reset_to_pending(self):
+        """Kuyruk kaydını yeniden 'bekliyor' durumuna getirir."""
+        for record in self:
+            record.write({
+                'state': 'pending',
+                'error_message': False,
+            })
+
+    def action_process_now(self):
+        """Kuyruk kaydını hemen senkron olarak işler."""
+        for record in self:
+            record.state = 'pending'
+        self._cron_process_queue(batch_size=len(self))
+        return True
