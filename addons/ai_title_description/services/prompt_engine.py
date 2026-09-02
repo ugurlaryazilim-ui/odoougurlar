@@ -6,18 +6,25 @@ class PromptEngine:
 Görevin, sağlanan ürün verilerini ve ürün görselini kullanarak profesyonel başlıklar, detaylı açıklamalar ve SEO metadataları oluşturmak.
 
 ═══════════════════════════════════════════
-TRENDYOL BAŞLIK KURALLARI (KESİNLİKLE UY)
+TRENDYOL VE E-TİCARET BAŞLIK KURALLARI
 ═══════════════════════════════════════════
 1. İdeal başlık uzunluğu 9-13 kelime arasıdır (60-100 karakter).
 2. Maksimum 100 karakter (aşma!).
 3. İlk harfler daima büyük olmalıdır (Title Case).
 4. Başlık içinde aynı kelime tekrarlanmamalıdır.
 5. Emoji, sembol veya tamamen büyük harflerle yazılmış kelimeler YASAKTIR.
-6. ⛔ RENK bilgisi başlıkta KULLANMA — Renk varyant alanına girilir, başlıkta ve açıklamada belirtilmez.
+6. ⛔ RENK bilgisi başlıkta KULLANMA — Renk varyant alanına girilir.
 7. ⛔ BEDEN bilgisi başlıkta KULLANMA — Beden de varyant alanına girilir.
 8. Promosyonel ifadeler YASAKTIR: "en ucuz", "kampanya", "fırsat", "şok fiyat", "garantili", "orijinal", "kargo bedava".
 9. Kelimelerde kısaltma kullanılmamalıdır.
 10. Marka başlığın en başında yer almalıdır.
+
+═══════════════════════════════════════════
+⛔ YASAKLI BASMAKALIP / REKLAM KELİMELERİ (KESİNLİKLE KULLANMA)
+═══════════════════════════════════════════
+- "Şık", "Konforlu", "Şık ve Konforlu", "Şık ve Konforlu Tasarım", "Göz Alıcı", "Harika", "Muhteşem", "Mükemmel", "Vazgeçilmez", "Kombinlerin Vazgeçilmezi", "Eşsiz", "Şıklığınızı Tamamlayın" gibi basmakalıp, klişe ve tekrarlayan dolgu lafları BAŞLIKLARDA VE AÇIKLAMALARDA KESİNLİKLE KULLANMA!
+- Başlıkların veya cümlelerin sonuna "- Şık ve Konforlu", "- Şık Tasarım" gibi anlamsız pazarlama ekleri EKLEME.
+- SADECE VE SADECE ürünün SOMUT FİZİKSEL VE TEKNİK ÖZELLİKLERİNE (örneğin: V Yaka, Dik Yaka, Fermuarlı, Çizgili, Dokulu Kumaş, Pamuk Karışımlı, Çentikli Yaka, Kuşaklı, İnci Düğmeli, Yüksek Bel, Geniş Paça, Örme, Triko, Blazer, Mini, Midi, Rahat Kesim, Normal Kesim, Standart Kalıp) odaklan.
 
 ═══════════════════════════════════════════
 KATEGORİ BAŞLIK ŞABLONLARI
@@ -33,18 +40,18 @@ Eğer kategori belli ise aşağıdaki formüllere sadık kal:
 ═══════════════════════════════════════════
 AÇIKLAMA KURALLARI (ÇOK ÖNEMLİ)
 ═══════════════════════════════════════════
-Açıklama MUTLAKA 150-300 kelime arasında olmalı, profesyonel bir e-ticaret açıklaması yaz.
+Açıklama MUTLAKA 150-300 kelime arasında olmalı, profesyonel ve teknik açıdan zengin bir e-ticaret açıklaması yaz.
 
 Açıklama yapısı şu sırayı takip etmeli:
-1. <h3> ile ürün başlığı (SEO dostu)
-2. <p> ile açılış paragrafı (ürünü tanıtan 2-3 cümle, ikna edici)
-3. <h3>Ürün Özellikleri</h3> + <ul><li> ile 5-8 madde
+1. <h3> ile ürün başlığı (SEO dostu, somut teknik isim)
+2. <p> ile açılış paragrafı (ürünün kesimini, kumaş yapısını ve teknik detaylarını anlatan 2-3 cümle)
+3. <h3>Ürün Özellikleri</h3> + <ul><li> ile 5-8 madde (kumaş, yaka, kol, dikiş, düğme, cep vb. somut detaylar)
 4. <h3>Kullanım Alanları</h3> + <p> ile nerede/nasıl kullanılabileceği
-5. <h3>Bakım ve Kullanım Önerileri</h3> + <p> ile bakım talimatı
-6. <p> ile kapanış paragrafı (CTA — satın alma motivasyonu)
+5. <h3>Bakım ve Kullanım Önerileri</h3> + <p> ile yıkama/ütüleme/bakım talimatı
+6. <p> ile kapanış paragrafı (ürün özelliklerini özetleyen cümle)
 
 İzin verilen HTML etiketleri: <h3>, <p>, <ul>, <li>, <strong>.
-⛔ Açıklamada da RENK bilgisi KULLANMA.
+⛔ Açıklamada da RENK/BEDEN bilgisi ve "Şık/Konforlu" gibi klişe kelimeleri KULLANMA.
 
 ═══════════════════════════════════════════
 GENEL KURALLAR
@@ -53,7 +60,7 @@ GENEL KURALLAR
 2. Üründe olmayan bir özelliği kesinlikle UYDURMA (Halüsinasyon YASAK).
 3. Görselden ürün türünü (kazak, pantolon, elbise vb.) doğru tespit et.
 4. Tüm metin Türkçe olmalıdır.
-5. Kısa açıklama (short_summary) 2-3 cümle, ikna edici ve bilgilendirici olmalı.
+5. Kısa açıklama (short_summary) 2-3 cümle, teknik ve bilgilendirici olmalı.
 """
 
     CATEGORY_TEMPLATES = {
@@ -107,13 +114,14 @@ GENEL KURALLAR
             prompt_parts.append("\n📸 Eklenen ürün görselini DİKKATLE analiz et.")
             prompt_parts.append("- Görselden ürün türünü (kazak, pantolon, elbise vb.), kumaş/materyal, yaka tipi, kol uzunluğu, detay/işleme gibi özellikleri çıkar.")
             prompt_parts.append("- ⛔ Görselden renk çıkarsan bile başlık ve açıklamada KULLANMA — renk varyant bilgisidir.")
+            prompt_parts.append("- ⛔ 'Şık ve konforlu' gibi basmakalıp laflar ekleme, sadece gördüğün fiziksel detayları (ör. dik yaka, fermuarlı, örme doku) yaz.")
             prompt_parts.append("- Görselde görünmeyen özellikleri UYDURMA.")
 
         # Açıklama kalitesi vurgusu
         prompt_parts.append("\n📝 AÇIKLAMA KALİTESİ:")
         prompt_parts.append("- Açıklama en az 150 kelime, ideal 200-250 kelime olmalı.")
-        prompt_parts.append("- Profesyonel, ikna edici, SEO dostu bir e-ticaret açıklaması yaz.")
-        prompt_parts.append("- Ürün özelliklerini, kullanım alanlarını ve bakım önerilerini detaylı anlat.")
+        prompt_parts.append("- ⛔ 'Şık', 'konforlu', 'vazgeçilmez' gibi basmakalıp dolgu kelimeleri KULLANMA.")
+        prompt_parts.append("- Sadece ürünün somut niteliklerini (kumaş yapısı, dikiş, yaka, kol, kesim) anlat.")
             
         return "\n".join(prompt_parts)
 

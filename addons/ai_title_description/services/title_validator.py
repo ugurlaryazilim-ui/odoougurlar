@@ -8,14 +8,21 @@ class TitleValidator:
         'orijinal', 'kargo bedava', 'hızlı kargo', 'tükeniyor', 
         'süper', 'muhteşem', 'trending', 'trend', '1. kalite', 
         'ücretsiz', 'hediyeli', 'indirimli', 'en iyi', 
-        'en kaliteli', 'lüks', 'premium'
+        'en kaliteli', 'lüks', 'premium',
+        # Tekrarlayan / Basmakalıp Dolgu İfadeler (YASAK)
+        'şık ve konforlu tasarım', 'şık ve konforlu', 'şık ve zarif', 
+        'modern ve şık', 'şık ve modern', 'şık tasarım', 'şık', 'konforlu', 'göz alıcı',
+        'vazgeçilmez', 'eşsiz', 'muazzam', 'harika', 'mükemmel'
     ]
     BANNED_CHARS = set("!@#$%^&*()_+={}[]|\\:;\"'<>,.?/~`😊😂👍❤️✨🔥🎉")
 
     def validate_and_fix(self, title, platform='trendyol'):
         warnings = []
-        original_title = title
-        fixed_title = title
+        original_title = title or ""
+        fixed_title = original_title
+
+        # 0. Başlığın sonundaki "- Şık ve Konforlu", "- Şık Tasarım" gibi ekleri temizle
+        fixed_title = re.sub(r'\s*[-–—]\s*(şık|konforlu|şık ve konforlu|şık ve konforlu tasarım|zarif|modern|göz alıcı).*$', '', fixed_title, flags=re.IGNORECASE)
         
         # 1. Remove emojis and symbols
         cleaned_chars = []
@@ -29,16 +36,17 @@ class TitleValidator:
             fixed_title = "".join(cleaned_chars)
             warnings.append("Yasaklı karakterler veya emojiler temizlendi.")
 
-        # 2. Banned words
+        # 2. Banned words filtering
         fixed_title_lower = self.tr_lower(fixed_title)
         for banned_word in self.BANNED_WORDS:
             if banned_word in fixed_title_lower:
-                # Replace logic case insensitive
-                pattern = re.compile(re.escape(banned_word), re.IGNORECASE)
-                fixed_title = pattern.sub('', fixed_title)
-                warnings.append(f"Yasaklı kelime silindi: {banned_word}")
-                
-        # 3. Clean multiple spaces
+                pattern = re.compile(r'\b' + re.escape(banned_word) + r'\b', re.IGNORECASE)
+                if pattern.search(fixed_title):
+                    fixed_title = pattern.sub('', fixed_title)
+                    warnings.append(f"Basmakalıp/yasaklı kelime silindi: {banned_word}")
+
+        # 3. Clean multiple spaces and stray dashes
+        fixed_title = re.sub(r'\s*-\s*$', '', fixed_title)
         fixed_title = " ".join(fixed_title.split())
 
         # 4. Repeated words
