@@ -91,17 +91,37 @@ class ProductTemplate(models.Model):
         }
 
     def _extract_ai_payload(self):
+        """Ürün verilerini AI promptu için hazırla.
+        
+        ÖNEMLİ: Renk bilgisi GÖNDERME — Trendyol kurallarına göre varyantlı
+        ürünlerde başlık ve açıklamada renk belirtilmemeli.
+        """
         self.ensure_one()
         attributes = {}
         brand = ""
         
+        # Renk niteliğini filtrele — Trendyol kuralı: başlıkta/açıklamada renk belirtme
+        EXCLUDED_ATTRIBUTES = ['renk', 'color', 'colour']
+        
         for line in self.attribute_line_ids:
             attr_name = line.attribute_id.name
+            attr_name_lower = attr_name.lower().strip()
+            
+            # Marka bilgisini al
+            if attr_name_lower in ['marka', 'brand']:
+                brand = ", ".join(line.value_ids.mapped('name'))
+                continue
+            
+            # Renk bilgisini atla
+            if attr_name_lower in EXCLUDED_ATTRIBUTES:
+                continue
+            
+            # Beden bilgisini atla (varyant bilgisi)
+            if attr_name_lower in ['beden', 'size', 'numara']:
+                continue
+                
             values = ", ".join(line.value_ids.mapped('name'))
             attributes[attr_name] = values
-            
-            if attr_name.lower() in ['marka', 'brand']:
-                brand = values
                 
         return {
             'raw_name': self.name,

@@ -2,43 +2,66 @@
 """Prompt engine for AI title and description generation."""
 
 class PromptEngine:
-    SYSTEM_PROMPT_TEMPLATE = """Sen uzman bir E-ticaret ve SEO uzmanısın. 
-Görevin, sağlanan ürün verilerini kullanarak mükemmel başlıklar, açıklamalar ve SEO metadataları oluşturmak.
+    SYSTEM_PROMPT_TEMPLATE = """Sen uzman bir E-ticaret SEO içerik yazarısın.
+Görevin, sağlanan ürün verilerini ve ürün görselini kullanarak profesyonel başlıklar, detaylı açıklamalar ve SEO metadataları oluşturmak.
 
-TRENDYOL BAŞLIK KURALLARI (Kesinlikle Uymalısın):
-1. İdeal başlık uzunluğu 9-13 kelime arasıdır.
-2. Maksimum 200 karakter olabilir (güvenli sınır: 100 karakter).
+═══════════════════════════════════════════
+TRENDYOL BAŞLIK KURALLARI (KESİNLİKLE UY)
+═══════════════════════════════════════════
+1. İdeal başlık uzunluğu 9-13 kelime arasıdır (60-100 karakter).
+2. Maksimum 100 karakter (aşma!).
 3. İlk harfler daima büyük olmalıdır (Title Case).
 4. Başlık içinde aynı kelime tekrarlanmamalıdır.
 5. Emoji, sembol veya tamamen büyük harflerle yazılmış kelimeler YASAKTIR.
-6. Marka, barkod, beden ve renk bilgileri ayrı alanlara girilmeli, sadece marka başlığın en başında yer alabilir.
-7. Promosyonel ifadeler YASAKTIR: "en ucuz", "kampanya", "fırsat", "şok fiyat", "garantili", "orijinal", "kargo bedava".
-8. Kelimelerde kısaltma kullanılmamalıdır.
+6. ⛔ RENK bilgisi başlıkta KULLANMA — Renk varyant alanına girilir, başlıkta ve açıklamada belirtilmez.
+7. ⛔ BEDEN bilgisi başlıkta KULLANMA — Beden de varyant alanına girilir.
+8. Promosyonel ifadeler YASAKTIR: "en ucuz", "kampanya", "fırsat", "şok fiyat", "garantili", "orijinal", "kargo bedava".
+9. Kelimelerde kısaltma kullanılmamalıdır.
+10. Marka başlığın en başında yer almalıdır.
 
-KATEGORİ BAŞLIK ŞABLONLARI:
+═══════════════════════════════════════════
+KATEGORİ BAŞLIK ŞABLONLARI
+═══════════════════════════════════════════
 Eğer kategori belli ise aşağıdaki formüllere sadık kal:
-- Giyim: [Marka] [Cinsiyet] [Kalıp] [Ürün Tipi] [Materyal] [Renk]
-- Ayakkabı: [Marka] [Cinsiyet] [Ürün Tipi] [Model] [Renk]
+- Giyim: [Marka] [Cinsiyet] [Kalıp] [Yaka Tipi] [Ürün Tipi] [Materyal/Detay]
+- Ayakkabı: [Marka] [Cinsiyet] [Ürün Tipi] [Model]
 - Elektronik: [Marka] [Model] [Ürün Tipi] [Özellik]
 - Kozmetik: [Marka] [Ürün Tipi] [Etki] [Hacim]
-- Ev Tekstili: [Marka] [Boyut] [Ürün Tipi] [Materyal] [Renk]
+- Ev Tekstili: [Marka] [Boyut] [Ürün Tipi] [Materyal]
 - Aksesuar: [Marka] [Ürün Tipi] [Materyal] [Detay]
 
-AÇIKLAMA KURALLARI:
-1. Semantik HTML kullan. İzin verilen etiketler: <h3>, <p>, <ul>, <li>, <strong>.
-2. Kullanıcının ürünü satın alması için fayda odaklı, ikna edici bir dil kullan.
+═══════════════════════════════════════════
+AÇIKLAMA KURALLARI (ÇOK ÖNEMLİ)
+═══════════════════════════════════════════
+Açıklama MUTLAKA 150-300 kelime arasında olmalı, profesyonel bir e-ticaret açıklaması yaz.
 
-GENEL KURALLAR:
+Açıklama yapısı şu sırayı takip etmeli:
+1. <h3> ile ürün başlığı (SEO dostu)
+2. <p> ile açılış paragrafı (ürünü tanıtan 2-3 cümle, ikna edici)
+3. <h3>Ürün Özellikleri</h3> + <ul><li> ile 5-8 madde
+4. <h3>Kullanım Alanları</h3> + <p> ile nerede/nasıl kullanılabileceği
+5. <h3>Bakım ve Kullanım Önerileri</h3> + <p> ile bakım talimatı
+6. <p> ile kapanış paragrafı (CTA — satın alma motivasyonu)
+
+İzin verilen HTML etiketleri: <h3>, <p>, <ul>, <li>, <strong>.
+⛔ Açıklamada da RENK bilgisi KULLANMA.
+
+═══════════════════════════════════════════
+GENEL KURALLAR
+═══════════════════════════════════════════
 1. Sadece verilen bilgilere ve (varsa) görsel analizine dayanarak içerik üret.
 2. Üründe olmayan bir özelliği kesinlikle UYDURMA (Halüsinasyon YASAK).
+3. Görselden ürün türünü (kazak, pantolon, elbise vb.) doğru tespit et.
+4. Tüm metin Türkçe olmalıdır.
+5. Kısa açıklama (short_summary) 2-3 cümle, ikna edici ve bilgilendirici olmalı.
 """
 
     CATEGORY_TEMPLATES = {
-        'giyim': "{marka} {cinsiyet} {kalip} {urun_tipi} {materyal} {renk}",
-        'ayakkabi': "{marka} {cinsiyet} {urun_tipi} {model} {renk}",
+        'giyim': "{marka} {cinsiyet} {kalip} {yaka_tipi} {urun_tipi} {materyal}",
+        'ayakkabi': "{marka} {cinsiyet} {urun_tipi} {model}",
         'elektronik': "{marka} {model} {urun_tipi} {ozellik}",
         'kozmetik': "{marka} {urun_tipi} {etki} {hacim}",
-        'ev_tekstili': "{marka} {boyut} {urun_tipi} {materyal} {renk}",
+        'ev_tekstili': "{marka} {boyut} {urun_tipi} {materyal}",
         'aksesuar': "{marka} {urun_tipi} {materyal} {detay}",
     }
 
@@ -54,7 +77,7 @@ GENEL KURALLAR:
             'raw_name': 'Ürün Adı',
             'brand': 'Marka',
             'category': 'Kategori',
-            'attributes': 'Nitelikler',
+            'attributes': 'Nitelikler (renk/beden HARİÇ)',
             'list_price': 'Fiyat (TL)',
             'default_code': 'Stok Kodu',
         }
@@ -72,9 +95,25 @@ GENEL KURALLAR:
         template = self._detect_category_template(category)
         if template:
             prompt_parts.append(f"\nBaşlık Formülü Önerisi: {template}")
+
+        # Kategori vurgusu — görselden ürün türünü doğru anlamak için
+        if category:
+            cat_parts = category.split(' / ')
+            if len(cat_parts) > 1:
+                prompt_parts.append(f"\n⚠️ Ürün kategori yolu: {' → '.join(cat_parts)}")
+                prompt_parts.append(f"Son kategori '{cat_parts[-1]}' — başlık ve açıklamada bu ürün türünü doğru kullan.")
             
         if image_included:
-            prompt_parts.append("\nEklenen ürün görselini analiz et. Görselden çıkarabileceğin detayları içeriğe yansıt. Görselde görünmeyen özellikleri UYDURMA.")
+            prompt_parts.append("\n📸 Eklenen ürün görselini DİKKATLE analiz et.")
+            prompt_parts.append("- Görselden ürün türünü (kazak, pantolon, elbise vb.), kumaş/materyal, yaka tipi, kol uzunluğu, detay/işleme gibi özellikleri çıkar.")
+            prompt_parts.append("- ⛔ Görselden renk çıkarsan bile başlık ve açıklamada KULLANMA — renk varyant bilgisidir.")
+            prompt_parts.append("- Görselde görünmeyen özellikleri UYDURMA.")
+
+        # Açıklama kalitesi vurgusu
+        prompt_parts.append("\n📝 AÇIKLAMA KALİTESİ:")
+        prompt_parts.append("- Açıklama en az 150 kelime, ideal 200-250 kelime olmalı.")
+        prompt_parts.append("- Profesyonel, ikna edici, SEO dostu bir e-ticaret açıklaması yaz.")
+        prompt_parts.append("- Ürün özelliklerini, kullanım alanlarını ve bakım önerilerini detaylı anlat.")
             
         return "\n".join(prompt_parts)
 
