@@ -57,9 +57,23 @@ class GeminiContentProvider:
         # Build contents based on whether image is provided
         parts = []
         if image_base64:
+            # Detect mime type from base64 header (PNG vs JPEG)
+            mime_type = "image/jpeg"
+            try:
+                import base64 as b64
+                raw = b64.b64decode(image_base64[:32])
+                if raw[:8] == b'\x89PNG\r\n\x1a\n':
+                    mime_type = "image/png"
+                elif raw[:2] == b'\xff\xd8':
+                    mime_type = "image/jpeg"
+                elif raw[:4] == b'RIFF':
+                    mime_type = "image/webp"
+            except Exception:
+                pass  # Default to jpeg
+
             parts.append({
                 "inline_data": {
-                    "mime_type": "image/jpeg",
+                    "mime_type": mime_type,
                     "data": image_base64
                 }
             })
@@ -76,10 +90,15 @@ class GeminiContentProvider:
             }
         }
 
-        if use_search_grounding:
+        # Note: google_search tool can conflict with responseSchema in some cases
+        # Only enable if no image is being sent (reduces complexity)
+        if use_search_grounding and not image_base64:
             payload["tools"] = [{"google_search": {}}]
 
         try:
+            _logger.info("Gemini API çağrısı: image=%s, grounding=%s, mime=%s",
+                        bool(image_base64), use_search_grounding and not image_base64,
+                        mime_type if image_base64 else 'N/A')
             response = requests.post(url, json=payload, timeout=60)
             response.raise_for_status()
             result = response.json()
@@ -87,6 +106,7 @@ class GeminiContentProvider:
             # Extract text from response
             candidates = result.get('candidates', [])
             if not candidates:
+                _logger.error("Gemini API boş yanıt: %s", json.dumps(result)[:500])
                 raise ValueError("Gemini API boş yanıt döndürdü.")
 
             text = candidates[0]['content']['parts'][0]['text']
@@ -98,13 +118,15 @@ class GeminiContentProvider:
             parsed['_prompt_tokens'] = usage.get('promptTokenCount', 0)
             parsed['_completion_tokens'] = usage.get('candidatesTokenCount', 0)
 
+            _logger.info("Gemini API başarılı: %d token kullanıldı", parsed.get('_token_count', 0))
             return parsed
 
         except requests.exceptions.Timeout:
             _logger.error("Gemini API timeout (60s)")
             raise ValueError("Gemini API zaman aşımına uğradı. Lütfen tekrar deneyin.")
         except requests.exceptions.HTTPError as e:
-            _logger.error("Gemini API HTTP error: %s - %s", e.response.status_code, e.response.text[:500])
+            error_body = e.response.text[:500] if e.response else 'No response'
+            _logger.error("Gemini API HTTP error: %s - %s", e.response.status_code, error_body)
             raise ValueError(f"Gemini API hatası: {e.response.status_code}")
         except json.JSONDecodeError:
             _logger.error("Gemini API yanıtı JSON olarak ayrıştırılamadı: %s", text[:500])
