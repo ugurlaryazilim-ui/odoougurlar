@@ -14,10 +14,10 @@
         'data/prompt_templates.xml',
         'data/cron.xml',
         'data/server_actions.xml',
-        'views/product_template_views.xml',
-        'views/ai_content_wizard_views.xml',
         'views/ai_content_log_views.xml',
         'views/ai_content_queue_views.xml',
+        'views/ai_content_wizard_views.xml',
+        'views/product_template_views.xml',
         'views/res_config_settings_views.xml',
     ],
     'assets': {
