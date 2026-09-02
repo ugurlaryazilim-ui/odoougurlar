@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="view_ai_content_queue_list" model="ir.ui.view">
+            <field name="name">ai.content.queue.list</field>
+            <field name="model">ai.content.queue</field>
+            <field name="arch" type="xml">
+                <list string="AI Üretim Kuyruğu" decoration-danger="state == 'error'" decoration-success="state == 'done'" decoration-info="state == 'pending'" decoration-warning="state == 'processing'">
+                    <field name="product_tmpl_id"/>
+                    <field name="mode"/>
+                    <field name="state"/>
+                    <field name="priority"/>
+                    <field name="attempts"/>
+                    <field name="create_date"/>
+                </list>
+            </field>
+        </record>
+
+        <record id="view_ai_content_queue_form" model="ir.ui.view">
+            <field name="name">ai.content.queue.form</field>
+            <field name="model">ai.content.queue</field>
+            <field name="arch" type="xml">
+                <form string="AI Kuyruk Kaydı">
+                    <sheet>
+                        <group>
+                            <group>
+                                <field name="product_tmpl_id"/>
+                                <field name="mode"/>
+                                <field name="state"/>
+                            </group>
+                            <group>
+                                <field name="priority"/>
+                                <field name="attempts"/>
+                                <field name="create_date"/>
+                            </group>
+                        </group>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <record id="action_ai_content_queue" model="ir.actions.act_window">
+            <field name="name">AI Üretim Kuyruğu</field>
+            <field name="res_model">ai.content.queue</field>
+            <field name="view_mode">list,form</field>
+        </record>
+
+        <menuitem id="menu_ai_content_queue" name="Kuyruk" parent="menu_ai_content_root" action="action_ai_content_queue"/>
+    </data>
+</odoo>

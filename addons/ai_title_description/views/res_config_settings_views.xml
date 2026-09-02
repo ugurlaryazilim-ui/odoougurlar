@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="res_config_settings_view_form_ai" model="ir.ui.view">
+            <field name="name">res.config.settings.view.form.inherit.ai</field>
+            <field name="model">res.config.settings</field>
+            <field name="inherit_id" ref="base_setup.res_config_settings_view_form"/>
+            <field name="arch" type="xml">
+                <xpath expr="//form" position="inside">
+                    <app data-string="AI Başlık &amp; Açıklama" string="AI Başlık &amp; Açıklama" name="ai_title_description">
+                        <block title="Gemini API" name="gemini_api">
+                            <setting id="gemini_api_key_setting" string="Gemini API Anahtarı" help="Google AI Studio üzerinden alınan Gemini API anahtarı">
+                                <field name="ai_td_gemini_api_key"/>
+                            </setting>
+                        </block>
+                        <block title="Varsayılan Ayarlar" name="ai_defaults">
+                            <setting string="Hedef Platform">
+                                <field name="ai_td_default_platform"/>
+                            </setting>
+                            <setting string="İçerik Tonu">
+                                <field name="ai_td_default_tone"/>
+                            </setting>
+                        </block>
+                        <block title="Görsel Analiz" name="ai_vision">
+                            <setting string="Görsel Analizi Kullan" help="Ürün görselinden yaka tipi, kumaş, desen gibi detayları çıkarır">
+                                <field name="ai_td_use_vision"/>
+                            </setting>
+                            <setting string="Görsel Boyutu" help="Düşük boyut = hızlı ve ucuz, yüksek boyut = detaylı analiz">
+                                <field name="ai_td_image_size"/>
+                            </setting>
+                        </block>
+                        <block title="SEO Anahtar Kelime Kaynakları" name="ai_seo">
+                            <setting string="Google Suggest (Ücretsiz)" help="Google arama önerilerinden anahtar kelime keşfi">
+                                <field name="ai_td_use_google_suggest"/>
+                            </setting>
+                            <setting string="Trendyol Autocomplete (Ücretsiz)" help="Trendyol arama önerilerinden anahtar kelime keşfi">
+                                <field name="ai_td_use_trendyol_suggest"/>
+                            </setting>
+                            <setting string="Gemini Search Grounding" help="Gemini'nin Google Search ile gerçek zamanlı SEO verisi çekmesi">
+                                <field name="ai_td_use_search_grounding"/>
+                            </setting>
+                        </block>
+                    </app>
+                </xpath>
+            </field>
+        </record>
+    </data>
+</odoo>

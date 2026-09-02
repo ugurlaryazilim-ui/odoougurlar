@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- Toplu AI Başlık Üretimi -->
+        <record id="action_ai_bulk_title" model="ir.actions.server">
+            <field name="name">🤖 AI Toplu Başlık Üret</field>
+            <field name="model_id" ref="product.model_product_template"/>
+            <field name="binding_model_id" ref="product.model_product_template"/>
+            <field name="binding_type">action</field>
+            <field name="binding_view_types">list</field>
+            <field name="state">code</field>
+            <field name="code">records.action_bulk_ai_generate_title()</field>
+        </record>
+
+        <!-- Toplu AI Açıklama Üretimi -->
+        <record id="action_ai_bulk_description" model="ir.actions.server">
+            <field name="name">🤖 AI Toplu Açıklama Üret</field>
+            <field name="model_id" ref="product.model_product_template"/>
+            <field name="binding_model_id" ref="product.model_product_template"/>
+            <field name="binding_type">action</field>
+            <field name="binding_view_types">list</field>
+            <field name="state">code</field>
+            <field name="code">records.action_bulk_ai_generate_description()</field>
+        </record>
+
+        <!-- Toplu AI Başlık + Açıklama Üretimi -->
+        <record id="action_ai_bulk_both" model="ir.actions.server">
+            <field name="name">🤖 AI Toplu Başlık &amp; Açıklama Üret</field>
+            <field name="model_id" ref="product.model_product_template"/>
+            <field name="binding_model_id" ref="product.model_product_template"/>
+            <field name="binding_type">action</field>
+            <field name="binding_view_types">list</field>
+            <field name="state">code</field>
+            <field name="code">records.action_bulk_ai_generate_both()</field>
+        </record>
+    </data>
+</odoo>

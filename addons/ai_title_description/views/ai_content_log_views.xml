@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="view_ai_content_log_list" model="ir.ui.view">
+            <field name="name">ai.content.log.list</field>
+            <field name="model">ai.content.log</field>
+            <field name="arch" type="xml">
+                <list string="AI İçerik Geçmişi" create="false" edit="false">
+                    <field name="product_tmpl_id"/>
+                    <field name="mode"/>
+                    <field name="generated_title"/>
+                    <field name="title_score" widget="progressbar"/>
+                    <field name="applied"/>
+                    <field name="cost_estimate"/>
+                    <field name="create_date"/>
+                </list>
+            </field>
+        </record>
+
+        <record id="view_ai_content_log_form" model="ir.ui.view">
+            <field name="name">ai.content.log.form</field>
+            <field name="model">ai.content.log</field>
+            <field name="arch" type="xml">
+                <form string="AI İçerik Günlüğü" create="false" edit="false">
+                    <sheet>
+                        <group>
+                            <group>
+                                <field name="product_tmpl_id"/>
+                                <field name="mode"/>
+                                <field name="applied"/>
+                                <field name="create_date"/>
+                            </group>
+                            <group>
+                                <field name="generated_title"/>
+                                <field name="title_score"/>
+                                <field name="cost_estimate"/>
+                            </group>
+                        </group>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <record id="action_ai_content_log" model="ir.actions.act_window">
+            <field name="name">AI İçerik Geçmişi</field>
+            <field name="res_model">ai.content.log</field>
+            <field name="view_mode">list,form</field>
+        </record>
+
+        <menuitem id="menu_ai_content_root" name="AI İçerik"/>
+        <menuitem id="menu_ai_content_log" name="İçerik Geçmişi" parent="menu_ai_content_root" action="action_ai_content_log"/>
+    </data>
+</odoo>

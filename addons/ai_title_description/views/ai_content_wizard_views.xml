@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="view_ai_content_wizard_form" model="ir.ui.view">
+            <field name="name">ai.content.wizard.form</field>
+            <field name="model">ai.content.wizard</field>
+            <field name="arch" type="xml">
+                <form string="AI İçerik Üretim Sihirbazı">
+                    <field name="state" invisible="1"/>
+                    <group invisible="state != 'draft'">
+                        <field name="product_tmpl_id" readonly="1"/>
+                        <field name="mode" widget="radio"/>
+                    </group>
+                    
+                    <group invisible="state != 'generated'">
+                        <group string="Başlıklar">
+                            <field name="preview_trendyol_title" invisible="mode == 'description'"/>
+                            <field name="preview_ecommerce_title" invisible="mode == 'description'"/>
+                        </group>
+                        <group string="Analiz" invisible="mode == 'description'">
+                            <field name="title_score" widget="progressbar"/>
+                            <field name="title_char_count"/>
+                            <field name="title_word_count"/>
+                            <field name="title_warnings" fg_color="text-warning"/>
+                        </group>
+                    </group>
+                    <group invisible="state != 'generated'">
+                        <group string="Açıklamalar" invisible="mode == 'title'">
+                            <field name="preview_short_description"/>
+                            <field name="preview_html_description"/>
+                        </group>
+                        <group string="SEO">
+                            <field name="preview_meta_title"/>
+                            <field name="preview_meta_description"/>
+                            <field name="preview_seo_keywords"/>
+                            <field name="discovered_keywords"/>
+                        </group>
+                    </group>
+                    
+                    <footer>
+                        <button name="action_generate" string="Üret" type="object" class="btn-primary" invisible="state != 'draft'"/>
+                        <button name="action_apply" string="Tümünü Uygula" type="object" class="btn-primary" invisible="state != 'generated'"/>
+                        <button name="action_apply_title_only" string="Sadece Başlığı Uygula" type="object" class="btn-secondary" invisible="state != 'generated' or mode == 'description'"/>
+                        <button name="action_apply_description_only" string="Sadece Açıklamayı Uygula" type="object" class="btn-secondary" invisible="state != 'generated' or mode == 'title'"/>
+                        <button name="action_regenerate" string="Yeniden Üret" type="object" class="btn-secondary" invisible="state != 'generated'"/>
+                        <button string="İptal" class="btn-secondary" special="cancel" data-hotkey="z"/>
+                    </footer>
+                </form>
+            </field>
+        </record>
+    </data>
+</odoo>

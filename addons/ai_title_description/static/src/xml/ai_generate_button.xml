@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="ai_title_description.AIGenerateButton" owl="1">
+        <div class="d-inline-block">
+            <button class="btn btn-outline-primary btn-sm"
+                    t-att-disabled="state.isGenerating"
+                    t-on-click="onClickGenerate">
+                <i t-if="state.isGenerating" class="fa fa-spinner fa-spin me-1"/>
+                <i t-else="" class="fa fa-magic me-1"/>
+                <span t-if="state.isGenerating">Üretiliyor...</span>
+                <span t-else="">AI ile Üret</span>
+            </button>
+        </div>
+    </t>
+</templates>

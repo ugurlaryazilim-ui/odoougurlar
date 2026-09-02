@@ -1,0 +1,32 @@
+.ai_title_score.good {
+    color: #28a745;
+}
+.ai_title_score.warning {
+    color: #ffc107;
+}
+.ai_title_score.bad {
+    color: #dc3545;
+}
+
+.ai_keyword_tag {
+    display: inline-block;
+    padding: 0.25em 0.4em;
+    font-size: 75%;
+    font-weight: 700;
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
+    vertical-align: baseline;
+    border-radius: 10rem;
+    background-color: #17a2b8;
+    color: white;
+    margin: 2px;
+}
+
+.ai_preview_section {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 0.25rem;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
