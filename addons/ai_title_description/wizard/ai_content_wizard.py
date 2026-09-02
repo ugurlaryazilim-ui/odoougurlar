@@ -183,7 +183,7 @@ class AIContentWizard(models.TransientModel):
         product.write(vals)
 
         # Üretim logunu kaydet
-        self.env['ai.content.log'].create({
+        self.env['ai.content.log'].sudo().create({
             'product_tmpl_id': product.id,
             'mode': self.mode,
             'generated_title': self.preview_trendyol_title,

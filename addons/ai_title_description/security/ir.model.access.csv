@@ -1,6 +1,6 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_ai_content_wizard_user,ai.content.wizard.user,model_ai_content_wizard,base.group_user,1,1,1,1
-access_ai_content_log_user,ai.content.log.user,model_ai_content_log,group_ai_content_user,1,0,0,0
+access_ai_content_log_user,ai.content.log.user,model_ai_content_log,base.group_user,1,1,1,0
 access_ai_content_log_manager,ai.content.log.manager,model_ai_content_log,group_ai_content_manager,1,1,1,1
-access_ai_content_queue_user,ai.content.queue.user,model_ai_content_queue,group_ai_content_user,1,0,0,0
+access_ai_content_queue_user,ai.content.queue.user,model_ai_content_queue,base.group_user,1,1,1,0
 access_ai_content_queue_manager,ai.content.queue.manager,model_ai_content_queue,group_ai_content_manager,1,1,1,1
