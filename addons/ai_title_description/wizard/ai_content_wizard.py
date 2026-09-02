@@ -47,6 +47,10 @@ class AIContentWizard(models.TransientModel):
     # Doğrulama
     title_score = fields.Integer('Başlık Skoru', readonly=True)
     title_char_count = fields.Integer('Karakter Sayısı', readonly=True)
+    title_word_count = fields.Integer('Kelime Sayısı', readonly=True)
+    title_warnings = fields.Text('Uyarılar', readonly=True)
+    discovered_keywords = fields.Text('Keşfedilen Anahtar Kelimeler', readonly=True)
+
     # Token ve Maliyet Takibi
     prompt_tokens = fields.Integer('Girdi Token', readonly=True)
     completion_tokens = fields.Integer('Çıktı Token', readonly=True)
