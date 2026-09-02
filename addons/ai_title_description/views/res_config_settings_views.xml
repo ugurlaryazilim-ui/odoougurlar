@@ -8,11 +8,30 @@
             <field name="arch" type="xml">
                 <xpath expr="//form" position="inside">
                     <app data-string="AI Başlık &amp; Açıklama" string="AI Başlık &amp; Açıklama" name="ai_title_description">
-                        <block title="Gemini API" name="gemini_api">
-                            <setting id="gemini_api_key_setting" string="Gemini API Anahtarı" help="Google AI Studio üzerinden alınan Gemini API anahtarı">
-                                <field name="ai_td_gemini_api_key"/>
+                        <block title="AI Sağlayıcı &amp; Model Seçimi" name="ai_provider_block">
+                            <setting string="Varsayılan AI Sağlayıcı" help="İçerik üretiminde kullanılacak varsayılan yapay zeka servisi">
+                                <field name="ai_td_provider"/>
                             </setting>
                         </block>
+
+                        <block title="Google Gemini API &amp; Model" name="gemini_api">
+                            <setting id="gemini_api_key_setting" string="Gemini API Anahtarı" help="Google AI Studio (aistudio.google.com) üzerinden alınan API anahtarı">
+                                <field name="ai_td_gemini_api_key"/>
+                            </setting>
+                            <setting string="Gemini Modeli" help="Kullanılacak Gemini yapay zeka modeli">
+                                <field name="ai_td_gemini_model"/>
+                            </setting>
+                        </block>
+
+                        <block title="OpenAI (ChatGPT) API &amp; Model" name="openai_api">
+                            <setting id="openai_api_key_setting" string="OpenAI API Anahtarı" help="OpenAI Platform (platform.openai.com) üzerinden alınan API anahtarı">
+                                <field name="ai_td_openai_api_key"/>
+                            </setting>
+                            <setting string="OpenAI Modeli" help="Kullanılacak GPT modeli (GPT-4o veya GPT-4o-mini)">
+                                <field name="ai_td_openai_model"/>
+                            </setting>
+                        </block>
+
                         <block title="Varsayılan Ayarlar" name="ai_defaults">
                             <setting string="Hedef Platform">
                                 <field name="ai_td_default_platform"/>
@@ -36,7 +55,7 @@
                             <setting string="Trendyol Autocomplete (Ücretsiz)" help="Trendyol arama önerilerinden anahtar kelime keşfi">
                                 <field name="ai_td_use_trendyol_suggest"/>
                             </setting>
-                            <setting string="Gemini Search Grounding" help="Gemini'nin Google Search ile gerçek zamanlı SEO verisi çekmesi">
+                            <setting string="Gemini Search Grounding" help="Gemini'nin Google Search ile gerçek zamanlı SEO verisi çekmesi (Sadece Gemini)">
                                 <field name="ai_td_use_search_grounding"/>
                             </setting>
                         </block>

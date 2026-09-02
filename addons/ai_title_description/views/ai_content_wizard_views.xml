@@ -8,8 +8,15 @@
                 <form string="AI İçerik Üretim Sihirbazı">
                     <field name="state" invisible="1"/>
                     <group invisible="state != 'draft'">
-                        <field name="product_tmpl_id" readonly="1"/>
-                        <field name="mode" widget="radio"/>
+                        <group string="Ürün ve Mod">
+                            <field name="product_tmpl_id" readonly="1"/>
+                            <field name="mode" widget="radio"/>
+                        </group>
+                        <group string="Yapay Zeka Servisi &amp; Model">
+                            <field name="provider"/>
+                            <field name="gemini_model" invisible="provider != 'gemini'"/>
+                            <field name="openai_model" invisible="provider != 'openai'"/>
+                        </group>
                     </group>
                     
                     <group invisible="state != 'generated'">

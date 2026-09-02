@@ -40,13 +40,14 @@ class GeminiContentProvider:
     MAX_RETRIES = 3
     RETRY_DELAYS = [5, 15, 30]  # Exponential backoff seconds
 
-    def __init__(self, api_key):
+    def __init__(self, api_key, model_name='gemini-2.5-flash'):
         self.api_key = api_key
+        self.model_name = model_name or 'gemini-2.5-flash'
         if not self.api_key:
-            raise ValueError("Gemini API key yapılandırılmamış.")
+            raise ValueError("Gemini API key yapılandırılmamış. Lütfen Ayarlar > AI Başlık & Açıklama bölümünden Gemini API anahtarını girin.")
 
     def generate(self, system_prompt, user_prompt, image_base64=None, use_search_grounding=True):
-        """Gemini 2.5 Flash API çağrısı — structured JSON çıktı ile.
+        """Gemini API çağrısı — structured JSON çıktı ile.
         
         Args:
             system_prompt: Sistem talimatı
@@ -57,7 +58,7 @@ class GeminiContentProvider:
         Returns:
             dict: Structured JSON çıktı (trendyol_title, ecommerce_title, etc.)
         """
-        url = f"{self.API_URL}?key={self.api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={self.api_key}"
 
         # Build contents based on whether image is provided
         parts = []

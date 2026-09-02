@@ -18,6 +18,23 @@ class AIContentWizard(models.TransientModel):
         ('both', 'Başlık + Açıklama')
     ], default='both', string='Üretim Modu')
 
+    # AI Sağlayıcı ve Model Seçimi
+    provider = fields.Selection([
+        ('gemini', 'Google Gemini'),
+        ('openai', 'OpenAI (ChatGPT)')
+    ], default='gemini', string='AI Sağlayıcı')
+
+    gemini_model = fields.Selection([
+        ('gemini-2.5-flash', 'Gemini 2.5 Flash (Hızlı & Ekonomik)'),
+        ('gemini-2.5-pro', 'Gemini 2.5 Pro (Gelişmiş & Derin Analiz)'),
+        ('gemini-2.0-flash', 'Gemini 2.0 Flash')
+    ], default='gemini-2.5-flash', string='Gemini Modeli')
+
+    openai_model = fields.Selection([
+        ('gpt-4o-mini', 'GPT-4o Mini (Hızlı & Ekonomik)'),
+        ('gpt-4o', 'GPT-4o (En Yüksek Kalite)')
+    ], default='gpt-4o-mini', string='OpenAI Modeli')
+
     # Önizleme Alanları
     preview_trendyol_title = fields.Char('Trendyol Başlık Önizleme', size=100)
     preview_ecommerce_title = fields.Char('E-Ticaret Başlık Önizleme')
@@ -40,13 +57,35 @@ class AIContentWizard(models.TransientModel):
         ('applied', 'Uygulandı')
     ], default='draft')
 
+    @api.model
+    def default_get(self, fields_list):
+        res = super().default_get(fields_list)
+        ICP = self.env['ir.config_parameter'].sudo()
+        if 'provider' in fields_list:
+            res['provider'] = ICP.get_param('ai_title_description.provider', 'gemini')
+        if 'gemini_model' in fields_list:
+            res['gemini_model'] = ICP.get_param('ai_title_description.gemini_model', 'gemini-2.5-flash')
+        if 'openai_model' in fields_list:
+            res['openai_model'] = ICP.get_param('ai_title_description.openai_model', 'gpt-4o-mini')
+        return res
+
     def action_generate(self):
-        """AI ile içerik üret: SEO kelimeleri keşfet → Prompt oluştur → Gemini'ye gönder → Validate → Önizle"""
+        """AI ile içerik üret: SEO kelimeleri keşfet → Prompt oluştur → AI Provider'a gönder → Validate → Önizle"""
         self.ensure_one()
         ICP = self.env['ir.config_parameter'].sudo()
-        api_key = ICP.get_param('ai_title_description.gemini_api_key')
-        if not api_key:
-            raise UserError(_("Lütfen Ayarlar > AI Başlık & Açıklama bölümünden Gemini API anahtarını girin."))
+        
+        provider_type = self.provider or ICP.get_param('ai_title_description.provider', 'gemini')
+        gemini_key = ICP.get_param('ai_title_description.gemini_api_key')
+        openai_key = ICP.get_param('ai_title_description.openai_api_key')
+
+        if provider_type == 'openai':
+            if not openai_key:
+                raise UserError(_("Lütfen Ayarlar > AI Başlık & Açıklama bölümünden OpenAI API anahtarını girin."))
+            model_name = self.openai_model or ICP.get_param('ai_title_description.openai_model', 'gpt-4o-mini')
+        else:
+            if not gemini_key:
+                raise UserError(_("Lütfen Ayarlar > AI Başlık & Açıklama bölümünden Gemini API anahtarını girin."))
+            model_name = self.gemini_model or ICP.get_param('ai_title_description.gemini_model', 'gemini-2.5-flash')
 
         # Ayarları oku
         use_vision = ICP.get_param('ai_title_description.use_vision', 'True') == 'True'
@@ -56,7 +95,7 @@ class AIContentWizard(models.TransientModel):
         use_grounding = ICP.get_param('ai_title_description.use_search_grounding', 'True') == 'True'
 
         # Servisleri import et
-        from ..services.gemini_provider import GeminiContentProvider
+        from ..services import get_ai_provider
         from ..services.prompt_engine import PromptEngine
         from ..services.keyword_discovery import KeywordDiscovery
         from ..services.title_validator import TitleValidator
@@ -96,19 +135,19 @@ class AIContentWizard(models.TransientModel):
             mode=self.mode,
         )
 
-        # 4. Gemini API Çağrısı
+        # 4. AI Provider Çağrısı
         try:
-            provider = GeminiContentProvider(api_key)
+            provider = get_ai_provider(provider_type, gemini_key, openai_key, model_name=model_name)
             result = provider.generate(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 image_base64=image_base64,
-                use_search_grounding=use_grounding,
+                use_search_grounding=use_grounding if provider_type == 'gemini' else False,
             )
         except ValueError as e:
             raise UserError(str(e))
         except Exception as e:
-            _logger.error("Gemini API çağrısı başarısız: %s", e)
+            _logger.error("AI API çağrısı başarısız (%s / %s): %s", provider_type, model_name, e)
             raise UserError(_("AI içerik üretimi başarısız oldu: %s") % str(e))
 
         # 5. Sonuçları önizleme alanlarına yaz
@@ -154,10 +193,16 @@ class AIContentWizard(models.TransientModel):
         }
 
     def action_regenerate(self):
-        """Yeniden üret (farklı varyasyon)"""
+        """Yeniden üret (farklı varyasyon veya farklı model ile)"""
         self.ensure_one()
         self.state = 'draft'
-        return self.action_generate()
+        return {
+            'type': 'ir.actions.act_window',
+            'res_model': self._name,
+            'res_id': self.id,
+            'view_mode': 'form',
+            'target': 'new',
+        }
 
     def _apply_data(self, title=True, description=True):
         """Onaylanan içeriği ürün kartına kaydet"""

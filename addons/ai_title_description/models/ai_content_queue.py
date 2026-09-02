@@ -40,17 +40,27 @@ class AIContentQueue(models.Model):
         if not records:
             return
 
-        from ..services.gemini_provider import GeminiContentProvider
+        from ..services import get_ai_provider
         from ..services.prompt_engine import PromptEngine
         from ..services.keyword_discovery import KeywordDiscovery
         from ..services.title_validator import TitleValidator
         from ..services.vision_analyzer import VisionAnalyzer
 
         ICP = self.env['ir.config_parameter'].sudo()
-        api_key = ICP.get_param('ai_title_description.gemini_api_key')
-        if not api_key:
-            _logger.error("AI İçerik Kuyruğu: Gemini API key yapılandırılmamış.")
-            return
+        provider_type = ICP.get_param('ai_title_description.provider', 'gemini')
+        gemini_key = ICP.get_param('ai_title_description.gemini_api_key')
+        openai_key = ICP.get_param('ai_title_description.openai_api_key')
+
+        if provider_type == 'openai':
+            if not openai_key:
+                _logger.error("AI İçerik Kuyruğu: OpenAI API key yapılandırılmamış.")
+                return
+            model_name = ICP.get_param('ai_title_description.openai_model', 'gpt-4o-mini')
+        else:
+            if not gemini_key:
+                _logger.error("AI İçerik Kuyruğu: Gemini API key yapılandırılmamış.")
+                return
+            model_name = ICP.get_param('ai_title_description.gemini_model', 'gemini-2.5-flash')
 
         use_vision = ICP.get_param('ai_title_description.use_vision', 'True') == 'True'
         image_size = ICP.get_param('ai_title_description.image_size', 'image_1024')
@@ -58,7 +68,7 @@ class AIContentQueue(models.Model):
         use_trendyol = ICP.get_param('ai_title_description.use_trendyol_suggest', 'True') == 'True'
         use_grounding = ICP.get_param('ai_title_description.use_search_grounding', 'True') == 'True'
 
-        provider = GeminiContentProvider(api_key)
+        provider = get_ai_provider(provider_type, gemini_key, openai_key, model_name=model_name)
         pe = PromptEngine()
         kd = KeywordDiscovery()
         tv = TitleValidator()
@@ -101,12 +111,12 @@ class AIContentQueue(models.Model):
                     mode=record.mode,
                 )
 
-                # 4. Gemini API Çağrısı
+                # 4. AI API Çağrısı
                 result = provider.generate(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     image_base64=image_base64,
-                    use_search_grounding=use_grounding,
+                    use_search_grounding=use_grounding if provider_type == 'gemini' else False,
                 )
 
                 # 5. Başlık Doğrulama
