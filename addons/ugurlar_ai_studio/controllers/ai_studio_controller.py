@@ -512,17 +512,25 @@ class AiStudioController(http.Controller):
                 return {'error': 'Sadece bekleyen veya işlenen revizyonlar iptal edilebilir.'}
 
             parent = gen.parent_generation_id
+            parent_id = parent.id if parent else False
             
-            # Yeni üretimi sil
-            gen.unlink()
-            
-            # Ebeveyni geri getir
-            if parent.exists():
+            # Önce ebeveyni geri getir (unlink'ten ÖNCE, ORM cache sorunları önlenir)
+            if parent and parent.exists():
                 parent.write({
                     'reject_reason_id': False,
                     'revision_prompt': False,
                     'revision_prompt_en': False,
+                    'state': 'done',  # Ebeveynin durumunu tamamlandı yap
                 })
+                _logger.info(
+                    'cancel_revision: parent gen %s geri yüklendi (reject_reason temizlendi), child gen %s silinecek',
+                    parent_id, gen.id
+                )
+            else:
+                _logger.warning('cancel_revision: parent bulunamadı (gen=%s, parent_id=%s)', gen.id, parent_id)
+            
+            # Yeni üretimi sil
+            gen.unlink()
                 
             return {'success': True}
         except Exception as e:
