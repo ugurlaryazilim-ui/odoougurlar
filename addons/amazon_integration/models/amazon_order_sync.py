@@ -153,13 +153,15 @@ class AmazonOrderSync(models.Model):
                         "Amazon orphan fix: %s picking oluşturulamadı: %s",
                         order.name, e)
 
-            # Draft sipariş ve ürünler atandıysa → onayla
-            if order.state == 'draft' and lines_updated > 0:
-                has_product = any(
-                    l.product_id and l.product_id.id != fallback_id
+            # Draft sipariş → onayla (picking oluşması için)
+            # Ürün ataması yapıldıysa (lines_updated > 0) veya
+            # mevcut satırlarında zaten product_id varsa (fallback ürün dahil)
+            if order.state == 'draft':
+                has_any_product = any(
+                    l.product_id
                     for l in order.order_line
                 )
-                if has_product:
+                if has_any_product:
                     try:
                         order.action_confirm()
                         _logger.info(
@@ -531,6 +533,15 @@ class AmazonOrderSync(models.Model):
             if is_missing_pii or partner_name in ('', 'Amazon Müşterisi') or \
                (total_order_amount > 0 and abs(existing_order.amount_total - total_order_amount) > 0.01):
                 force_update = True
+            # ─── KRİTİK: Draft sipariş + Pending olmayan durum = MUTLAKA onayla ───
+            # Sipariş ilk geldiğinde Pending → draft bırakıldı. Cron tekrar çalıştığında
+            # PII ve tutar zaten doğru olabilir ama sipariş hâlâ draft ise, picking
+            # oluşmamıştır → force_update ile devam et ki satır 672-678 onaylasın.
+            elif existing_order.state == 'draft' and status not in ('Pending', 'Canceled'):
+                force_update = True
+                _logger.info(
+                    "Amazon sipariş %s draft durumda ama statü '%s' — force_update ile onaylanacak.",
+                    amazon_order_id, status)
             else:
                 return processed, 0, 0, msgs
 
