@@ -2,10 +2,10 @@
     'name': 'Uğurlar Ürün Seçenekleri',
     'version': '19.0.1.0.0',
     'category': 'Inventory',
-    'summary': 'Ürün listesi için gelişmiş filtreleme araçları',
+    'summary': 'Ürün ve Ürün Varyantları listesi için gelişmiş filtreleme araçları',
     'description': """
-        Ürün Varyantları listesine barkod/iç referans bazlı
-        toplu filtreleme özelliği ekler.
+        Ürünler (product.template) ve Ürün Varyantları (product.product) listesine
+        barkod/iç referans bazlı toplu filtreleme ve temiz XLSX export özelliği ekler.
     """,
     'author': 'Uğurlar',
     'website': 'https://ugurlar.com',

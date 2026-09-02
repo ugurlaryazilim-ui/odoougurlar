@@ -23,6 +23,10 @@ class ProductExportController(http.Controller):
     @http.route('/ugurlar/product/export', type='http', auth='user', methods=['POST'], csrf=True)
     def export_products(self, **kwargs):
         data = json.loads(kwargs.get('data', '{}'))
+        res_model = data.get('res_model', 'product.product')
+        if res_model not in ('product.product', 'product.template'):
+            res_model = 'product.product'
+
         ids = data.get('ids', [])
         field_defs = data.get('fields', [])
 
@@ -35,7 +39,7 @@ class ProductExportController(http.Controller):
 
         # Ürünleri oku
         field_names = [f['name'] for f in field_defs]
-        products = request.env['product.product'].sudo().browse(ids).read(field_names)
+        products = request.env[res_model].sudo().browse(ids).read(field_names)
 
         # XLSX oluştur
         output = io.BytesIO()

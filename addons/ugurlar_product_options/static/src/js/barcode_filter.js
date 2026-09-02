@@ -268,14 +268,16 @@ export class ProductBarcodeListController extends ListController {
             }
         }
 
+        const resModel = this.props.resModel || "product.product";
         const hasFilter = domain.length > 0;
+        const defaultLabel = resModel === 'product.template' ? 'Ürünler' : 'Ürün Varyantları';
         const label = hasFilter
             ? `Filtre: ${Object.entries(this._bfFilterValues).map(([f, v]) => `${v.length} ${f === 'barcode' ? 'barkod' : 'referans'}`).join(' + ')}`
-            : 'Ürün Varyantları';
+            : defaultLabel;
 
         this.actionService.doAction({
             type: "ir.actions.act_window",
-            res_model: "product.product",
+            res_model: resModel,
             name: label,
             views: [[false, "list"], [false, "form"]],
             domain: domain,
@@ -376,8 +378,9 @@ export class ProductBarcodeListController extends ListController {
         );
 
         try {
+            const resModel = this.props.resModel || 'product.product';
             // 1. ORM ile eşleşen ID'leri bul
-            const ids = await this.orm.search('product.product', domain);
+            const ids = await this.orm.search(resModel, domain);
 
             if (ids.length === 0) {
                 this.notification.add('Eşleşen ürün bulunamadı', { type: 'warning' });
@@ -394,6 +397,7 @@ export class ProductBarcodeListController extends ListController {
 
             // 3. Kendi endpoint'imiz ile XLSX indir (wrap_text KAPALI)
             const exportPayload = JSON.stringify({
+                res_model: resModel,
                 ids: ids,
                 fields: exportFields,
             });
