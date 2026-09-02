@@ -136,7 +136,7 @@ class GeminiContentProvider:
                     raise ValueError("Gemini API boş yanıt döndürdü.")
 
                 text = candidates[0]['content']['parts'][0]['text']
-                parsed = json.loads(text)
+                parsed = self._parse_json_response(text)
 
                 # Extract token usage for cost tracking
                 usage = result.get('usageMetadata', {})
@@ -176,3 +176,50 @@ class GeminiContentProvider:
                 raise
 
         raise ValueError(last_error or "Gemini API bilinmeyen hata")
+
+    @staticmethod
+    def _parse_json_response(text):
+        """Gemini yanıtından JSON çıkar — markdown fence ve ekstra metin toleranslı.
+        
+        Gemini bazen şunları döndürebilir:
+        - Düz JSON: {"key": "value"}
+        - Markdown fence: ```json\n{"key": "value"}\n```
+        - Ekstra metin + JSON karışımı
+        """
+        if not text:
+            raise json.JSONDecodeError("Boş yanıt", text or "", 0)
+
+        # 1. Direkt parse dene
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        # 2. Markdown code fence temizle: ```json ... ``` veya ``` ... ```
+        import re
+        fence_pattern = re.compile(r'```(?:json)?\s*\n?(.*?)\n?\s*```', re.DOTALL)
+        match = fence_pattern.search(text)
+        if match:
+            try:
+                return json.loads(match.group(1).strip())
+            except json.JSONDecodeError:
+                pass
+
+        # 3. İlk { ile son } arasını al (en dıştaki JSON objesi)
+        first_brace = text.find('{')
+        last_brace = text.rfind('}')
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            json_str = text[first_brace:last_brace + 1]
+            try:
+                return json.loads(json_str)
+            except json.JSONDecodeError:
+                pass
+
+        # 4. Hiçbiri çalışmadı — log ve hata
+        _logger.error(
+            "Gemini yanıtı JSON olarak ayrıştırılamadı. Ham yanıt (ilk 1000 karakter): %s",
+            text[:1000]
+        )
+        raise json.JSONDecodeError(
+            "Gemini yanıtı geçerli JSON içermiyor", text[:200], 0
+        )
