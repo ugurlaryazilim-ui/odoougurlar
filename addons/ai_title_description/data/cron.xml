@@ -8,7 +8,6 @@
             <field name="code">model._cron_process_queue(batch_size=10)</field>
             <field name="interval_number">5</field>
             <field name="interval_type">minutes</field>
-            <field name="numbercall">-1</field>
             <field name="active" eval="True"/>
             <field name="priority">100</field>
         </record>
