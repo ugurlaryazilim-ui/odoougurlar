@@ -6,13 +6,16 @@
             <field name="model">ai.content.log</field>
             <field name="arch" type="xml">
                 <list string="AI İçerik Geçmişi" create="false" edit="false">
+                    <field name="create_date"/>
                     <field name="product_tmpl_id"/>
+                    <field name="provider"/>
+                    <field name="model_name"/>
                     <field name="mode"/>
                     <field name="generated_title"/>
                     <field name="title_score" widget="progressbar"/>
                     <field name="applied"/>
-                    <field name="cost_estimate"/>
-                    <field name="create_date"/>
+                    <field name="token_count"/>
+                    <field name="cost_estimate" widget="monetary" options="{'currency_field': 'usd_currency'}"/>
                 </list>
             </field>
         </record>
@@ -23,7 +26,7 @@
             <field name="arch" type="xml">
                 <form string="AI İçerik Günlüğü" create="false" edit="false">
                     <sheet>
-                        <group>
+                        <group string="Genel Bilgiler">
                             <group>
                                 <field name="product_tmpl_id"/>
                                 <field name="mode"/>
@@ -31,11 +34,37 @@
                                 <field name="create_date"/>
                             </group>
                             <group>
-                                <field name="generated_title"/>
+                                <field name="provider"/>
+                                <field name="model_name"/>
+                                <field name="used_vision"/>
                                 <field name="title_score"/>
+                            </group>
+                        </group>
+                        <group string="Token &amp; Maliyet">
+                            <group>
+                                <field name="prompt_tokens"/>
+                                <field name="completion_tokens"/>
+                            </group>
+                            <group>
+                                <field name="token_count"/>
                                 <field name="cost_estimate"/>
                             </group>
                         </group>
+                        <notebook>
+                            <page string="Üretilen Başlık &amp; Açıklama">
+                                <group>
+                                    <field name="generated_title"/>
+                                    <field name="seo_keywords_used"/>
+                                </group>
+                                <field name="generated_description"/>
+                            </page>
+                            <page string="Prompt &amp; Ham Yanıt">
+                                <group>
+                                    <field name="prompt_used"/>
+                                    <field name="raw_response"/>
+                                </group>
+                            </page>
+                        </notebook>
                     </sheet>
                 </form>
             </field>

@@ -5,6 +5,7 @@ from . import prompt_engine
 from . import title_validator
 from . import keyword_discovery
 from . import vision_analyzer
+from . import cost_calculator
 
 def get_ai_provider(provider, gemini_key, openai_key, model_name=None):
     """Provider tipine göre uygun AI servis örneğini döndürür."""

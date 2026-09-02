@@ -47,9 +47,15 @@ class AIContentWizard(models.TransientModel):
     # Doğrulama
     title_score = fields.Integer('Başlık Skoru', readonly=True)
     title_char_count = fields.Integer('Karakter Sayısı', readonly=True)
-    title_word_count = fields.Integer('Kelime Sayısı', readonly=True)
-    title_warnings = fields.Text('Uyarılar', readonly=True)
-    discovered_keywords = fields.Text('Keşfedilen Anahtar Kelimeler', readonly=True)
+    # Token ve Maliyet Takibi
+    prompt_tokens = fields.Integer('Girdi Token', readonly=True)
+    completion_tokens = fields.Integer('Çıktı Token', readonly=True)
+    token_count = fields.Integer('Toplam Token', readonly=True)
+    cost_estimate = fields.Float('Tahmini Maliyet ($)', digits=(10, 6), readonly=True)
+    used_provider = fields.Char('Kullanılan Provider', readonly=True)
+    used_model = fields.Char('Kullanılan Model', readonly=True)
+    prompt_used = fields.Text('Kullanılan Prompt', readonly=True)
+    raw_response = fields.Text('Ham AI Yanıtı', readonly=True)
 
     state = fields.Selection([
         ('draft', 'Hazır'),
@@ -169,7 +175,24 @@ class AIContentWizard(models.TransientModel):
         seo_kws = result.get('seo_keywords', [])
         self.preview_seo_keywords = ', '.join(seo_kws) if isinstance(seo_kws, list) else str(seo_kws)
 
-        # 6. Başlık Doğrulama
+        # 6. Token & Maliyet Hesapla
+        prompt_toks = result.get('_prompt_tokens', 0)
+        comp_toks = result.get('_completion_tokens', 0)
+        total_toks = result.get('_token_count', prompt_toks + comp_toks)
+
+        from ..services.cost_calculator import calculate_ai_cost
+        cost = calculate_ai_cost(provider_type, model_name, prompt_tokens=prompt_toks, completion_tokens=comp_toks)
+
+        self.prompt_tokens = prompt_toks
+        self.completion_tokens = comp_toks
+        self.token_count = total_toks
+        self.cost_estimate = cost
+        self.used_provider = provider_type
+        self.used_model = model_name
+        self.prompt_used = user_prompt[:5000]
+        self.raw_response = str(result)[:5000]
+
+        # 7. Başlık Doğrulama
         tv = TitleValidator()
         validation = tv.validate_and_fix(self.preview_trendyol_title or '')
         self.title_score = validation.get('score', 0)
@@ -267,12 +290,21 @@ class AIContentWizard(models.TransientModel):
         # Üretim logunu kaydet
         self.env['ai.content.log'].sudo().create({
             'product_tmpl_id': product.id,
+            'provider': self.used_provider or self.provider,
+            'model_name': self.used_model or self.gemini_model,
             'mode': self.mode,
             'generated_title': self.preview_trendyol_title,
             'generated_description': self.preview_html_description,
             'title_score': self.title_score,
             'applied': True,
+            'used_vision': bool(product.image_1920),
             'seo_keywords_used': self.preview_seo_keywords,
+            'prompt_tokens': self.prompt_tokens,
+            'completion_tokens': self.completion_tokens,
+            'token_count': self.token_count,
+            'cost_estimate': self.cost_estimate,
+            'prompt_used': self.prompt_used,
+            'raw_response': self.raw_response,
         })
 
         self.state = 'applied'

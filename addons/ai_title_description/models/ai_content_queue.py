@@ -188,8 +188,17 @@ class AIContentQueue(models.Model):
                 product.write(product_vals)
 
                 # 7. Log Kaydet
-                self.env['ai.content.log'].create({
+                prompt_toks = result.get('_prompt_tokens', 0)
+                comp_toks = result.get('_completion_tokens', 0)
+                total_toks = result.get('_token_count', prompt_toks + comp_toks)
+
+                from ..services.cost_calculator import calculate_ai_cost
+                cost = calculate_ai_cost(provider_type, model_name, prompt_tokens=prompt_toks, completion_tokens=comp_toks)
+
+                self.env['ai.content.log'].sudo().create({
                     'product_tmpl_id': product.id,
+                    'provider': provider_type,
+                    'model_name': model_name,
                     'mode': record.mode,
                     'generated_title': fixed_title,
                     'generated_description': result.get('html_description', ''),
@@ -197,8 +206,10 @@ class AIContentQueue(models.Model):
                     'title_score': validation.get('score', 0),
                     'used_vision': bool(image_base64),
                     'seo_keywords_used': ', '.join(seo_keywords) if seo_keywords else '',
-                    'token_count': result.get('_token_count', 0),
-                    'cost_estimate': result.get('_token_count', 0) * 0.00000015,  # ~$0.15/M tokens
+                    'prompt_tokens': prompt_toks,
+                    'completion_tokens': comp_toks,
+                    'token_count': total_toks,
+                    'cost_estimate': cost,
                     'prompt_used': user_prompt[:5000],
                     'raw_response': str(result)[:5000],
                 })

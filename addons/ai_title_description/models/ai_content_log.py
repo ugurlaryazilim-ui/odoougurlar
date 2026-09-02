@@ -6,7 +6,12 @@ class AIContentLog(models.Model):
     _description = 'AI İçerik Üretim Geçmişi'
     _order = 'create_date desc'
 
-    product_tmpl_id = fields.Many2one('product.template', required=True, ondelete='cascade', index=True)
+    product_tmpl_id = fields.Many2one('product.template', required=True, ondelete='cascade', index=True, string="Ürün")
+    provider = fields.Selection([
+        ('gemini', 'Google Gemini'),
+        ('openai', 'OpenAI')
+    ], string="AI Sağlayıcı")
+    model_name = fields.Char("Model Adı")
     mode = fields.Selection([
         ('title', 'Başlık'),
         ('description', 'Açıklama'),
@@ -18,7 +23,9 @@ class AIContentLog(models.Model):
     title_score = fields.Integer("Başlık Skoru")
     used_vision = fields.Boolean("Görsel Analiz")
     seo_keywords_used = fields.Char("Kullanılan SEO Kelimeleri")
-    token_count = fields.Integer("Token Sayısı")
-    cost_estimate = fields.Float("Tahmini Maliyet ($)", digits=(10, 6))
+    prompt_tokens = fields.Integer("Girdi Token (Prompt)")
+    completion_tokens = fields.Integer("Çıktı Token (Completion)")
+    token_count = fields.Integer("Toplam Token")
+    cost_estimate = fields.Float("Maliyet ($)", digits=(10, 6))
     prompt_used = fields.Text("Kullanılan Prompt")
     raw_response = fields.Text("Ham AI Yanıtı")
