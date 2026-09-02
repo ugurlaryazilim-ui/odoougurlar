@@ -131,10 +131,16 @@ class FashnProvider(AIProviderBase):
                 inputs['generation_mode'] = 'balanced'
         else:
             # tryon-v1.6
+            # FASHN v1.6 accepts: 'tops', 'bottoms', 'one-pieces'
+            # garment_analyzer returns 'full-body' for dresses/jumpsuits
+            fashn_category = {
+                'full-body': 'one-pieces',
+                'one_piece': 'one-pieces',
+            }.get(category, category)
             inputs = {
                 'model_image': model_image_url,
                 'garment_image': garment_image_url,
-                'category': category,
+                'category': fashn_category,
                 'mode': mode,
                 'garment_photo_type': kwargs.get('garment_photo_type', 'auto'),
                 'num_samples': num_samples,

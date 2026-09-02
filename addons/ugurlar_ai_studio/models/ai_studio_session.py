@@ -764,8 +764,12 @@ class AiStudioSession(models.Model):
                     img_array[:, :, 3][mask > 0] = 0
 
                     result_img = Image.fromarray(img_array)
+                    # RGBA'yi beyaz arkaplan üzerinde RGB JPEG'e dönüştür
+                    # (FASHN API yalnızca RGB JPEG kabul eder, PNG alpha ile garment algılayamaz)
+                    rgb_result = Image.new('RGB', result_img.size, (255, 255, 255))
+                    rgb_result.paste(result_img, mask=result_img.split()[3])
                     buffered = io.BytesIO()
-                    result_img.save(buffered, format='PNG')
+                    rgb_result.save(buffered, format='JPEG', quality=95)
                     _logger.info('Aski kancasi temizlendi (OpenCV inpainting)')
                     return base64.b64encode(buffered.getvalue())
                 else:
@@ -789,7 +793,10 @@ class AiStudioSession(models.Model):
                         break
 
                 buffered = io.BytesIO()
-                img.save(buffered, format='PNG')
+                # RGBA'yi beyaz arkaplan üzerinde RGB JPEG'e dönüştür
+                rgb_result = Image.new('RGB', img.size, (255, 255, 255))
+                rgb_result.paste(img, mask=img.split()[3])
+                rgb_result.save(buffered, format='JPEG', quality=95)
                 return base64.b64encode(buffered.getvalue())
 
         except Exception as e:
