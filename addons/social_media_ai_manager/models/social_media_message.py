@@ -166,7 +166,19 @@ class SocialMediaMessage(models.Model):
         ai_provider = self.env['social.media.ai.provider'].sudo()
         conversations = messages.mapped('conversation_id')
         
+        import time
+        consecutive_429s = 0
+        MAX_CONSECUTIVE_429S = 3  # 3 ard arda 429 alırsak dur
+        
         for conversation in conversations:
+            # Rate limit: 429 hataları arka arkaya geliyorsa dur
+            if consecutive_429s >= MAX_CONSECUTIVE_429S:
+                _logger.warning(
+                    'Gemini 429 rate limit: %d ard arda hata, kalan konuşmalar sonraki cron döngüsüne bırakılıyor',
+                    consecutive_429s
+                )
+                break
+            
             try:
                 account = conversation.account_id
                 conv_msgs = messages.filtered(lambda m: m.conversation_id.id == conversation.id)
@@ -290,7 +302,13 @@ class SocialMediaMessage(models.Model):
                     
                     if not reply_text or str(reply_text).startswith("[ERROR]"):
                         _logger.error(f"AI Provider error or empty reply for conversation {conversation.id}")
+                        # 429 rate limit kontrolü
+                        if '429' in str(reply_text) or not reply_text:
+                            consecutive_429s += 1
                         continue # Will retry next cron run
+                    
+                    # Başarılı yanıt — 429 sayacını sıfırla
+                    consecutive_429s = 0
                         
                     # Process Handoff (only for DMs, not comments)
                     if "[DEVRET]" in reply_text.upper():
@@ -332,6 +350,9 @@ class SocialMediaMessage(models.Model):
                     
                     # Commit progress
                     self.env.cr.commit()
+                    
+                    # Rate limiting: Gemini rate limit'e takılmamak için bekleme
+                    time.sleep(2)
                 
             except Exception as e:
                 _logger.error(f"Failed to process AI queue for conversation {conversation.id}: {e}")
