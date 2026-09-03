@@ -114,7 +114,7 @@ class AiStudioGeneration(models.Model):
     )
     effective_reject_reason_id = fields.Many2one(
         'ai.studio.reject.reason',
-        string='Red Sebebi',
+        string='Etkin Red Sebebi',
         compute='_compute_effective_reject_reason',
         store=True,
     )
@@ -140,7 +140,10 @@ class AiStudioGeneration(models.Model):
     @api.depends('reject_reason_id', 'parent_generation_id.reject_reason_id')
     def _compute_effective_reject_reason(self):
         for rec in self:
-            rec.effective_reject_reason_id = rec.reject_reason_id or (rec.parent_generation_id and rec.parent_generation_id.reject_reason_id)
+            reason = rec.reject_reason_id
+            if not reason and rec.parent_generation_id:
+                reason = rec.parent_generation_id.reject_reason_id
+            rec.effective_reject_reason_id = reason or False
 
     # --- fal.ai Bilgileri ---
     fal_request_id = fields.Char(string='fal.ai İstek ID')
