@@ -73,7 +73,7 @@ class ImageSyncFile(models.Model):
         help='Görselin yayıldığı varyant sayısı',
     )
 
-    unique_filename = models.Constraint(
+    _unique_filename = models.Constraint(
         'unique(filename)',
         'Bu dosya adı zaten kayıtlı!',
     )

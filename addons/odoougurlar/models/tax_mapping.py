@@ -12,7 +12,7 @@ class TaxMapping(models.Model):
     nebim_tax_office_code = fields.Char(string='Nebim Vergi Dairesi Kodu', required=True, help='Örn: 016251')
     nebim_tax_office_name = fields.Char(string='Nebim Vergi Dairesi Adı', help='Örn: OSMANGAZİ VERGİ DAİRESİ')
     
-    name_unique = models.Constraint(
+    _name_unique = models.Constraint(
         'unique(name)',
         'Bu vergi dairesi için zaten bir eşleştirme var!',
     )

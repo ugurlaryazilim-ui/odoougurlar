@@ -29,7 +29,7 @@ class UgurlarTtsMessage(models.Model):
     active = fields.Boolean('Aktif', default=True)
     sequence = fields.Integer('Sıra', default=10)
 
-    key_unique = models.Constraint(
+    _key_unique = models.Constraint(
         'UNIQUE(key)',
         'Her seslendirme anahtarı benzersiz olmalıdır!',
     )
