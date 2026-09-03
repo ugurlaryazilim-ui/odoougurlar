@@ -504,6 +504,19 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         if photo_type in ['front', 'side', 'back']:
             base_prompt += "Accessories: small handbag held at side, small earrings. "
 
+        # ═══ ALT KOMBİN — ÇIPLAKLIKLARI ÖNLE ═══
+        # Üst giyim / dış giyim kategorilerinde uygun alt kombin zorunlu
+        if category in ['tops', 'outerwear', 'knitwear']:
+            recommended_bottoms = analysis.get('recommendedBottoms', 'dark blue skinny jeans')
+            if not recommended_bottoms:
+                recommended_bottoms = 'dark blue skinny jeans'
+            base_prompt += (
+                f"MANDATORY BOTTOM PAIRING: The model MUST wear {recommended_bottoms} on the lower body. "
+                "Full-length bottoms covering the entire leg are REQUIRED. "
+                "Absolutely NO bare legs, NO bare thighs, NO exposed skin, NO underwear, "
+                "NO shorts, NO mini skirts. The legs must be COMPLETELY COVERED. "
+            )
+
         # ═══ GÜVENLİK ETİKETİ / ALARM TAGI İGNORE ═══
         base_prompt += (
             "Ignore any security tags, alarm tags, price tags, hangers, or store fixtures "
@@ -574,6 +587,10 @@ _VIEW_PROMPT_TEMPLATES = {
         "{fit}, {pattern} pattern. Clean white studio background, even lighting. "
         "Confident fashion pose, one hand on hip, slight S-curve silhouette. "
         "Sharp focus on garment details and fabric texture. "
+        "The model MUST be fully clothed with appropriate matching bottoms "
+        "(long pants, jeans, trousers, or full-length leggings). "
+        "Absolutely NO bare legs, NO bare thighs, NO exposed skin below the waist. "
+        "NO shorts, NO mini skirts, NO underwear visible. "
     ),
     'back': (
         "Professional e-commerce back view photography. "
@@ -581,6 +598,10 @@ _VIEW_PROMPT_TEMPLATES = {
         "{fit}, {pattern} pattern. Clean white studio background, even lighting. "
         "Elegant back pose, slight contrapposto, head turned to show jawline profile. "
         "Sharp focus on back details, seams, and garment shape. "
+        "The model MUST be fully clothed with appropriate matching bottoms "
+        "(long pants, jeans, trousers, or full-length leggings). "
+        "Absolutely NO bare legs, NO bare thighs, NO exposed skin below the waist. "
+        "NO shorts, NO mini skirts, NO underwear visible. "
     ),
     'side': (
         "Professional e-commerce side view photography. "
@@ -588,6 +609,10 @@ _VIEW_PROMPT_TEMPLATES = {
         "{fit}, {pattern} pattern. Clean white studio background, even lighting. "
         "Three-quarter fashion pose, contrapposto stance, dynamic silhouette. "
         "Sharp focus on garment side profile and fit. "
+        "The model MUST be fully clothed with appropriate matching bottoms "
+        "(long pants, jeans, trousers, or full-length leggings). "
+        "Absolutely NO bare legs, NO bare thighs, NO exposed skin below the waist. "
+        "NO shorts, NO mini skirts, NO underwear visible. "
     ),
     'detail': (
         "Professional close-up detail shot of {color} {fabric} {garment_type} worn on a model. "
@@ -598,9 +623,22 @@ _VIEW_PROMPT_TEMPLATES = {
 }
 
 _VIEW_NEGATIVE_PROMPTS = {
-    'front': '',
-    'back': '',
-    'side': '',
+    'front': (
+        "nudity, naked, bare skin, bare legs, bare thighs, exposed legs, underwear, "
+        "lingerie, swimwear, bikini, mini skirt, short shorts, hot pants, "
+        "no pants, panties, see-through clothing revealing skin, inappropriate, NSFW"
+    ),
+    'back': (
+        "nudity, naked, bare skin, bare legs, bare thighs, bare back, exposed legs, "
+        "underwear, lingerie, swimwear, bikini, mini skirt, short shorts, hot pants, "
+        "no pants, panties, see-through clothing revealing skin, inappropriate, NSFW, "
+        "crop top only, sports bra only"
+    ),
+    'side': (
+        "nudity, naked, bare skin, bare legs, bare thighs, exposed legs, underwear, "
+        "lingerie, swimwear, bikini, mini skirt, short shorts, hot pants, "
+        "no pants, panties, see-through clothing revealing skin, inappropriate, NSFW"
+    ),
     'detail': '',
 }
 
