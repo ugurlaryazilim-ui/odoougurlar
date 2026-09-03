@@ -106,11 +106,22 @@
                   decoration-success="state == 'done' and is_approved"
                   decoration-muted="state == 'done' and not is_approved">
                 <header>
+                    <button name="action_batch_retry"
+                            string="🔄 Seçilenleri Tekrar Dene"
+                            type="object"
+                            class="btn-warning"
+                            help="Seçilen veya listedeki başarısız revizyonları sırayla yeniden üretir."/>
+                    <button name="action_batch_cancel"
+                            string="🛑 Seçilenleri İptal Et"
+                            type="object"
+                            class="btn-danger"
+                            confirm="Seçilen revizyonları iptal edip önceki görsellerine geri döndürmek istediğinize emin misiniz?"
+                            help="Seçilen revizyonları siler ve önceki görselleri geri yükler."/>
                     <button name="action_recover_stuck_revisions_server"
                             string="🧹 Takılmış Revizeleri Düzelt"
                             type="object"
                             class="btn-secondary"
-                            help="10 dakikadan uzun süredir yanıt vermeyen revizeleri tespit edip günceller."/>
+                            help="5 dakikadan uzun süredir yanıt vermeyen revizeleri tespit edip günceller."/>
                 </header>
                 <field name="session_id"/>
                 <field name="product_name" string="Ürün"/>
@@ -173,6 +184,30 @@
                 <filter string="Red Sebebi" name="group_by_reject_reason" context="{'group_by': 'effective_reject_reason_id'}"/>
                 <filter string="Tarih" name="group_by_create_date" context="{'group_by': 'create_date:day'}"/>
             </search>
+        </field>
+    </record>
+
+    <!-- Aksiyonlar Menüsü: Toplu Tekrar Dene -->
+    <record id="action_server_batch_retry_revisions" model="ir.actions.server">
+        <field name="name">🔄 Toplu Tekrar Dene</field>
+        <field name="model_id" ref="model_ai_studio_generation"/>
+        <field name="binding_model_id" ref="model_ai_studio_generation"/>
+        <field name="binding_view_types">list</field>
+        <field name="state">code</field>
+        <field name="code">
+action = records.action_batch_retry()
+        </field>
+    </record>
+
+    <!-- Aksiyonlar Menüsü: Toplu Revizyon İptal Et -->
+    <record id="action_server_batch_cancel_revisions" model="ir.actions.server">
+        <field name="name">🛑 Toplu Revizyonu İptal Et</field>
+        <field name="model_id" ref="model_ai_studio_generation"/>
+        <field name="binding_model_id" ref="model_ai_studio_generation"/>
+        <field name="binding_view_types">list</field>
+        <field name="state">code</field>
+        <field name="code">
+action = records.action_batch_cancel()
         </field>
     </record>
 

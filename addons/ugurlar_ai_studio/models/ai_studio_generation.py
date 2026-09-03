@@ -585,6 +585,118 @@ class AiStudioGeneration(models.Model):
             }
         }
 
+    def action_batch_retry(self, *args, **kwargs):
+        """Seçilen veya başarısız olan revizyonları toplu olarak sırayla tekrar dene."""
+        import threading
+        failed_records = self.filtered(lambda g: g.state == 'failed')
+        if not failed_records:
+            failed_records = self.search([
+                ('state', '=', 'failed'),
+                '|', ('revision_number', '>', 1), ('parent_generation_id', '!=', False),
+            ])
+
+        if not failed_records:
+            raise UserError(_('Tekrar denenecek başarısız revizyon bulunamadı.'))
+
+        failed_records.write({
+            'state': 'pending',
+            'error_message': False,
+        })
+
+        provider_type = self.env['ir.config_parameter'].sudo().get_param(
+            'ugurlar_ai_studio.default_provider', 'fashn'
+        )
+        api_key = self.env['ir.config_parameter'].sudo().get_param(
+            'ugurlar_ai_studio.fashn_api_key' if provider_type == 'fashn' else 'ugurlar_ai_studio.fal_api_key'
+        )
+        if not api_key:
+            raise UserError(_('AI API anahtarı ayarlanmamış.'))
+
+        gen_ids = failed_records.ids
+        uid = self.env.uid or 1
+
+        thread = threading.Thread(
+            target=self._batch_retry_worker_thread,
+            args=(gen_ids, api_key, uid),
+        )
+        thread.daemon = True
+        thread.start()
+
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Toplu Tekrar Deneme Başlatıldı'),
+                'message': _('%d adet revizyon sırayla işlenmek üzere arka plana alındı. Durumları sayfayı yenileyerek takip edebilirsiniz.') % len(failed_records),
+                'type': 'success',
+                'sticky': False,
+                'next': {'type': 'ir.actions.client', 'tag': 'reload'},
+            }
+        }
+
+    @api.model
+    def _batch_retry_worker_thread(self, gen_ids, api_key, uid):
+        """Toplu revizyonları sırayla işleyen arka plan thread'i."""
+        import time
+        _logger.info("Toplu revizyon tekrar deneme thread'i baslatildi: %d adet", len(gen_ids))
+        for gen_id in gen_ids:
+            try:
+                with self.pool.cursor() as cr:
+                    env = api.Environment(cr, uid, {})
+                    gen = env['ai.studio.generation'].browse(gen_id)
+                    if not gen.exists() or gen.state != 'pending':
+                        continue
+                    session = gen.session_id
+                    session_id = session.id
+
+                # Session retry thread body'sini çağır
+                session._retry_generation_thread_body(session_id, gen_id, api_key, uid)
+                time.sleep(1.0)
+            except Exception as e:
+                _logger.error("Toplu tekrar deneme hatası (gen=%s): %s", gen_id, e)
+                try:
+                    with self.pool.cursor() as cr:
+                        env = api.Environment(cr, uid, {})
+                        gen = env['ai.studio.generation'].browse(gen_id)
+                        if gen.exists() and gen.state == 'pending':
+                            gen.write({
+                                'state': 'failed',
+                                'error_message': _('Toplu işlem hatası: %s') % str(e),
+                            })
+                            cr.commit()
+                except Exception:
+                    pass
+        _logger.info("Toplu revizyon tekrar deneme thread'i tamamlandi.")
+
+    def action_batch_cancel(self, *args, **kwargs):
+        """Seçilen revizyonları iptal edip önceki hallerine döndür."""
+        revisions = self.filtered(lambda g: g.parent_generation_id)
+        if not revisions:
+            raise UserError(_('İptal edilecek geçerli bir revizyon kaydı seçilmedi.'))
+        count = 0
+        for gen in revisions:
+            parent = gen.parent_generation_id
+            if parent and parent.exists():
+                parent.write({
+                    'reject_reason_id': False,
+                    'revision_prompt': False,
+                    'revision_prompt_en': False,
+                    'state': 'done',
+                })
+            gen.unlink()
+            count += 1
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Revizyonlar İptal Edildi'),
+                'message': _('%d adet revizyon iptal edildi ve önceki görseller geri yüklendi.') % count,
+                'type': 'success',
+                'sticky': False,
+                'next': {'type': 'ir.actions.client', 'tag': 'reload'},
+            }
+        }
+
     @api.model
     def _cron_garbage_collect(self):
         """Reddedilen ve eski versiyonların görsellerini temizle (disk tasarrufu).
