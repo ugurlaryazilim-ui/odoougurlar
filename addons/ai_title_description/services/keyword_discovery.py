@@ -83,11 +83,11 @@ class KeywordDiscovery:
             "Referer": "https://www.trendyol.com/"
         }
         try:
-            response = requests.get(url, params=params, headers=headers, timeout=5)
+            response = requests.get(url, params=params, headers=headers, timeout=(2, 3))
             response.raise_for_status()
             data = response.json()
             suggestions = data.get("result", {}).get("suggestions", [])
             return [s.get("text") for s in suggestions if s.get("text")]
         except Exception as e:
-            _logger.warning("Trendyol Autocomplete error for query '%s': %s", query, str(e))
-        return []
+            _logger.debug("Trendyol Autocomplete error for query '%s': %s", query, str(e))
+            return []
