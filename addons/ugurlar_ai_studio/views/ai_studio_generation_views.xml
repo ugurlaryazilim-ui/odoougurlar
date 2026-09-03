@@ -148,7 +148,7 @@
         <field name="name">ai.studio.generation.search</field>
         <field name="model">ai.studio.generation</field>
         <field name="arch" type="xml">
-            <search string="Üretim ve Revizeler">
+            <search>
                 <field name="session_id"/>
                 <field name="product_id"/>
                 <field name="product_barcode"/>
@@ -165,14 +165,13 @@
                         domain="[('is_approved', '=', True)]"/>
                 <separator/>
                 <filter string="Sadece Revizyonlar (v2+)" name="revisions_only"
-                        domain="['|', ('revision_number', '>', 1), ('parent_generation_id', '!=', False)]"/>
-                <group expand="0" string="Grupla">
-                    <filter string="Oturum" name="group_by_session" context="{'group_by': 'session_id'}"/>
-                    <filter string="Durum" name="group_by_state" context="{'group_by': 'state'}"/>
-                    <filter string="Fotoğraf Tipi" name="group_by_photo_type" context="{'group_by': 'photo_type'}"/>
-                    <filter string="Red Sebebi" name="group_by_reject_reason" context="{'group_by': 'effective_reject_reason_id'}"/>
-                    <filter string="Tarih" name="group_by_create_date" context="{'group_by': 'create_date:day'}"/>
-                </group>
+                        domain="['|', ('revision_number', '&gt;', 1), ('parent_generation_id', '!=', False)]"/>
+                <separator/>
+                <filter string="Oturum" name="group_by_session" context="{'group_by': 'session_id'}"/>
+                <filter string="Durum" name="group_by_state" context="{'group_by': 'state'}"/>
+                <filter string="Fotoğraf Tipi" name="group_by_photo_type" context="{'group_by': 'photo_type'}"/>
+                <filter string="Red Sebebi" name="group_by_reject_reason" context="{'group_by': 'effective_reject_reason_id'}"/>
+                <filter string="Tarih" name="group_by_create_date" context="{'group_by': 'create_date:day'}"/>
             </search>
         </field>
     </record>
