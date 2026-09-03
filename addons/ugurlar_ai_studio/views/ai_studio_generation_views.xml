@@ -95,5 +95,87 @@
         </field>
     </record>
 
+    <!-- Revizeler Özel Liste Görünümü -->
+    <record id="view_ai_studio_revision_list" model="ir.ui.view">
+        <field name="name">ai.studio.revision.list</field>
+        <field name="model">ai.studio.generation</field>
+        <field name="arch" type="xml">
+            <list string="Revizeler"
+                  decoration-warning="state in ('pending', 'processing')"
+                  decoration-danger="state == 'failed'"
+                  decoration-success="state == 'done' and is_approved"
+                  decoration-muted="state == 'done' and not is_approved">
+                <header>
+                    <button name="action_recover_stuck_revisions_server"
+                            string="🧹 Takılmış Revizeleri Düzelt"
+                            type="object"
+                            class="btn-secondary"
+                            help="10 dakikadan uzun süredir yanıt vermeyen revizeleri tespit edip günceller."/>
+                </header>
+                <field name="session_id"/>
+                <field name="product_name" string="Ürün"/>
+                <field name="product_barcode" string="Barkod" optional="show"/>
+                <field name="photo_type"/>
+                <field name="revision_number" string="Versiyon" widget="badge"/>
+                <field name="state" widget="badge"
+                       decoration-warning="state in ('pending', 'processing')"
+                       decoration-danger="state == 'failed'"
+                       decoration-success="state == 'done'"/>
+                <field name="is_approved" widget="boolean_toggle" string="Onaylı" readonly="1"/>
+                <field name="effective_reject_reason_id" string="Red Sebebi" optional="show"/>
+                <field name="revision_prompt" string="Revizyon Talimatı" optional="show"/>
+                <field name="error_message" string="Hata Mesajı" optional="show"/>
+                <field name="create_date" string="Oluşturulma Tarihi"/>
+                <field name="write_date" string="Son Güncelleme" optional="hide"/>
+                <button name="action_retry" string="Tekrar Dene" type="object"
+                        icon="fa-refresh"
+                        invisible="state != 'failed'"
+                        class="btn-warning btn-sm"/>
+                <button name="action_cancel_revision_record" string="İptal Et" type="object"
+                        icon="fa-times"
+                        invisible="state not in ('pending', 'processing', 'failed')"
+                        confirm="Bu revizyonu iptal edip önceki görsele dönmek istediğinize emin misiniz?"
+                        class="btn-secondary btn-sm"/>
+                <button name="action_open_session_review" string="İncele" type="object"
+                        icon="fa-external-link"
+                        class="btn-primary btn-sm"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Generation ve Revizeler Arama & Filtre Görünümü -->
+    <record id="view_ai_studio_generation_search" model="ir.ui.view">
+        <field name="name">ai.studio.generation.search</field>
+        <field name="model">ai.studio.generation</field>
+        <field name="arch" type="xml">
+            <search string="Üretim ve Revizeler">
+                <field name="session_id"/>
+                <field name="product_id"/>
+                <field name="product_barcode"/>
+                <field name="photo_type"/>
+                <field name="revision_prompt"/>
+                <separator/>
+                <filter string="⏳ İşlemde / Bekleyen Revizeler" name="pending_or_processing"
+                        domain="[('state', 'in', ['pending', 'processing'])]"/>
+                <filter string="❌ Başarısız Revizeler" name="failed"
+                        domain="[('state', '=', 'failed')]"/>
+                <filter string="✅ Tamamlananlar" name="done"
+                        domain="[('state', '=', 'done')]"/>
+                <filter string="🌟 Onaylananlar" name="approved"
+                        domain="[('is_approved', '=', True)]"/>
+                <separator/>
+                <filter string="Sadece Revizyonlar (v2+)" name="revisions_only"
+                        domain="['|', ('revision_number', '>', 1), ('parent_generation_id', '!=', False)]"/>
+                <group expand="0" string="Grupla">
+                    <filter string="Oturum" name="group_by_session" context="{'group_by': 'session_id'}"/>
+                    <filter string="Durum" name="group_by_state" context="{'group_by': 'state'}"/>
+                    <filter string="Fotoğraf Tipi" name="group_by_photo_type" context="{'group_by': 'photo_type'}"/>
+                    <filter string="Red Sebebi" name="group_by_reject_reason" context="{'group_by': 'effective_reject_reason_id'}"/>
+                    <filter string="Tarih" name="group_by_create_date" context="{'group_by': 'create_date:day'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
 </odoo>
 

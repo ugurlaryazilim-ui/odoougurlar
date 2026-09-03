@@ -112,6 +112,35 @@ class AiStudioGeneration(models.Model):
         'parent_generation_id',
         string='Sonraki Versiyonlar',
     )
+    effective_reject_reason_id = fields.Many2one(
+        'ai.studio.reject.reason',
+        string='Red Sebebi',
+        compute='_compute_effective_reject_reason',
+        store=True,
+    )
+
+    # --- Ürün İlişkili Alanlar ---
+    product_id = fields.Many2one(
+        'product.product',
+        string='Ürün Varyantı',
+        related='session_id.product_id',
+        store=True,
+    )
+    product_barcode = fields.Char(
+        string='Barkod',
+        related='session_id.product_barcode',
+        store=True,
+    )
+    product_name = fields.Char(
+        string='Ürün Adı',
+        related='session_id.product_id.display_name',
+        store=False,
+    )
+
+    @api.depends('reject_reason_id', 'parent_generation_id.reject_reason_id')
+    def _compute_effective_reject_reason(self):
+        for rec in self:
+            rec.effective_reject_reason_id = rec.reject_reason_id or (rec.parent_generation_id and rec.parent_generation_id.reject_reason_id)
 
     # --- fal.ai Bilgileri ---
     fal_request_id = fields.Char(string='fal.ai İstek ID')
@@ -476,6 +505,59 @@ class AiStudioGeneration(models.Model):
             'error_message': False,
         })
         self.session_id._process_single_generation(self)
+
+    def action_open_session_review(self):
+        """Oturumun form görünümünü açar."""
+        self.ensure_one()
+        return {
+            'name': _('Oturum: %s') % self.session_id.name,
+            'type': 'ir.actions.act_window',
+            'res_model': 'ai.studio.session',
+            'res_id': self.session_id.id,
+            'view_mode': 'form',
+            'target': 'current',
+        }
+
+    def action_cancel_revision_record(self):
+        """Listeden veya formdan revizyonu iptal edip önceki haline döndür."""
+        self.ensure_one()
+        parent = self.parent_generation_id
+        if not parent:
+            raise UserError(_('Bu kaydın bağlı olduğu bir önceki versiyon bulunamadı.'))
+        parent.write({
+            'reject_reason_id': False,
+            'revision_prompt': False,
+            'revision_prompt_en': False,
+            'state': 'done',
+        })
+        self.unlink()
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Revizyon İptal Edildi'),
+                'message': _('Revizyon iptal edildi ve önceki görsel geri yüklendi.'),
+                'type': 'success',
+                'sticky': False,
+                'next': {'type': 'ir.actions.client', 'tag': 'reload'},
+            }
+        }
+
+    @api.model
+    def action_recover_stuck_revisions_server(self):
+        """10 dakikadan uzun süredir takılmış revizeleri başarısız durumuna çekerek kurtar."""
+        self.env['ai.studio.session']._cron_check_stuck_generations()
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Revizeler Kontrol Edildi'),
+                'message': _('Takılmış veya yanıt vermeyen revizyonlar temizlendi ve güncellendi.'),
+                'type': 'success',
+                'sticky': False,
+                'next': {'type': 'ir.actions.client', 'tag': 'reload'},
+            }
+        }
 
     @api.model
     def _cron_garbage_collect(self):

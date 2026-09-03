@@ -160,7 +160,9 @@ Return ONLY valid JSON, no markdown."""
                         if text.endswith('```'):
                             text = text[:-3]
                         text = text.strip()
-                        return json.loads(text)
+                        parsed = json.loads(text)
+                        if isinstance(parsed, dict):
+                            return parsed
             except Exception as e:
                 _logger.exception('Direct Gemini API hatası, fal.ai fallback denenecek: %s', e)
         else:
@@ -214,7 +216,9 @@ def _analyze_via_fal(api_key, image_url, prompt):
             json_match = output[start:end]
 
         if json_match:
-            return json.loads(json_match)
+            parsed = json.loads(json_match)
+            if isinstance(parsed, dict):
+                return parsed
 
     except Exception as e:
         _logger.exception('fal.ai kiyafet analizi hatasi: %s', e)
@@ -411,6 +415,12 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         dict: {'positive': str, 'negative': str}
     """
     view_base = _VIEW_PROMPT_TEMPLATES.get(photo_type, _VIEW_PROMPT_TEMPLATES['front'])
+    if not isinstance(analysis, dict):
+        analysis = _default_analysis()
+    if not isinstance(preset, dict):
+        preset = {}
+    if not isinstance(outfit_consistency, dict):
+        outfit_consistency = {}
 
     if provider_type == 'fashn':
         # Sablonu generic kelimelerle formatla (kiyafet detaylari prompta gitmesin)

@@ -229,9 +229,16 @@ async function openReviewPopup(sessionId) {
                             <h3 style="color:#ef4444">Üretim Başarısız Oldu</h3>
                             <p style="color:#9ca3af; max-width:500px; text-align:center;">${item.error_message || 'Bilinmeyen bir hata oluştu.'}</p>
                             ${canApprove ? `
-                                <button class="ais-rp-btn ais-rp-btn-approve" id="ais-rp-retry" style="margin-top:20px; background:#f59e0b;">
-                                    🔄 Tekrar Dene
-                                </button>
+                                <div style="display:flex; gap:10px; justify-content:center; align-items:center; margin-top:20px; flex-wrap:wrap;">
+                                    <button class="ais-rp-btn ais-rp-btn-approve" id="ais-rp-retry" style="background:#f59e0b;">
+                                        🔄 Tekrar Dene
+                                    </button>
+                                    ${item.revision_number > 1 ? `
+                                        <button class="ais-rp-btn" id="ais-rp-cancel-revision" style="background:#6b7280; border-color:#6b7280;">
+                                            🛑 Revizyonu İptal Et &amp; Geri Dön
+                                        </button>
+                                    ` : ''}
+                                </div>
                             ` : `
                                 <p style="color:#6b7280; margin-top:10px;">Onaycının tekrar denemesi bekleniyor.</p>
                             `}

@@ -266,13 +266,25 @@ class FalProvider(AIProviderBase):
                     raise
 
         image_urls = []
-        if 'images' in result and result['images']:
-            image_urls = [img.get('url', '') for img in result['images']]
-        elif 'image' in result and result['image']:
-            image_urls = [result['image'].get('url', '')]
+        if isinstance(result, dict):
+            if 'images' in result and isinstance(result['images'], list):
+                for img in result['images']:
+                    if isinstance(img, dict):
+                        u = img.get('url', '')
+                        if u:
+                            image_urls.append(u)
+                    elif isinstance(img, str) and img:
+                        image_urls.append(img)
+            elif 'image' in result and result['image']:
+                if isinstance(result['image'], dict):
+                    u = result['image'].get('url', '')
+                    if u:
+                        image_urls.append(u)
+                elif isinstance(result['image'], str) and result['image']:
+                    image_urls.append(result['image'])
 
         image_url = image_urls[0] if image_urls else ''
-        request_id = result.get('request_id', '')
+        request_id = result.get('request_id', '') if isinstance(result, dict) else ''
         
         # fal.ai base response'dan veya result dict'ten seed oku
         seed_val = None
@@ -299,7 +311,13 @@ class FalProvider(AIProviderBase):
             arguments={'image_url': image_url},
             client_timeout=60,
         )
-        output_url = result.get('image', {}).get('url', '')
+        output_url = ''
+        if isinstance(result, dict):
+            img_val = result.get('image')
+            if isinstance(img_val, dict):
+                output_url = img_val.get('url', '')
+            elif isinstance(img_val, str):
+                output_url = img_val
         if output_url:
             import requests
             img_data = requests.get(output_url, timeout=60).content
@@ -324,7 +342,15 @@ class FalProvider(AIProviderBase):
             client_timeout=120,
         )
 
-        image_url = result.get('images', [{}])[0].get('url', '')
+        image_url = ''
+        if isinstance(result, dict):
+            imgs = result.get('images', [])
+            if imgs and isinstance(imgs, list):
+                first = imgs[0]
+                if isinstance(first, dict):
+                    image_url = first.get('url', '')
+                elif isinstance(first, str):
+                    image_url = first
         if image_url:
             import requests
             img_data = requests.get(image_url, timeout=60).content
@@ -338,8 +364,59 @@ class FalProvider(AIProviderBase):
             image_base64 = image_base64.decode('ascii')
         if image_base64.startswith('data:'):
             image_base64 = image_base64.split(';base64,', 1)[1]
-        image_bytes = base64.b64decode(image_base64)
-        return fal_client.upload(image_bytes, content_type)
+        raw_bytes = base64.b64decode(image_base64)
+        
+        # ═══ AKILLI RESIZE (5MB fal.ai REST limiti aşılmasın) ═══
+        if len(raw_bytes) > 4 * 1024 * 1024:
+            try:
+                from PIL import Image as _PILImage
+                import io as _io
+                _img = _PILImage.open(_io.BytesIO(raw_bytes))
+                if _img.mode in ('RGBA', 'P'):
+                    _img = _img.convert('RGB')
+                _max_dim = 1600
+                if max(_img.size) > _max_dim:
+                    _img.thumbnail((_max_dim, _max_dim), _PILImage.LANCZOS)
+                _out = _io.BytesIO()
+                _img.save(_out, format='JPEG', quality=85, optimize=True)
+                raw_bytes = _out.getvalue()
+                content_type = 'image/jpeg'
+                _logger.info('fal CDN yükleme öncesi görsel küçültüldü: %d KB', len(raw_bytes) // 1024)
+            except Exception as _re:
+                _logger.warning('Görsel küçültme başarısız, orijinal gönderilecek: %s', _re)
+        
+        # 1. fal_client.upload (HTTP REST - primary)
+        for attempt in range(3):
+            try:
+                return fal_client.upload(raw_bytes, content_type)
+            except Exception as e:
+                _logger.warning('fal CDN yükleme denemesi %d/3 başarısız: %s', attempt + 1, e)
+                if attempt < 2:
+                    time.sleep(2 ** attempt)
+        
+        # 2. REST API doğrudan deneme (fallback)
+        try:
+            import requests as _req
+            resp = _req.post(
+                'https://rest.alpha.fal.ai/storage/upload/initiate',
+                headers={'Authorization': f'Key {self.api_key}'},
+                json={'content_type': content_type, 'file_name': 'garment.jpg'},
+                timeout=15,
+            )
+            if resp.status_code in (200, 201):
+                init_data = resp.json()
+                upload_url = init_data.get('upload_url')
+                file_url = init_data.get('file_url')
+                if upload_url and file_url:
+                    put_resp = _req.put(upload_url, data=raw_bytes, headers={'Content-Type': content_type}, timeout=30)
+                    if put_resp.status_code in (200, 201):
+                        return file_url
+        except Exception as e2:
+            _logger.warning('fal REST doğrudan yükleme de başarısız: %s', e2)
+        
+        # 3. Son çare: base64 data URI dönder
+        _logger.warning('fal CDN yükleme tamamen başarısız, data URI fallback')
+        return f'data:{content_type};base64,{image_base64}'
 
     def kontext_edit(self, image_base64, prompt, **kwargs):
         """FLUX Kontext ile hedefli gorsel duzenleme.
@@ -371,10 +448,70 @@ class FalProvider(AIProviderBase):
                     raise
 
         output_url = ''
-        if 'images' in result and result['images']:
-            output_url = result['images'][0].get('url', '')
-        elif 'image' in result and result['image']:
-            output_url = result['image'].get('url', '')
+        if isinstance(result, dict):
+            if 'images' in result and isinstance(result['images'], list) and result['images']:
+                first = result['images'][0]
+                if isinstance(first, dict):
+                    output_url = first.get('url', '')
+                elif isinstance(first, str):
+                    output_url = first
+            elif 'image' in result and result['image']:
+                first = result['image']
+                if isinstance(first, dict):
+                    output_url = first.get('url', '')
+                elif isinstance(first, str):
+                    output_url = first
+
+        if output_url:
+            import requests as req_lib
+            img_data = req_lib.get(output_url, timeout=60).content
+            return base64.b64encode(img_data).decode()
+        return None
+
+    def inpaint_edit(self, prompt, image_urls, **kwargs):
+        """Seedream v5 Pro Edit — Region-precise inpainting/editing."""
+        self._check_client()
+        arguments = {
+            'prompt': prompt,
+            'image_urls': image_urls,
+            'aspect_ratio': kwargs.get('aspect_ratio', '2:3'),
+            'output_format': 'png',
+            'resolution': kwargs.get('resolution', '2k'),
+        }
+        if 'seed' in kwargs and kwargs['seed']:
+            arguments['seed'] = int(kwargs['seed'])
+
+        import time
+        max_retries = 3
+        result = None
+        for attempt in range(max_retries):
+            try:
+                result = fal_client.subscribe(
+                    self.ENDPOINTS['seedream'],
+                    arguments=arguments,
+                    client_timeout=300,
+                )
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(3)
+                else:
+                    raise
+
+        output_url = ''
+        if isinstance(result, dict):
+            if 'images' in result and isinstance(result['images'], list) and result['images']:
+                first = result['images'][0]
+                if isinstance(first, dict):
+                    output_url = first.get('url', '')
+                elif isinstance(first, str):
+                    output_url = first
+            elif 'image' in result and result['image']:
+                first = result['image']
+                if isinstance(first, dict):
+                    output_url = first.get('url', '')
+                elif isinstance(first, str):
+                    output_url = first
 
         if output_url:
             import requests as req_lib

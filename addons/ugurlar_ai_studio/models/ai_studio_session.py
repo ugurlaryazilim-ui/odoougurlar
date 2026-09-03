@@ -2239,12 +2239,17 @@ class AiStudioSession(models.Model):
                             },
                         )
 
-                        edit_images = edit_result.get('images', [])
+                        edit_images = edit_result.get('images', []) if isinstance(edit_result, dict) else []
                         if edit_images:
                             import requests as req_lib
                             import base64 as b64_lib
-                            img_url = edit_images[0].get('url', '')
-                            img_resp = req_lib.get(img_url, timeout=30)
+                            img_url = ''
+                            if isinstance(edit_images[0], dict):
+                                img_url = edit_images[0].get('url', '')
+                            elif isinstance(edit_images[0], str):
+                                img_url = edit_images[0]
+                            if img_url:
+                                img_resp = req_lib.get(img_url, timeout=30)
                             if img_resp.status_code == 200:
                                 img_content = _convert_to_jpeg(img_resp.content)
                                 result_b64 = b64_lib.b64encode(img_content).decode('ascii')
@@ -2479,8 +2484,8 @@ class AiStudioSession(models.Model):
                         outfit_consistency=outfit_consistency,
                         provider_type=provider_type,
                     )
-                    prompt_text = built_prompt.get('positive', '')
-                    negative_prompt_text = built_prompt.get('negative', '')
+                    prompt_text = built_prompt.get('positive', '') if isinstance(built_prompt, dict) else ''
+                    negative_prompt_text = built_prompt.get('negative', '') if isinstance(built_prompt, dict) else ''
                 except Exception as pe:
                     _logger.warning('Failed to build retry prompt: %s', pe)
 
@@ -2508,10 +2513,12 @@ class AiStudioSession(models.Model):
                     seed=front_seed,
                 )
 
-                output_url = tryon_result.get('image_url', '')
-                if not output_url:
-                    image_urls = tryon_result.get('image_urls', [])
-                    output_url = image_urls[0] if image_urls else ''
+                output_url = ''
+                if tryon_result and isinstance(tryon_result, dict):
+                    output_url = tryon_result.get('image_url', '')
+                    if not output_url:
+                        image_urls = tryon_result.get('image_urls', [])
+                        output_url = image_urls[0] if image_urls else ''
 
                 if output_url:
                     if output_url.startswith('data:'):
@@ -2643,6 +2650,11 @@ class AiStudioSession(models.Model):
                         pass
 
                     _safe_write_and_commit(cr, gen, gen_vals)
+                else:
+                    _safe_write_and_commit(cr, gen, {
+                        'state': 'failed',
+                        'error_message': _('API görsel çıktısı döndürmedi veya üretim başarısız oldu.'),
+                    })
 
             except Exception as e:
                 cr.rollback()
@@ -2999,6 +3011,22 @@ class AiStudioSession(models.Model):
                 session.message_post(
                     body=_('Bazı üretimler zaman aşımına uğradı. Sonuçları kontrol edin.'),
                 )
+
+        # 3. İnceleme (review) durumundaki oturumlarda takılmış (pending/processing) revizyonları temizle
+        stuck_revisions = self.env['ai.studio.generation'].search([
+            ('session_id.state', '=', 'review'),
+            ('state', 'in', ['pending', 'processing']),
+            ('write_date', '<', cutoff),
+        ])
+        for rev_gen in stuck_revisions:
+            rev_gen.write({
+                'state': 'failed',
+                'error_message': _('Zaman aşımı: Sunucu yeniden başlatıldığı veya servis yanıt vermediği için revizyon tamamlanamadı. "Tekrar Dene" butonuyla yeniden başlatabilir veya iptal edebilirsiniz.'),
+            })
+            _logger.warning(
+                'Cron: Takılmış revizyon başarısız olarak işaretlendi (gen_id=%s, session=%s)',
+                rev_gen.id, rev_gen.session_id.name
+            )
 
     def write(self, vals):
         res = super(AiStudioSession, self).write(vals)

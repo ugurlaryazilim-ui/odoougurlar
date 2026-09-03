@@ -508,8 +508,8 @@ class AiStudioController(http.Controller):
             if not gen.exists():
                 return {'error': 'Üretim bulunamadı.'}
             
-            if gen.state not in ('pending', 'processing'):
-                return {'error': 'Sadece bekleyen veya işlenen revizyonlar iptal edilebilir.'}
+            if gen.state not in ('pending', 'processing', 'failed'):
+                return {'error': 'Sadece bekleyen, işlenen veya başarısız revizyonlar iptal edilebilir.'}
 
             parent = gen.parent_generation_id
             parent_id = parent.id if parent else False

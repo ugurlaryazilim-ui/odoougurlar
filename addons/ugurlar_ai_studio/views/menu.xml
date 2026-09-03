@@ -53,9 +53,29 @@
         <field name="name">AI Üretimler</field>
         <field name="res_model">ai.studio.generation</field>
         <field name="view_mode">list,kanban,form</field>
+        <field name="search_view_id" ref="view_ai_studio_generation_search"/>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">
                 Henüz AI üretimi yok
+            </p>
+        </field>
+    </record>
+
+    <!-- Revizeler Action -->
+    <record id="action_ai_studio_revisions" model="ir.actions.act_window">
+        <field name="name">Revizeler</field>
+        <field name="res_model">ai.studio.generation</field>
+        <field name="view_mode">list,form</field>
+        <field name="view_id" ref="view_ai_studio_revision_list"/>
+        <field name="search_view_id" ref="view_ai_studio_generation_search"/>
+        <field name="domain">['|', ('revision_number', '&gt;', 1), ('parent_generation_id', '!=', False)]</field>
+        <field name="context">{'search_default_pending_or_processing': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Henüz revize edilmiş bir görsel bulunmuyor.
+            </p>
+            <p>
+                İnceleme popup'ında reddedilen ve yeni versiyonu üretilen tüm görseller bu ekranda listelenir.
             </p>
         </field>
     </record>
@@ -100,6 +120,13 @@
               parent="menu_ai_studio_root"
               action="action_ai_studio_session"
               sequence="10"/>
+
+    <!-- Revizeler — Reddedilen ve yeniden üretilen görseller -->
+    <menuitem id="menu_ai_studio_revisions"
+              name="Revizeler"
+              parent="menu_ai_studio_root"
+              action="action_ai_studio_revisions"
+              sequence="12"/>
 
     <!-- Resmi Olmayanlar — Gorselsiz urunler listesi -->
     <menuitem id="menu_ai_studio_imageless"

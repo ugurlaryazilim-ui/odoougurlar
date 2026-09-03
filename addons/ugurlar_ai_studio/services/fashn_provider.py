@@ -176,17 +176,26 @@ class FashnProvider(AIProviderBase):
 
         elapsed = time.time() - start_time
 
+        # FASHN hata durumunu kontrol et
+        if getattr(result, 'status', None) == 'failed' or (hasattr(result, 'error') and result.error):
+            err_msg = getattr(result, 'error', None) or 'FASHN görsel üretimi başarısız oldu.'
+            if isinstance(err_msg, dict):
+                err_msg = err_msg.get('message', str(err_msg))
+            raise Exception(f"FASHN API Hatası: {err_msg}")
+
         # Sonuclari parse et
         image_urls = []
-        if result.status == 'completed' and result.output:
+        if getattr(result, 'status', None) == 'completed' and result.output:
             if isinstance(result.output, list):
-                image_urls = result.output
+                image_urls = [u for u in result.output if isinstance(u, str)]
             elif isinstance(result.output, str):
                 image_urls = [result.output]
 
         credits_used = getattr(result, 'credits_used', None) or 0
         cost = credits_used * 0.05 if credits_used else self.get_estimated_cost(model_name) * num_samples
-        seed_val = getattr(result, 'seed', None) or (result.output.get('seed') if isinstance(result.output, dict) else None)
+        seed_val = getattr(result, 'seed', None)
+        if not seed_val and hasattr(result, 'output') and isinstance(result.output, dict):
+            seed_val = result.output.get('seed')
 
         _logger.info(
             'FASHN %s tamamlandi: %d gorsel, %.1f sn, %.3f kredi',
