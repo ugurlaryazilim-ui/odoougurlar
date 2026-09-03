@@ -301,10 +301,15 @@ class SocialMediaMessage(models.Model):
                     reply_text = ai_provider.generate_response(user_message, system_context)
                     
                     if not reply_text or str(reply_text).startswith("[ERROR]"):
-                        _logger.error(f"AI Provider error or empty reply for conversation {conversation.id}")
-                        # 429 rate limit kontrolü
-                        if '429' in str(reply_text) or not reply_text:
-                            consecutive_429s += 1
+                        _logger.error(f"AI Provider error or empty reply for conversation {conversation.id}: {reply_text}")
+                        consecutive_429s += 1
+                        if consecutive_429s >= MAX_CONSECUTIVE_429S:
+                            _logger.warning(
+                                'AI Provider ard arda %d hata verdi (%s), döngü durduruluyor.',
+                                consecutive_429s, reply_text
+                            )
+                            break
+                        time.sleep(3)
                         continue # Will retry next cron run
                     
                     # Başarılı yanıt — 429 sayacını sıfırla

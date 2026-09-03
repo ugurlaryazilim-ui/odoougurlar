@@ -17,6 +17,15 @@ class TaxMapping(models.Model):
         'Bu vergi dairesi için zaten bir eşleştirme var!',
     )
 
+    def init(self):
+        # Mevcut yinelenen kayıtları temizle (böylece unique constraint hatasız oluşturulur)
+        self.env.cr.execute("""
+            DELETE FROM odoougurlar_tax_mapping a
+            USING odoougurlar_tax_mapping b
+            WHERE a.id < b.id AND a.name = b.name;
+        """)
+        super().init()
+
     @api.model
     def sync_from_nebim(self):
         """Nebim'den vergi dairesi listesini çeker ve eşleştirme tablosunu günceller."""

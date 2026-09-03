@@ -57,8 +57,11 @@ class SocialAIProvider(models.AbstractModel):
         if not api_key:
             return "Gemini API Key is not configured."
         
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-        headers = {'Content-Type': 'application/json'}
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        headers = {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': api_key.strip()
+        }
         data = {
             "systemInstruction": {
                 "parts": [{"text": system_prompt}]
@@ -72,9 +75,13 @@ class SocialAIProvider(models.AbstractModel):
             response.raise_for_status()
             res_data = response.json()
             return res_data['candidates'][0]['content']['parts'][0]['text']
+        except requests.exceptions.HTTPError as e:
+            status_code = e.response.status_code if e.response is not None else 500
+            _logger.error(f"Gemini API HTTP Error {status_code}: {e}")
+            return f"[ERROR] [{status_code}] Gemini API Error: {e}"
         except Exception as e:
             _logger.error(f"Gemini API Error: {e}")
-            return "[ERROR] An error occurred with the Gemini service."
+            return f"[ERROR] {e}"
 
     def _call_ollama(self, message_text, system_prompt):
         endpoint = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.ollama_endpoint', 'http://localhost:11434/api/generate')
