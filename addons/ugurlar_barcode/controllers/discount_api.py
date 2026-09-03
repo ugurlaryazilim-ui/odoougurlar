@@ -12,7 +12,7 @@ _logger = logging.getLogger(__name__)
 class DiscountApiController(BarcodeApiBase):
     """Satış İndirimleri API'si."""
 
-    @http.route('/ugurlar_barcode/api/calculate_discounts', type='json', auth='user')
+    @http.route('/ugurlar_barcode/api/calculate_discounts', type='jsonrpc', auth='user')
     def calculate_discounts(self, basket=None, customer_code=''):
         """
         Sepet bilgisini alır, Nebim V3'e gönderir ve hesaplanmış sonuçları döner.
@@ -130,7 +130,7 @@ class DiscountApiController(BarcodeApiBase):
             }
         }
 
-    @http.route('/ugurlar_barcode/api/search_customer', type='json', auth='user')
+    @http.route('/ugurlar_barcode/api/search_customer', type='jsonrpc', auth='user')
     def search_customer(self, query):
         """Müşteri arama endpoint'i. Doğrudan Nebim (SQL) üzerinden arar."""
         if not query or len(query) < 3:

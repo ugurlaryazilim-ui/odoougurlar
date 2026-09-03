@@ -152,7 +152,7 @@ class PackingApiController(BarcodeApiBase):
         picking.invalidate_recordset(['state'])
         return picking.state == 'done'
 
-    @http.route('/ugurlar_barcode/api/packing_batch_detail', type='json', auth='user')
+    @http.route('/ugurlar_barcode/api/packing_batch_detail', type='jsonrpc', auth='user')
     def packing_batch_detail(self, batch_name='', batch_id=0, **kw):
         """Rota numarası veya ID ile batch detayı getir."""
         Batch = request.env['stock.picking.batch'].sudo()
@@ -317,7 +317,7 @@ class PackingApiController(BarcodeApiBase):
             'all_matched': matched == total,
         }
 
-    @http.route('/ugurlar_barcode/api/packing_scan', type='json', auth='user')
+    @http.route('/ugurlar_barcode/api/packing_scan', type='jsonrpc', auth='user')
     def packing_scan(self, batch_id=0, barcode='', **kw):
         """Paketleme sırasında ürün barkodu tara → eşleştir.
         
@@ -682,7 +682,7 @@ class PackingApiController(BarcodeApiBase):
             'all_matched': all_matched,
         }
 
-    @http.route('/ugurlar_barcode/api/packing_undo', type='json', auth='user')
+    @http.route('/ugurlar_barcode/api/packing_undo', type='jsonrpc', auth='user')
     def packing_undo(self, picking_id=0, barcode='', **kw):
         """Paketlemede yanlış okutulan ürünü geri alır (Miktar -1)."""
         picking = request.env['stock.picking'].sudo().browse(int(picking_id))
@@ -727,7 +727,7 @@ class PackingApiController(BarcodeApiBase):
 
         return {'success': True, 'message': f'{product.name} siparişten 1 adet eksiltildi.'}
 
-    @http.route('/ugurlar_barcode/api/packing_backorder', type='json', auth='user')
+    @http.route('/ugurlar_barcode/api/packing_backorder', type='jsonrpc', auth='user')
     def packing_backorder(self, picking_id=0, **kw):
         """Kısmi olarak tamamlanmış siparişi kapatır ve geriye kalanları backorder (eksik) yapar."""
         picking = request.env['stock.picking'].sudo().browse(int(picking_id))
@@ -757,7 +757,7 @@ class PackingApiController(BarcodeApiBase):
             _logger.exception("Backorder error for %s", picking.name)
             return {'error': 'Eksik onaylama hatası'}
 
-    @http.route('/ugurlar_barcode/api/packing_complete', type='json', auth='user')
+    @http.route('/ugurlar_barcode/api/packing_complete', type='jsonrpc', auth='user')
     def packing_complete(self, batch_id=0, **kw):
         """Paketleme tamamla — picking'leri doğrula."""
         batch = request.env['stock.picking.batch'].sudo().browse(int(batch_id))
@@ -845,7 +845,7 @@ class PackingApiController(BarcodeApiBase):
             'message': f'{validated} sipariş paketlendi ve doğrulandı',
         }
 
-    @http.route('/ugurlar_barcode/api/packing_label_data', type='json', auth='user')
+    @http.route('/ugurlar_barcode/api/packing_label_data', type='jsonrpc', auth='user')
     def packing_label_data(self, picking_id=0, **kw):
         """Kargo etiketi için sipariş verilerini döndür."""
         picking = request.env['stock.picking'].sudo().browse(int(picking_id))

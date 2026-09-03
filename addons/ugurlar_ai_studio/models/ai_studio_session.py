@@ -248,7 +248,7 @@ class AiStudioSession(models.Model):
         ('bags', 'Çanta'),
         ('accessories', 'Aksesuar'),
         ('auto', 'Otomatik'),
-    ], string='Kategori', default='auto')
+    ], string='Giyim Kategorisi', default='auto')
     quality_mode = fields.Selection([
         ('performance', 'Hızlı'),
         ('balanced', 'Dengeli'),

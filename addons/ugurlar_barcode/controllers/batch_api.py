@@ -91,7 +91,7 @@ class BatchApiController(BarcodeApiBase):
 
         return result
 
-    @http.route('/ugurlar_barcode/api/batch_list', type='json', auth='user')
+    @http.route('/ugurlar_barcode/api/batch_list', type='jsonrpc', auth='user')
     def batch_list(self, **kw):
         """Batch'leri listele — opsiyonel filtre desteği."""
         filter_state = kw.get('filter_state', '')   # draft | in_progress | done | ''
@@ -282,7 +282,7 @@ class BatchApiController(BarcodeApiBase):
             'can_delete': request.env.user.has_group('stock.group_stock_manager') or request.env.user.has_group('base.group_system')
         }
 
-    @http.route('/ugurlar_barcode/api/batch_detail', type='json', auth='user')
+    @http.route('/ugurlar_barcode/api/batch_detail', type='jsonrpc', auth='user')
     def batch_detail(self, batch_id=0, **kw):
         """Batch detayı — picking'ler ve ürün satırları."""
         batch = request.env['stock.picking.batch'].sudo().browse(int(batch_id))
@@ -359,7 +359,7 @@ class BatchApiController(BarcodeApiBase):
             'route_products': route_products,
         }
 
-    @http.route('/ugurlar_barcode/api/batch_create_now', type='json', auth='user')
+    @http.route('/ugurlar_barcode/api/batch_create_now', type='jsonrpc', auth='user')
     def batch_create_now(self, **kw):
         """Manuel batch oluştur — şu anki zaman penceresi."""
         Schedule = request.env['ugurlar.picking.schedule'].sudo()
@@ -380,7 +380,7 @@ class BatchApiController(BarcodeApiBase):
         except Exception as e:
             return {'error': str(e)}
 
-    @http.route('/ugurlar_barcode/api/batch_delete', type='json', auth='user')
+    @http.route('/ugurlar_barcode/api/batch_delete', type='jsonrpc', auth='user')
     def batch_delete(self, batch_id=0, **kw):
         """Test rotalarını vs. silmek için."""
         batch = request.env['stock.picking.batch'].sudo().browse(int(batch_id))
@@ -405,7 +405,7 @@ class BatchApiController(BarcodeApiBase):
     # ROTA TOPLAMA (WAVE PICKING) API'LERİ
     # ═══════════════════════════════════════════════════════
 
-    @http.route('/ugurlar_barcode/api/batch_route_items', type='json', auth='user')
+    @http.route('/ugurlar_barcode/api/batch_route_items', type='jsonrpc', auth='user')
     def batch_route_items(self, batch_id=0, **kw):
         """Rota ürünlerini raf lokasyonuna göre sıralı döndür."""
         try:
@@ -605,7 +605,7 @@ class BatchApiController(BarcodeApiBase):
             _logger.exception("batch_route_items hatası: %s", e)
             return {'error': f'Rota yükleme hatası: {str(e)}'}
 
-    @http.route('/ugurlar_barcode/api/batch_collect_scan', type='json', auth='user')
+    @http.route('/ugurlar_barcode/api/batch_collect_scan', type='jsonrpc', auth='user')
     def batch_collect_scan(self, batch_id=0, barcode='', **kw):
         """Rota toplama sırasında barkod tara → wave_collected_qty artır.
 
@@ -721,7 +721,7 @@ class BatchApiController(BarcodeApiBase):
             'image_url': f'/web/image/product.product/{product.id}/image_256',
         }
 
-    @http.route('/ugurlar_barcode/api/batch_undo', type='json', auth='user')
+    @http.route('/ugurlar_barcode/api/batch_undo', type='jsonrpc', auth='user')
     def batch_undo(self, move_id=0, **kw):
         """Rota toplamada alınan bir ürünü sepetteki sayısından düşmek (Undo/Geri al)."""
         move = request.env['stock.move'].sudo().browse(int(move_id))
@@ -748,7 +748,7 @@ class BatchApiController(BarcodeApiBase):
             'message': '1 adet eksiltildi.',
         }
 
-    @http.route('/ugurlar_barcode/api/batch_collect_complete', type='json', auth='user')
+    @http.route('/ugurlar_barcode/api/batch_collect_complete', type='jsonrpc', auth='user')
     def batch_collect_complete(self, batch_id=0, **kw):
         """Rota toplama tamamla — picking'leri doğrula ve stok aktar."""
         batch = request.env['stock.picking.batch'].sudo().browse(int(batch_id))

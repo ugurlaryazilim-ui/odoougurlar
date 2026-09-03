@@ -21,7 +21,7 @@
                 </div>
                 
                 <div class="text-center" invisible="state != 'connected'">
-                    <i class="fa fa-check-circle text-success" style="font-size: 100px;"></i>
+                    <i class="fa fa-check-circle text-success" style="font-size: 100px;" title="Bağlı"></i>
                     <h2 class="mt-3 text-success">Bağlantı Başarılı!</h2>
                 </div>
 

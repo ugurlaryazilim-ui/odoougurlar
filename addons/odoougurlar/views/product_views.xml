@@ -19,7 +19,7 @@
                     </group>
                     <div class="alert alert-info" role="alert"
                          invisible="not substitute_product_id">
-                        <i class="fa fa-exchange me-1"/>
+                        <i class="fa fa-exchange me-1" title="Eşitle"/>
                         <strong>Paket Ürün Aktif:</strong>
                         Pazaryerinden bu barkod ile sipariş geldiğinde,
                         sipariş satırına ikame ürün yazılacak.
@@ -47,7 +47,7 @@
                     </group>
                     <div class="alert alert-info" role="alert"
                          invisible="not substitute_product_id">
-                        <i class="fa fa-exchange me-1"/>
+                        <i class="fa fa-exchange me-1" title="Eşitle"/>
                         <strong>Paket Ürün Aktif:</strong>
                         Pazaryerinden bu barkod ile sipariş geldiğinde,
                         sipariş satırına ikame ürün yazılacak.

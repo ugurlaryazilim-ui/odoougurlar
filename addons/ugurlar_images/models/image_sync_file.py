@@ -73,9 +73,10 @@ class ImageSyncFile(models.Model):
         help='Görselin yayıldığı varyant sayısı',
     )
 
-    _sql_constraints = [
-        ('unique_filename', 'unique(filename)', 'Bu dosya adı zaten kayıtlı!'),
-    ]
+    unique_filename = models.Constraint(
+        'unique(filename)',
+        'Bu dosya adı zaten kayıtlı!',
+    )
 
     @api.model
     def is_file_processed(self, filename, file_size, file_mtime):

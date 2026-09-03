@@ -877,7 +877,7 @@ class PickingScheduleLine(models.Model):
     hour = fields.Integer(string='Saat', required=True, default=9)
     minute = fields.Integer(string='Dakika', required=True, default=0)
     display_time = fields.Char(
-        string='Saat', compute='_compute_display_time', store=True,
+        string='Görüntülenen Saat', compute='_compute_display_time', store=True,
     )
 
     @api.depends('hour', 'minute')

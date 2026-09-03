@@ -140,7 +140,7 @@ class HepsiburadaStore(models.Model):
     log_ids = fields.One2many('hepsiburada.sync.log', 'store_id', string='Loglar')
 
     order_count = fields.Integer(compute='_compute_order_count', string='Siparişler')
-    log_count = fields.Integer(compute='_compute_log_count', string='Loglar')
+    log_count = fields.Integer(compute='_compute_log_count', string='Log Sayısı')
 
     @api.depends()
     def _compute_order_count(self):

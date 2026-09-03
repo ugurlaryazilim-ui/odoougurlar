@@ -11,7 +11,7 @@ _logger = logging.getLogger(__name__)
 class AiStudioController(http.Controller):
     """AI Studio REST API endpointleri."""
 
-    @http.route('/ai_studio/upload_photo', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/upload_photo', type='jsonrpc', auth='user', methods=['POST'])
     def upload_photo(self, session_id, photo_type, image_data, detail_placement=None, **kwargs):
         """Mobil cihazdan fotograf yukle."""
         try:
@@ -66,7 +66,7 @@ class AiStudioController(http.Controller):
             _logger.exception('upload_photo hatasi: %s', e)
             return {'error': str(e)}
 
-    @http.route('/ai_studio/create_session', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/create_session', type='jsonrpc', auth='user', methods=['POST'])
     def create_session(self, product_id, **kwargs):
         """Yeni cekim oturumu olustur."""
         try:
@@ -123,7 +123,7 @@ class AiStudioController(http.Controller):
             _logger.exception('create_session hatasi: %s', e)
             return {'error': str(e)}
 
-    @http.route('/ai_studio/sibling_variants', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/sibling_variants', type='jsonrpc', auth='user', methods=['POST'])
     def sibling_variants(self, product_id):
         """Aynı ürün template'ının stokta olup görseli olmayan diğer renk varyantlarını döndürür."""
         try:
@@ -231,7 +231,7 @@ class AiStudioController(http.Controller):
             _logger.exception('sibling_variants hatasi: %s', e)
             return {'variants': []}
 
-    @http.route('/ai_studio/find_product', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/find_product', type='jsonrpc', auth='user', methods=['POST'])
     def find_product(self, query):
         """Barkod, SKU veya isim ile urun ara."""
         try:
@@ -360,7 +360,7 @@ class AiStudioController(http.Controller):
             return {'found': False, 'products': [], 'error': str(e)}
 
     @http.route('/ai_studio/generation_status/<int:session_id>',
-                type='json', auth='user', methods=['POST'])
+                type='jsonrpc', auth='user', methods=['POST'])
     def generation_status(self, session_id):
         """Oturumdaki AI uretimlerinin durumunu sorgula."""
         try:
@@ -390,7 +390,7 @@ class AiStudioController(http.Controller):
             _logger.exception('generation_status hatasi: %s', e)
             return {'error': str(e)}
 
-    @http.route('/ai_studio/approve_generation', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/approve_generation', type='jsonrpc', auth='user', methods=['POST'])
     def approve_generation(self, generation_id, is_primary=False):
         """AI uretimini onayla. Sadece onaycı ve yönetici."""
         try:
@@ -409,7 +409,7 @@ class AiStudioController(http.Controller):
             _logger.exception('approve_generation hatasi: %s', e)
             return {'error': str(e)}
 
-    @http.route('/ai_studio/unapprove_generation', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/unapprove_generation', type='jsonrpc', auth='user', methods=['POST'])
     def unapprove_generation(self, generation_id):
         """AI uretim onayini geri al. Sadece onaycı ve yönetici."""
         try:
@@ -425,7 +425,7 @@ class AiStudioController(http.Controller):
             _logger.exception('unapprove_generation hatasi: %s', e)
             return {'error': str(e)}
 
-    @http.route('/ai_studio/toggle_exclude', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/toggle_exclude', type='jsonrpc', auth='user', methods=['POST'])
     def toggle_exclude(self, generation_id):
         """AI uretimini haric tut / tekrar dahil et (toggle). Sadece onaycı ve yönetici."""
         try:
@@ -441,7 +441,7 @@ class AiStudioController(http.Controller):
             _logger.exception('toggle_exclude hatasi: %s', e)
             return {'error': str(e)}
 
-    @http.route('/ai_studio/reject_generation', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/reject_generation', type='jsonrpc', auth='user', methods=['POST'])
     def reject_generation(self, generation_id, reason_id=None, revision_prompt='', revision_prompt_en=''):
         """AI uretimini reddet ve revizeye gonder. Sadece onaycı ve yönetici."""
         try:
@@ -497,7 +497,7 @@ class AiStudioController(http.Controller):
             _logger.exception('reject_generation hatasi: %s', e)
             return {'error': str(e)}
 
-    @http.route('/ai_studio/cancel_revision', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/cancel_revision', type='jsonrpc', auth='user', methods=['POST'])
     def cancel_revision(self, generation_id):
         """Devam eden veya takılı kalan bir revizyonu iptal et ve önceki haline döndür."""
         try:
@@ -537,7 +537,7 @@ class AiStudioController(http.Controller):
             _logger.exception('cancel_revision hatasi: %s', e)
             return {'error': str(e)}
 
-    @http.route('/ai_studio/translate_revision', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/translate_revision', type='jsonrpc', auth='user', methods=['POST'])
     def translate_revision(self, text=''):
         """Türkçe revizyon metnini İngilizce'ye çevir.
         
@@ -590,7 +590,7 @@ class AiStudioController(http.Controller):
         
         return {'translated': text}
 
-    @http.route('/ai_studio/retry_generation', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/retry_generation', type='jsonrpc', auth='user', methods=['POST'])
     def retry_generation(self, generation_id):
         """Başarısız üretimi tekrar dene. Onaycı ve yönetici yetkili."""
         try:
@@ -612,7 +612,7 @@ class AiStudioController(http.Controller):
             _logger.exception('retry_generation hatasi: %s', e)
             return {'error': str(e)}
 
-    @http.route('/ai_studio/complete_session', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/complete_session', type='jsonrpc', auth='user', methods=['POST'])
     def complete_session(self, session_id, approved_items=None):
         """Oturumu tamamla ve gorselleri urune kaydet. Sadece onaycı ve yönetici.
         
@@ -677,7 +677,7 @@ class AiStudioController(http.Controller):
     # ═══════════════════════════════════════════════════════════
     REVIEW_LOCK_TIMEOUT_MINUTES = 5
 
-    @http.route('/ai_studio/acquire_lock', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/acquire_lock', type='jsonrpc', auth='user', methods=['POST'])
     def acquire_review_lock(self, session_id, lock_token=''):
         """Oturumu inceleme için kilitle. Başka kullanıcı/sekme inceliyorsa engelle."""
         try:
@@ -726,7 +726,7 @@ class AiStudioController(http.Controller):
             _logger.exception('acquire_lock hatasi: %s', e)
             return {'success': False, 'error': str(e)}
 
-    @http.route('/ai_studio/release_lock', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/release_lock', type='jsonrpc', auth='user', methods=['POST'])
     def release_review_lock(self, session_id, lock_token=''):
         """İnceleme kilidini bırak."""
         try:
@@ -750,7 +750,7 @@ class AiStudioController(http.Controller):
             _logger.exception('release_lock hatasi: %s', e)
             return {'success': False}
 
-    @http.route('/ai_studio/heartbeat_lock', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/heartbeat_lock', type='jsonrpc', auth='user', methods=['POST'])
     def heartbeat_review_lock(self, session_id, lock_token=''):
         """Kilit heartbeat — her 2dk'da çağrılır, kilidi canlı tutar."""
         try:
@@ -766,7 +766,7 @@ class AiStudioController(http.Controller):
         except Exception as e:
             return {'success': False}
 
-    @http.route('/ai_studio/review_data', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/review_data', type='jsonrpc', auth='user', methods=['POST'])
     def get_review_data(self, session_id, lock_token=''):
         """Oturumun tum generation verilerini inceleme popup'i icin dondurur."""
         try:
@@ -886,7 +886,7 @@ class AiStudioController(http.Controller):
             _logger.exception('review_data hatasi: %s', e)
             return {'error': str(e)}
 
-    @http.route('/ai_studio/get_presets', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/get_presets', type='jsonrpc', auth='user', methods=['POST'])
     def get_presets(self, garment_type=None, gender=None, body_type=None):
         """Aktif manken presetlerini getir. Opsiyonel cinsiyet ve vücut tipi filtresi."""
         try:
@@ -939,7 +939,7 @@ class AiStudioController(http.Controller):
             _logger.exception('get_presets hatasi: %s', e)
             return {'presets': []}
 
-    @http.route('/ai_studio/get_reject_reasons', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/get_reject_reasons', type='jsonrpc', auth='user', methods=['POST'])
     def get_reject_reasons(self):
         """Aktif red sebeplerini getir."""
         try:
@@ -959,7 +959,7 @@ class AiStudioController(http.Controller):
             _logger.exception('get_reject_reasons hatasi: %s', e)
             return {'reasons': []}
 
-    @http.route('/ai_studio/get_prompt_templates', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/get_prompt_templates', type='jsonrpc', auth='user', methods=['POST'])
     def get_prompt_templates(self, scope=None, category_id=None):
         """Prompt sablonlarini getir."""
         try:
@@ -984,7 +984,7 @@ class AiStudioController(http.Controller):
             _logger.exception('get_prompt_templates hatasi: %s', e)
             return {'templates': []}
 
-    @http.route('/ai_studio/dashboard_stats', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/dashboard_stats', type='jsonrpc', auth='user', methods=['POST'])
     def dashboard_stats(self):
         """Dashboard istatistikleri."""
         try:
@@ -1031,7 +1031,7 @@ class AiStudioController(http.Controller):
                 'today_sessions': 0,
             }
 
-    @http.route('/ai_studio/analyze_garment', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/analyze_garment', type='jsonrpc', auth='user', methods=['POST'])
     def analyze_garment(self, image_data):
         """Kiyafet gorseli AI ile analiz et — tur, renk, kumas, detaylar."""
         try:
@@ -1062,7 +1062,7 @@ class AiStudioController(http.Controller):
             _logger.exception('analyze_garment hatasi: %s', e)
             return {'error': str(e)}
 
-    @http.route('/ai_studio/build_prompt', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/build_prompt', type='jsonrpc', auth='user', methods=['POST'])
     def build_prompt(self, analysis, preset_id=None, lock_ids=None, extra_prompt=''):
         """Analiz sonuclarina gore AI gorsel uretim promptu olustur."""
         try:
@@ -1102,7 +1102,7 @@ class AiStudioController(http.Controller):
             _logger.exception('build_prompt hatasi: %s', e)
             return {'error': str(e)}
 
-    @http.route('/ai_studio/generate_image', type='json', auth='user', methods=['POST'])
+    @http.route('/ai_studio/generate_image', type='jsonrpc', auth='user', methods=['POST'])
     def generate_image(self, session_id, photo_id, preset_id, prompt=None):
         """AI gorsel uretim — fal.ai FASHN virtual try-on."""
         try:

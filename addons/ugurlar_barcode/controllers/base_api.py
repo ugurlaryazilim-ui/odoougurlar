@@ -275,7 +275,7 @@ class BarcodeApiBase(http.Controller):
 
     # ═══ TTS CONFIG ═══
 
-    @http.route('/ugurlar_barcode/api/tts_config', type='json', auth='user')
+    @http.route('/ugurlar_barcode/api/tts_config', type='jsonrpc', auth='user')
     def tts_config(self, **kw):
         """Tüm aktif TTS mesajlarını key→message dict olarak döndür."""
         try:

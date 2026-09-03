@@ -6,7 +6,7 @@ class EkOzelliklerController(http.Controller):
 
     @http.route(
         '/ek_ozellikler/product_settings',
-        type='json', auth='public', website=True,
+        type='jsonrpc', auth='public', website=True,
     )
     def get_product_settings(self):
         """SKU/Barkod gösterim ayarlarını frontend JS'e döner."""

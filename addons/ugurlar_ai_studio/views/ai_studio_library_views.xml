@@ -42,7 +42,7 @@
                                 </span>
                             </div>
                             <div class="mt-1 text-muted">
-                                <i class="fa fa-bar-chart"/> <field name="usage_count"/> kullanım
+                                <i class="fa fa-bar-chart" title="İstatistik"/> <field name="usage_count"/> kullanım
                             </div>
                         </div>
                     </t>

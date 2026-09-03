@@ -12,7 +12,7 @@ _logger = logging.getLogger(__name__)
 class ProductApiController(BarcodeApiBase):
     """Ürün stok arama API'si."""
 
-    @http.route('/ugurlar_barcode/api/product_search', type='json', auth='user')
+    @http.route('/ugurlar_barcode/api/product_search', type='jsonrpc', auth='user')
     def product_search(self, barcode='', search_type='barcode', **kw):
         """Ürün ara → stok + raf + varyant bilgisi döndür.
         search_type: 'barcode' → sadece o varyant
@@ -218,7 +218,7 @@ class ProductApiController(BarcodeApiBase):
             'search_type': search_type,
         }
 
-    @http.route('/ugurlar_barcode/api/inventory_matrix', type='json', auth='user')
+    @http.route('/ugurlar_barcode/api/inventory_matrix', type='jsonrpc', auth='user')
     def inventory_matrix(self, barcode=''):
         """Ürün Stok Matrisi (Depo, Renk, Beden bazında) - Nebim'den Çeker."""
         if not barcode:

@@ -12,22 +12,22 @@ class TailorController(http.Controller):
     """Terzi OWL frontend için JSON API endpoint'leri."""
 
     # ── Fatura Arama (Nebim MSSQL) ──
-    @http.route('/ugurlar_tailor/search_invoice', type='json', auth='user')
+    @http.route('/ugurlar_tailor/search_invoice', type='jsonrpc', auth='user')
     def search_invoice(self, search_term=''):
         connector = request.env['ugurlar.tailor.mssql.connector']
         return connector.search_invoices(search_term)
 
-    @http.route('/ugurlar_tailor/invoice_detail', type='json', auth='user')
+    @http.route('/ugurlar_tailor/invoice_detail', type='jsonrpc', auth='user')
     def invoice_detail(self, invoice_no=''):
         connector = request.env['ugurlar.tailor.mssql.connector']
         return connector.get_invoice_detail(invoice_no)
 
-    @http.route('/ugurlar_tailor/verify_product', type='json', auth='user')
+    @http.route('/ugurlar_tailor/verify_product', type='jsonrpc', auth='user')
     def verify_product(self, invoice_no='', barcode=''):
         connector = request.env['ugurlar.tailor.mssql.connector']
         return connector.verify_product(invoice_no, barcode)
 
-    @http.route('/ugurlar_tailor/search_product', type='json', auth='user')
+    @http.route('/ugurlar_tailor/search_product', type='jsonrpc', auth='user')
     def search_product(self, barcode=''):
         product = request.env['product.product'].search([('barcode', '=', barcode)], limit=1)
         if product:
@@ -38,13 +38,13 @@ class TailorController(http.Controller):
             }
         return None
 
-    @http.route('/ugurlar_tailor/test_connection', type='json', auth='user')
+    @http.route('/ugurlar_tailor/test_connection', type='jsonrpc', auth='user')
     def test_connection(self):
         connector = request.env['ugurlar.tailor.mssql.connector']
         return connector.test_connection()
 
     # ── Hizmetler ──
-    @http.route('/ugurlar_tailor/services', type='json', auth='user')
+    @http.route('/ugurlar_tailor/services', type='jsonrpc', auth='user')
     def get_services(self):
         services = request.env['ugurlar.tailor.service'].search_read(
             [('active', '=', True)],
@@ -54,7 +54,7 @@ class TailorController(http.Controller):
         return services
 
     # ── Terziler ──
-    @http.route('/ugurlar_tailor/tailors', type='json', auth='user')
+    @http.route('/ugurlar_tailor/tailors', type='jsonrpc', auth='user')
     def get_tailors(self):
         tailors = request.env['ugurlar.tailor'].search_read(
             [('active', '=', True)],
@@ -77,7 +77,7 @@ class TailorController(http.Controller):
         return tailors
 
     # ── Sipariş Oluştur ──
-    @http.route('/ugurlar_tailor/create_order', type='json', auth='user')
+    @http.route('/ugurlar_tailor/create_order', type='jsonrpc', auth='user')
     def create_order(self, orders=None):
         """Toplu sipariş oluşturma — her ürün için ayrı sipariş."""
         if not orders:
@@ -124,7 +124,7 @@ class TailorController(http.Controller):
         return {'success': True, 'orders': created, 'label_url': label_url}
 
     # ── Sipariş Listesi ──
-    @http.route('/ugurlar_tailor/orders', type='json', auth='user')
+    @http.route('/ugurlar_tailor/orders', type='jsonrpc', auth='user')
     def get_orders(self, status=None, search='', page=1, limit=20):
         domain = []
         if status:
@@ -169,7 +169,7 @@ class TailorController(http.Controller):
         }
 
     # ── Sipariş Durum Güncelle ──
-    @http.route('/ugurlar_tailor/update_status', type='json', auth='user')
+    @http.route('/ugurlar_tailor/update_status', type='jsonrpc', auth='user')
     def update_status(self, order_id=0, status=''):
         order = request.env['ugurlar.tailor.order'].browse(int(order_id))
         if not order.exists():
@@ -188,7 +188,7 @@ class TailorController(http.Controller):
         return {'success': False, 'error': 'Geçersiz durum!'}
 
     # ── Etiket Verisi ──
-    @http.route('/ugurlar_tailor/label_data', type='json', auth='user')
+    @http.route('/ugurlar_tailor/label_data', type='jsonrpc', auth='user')
     def label_data(self, order_id=0):
         """Etiket yazdırma için sipariş verisini döndür."""
         order = request.env['ugurlar.tailor.order'].browse(int(order_id))

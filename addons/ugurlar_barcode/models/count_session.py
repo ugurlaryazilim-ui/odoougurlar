@@ -12,17 +12,17 @@ class CountSession(models.Model):
     _order = 'create_date desc'
 
     name = fields.Char('Sayım Kodu', default='Yeni', required=True, readonly=True, copy=False)
-    location_id = fields.Many2one('stock.location', string='Raf (Konum)', required=True, readonly=True, states={'draft': [('readonly', False)]})
-    user_id = fields.Many2one('res.users', string='Operatör', default=lambda self: self.env.uid, readonly=True, states={'draft': [('readonly', False)]})
-    date = fields.Datetime('Tarih', default=fields.Datetime.now, readonly=True, states={'draft': [('readonly', False)]})
+    location_id = fields.Many2one('stock.location', string='Raf (Konum)', required=True, readonly=True)
+    user_id = fields.Many2one('res.users', string='Operatör', default=lambda self: self.env.uid, readonly=True)
+    date = fields.Datetime('Tarih', default=fields.Datetime.now, readonly=True)
     
     state = fields.Selection([
         ('draft', 'Taslak'),
         ('done', 'Tamamlandı'),
         ('validated', 'Onaylandı')
-    ], string='Durum', default='done', tracking=True)
+    ], string='Durum', default='done')
 
-    operation_ids = fields.One2many('ugurlar.barcode.operation', 'count_session_id', string='Sayım Detayları', readonly=True, states={'draft': [('readonly', False)], 'done': [('readonly', False)]})
+    operation_ids = fields.One2many('ugurlar.barcode.operation', 'count_session_id', string='Sayım Detayları', readonly=True)
     
     notes = fields.Text('Notlar')
     

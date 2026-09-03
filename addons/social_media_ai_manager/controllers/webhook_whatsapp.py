@@ -8,7 +8,7 @@ _logger = logging.getLogger(__name__)
 
 class WebhookWhatsApp(http.Controller):
 
-    @http.route('/social_media_ai/webhook/whatsapp', type='json', auth='public', methods=['POST'], csrf=False)
+    @http.route('/social_media_ai/webhook/whatsapp', type='jsonrpc', auth='public', methods=['POST'], csrf=False)
     def whatsapp_webhook(self, **post):
         """ Webhook endpoint for WAHA or Evolution API """
         data = request.jsonrequest

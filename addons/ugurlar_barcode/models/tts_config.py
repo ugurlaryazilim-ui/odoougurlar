@@ -29,9 +29,10 @@ class UgurlarTtsMessage(models.Model):
     active = fields.Boolean('Aktif', default=True)
     sequence = fields.Integer('Sıra', default=10)
 
-    _sql_constraints = [
-        ('key_unique', 'UNIQUE(key)', 'Her seslendirme anahtarı benzersiz olmalıdır!'),
-    ]
+    key_unique = models.Constraint(
+        'UNIQUE(key)',
+        'Her seslendirme anahtarı benzersiz olmalıdır!',
+    )
 
     @api.model
     def get_tts_config(self):
