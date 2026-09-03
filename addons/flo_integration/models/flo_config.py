@@ -11,13 +11,13 @@ class ResConfigSettings(models.TransientModel):
     # ─── Depo ────────────────────────────────────────────
     flo_warehouse_id = fields.Many2one(
         'stock.warehouse',
-        string='İnternet Mağaza Deposu',
+        string='Flo Depo',
         config_parameter='flo_integration.warehouse_id',
         help='Flo siparişlerinin düşeceği ana depo',
     )
     flo_backup_warehouse_id = fields.Many2one(
         'stock.warehouse',
-        string='Yedek Depo (Heykel Mağaza)',
+        string='Flo Yedek Depo',
         config_parameter='flo_integration.backup_warehouse_id',
         help='Ana depoda stok yoksa bu depoda aranacak',
     )

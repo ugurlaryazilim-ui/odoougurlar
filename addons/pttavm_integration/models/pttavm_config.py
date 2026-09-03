@@ -11,13 +11,13 @@ class ResConfigSettings(models.TransientModel):
     # ─── Depo ────────────────────────────────────────────
     pttavm_warehouse_id = fields.Many2one(
         'stock.warehouse',
-        string='İnternet Mağaza Deposu',
+        string='PttAVM Depo',
         config_parameter='pttavm_integration.warehouse_id',
         help='Pttavm siparişlerinin düşeceği ana depo',
     )
     pttavm_backup_warehouse_id = fields.Many2one(
         'stock.warehouse',
-        string='Yedek Depo (Heykel Mağaza)',
+        string='PttAVM Yedek Depo',
         config_parameter='pttavm_integration.backup_warehouse_id',
         help='Ana depoda stok yoksa bu depoda aranacak',
     )

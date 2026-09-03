@@ -13,7 +13,7 @@ class ResConfigSettings(models.TransientModel):
         help='Trendyol\'da showUserName=false olan müşteriler için "Gizli Müşteri" gösterilsin mi?',
     )
     pq_auto_sync_enabled = fields.Boolean(
-        string='Otomatik Senkronizasyon',
+        string='Soru Otomatik Sync',
         config_parameter='pazaryeri_question.auto_sync_enabled',
         default=True,
         help='Cron ile otomatik soru senkronizasyonu açık/kapalı',

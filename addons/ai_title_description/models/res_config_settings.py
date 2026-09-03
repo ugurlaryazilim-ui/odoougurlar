@@ -7,16 +7,16 @@ class ResConfigSettings(models.TransientModel):
     ai_td_provider = fields.Selection([
         ('gemini', 'Google Gemini'),
         ('openai', 'OpenAI')
-    ], default='gemini', string="AI Sağlayıcı", config_parameter='ai_title_description.provider')
+    ], default='gemini', string="Başlık AI Sağlayıcı", config_parameter='ai_title_description.provider')
 
-    ai_td_gemini_api_key = fields.Char("Gemini API Key", config_parameter='ai_title_description.gemini_api_key')
+    ai_td_gemini_api_key = fields.Char("Başlık AI Gemini Key", config_parameter='ai_title_description.gemini_api_key')
     ai_td_gemini_model = fields.Selection([
         ('gemini-2.5-flash', 'Gemini 2.5 Flash (Hızlı & Ekonomik - Önerilen)'),
         ('gemini-2.5-pro', 'Gemini 2.5 Pro (Gelişmiş & Derin Analiz)'),
         ('gemini-2.0-flash', 'Gemini 2.0 Flash')
     ], default='gemini-2.5-flash', string="Gemini Modeli", config_parameter='ai_title_description.gemini_model')
 
-    ai_td_openai_api_key = fields.Char("OpenAI API Key", config_parameter='ai_title_description.openai_api_key')
+    ai_td_openai_api_key = fields.Char("Başlık AI OpenAI Key", config_parameter='ai_title_description.openai_api_key')
     ai_td_openai_model = fields.Selection([
         ('gpt-4o-mini', 'GPT-4o Mini (Hızlı & Ekonomik)'),
         ('gpt-4o', 'GPT-4o (En Yüksek Kalite)')

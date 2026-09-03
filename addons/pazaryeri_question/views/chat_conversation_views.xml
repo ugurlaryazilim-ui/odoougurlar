@@ -179,7 +179,7 @@
                             </div>
                             <div class="o_kanban_record_body">
                                 <div class="text-muted small" t-if="record.customer_email.value">
-                                    <i class="fa fa-envelope"/> <field name="customer_email"/>
+                                    <i class="fa fa-envelope" title="Mesaj"/> <field name="customer_email"/>
                                 </div>
                                 <div class="text-truncate mt-1">
                                     <field name="last_message_preview"/>

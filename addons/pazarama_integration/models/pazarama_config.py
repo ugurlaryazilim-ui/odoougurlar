@@ -11,13 +11,13 @@ class ResConfigSettings(models.TransientModel):
     # ─── Depo ────────────────────────────────────────────
     pazarama_warehouse_id = fields.Many2one(
         'stock.warehouse',
-        string='İnternet Mağaza Deposu',
+        string='Pazarama Depo',
         config_parameter='pazarama_integration.warehouse_id',
         help='Pazarama siparişlerinin düşeceği ana depo',
     )
     pazarama_backup_warehouse_id = fields.Many2one(
         'stock.warehouse',
-        string='Yedek Depo (Heykel Mağaza)',
+        string='Pazarama Yedek Depo',
         config_parameter='pazarama_integration.backup_warehouse_id',
         help='Ana depoda stok yoksa bu depoda aranacak',
     )

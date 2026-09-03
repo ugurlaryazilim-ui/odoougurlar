@@ -11,13 +11,13 @@ class ResConfigSettings(models.TransientModel):
     # ─── Depo ────────────────────────────────────────────
     shopify_warehouse_id = fields.Many2one(
         'stock.warehouse',
-        string='İnternet Mağaza Deposu',
+        string='Shopify Depo',
         config_parameter='shopify_integration.warehouse_id',
         help='Shopify siparişlerinin düşeceği ana depo',
     )
     shopify_backup_warehouse_id = fields.Many2one(
         'stock.warehouse',
-        string='Yedek Depo (Heykel Mağaza)',
+        string='Shopify Yedek Depo',
         config_parameter='shopify_integration.backup_warehouse_id',
         help='Ana depoda stok yoksa bu depoda aranacak',
     )
