@@ -652,9 +652,11 @@ class AiStudioController(http.Controller):
             session._save_to_product(approved)
 
             # 5. Oturumu tamamlandı olarak işaretle
-            session.reviewer_id = request.env.user
-            session.state = 'done'
-            session.date_done = fields.Datetime.now()
+            session.write({
+                'reviewer_id': request.env.user.id,
+                'state': 'done',
+                'date_done': fields.Datetime.now(),
+            })
             session.message_post(
                 body=_('%d onaylı görsel ürüne başarıyla kaydedildi.') % len(approved),
             )

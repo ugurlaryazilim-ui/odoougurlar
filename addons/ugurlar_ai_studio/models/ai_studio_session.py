@@ -2783,11 +2783,13 @@ class AiStudioSession(models.Model):
                 )
                 self.env.cr.commit()
     def _save_to_product(self, approved_generations):
-        """Onaylı görselleri ürün kartına aktar.
-
-        """
+        """Onaylı görselleri ürün kartına aktar."""
         import logging
         _logger = logging.getLogger(__name__)
+
+        # Eğer takım modu ise doğrudan takım kayıt metoduna yönlendir
+        if getattr(self, 'generation_mode', False) == 'set_combo' or self.set_line_ids:
+            return self._save_to_product_set_mode(approved_generations)
 
         # ═══ TEKLİ MOD ═══
         product = self.product_id
@@ -2816,30 +2818,31 @@ class AiStudioSession(models.Model):
         if existing_ai_images:
             existing_ai_images.unlink()
 
-        # 2. Ana resmi template'e ata
-        tmpl.image_1920 = primary.generated_image
-        tmpl.flush_recordset()
+        # 2. Ana resmi template ve varyantlara batch olarak ata
+        tmpl.write({'image_1920': primary.generated_image})
+        variant_records = products.filtered(lambda p: hasattr(p, 'image_variant_1920'))
+        if variant_records:
+            variant_records.write({'image_variant_1920': primary.generated_image})
 
-        # 3. Varyantlara ata
+        # 3. Ek görselleri TEK BATCH (vals_list) halinde oluştur (döngü içinde flush_model çağrılmaz!)
+        image_vals_list = []
         for prod in products:
-            if hasattr(prod, 'image_variant_1920'):
-                prod.image_variant_1920 = primary.generated_image
-                prod.flush_recordset()
-
             sequence = 10
             for gen in others:
                 type_label = dict(
                     gen._fields['photo_type'].selection
                 ).get(gen.photo_type, 'Görsel')
-                self.env['product.image'].create({
+                image_vals_list.append({
                     'product_tmpl_id': tmpl.id,
                     'product_variant_id': prod.id,
                     'name': f'{type_label} - AI ({gen.revision_number})',
                     'image_1920': gen.generated_image,
                     'sequence': sequence,
                 })
-                self.env['product.image'].flush_model()
                 sequence += 10
+
+        if image_vals_list:
+            self.env['product.image'].create(image_vals_list)
 
     def _save_to_product_set_mode(self, approved_generations):
         """Takım modu: Her ürüne tekli ön + kombin görselleri kaydet.
@@ -2877,12 +2880,10 @@ class AiStudioSession(models.Model):
             
             # Bu parçanın tekli ön görseli
             if set_line.role == 'primary':
-                # Ana ürünün tekli görselleri = oturumun normal generation'ları
                 single_front = approved_generations.filtered(
                     lambda g: g.generation_mode == 'single' and g.photo_type == 'front' and not g.set_line_id
                 )[:1]
             else:
-                # Takım parçasının tekli ön görseli
                 single_front = approved_generations.filtered(
                     lambda g: g.generation_mode == 'single' and g.photo_type == 'front' and g.set_line_id.id == set_line.id
                 )[:1]
@@ -2900,29 +2901,31 @@ class AiStudioSession(models.Model):
                 existing_ai.unlink()
             
             # _1: Tekli ön → Ana görsel
-            tmpl.image_1920 = single_front.generated_image
-            tmpl.flush_recordset()
+            tmpl.write({'image_1920': single_front.generated_image})
             
+            variant_records = products.filtered(lambda p: hasattr(p, 'image_variant_1920'))
+            if variant_records:
+                variant_records.write({'image_variant_1920': single_front.generated_image})
+            
+            # _2, _3, _4, _5: Kombin görselleri BATCH halinde oluştur
+            combo_image_vals = []
             for prod in products:
-                if hasattr(prod, 'image_variant_1920'):
-                    prod.image_variant_1920 = single_front.generated_image
-                    prod.flush_recordset()
-                
-                # _2, _3, _4, _5: Kombin görselleri
                 sequence = 10
                 for gen in combo_gens:
                     type_label = dict(
                         gen._fields['photo_type'].selection
                     ).get(gen.photo_type, 'Görsel')
-                    self.env['product.image'].create({
+                    combo_image_vals.append({
                         'product_tmpl_id': tmpl.id,
                         'product_variant_id': prod.id,
                         'name': f'Takım {type_label} - AI ({self.name})',
                         'image_1920': gen.generated_image,
                         'sequence': sequence,
                     })
-                    self.env['product.image'].flush_model()
                     sequence += 10
+
+            if combo_image_vals:
+                self.env['product.image'].create(combo_image_vals)
             
             _logger.info('Takım görselleri kaydedildi: %s (%d varyant)', set_line.product_name, len(products))
 
@@ -3040,14 +3043,14 @@ class AiStudioSession(models.Model):
                     except Exception as e:
                         _logger.warning("Review aktivite oluşturma başarısız (session=%s): %s", record.id, e)
                 elif record.state in ['done', 'cancelled']:
-                    # Aktiviteleri kapatmayı dene
+                    # Aktiviteleri kapatmayı dene (Batch)
                     try:
                         activities = self.env['mail.activity'].search([
                             ('res_id', '=', record.id),
-                            ('res_model', '=', 'ai.studio.session')
+                            ('res_model', '=', 'ai.studio.session'),
                         ])
-                        for activity in activities:
-                            activity.action_done()
+                        if activities:
+                            activities.action_done()
                     except Exception as e:
                         _logger.warning("Aktivite kapatma başarısız (session=%s): %s", record.id, e)
 
