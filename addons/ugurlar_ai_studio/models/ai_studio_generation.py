@@ -546,16 +546,39 @@ class AiStudioGeneration(models.Model):
             }
         }
 
-    @api.model
-    def action_recover_stuck_revisions_server(self):
-        """10 dakikadan uzun süredir takılmış revizeleri başarısız durumuna çekerek kurtar."""
-        self.env['ai.studio.session']._cron_check_stuck_generations()
+    def action_recover_stuck_revisions_server(self, *args, **kwargs):
+        """Takılmış revizeleri başarısız durumuna çekerek kurtar."""
+        from datetime import timedelta
+        # Eğer kullanıcı belirli satırları seçip butona bastıysa doğrudan onları kurtar
+        selected = self.filtered(lambda g: g.state in ('pending', 'processing'))
+        if selected:
+            selected.write({
+                'state': 'failed',
+                'error_message': _('Kullanıcı tarafından kurtarıldı. "Tekrar Dene" butonuyla yeniden başlatabilir veya iptal edebilirsiniz.'),
+            })
+            count = len(selected)
+        else:
+            # Seçili yoksa 5 dakikadan uzun süredir takılmış tüm revizyonları kurtar
+            cutoff = fields.Datetime.now() - timedelta(minutes=5)
+            stuck = self.search([
+                ('session_id.state', '=', 'review'),
+                ('state', 'in', ['pending', 'processing']),
+                ('write_date', '<', cutoff),
+            ])
+            stuck.write({
+                'state': 'failed',
+                'error_message': _('Zaman aşımı: Sunucu yeniden başlatıldığı veya servis yanıt vermediği için revizyon tamamlanamadı. "Tekrar Dene" butonuyla yeniden başlatabilir veya iptal edebilirsiniz.'),
+            })
+            count = len(stuck)
+            # Ayrıca genel cron'u da çalıştır
+            self.env['ai.studio.session']._cron_check_stuck_generations()
+
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
                 'title': _('Revizeler Kontrol Edildi'),
-                'message': _('Takılmış veya yanıt vermeyen revizyonlar temizlendi ve güncellendi.'),
+                'message': _('%d adet takılmış revizyon düzeltildi.') % count if count else _('Takılmış revizyon bulunamadı, tüm işlemler güncel.'),
                 'type': 'success',
                 'sticky': False,
                 'next': {'type': 'ir.actions.client', 'tag': 'reload'},
