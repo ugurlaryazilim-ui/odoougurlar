@@ -407,6 +407,18 @@ class AmazonOrderSync(models.Model):
                 if hasattr(Product, 'find_by_marketplace_barcode'):
                     product = Product.find_by_marketplace_barcode(sku)
 
+            if product:
+                _logger.info(
+                    "Amazon SKU eşleşti: '%s' → %s (id:%d, code:%s) Sipariş: %s",
+                    sku, product.display_name, product.id,
+                    product.default_code, amazon_order_id)
+            else:
+                _logger.warning(
+                    "Amazon ADIM-1 BAŞARISIZ: SellerSKU '%s' ile ürün bulunamadı. "
+                    "ASIN: %s, Sipariş: %s, Title: %s",
+                    sku, asin, amazon_order_id,
+                    item.get('Title', '')[:80])
+
             # ─── ADIM 2: ASIN → Catalog API → EAN/UPC ile ara ───
             if not product and asin and session and auth and base_url:
                 ean = _ean_cache.get(asin)
@@ -421,6 +433,16 @@ class AmazonOrderSync(models.Model):
                         _logger.info(
                             "Amazon ASIN→EAN eşleşme başarılı: %s → EAN %s → %s (%s)",
                             asin, ean, product.display_name, product.default_code)
+                    else:
+                        _logger.warning(
+                            "Amazon ADIM-2 BAŞARISIZ: ASIN %s → EAN '%s' bulundu ama "
+                            "Odoo'da bu barkodla ürün yok. Sipariş: %s",
+                            asin, ean, amazon_order_id)
+                else:
+                    _logger.warning(
+                        "Amazon ADIM-2 BAŞARISIZ: ASIN %s için Catalog API'den "
+                        "EAN/UPC alınamadı. Sipariş: %s",
+                        asin, amazon_order_id)
 
             # ─── ADIM 3: Fallback ürünü ───
             if not product:
@@ -440,8 +462,9 @@ class AmazonOrderSync(models.Model):
                         f"fallback ürünü de yok — ürünsüz satır oluşturuluyor."
                     )
                 _logger.warning(
-                    "Amazon ürün bulunamadı: %s (Sipariş: %s) — fallback ürünü kullanılıyor.",
-                    sku, amazon_order_id,
+                    "Amazon ADIM-3 FALLBACK: SKU '%s', ASIN '%s' (Sipariş: %s) — "
+                    "eşleşme 3 adımda da başarısız, fallback ürünü kullanılıyor.",
+                    sku, asin, amazon_order_id,
                 )
 
             unit_price_incl = item_price / qty if qty > 0 else item_price
@@ -687,6 +710,24 @@ class AmazonOrderSync(models.Model):
                         amazon_order_id, status
                     )
                     existing_order.action_confirm()
+                    # ─── Picking debug logu ───
+                    if existing_order.picking_ids:
+                        for p in existing_order.picking_ids:
+                            _logger.info(
+                                "Amazon picking (force): %s | state=%s | type=%s (id:%d) | "
+                                "wh=%s | batch=%s | create=%s | Sipariş: %s",
+                                p.name, p.state,
+                                p.picking_type_id.display_name, p.picking_type_id.id,
+                                p.picking_type_id.warehouse_id.name if p.picking_type_id.warehouse_id else 'N/A',
+                                p.batch_id.name if p.batch_id else 'YOK',
+                                p.create_date, amazon_order_id)
+                    else:
+                        _logger.warning(
+                            "Amazon sipariş %s (force) onaylandı ama picking OLUŞMADI! "
+                            "Satır ürünleri: %s",
+                            amazon_order_id,
+                            [(l.product_id.display_name, l.product_id.type, l.product_id.id)
+                             for l in existing_order.order_line if l.product_id])
 
             return processed, 0, 0, msgs
 
@@ -720,6 +761,24 @@ class AmazonOrderSync(models.Model):
         # Unshipped/Shipped siparişlerde PII mevcut → action_confirm YAP
         if order_data.get('FulfillmentChannel') == 'MFN' and status != 'Pending':
             sale_order.action_confirm()
+            # ─── Picking debug logu ───
+            if sale_order.picking_ids:
+                for p in sale_order.picking_ids:
+                    _logger.info(
+                        "Amazon picking oluştu: %s | state=%s | type=%s (id:%d) | "
+                        "wh=%s | batch=%s | create=%s | Sipariş: %s",
+                        p.name, p.state,
+                        p.picking_type_id.display_name, p.picking_type_id.id,
+                        p.picking_type_id.warehouse_id.name if p.picking_type_id.warehouse_id else 'N/A',
+                        p.batch_id.name if p.batch_id else 'YOK',
+                        p.create_date, amazon_order_id)
+            else:
+                _logger.warning(
+                    "Amazon sipariş %s onaylandı ama picking OLUŞMADI! "
+                    "Satır ürünleri: %s",
+                    amazon_order_id,
+                    [(l.product_id.display_name, l.product_id.type, l.product_id.id)
+                     for l in sale_order.order_line if l.product_id])
         elif status == 'Pending':
             _logger.info(
                 "Amazon sipariş %s Pending durumunda — draft olarak bırakılıyor (PII henüz mevcut değil).",
