@@ -33,58 +33,65 @@ class ProductTemplate(models.Model):
             }
         }
 
+    def _add_to_ai_queue(self, mode):
+        """Toplu kuyruğa ekleme — Binary görselleri RAM'e çekmeden, batch insert ile güvenli ekler."""
+        if not self:
+            return 0
+
+        # Zaten kuyrukta bekleyen veya işlenen kayıtları tekrar eklemeyelim
+        existing_queued_pids = set(self.env['ai.content.queue'].search([
+            ('product_tmpl_id', 'in', self.ids),
+            ('state', 'in', ('pending', 'processing'))
+        ]).mapped('product_tmpl_id.id'))
+
+        to_create = [
+            {'product_tmpl_id': pid, 'mode': mode}
+            for pid in self.ids
+            if pid not in existing_queued_pids
+        ]
+
+        if to_create:
+            # 500'lük gruplarla batch insert yaparak veritabanını ve belleği koru
+            batch_size = 500
+            for i in range(0, len(to_create), batch_size):
+                self.env['ai.content.queue'].create(to_create[i:i + batch_size])
+
+        return len(to_create)
+
     def action_bulk_ai_generate_title(self):
-        products = self.filtered(lambda p: p.image_1920)
-        for product in products:
-            self.env['ai.content.queue'].create({
-                'product_tmpl_id': product.id,
-                'mode': 'title'
-            })
-        
+        count = self._add_to_ai_queue('title')
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
                 'title': _('Başarılı'),
-                'message': _('%s ürün için başlık üretim kuyruğa eklendi.', len(products)),
+                'message': _('%s ürün başlık üretim kuyruğuna eklendi.', count),
                 'sticky': False,
                 'type': 'success',
             }
         }
 
     def action_bulk_ai_generate_description(self):
-        products = self.filtered(lambda p: p.image_1920)
-        for product in products:
-            self.env['ai.content.queue'].create({
-                'product_tmpl_id': product.id,
-                'mode': 'description'
-            })
-            
+        count = self._add_to_ai_queue('description')
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
                 'title': _('Başarılı'),
-                'message': _('%s ürün için açıklama üretim kuyruğa eklendi.', len(products)),
+                'message': _('%s ürün açıklama üretim kuyruğuna eklendi.', count),
                 'sticky': False,
                 'type': 'success',
             }
         }
 
     def action_bulk_ai_generate_both(self):
-        products = self.filtered(lambda p: p.image_1920)
-        for product in products:
-            self.env['ai.content.queue'].create({
-                'product_tmpl_id': product.id,
-                'mode': 'both'
-            })
-            
+        count = self._add_to_ai_queue('both')
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
                 'title': _('Başarılı'),
-                'message': _('%s ürün için başlık ve açıklama üretim kuyruğa eklendi.', len(products)),
+                'message': _('%s ürün başlık ve açıklama üretim kuyruğuna eklendi.', count),
                 'sticky': False,
                 'type': 'success',
             }
