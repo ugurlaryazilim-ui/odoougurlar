@@ -108,9 +108,10 @@ function showToast(message, type = 'error') {
     }, 4000);
 }
 
-async function openReviewPopup(sessionId) {
-    // Unique lock token for this specific popup window
-    const lockToken = 'lock_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+async function openReviewPopup(initialSessionId) {
+    // Unique lock token for this specific popup window (let: sonraki session geçişinde güncellenebilir)
+    let sessionId = initialSessionId;
+    let lockToken = 'lock_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
 
     // ═══ KİLİT KONTROLÜ ═══
     const lockResult = await _jsonRpc('/ai_studio/acquire_lock', { session_id: sessionId, lock_token: lockToken });
@@ -811,24 +812,42 @@ async function openReviewPopup(sessionId) {
         try {
             const result = await _jsonRpc('/ai_studio/complete_session', payload);
 
-            // Sunucu hatası kontrolü
-            if (result && result.success === false) {
-                showToast('❌ Kaydetme hatası: ' + (result.error || 'Bilinmeyen hata'), 'error');
+            // Sunucu hatası kontrolü — hem success:false hem de error key'i kontrol et
+            if (!result || result.success === false || result.error) {
+                const errorMsg = (result && (result.error || 'Bilinmeyen hata')) || 'Sunucu yanıt vermedi';
+                showToast('❌ Kaydetme hatası: ' + errorMsg, 'error');
                 if (btn) { btn.disabled = false; btn.textContent = `✅ Tamamla ve Kaydet (${approvedItems.length} görsel)`; }
                 return;
             }
 
+            // Eski session kilidini serbest bırak
+            await _jsonRpc('/ai_studio/release_lock', { session_id: sessionId, lock_token: lockToken }).catch(() => {});
+
             // Sonraki review session var mı?
             if (data.next_session_id) {
-                // Aynı popup'ta sonraki session'ı yükle
-                currentIndex = 0;
-                const nextData = await _jsonRpc('/ai_studio/review_data', { session_id: data.next_session_id });
-                if (nextData.error || !nextData.items || nextData.items.length === 0) {
-                    showToast(`✅ ${previousSessionName} başarıyla kaydedildi! İncelenecek başka oturum yok.`, 'success');
+                // Yeni session için kilit al
+                const newLockToken = 'lock_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+                const nextLock = await _jsonRpc('/ai_studio/acquire_lock', { session_id: data.next_session_id, lock_token: newLockToken }).catch(() => null);
+                if (!nextLock || !nextLock.success) {
+                    showToast(`✅ ${previousSessionName} başarıyla kaydedildi! Sonraki oturum kilitli veya erişilemiyor.`, 'success');
                     close();
                     window.location.reload();
                     return;
                 }
+
+                // Sonraki session'ı yükle
+                currentIndex = 0;
+                const nextData = await _jsonRpc('/ai_studio/review_data', { session_id: data.next_session_id, lock_token: newLockToken });
+                if (nextData.error || !nextData.items || nextData.items.length === 0) {
+                    showToast(`✅ ${previousSessionName} başarıyla kaydedildi! İncelenecek başka oturum yok.`, 'success');
+                    await _jsonRpc('/ai_studio/release_lock', { session_id: data.next_session_id, lock_token: newLockToken }).catch(() => {});
+                    close();
+                    window.location.reload();
+                    return;
+                }
+                // Closure değişkenlerini güncelle (heartbeat & close doğru session'ı hedeflesin)
+                sessionId = data.next_session_id;
+                lockToken = newLockToken;
                 // Verileri güncelle
                 data.session_id = nextData.session_id;
                 data.session_name = nextData.session_name;
