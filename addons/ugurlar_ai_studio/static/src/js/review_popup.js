@@ -26,43 +26,84 @@ async function _jsonRpc(url, params = {}) {
 }
 
 function showToast(message, type = 'error') {
+    // Odoo 19 tarzı bildirim — sağ üst köşede, stack halinde gösterilir
+    const TOAST_TYPES = {
+        success: { icon: '✅', bg: '#d1fae5', border: '#34d399', color: '#065f46', iconBg: '#a7f3d0' },
+        error:   { icon: '⚠️', bg: '#fee2e2', border: '#f87171', color: '#991b1b', iconBg: '#fecaca' },
+        warning: { icon: '⚡', bg: '#fef3c7', border: '#fbbf24', color: '#92400e', iconBg: '#fde68a' },
+        info:    { icon: 'ℹ️', bg: '#dbeafe', border: '#60a5fa', color: '#1e40af', iconBg: '#bfdbfe' },
+    };
+    const t = TOAST_TYPES[type] || TOAST_TYPES.error;
+
+    // Container — sağ üst köşede sabit, yeni bildirimler alta eklenir
+    let container = document.getElementById('ais-toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'ais-toast-container';
+        container.style.cssText = `
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 2147483647;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: none;
+            max-width: 420px;
+            width: 100%;
+        `;
+        document.body.appendChild(container);
+    }
+
     const toast = document.createElement('div');
     toast.style.cssText = `
-        position: fixed;
-        top: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: ${type === 'error' ? '#ef4444' : '#10b981'};
-        color: white;
-        padding: 14px 20px;
-        border-radius: 8px;
-        font-size: 15px;
-        font-weight: 500;
-        box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
-        z-index: 2147483647;
         display: flex;
-        align-items: center;
-        gap: 12px;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 12px 14px;
+        background: ${t.bg};
+        border: 1px solid ${t.border};
+        border-left: 4px solid ${t.border};
+        border-radius: 6px;
+        color: ${t.color};
+        font-size: 13px;
+        font-weight: 500;
+        line-height: 1.45;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.06);
+        pointer-events: auto;
         opacity: 0;
-        transition: opacity 0.3s ease, top 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        pointer-events: none;
-        max-width: 90vw;
-        text-align: center;
+        transform: translateX(30px);
+        transition: opacity 0.25s ease, transform 0.3s cubic-bezier(0.175,0.885,0.32,1.275);
+        word-break: break-word;
     `;
     toast.innerHTML = `
-        <span style="font-size: 20px;">${type === 'error' ? '⚠️' : '✨'}</span>
-        <span>${message}</span>
+        <span style="
+            flex-shrink: 0;
+            width: 26px; height: 26px;
+            display: flex; align-items: center; justify-content: center;
+            background: ${t.iconBg};
+            border-radius: 50%;
+            font-size: 14px;
+        ">${t.icon}</span>
+        <span style="flex:1; padding-top:3px;">${message}</span>
+        <button style="
+            flex-shrink: 0;
+            background: none; border: none;
+            color: ${t.color}; opacity: 0.5;
+            cursor: pointer; font-size: 16px;
+            padding: 0 2px; line-height: 1;
+        " onclick="this.parentElement.style.opacity='0';this.parentElement.style.transform='translateX(30px)';setTimeout(()=>this.parentElement.remove(),250);">✕</button>
     `;
-    document.body.appendChild(toast);
-    
+    container.appendChild(toast);
+
     requestAnimationFrame(() => {
-        toast.style.top = '50px';
         toast.style.opacity = '1';
+        toast.style.transform = 'translateX(0)';
     });
 
     setTimeout(() => {
         toast.style.opacity = '0';
-        toast.style.top = '20px';
+        toast.style.transform = 'translateX(30px)';
         setTimeout(() => toast.remove(), 300);
     }, 4000);
 }
