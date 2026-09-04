@@ -256,7 +256,7 @@ class FalProvider(AIProviderBase):
 
         # Rate Limit / Concurrency Limit Retry Mekanizması
         import time
-        max_retries = 3
+        max_retries = 2
         backoff_factor = 4
         result = None
         for attempt in range(max_retries):
@@ -264,7 +264,7 @@ class FalProvider(AIProviderBase):
                 result = fal_client.subscribe(
                     endpoint,
                     arguments=arguments,
-                    client_timeout=300,
+                    client_timeout=180,
                 )
                 break
             except Exception as e:

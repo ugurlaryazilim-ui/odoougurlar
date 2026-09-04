@@ -16,6 +16,9 @@ from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 
+# Modül düzeyinde eşzamanlı oturum kuyruğu (Fal.ai / FASHN API kuyruk birikmesini ve timeout'ları önler)
+_AI_SESSION_SEMAPHORE = threading.Semaphore(2)
+
 
 def _convert_to_jpeg(img_data_bytes, quality=92):
     """PNG/WebP gibi büyük formatları JPEG'e çevir.
@@ -1667,23 +1670,33 @@ class AiStudioSession(models.Model):
 
     def _process_ai_thread(self, session_id, api_key, uid):
         """Thread içinde tüm generation'ları işle (wrapper)."""
-        try:
-            self._process_ai_thread_body(session_id, api_key, uid)
-        except Exception as thread_err:
-            _logger.exception("AI Thread: Beklenmeyen kritik hata olustu: %s", thread_err)
+        _logger.info("AI Thread kuyrukta bekliyor (session_id=%s)", session_id)
+        with _AI_SESSION_SEMAPHORE:
+            _logger.info("AI Thread kilit aldı, işleme başlıyor (session_id=%s)", session_id)
             try:
-                with self.pool.cursor() as cr:
-                    env = api.Environment(cr, uid, {'lang': 'tr_TR'})
-                    session = env['ai.studio.session'].browse(session_id)
-                    session.write({'state': 'failed'})
-                    cr.commit()
-                    try:
-                        session.message_post(body=_('Kritik Sistem Hatası: %s') % str(thread_err))
+                self._process_ai_thread_body(session_id, api_key, uid)
+            except Exception as thread_err:
+                _logger.exception("AI Thread: Beklenmeyen kritik hata olustu: %s", thread_err)
+                try:
+                    with self.pool.cursor() as cr:
+                        env = api.Environment(cr, uid, {'lang': 'tr_TR'})
+                        session = env['ai.studio.session'].sudo().browse(session_id)
+                        # Kalan pending/processing kayıtlarını failed yap
+                        for g in session.generation_ids.filtered(lambda x: x.state in ('pending', 'processing')):
+                            g.write({
+                                'state': 'failed',
+                                'error_message': _('Kritik sistem hatası nedeniyle işlem tamamlanamadı: %s') % str(thread_err)[:200],
+                            })
+                        has_done = any(x.state == 'done' for x in session.generation_ids)
+                        session.write({'state': 'review' if has_done else 'failed'})
                         cr.commit()
-                    except Exception as msg_err:
-                        _logger.error("AI Thread message_post hatası: %s", msg_err)
-            except Exception:
-                pass
+                        try:
+                            session.message_post(body=_('Kritik Sistem Hatası: %s') % str(thread_err))
+                            cr.commit()
+                        except Exception as msg_err:
+                            _logger.error("AI Thread message_post hatası: %s", msg_err)
+                except Exception:
+                    pass
 
     def _process_batch_ai_thread(self, session_ids, api_key, uid):
         """Toplu seçilen oturumları sırayla arka planda AI ile işler."""
@@ -2247,15 +2260,17 @@ class AiStudioSession(models.Model):
                     parsed = parse_fal_error(e)
                     _logger.error('AI üretim hatası (gen=%s): %s', gen.id, e)
                     try:
-                        gen.write({
-                            'state': 'failed',
-                            'error_message': parsed['message'][:500],
-                        })
+                        with self.pool.cursor() as err_cr:
+                            err_env = api.Environment(err_cr, uid, {'lang': 'tr_TR'})
+                            e_gen = err_env['ai.studio.generation'].browse(gen.id)
+                            e_gen.write({
+                                'state': 'failed',
+                                'error_message': parsed['message'][:500],
+                            })
+                            err_cr.commit()
                         if photo_type == 'front':
                             front_failed = True
-                        cr.commit()
                     except Exception as db_e:
-                        cr.rollback()
                         _logger.error('Uretim hatasi kaydedilemedi (gen=%s): %s', gen.id, db_e)
 
         # ═══ TÜM ÜRETİMLER TAMAMLANDI — TAZE TRANSACTION İLE STATE GÜNCELLE ═══
@@ -2265,8 +2280,9 @@ class AiStudioSession(models.Model):
                     final_env = api.Environment(final_cr, uid, {'lang': 'tr_TR'})
                     final_session = final_env['ai.studio.session'].sudo().browse(session_id)
                     
+                    has_done = any(g.state == 'done' for g in final_session.generation_ids)
                     has_failed = any(g.state == 'failed' for g in final_session.generation_ids)
-                    final_state = 'failed' if has_failed else 'review'
+                    final_state = 'review' if has_done else ('failed' if has_failed else 'processing')
                     
                     final_session.write({
                         'state': final_state,
@@ -3058,7 +3074,8 @@ class AiStudioSession(models.Model):
                     thread.daemon = True
                     thread.start()
 
-        # 2. 10 dakikadan uzun kalmış takılmış işlemleri temizle
+        # 2. 20 dakikadan uzun kalmış takılmış işlemleri temizle
+        cutoff = fields.Datetime.now() - timedelta(minutes=20)
         stuck_sessions = self.search([
             ('state', 'in', ['preprocessing', 'processing']),
             ('write_date', '<', cutoff),
@@ -3070,18 +3087,28 @@ class AiStudioSession(models.Model):
             for gen in stuck_gens:
                 gen.write({
                     'state': 'failed',
-                    'error_message': 'Zaman aşımı: 10 dakika içinde sonuç alınamadı.',
+                    'error_message': _('Zaman aşımı: 20 dakika içinde AI servisinden yanıt alınamadı.'),
                 })
 
-            # Tüm generation'lar tamamlandıysa review'a geç
-            pending = session.generation_ids.filtered(
-                lambda g: g.state in ('pending', 'processing')
+            # Terk edilmiş veya takılmış pending üretimleri de temizle
+            abandoned_gens = session.generation_ids.filtered(
+                lambda g: g.state == 'pending'
             )
-            if not pending:
-                session.write({'state': 'review'})
+            for gen in abandoned_gens:
+                gen.write({
+                    'state': 'failed',
+                    'error_message': _('Önceki işlem zaman aşımına uğradığı için bu işlem tamamlanamadı. "🔄 Kaldığı Yerden Devam Et" butonu ile tekrar deneyebilirsiniz.'),
+                })
+
+            # Oturum durumunu güncelle: en az bir görsel başarılıysa review'a al ki incelenebilsin
+            has_done = any(g.state == 'done' for g in session.generation_ids)
+            session.write({'state': 'review' if has_done else 'failed'})
+            try:
                 session.message_post(
-                    body=_('Bazı üretimler zaman aşımına uğradı. Sonuçları kontrol edin.'),
+                    body=_('Zaman aşımına uğrayan üretimler kapatıldı. "🔄 Kaldığı Yerden Devam Et" butonu ile eksik kalanları tekrar başlatabilirsiniz.'),
                 )
+            except Exception:
+                pass
 
         # 3. İnceleme (review) durumundaki oturumlarda takılmış (pending/processing) revizyonları temizle
         stuck_revisions = self.env['ai.studio.generation'].search([
