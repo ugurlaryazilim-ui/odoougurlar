@@ -1,6 +1,7 @@
 /** @odoo-module **/
 
 import { registry } from "@web/core/registry";
+import { _t } from "@web/core/l10n/translation";
 
 /**
  * AI Studio - Profesyonel İnceleme Popup'ı
@@ -146,7 +147,7 @@ async function openReviewPopup(initialSessionId) {
     }
     if (!data.items || data.items.length === 0) {
         await _jsonRpc('/ai_studio/release_lock', { session_id: sessionId, lock_token: lockToken });
-        showToast('İncelenecek görsel bulunamadı.');
+        showToast(_t('İncelenecek görsel bulunamadı.'));
         return;
     }
 
@@ -175,6 +176,24 @@ async function openReviewPopup(initialSessionId) {
     const overlay = document.createElement('div');
     overlay.className = 'ais-review-overlay';
     document.body.appendChild(overlay);
+
+    // MutationObserver: Overlay dışarıdan DOM'dan kaldırılırsa (Odoo navigation, vb.)
+    // setInterval timer'larını otomatik temizle
+    const _overlayObserver = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+            for (const removed of m.removedNodes) {
+                if (removed === overlay || (removed.contains && removed.contains(overlay))) {
+                    _overlayObserver.disconnect();
+                    if (revisionPollTimer) { clearInterval(revisionPollTimer); revisionPollTimer = null; }
+                    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+                    window.removeEventListener('beforeunload', window._aisBeforeUnload);
+                    _jsonRpc('/ai_studio/release_lock', { session_id: sessionId, lock_token: lockToken }).catch(() => {});
+                    return;
+                }
+            }
+        }
+    });
+    _overlayObserver.observe(document.body, { childList: true, subtree: true });
 
     function getPhotoTypeIcon(type) {
         switch(type) {
@@ -520,7 +539,7 @@ async function openReviewPopup(initialSessionId) {
                     if (res.error) {
                         showToast(res.error);
                     } else {
-                        showToast('Revize iptal edildi.', 'success');
+                        showToast(_t('Revize iptal edildi.'), 'success');
                     }
                     const freshData = await _jsonRpc('/ai_studio/review_data', { session_id: data.session_id });
                     if (!freshData.error && freshData.items) {
@@ -658,7 +677,7 @@ async function openReviewPopup(initialSessionId) {
         revisionPrompt = promptEl ? promptEl.value : '';
 
         if (!selectedReasonId) {
-            showToast('Lütfen bir red sebebi seçin.');
+            showToast(_t('Lütfen bir red sebebi seçin.'));
             return;
         }
 
@@ -777,9 +796,26 @@ async function openReviewPopup(initialSessionId) {
                 }
 
                 if (updated) {
-                    // Kullanıcı red modalında yazı yazıyorsa re-render'ı ertele (girdiyi ve odağı sıfırlamasın)
+                    // Hedefli DOM güncelleme: Eğer aktif tab'da değişiklik varsa
+                    // tam render gerekir, değilse sadece tab badge'lerini güncelle
                     if (!showRejectModal) {
-                        render();
+                        // Tab badge'lerini güncelle (tam render yerine)
+                        const tabs = overlay.querySelectorAll('.ais-rp-tab');
+                        let needFullRender = false;
+                        tabs.forEach((tab, idx) => {
+                            if (idx < items.length) {
+                                const it = items[idx];
+                                // Pending → Done geçişi varsa ve aktif tab ise tam render gerekli
+                                if (idx === currentIndex && !it.pending_revision) {
+                                    needFullRender = true;
+                                }
+                                // Tab class'larını güncelle
+                                tab.className = `ais-rp-tab ${idx === currentIndex ? 'active' : ''} ${it.is_approved ? 'approved' : ''} ${it.pending_revision ? 'pending' : ''} ${it.is_excluded ? 'excluded' : ''}`;
+                            }
+                        });
+                        if (needFullRender) {
+                            render();
+                        }
                     }
                 }
 
@@ -797,7 +833,7 @@ async function openReviewPopup(initialSessionId) {
     async function complete() {
         const approvedItems = items.filter(i => i.is_approved);
         if (approvedItems.length === 0) {
-            showToast('Lütfen en az bir görseli onaylayın!', 'error');
+            showToast(_t('Lütfen en az bir görseli onaylayın!'), 'error');
             return;
         }
 
@@ -885,6 +921,8 @@ async function openReviewPopup(initialSessionId) {
             clearInterval(heartbeatTimer);
             heartbeatTimer = null;
         }
+        // ═══ MutationObserver temizle ═══
+        _overlayObserver.disconnect();
         // ═══ KİLİDİ BIRAK ═══
         _jsonRpc('/ai_studio/release_lock', { session_id: sessionId, lock_token: lockToken }).catch(() => {});
         if (overlay.parentNode) overlay.parentNode.removeChild(overlay);

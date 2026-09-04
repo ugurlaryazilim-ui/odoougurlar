@@ -2,6 +2,12 @@
 
 SaaS ai-fashion-studio/services/geminiService.ts'den uyarlanmistir.
 fal.ai any-llm + vision API kullanir.
+
+PROMPT KONFİGÜRASYONU:
+    Ana analiz prompt'ı: GARMENT_ANALYSIS_PROMPT (aşağıda tanımlı)
+    Görüş açısı prompt'ları: _VIEW_PROMPT_TEMPLATES, _VIEW_NEGATIVE_PROMPTS
+    Bu constant'ları değiştirerek AI davranışını özelleştirebilirsiniz.
+    Gelecekte ir.config_parameter'a taşınabilir.
 """
 import json
 import logging

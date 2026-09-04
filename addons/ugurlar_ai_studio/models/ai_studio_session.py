@@ -917,6 +917,8 @@ class AiStudioSession(models.Model):
     def action_start_processing(self):
         """AI işlemeyi başlat."""
         self.ensure_one()
+        if not self.env.user.has_group('ugurlar_ai_studio.group_ai_studio_user'):
+            raise UserError(_('Bu işlem için AI Stüdyo kullanıcı yetkisi gereklidir.'))
         # Tamamlanmış/kaydedilmiş session'ları koruma altına al
         if self.state in ('done', 'saving'):
             raise UserError(_('Bu oturum zaten tamamlanmış. Onaylı görsellerin silinmemesi için yeniden başlatılamaz.'))
@@ -2712,6 +2714,8 @@ class AiStudioSession(models.Model):
     def action_mark_done(self):
         """Onaylanmış görselleri ürüne kaydet ve oturumu tamamla (Senkron)."""
         self.ensure_one()
+        if not self.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'):
+            raise UserError(_('Bu işlem için onaycı veya yönetici yetkisi gereklidir.'))
         approved = self.generation_ids.filtered(
             lambda g: g.is_approved and g.state == 'done' and not g.is_excluded
         )

@@ -28,7 +28,7 @@ import shutil
 import sqlite3
 import sys
 import time
-import xmlrpc.client
+import requests
 
 # ── Logging ──
 logging.basicConfig(
@@ -129,8 +129,50 @@ def compress_image(filepath):
             return base64.b64encode(f.read()).decode('ascii')
 
 
+class JsonRpcHelper:
+    def __init__(self, url, db, user, password):
+        self.url = url.rstrip('/')
+        self.db = db
+        self.user = user
+        self.password = password
+        self.session = requests.Session()
+        self.uid = None
+
+    def authenticate(self):
+        payload = {
+            'jsonrpc': '2.0',
+            'method': 'call',
+            'params': {
+                'db': self.db,
+                'login': self.user,
+                'password': self.password,
+            }
+        }
+        res = self.session.post(f'{self.url}/web/session/authenticate', json=payload).json()
+        if 'error' in res:
+            raise Exception(res['error'].get('message', 'Authentication failed'))
+        self.uid = res.get('result', {}).get('uid')
+        return self.uid
+
+    def execute_kw(self, db, uid, password, model, method, args, kwargs):
+        payload = {
+            'jsonrpc': '2.0',
+            'method': 'call',
+            'params': {
+                'model': model,
+                'method': method,
+                'args': args,
+                'kwargs': kwargs,
+            }
+        }
+        res = self.session.post(f'{self.url}/web/dataset/call_kw/{model}/{method}', json=payload).json()
+        if 'error' in res:
+            raise Exception(str(res['error']))
+        return res.get('result')
+
+
 class OdooImageSync:
-    """Odoo XML-RPC ile görsel yükleme motoru."""
+    """Odoo JSON-RPC ile görsel yükleme motoru."""
 
     def __init__(self, config):
         self.config = config
@@ -149,27 +191,26 @@ class OdooImageSync:
             _logger.warning("Odoo bağlantısı başarısız, tekrar denenecek: %s", e)
 
     def _connect(self):
-        """Odoo'ya XML-RPC ile bağlanıp ORM sarmalayıcısını (OdooEnv) kurar."""
+        """Odoo'ya JSON-RPC ile bağlanıp ORM sarmalayıcısını (OdooEnv) kurar."""
         url = self.config['odoo_url'].rstrip('/')
         db = self.config['odoo_db']
         user = self.config['odoo_user']
         password = self.config['odoo_password']
 
-        _logger.info("Odoo'ya bağlanılıyor: %s (DB: %s) [XML-RPC ORM üzerinden]", url, db)
+        _logger.info("Odoo'ya bağlanılıyor: %s (DB: %s) [JSON-RPC ORM üzerinden]", url, db)
 
-        import xmlrpc.client
         from odoo_orm import OdooEnv
 
-        common = xmlrpc.client.ServerProxy(f'{url}/xmlrpc/2/common')
-        uid = common.authenticate(db, user, password, {})
+        self.json_rpc = JsonRpcHelper(url, db, user, password)
+        uid = self.json_rpc.authenticate()
 
         if not uid:
             raise Exception("Odoo bağlantısı başarısız! Kullanıcı adı/şifre kontrol edin.")
 
-        models = xmlrpc.client.ServerProxy(f'{url}/xmlrpc/2/object')
+        self.models = self.json_rpc
         
         # OdooEnv sarmalayıcısı ile ORM deneyimi
-        self.env = OdooEnv(models.execute_kw, db, uid, password)
+        self.env = OdooEnv(self.models.execute_kw, db, uid, password)
         self.uid = uid
 
         _logger.info("Odoo bağlantısı başarılı. UID: %d", self.uid)
@@ -193,7 +234,7 @@ class OdooImageSync:
         self._sync_odoo_settings()
 
     def _execute(self, model, method, *args, **kwargs):
-        """Odoo XML-RPC execute_kw wrapper."""
+        """Odoo JSON-RPC execute_kw wrapper."""
         return self.models.execute_kw(
             self.config['odoo_db'],
             self.uid,
