@@ -1,6 +1,43 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <data>
+        <record id="view_ai_content_log_search" model="ir.ui.view">
+            <field name="name">ai.content.log.search</field>
+            <field name="model">ai.content.log</field>
+            <field name="arch" type="xml">
+                <search string="İçerik Geçmişi Arama ve Filtreleme">
+                    <field name="product_tmpl_id" string="Ürün"/>
+                    <field name="generated_title" string="Üretilen Başlık"/>
+                    <field name="provider" string="AI Sağlayıcı"/>
+                    <field name="model_name" string="Model"/>
+
+                    <!-- Hızlı Filtreler -->
+                    <filter string="Uygulandı" name="filter_applied" domain="[('applied', '=', True)]"/>
+                    <filter string="Uygulanmadı" name="filter_not_applied" domain="[('applied', '=', False)]"/>
+
+                    <separator/>
+                    <filter string="Yüksek Skor (%90+)" name="filter_high_score" domain="[('title_score', '&gt;=', 90)]"/>
+                    <filter string="Görsel Analiz Kullanıldı" name="filter_used_vision" domain="[('used_vision', '=', True)]"/>
+
+                    <separator/>
+                    <filter string="Google Gemini" name="filter_gemini" domain="[('provider', '=', 'gemini')]"/>
+                    <filter string="OpenAI" name="filter_openai" domain="[('provider', '=', 'openai')]"/>
+
+                    <separator/>
+                    <filter string="Bugün" name="filter_today" domain="[('create_date', '&gt;=', context_today().strftime('%Y-%m-%d 00:00:00'))]"/>
+
+                    <!-- Gruplama Seçenekleri -->
+                    <group expand="0" string="Grupla">
+                        <filter string="AI Sağlayıcı" name="group_by_provider" context="{'group_by': 'provider'}"/>
+                        <filter string="Model" name="group_by_model" context="{'group_by': 'model_name'}"/>
+                        <filter string="Üretim Modu" name="group_by_mode" context="{'group_by': 'mode'}"/>
+                        <filter string="Uygulandı" name="group_by_applied" context="{'group_by': 'applied'}"/>
+                        <filter string="Oluşturulma Tarihi" name="group_by_date" context="{'group_by': 'create_date:day'}"/>
+                    </group>
+                </search>
+            </field>
+        </record>
+
         <record id="view_ai_content_log_list" model="ir.ui.view">
             <field name="name">ai.content.log.list</field>
             <field name="model">ai.content.log</field>
@@ -74,6 +111,7 @@
             <field name="name">AI İçerik Geçmişi</field>
             <field name="res_model">ai.content.log</field>
             <field name="view_mode">list,form</field>
+            <field name="search_view_id" ref="view_ai_content_log_search"/>
         </record>
 
         <menuitem id="menu_ai_content_root" name="AI İçerik"/>

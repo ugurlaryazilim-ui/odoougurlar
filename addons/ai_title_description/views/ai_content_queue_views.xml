@@ -1,6 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <data>
+        <record id="view_ai_content_queue_search" model="ir.ui.view">
+            <field name="name">ai.content.queue.search</field>
+            <field name="model">ai.content.queue</field>
+            <field name="arch" type="xml">
+                <search string="Kuyruk Arama ve Filtreleme">
+                    <field name="product_tmpl_id" string="Ürün"/>
+                    <field name="mode" string="Mod"/>
+                    <field name="state" string="Durum"/>
+
+                    <!-- Durum Hızlı Filtreleri -->
+                    <filter string="Bekliyor" name="filter_pending" domain="[('state', '=', 'pending')]"/>
+                    <filter string="İşleniyor" name="filter_processing" domain="[('state', '=', 'processing')]"/>
+                    <filter string="Tamamlandı" name="filter_done" domain="[('state', '=', 'done')]"/>
+                    <filter string="Hata Alındı" name="filter_error" domain="[('state', '=', 'error')]"/>
+
+                    <separator/>
+                    <!-- Mod Hızlı Filtreleri -->
+                    <filter string="Başlık + Açıklama" name="filter_mode_both" domain="[('mode', '=', 'both')]"/>
+                    <filter string="Sadece Başlık" name="filter_mode_title" domain="[('mode', '=', 'title')]"/>
+                    <filter string="Sadece Açıklama" name="filter_mode_description" domain="[('mode', '=', 'description')]"/>
+
+                    <separator/>
+                    <filter string="Bugün" name="filter_today" domain="[('create_date', '&gt;=', context_today().strftime('%Y-%m-%d 00:00:00'))]"/>
+
+                    <!-- Gruplama Seçenekleri -->
+                    <group expand="0" string="Grupla">
+                        <filter string="Durum" name="group_by_state" context="{'group_by': 'state'}"/>
+                        <filter string="Mod" name="group_by_mode" context="{'group_by': 'mode'}"/>
+                        <filter string="Oluşturulma Tarihi" name="group_by_create_date" context="{'group_by': 'create_date:day'}"/>
+                    </group>
+                </search>
+            </field>
+        </record>
+
         <record id="view_ai_content_queue_list" model="ir.ui.view">
             <field name="name">ai.content.queue.list</field>
             <field name="model">ai.content.queue</field>
@@ -53,6 +87,8 @@
             <field name="name">AI Üretim Kuyruğu</field>
             <field name="res_model">ai.content.queue</field>
             <field name="view_mode">list,form</field>
+            <field name="search_view_id" ref="view_ai_content_queue_search"/>
+            <field name="context">{}</field>
         </record>
 
         <menuitem id="menu_ai_content_queue" name="Kuyruk" parent="menu_ai_content_root" action="action_ai_content_queue"/>
