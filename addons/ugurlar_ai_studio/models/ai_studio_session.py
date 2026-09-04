@@ -3196,7 +3196,9 @@ Lütfen bu ürün için SEO'ya uygun, ikna edici ve çarpıcı 1 paragraflık bi
 
         # Base64 decode string for JSON
         import base64
-        image_data = primary_gen.generated_image.decode('utf-8')
+        image_data = primary_gen.generated_image
+        if isinstance(image_data, bytes):
+            image_data = image_data.decode('utf-8')
 
         payload = {
             "contents": [{
