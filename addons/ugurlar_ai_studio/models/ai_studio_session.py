@@ -914,6 +914,138 @@ class AiStudioSession(models.Model):
             },
         }
 
+    # ═══════════════════════════════════════════════════════════════════
+    # DRY HELPER METODLARI — _process_ai_thread_body ve
+    # _retry_generation_thread_body tarafından ortak kullanılır
+    # ═══════════════════════════════════════════════════════════════════
+
+    def _prepare_garment_for_tryon(self, source_image, provider, session, auto_bg=True):
+        """Kaynak görseli AI try-on için hazırla: preprocess → bg_remove → hanger_remove → upload.
+
+        Returns:
+            tuple: (garment_url, processed_b64) — CDN URL ve işlenmiş base64
+        """
+        from ..services.garment_preprocessor import (
+            preprocess_garment_image,
+            convert_birefnet_output_to_rgb,
+        )
+        preprocessed = preprocess_garment_image(source_image, target_long_edge=1200)
+        processed_b64 = preprocessed['image_base64']
+
+        if auto_bg and processed_b64:
+            try:
+                bg_removed_b64 = provider.remove_background(processed_b64)
+                try:
+                    bg_removed_data = base64.b64decode(bg_removed_b64)
+                    rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
+                    rgb_b64 = base64.b64encode(rgb_data)
+                except Exception:
+                    rgb_b64 = bg_removed_b64
+                cleaned_b64 = session._remove_hanger_hook(rgb_b64)
+                garment_url = provider.upload_image(cleaned_b64)
+            except Exception as e:
+                _logger.warning('BG remove başarısız, orijinal kullanılacak: %s', e)
+                garment_url = provider.upload_image(processed_b64)
+        else:
+            garment_url = provider.upload_image(processed_b64)
+
+        return garment_url, processed_b64
+
+    def _process_detail_generation(self, gen, session, provider, source_image, auto_bg, provider_type, preset):
+        """Detay fotoğrafı generation'ını işle (crop veya BG remove).
+
+        Returns:
+            base64: Detay görseli base64 verisi
+        """
+        from ..services.garment_preprocessor import (
+            preprocess_garment_image,
+            convert_birefnet_output_to_rgb,
+        )
+        garment_cat = session._detect_garment_type()
+        _logger.info('DETAY TİP TESPİT: ürün=%s → algılanan=%s (preset=%s)',
+                     session.product_id.display_name, garment_cat,
+                     preset.garment_type if preset else 'yok')
+
+        preprocessed = preprocess_garment_image(source_image, target_long_edge=1200)
+        processed_b64 = preprocessed['image_base64']
+
+        # Ayakkabı/Çanta/Aksesuar → doğrudan ürün fotoğrafından kırp
+        if garment_cat in ('shoes', 'bags', 'accessories'):
+            if auto_bg and processed_b64:
+                try:
+                    bg_removed_b64 = provider.remove_background(processed_b64)
+                    try:
+                        bg_removed_data = base64.b64decode(bg_removed_b64)
+                        rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
+                        clean_b64 = base64.b64encode(rgb_data)
+                    except Exception:
+                        clean_b64 = bg_removed_b64
+                except Exception:
+                    clean_b64 = processed_b64
+            else:
+                clean_b64 = processed_b64
+            return session._crop_image_detail(clean_b64, category=garment_cat)
+
+        # Üst/Alt/Tek Parça → manken try-on sonucundan kırp
+        target_type = 'front'
+        if gen.source_photo_id and gen.source_photo_id.photo_type == 'detail':
+            if gen.source_photo_id.detail_placement == 'back':
+                target_type = 'back'
+
+        target_gen = session.generation_ids.filtered(
+            lambda g: g.photo_type == target_type and g.state == 'done' and g.generated_image
+        )
+        if not target_gen and target_type == 'back':
+            target_gen = session.generation_ids.filtered(
+                lambda g: g.photo_type == 'front' and g.state == 'done' and g.generated_image
+            )
+
+        if target_gen:
+            return session._crop_image_detail(
+                target_gen[0].generated_image,
+                category=garment_cat
+            )
+
+        # Fallback: BG remove
+        if auto_bg and processed_b64:
+            try:
+                bg_removed_b64 = provider.remove_background(processed_b64)
+                try:
+                    bg_removed_data = base64.b64decode(bg_removed_b64)
+                    rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
+                    return base64.b64encode(rgb_data)
+                except Exception:
+                    return bg_removed_b64
+            except Exception:
+                pass
+        return processed_b64
+
+    def _download_tryon_result(self, tryon_result):
+        """Try-on API sonucunu indir ve JPEG'e dönüştür.
+
+        Returns:
+            tuple: (gen_b64, gen_seed) veya (None, None) başarısızsa
+        """
+        import requests as req_lib
+        output_url = tryon_result.get('image_url', '')
+        if not output_url:
+            image_urls = tryon_result.get('image_urls', [])
+            output_url = image_urls[0] if image_urls else ''
+
+        if not output_url:
+            return None, None
+
+        if output_url.startswith('data:'):
+            raw = output_url.split(';base64,', 1)[1]
+            img_data = base64.b64decode(raw)
+        else:
+            img_data = req_lib.get(output_url, timeout=60).content
+
+        img_data = _convert_to_jpeg(img_data)
+        gen_b64 = base64.b64encode(img_data)
+        gen_seed = tryon_result.get('seed') or False
+        return gen_b64, gen_seed
+
     def action_start_processing(self):
         """AI işlemeyi başlat."""
         self.ensure_one()
@@ -1819,23 +1951,10 @@ class AiStudioSession(models.Model):
                             detail_urls.append(dp_url)
                         except Exception:
                             pass
-                    # Arka plan kaldırma ve askı temizleme
-                    if auto_bg and processed_b64:
-                        try:
-                            bg_removed_b64 = provider.remove_background(processed_b64)
-                            try:
-                                bg_removed_data = base64.b64decode(bg_removed_b64)
-                                rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
-                                rgb_b64 = base64.b64encode(rgb_data)
-                            except Exception:
-                                rgb_b64 = bg_removed_b64
-                            cleaned_b64 = session._remove_hanger_hook(rgb_b64)
-                            garment_url = provider.upload_image(cleaned_b64)
-                        except Exception as e:
-                            _logger.warning('Main BG remove başarısız: %s', e)
-                            garment_url = provider.upload_image(processed_b64)
-                    else:
-                        garment_url = provider.upload_image(processed_b64)
+                    # Arka plan kaldırma ve askı temizleme (DRY helper)
+                    garment_url, _ = self._prepare_garment_for_tryon(
+                        source_image, provider, session, auto_bg=auto_bg
+                    )
 
                     # Seedream v5 Pro — region-precise editing, kiafet sadakati icin
                     tryon_model = 'seedream/v5/pro/edit' if provider_type == 'fal' else 'tryon-v1.6'
@@ -1921,23 +2040,10 @@ class AiStudioSession(models.Model):
 
                     elapsed = time.time() - start_time
 
-                    # SONUCU İNDİR
-                    import requests as req_lib
-                    output_url = tryon_result.get('image_url', '')
-                    if not output_url:
-                        image_urls = tryon_result.get('image_urls', [])
-                        output_url = image_urls[0] if image_urls else ''
+                    # SONUCU İNDİR (DRY helper)
+                    gen_b64, gen_seed = self._download_tryon_result(tryon_result)
 
-                    if output_url:
-                        if output_url.startswith('data:'):
-                            raw = output_url.split(';base64,', 1)[1]
-                            img_data = base64.b64decode(raw)
-                        else:
-                            img_data = req_lib.get(output_url, timeout=60).content
-
-                        img_data = _convert_to_jpeg(img_data)
-                        gen_b64 = base64.b64encode(img_data)
-                        gen_seed = tryon_result.get('seed') or False
+                    if gen_b64:
                         
                         gen.write({
                             'generated_image': gen_b64,
@@ -2302,116 +2408,31 @@ class AiStudioSession(models.Model):
                 source_image = gen.original_image or (gen.source_photo_id and gen.source_photo_id.image_original)
                 preset = session.model_preset_id
 
-                # ═══ DETAY İŞLEMİ ═══
+                # ═══ DETAY İŞLEMİ (DRY helper) ═══
                 if photo_type == 'detail':
-                    garment_cat = session._detect_garment_type()
-                    _logger.info('DETAY TİP TESPİT (retry): ürün=%s → algılanan=%s (preset=%s)',
-                                 session.product_id.display_name, garment_cat,
-                                 preset.garment_type if preset else 'yok')
-                    
-                    from ..services.garment_preprocessor import (
-                        preprocess_garment_image,
-                        convert_birefnet_output_to_rgb,
-                    )
-                    preprocessed = preprocess_garment_image(source_image, target_long_edge=1200)
-                    processed_b64 = preprocessed['image_base64']
-                    
                     auto_bg = env['ir.config_parameter'].sudo().get_param(
                         'ugurlar_ai_studio.auto_bg_remove', 'True'
                     ) == 'True'
-                    
-                    # Ayakkabı/Çanta/Aksesuar → doğrudan ürün fotoğrafından kırp
-                    if garment_cat in ('shoes', 'bags', 'accessories'):
-                        if auto_bg and processed_b64:
-                            try:
-                                bg_removed_b64 = provider.remove_background(processed_b64)
-                                try:
-                                    bg_removed_data = base64.b64decode(bg_removed_b64)
-                                    rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
-                                    clean_b64 = base64.b64encode(rgb_data)
-                                except Exception:
-                                    clean_b64 = bg_removed_b64
-                            except Exception:
-                                clean_b64 = processed_b64
-                        else:
-                            clean_b64 = processed_b64
-                        detail_b64 = session._crop_image_detail(clean_b64, category=garment_cat)
-                        crop_source = 'product-detail-crop'
-                    else:
-                        # Üst/Alt/Tek Parça → manken try-on sonucundan kırp
-                        target_type = 'front'
-                        if gen.source_photo_id and gen.source_photo_id.photo_type == 'detail':
-                            if gen.source_photo_id.detail_placement == 'back':
-                                target_type = 'back'
-
-                        target_gen = session.generation_ids.filtered(
-                            lambda g: g.photo_type == target_type and g.state == 'done' and g.generated_image
-                        )
-                        if not target_gen and target_type == 'back':
-                            target_gen = session.generation_ids.filtered(
-                                lambda g: g.photo_type == 'front' and g.state == 'done' and g.generated_image
-                            )
-
-                        if target_gen:
-                            detail_b64 = session._crop_image_detail(
-                                target_gen[0].generated_image,
-                                category=garment_cat
-                            )
-                            crop_source = 'detail-crop'
-                        else:
-                            # Fallback: BG remove
-                            if auto_bg and processed_b64:
-                                try:
-                                    bg_removed_b64 = provider.remove_background(processed_b64)
-                                    try:
-                                        bg_removed_data = base64.b64decode(bg_removed_b64)
-                                        rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
-                                        detail_b64 = base64.b64encode(rgb_data)
-                                    except Exception:
-                                        detail_b64 = bg_removed_b64
-                                except Exception:
-                                    detail_b64 = processed_b64
-                            else:
-                                detail_b64 = processed_b64
-                            crop_source = '%s/bg-remove-detail' % provider_type
-
+                    detail_b64 = self._process_detail_generation(
+                        gen, session, provider, source_image, auto_bg, provider_type, preset
+                    )
                     gen.write({
                         'generated_image': detail_b64,
                         'state': 'done',
-                        'fal_endpoint': crop_source,
+                        'fal_endpoint': 'detail-crop',
                         'error_message': False,
                     })
                     cr.commit()
                     return
 
-                # ═══ TRY-ON RETRY İŞLEMİ ═══
+                # ═══ TRY-ON RETRY İŞLEMİ (DRY helper) ═══
                 auto_bg = env['ir.config_parameter'].sudo().get_param(
                     'ugurlar_ai_studio.auto_bg_remove', 'True'
                 ) == 'True'
 
-                from ..services.garment_preprocessor import (
-                    preprocess_garment_image,
-                    convert_birefnet_output_to_rgb,
+                garment_url, processed_b64 = self._prepare_garment_for_tryon(
+                    source_image, provider, session, auto_bg=auto_bg
                 )
-                preprocessed = preprocess_garment_image(source_image, target_long_edge=1200)
-                processed_b64 = preprocessed['image_base64']
-
-                if auto_bg and processed_b64:
-                    try:
-                        bg_removed_b64 = provider.remove_background(processed_b64)
-                        try:
-                            bg_removed_data = base64.b64decode(bg_removed_b64)
-                            rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
-                            rgb_b64 = base64.b64encode(rgb_data)
-                        except Exception:
-                            rgb_b64 = bg_removed_b64
-                        cleaned_b64 = session._remove_hanger_hook(rgb_b64)
-                        garment_url = provider.upload_image(cleaned_b64)
-                    except Exception as e:
-                        _logger.warning('Retry BG remove başarısız: %s', e)
-                        garment_url = provider.upload_image(processed_b64)
-                else:
-                    garment_url = provider.upload_image(processed_b64)
 
                 model_image_field = 'model_image_front'
                 if photo_type == 'back':
@@ -2545,25 +2566,10 @@ class AiStudioSession(models.Model):
                     seed=front_seed,
                 )
 
-                output_url = ''
-                if tryon_result and isinstance(tryon_result, dict):
-                    output_url = tryon_result.get('image_url', '')
-                    if not output_url:
-                        image_urls = tryon_result.get('image_urls', [])
-                        output_url = image_urls[0] if image_urls else ''
+                # ═══ SONUCU İNDİR (DRY helper) ═══
+                gen_b64, gen_seed = self._download_tryon_result(tryon_result or {})
 
-                if output_url:
-                    if output_url.startswith('data:'):
-                        raw_b64 = output_url.split(';base64,', 1)[1]
-                        img_data = base64.b64decode(raw_b64)
-                    else:
-                        import requests
-                        img_data = requests.get(output_url, timeout=60).content
-
-                    img_data = _convert_to_jpeg(img_data)
-                    gen_b64 = base64.b64encode(img_data)
-                    gen_seed = tryon_result.get('seed') or False
-                    
+                if gen_b64:
                     gen_vals = {
                         'generated_image': gen_b64,
                         'state': 'done',
