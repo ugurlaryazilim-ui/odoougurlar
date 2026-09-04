@@ -232,24 +232,16 @@ class AiStudioGeneration(models.Model):
                 )
         return True
 
-    @api.onchange('revision_prompt')
-    def _onchange_revision_prompt(self):
-        """Türkçe revizyon metnini İngilizce'ye çevir.
-        
-        Öncelik: deep-translator (ücretsiz Google Translate)
-        Fallback: Gemini Flash API
-        """
-        if not self.revision_prompt or not self.revision_prompt.strip():
-            self.revision_prompt_en = ''
-            return
+    def _translate_prompt(self, prompt_text):
+        if not prompt_text or not prompt_text.strip():
+            return ''
         
         # ═══ YÖNTEM 1: deep-translator (ÜCRETSİZ) ═══
         try:
             from deep_translator import GoogleTranslator
-            translated = GoogleTranslator(source='tr', target='en').translate(self.revision_prompt)
+            translated = GoogleTranslator(source='tr', target='en').translate(prompt_text)
             if translated:
-                self.revision_prompt_en = translated
-                return
+                return translated
         except ImportError:
             pass  # deep-translator kurulu değil, Gemini fallback
         except Exception:
@@ -261,15 +253,14 @@ class AiStudioGeneration(models.Model):
                 'ugurlar_ai_studio.gemini_api_key', ''
             )
             if not gemini_key:
-                self.revision_prompt_en = self.revision_prompt
-                return
+                return prompt_text
             
             import requests as _req
             prompt = (
                 "Translate this fashion image editing instruction to clear, precise English. "
                 "Context: This is an edit request for a fashion e-commerce photo. "
                 "Return ONLY the English translation, nothing else.\n\n"
-                f"Turkish instruction: {self.revision_prompt}"
+                f"Turkish instruction: {prompt_text}"
             )
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
             resp = _req.post(url, json={
@@ -282,12 +273,28 @@ class AiStudioGeneration(models.Model):
                 if candidates:
                     en_text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '').strip()
                     if en_text:
-                        self.revision_prompt_en = en_text
-                        return
+                        return en_text
             
-            self.revision_prompt_en = self.revision_prompt
+            return prompt_text
         except Exception:
-            self.revision_prompt_en = self.revision_prompt
+            return prompt_text
+
+    @api.onchange('revision_prompt')
+    def _onchange_revision_prompt(self):
+        """Türkçe revizyon metnini İngilizce'ye çevir."""
+        self.revision_prompt_en = self._translate_prompt(self.revision_prompt)
+
+    def write(self, vals):
+        if 'revision_prompt' in vals and vals.get('revision_prompt') and 'revision_prompt_en' not in vals:
+            vals['revision_prompt_en'] = self._translate_prompt(vals['revision_prompt'])
+        return super().write(vals)
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        for vals in vals_list:
+            if vals.get('revision_prompt') and not vals.get('revision_prompt_en'):
+                vals['revision_prompt_en'] = self._translate_prompt(vals['revision_prompt'])
+        return super().create(vals_list)
 
     def action_reject(self):
         """Red dialog'u aç — revize için."""
@@ -642,7 +649,7 @@ class AiStudioGeneration(models.Model):
         for gen_id in gen_ids:
             try:
                 with self.pool.cursor() as cr:
-                    env = api.Environment(cr, uid, {})
+                    env = api.Environment(cr, uid, {'lang': 'tr_TR'})
                     gen = env['ai.studio.generation'].browse(gen_id)
                     if not gen.exists() or gen.state != 'pending':
                         continue
@@ -656,7 +663,7 @@ class AiStudioGeneration(models.Model):
                 _logger.error("Toplu tekrar deneme hatası (gen=%s): %s", gen_id, e)
                 try:
                     with self.pool.cursor() as cr:
-                        env = api.Environment(cr, uid, {})
+                        env = api.Environment(cr, uid, {'lang': 'tr_TR'})
                         gen = env['ai.studio.generation'].browse(gen_id)
                         if gen.exists() and gen.state == 'pending':
                             gen.write({
@@ -775,33 +782,25 @@ class AiStudioGeneration(models.Model):
         for gen_id, photo_id in rows:
             try:
                 # ir_attachment kaydını SQL ile kopyala (binary Python'a hiç yüklenmez)
-                cr.execute("""
-                    INSERT INTO ir_attachment (
-                        name, res_model, res_field, res_id, type,
-                        db_datas, store_fname, file_size, checksum, mimetype,
-                        create_uid, create_date, write_uid, write_date
-                    )
-                    SELECT
-                        'original_image',
-                        'ai.studio.generation',
-                        'original_image',
-                        %s,
-                        a.type,
-                        a.db_datas,
-                        a.store_fname,
-                        a.file_size,
-                        a.checksum,
-                        a.mimetype,
-                        a.create_uid,
-                        NOW() AT TIME ZONE 'UTC',
-                        a.write_uid,
-                        NOW() AT TIME ZONE 'UTC'
-                    FROM ir_attachment a
-                    WHERE a.res_model = 'ai.studio.photo'
-                      AND a.res_field = 'image_original'
-                      AND a.res_id = %s
-                    LIMIT 1
-                """, (gen_id, photo_id))
+                source_attachment = self.env['ir.attachment'].sudo().search([
+                    ('res_model', '=', 'ai.studio.photo'),
+                    ('res_field', '=', 'image_original'),
+                    ('res_id', '=', photo_id)
+                ], limit=1)
+                
+                if source_attachment:
+                    self.env['ir.attachment'].sudo().create({
+                        'name': 'original_image',
+                        'res_model': 'ai.studio.generation',
+                        'res_field': 'original_image',
+                        'res_id': gen_id,
+                        'type': source_attachment.type,
+                        'db_datas': source_attachment.db_datas,
+                        'store_fname': source_attachment.store_fname,
+                        'file_size': source_attachment.file_size,
+                        'checksum': source_attachment.checksum,
+                        'mimetype': source_attachment.mimetype,
+                    })
                 cr.commit()
                 recovered += 1
                 if recovered % 10 == 0:

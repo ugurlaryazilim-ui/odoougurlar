@@ -5,6 +5,7 @@
 
 import base64
 import logging
+import time
 
 from .ai_provider_base import AIProviderBase
 

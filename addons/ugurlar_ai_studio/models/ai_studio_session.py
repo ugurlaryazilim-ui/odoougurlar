@@ -5,6 +5,11 @@ import time
 import json
 import uuid
 import io
+import os
+import random
+import requests
+from datetime import timedelta
+from PIL import Image, ImageDraw, Image as PILImage
 
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
@@ -146,13 +151,20 @@ class AiStudioSession(models.Model):
         compute='_compute_attributes', store=True
     )
 
+    # Attribute isim eşleştirme sabitleri (gelecekte ir.config_parameter'a taşınabilir)
+    ATTR_COLOR_NAMES = {'renk', 'color', 'colour'}
+    ATTR_SIZE_NAMES = {'beden', 'size', 'numara', 'boyut'}
+    ATTR_BRAND_NAMES = {'marka', 'brand'}
+    ATTR_SEASON_NAMES = {'sezon', 'sezon/yıl', 'season'}
+    ATTR_GENDER_NAMES = {'cinsiyet', 'gender'}
+
     @api.depends('product_id', 'product_id.product_template_attribute_value_ids', 'product_id.product_tmpl_id.attribute_line_ids')
     def _compute_attributes(self):
-        color_attrs = {'renk', 'color'}
-        size_attrs = {'beden', 'size', 'numara'}
-        brand_attrs = {'marka', 'brand'}
-        season_attrs = {'sezon', 'sezon/yıl', 'season'}
-        gender_attrs = {'cinsiyet', 'gender'}
+        color_attrs = self.ATTR_COLOR_NAMES
+        size_attrs = self.ATTR_SIZE_NAMES
+        brand_attrs = self.ATTR_BRAND_NAMES
+        season_attrs = self.ATTR_SEASON_NAMES
+        gender_attrs = self.ATTR_GENDER_NAMES
 
         for session in self:
             c_ids, s_ids, b_ids, se_ids, g_ids = [], [], [], [], []
@@ -878,13 +890,15 @@ class AiStudioSession(models.Model):
             body=_('🔄 Kaldığı yerden devam ediliyor: %d başarısız/bekleyen üretim yeniden kuyruğa alındı.') % len(retryable),
         )
 
-        # Thread'i tekrar başlat
-        thread = threading.Thread(
-            target=self._process_ai_thread,
-            args=(self.id, api_key, self.env.uid),
-        )
-        thread.daemon = True
-        thread.start()
+        # Thread'i transaction commit'inden sonra başlat (race condition'ı önler)
+        def _start_thread():
+            thread = threading.Thread(
+                target=self._process_ai_thread,
+                args=(self.id, api_key, self.env.uid),
+            )
+            thread.daemon = True
+            thread.start()
+        self.env.cr.postcommit.add(_start_thread)
 
         return {
             'type': 'ir.actions.client',
@@ -1001,13 +1015,15 @@ class AiStudioSession(models.Model):
                 concurrent_limit, active_processing,
             )
 
-        # Arka planda AI işlemeyi başlat
-        thread = threading.Thread(
-            target=self._process_ai_thread,
-            args=(self.id, api_key, self.env.uid),
-        )
-        thread.daemon = True
-        thread.start()
+        # Arka planda AI işlemeyi başlat (commit sonrası)
+        def _start_thread():
+            thread = threading.Thread(
+                target=self._process_ai_thread,
+                args=(self.id, api_key, self.env.uid),
+            )
+            thread.daemon = True
+            thread.start()
+        self.env.cr.postcommit.add(_start_thread)
 
         return {
             'type': 'ir.actions.client',
@@ -1497,7 +1513,7 @@ class AiStudioSession(models.Model):
             _logger.exception("AI Thread: Beklenmeyen kritik hata olustu: %s", thread_err)
             try:
                 with self.pool.cursor() as cr:
-                    env = api.Environment(cr, uid, {})
+                    env = api.Environment(cr, uid, {'lang': 'tr_TR'})
                     session = env['ai.studio.session'].browse(session_id)
                     session.write({'state': 'failed'})
                     cr.commit()
@@ -1512,7 +1528,6 @@ class AiStudioSession(models.Model):
     def _process_batch_ai_thread(self, session_ids, api_key, uid):
         """Toplu seçilen oturumları sırayla arka planda AI ile işler."""
         _logger.info("Toplu AI İşleme Thread başlatıldı. Toplam oturum sayısı: %d", len(session_ids))
-        time.sleep(2.0)  # Ana veritabanı işleminin Postgres'e tamamen commit edilmesini bekle
         for session_id in session_ids:
             try:
                 self._process_ai_thread_body(session_id, api_key, uid)
@@ -1520,7 +1535,7 @@ class AiStudioSession(models.Model):
                 _logger.error("Toplu AI işleme hatası (session_id=%s): %s", session_id, e, exc_info=True)
                 try:
                     with self.pool.cursor() as cr:
-                        env = api.Environment(cr, uid, {})
+                        env = api.Environment(cr, uid, {'lang': 'tr_TR'})
                         sess = env['ai.studio.session'].browse(session_id)
                         sess.write({'state': 'failed'})
                         cr.commit()
@@ -1531,9 +1546,8 @@ class AiStudioSession(models.Model):
     def _process_ai_thread_body(self, session_id, api_key, uid):
         """Thread içinde tüm generation'ları işle (body)."""
         _logger.info("AI Thread starting for session %s with uid %s", session_id, uid)
-        time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
         with self.pool.cursor() as cr:
-            env = api.Environment(cr, uid, {})
+            env = api.Environment(cr, uid, {'lang': 'tr_TR'})
             provider_type = env['ir.config_parameter'].sudo().get_param(
                 'ugurlar_ai_studio.default_provider', 'fashn'
             )
@@ -1549,7 +1563,7 @@ class AiStudioSession(models.Model):
         except ImportError as ie:
             _logger.error('AI provider kurulu degil: %s', ie)
             with self.pool.cursor() as cr:
-                env = api.Environment(cr, uid, {})
+                env = api.Environment(cr, uid, {'lang': 'tr_TR'})
                 session = env['ai.studio.session'].browse(session_id)
                 session.write({'state': 'draft'})
                 session.message_post(
@@ -1558,7 +1572,7 @@ class AiStudioSession(models.Model):
             return
 
         with self.pool.cursor() as cr:
-            env = api.Environment(cr, uid, {})
+            env = api.Environment(cr, uid, {'lang': 'tr_TR'})
             session = env['ai.studio.session'].browse(session_id)
             for attempt in range(3):
                 try:
@@ -2149,12 +2163,14 @@ class AiStudioSession(models.Model):
         if not api_key:
             raise UserError(_('AI API anahtarı ayarlanmamış.'))
 
-        thread = threading.Thread(
-            target=self._retry_generation_thread,
-            args=(self.id, generation.id, api_key, self.env.uid),
-        )
-        thread.daemon = True
-        thread.start()
+        def _start_retry_thread():
+            thread = threading.Thread(
+                target=self._retry_generation_thread,
+                args=(self.id, generation.id, api_key, self.env.uid),
+            )
+            thread.daemon = True
+            thread.start()
+        self.env.cr.postcommit.add(_start_retry_thread)
 
     def _retry_generation_thread(self, session_id, gen_id, api_key, uid):
         """Tek generation retry thread'i (wrapper)."""
@@ -2164,7 +2180,7 @@ class AiStudioSession(models.Model):
             _logger.exception("AI Retry Thread: Beklenmeyen kritik hata olustu: %s", thread_err)
             try:
                 with self.pool.cursor() as cr:
-                    env = api.Environment(cr, uid, {})
+                    env = api.Environment(cr, uid, {'lang': 'tr_TR'})
                     gen = env['ai.studio.generation'].browse(gen_id)
                     gen.write({
                         'state': 'failed',
@@ -2177,9 +2193,8 @@ class AiStudioSession(models.Model):
     def _retry_generation_thread_body(self, session_id, gen_id, api_key, uid):
         """Tek generation retry thread'i (body)."""
         _logger.info("AI Retry Thread starting for session %s, gen %s with uid %s", session_id, gen_id, uid)
-        time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
         with self.pool.cursor() as cr:
-            env = api.Environment(cr, uid, {})
+            env = api.Environment(cr, uid, {'lang': 'tr_TR'})
             provider_type = env['ir.config_parameter'].sudo().get_param(
                 'ugurlar_ai_studio.default_provider', 'fashn'
             )
@@ -3054,12 +3069,14 @@ class AiStudioSession(models.Model):
                     except Exception as e:
                         _logger.warning("Aktivite kapatma başarısız (session=%s): %s", record.id, e)
 
-                    # Done ise Gemini SEO üretimi tetikle (Thread ile arka planda)
+                    # Done ise Gemini SEO üretimi tetikle (commit sonrası arka planda)
                     if record.state == 'done':
                         try:
-                            import threading
-                            thread = threading.Thread(target=record._generate_seo_content_gemini_threaded, args=(record.id,))
-                            thread.start()
+                            record_id = record.id
+                            def _start_seo_thread():
+                                thread = threading.Thread(target=record._generate_seo_content_gemini_threaded, args=(record_id,))
+                                thread.start()
+                            record.env.cr.postcommit.add(_start_seo_thread)
                         except Exception as e:
                             _logger.warning("SEO thread başlatma başarısız (session=%s): %s", record.id, e)
         return res

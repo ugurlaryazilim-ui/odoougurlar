@@ -122,19 +122,30 @@ class AiStudioModelPreset(models.Model):
         session_model = self.env['ai.studio.session']
         gen_model = self.env['ai.studio.generation']
         for preset in self:
-            sessions = session_model.search([
-                ('model_preset_id', '=', preset.id),
-            ])
-            preset.usage_count = len(sessions)
-            if sessions:
-                gens = gen_model.search([
-                    ('session_id', 'in', sessions.ids),
-                    ('state', '=', 'done'),
-                ])
-                approved = gens.filtered('is_approved')
-                preset.approval_rate = (
-                    (len(approved) / len(gens)) * 100 if gens else 0.0
+            session_groups = session_model._read_group(
+                [('model_preset_id', '=', preset.id)],
+                groupby=[],
+                aggregates=['__count']
+            )
+            preset.usage_count = session_groups[0][0] if session_groups else 0
+
+            if preset.usage_count > 0:
+                gen_groups = gen_model._read_group(
+                    [('session_id.model_preset_id', '=', preset.id), ('state', '=', 'done')],
+                    groupby=['is_approved'],
+                    aggregates=['__count']
                 )
+                total_done = 0
+                approved_count = 0
+                for is_approved, count in gen_groups:
+                    total_done += count
+                    if is_approved:
+                        approved_count += count
+                
+                if total_done > 0:
+                    preset.approval_rate = (approved_count / total_done) * 100.0
+                else:
+                    preset.approval_rate = 0.0
             else:
                 preset.approval_rate = 0.0
 
@@ -211,14 +222,16 @@ class AiStudioModelPreset(models.Model):
 
         self.mannequin_generation_state = 'generating'
 
-        # Arka planda çalıştır
-        thread = threading.Thread(
-            target=self._generate_mannequin_thread,
-            args=(self.id, self.mannequin_prompt, api_key,
-                  self.gender, self.body_type, self.background_type, provider_type, self.env.uid),
-        )
-        thread.daemon = True
-        thread.start()
+        # Arka planda çalıştır (commit sonrası)
+        def _start_mannequin_thread():
+            thread = threading.Thread(
+                target=self._generate_mannequin_thread,
+                args=(self.id, self.mannequin_prompt, api_key,
+                      self.gender, self.body_type, self.background_type, provider_type, self.env.uid),
+            )
+            thread.daemon = True
+            thread.start()
+        self.env.cr.postcommit.add(_start_mannequin_thread)
 
         return {
             'type': 'ir.actions.client',
@@ -395,7 +408,6 @@ class AiStudioModelPreset(models.Model):
                                     gender, body_type, bg_type, provider_type, uid):
         """Thread içinde AI manken oluştur — SaaS tarzı consistency ile."""
         _logger.info("Mannequin Thread starting for preset %s with uid %s", preset_id, uid)
-        time.sleep(1.5)  # Wait for main thread transaction to commit and release locks
         try:
             # Gender/body hints
             gender_hints = {
@@ -432,7 +444,7 @@ class AiStudioModelPreset(models.Model):
             garment_type = 'tops'
             try:
                 with self.pool.cursor() as cr:
-                    env = api.Environment(cr, uid, {})
+                    env = api.Environment(cr, uid, {'lang': 'tr_TR'})
                     p = env['ai.studio.model.preset'].browse(preset_id)
                     garment_type = p.garment_type or 'tops'
             except Exception:
@@ -601,7 +613,7 @@ class AiStudioModelPreset(models.Model):
 
             # ═══ DB'ye kaydet ═══
             with self.pool.cursor() as cr:
-                env = api.Environment(cr, uid, {})
+                env = api.Environment(cr, uid, {'lang': 'tr_TR'})
                 preset = env['ai.studio.model.preset'].browse(preset_id)
                 preset.write({
                     'model_image_front': front_data,
@@ -620,7 +632,7 @@ class AiStudioModelPreset(models.Model):
             _logger.error('Manken oluşturma hatası: %s', format_fal_error_for_log(e, f'preset={preset_id}'))
             try:
                 with self.pool.cursor() as cr:
-                    env = api.Environment(cr, uid, {})
+                    env = api.Environment(cr, uid, {'lang': 'tr_TR'})
                     preset = env['ai.studio.model.preset'].browse(preset_id)
                     preset.write({'mannequin_generation_state': 'failed'})
                     cr.commit()

@@ -17,7 +17,7 @@
                              t-on-click="() => this.selectPreset(preset.id)">
                             <div class="ais-preset-image">
                                 <t t-if="preset.preview_image">
-                                    <img t-att-src="'data:image/png;base64,' + preset.preview_image"/>
+                                    <img t-att-src="preset.preview_image"/>
                                 </t>
                                 <t t-else="">
                                     <div class="ais-preset-placeholder">👤</div>

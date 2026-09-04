@@ -25,6 +25,13 @@ async function _jsonRpc(url, params = {}) {
     return data.result;
 }
 
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
 function showToast(message, type = 'error') {
     // Odoo 19 tarzı bildirim — sağ üst köşede, stack halinde gösterilir
     const TOAST_TYPES = {
@@ -118,7 +125,7 @@ async function openReviewPopup(initialSessionId) {
     if (!lockResult.success) {
         if (lockResult.locked) {
             showToast(
-                `⚠️ Bu oturum şu an ${lockResult.locked_by_name} tarafından inceleniyor (${lockResult.lock_duration}). ` +
+                `⚠️ Bu oturum şu an ${escapeHtml(lockResult.locked_by_name)} tarafından inceleniyor (${lockResult.lock_duration}). ` +
                 `Lütfen tamamlamasını bekleyin veya 5dk sonra otomatik açılacak.`,
                 'error'
             );
@@ -214,7 +221,7 @@ async function openReviewPopup(initialSessionId) {
                 <div class="ais-rp-header">
                     <div class="ais-rp-title-area">
                         <h2 class="ais-rp-title">🖼️ Görsel İnceleme</h2>
-                        <div class="ais-rp-subtitle">${data.product_name || data.session_name}</div>
+                        <div class="ais-rp-subtitle">${escapeHtml(data.product_name) || escapeHtml(data.session_name)}</div>
                     </div>
                     <div class="ais-rp-progress">
                         <div class="ais-rp-progress-bar">
@@ -269,7 +276,7 @@ async function openReviewPopup(initialSessionId) {
                         <div class="ais-rp-pending-revision">
                             <div class="ais-rp-pending-icon" style="color:#ef4444">❌</div>
                             <h3 style="color:#ef4444">Üretim Başarısız Oldu</h3>
-                            <p style="color:#9ca3af; max-width:500px; text-align:center;">${item.error_message || 'Bilinmeyen bir hata oluştu.'}</p>
+                            <p style="color:#9ca3af; max-width:500px; text-align:center;">${escapeHtml(item.error_message) || 'Bilinmeyen bir hata oluştu.'}</p>
                             ${canApprove ? `
                                 <div style="display:flex; gap:10px; justify-content:center; align-items:center; margin-top:20px; flex-wrap:wrap;">
                                     <button class="ais-rp-btn ais-rp-btn-approve" id="ais-rp-retry" style="background:#f59e0b;">
@@ -389,14 +396,14 @@ async function openReviewPopup(initialSessionId) {
                                 </label>
                             `).join('')}
                             <textarea class="ais-rp-textarea" id="ais-rp-revision-prompt" 
-                                      placeholder="Ek revizyon talimatı yazın (Türkçe)...">${revisionPrompt}</textarea>
+                                      placeholder="Ek revizyon talimatı yazın (Türkçe)...">${escapeHtml(revisionPrompt)}</textarea>
                             <div class="ais-rp-en-label" style="margin-top:8px; font-size:12px; color:#9ca3af; display:flex; align-items:center; gap:4px;">
                                 <span>🔤</span> İngilizce Çeviri (AI modeline bu gönderilir):
                             </div>
                             <textarea class="ais-rp-textarea ais-rp-textarea-en" id="ais-rp-revision-prompt-en" 
                                       readonly
                                       style="background:#f3f4f6; color:#374151; border:1px solid #d1d5db; font-style:italic; min-height:50px;"
-                                      placeholder="Türkçe yazdığınızda otomatik çevrilecek...">${revisionPromptEn}</textarea>
+                                      placeholder="Türkçe yazdığınızda otomatik çevrilecek...">${escapeHtml(revisionPromptEn)}</textarea>
                         </div>
                         <div class="ais-rp-modal-footer">
                             <button class="ais-rp-btn ais-rp-btn-reject" id="ais-rp-submit-reject">
@@ -911,7 +918,8 @@ async function openReviewPopup(initialSessionId) {
         });
         navigator.sendBeacon('/ai_studio/release_lock', new Blob([payload], { type: 'application/json' }));
     };
-    window.addEventListener('beforeunload', onBeforeUnload);
+    window._aisBeforeUnload = onBeforeUnload;
+    window.addEventListener('beforeunload', window._aisBeforeUnload);
 }
 
 // Client action olarak kaydet

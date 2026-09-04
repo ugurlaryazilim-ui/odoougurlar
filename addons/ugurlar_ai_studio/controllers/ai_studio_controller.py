@@ -25,6 +25,8 @@ class AiStudioController(http.Controller):
             try:
                 image_bytes = base64.b64decode(image_data)
                 size_kb = len(image_bytes) / 1024
+                if size_kb > 15360:
+                    return {'success': False, 'error': 'Dosya boyutu 15MB sınırını aşıyor. Lütfen daha küçük bir fotoğraf yükleyin.'}
                 if size_kb < 50:
                     warnings.append('Dosya cok kucuk')
                     score -= 30
@@ -179,7 +181,7 @@ class AiStudioController(http.Controller):
                 # Template'ten miras alınan resme (image_1920) bakma!
                 # Böylece Siyah rengin resimleri template'e yazıldığında
                 # Ekru/Biru gibi diğer renkler hâlâ "görselsiz" sayılır.
-                if bool(variant.image_variant_1920):
+                if bool(variant.with_context(bin_size=True).image_variant_1920):
                     color_groups[key]['has_image'] = True
                     
                 active_session = request.env['ai.studio.session'].sudo().search([
@@ -321,12 +323,12 @@ class AiStudioController(http.Controller):
 
                 # Resim var mı kontrol et — aynı renkteki varyantların KENDİ resmine bak
                 # Template'ten veya başka renkten miras alınan resme bakma!
-                has_image = any(bool(v.image_variant_1920) for v in color_variants)
+                has_image = any(bool(v.with_context(bin_size=True).image_variant_1920) for v in color_variants)
                 
                 # DEBUG: Hangi varyant has_image'ı tetikledi?
                 if has_image:
                     for v in color_variants:
-                        if bool(v.image_variant_1920):
+                        if bool(v.with_context(bin_size=True).image_variant_1920):
                             _logger.info(
                                 "AI Studio DEBUG: has_image=True tetiklendi! "
                                 "Aranan barkod=%s, renk_grubu_id=%s, "
@@ -378,7 +380,7 @@ class AiStudioController(http.Controller):
                     'is_primary': gen.is_primary,
                     'revision_number': gen.revision_number,
                     'error_message': gen.error_message or '',
-                    'has_generated': bool(gen.generated_image),
+                    'has_generated': gen.state == 'done',
                 })
 
             return {
@@ -625,15 +627,28 @@ class AiStudioController(http.Controller):
             session = request.env['ai.studio.session'].browse(int(session_id))
             if not session.exists():
                 return {'success': False, 'error': 'Oturum bulunamadı.'}
+            
+            if session.state == 'done':
+                return {'success': False, 'error': 'Bu oturum zaten tamamlanmış.'}
+            if session.state not in ('review', 'generating'):
+                return {'success': False, 'error': 'Bu oturum tamamlanabilir durumda değil (durum: %s).' % session.state}
 
             # 1. is_primary değerlerini güncelle
             if approved_items:
+                primary_ids = []
+                non_primary_ids = []
                 for item in approved_items:
-                    gen_id = item.get('id')
-                    is_primary = item.get('is_primary', False)
-                    gen = request.env['ai.studio.generation'].browse(int(gen_id))
-                    if gen.exists() and gen.session_id.id == session.id:
-                        gen.write({'is_primary': is_primary})
+                    gen_id = int(item.get('id', 0))
+                    if gen_id:
+                        if item.get('is_primary', False):
+                            primary_ids.append(gen_id)
+                        else:
+                            non_primary_ids.append(gen_id)
+                
+                if primary_ids:
+                    request.env['ai.studio.generation'].browse(primary_ids).filtered(lambda g: g.session_id.id == session.id).write({'is_primary': True})
+                if non_primary_ids:
+                    request.env['ai.studio.generation'].browse(non_primary_ids).filtered(lambda g: g.session_id.id == session.id).write({'is_primary': False})
 
             # 2. Onaylı görselleri bul
             approved = session.generation_ids.filtered(
@@ -665,11 +680,10 @@ class AiStudioController(http.Controller):
                          session.name, session.id, len(approved))
             return {'success': True}
 
-        except psycopg2.Error as e:
-            if getattr(e, 'pgcode', '') in ('40001', '25P02'):
-                raise
-            _logger.exception('complete_session veritabanı hatası (session=%s): %s', session_id, e)
-            return {'success': False, 'error': 'Veritabanı hatası: %s' % str(e)[:200]}
+        except psycopg2.Error:
+            # Tüm PostgreSQL hatalarını Odoo'nun retrying mekanizmasına bırak
+            # (SerializationFailure, Deadlock, LockTimeout vb.)
+            raise
         except Exception as e:
             _logger.exception('complete_session hatasi (session=%s): %s', session_id, e)
             return {'success': False, 'error': 'Kaydetme hatası: %s' % str(e)[:200]}
@@ -917,17 +931,7 @@ class AiStudioController(http.Controller):
             presets = request.env['ai.studio.model.preset'].search(domain)
             result = []
             for p in presets:
-                # Safe base64 decoding for preview_image or model_image_front
-                preview_data = False
-                raw_preview = p.preview_image or p.model_image_front
-                if raw_preview:
-                    try:
-                        if isinstance(raw_preview, bytes):
-                            preview_data = raw_preview.decode('ascii')
-                        else:
-                            preview_data = str(raw_preview)
-                    except Exception:
-                        preview_data = False
+                preview_url = f"/web/image/ai.studio.model.preset/{p.id}/preview_image" if p.preview_image else (f"/web/image/ai.studio.model.preset/{p.id}/model_image_front" if p.model_image_front else False)
 
                 result.append({
                     'id': p.id,
@@ -941,7 +945,7 @@ class AiStudioController(http.Controller):
                     'background_type': p.background_type,
                     'usage_count': p.usage_count,
                     'approval_rate': p.approval_rate,
-                    'preview_image': preview_data,
+                    'preview_image': preview_url,
                 })
 
             return {'presets': result}
