@@ -371,7 +371,11 @@ class AiStudioModelPreset(models.Model):
         if view == 'front':
             view_desc = 'front view, facing camera directly'
         elif view == 'back':
-            view_desc = 'back view, facing away from camera, showing full back'
+            view_desc = (
+                'back view, facing away from camera, showing full back. '
+                'The garment reference was photographed on a hanger — any fabric folding over the hanger hook at the top '
+                'is the front side draped backward and must be IGNORED. Show only the single back panel as one clean layer'
+            )
         else:
             view_desc = 'side profile view, standing profile at 90 degree angle'
 

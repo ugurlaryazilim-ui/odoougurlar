@@ -548,6 +548,12 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         base_prompt += (
             "This is the BACK VIEW. The garment reference shows the back of the product. "
             "Reproduce the back design exactly as shown — same details, same surface. "
+            "HANGER FOLD-OVER RULE: The reference garment was photographed hanging on a hanger. "
+            "Any fabric visible at the top that appears as a second layer, a flap, or a fold-over "
+            "above the natural shoulder line is the FRONT of the garment draped backward over the hanger — "
+            "it is NOT a cape, NOT a collar extension, and NOT part of the back design. "
+            "The model's back must show ONLY the single back panel of the garment as one clean, uninterrupted layer. "
+            "Do NOT add any extra fabric layers, wing-like extensions, or double-layered look on the model's back. "
         )
     elif photo_type == 'side':
         base_prompt += (
@@ -608,6 +614,12 @@ _VIEW_PROMPT_TEMPLATES = {
         "{fit}, {pattern} pattern. Clean white studio background, even lighting. "
         "Elegant back pose, slight contrapposto, head turned to show jawline profile. "
         "Sharp focus on back details, seams, and garment shape. "
+        "CRITICAL HANGER ARTIFACT WARNING: The garment reference image was photographed on a hanger. "
+        "The fabric visible at the top/shoulder area that folds over the hanger is the FRONT side of the garment "
+        "folding backward over the hanger hook — it is NOT part of the back design. "
+        "IGNORE any fabric fold-over, overlapping layers, or double-layered appearance at the top of the garment "
+        "caused by the hanger. Only reproduce the actual BACK PANEL of the garment — the single continuous surface "
+        "below the shoulder seam line. The back of the garment should appear as ONE clean, single layer. "
         "The model MUST be fully clothed with appropriate matching bottoms "
         "(long pants, jeans, trousers, or full-length leggings). "
         "Absolutely NO bare legs, NO bare thighs, NO exposed skin below the waist. "
@@ -642,7 +654,9 @@ _VIEW_NEGATIVE_PROMPTS = {
         "nudity, naked, bare skin, bare legs, bare thighs, bare back, exposed legs, "
         "underwear, lingerie, swimwear, bikini, mini skirt, short shorts, hot pants, "
         "no pants, panties, see-through clothing revealing skin, inappropriate, NSFW, "
-        "crop top only, sports bra only"
+        "crop top only, sports bra only, "
+        "hanger, hanger hook, fabric fold-over, double-layered back, cape-like flap, "
+        "extra fabric layer on back, wing-like extensions on shoulders, two-toned back panel"
     ),
     'side': (
         "nudity, naked, bare skin, bare legs, bare thighs, exposed legs, underwear, "

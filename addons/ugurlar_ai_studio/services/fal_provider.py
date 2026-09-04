@@ -129,7 +129,15 @@ class FalProvider(AIProviderBase):
             # Base View Hints
             if 'seedream' in endpoint:
                 view_hints = {
-                    'back': 'Show the BACK view of the model from Figure 2, facing away from camera, wearing the garment from Figure 1. Copy EVERY detail from Figure 1 exactly — same waistband, same pockets, same surface. ',
+                    'back': (
+                        'Show the BACK view of the model from Figure 2, facing away from camera, wearing the garment from Figure 1. '
+                        'Copy EVERY detail from Figure 1 exactly — same waistband, same pockets, same surface. '
+                        'IMPORTANT: Figure 1 was photographed on a hanger. Any fabric visible at the top/shoulder area that folds over '
+                        'the hanger hook is the FRONT of the garment draped backward — it is NOT part of the back design. '
+                        'IGNORE any fold-over, overlapping layers, or double-layered appearance at the top. '
+                        'Show ONLY the single back panel as one clean, uninterrupted layer on the model. '
+                        'Do NOT add cape-like flaps, wing extensions, or extra fabric layers on the back. '
+                    ),
                     'side': (
                         'Show the SIDE view of the model from Figure 2, turned 45 degrees. '
                         'The garment is from Figure 1 — Figure 1 is the ONLY source of truth for the garment. '
@@ -140,7 +148,13 @@ class FalProvider(AIProviderBase):
                 }
             else:
                 view_hints = {
-                    'back': 'IMPORTANT: Show the BACK view of the model, facing away from camera. ',
+                    'back': (
+                        'IMPORTANT: Show the BACK view of the model, facing away from camera. '
+                        'The garment reference was photographed on a hanger. Any fabric at the top/shoulder area '
+                        'that folds over the hanger hook is the FRONT side draped backward — NOT part of the back design. '
+                        'IGNORE fold-over layers. Show ONLY the single back panel as one clean layer. '
+                        'Do NOT add cape-like flaps, wing extensions, or double-layered fabric on the back. '
+                    ),
                     'side': 'IMPORTANT: Show the SIDE view of the model, turned 45 degrees. ',
                     'detail': 'IMPORTANT: Close-up detail shot showing fabric texture and details. ',
                 }
