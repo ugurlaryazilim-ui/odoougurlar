@@ -301,6 +301,12 @@ class AiStudioSession(models.Model):
     def action_review_generations(self):
         """Profesyonel inceleme popup'ini acar."""
         self.ensure_one()
+        # Eğer oturum işleniyor durumunda kalmış ama tüm generation'lar bittiyse otomatik onaya geçir
+        if self.state in ('preprocessing', 'processing') and self.generation_ids and all(g.state == 'done' for g in self.generation_ids):
+            self.sudo().write({
+                'state': 'review',
+                'date_review_start': fields.Datetime.now(),
+            })
         now = fields.Datetime.now()
         from datetime import timedelta
         if self.review_locked_by and self.review_lock_time:
@@ -845,10 +851,15 @@ class AiStudioSession(models.Model):
         """
         for session in self:
             if session.generation_ids:
-                session.state = 'review'
+                session.sudo().write({
+                    'state': 'review',
+                    'date_review_start': fields.Datetime.now(),
+                })
                 session.message_post(
-                    body=_('⚠️ Oturum manuel olarak inceleme durumuna alındı (önceki kaydetme hatası nedeniyle).'),
+                    body=_('⚠️ Oturum manuel olarak inceleme durumuna alındı.'),
                 )
+        if len(self) == 1:
+            return self.action_review_generations()
 
     def action_retry_failed(self):
         """Başarısız ve bekleyen üretimleri kaldığı yerden devam ettir.
@@ -863,6 +874,13 @@ class AiStudioSession(models.Model):
             lambda g: g.state in ('failed', 'pending')
         )
         if not retryable:
+            # Tüm generation'lar zaten tamamlanmışsa oturumu hemen 'review' durumuna al
+            if self.generation_ids and all(g.state == 'done' for g in self.generation_ids):
+                self.sudo().write({
+                    'state': 'review',
+                    'date_review_start': fields.Datetime.now(),
+                })
+                return self.action_review_generations()
             raise UserError(_('Tekrar denenecek başarısız veya bekleyen üretim yok.'))
 
         # Failed olanları pending'e çevir, error mesajını temizle
@@ -2240,31 +2258,41 @@ class AiStudioSession(models.Model):
                         cr.rollback()
                         _logger.error('Uretim hatasi kaydedilemedi (gen=%s): %s', gen.id, db_e)
 
-            # ═══ TÜM ÜRETİMLER TAMAMLANDI ═══
-            has_failed = any(g.state == 'failed' for g in session.generation_ids)
-            final_state = 'failed' if has_failed else 'review'
-            
-            for attempt in range(3):
-                try:
-                    session.write({
+        # ═══ TÜM ÜRETİMLER TAMAMLANDI — TAZE TRANSACTION İLE STATE GÜNCELLE ═══
+        for attempt in range(5):
+            try:
+                with self.pool.cursor() as final_cr:
+                    final_env = api.Environment(final_cr, uid, {'lang': 'tr_TR'})
+                    final_session = final_env['ai.studio.session'].sudo().browse(session_id)
+                    
+                    has_failed = any(g.state == 'failed' for g in final_session.generation_ids)
+                    final_state = 'failed' if has_failed else 'review'
+                    
+                    final_session.write({
                         'state': final_state,
                         'date_review_start': fields.Datetime.now()
                     })
-                    if has_failed:
-                        done_count = len(session.generation_ids.filtered(lambda g: g.state == 'done'))
-                        fail_count = len(session.generation_ids.filtered(lambda g: g.state == 'failed'))
-                        session.message_post(body=_(
-                            'AI üretimi tamamlandı: ✅ %d başarılı, ❌ %d başarısız. '
-                            '"🔄 Kaldığı Yerden Devam Et" butonu ile başarısız olanları tekrar deneyebilirsiniz.'
-                        ) % (done_count, fail_count))
-                    else:
-                        session.message_post(body=_('AI üretimi tamamlandı. %d görsel onay bekliyor.') % len(session.generation_ids))
-                    cr.commit()
+                    final_cr.commit()
+                    _logger.info('Oturum başarıyla %s durumuna geçirildi (session_id=%s)', final_state, session_id)
+
+                    # message_post ayrı bir try içinde, state'i ASLA rollback ettirmemeli
+                    try:
+                        if has_failed:
+                            done_count = len(final_session.generation_ids.filtered(lambda g: g.state == 'done'))
+                            fail_count = len(final_session.generation_ids.filtered(lambda g: g.state == 'failed'))
+                            final_session.message_post(body=_(
+                                'AI üretimi tamamlandı: ✅ %d başarılı, ❌ %d başarısız. '
+                                '"🔄 Kaldığı Yerden Devam Et" butonu ile başarısız olanları tekrar deneyebilirsiniz.'
+                            ) % (done_count, fail_count))
+                        else:
+                            final_session.message_post(body=_('AI üretimi tamamlandı. %d görsel onay bekliyor.') % len(final_session.generation_ids))
+                        final_cr.commit()
+                    except Exception as msg_e:
+                        _logger.warning('Oturum tamamlama mesajı paylaşılamadı (session_id=%s): %s', session_id, msg_e)
                     break
-                except Exception as final_write_err:
-                    cr.rollback()
-                    _logger.warning('Oturum son durum güncellemesi kilit çakışması (session_id=%s, deneme %d/3): %s', session_id, attempt + 1, final_write_err)
-                    time.sleep(1.5)
+            except Exception as final_write_err:
+                _logger.warning('Oturum son durum güncellemesi kilit çakışması (session_id=%s, deneme %d/5): %s', session_id, attempt + 1, final_write_err)
+                time.sleep(1.0 + attempt * 0.5)
 
     def _process_single_generation(self, generation):
         """Tek bir generation'ı yeniden işle (retry için)."""
