@@ -228,6 +228,10 @@ class AiStudioSession(models.Model):
     date_review_start = fields.Datetime(string='Onaya Düşme', readonly=True)
     date_done = fields.Datetime(string='Tamamlanma', readonly=True)
 
+    # --- Otomatik Yeniden Deneme Sayacı (Cron Kuyruk Yönetimi) ---
+    retry_count = fields.Integer('Otomatik Deneme Sayısı', default=0, readonly=True,
+                                 help='Cron tarafından otomatik yeniden deneme sayısı. Maksimum 3 deneme sonrası durur.')
+
     # --- İnceleme Kilidi (Concurrency Control) ---
     review_locked_by = fields.Many2one(
         'res.users',
@@ -869,7 +873,8 @@ class AiStudioSession(models.Model):
         
         - 'failed' ve 'pending' durumdaki generation'ları sıfırlayıp tekrar kuyruğa alır
         - Tamamlanmış ('done') olanlara dokunmaz
-        - AI thread'ini yeniden başlatır
+        - Thread başlatmaz — Cron otomatik olarak alır ve sırayla işler
+          (Sunucu yeniden başlatmalarına dayanıklı kuyruk yönetimi)
         """
         self.ensure_one()
 
@@ -886,14 +891,7 @@ class AiStudioSession(models.Model):
                 return self.action_review_generations()
             raise UserError(_('Tekrar denenecek başarısız veya bekleyen üretim yok.'))
 
-        # Failed olanları pending'e çevir, error mesajını temizle
-        for gen in retryable:
-            gen.write({
-                'state': 'pending',
-                'error_message': False,
-            })
-
-        # API anahtarını al
+        # API anahtarı kontrolü (erken hata yakalama)
         provider_type = self.env['ir.config_parameter'].sudo().get_param(
             'ugurlar_ai_studio.default_provider', 'fashn'
         )
@@ -905,31 +903,34 @@ class AiStudioSession(models.Model):
             api_key = self.env['ir.config_parameter'].sudo().get_param(
                 'ugurlar_ai_studio.fal_api_key'
             )
-
         if not api_key:
             raise UserError(_('API anahtarı bulunamadı. Lütfen Yapılandırma ayarlarını kontrol edin.'))
 
-        self.state = 'processing'
+        # Failed olanları pending'e çevir, error mesajını temizle
+        for gen in retryable:
+            gen.write({
+                'state': 'pending',
+                'error_message': False,
+            })
+
+        # Oturumu processing durumuna al — Cron otomatik yakalayacak
+        self.write({
+            'state': 'processing',
+            'retry_count': 0,  # Manuel retry sayacı sıfırla
+        })
         self.message_post(
-            body=_('🔄 Kaldığı yerden devam ediliyor: %d başarısız/bekleyen üretim yeniden kuyruğa alındı.') % len(retryable),
+            body=_('🔄 %d başarısız/bekleyen üretim kuyruğa alındı. Cron tarafından otomatik işlenecek (maks. 2dk içinde).') % len(retryable),
         )
 
-        # Thread'i transaction commit'inden sonra başlat (race condition'ı önler)
-        def _start_thread():
-            thread = threading.Thread(
-                target=self._process_ai_thread,
-                args=(self.id, api_key, self.env.uid),
-            )
-            thread.daemon = True
-            thread.start()
-        self.env.cr.postcommit.add(_start_thread)
+        # Thread başlatmıyoruz — Cron _cron_check_stuck_generations içinde
+        # processing + pending generation bulunan oturumları otomatik alır
 
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
-                'title': _('AI İşleme Devam Ediyor'),
-                'message': _('%d üretim yeniden başlatıldı. Tamamlandığında bildirim alacaksınız.') % len(retryable),
+                'title': _('Kuyruğa Alındı'),
+                'message': _('%d üretim kuyruğa alındı. Cron tarafından otomatik işlenecek.') % len(retryable),
                 'type': 'info',
                 'sticky': False,
             },
@@ -1699,22 +1700,35 @@ class AiStudioSession(models.Model):
                     pass
 
     def _process_batch_ai_thread(self, session_ids, api_key, uid):
-        """Toplu seçilen oturumları sırayla arka planda AI ile işler."""
+        """Toplu seçilen oturumları sırayla arka planda AI ile işler.
+        
+        Her oturum semaphore ile korunur — eşzamanlı limit aşılmaz.
+        """
         _logger.info("Toplu AI İşleme Thread başlatıldı. Toplam oturum sayısı: %d", len(session_ids))
         for session_id in session_ids:
-            try:
-                self._process_ai_thread_body(session_id, api_key, uid)
-            except Exception as e:
-                _logger.error("Toplu AI işleme hatası (session_id=%s): %s", session_id, e, exc_info=True)
+            _logger.info("Toplu işleme: Oturum %s için semaphore bekleniyor...", session_id)
+            with _AI_SESSION_SEMAPHORE:
+                _logger.info("Toplu işleme: Oturum %s semaphore aldı, işleniyor...", session_id)
                 try:
-                    with self.pool.cursor() as cr:
-                        env = api.Environment(cr, uid, {'lang': 'tr_TR'})
-                        sess = env['ai.studio.session'].browse(session_id)
-                        sess.write({'state': 'failed'})
-                        cr.commit()
-                except Exception:
-                    pass
-            time.sleep(1)
+                    self._process_ai_thread_body(session_id, api_key, uid)
+                except Exception as e:
+                    _logger.error("Toplu AI işleme hatası (session_id=%s): %s", session_id, e, exc_info=True)
+                    try:
+                        with self.pool.cursor() as cr:
+                            env = api.Environment(cr, uid, {'lang': 'tr_TR'})
+                            sess = env['ai.studio.session'].browse(session_id)
+                            # Kalan pending/processing kayıtlarını failed yap
+                            for g in sess.generation_ids.filtered(lambda x: x.state in ('pending', 'processing')):
+                                g.write({
+                                    'state': 'failed',
+                                    'error_message': _('Toplu işleme sırasında beklenmeyen hata: %s') % str(e)[:200],
+                                })
+                            has_done = any(x.state == 'done' for x in sess.generation_ids)
+                            sess.write({'state': 'review' if has_done else 'failed'})
+                            cr.commit()
+                    except Exception:
+                        pass
+            time.sleep(2)  # Oturumlar arası API baskısını azaltmak için 2s bekleme
 
     def _process_ai_thread_body(self, session_id, api_key, uid):
         """Thread içinde tüm generation'ları işle (body)."""
@@ -3044,82 +3058,183 @@ class AiStudioSession(models.Model):
 
     @api.model
     def _cron_check_stuck_generations(self):
-        """Processing durumunda 10 dakikadan uzun kalmış üretimleri kontrol et ve yarım kalan toplu AI işlemlerini otomatik sürdür."""
+        """Veritabanı tabanlı kuyruk yöneticisi (her 2 dakikada çalışır).
+        
+        Görevler:
+        1. İşlenmeyi bekleyen oturumları tespit et ve thread başlat (maks. 2 eşzamanlı)
+        2. Takılmış (thread ölen) oturumları temizle (15dk+ güncellenmemiş)
+        3. Başarısız oturumları otomatik yeniden dene (maks. 3 deneme)
+        4. Review'daki takılmış revizyonları temizle
+        """
         from datetime import timedelta
-        cutoff = fields.Datetime.now() - timedelta(minutes=10)
 
-        # 1. Sunucu yeniden başlatıldıysa/redeploy edildiyse yarım kalan toplu AI işleme oturumlarını otomatik olarak kaldığı yerden devam ettir
-        stuck_preprocessing = self.search([
-            ('state', '=', 'preprocessing'),
+        # ═══ ADIM 1: İşlenmeyi bekleyen oturumları bul ve thread başlat ═══
+        # "processing" durumunda ve pending generation'ları olan oturumlar = kuyrukta bekleyenler
+        # (action_retry_failed veya action_start_processing tarafından oluşturulmuş)
+        pending_sessions = self.search([
+            ('state', 'in', ['preprocessing', 'processing']),
         ])
-        if stuck_preprocessing:
-            unprocessed_sessions = stuck_preprocessing.filtered(
-                lambda s: any(g.state == 'pending' for g in s.generation_ids)
+        
+        # Pending generation'ı olan (thread başlatılması gereken) oturumları filtrele
+        sessions_needing_processing = pending_sessions.filtered(
+            lambda s: any(g.state == 'pending' for g in s.generation_ids)
+        )
+        
+        # Halihazırda aktif olarak işlenen oturumları tespit et
+        # (processing generation'ı olan ve son 2dk içinde güncellenmiş → thread muhtemelen çalışıyor)
+        recently_active_cutoff = fields.Datetime.now() - timedelta(minutes=2)
+        actively_processing = pending_sessions.filtered(
+            lambda s: any(g.state == 'processing' for g in s.generation_ids)
+                      and s.write_date >= recently_active_cutoff
+        )
+        active_count = len(actively_processing)
+        
+        if sessions_needing_processing and active_count < 2:
+            # API anahtarını al
+            provider_type = self.env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.default_provider', 'fashn'
             )
-            if unprocessed_sessions:
-                provider_type = self.env['ir.config_parameter'].sudo().get_param(
-                    'ugurlar_ai_studio.default_provider', 'fashn'
+            api_key = self.env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.fashn_api_key' if provider_type == 'fashn' else 'ugurlar_ai_studio.fal_api_key'
+            )
+            
+            if api_key:
+                # Eşzamanlı limit: maks 2 aktif, kalan slotları doldur
+                slots_available = 2 - active_count
+                # write_date sırasına göre en eski oturumları seç (FIFO kuyruk)
+                to_process = sessions_needing_processing.sorted('write_date')[:slots_available]
+                
+                _logger.info(
+                    'Cron Kuyruk: %d oturum bekliyor, %d aktif işleniyor, %d slot boş → %d oturum başlatılacak',
+                    len(sessions_needing_processing), active_count, slots_available, len(to_process)
                 )
-                api_key = self.env['ir.config_parameter'].sudo().get_param(
-                    'ugurlar_ai_studio.fashn_api_key' if provider_type == 'fashn' else 'ugurlar_ai_studio.fal_api_key'
+                
+                session_ids = to_process.ids
+                uid = self.env.uid or 1
+                thread = threading.Thread(
+                    target=self._process_batch_ai_thread,
+                    args=(session_ids, api_key, uid),
                 )
-                if api_key:
-                    _logger.info('Cron: Sunucu/Modül güncellemesi sonrası yarım kalan %d oturum otomatik devam ettiriliyor...', len(unprocessed_sessions))
-                    session_ids = unprocessed_sessions.ids
-                    uid = self.env.uid or 1
-                    thread = threading.Thread(
-                        target=self._process_batch_ai_thread,
-                        args=(session_ids, api_key, uid),
-                    )
-                    thread.daemon = True
-                    thread.start()
+                thread.daemon = True
+                thread.start()
+            else:
+                _logger.warning('Cron Kuyruk: %d oturum bekliyor ama API anahtarı bulunamadı!', len(sessions_needing_processing))
 
-        # 2. 20 dakikadan uzun kalmış takılmış işlemleri temizle
-        cutoff = fields.Datetime.now() - timedelta(minutes=20)
+        # ═══ ADIM 2: Takılmış oturumları temizle (thread öldü, sunucu yeniden başladı) ═══
+        stuck_cutoff = fields.Datetime.now() - timedelta(minutes=15)
         stuck_sessions = self.search([
             ('state', 'in', ['preprocessing', 'processing']),
-            ('write_date', '<', cutoff),
+            ('write_date', '<', stuck_cutoff),
         ])
+        # Aktif kuyrukta olanlara dokunma (ADIM 1'de zaten işleme alındı)
+        stuck_sessions = stuck_sessions - sessions_needing_processing
+        
         for session in stuck_sessions:
             stuck_gens = session.generation_ids.filtered(
-                lambda g: g.state == 'processing' and g.write_date < cutoff
+                lambda g: g.state == 'processing' and g.write_date < stuck_cutoff
             )
             for gen in stuck_gens:
                 gen.write({
                     'state': 'failed',
-                    'error_message': _('Zaman aşımı: 20 dakika içinde AI servisinden yanıt alınamadı.'),
+                    'error_message': _('Zaman aşımı: 15 dakika içinde AI servisinden yanıt alınamadı (sunucu yeniden başlamış olabilir).'),
                 })
 
-            # Terk edilmiş veya takılmış pending üretimleri de temizle
+            # Terk edilmiş pending üretimleri de failed yap
             abandoned_gens = session.generation_ids.filtered(
                 lambda g: g.state == 'pending'
             )
             for gen in abandoned_gens:
                 gen.write({
                     'state': 'failed',
-                    'error_message': _('Önceki işlem zaman aşımına uğradığı için bu işlem tamamlanamadı. "🔄 Kaldığı Yerden Devam Et" butonu ile tekrar deneyebilirsiniz.'),
+                    'error_message': _('Sunucu yeniden başladığı için bu işlem tamamlanamadı.'),
                 })
 
-            # Oturum durumunu güncelle: en az bir görsel başarılıysa review'a al ki incelenebilsin
+            # Oturum durumunu güncelle
             has_done = any(g.state == 'done' for g in session.generation_ids)
             session.write({'state': 'review' if has_done else 'failed'})
             try:
                 session.message_post(
-                    body=_('Zaman aşımına uğrayan üretimler kapatıldı. "🔄 Kaldığı Yerden Devam Et" butonu ile eksik kalanları tekrar başlatabilirsiniz.'),
+                    body=_('⏱️ Zaman aşımı — üretimler kapatıldı. '
+                           'Otomatik yeniden deneme %s/3 yapılacak.') % (session.retry_count + 1),
                 )
             except Exception:
                 pass
 
-        # 3. İnceleme (review) durumundaki oturumlarda takılmış (pending/processing) revizyonları temizle
+            _logger.warning(
+                'Cron: Takılmış oturum temizlendi (session=%s, retry_count=%d)',
+                session.name, session.retry_count
+            )
+
+        # ═══ ADIM 3: Başarısız oturumları otomatik yeniden dene (maks. 3 deneme) ═══
+        failed_sessions = self.search([
+            ('state', '=', 'failed'),
+            ('retry_count', '<', 3),
+            # Son 60dk içinde başarısız olmuş oturumları dene (çok eskiler otomatik denenmez)
+            ('write_date', '>=', fields.Datetime.now() - timedelta(minutes=60)),
+        ])
+        # Sadece retryable generation'ları olanları filtrele
+        auto_retryable = failed_sessions.filtered(
+            lambda s: any(g.state == 'failed' for g in s.generation_ids)
+                      and s.generation_ids  # generation'ı olmayanları atla
+        )
+
+        for session in auto_retryable:
+            # Failed generation'ları pending'e çevir
+            failed_gens = session.generation_ids.filtered(lambda g: g.state == 'failed')
+            for gen in failed_gens:
+                gen.write({
+                    'state': 'pending',
+                    'error_message': False,
+                })
+
+            # Oturumu processing'e al, retry sayacını artır
+            session.write({
+                'state': 'processing',
+                'retry_count': session.retry_count + 1,
+            })
+            try:
+                session.message_post(
+                    body=_('🔄 Otomatik yeniden deneme #%d/3 — %d üretim kuyruğa alındı.') % (
+                        session.retry_count, len(failed_gens)
+                    ),
+                )
+            except Exception:
+                pass
+
+            _logger.info(
+                'Cron: Başarısız oturum otomatik yeniden denemeye alındı (session=%s, retry=%d/3)',
+                session.name, session.retry_count
+            )
+
+        # Retry limiti aşılmış oturumlar için bildirim (sadece bir kez)
+        exhausted_sessions = self.search([
+            ('state', '=', 'failed'),
+            ('retry_count', '=', 3),
+            # Son 10dk içinde 3. denemeye ulaşmış olanlar (tekrarlayan bildirim önleme)
+            ('write_date', '>=', fields.Datetime.now() - timedelta(minutes=10)),
+        ])
+        for session in exhausted_sessions:
+            try:
+                session.message_post(
+                    body=_('❌ Otomatik yeniden deneme limiti (3/3) aşıldı. '
+                           'Lütfen sorunu manuel olarak kontrol edin ve "🔄 Kaldığı Yerden Devam Et" butonu ile tekrar deneyin.'),
+                )
+                # retry_count'u 4 yap ki tekrar bildirim göndermesin
+                session.write({'retry_count': 4})
+            except Exception:
+                pass
+
+        # ═══ ADIM 4: Review'daki takılmış revizyonları temizle ═══
+        revision_cutoff = fields.Datetime.now() - timedelta(minutes=15)
         stuck_revisions = self.env['ai.studio.generation'].search([
             ('session_id.state', '=', 'review'),
             ('state', 'in', ['pending', 'processing']),
-            ('write_date', '<', cutoff),
+            ('write_date', '<', revision_cutoff),
         ])
         for rev_gen in stuck_revisions:
             rev_gen.write({
                 'state': 'failed',
-                'error_message': _('Zaman aşımı: Sunucu yeniden başlatıldığı veya servis yanıt vermediği için revizyon tamamlanamadı. "Tekrar Dene" butonuyla yeniden başlatabilir veya iptal edebilirsiniz.'),
+                'error_message': _('Zaman aşımı: Sunucu yeniden başlatıldığı veya servis yanıt vermediği için revizyon tamamlanamadı.'),
             })
             _logger.warning(
                 'Cron: Takılmış revizyon başarısız olarak işaretlendi (gen_id=%s, session=%s)',
@@ -3172,8 +3287,13 @@ class AiStudioSession(models.Model):
         if not reviewer_group:
             return
 
-        # Odoo 19 uyumlu: reviewer grubundaki kullanıcıları ORM ile bul
-        reviewer_ids = reviewer_group.users.ids
+        # Odoo 19 uyumlu: res.groups artık 'users' alanına sahip değil
+        # res.users üzerinden groups_id ile arama yapıyoruz
+        reviewer_users = self.env['res.users'].sudo().search([
+            ('groups_id', 'in', reviewer_group.id),
+            ('active', '=', True),
+        ])
+        reviewer_ids = reviewer_users.ids
 
         if not reviewer_ids:
             return
