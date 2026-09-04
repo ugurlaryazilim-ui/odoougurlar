@@ -6,9 +6,9 @@
             <field name="model">ai.content.queue</field>
             <field name="arch" type="xml">
                 <search string="Kuyruk Arama ve Filtreleme">
-                    <field name="product_tmpl_id" string="Ürün"/>
-                    <field name="mode" string="Mod"/>
-                    <field name="state" string="Durum"/>
+                    <field name="product_tmpl_id"/>
+                    <field name="mode"/>
+                    <field name="state"/>
 
                     <!-- Durum Hızlı Filtreleri -->
                     <filter string="Bekliyor" name="filter_pending" domain="[('state', '=', 'pending')]"/>
@@ -25,8 +25,8 @@
                     <separator/>
                     <filter string="Bugün" name="filter_today" domain="[('create_date', '&gt;=', context_today().strftime('%Y-%m-%d 00:00:00'))]"/>
 
-                    <!-- Gruplama Seçenekleri -->
-                    <group expand="0" string="Grupla">
+                    <!-- Gruplama -->
+                    <group>
                         <filter string="Durum" name="group_by_state" context="{'group_by': 'state'}"/>
                         <filter string="Mod" name="group_by_mode" context="{'group_by': 'mode'}"/>
                         <filter string="Oluşturulma Tarihi" name="group_by_create_date" context="{'group_by': 'create_date:day'}"/>

@@ -6,10 +6,10 @@
             <field name="model">ai.content.log</field>
             <field name="arch" type="xml">
                 <search string="İçerik Geçmişi Arama ve Filtreleme">
-                    <field name="product_tmpl_id" string="Ürün"/>
-                    <field name="generated_title" string="Üretilen Başlık"/>
-                    <field name="provider" string="AI Sağlayıcı"/>
-                    <field name="model_name" string="Model"/>
+                    <field name="product_tmpl_id"/>
+                    <field name="generated_title"/>
+                    <field name="provider"/>
+                    <field name="model_name"/>
 
                     <!-- Hızlı Filtreler -->
                     <filter string="Uygulandı" name="filter_applied" domain="[('applied', '=', True)]"/>
@@ -26,8 +26,8 @@
                     <separator/>
                     <filter string="Bugün" name="filter_today" domain="[('create_date', '&gt;=', context_today().strftime('%Y-%m-%d 00:00:00'))]"/>
 
-                    <!-- Gruplama Seçenekleri -->
-                    <group expand="0" string="Grupla">
+                    <!-- Gruplama -->
+                    <group>
                         <filter string="AI Sağlayıcı" name="group_by_provider" context="{'group_by': 'provider'}"/>
                         <filter string="Model" name="group_by_model" context="{'group_by': 'model_name'}"/>
                         <filter string="Üretim Modu" name="group_by_mode" context="{'group_by': 'mode'}"/>
