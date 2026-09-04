@@ -4,6 +4,17 @@ import logging
 
 from odoo import _, fields, http
 from odoo.http import request
+import psycopg2
+import requests as _req
+import requests as req_lib
+from datetime import date, timedelta
+from ..services.garment_analyzer import analyze_garment as do_analyze, build_generation_prompt
+from ..services.fal_provider import FalProvider
+from ..services.fal_error_handler import parse_fal_error
+try:
+    from deep_translator import GoogleTranslator
+except ImportError:
+    GoogleTranslator = None
 
 _logger = logging.getLogger(__name__)
 
@@ -26,7 +37,7 @@ class AiStudioController(http.Controller):
                 image_bytes = base64.b64decode(image_data)
                 size_kb = len(image_bytes) / 1024
                 if size_kb > 15360:
-                    return {'success': False, 'error': 'Dosya boyutu 15MB sınırını aşıyor. Lütfen daha küçük bir fotoğraf yükleyin.'}
+                    return {'success': False, 'error': _('Dosya boyutu 15MB sınırını aşıyor. Lütfen daha küçük bir fotoğraf yükleyin.')}
                 if size_kb < 50:
                     warnings.append('Dosya cok kucuk')
                     score -= 30
@@ -551,10 +562,10 @@ class AiStudioController(http.Controller):
         
         # YÖNTEM 1: deep-translator (ÜCRETSİZ)
         try:
-            from deep_translator import GoogleTranslator
-            translated = GoogleTranslator(source='tr', target='en').translate(text)
-            if translated:
-                return {'translated': translated}
+            if GoogleTranslator:
+                translated = GoogleTranslator(source='tr', target='en').translate(text)
+                if translated:
+                    return {'translated': translated}
         except ImportError:
             pass
         except Exception as e:
@@ -568,7 +579,6 @@ class AiStudioController(http.Controller):
             if not gemini_key:
                 return {'translated': text}
             
-            import requests as _req
             prompt = (
                 "Translate this fashion image editing instruction to clear, precise English. "
                 "Context: This is an edit request for a fashion e-commerce photo. "
@@ -620,7 +630,6 @@ class AiStudioController(http.Controller):
         
         Doğrudan senkron kaydetme yapar (cron'a bırakmaz).
         """
-        import psycopg2
         try:
             if not request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'):
                 return {'success': False, 'error': 'Bu işlemi yapmaya yetkiniz yok. Onaycı veya yönetici rolü gerekli.'}

@@ -41,21 +41,29 @@ class AiStudioPromptTemplate(models.Model):
     def _compute_stats(self):
         """Kullanım sayısı ve başarı oranını hesapla."""
         session_model = self.env['ai.studio.session']
+        
+        self.usage_count = 0
+        self.success_rate = 0.0
+        
+        if not self.ids:
+            return
+            
+        groups = session_model._read_group(
+            [('prompt_template_id', 'in', self.ids)],
+            ['prompt_template_id', 'state'],
+            ['__count']
+        )
+        
+        stats = {}
+        for template, state, count in groups:
+            if template.id not in stats:
+                stats[template.id] = {'total': 0, 'done': 0}
+            stats[template.id]['total'] += count
+            if state == 'done':
+                stats[template.id]['done'] += count
+                
         for template in self:
-            groups = session_model._read_group(
-                [('prompt_template_id', '=', template.id)],
-                groupby=['state'],
-                aggregates=['__count']
-            )
-            total = 0
-            done_count = 0
-            for state, count in groups:
-                total += count
-                if state == 'done':
-                    done_count += count
-
-            template.usage_count = total
-            if total > 0:
-                template.success_rate = (done_count / total) * 100.0
-            else:
-                template.success_rate = 0.0
+            ts = stats.get(template.id)
+            if ts:
+                template.usage_count = ts['total']
+                template.success_rate = (ts['done'] / ts['total']) * 100.0 if ts['total'] > 0 else 0.0

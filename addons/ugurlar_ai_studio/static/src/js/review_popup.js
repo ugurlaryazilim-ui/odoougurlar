@@ -99,7 +99,7 @@ function showToast(message, type = 'error') {
             color: ${t.color}; opacity: 0.5;
             cursor: pointer; font-size: 16px;
             padding: 0 2px; line-height: 1;
-        " onclick="this.parentElement.style.opacity='0';this.parentElement.style.transform='translateX(30px)';setTimeout(()=>this.parentElement.remove(),250);">✕</button>
+        " onclick="this.parentElement.style.opacity='0';this.parentElement.style.transform='translateX(30px)';setTimeout(()=>this.parentElement.remove(),250);" aria-label="Kapat">✕</button>
     `;
     container.appendChild(toast);
 
@@ -118,7 +118,7 @@ function showToast(message, type = 'error') {
 async function openReviewPopup(initialSessionId) {
     // Unique lock token for this specific popup window (let: sonraki session geçişinde güncellenebilir)
     let sessionId = initialSessionId;
-    let lockToken = 'lock_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+    let lockToken = 'lock_' + (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '').substring(0, 16) : Math.random().toString(36).substring(2) + Date.now().toString(36));
 
     // ═══ KİLİT KONTROLÜ ═══
     const lockResult = await _jsonRpc('/ai_studio/acquire_lock', { session_id: sessionId, lock_token: lockToken });
@@ -229,7 +229,7 @@ async function openReviewPopup(initialSessionId) {
                         </div>
                         <span class="ais-rp-progress-text">${progressText}</span>
                     </div>
-                    <button class="ais-rp-close" id="ais-rp-close">✕</button>
+                    <button class="ais-rp-close" id="ais-rp-close" aria-label="Kapat">✕</button>
                 </div>
 
                 <!-- Tabs & Session Badge -->
@@ -239,7 +239,7 @@ async function openReviewPopup(initialSessionId) {
                             <button class="ais-rp-tab ${idx === currentIndex ? 'active' : ''} ${it.is_approved ? 'approved' : ''} ${it.pending_revision ? 'pending' : ''} ${it.is_excluded ? 'excluded' : ''}"
                                     data-idx="${idx}">
                                 <span class="ais-rp-tab-icon">${getPhotoTypeIcon(it.photo_type)}</span>
-                                <span class="ais-rp-tab-label ${it.is_excluded ? 'ais-rp-strikethrough' : ''}">${it.photo_type_label}</span>
+                                <span class="ais-rp-tab-label ${it.is_excluded ? 'ais-rp-strikethrough' : ''}">${escapeHtml(it.photo_type_label)}</span>
                                 ${it.is_approved && !it.is_excluded ? '<span class="ais-rp-tab-check">✓</span>' : ''}
                                 ${it.is_excluded ? '<span class="ais-rp-tab-check" style="color:#9ca3af">🚫</span>' : ''}
                                 ${it.pending_revision && !it.is_excluded ? '<span class="ais-rp-tab-check" style="color:#f59e0b">⏳</span>' : ''}
@@ -250,7 +250,7 @@ async function openReviewPopup(initialSessionId) {
                     </div>
                     <div class="ais-rp-session-badge" id="ais-rp-copy-session-btn" title="Tıklayıp Oturum Numarasını Kopyalayın">
                         <span class="ais-rp-sb-icon">📋</span>
-                        <span class="ais-rp-sb-text">${data.session_name}</span>
+                        <span class="ais-rp-sb-text">${escapeHtml(data.session_name)}</span>
                         <span class="ais-rp-sb-copy-hint">Kopyala</span>
                     </div>
                 </div>
@@ -347,7 +347,7 @@ async function openReviewPopup(initialSessionId) {
                                 🚫 Dahil Etme
                             </button>
                         ` : `
-                            <button class="ais-rp-btn ais-rp-btn-reject" id="ais-rp-reject">
+                            <button class="ais-rp-btn ais-rp-btn-reject" id="ais-rp-reject" aria-label="Reddet">
                                 ❌ Reddet
                             </button>
                             ${showStarBtn ? `
@@ -355,7 +355,7 @@ async function openReviewPopup(initialSessionId) {
                                 ⭐ Ana Görsel
                             </button>
                             ` : ''}
-                            <button class="ais-rp-btn ais-rp-btn-approve" id="ais-rp-approve">
+                            <button class="ais-rp-btn ais-rp-btn-approve" id="ais-rp-approve" aria-label="Onayla">
                                 ✅ Onayla
                             </button>
                             <button class="ais-rp-btn ais-rp-btn-exclude" id="ais-rp-toggle-exclude" style="background:#6b7280; color:white;" title="Bu yönü ürüne kaydetme">
@@ -386,13 +386,13 @@ async function openReviewPopup(initialSessionId) {
                     <div class="ais-rp-modal" onclick="event.stopPropagation()">
                         <div class="ais-rp-modal-header">
                             <h3>❌ Red Sebebi</h3>
-                            <button class="ais-rp-modal-close" id="ais-rp-modal-close">✕</button>
+                            <button class="ais-rp-modal-close" id="ais-rp-modal-close" aria-label="Kapat">✕</button>
                         </div>
                         <div class="ais-rp-modal-body">
                             ${rejectReasons.map(r => `
                                 <label class="ais-rp-reason ${selectedReasonId === r.id ? 'selected' : ''}" data-reason-id="${r.id}">
                                     <input type="radio" name="reason" ${selectedReasonId === r.id ? 'checked' : ''}/>
-                                    ${r.name}
+                                    ${escapeHtml(r.name)}
                                 </label>
                             `).join('')}
                             <textarea class="ais-rp-textarea" id="ais-rp-revision-prompt" 
@@ -890,12 +890,15 @@ async function openReviewPopup(initialSessionId) {
         if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
         // beforeunload temizle
         window.removeEventListener('beforeunload', window._aisBeforeUnload);
+        if (typeof onKeyDown !== 'undefined') {
+            document.removeEventListener('keydown', onKeyDown);
+        }
     }
 
     // İlk render
     render();
 
-    // ESC tuşu ile kapat
+    // ESC ve Yön tuşları ile kapat/gez
     const onKeyDown = (e) => {
         if (e.key === 'Escape') {
             if (showRejectModal) {
@@ -903,7 +906,17 @@ async function openReviewPopup(initialSessionId) {
                 render();
             } else {
                 close();
-                document.removeEventListener('keydown', onKeyDown);
+            }
+        } else if (e.key === 'ArrowLeft') {
+            if (currentIndex > 0) {
+                currentIndex--;
+                render();
+            }
+        } else if (e.key === 'ArrowRight') {
+            const activeItems = items.filter(i => !i.is_excluded);
+            if (currentIndex < items.length - 1) {
+                currentIndex++;
+                render();
             }
         }
     };

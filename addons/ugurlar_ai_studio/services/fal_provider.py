@@ -5,6 +5,7 @@
 
 import base64
 import logging
+import threading
 import time
 
 from .ai_provider_base import AIProviderBase
@@ -53,9 +54,13 @@ class FalProvider(AIProviderBase):
         'fal-ai/flux-kontext/dev': 0.025,
     }
 
+    # Thread-safety: os.environ mutasyonu tek noktadan kontrol edilir
+    _fal_key_lock = threading.Lock()
+
     def __init__(self, api_key):
         import os
-        os.environ['FAL_KEY'] = api_key
+        with FalProvider._fal_key_lock:
+            os.environ['FAL_KEY'] = api_key
         self.api_key = api_key
 
     def _check_client(self):

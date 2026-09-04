@@ -54,6 +54,8 @@ class AiStudioGeneration(models.Model):
 
     @api.depends('source_photo_id.image_original')
     def _compute_original_image(self):
+        # Prefetch source_photo_ids to avoid N+1 queries
+        self.mapped('source_photo_id')
         for gen in self:
             if gen.source_photo_id and gen.source_photo_id.image_original:
                 gen.original_image = gen.source_photo_id.image_original
@@ -281,19 +283,26 @@ class AiStudioGeneration(models.Model):
 
     @api.onchange('revision_prompt')
     def _onchange_revision_prompt(self):
-        """Türkçe revizyon metnini İngilizce'ye çevir."""
+        """Türkçe revizyon metnini İngilizce'ye çevir (UI'dan tetiklenir)."""
         self.revision_prompt_en = self._translate_prompt(self.revision_prompt)
 
     def write(self, vals):
+        # Programatik write'larda çeviri sadece deep-translator ile dene
+        # (hızlı, <100ms). Başarısız olursa orijinal metni kullan — transaction'ı bloke etme.
         if 'revision_prompt' in vals and vals.get('revision_prompt') and 'revision_prompt_en' not in vals:
-            vals['revision_prompt_en'] = self._translate_prompt(vals['revision_prompt'])
+            try:
+                from deep_translator import GoogleTranslator
+                translated = GoogleTranslator(source='tr', target='en').translate(vals['revision_prompt'])
+                if translated:
+                    vals['revision_prompt_en'] = translated
+            except Exception:
+                pass  # Çeviri başarısız — orijinal metin kalır, transaction bloke olmaz
         return super().write(vals)
 
     @api.model_create_multi
     def create(self, vals_list):
-        for vals in vals_list:
-            if vals.get('revision_prompt') and not vals.get('revision_prompt_en'):
-                vals['revision_prompt_en'] = self._translate_prompt(vals['revision_prompt'])
+        # Batch create'de çeviri yapmıyoruz — performans için
+        # Onchange zaten UI'dan gelen kayıtlarda çeviriyi yapıyor
         return super().create(vals_list)
 
     def action_reject(self):
@@ -738,82 +747,22 @@ class AiStudioGeneration(models.Model):
             )
             old_rejected.write({
                 'generated_image': False,
-                'original_image': False,
             })
 
     @api.model
     def action_recover_originals(self):
-        """Cron garbage-collect tarafından yanlışlıkla silinen orijinal görselleri
-        source_photo_id üzerinden geri yükle.
+        """Orijinal görseller artık source_photo_id üzerinden compute field ile
+        otomatik olarak hesaplanmaktadır. Bu fonksiyon geriye dönük uyumluluk
+        için korunmaktadır ancak artık işlem yapmaz.
 
-        Tamamen SQL bazlı: ir_attachment kayıtlarını kopyalayarak çalışır.
-        Python belleğine hiç görsel yüklenmez — MemoryError riski sıfır.
+        original_image = compute('_compute_original_image') → source_photo_id.image_original
         """
-        cr = self.env.cr
-
-        # 1. Kurtarılacak generation'ları bul:
-        #    - original_image attachment'ı YOK
-        #    - source_photo_id VAR
-        #    - source photo'nun image_original attachment'ı VAR
-        cr.execute("""
-            SELECT g.id AS gen_id, g.source_photo_id AS photo_id
-            FROM ai_studio_generation g
-            WHERE g.source_photo_id IS NOT NULL
-              AND g.state = 'done'
-              AND g.reject_reason_id IS NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM ir_attachment a
-                  WHERE a.res_model = 'ai.studio.generation'
-                    AND a.res_field = 'original_image'
-                    AND a.res_id = g.id
-              )
-              AND EXISTS (
-                  SELECT 1 FROM ir_attachment a
-                  WHERE a.res_model = 'ai.studio.photo'
-                    AND a.res_field = 'image_original'
-                    AND a.res_id = g.source_photo_id
-              )
-        """)
-        rows = cr.fetchall()
-        total = len(rows)
-        _logger.info('Kurtarılacak toplam generation: %d', total)
-
-        recovered = 0
-        for gen_id, photo_id in rows:
-            try:
-                # ir_attachment kaydını SQL ile kopyala (binary Python'a hiç yüklenmez)
-                source_attachment = self.env['ir.attachment'].sudo().search([
-                    ('res_model', '=', 'ai.studio.photo'),
-                    ('res_field', '=', 'image_original'),
-                    ('res_id', '=', photo_id)
-                ], limit=1)
-                
-                if source_attachment:
-                    self.env['ir.attachment'].sudo().create({
-                        'name': 'original_image',
-                        'res_model': 'ai.studio.generation',
-                        'res_field': 'original_image',
-                        'res_id': gen_id,
-                        'type': source_attachment.type,
-                        'db_datas': source_attachment.db_datas,
-                        'store_fname': source_attachment.store_fname,
-                        'file_size': source_attachment.file_size,
-                        'checksum': source_attachment.checksum,
-                        'mimetype': source_attachment.mimetype,
-                    })
-                cr.commit()
-                recovered += 1
-                if recovered % 10 == 0:
-                    _logger.info('Kurtarma devam ediyor: %d / %d', recovered, total)
-            except Exception as e:
-                cr.rollback()
-                _logger.warning('Generation %d kurtarılamadı: %s', gen_id, e)
-
         _logger.info(
-            'Kurtarma tamamlandı: %d / %d generation orijinal görseli geri yüklendi.',
-            recovered, total
+            'action_recover_originals çağrıldı. '
+            'original_image artık compute field olarak source_photo_id üzerinden '
+            'otomatik hesaplandığı için kurtarma işlemi gerekli değildir.'
         )
-        return recovered
+        return 0
 
     @api.model
     def action_recover_from_fal_history(self):
@@ -1229,12 +1178,10 @@ class AiStudioGeneration(models.Model):
             if best:
                 res_info = f"✅ Tip: {p_type:<6} (Gen ID: {gen_id}) -> Eşleşti! | Gen Tarih: {g_date} | fal Tarih: {best['timestamp']} | Fark: {best_diff} | URL: {best['url']}"
                 _logger.info(res_info)
-                print(res_info)
                 results.append({'gen_id': gen_id, 'photo_type': p_type, 'matched': True, 'url': best['url'], 'diff': str(best_diff)})
             else:
                 res_info = f"❌ Tip: {p_type:<6} (Gen ID: {gen_id}) -> Eşleşme Bulunamadı!"
                 _logger.info(res_info)
-                print(res_info)
                 results.append({'gen_id': gen_id, 'photo_type': p_type, 'matched': False})
 
         return results

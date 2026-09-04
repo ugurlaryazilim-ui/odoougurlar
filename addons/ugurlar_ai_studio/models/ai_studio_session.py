@@ -72,13 +72,11 @@ def _safe_write_and_commit(cr, record, vals, max_retries=5):
             return True
         except Exception as e:
             cr.rollback()
-            err_str = str(e).lower()
-            is_serialization = (
-                'serialize access' in err_str or
-                'serializationfailure' in str(e.__class__).lower() or
-                'current transaction is aborted' in err_str or
-                'concurrent update' in err_str
-            )
+            from psycopg2 import errors as pg_errors
+            # Odoo exception wrapper'lari asmak icin orig'e de bakiyoruz
+            orig_e = getattr(e, 'orig', getattr(e, '__cause__', e))
+            is_serialization = isinstance(orig_e, pg_errors.SerializationFailure)
+            
             if is_serialization and attempt < max_retries - 1:
                 time.sleep(random.uniform(0.2, 1.5))
                 continue
@@ -165,6 +163,11 @@ class AiStudioSession(models.Model):
         brand_attrs = self.ATTR_BRAND_NAMES
         season_attrs = self.ATTR_SEASON_NAMES
         gender_attrs = self.ATTR_GENDER_NAMES
+
+        products = self.mapped('product_id')
+        if products:
+            products.mapped('product_template_attribute_value_ids.attribute_id')
+            products.mapped('product_tmpl_id.attribute_line_ids.attribute_id')
 
         for session in self:
             c_ids, s_ids, b_ids, se_ids, g_ids = [], [], [], [], []
@@ -914,6 +917,11 @@ class AiStudioSession(models.Model):
     def action_start_processing(self):
         """AI işlemeyi başlat."""
         self.ensure_one()
+        # Tamamlanmış/kaydedilmiş session'ları koruma altına al
+        if self.state in ('done', 'saving'):
+            raise UserError(_('Bu oturum zaten tamamlanmış. Onaylı görsellerin silinmemesi için yeniden başlatılamaz.'))
+        if self.state == 'processing':
+            raise UserError(_('Bu oturum zaten işleniyor.'))
         if not self.model_preset_id:
             raise UserError(_('Lütfen bir manken preseti seçin.'))
         if not self.photo_ids:
@@ -1637,6 +1645,13 @@ class AiStudioSession(models.Model):
             import random
             front_seed = random.randint(100000, 99999999)  # Front try-on seed'i — back/side çağrıları için referans
 
+            # Fetch prompt locks OUTSIDE the loop (Item 10)
+            all_locks = env['ai.studio.prompt.template'].search([
+                ('scope', '=', 'global'),
+                ('active', '=', True),
+            ])
+            global_prompt_locks = [l.prompt_text for l in all_locks]
+
             # Sıralama: front → back → side → detail
             ordered_gens = (
                 generations.filtered(lambda g: g.photo_type == 'front')
@@ -1833,11 +1848,7 @@ class AiStudioSession(models.Model):
                     # VIEW-SPESİFİK PROMPT OLUŞTURMA
                     prompt_text = ""
                     try:
-                        all_locks = env['ai.studio.prompt.template'].search([
-                            ('scope', '=', 'global'),
-                            ('active', '=', True),
-                        ])
-                        prompt_locks = [l.prompt_text for l in all_locks]
+                        prompt_locks = global_prompt_locks
 
                         analysis_data = cached_analysis or {}
                         preset_data = {
@@ -2195,6 +2206,14 @@ class AiStudioSession(models.Model):
         _logger.info("AI Retry Thread starting for session %s, gen %s with uid %s", session_id, gen_id, uid)
         with self.pool.cursor() as cr:
             env = api.Environment(cr, uid, {'lang': 'tr_TR'})
+            
+            # Fetch prompt locks OUTSIDE
+            all_locks = env['ai.studio.prompt.template'].search([
+                ('scope', '=', 'global'),
+                ('active', '=', True),
+            ])
+            global_prompt_locks = [l.prompt_text for l in all_locks]
+            
             provider_type = env['ir.config_parameter'].sudo().get_param(
                 'ugurlar_ai_studio.default_provider', 'fashn'
             )
@@ -2477,11 +2496,7 @@ class AiStudioSession(models.Model):
                 # ═══ VIEW-SPESİFİK PROMPT ═══
                 prompt_text = ""
                 try:
-                    all_locks = env['ai.studio.prompt.template'].search([
-                        ('scope', '=', 'global'),
-                        ('active', '=', True),
-                    ])
-                    prompt_locks = [l.prompt_text for l in all_locks]
+                    prompt_locks = global_prompt_locks
 
                     from ..services.garment_analyzer import analyze_garment, build_generation_prompt
                     analysis = analyze_garment(fal_api_key, garment_url, gemini_api_key=gemini_api_key)
@@ -3092,11 +3107,8 @@ class AiStudioSession(models.Model):
         if not reviewer_group:
             return
 
-        # Odoo 19 uyumlu: reviewer grubundaki kullanıcıları SQL ile bul
-        self.env.cr.execute("""
-            SELECT uid FROM res_groups_users_rel WHERE gid = %s
-        """, (reviewer_group.id,))
-        reviewer_ids = [row[0] for row in self.env.cr.fetchall()]
+        # Odoo 19 uyumlu: reviewer grubundaki kullanıcıları ORM ile bul
+        reviewer_ids = reviewer_group.users.ids
 
         if not reviewer_ids:
             return

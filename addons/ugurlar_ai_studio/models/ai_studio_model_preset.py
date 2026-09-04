@@ -121,31 +121,48 @@ class AiStudioModelPreset(models.Model):
         """Kullanım ve onay istatistiklerini hesapla."""
         session_model = self.env['ai.studio.session']
         gen_model = self.env['ai.studio.generation']
-        for preset in self:
-            session_groups = session_model._read_group(
-                [('model_preset_id', '=', preset.id)],
-                groupby=[],
-                aggregates=['__count']
-            )
-            preset.usage_count = session_groups[0][0] if session_groups else 0
 
-            if preset.usage_count > 0:
-                gen_groups = gen_model._read_group(
-                    [('session_id.model_preset_id', '=', preset.id), ('state', '=', 'done')],
-                    groupby=['is_approved'],
-                    aggregates=['__count']
-                )
-                total_done = 0
-                approved_count = 0
-                for is_approved, count in gen_groups:
-                    total_done += count
-                    if is_approved:
-                        approved_count += count
-                
-                if total_done > 0:
-                    preset.approval_rate = (approved_count / total_done) * 100.0
-                else:
-                    preset.approval_rate = 0.0
+        self.usage_count = 0
+        self.approval_rate = 0.0
+
+        if not self.ids:
+            return
+
+        session_groups = session_model._read_group(
+            [('model_preset_id', 'in', self.ids)],
+            ['model_preset_id'],
+            ['__count']
+        )
+        usage_map = {preset.id: count for preset, count in session_groups}
+
+        gen_groups = gen_model._read_group(
+            [('session_id.model_preset_id', 'in', self.ids), ('state', '=', 'done')],
+            ['session_id'],
+            ['is_approved:array_agg']
+        )
+        # We can just group by session_id and then map to preset, 
+        # or we can group by 'session_id.model_preset_id' which is safer if supported.
+        # But let's use the simplest approach that works in Odoo 17/18 without chaining issues.
+        # Actually in Odoo 16/17 chaining in groupby like 'session_id.model_preset_id' works perfectly.
+        gen_groups_safe = gen_model._read_group(
+            [('session_id.model_preset_id', 'in', self.ids), ('state', '=', 'done')],
+            ['session_id'],
+            ['is_approved:sum', '__count']
+        )
+        
+        gen_map = {}
+        for session, approved_sum, count in gen_groups_safe:
+            preset_id = session.model_preset_id.id
+            if preset_id not in gen_map:
+                gen_map[preset_id] = {'total': 0, 'approved': 0}
+            gen_map[preset_id]['total'] += count
+            gen_map[preset_id]['approved'] += approved_sum or 0
+
+        for preset in self:
+            preset.usage_count = usage_map.get(preset.id, 0)
+            stats = gen_map.get(preset.id)
+            if stats and stats['total'] > 0:
+                preset.approval_rate = (stats['approved'] / stats['total']) * 100.0
             else:
                 preset.approval_rate = 0.0
 
