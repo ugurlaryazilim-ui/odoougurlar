@@ -137,26 +137,18 @@ class AiStudioModelPreset(models.Model):
 
         gen_groups = gen_model._read_group(
             [('session_id.model_preset_id', 'in', self.ids), ('state', '=', 'done')],
-            ['session_id'],
-            ['is_approved:array_agg']
-        )
-        # We can just group by session_id and then map to preset, 
-        # or we can group by 'session_id.model_preset_id' which is safer if supported.
-        # But let's use the simplest approach that works in Odoo 17/18 without chaining issues.
-        # Actually in Odoo 16/17 chaining in groupby like 'session_id.model_preset_id' works perfectly.
-        gen_groups_safe = gen_model._read_group(
-            [('session_id.model_preset_id', 'in', self.ids), ('state', '=', 'done')],
-            ['session_id'],
-            ['is_approved:sum', '__count']
+            ['session_id', 'is_approved'],
+            ['__count']
         )
         
         gen_map = {}
-        for session, approved_sum, count in gen_groups_safe:
+        for session, is_approved, count in gen_groups:
             preset_id = session.model_preset_id.id
             if preset_id not in gen_map:
                 gen_map[preset_id] = {'total': 0, 'approved': 0}
             gen_map[preset_id]['total'] += count
-            gen_map[preset_id]['approved'] += approved_sum or 0
+            if is_approved:
+                gen_map[preset_id]['approved'] += count
 
         for preset in self:
             preset.usage_count = usage_map.get(preset.id, 0)

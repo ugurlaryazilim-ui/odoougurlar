@@ -938,8 +938,19 @@ class AiStudioController(http.Controller):
                 pass
 
             presets = request.env['ai.studio.model.preset'].search(domain)
+            if not presets:
+                # Filtreyle preset bulunamadıysa kullanıcıyı mankensiz bırakmamak için tüm aktif presetleri getir
+                presets = request.env['ai.studio.model.preset'].search([('active', '=', True)])
+
             result = []
             for p in presets:
+                try:
+                    usage_cnt = p.usage_count
+                    appr_rate = p.approval_rate
+                except Exception:
+                    usage_cnt = 0
+                    appr_rate = 0.0
+
                 preview_url = f"/web/image/ai.studio.model.preset/{p.id}/preview_image" if p.preview_image else (f"/web/image/ai.studio.model.preset/{p.id}/model_image_front" if p.model_image_front else False)
 
                 result.append({
@@ -952,15 +963,20 @@ class AiStudioController(http.Controller):
                     'has_front': bool(p.model_image_front),
                     'has_back': bool(p.model_image_back),
                     'background_type': p.background_type,
-                    'usage_count': p.usage_count,
-                    'approval_rate': p.approval_rate,
+                    'usage_count': usage_cnt,
+                    'approval_rate': appr_rate,
                     'preview_image': preview_url,
                 })
 
             return {'presets': result}
         except Exception as e:
             _logger.exception('get_presets hatasi: %s', e)
-            return {'presets': []}
+            # En son çare fallback
+            try:
+                fallback_presets = request.env['ai.studio.model.preset'].search([('active', '=', True)])
+                return {'presets': [{'id': p.id, 'name': p.name, 'preview_image': f"/web/image/ai.studio.model.preset/{p.id}/preview_image" if p.preview_image else False} for p in fallback_presets]}
+            except Exception:
+                return {'presets': []}
 
     @http.route('/ai_studio/get_reject_reasons', type='jsonrpc', auth='user', methods=['POST'])
     def get_reject_reasons(self):
