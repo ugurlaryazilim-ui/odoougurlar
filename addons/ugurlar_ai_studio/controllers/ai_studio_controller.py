@@ -696,12 +696,23 @@ class AiStudioController(http.Controller):
                 lock_age = now - session.review_lock_time
                 if lock_age < timedelta(minutes=self.REVIEW_LOCK_TIMEOUT_MINUTES):
                     # Kilit aktif (5dk henüz dolmamış)
-                    # 1. Eğer jeton ve kullanıcı tam eşleşiyorsa (aynı sekme/yenileme) -> kilit süresini uzat
+                    # 1. Eğer jeton tam eşleşiyorsa (aynı sekme/yenileme) -> kilit süresini uzat
                     if lock_token and session.review_lock_token == lock_token:
                         session.sudo().write({'review_lock_time': now})
                         return {'success': True, 'locked_by_self': True}
                     
-                    # 2. Eğer kilit başka bir kullanıcıya veya farklı bir sekmeye aitse -> ENGELLE!
+                    # 2. Aynı kullanıcı farklı sekme/token ile geliyorsa -> kilidi devral
+                    #    (Sayfa yenilemesi, tarayıcı çökmesi vb. sonrası kendi kilidinin takılmasını önler)
+                    if session.review_locked_by.id == current_user.id:
+                        _logger.info('Oturum %s: aynı kullanıcı (%s) kilidi devraldı (eski token: %s -> yeni: %s)',
+                                     session.id, current_user.name, session.review_lock_token, lock_token)
+                        session.sudo().write({
+                            'review_lock_time': now,
+                            'review_lock_token': lock_token or '',
+                        })
+                        return {'success': True, 'locked_by_self': True}
+
+                    # 3. Eğer kilit başka bir kullanıcıya aitse -> ENGELLE!
                     lock_minutes = int(lock_age.total_seconds() // 60)
                     lock_seconds = int(lock_age.total_seconds() % 60)
                     locker_name = session.review_locked_by.name or 'Başka bir kullanıcı'
@@ -782,16 +793,13 @@ class AiStudioController(http.Controller):
             if session.review_locked_by and session.review_lock_time:
                 lock_age = now - session.review_lock_time
                 if lock_age < timedelta(minutes=self.REVIEW_LOCK_TIMEOUT_MINUTES):
-                    # Kilit aktif
-                    if lock_token and session.review_lock_token and session.review_lock_token != lock_token:
+                    # Kilit aktif — aynı kullanıcı her zaman geçebilir
+                    is_same_user = session.review_locked_by.id == request.env.user.id
+                    is_same_token = lock_token and session.review_lock_token == lock_token
+                    if not is_same_user and not is_same_token:
                         locker_name = session.review_locked_by.name or 'Başka bir kullanıcı'
                         return {
-                            'error': f'⚠️ Bu oturum şu an {locker_name} tarafından başka bir ekranda/kullanıcıda inceleniyor. Lütfen tamamlanmasını bekleyin.'
-                        }
-                    elif not lock_token and session.review_locked_by.id != request.env.user.id:
-                        locker_name = session.review_locked_by.name or 'Başka bir kullanıcı'
-                        return {
-                            'error': f'⚠️ Bu oturum şu an {locker_name} tarafından inceleniyor.'
+                            'error': f'⚠️ Bu oturum şu an {locker_name} tarafından inceleniyor. Lütfen tamamlanmasını bekleyin.'
                         }
 
             # Son versiyon generation'lari al (done, failed, pending, processing)
