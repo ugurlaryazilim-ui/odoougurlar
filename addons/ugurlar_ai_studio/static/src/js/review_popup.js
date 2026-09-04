@@ -233,6 +233,9 @@ async function openReviewPopup(sessionId) {
                                     <button class="ais-rp-btn ais-rp-btn-approve" id="ais-rp-retry" style="background:#f59e0b;">
                                         🔄 Tekrar Dene
                                     </button>
+                                    <button class="ais-rp-btn ais-rp-btn-exclude" id="ais-rp-toggle-exclude" style="background:#6b7280; color:white;" title="Bu yönü ürüne kaydetme">
+                                        🚫 Dahil Etme
+                                    </button>
                                     ${item.revision_number > 1 ? `
                                         <button class="ais-rp-btn" id="ais-rp-cancel-revision" style="background:#6b7280; border-color:#6b7280;">
                                             🛑 Revizyonu İptal Et &amp; Geri Dön
@@ -276,7 +279,7 @@ async function openReviewPopup(sessionId) {
                         ` : item.pending_revision ? `
                             <div class="ais-rp-pending-badge">⏳ Revize üretiliyor — diğer görselleri inceleyebilirsiniz</div>
                         ` : item.state === 'failed' ? `
-                            <div class="ais-rp-pending-badge" style="background:rgba(239,68,68,0.15); color:#ef4444;">❌ Bu görsel başarısız oldu${canApprove ? ' — Tekrar Dene butonunu kullanın' : ''}</div>
+                            <div class="ais-rp-pending-badge" style="background:rgba(239,68,68,0.15); color:#ef4444;">❌ Bu görsel başarısız oldu${canApprove ? ' — Tekrar Dene veya Dahil Etme butonunu kullanın' : ''}</div>
                         ` : !canApprove ? `
                             <div class="ais-rp-operator-badge">
                                 📷 Görüntüleme Modu — Onay yetkisi için onaycı rolü gerekli
