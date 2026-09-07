@@ -28,7 +28,25 @@ class AIContentQueue(models.Model):
     priority = fields.Integer("Öncelik", default=10)
     attempts = fields.Integer("Deneme Sayısı", default=0)
     max_attempts = fields.Integer("Maks Deneme", default=5)
-    product_code = fields.Char("Ürün Kodu", related='product_tmpl_id.default_code', store=True, readonly=True)
+    product_code = fields.Char("Ürün Kodu", compute='_compute_product_code', search='_search_product_code')
+
+    @api.depends('product_tmpl_id.default_code', 'product_tmpl_id.product_variant_ids.default_code')
+    def _compute_product_code(self):
+        for rec in self:
+            tmpl = rec.product_tmpl_id
+            # Önce ana şablon iç referansı, yoksa ilk varyantın kodu
+            code = tmpl.default_code
+            if not code and tmpl.product_variant_ids:
+                for variant in tmpl.product_variant_ids:
+                    if variant.default_code:
+                        code = variant.default_code
+                        break
+            rec.product_code = code or ''
+
+    def _search_product_code(self, operator, value):
+        return ['|',
+                ('product_tmpl_id.default_code', operator, value),
+                ('product_tmpl_id.product_variant_ids.default_code', operator, value)]
 
     @api.model
     def _cron_process_queue(self, batch_size=10):
