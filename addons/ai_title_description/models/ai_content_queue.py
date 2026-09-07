@@ -281,3 +281,12 @@ class AIContentQueue(models.Model):
             record.state = 'pending'
         self._cron_process_queue(batch_size=len(self))
         return True
+
+    def action_cancel(self):
+        """Seçili kuyruk kayıtlarını durdurur / iptal eder."""
+        cancelable = self.filtered(lambda r: r.state in ('pending', 'processing'))
+        cancelable.write({
+            'state': 'error',
+            'error_message': 'Kullanıcı tarafından iptal edildi.',
+        })
+        return True
