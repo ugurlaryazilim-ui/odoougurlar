@@ -41,6 +41,7 @@
             <field name="arch" type="xml">
                 <list string="AI Üretim Kuyruğu" decoration-danger="state == 'error'" decoration-success="state == 'done'" decoration-info="state == 'pending'" decoration-warning="state == 'processing'">
                     <field name="product_tmpl_id"/>
+                    <field name="product_code" optional="show"/>
                     <field name="mode"/>
                     <field name="state"/>
                     <field name="priority"/>

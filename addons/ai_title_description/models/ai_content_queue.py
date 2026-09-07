@@ -28,6 +28,7 @@ class AIContentQueue(models.Model):
     priority = fields.Integer("Öncelik", default=10)
     attempts = fields.Integer("Deneme Sayısı", default=0)
     max_attempts = fields.Integer("Maks Deneme", default=5)
+    product_code = fields.Char("Ürün Kodu", related='product_tmpl_id.default_code', store=True, readonly=True)
 
     @api.model
     def _cron_process_queue(self, batch_size=10):
