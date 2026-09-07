@@ -81,18 +81,35 @@ class PowerBIController(http.Controller):
         )
 
         try:
-            # Doğrudan SQL — en hafif yöntem, ORM overhead'i yok
+            # Doğrudan SQL — sadece görseli olan ürünleri getir
+            # ir_attachment tablosundan varyant veya şablon görseli kontrolü
             request.env.cr.execute("""
                 SELECT
                     pp.id AS product_id,
                     pp.product_tmpl_id AS template_id,
                     pp.barcode,
                     pp.default_code,
-                    pt.name->>'en_US' AS template_name,
-                    pp.active
+                    pt.name->>'en_US' AS template_name
                 FROM product_product pp
                 JOIN product_template pt ON pt.id = pp.product_tmpl_id
                 WHERE pp.active = true
+                  AND (
+                    -- Varyantın kendi görseli var mı?
+                    EXISTS (
+                        SELECT 1 FROM ir_attachment ia
+                        WHERE ia.res_model = 'product.product'
+                          AND ia.res_field = 'image_variant_1920'
+                          AND ia.res_id = pp.id
+                    )
+                    OR
+                    -- Şablonun görseli var mı?
+                    EXISTS (
+                        SELECT 1 FROM ir_attachment ia
+                        WHERE ia.res_model = 'product.template'
+                          AND ia.res_field = 'image_1920'
+                          AND ia.res_id = pt.id
+                    )
+                  )
                 ORDER BY pp.id
             """)
             rows = request.env.cr.dictfetchall()
