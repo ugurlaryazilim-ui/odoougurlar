@@ -61,6 +61,36 @@
                         </setting>
                     </block>
 
+                    <!-- Power BI Entegrasyon Ayarları -->
+                    <block title="Power BI Entegrasyonu" name="powerbi_settings">
+                        <setting string="Power BI Görsel Entegrasyonu"
+                                 help="Power BI'ın ürün görsellerine erişebilmesi için API endpoint'ini aktifleştirir.">
+                            <field name="powerbi_enabled"/>
+                            <div class="content-group mt-2" invisible="not powerbi_enabled">
+                                <div class="row mt8">
+                                    <label for="powerbi_api_key" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="powerbi_api_key" class="col-6"/>
+                                </div>
+                                <div class="row mt8">
+                                    <label for="powerbi_image_size" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="powerbi_image_size" class="col-6"/>
+                                </div>
+                                <div class="mt8">
+                                    <button name="action_generate_powerbi_api_key"
+                                            type="object"
+                                            string="Yeni Power BI API Anahtarı Oluştur"
+                                            class="btn-primary"/>
+                                </div>
+                                <div class="mt16 alert alert-info" role="alert">
+                                    <strong>Power BI Endpoint'leri:</strong><br/>
+                                    <code>/api/powerbi/products?token=API_KEY</code> — Ürün listesi (JSON)<br/>
+                                    <code>/api/powerbi/image/BARKOD?token=API_KEY</code> — Tek görsel (Binary)<br/>
+                                    <code>/api/powerbi/image-by-id/ID?token=API_KEY</code> — ID ile görsel
+                                </div>
+                            </div>
+                        </setting>
+                    </block>
+
                     <!-- Tanılama ve Veri Düzeltme -->
                     <block title="Tanılama ve Veri Düzeltme" name="diagnostics_settings">
                         <setting string="Mevcut Görselleri Düzelt"

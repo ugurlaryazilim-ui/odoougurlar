@@ -1,6 +1,6 @@
 {
     'name': 'Uğurlar Resim Yönetimi',
-    'version': '19.0.1.0.1',
+    'version': '19.0.1.1.0',
     'category': 'Inventory/Products',
     'summary': 'Toplu ürün görseli yükleme ve otomatik barkod eşleştirme',
     'description': """

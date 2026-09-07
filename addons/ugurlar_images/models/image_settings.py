@@ -82,6 +82,35 @@ class ResConfigSettings(models.TransientModel):
     )
 
     # -----------------------------------------------------------------
+    #  Power BI Entegrasyon Ayarları
+    # -----------------------------------------------------------------
+    powerbi_enabled = fields.Boolean(
+        string='Power BI Entegrasyonu Aktif',
+        config_parameter='ugurlar_images.powerbi_enabled',
+        default=False,
+        help='Power BI görsel entegrasyonunu aktifleştirir.',
+    )
+    powerbi_api_key = fields.Char(
+        string='Power BI API Anahtarı',
+        config_parameter='ugurlar_images.powerbi_api_key',
+        groups='base.group_system',
+        help='Power BI\'ın ürün görsellerine erişmek için kullanacağı API anahtarı.',
+    )
+    powerbi_image_size = fields.Selection([
+        ('128', '128px (Küçük — en hızlı)'),
+        ('256', '256px (Orta küçük)'),
+        ('512', '512px (Orta — önerilen)'),
+        ('1024', '1024px (Büyük)'),
+        ('1920', '1920px (Orijinal — en yavaş)'),
+    ],
+        string='Varsayılan Görsel Boyutu',
+        config_parameter='ugurlar_images.powerbi_image_size',
+        default='512',
+        help='Power BI\'a gönderilecek varsayılan görsel boyutu.\n'
+             'Küçük boyutlar daha hızlı yüklenir, büyük boyutlar daha kaliteli görünür.',
+    )
+
+    # -----------------------------------------------------------------
     #  Veri Düzeltme — image.fix.job modelinden okunan alanlar
     # -----------------------------------------------------------------
     fix_images_status = fields.Selection([
@@ -112,6 +141,25 @@ class ResConfigSettings(models.TransientModel):
             'params': {
                 'title': 'API Anahtarı Oluşturuldu',
                 'message': f'Yeni anahtar: {key}',
+                'type': 'success',
+                'sticky': True,
+            },
+        }
+
+    def action_generate_powerbi_api_key(self):
+        """Power BI entegrasyonu için rastgele bir API anahtarı üretir."""
+        key = secrets.token_urlsafe(32)
+        self.env['ir.config_parameter'].sudo().set_param(
+            'ugurlar_images.powerbi_api_key', key
+        )
+        base_url = self.env['ir.config_parameter'].sudo().get_param('web.base.url', '')
+        products_url = f"{base_url}/api/powerbi/products?token={key}"
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Power BI API Anahtarı Oluşturuldu',
+                'message': f'Ürün listesi URL: {products_url}',
                 'type': 'success',
                 'sticky': True,
             },
