@@ -25,6 +25,10 @@
                     <separator/>
                     <filter string="Bugün" name="filter_today" domain="[('create_date', '&gt;=', context_today().strftime('%Y-%m-%d 00:00:00'))]"/>
 
+                    <separator/>
+                    <filter string="📸 Resimli" name="filter_has_image" domain="[('product_tmpl_id.image_1920', '!=', False)]"/>
+                    <filter string="🚫 Resimsiz" name="filter_no_image" domain="[('product_tmpl_id.image_1920', '=', False)]"/>
+
                     <!-- Gruplama -->
                     <group>
                         <filter string="Durum" name="group_by_state" context="{'group_by': 'state'}"/>
