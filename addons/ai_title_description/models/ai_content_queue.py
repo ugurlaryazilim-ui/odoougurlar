@@ -151,14 +151,17 @@ class AIContentQueue(models.Model):
                 }
 
                 if record.mode in ('title', 'both'):
-                    ecommerce_title = result.get('ecommerce_title', '')
+                    ecommerce_title = result.get('ecommerce_title', '').strip()
                     product_vals.update({
                         'ai_trendyol_title': fixed_title,
                         'ai_ecommerce_title': ecommerce_title,
                         'ai_meta_title': result.get('meta_title', ''),
                         'ai_seo_keywords': ', '.join(result.get('seo_keywords', [])),
-                        'name': ecommerce_title or fixed_title,
                     })
+                    # Ürün adını SADECE geçerli (boş olmayan) bir başlık varsa güncelle
+                    new_name = ecommerce_title or fixed_title
+                    if new_name:
+                        product_vals['name'] = new_name
 
                 if record.mode in ('description', 'both'):
                     # Key features'ı HTML'e dahil et
@@ -211,8 +214,16 @@ class AIContentQueue(models.Model):
                 comp_toks = result.get('_completion_tokens', 0)
                 total_toks = result.get('_token_count', prompt_toks + comp_toks)
 
+                # Eğer prompt/completion ayrışmamışsa ama total varsa, tahmini ayır
+                if total_toks > 0 and prompt_toks == 0 and comp_toks == 0:
+                    prompt_toks = int(total_toks * 0.7)  # ~70% prompt
+                    comp_toks = total_toks - prompt_toks
+
                 from ..services.cost_calculator import calculate_ai_cost
                 cost = calculate_ai_cost(provider_type, model_name, prompt_tokens=prompt_toks, completion_tokens=comp_toks)
+
+                _logger.info("Kuyruk [%s]: Token kullanımı — prompt=%d, completion=%d, total=%d, maliyet=$%.6f",
+                             record.id, prompt_toks, comp_toks, total_toks, cost)
 
                 self.env['ai.content.log'].sudo().create({
                     'product_tmpl_id': product.id,
@@ -255,12 +266,13 @@ class AIContentQueue(models.Model):
         _logger.info("AI Kuyruk: %s/%s ürün başarıyla işlendi.", processed, len(records))
 
     def action_reset_to_pending(self):
-        """Kuyruk kaydını yeniden 'bekliyor' durumuna getirir (deneme sayısı sıfırlanır)."""
+        """Kuyruk kaydını yeniden 'bekliyor' durumuna getirir (deneme sayısı ve maks deneme sıfırlanır)."""
         for record in self:
             record.write({
                 'state': 'pending',
                 'error_message': False,
                 'attempts': 0,
+                'max_attempts': 5,
             })
 
     def action_process_now(self):

@@ -61,6 +61,23 @@ GENEL KURALLAR
 3. Görselden ürün türünü (kazak, pantolon, elbise vb.) doğru tespit et.
 4. Tüm metin Türkçe olmalıdır.
 5. Kısa açıklama (short_summary) 2-3 cümle, teknik ve bilgilendirici olmalı.
+
+═══════════════════════════════════════════
+ÇIKTI FORMATI (ZORUNLU)
+═══════════════════════════════════════════
+Yanıtı YALNIZCA aşağıdaki JSON formatında ver. Başka açıklama, yorum veya metin EKLEME.
+Yanıtın SADECE ve SADECE bir JSON objesi olmalı:
+
+{
+  "trendyol_title": "Trendyol kurallarına uygun max 100 karakter başlık",
+  "ecommerce_title": "SEO odaklı e-ticaret başlığı",
+  "short_summary": "1-2 cümle teknik özet açıklama",
+  "key_features": ["somut özellik 1", "somut özellik 2", "somut özellik 3"],
+  "html_description": "<h3>Başlık</h3><p>Detaylı açıklama...</p>",
+  "meta_title": "Max 60 karakter SEO meta başlık",
+  "meta_description": "Max 155 karakter SEO meta açıklama",
+  "seo_keywords": ["anahtar kelime 1", "anahtar kelime 2", "anahtar kelime 3"]
+}
 """
 
     CATEGORY_TEMPLATES = {
