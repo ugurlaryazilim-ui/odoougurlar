@@ -1,4 +1,6 @@
+import base64
 import hashlib
+import hmac
 import json
 import logging
 
@@ -27,9 +29,10 @@ class PowerBIController(http.Controller):
     """
     Power BI entegrasyonu için public controller.
 
-    İki endpoint sunar:
+    Üç endpoint sunar:
     1. /api/powerbi/products  → Tüm varyantların JSON listesi (barkod + görsel URL)
     2. /api/powerbi/image/<barcode> → Tek bir varyantın görselini binary olarak döndürür
+    3. /api/powerbi/image-by-id/<id> → ID ile görsel
 
     Güvenlik: API token ile korunur (Ayarlar → Resimler → Power BI API Anahtarı)
     """
@@ -46,10 +49,13 @@ class PowerBIController(http.Controller):
             'ugurlar_images.powerbi_api_key', ''
         )
         if not stored_token:
-            _logger.warning("Power BI API anahtarı tanımlanmamış. Ayarlar → Resimler → Power BI bölümünden oluşturun.")
+            _logger.warning(
+                "Power BI API anahtarı tanımlanmamış. "
+                "Ayarlar → Resimler → Power BI bölümünden oluşturun."
+            )
             return False
         # Sabit zamanlı karşılaştırma (timing attack koruması)
-        return hmac_compare(token, stored_token)
+        return hmac.compare_digest(str(token), str(stored_token))
 
     def _json_error(self, message, status=403):
         """Standart JSON hata yanıtı."""
@@ -65,7 +71,9 @@ class PowerBIController(http.Controller):
 
     def _get_base_url(self):
         """Odoo base URL'ini döndürür."""
-        return request.env['ir.config_parameter'].sudo().get_param('web.base.url', '')
+        return request.env['ir.config_parameter'].sudo().get_param(
+            'web.base.url', ''
+        )
 
     # =================================================================
     #  Endpoint 1: Ürün Listesi (JSON)
@@ -82,25 +90,8 @@ class PowerBIController(http.Controller):
         """
         Power BI için tüm varyantların listesini JSON olarak döndürür.
 
-        Parametreler:
-            token (str): API anahtarı (zorunlu)
-            size  (str): Görsel boyutu — 128, 256, 512, 1024, 1920 (varsayılan: 512)
-
-        Döndürür:
-            JSON array:
-            [
-                {
-                    "product_id": 12345,
-                    "barcode": "8691234560001",
-                    "default_code": "ABC-001",
-                    "product_name": "Ürün Adı",
-                    "template_name": "Şablon Adı",
-                    "variant_attributes": "Kırmızı / M",
-                    "has_image": true,
-                    "image_url": "https://odoo.sirket.com/api/powerbi/image/8691234560001?token=XXX&size=512"
-                },
-                ...
-            ]
+        Görsellerin binary verisini YÜKLEMEZ — sadece URL döndürür.
+        Böylece binlerce ürün olsa bile hızlı çalışır.
         """
         # Token doğrulama
         if not self._validate_token(token):
@@ -109,61 +100,109 @@ class PowerBIController(http.Controller):
         size = size or DEFAULT_SIZE
         if size not in VALID_SIZES:
             return self._json_error(
-                f"Geçersiz boyut: {size}. Geçerli değerler: {', '.join(sorted(VALID_SIZES.keys()))}",
+                f"Geçersiz boyut: {size}. "
+                f"Geçerli değerler: {', '.join(sorted(VALID_SIZES.keys()))}",
                 400,
             )
 
         base_url = self._get_base_url()
-        image_field = VALID_SIZES[size]
 
-        # Tüm aktif ürün varyantlarını çek
-        products = request.env['product.product'].sudo().search([
-            ('active', '=', True),
-        ])
+        try:
+            # SQL ile hızlı sorgu — image binary yüklemeden sadece meta veri çek
+            # image_variant_1920 alanının boş olup olmadığını kontrol etmek için
+            # ir_attachment tablosunu kontrol ediyoruz ama daha basit yol:
+            # product.product tablosundan sadece gerekli alanları read() ile çek
+            products = request.env['product.product'].sudo().search_read(
+                domain=[('active', '=', True)],
+                fields=[
+                    'id',
+                    'barcode',
+                    'default_code',
+                    'display_name',
+                    'product_tmpl_id',
+                ],
+                order='id asc',
+            )
 
-        data = []
-        for product in products:
-            barcode = product.barcode or ''
-            default_code = product.default_code or ''
-
-            # Görsel var mı kontrolü
-            has_image = bool(product[image_field])
-
-            # Barkod veya ID bazlı görsel URL
-            if barcode:
-                image_url = f"{base_url}/api/powerbi/image/{barcode}?token={token}&size={size}"
-            else:
-                # Barkodu olmayan ürünler için ID bazlı URL
-                image_url = f"{base_url}/api/powerbi/image-by-id/{product.id}?token={token}&size={size}"
-
-            # Varyant özellik metni (ör: "Kırmızı / M")
-            variant_attrs = ', '.join(
-                product.product_template_attribute_value_ids.mapped(
-                    lambda v: f"{v.attribute_id.name}: {v.name}"
+            # Template isimlerini toplu çek (N+1 önleme)
+            tmpl_ids = list(set(
+                p['product_tmpl_id'][0]
+                for p in products
+                if p.get('product_tmpl_id')
+            ))
+            tmpl_names = {}
+            if tmpl_ids:
+                templates = request.env['product.template'].sudo().search_read(
+                    domain=[('id', 'in', tmpl_ids)],
+                    fields=['id', 'name'],
                 )
-            ) if product.product_template_attribute_value_ids else ''
+                tmpl_names = {t['id']: t['name'] for t in templates}
 
-            data.append({
-                'product_id': product.id,
-                'template_id': product.product_tmpl_id.id,
-                'barcode': barcode,
-                'default_code': default_code,
-                'product_name': product.display_name or '',
-                'template_name': product.product_tmpl_id.name or '',
-                'variant_attributes': variant_attrs,
-                'has_image': has_image,
-                'image_url': image_url if has_image else '',
-            })
+            # Varyant özelliklerini toplu çek
+            product_ids = [p['id'] for p in products]
+            variant_attrs_map = {}
+            if product_ids:
+                pp_records = request.env['product.product'].sudo().browse(product_ids)
+                # Batch prefetch ile performans
+                for pp in pp_records:
+                    try:
+                        attrs = []
+                        for ptav in pp.product_template_attribute_value_ids:
+                            attrs.append(
+                                f"{ptav.attribute_id.name}: {ptav.name}"
+                            )
+                        variant_attrs_map[pp.id] = ', '.join(attrs)
+                    except Exception:
+                        variant_attrs_map[pp.id] = ''
 
-        response_body = json.dumps(data, ensure_ascii=False, indent=2)
-        return Response(
-            response_body,
-            status=200,
-            content_type='application/json; charset=utf-8',
-            headers={
-                'Access-Control-Allow-Origin': '*',
-            },
-        )
+            data = []
+            for product in products:
+                barcode = product.get('barcode') or ''
+                default_code = product.get('default_code') or ''
+                product_id = product['id']
+
+                tmpl_id = (
+                    product['product_tmpl_id'][0]
+                    if product.get('product_tmpl_id')
+                    else False
+                )
+                tmpl_name = tmpl_names.get(tmpl_id, '') if tmpl_id else ''
+
+                # Görsel URL — barkod varsa barkod ile, yoksa ID ile
+                if barcode:
+                    image_url = (
+                        f"{base_url}/api/powerbi/image/{barcode}"
+                        f"?token={token}&size={size}"
+                    )
+                else:
+                    image_url = (
+                        f"{base_url}/api/powerbi/image-by-id/{product_id}"
+                        f"?token={token}&size={size}"
+                    )
+
+                data.append({
+                    'product_id': product_id,
+                    'template_id': tmpl_id or 0,
+                    'barcode': barcode,
+                    'default_code': default_code,
+                    'product_name': product.get('display_name') or '',
+                    'template_name': tmpl_name,
+                    'variant_attributes': variant_attrs_map.get(product_id, ''),
+                    'image_url': image_url,
+                })
+
+            response_body = json.dumps(data, ensure_ascii=False)
+            return Response(
+                response_body,
+                status=200,
+                content_type='application/json; charset=utf-8',
+                headers={
+                    'Access-Control-Allow-Origin': '*',
+                },
+            )
+        except Exception as e:
+            _logger.exception("Power BI ürün listesi hatası")
+            return self._json_error(f"Sunucu hatası: {str(e)}", 500)
 
     # =================================================================
     #  Endpoint 2: Tek Görsel (Binary — Barkod ile)
@@ -179,14 +218,6 @@ class PowerBIController(http.Controller):
     def powerbi_image_by_barcode(self, barcode, token=None, size=None, **kwargs):
         """
         Barkod ile ürün görselini binary olarak döndürür.
-
-        Parametreler:
-            barcode (str): Ürün barkodu (URL path)
-            token   (str): API anahtarı (zorunlu)
-            size    (str): Görsel boyutu — 128, 256, 512, 1024, 1920 (varsayılan: 512)
-
-        Döndürür:
-            image/png veya image/jpeg binary yanıt
         """
         if not self._validate_token(token):
             return self._json_error('Geçersiz veya eksik API anahtarı.', 403)
@@ -194,26 +225,33 @@ class PowerBIController(http.Controller):
         size = size or DEFAULT_SIZE
         if size not in VALID_SIZES:
             return self._json_error(
-                f"Geçersiz boyut: {size}. Geçerli değerler: {', '.join(sorted(VALID_SIZES.keys()))}",
+                f"Geçersiz boyut: {size}. "
+                f"Geçerli değerler: {', '.join(sorted(VALID_SIZES.keys()))}",
                 400,
             )
 
         image_field = VALID_SIZES[size]
 
-        # Ürünü barkod ile bul
-        product = request.env['product.product'].sudo().search([
-            ('barcode', '=', barcode),
-            ('active', '=', True),
-        ], limit=1)
+        try:
+            # Ürünü barkod ile bul
+            product = request.env['product.product'].sudo().search([
+                ('barcode', '=', barcode),
+                ('active', '=', True),
+            ], limit=1)
 
-        if not product:
-            return self._json_error(f"Ürün bulunamadı: {barcode}", 404)
+            if not product:
+                return self._json_error(f"Ürün bulunamadı: {barcode}", 404)
 
-        image_data = product[image_field]
-        if not image_data:
-            return self._json_error(f"Bu ürünün görseli yok: {barcode}", 404)
+            image_data = product[image_field]
+            if not image_data:
+                return self._json_error(
+                    f"Bu ürünün görseli yok: {barcode}", 404
+                )
 
-        return self._serve_image(image_data, barcode)
+            return self._serve_image(image_data, barcode)
+        except Exception as e:
+            _logger.exception("Power BI görsel hatası (barkod: %s)", barcode)
+            return self._json_error(f"Sunucu hatası: {str(e)}", 500)
 
     # =================================================================
     #  Endpoint 3: Tek Görsel (Binary — ID ile)
@@ -230,11 +268,6 @@ class PowerBIController(http.Controller):
         """
         Ürün ID ile görselini binary olarak döndürür.
         Barkodu olmayan ürünler için kullanılır.
-
-        Parametreler:
-            product_id (int): product.product ID (URL path)
-            token      (str): API anahtarı (zorunlu)
-            size       (str): Görsel boyutu (varsayılan: 512)
         """
         if not self._validate_token(token):
             return self._json_error('Geçersiz veya eksik API anahtarı.', 403)
@@ -242,21 +275,32 @@ class PowerBIController(http.Controller):
         size = size or DEFAULT_SIZE
         if size not in VALID_SIZES:
             return self._json_error(
-                f"Geçersiz boyut: {size}. Geçerli değerler: {', '.join(sorted(VALID_SIZES.keys()))}",
+                f"Geçersiz boyut: {size}. "
+                f"Geçerli değerler: {', '.join(sorted(VALID_SIZES.keys()))}",
                 400,
             )
 
         image_field = VALID_SIZES[size]
 
-        product = request.env['product.product'].sudo().browse(product_id)
-        if not product.exists() or not product.active:
-            return self._json_error(f"Ürün bulunamadı: ID {product_id}", 404)
+        try:
+            product = request.env['product.product'].sudo().browse(product_id)
+            if not product.exists() or not product.active:
+                return self._json_error(
+                    f"Ürün bulunamadı: ID {product_id}", 404
+                )
 
-        image_data = product[image_field]
-        if not image_data:
-            return self._json_error(f"Bu ürünün görseli yok: ID {product_id}", 404)
+            image_data = product[image_field]
+            if not image_data:
+                return self._json_error(
+                    f"Bu ürünün görseli yok: ID {product_id}", 404
+                )
 
-        return self._serve_image(image_data, str(product_id))
+            return self._serve_image(image_data, str(product_id))
+        except Exception as e:
+            _logger.exception(
+                "Power BI görsel hatası (ID: %s)", product_id
+            )
+            return self._json_error(f"Sunucu hatası: {str(e)}", 500)
 
     # =================================================================
     #  Yardımcı: Görseli HTTP Response olarak döndür
@@ -267,8 +311,6 @@ class PowerBIController(http.Controller):
         Base64 encoded görsel verisini binary HTTP yanıtı olarak döndürür.
         ETag ve Cache-Control header'ları ekler.
         """
-        import base64
-
         try:
             image_bytes = base64.b64decode(image_base64)
         except Exception:
@@ -300,12 +342,3 @@ class PowerBIController(http.Controller):
         }
 
         return Response(image_bytes, status=200, headers=headers)
-
-
-def hmac_compare(a, b):
-    """
-    Sabit zamanlı string karşılaştırma.
-    Timing attack'lere karşı koruma sağlar.
-    """
-    import hmac
-    return hmac.compare_digest(str(a), str(b))
