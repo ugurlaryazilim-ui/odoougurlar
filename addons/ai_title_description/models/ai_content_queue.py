@@ -48,6 +48,25 @@ class AIContentQueue(models.Model):
                 ('product_tmpl_id.default_code', operator, value),
                 ('product_tmpl_id.product_variant_ids.default_code', operator, value)]
 
+    product_barcode = fields.Char("Barkod", compute='_compute_product_barcode', search='_search_product_barcode')
+
+    @api.depends('product_tmpl_id.barcode', 'product_tmpl_id.product_variant_ids.barcode')
+    def _compute_product_barcode(self):
+        for rec in self:
+            tmpl = rec.product_tmpl_id
+            barcode = tmpl.barcode
+            if not barcode and tmpl.product_variant_ids:
+                for variant in tmpl.product_variant_ids:
+                    if variant.barcode:
+                        barcode = variant.barcode
+                        break
+            rec.product_barcode = barcode or ''
+
+    def _search_product_barcode(self, operator, value):
+        return ['|',
+                ('product_tmpl_id.barcode', operator, value),
+                ('product_tmpl_id.product_variant_ids.barcode', operator, value)]
+
     @api.model
     def _cron_process_queue(self, batch_size=10):
         """Kuyruktan batch_size kadar ürün alıp AI içerik üretir."""
