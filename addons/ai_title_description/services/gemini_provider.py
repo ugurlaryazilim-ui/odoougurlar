@@ -89,20 +89,23 @@ class GeminiContentProvider:
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "contents": [{"parts": parts}],
             "generationConfig": {
-                "responseMimeType": "application/json",
-                "responseSchema": self.RESPONSE_SCHEMA,
                 "temperature": 0.2,
                 "maxOutputTokens": 8192,
             }
         }
 
-        # Note: google_search tool can conflict with responseSchema in some cases
-        # Only enable if no image is being sent (reduces complexity)
-        if use_search_grounding and not image_base64:
+        # Note: Gemini API does NOT support tools + responseMimeType:'application/json' together.
+        # When grounding is active, we rely on prompt instructions + robust JSON parser.
+        # When grounding is off, we use structured JSON output for better reliability.
+        use_grounding = use_search_grounding and not image_base64
+        if use_grounding:
             payload["tools"] = [{"google_search": {}}]
+        else:
+            payload["generationConfig"]["responseMimeType"] = "application/json"
+            payload["generationConfig"]["responseSchema"] = self.RESPONSE_SCHEMA
 
         _logger.info("Gemini API çağrısı: image=%s, grounding=%s, mime=%s",
-                    bool(image_base64), use_search_grounding and not image_base64,
+                    bool(image_base64), use_grounding,
                     mime_type if image_base64 else 'N/A')
 
         last_error = None
