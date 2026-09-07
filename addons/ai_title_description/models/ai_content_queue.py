@@ -102,6 +102,18 @@ class AIContentQueue(models.Model):
                 self.env.cr.execute('SAVEPOINT ai_queue_sp')
 
                 product = record.product_tmpl_id
+
+                # Görsel kontrolü — görseli olmayan ürünler atlanır
+                if not product.image_1920:
+                    record.write({
+                        'state': 'error',
+                        'error_message': 'Ürün görseli (ana görsel) bulunamadı. Lütfen önce görsel yükleyin.',
+                    })
+                    self.env.cr.execute('RELEASE SAVEPOINT ai_queue_sp')
+                    self.env.cr.commit()
+                    _logger.info("Kuyruk [%s] ürün [%s]: Görsel yok, atlandı.", record.id, product.name)
+                    continue
+
                 payload = product._extract_ai_payload()
 
                 # 1. SEO Anahtar Kelime Keşfi
