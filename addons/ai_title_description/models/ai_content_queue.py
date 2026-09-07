@@ -27,23 +27,25 @@ class AIContentQueue(models.Model):
     error_message = fields.Text("Hata Mesajı")
     priority = fields.Integer("Öncelik", default=10)
     attempts = fields.Integer("Deneme Sayısı", default=0)
-    max_attempts = fields.Integer("Maks Deneme", default=3)
+    max_attempts = fields.Integer("Maks Deneme", default=5)
 
     @api.model
     def _cron_process_queue(self, batch_size=10):
         """Kuyruktan batch_size kadar ürün alıp AI içerik üretir."""
         from datetime import timedelta
-        # 0. 5 dakikadan fazla 'processing' kalan takılı kayıtları sıfırla
-        stuck_threshold = fields.Datetime.now() - timedelta(minutes=5)
+        # 0. 20 dakikadan fazla 'processing' kalan takılı kayıtları sıfırla
+        stuck_threshold = fields.Datetime.now() - timedelta(minutes=20)
         stuck_records = self.search([
             ('state', '=', 'processing'),
             ('write_date', '<', stuck_threshold)
         ])
         for stuck in stuck_records:
             stuck.attempts += 1
+            _logger.warning("Kuyruk [%s] ürün [%s]: 20 dk'dan fazla işleniyor, takılı olarak işaretlendi (deneme: %s/%s).",
+                            stuck.id, stuck.product_tmpl_id.name, stuck.attempts, stuck.max_attempts)
             if stuck.attempts >= stuck.max_attempts:
                 stuck.state = 'error'
-                stuck.error_message = 'İşlem zaman aşımına uğradı veya durduruldu.'
+                stuck.error_message = 'İşlem zaman aşımına uğradı veya durduruldu (20 dk).'
             else:
                 stuck.state = 'pending'
         if stuck_records:
@@ -253,11 +255,12 @@ class AIContentQueue(models.Model):
         _logger.info("AI Kuyruk: %s/%s ürün başarıyla işlendi.", processed, len(records))
 
     def action_reset_to_pending(self):
-        """Kuyruk kaydını yeniden 'bekliyor' durumuna getirir."""
+        """Kuyruk kaydını yeniden 'bekliyor' durumuna getirir (deneme sayısı sıfırlanır)."""
         for record in self:
             record.write({
                 'state': 'pending',
                 'error_message': False,
+                'attempts': 0,
             })
 
     def action_process_now(self):

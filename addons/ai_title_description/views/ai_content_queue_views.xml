@@ -91,6 +91,30 @@
             <field name="context">{}</field>
         </record>
 
+        <!-- Aksiyonlar Menüsü: Toplu Tekrar Dene -->
+        <record id="action_server_batch_retry_queue" model="ir.actions.server">
+            <field name="name">🔄 Toplu Tekrar Dene</field>
+            <field name="model_id" ref="model_ai_content_queue"/>
+            <field name="binding_model_id" ref="model_ai_content_queue"/>
+            <field name="binding_view_types">list</field>
+            <field name="state">code</field>
+            <field name="code">
+records.action_reset_to_pending()
+            </field>
+        </record>
+
+        <!-- Aksiyonlar Menüsü: Toplu Sil -->
+        <record id="action_server_batch_delete_queue" model="ir.actions.server">
+            <field name="name">🗑️ Toplu Sil</field>
+            <field name="model_id" ref="model_ai_content_queue"/>
+            <field name="binding_model_id" ref="model_ai_content_queue"/>
+            <field name="binding_view_types">list</field>
+            <field name="state">code</field>
+            <field name="code">
+records.unlink()
+            </field>
+        </record>
+
         <menuitem id="menu_ai_content_queue" name="Kuyruk" parent="menu_ai_content_root" action="action_ai_content_queue"/>
     </data>
 </odoo>
