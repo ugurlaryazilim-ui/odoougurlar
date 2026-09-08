@@ -6,6 +6,21 @@ import sys
 import time
 import logging
 import traceback
+
+# ═══ Görev Zamanlayıcı düzeltmesi ═══
+# Windows Görev Zamanlayıcı uygulamayı C:\WINDOWS\system32'den çalıştırır.
+# Bu durumda config.json, cache, log gibi göreceli yollar yanlış dizini kullanır.
+# Çözüm: Çalışma dizinini exe/script'in bulunduğu dizine değiştir.
+if getattr(sys, 'frozen', False):
+    # PyInstaller ile paketlenmiş exe
+    _app_dir = os.path.dirname(sys.executable)
+else:
+    # Normal Python script
+    _app_dir = os.path.dirname(os.path.abspath(__file__))
+
+os.chdir(_app_dir)
+# ═══════════════════════════════════════
+
 from sync_agent import OdooImageSync, load_config, _logger
 
 def resource_path(relative_path):

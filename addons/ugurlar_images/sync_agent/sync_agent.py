@@ -30,6 +30,19 @@ import sys
 import time
 import requests
 
+# ═══ Görev Zamanlayıcı düzeltmesi ═══
+# Windows Görev Zamanlayıcı uygulamayı C:\WINDOWS\system32'den çalıştırır.
+# Bu durumda config.json, cache, log gibi göreceli yollar yanlış dizini kullanır.
+# Çözüm: Çalışma dizinini exe/script'in bulunduğu dizine değiştir.
+if getattr(sys, 'frozen', False):
+    _app_dir = os.path.dirname(sys.executable)
+else:
+    _app_dir = os.path.dirname(os.path.abspath(__file__))
+
+if _app_dir:
+    os.chdir(_app_dir)
+# ═══════════════════════════════════════
+
 # ── Logging ──
 logging.basicConfig(
     level=logging.INFO,
