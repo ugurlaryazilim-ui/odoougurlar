@@ -17,14 +17,24 @@ class OdooModelWrapper:
         return self._execute_kw(self._db, self._uid, self._pwd, self._model, 'search_read', [domain], kwargs)
         
     def read(self, ids, fields=None, **kwargs):
-        if fields: kwargs['fields'] = fields
+        if isinstance(ids, int):
+            ids = [ids]
+        if fields:
+            kwargs['fields'] = fields
         return self._execute_kw(self._db, self._uid, self._pwd, self._model, 'read', [ids], kwargs)
         
-    def write(self, ids, vals):
-        return self._execute_kw(self._db, self._uid, self._pwd, self._model, 'write', [ids, vals])
+    def write(self, ids, vals, **kwargs):
+        if isinstance(ids, int):
+            ids = [ids]
+        return self._execute_kw(self._db, self._uid, self._pwd, self._model, 'write', [ids, vals], kwargs)
 
-    def unlink(self, ids):
-        return self._execute_kw(self._db, self._uid, self._pwd, self._model, 'unlink', [ids])
+    def unlink(self, ids, **kwargs):
+        if isinstance(ids, int):
+            ids = [ids]
+        return self._execute_kw(self._db, self._uid, self._pwd, self._model, 'unlink', [ids], kwargs)
+
+    def create(self, vals, **kwargs):
+        return self._execute_kw(self._db, self._uid, self._pwd, self._model, 'create', [vals], kwargs)
 
     def __getattr__(self, method):
         def wrapper(*args, **kwargs):

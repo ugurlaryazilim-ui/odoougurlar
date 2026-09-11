@@ -167,7 +167,9 @@ class JsonRpcHelper:
         self.uid = res.get('result', {}).get('uid')
         return self.uid
 
-    def execute_kw(self, db, uid, password, model, method, args, kwargs):
+    def execute_kw(self, db, uid, password, model, method, args, kwargs=None):
+        if kwargs is None:
+            kwargs = {}
         payload = {
             'jsonrpc': '2.0',
             'method': 'call',
@@ -180,7 +182,9 @@ class JsonRpcHelper:
         }
         res = self.session.post(f'{self.url}/web/dataset/call_kw/{model}/{method}', json=payload).json()
         if 'error' in res:
-            raise Exception(str(res['error']))
+            err_data = res['error'].get('data', {}) if isinstance(res['error'], dict) else {}
+            err_msg = err_data.get('message') or (res['error'].get('message') if isinstance(res['error'], dict) else str(res['error']))
+            raise Exception(err_msg)
         return res.get('result')
 
 
@@ -398,15 +402,19 @@ class OdooImageSync:
         if not self.has_product_image:
             return 0
 
-        old_images = self.env['product.image'].search(
-            [
-                '|',
-                ('product_variant_id', '=', variant_id),
+        # Varyanta özel görselleri bul
+        old_images = self.env['product.image'].search([
+            ('product_variant_id', '=', variant_id),
+        ])
+        # Varyanta özel yoksa ve genel template görseli varsa (varyantsız)
+        if not old_images:
+            old_images = self.env['product.image'].search([
                 ('product_tmpl_id', '=', tmpl_id),
-            ],
-        )
+                ('product_variant_id', '=', False),
+            ])
+
         if old_images:
-            self.env['product.image'].unlink( old_images)
+            self.env['product.image'].unlink(old_images)
             return len(old_images)
         return 0
 
