@@ -112,30 +112,127 @@ class FalProvider(AIProviderBase):
                 
             enhanced_prompt = prompt
             
+            prompt_lower = (prompt or '').lower()
+            is_skirt = any(k in prompt_lower for k in ['skirt', 'etek'])
+            is_shorts = any(k in prompt_lower for k in ['shorts', 'şort', 'sort', 'bermuda'])
+            is_dress = category in ('one-piece', 'one_piece', 'dress', 'full-body') or any(k in prompt_lower for k in ['dress', 'elbise', 'tulum', 'jumpsuit', 'abiye'])
+            is_bottom = category == 'bottoms' or is_skirt or is_shorts
+
             # ═══ GARMENT FIDELITY (OLUMLU ÇERÇEVELEME) ═══
             if 'seedream' in endpoint:
                 # Seedream uses Figure references
-                garment_fidelity = (
-                    "Dress the model in Figure 2 with the exact garment shown in Figure 1. "
-                    "IMPORTANT: Ignore and remove any security tags, alarm tags, price tags, hangers, or store fixtures "
-                    "visible on Figure 1 — these are store artifacts, NOT part of the garment. "
-                    "The output garment must be completely clean, tag-free, and alarm-free. "
-                    "Reproduce every visible garment detail of Figure 1 precisely: same waistband, "
-                    "same seams, same pockets, authentic garment closures only, same fabric texture. "
-                    "Strictly NO anti-theft tags, security pins, or artificial metallic badges. "
-                    "The output garment must be a pixel-perfect match of Figure 1 (minus any store tags or alarm pins). "
-                )
+                if is_skirt:
+                    garment_fidelity = (
+                        "Dress the model in Figure 2 with the exact garment shown in Figure 1. "
+                        "CRITICAL LOWER BODY REPLACEMENT: Figure 1 is a SKIRT. You MUST completely REMOVE and REPLACE "
+                        "the pants/jeans that the model in Figure 2 is wearing. The model MUST wear Figure 1 as the skirt on her waist. "
+                        "LEG MANDATE: The model's legs below the skirt hemline MUST BE NATURAL BARE LEGS with clean, realistic human skin tone. "
+                        "REMOVE the pants/jeans from Figure 2 completely! Strictly NO pants, NO jeans, NO trousers, NO leggings underneath the skirt! "
+                        "Under no circumstances should the model wear denim or pants under the skirt. "
+                        "Keep the model's face, hair, neutral upper top, and shoes from Figure 2. "
+                        "IMPORTANT: Ignore and remove any security tags, alarm tags, price tags, hangers, or store fixtures "
+                        "visible on Figure 1 — these are store artifacts, NOT part of the garment. "
+                        "The output garment must be completely clean, tag-free, and alarm-free. "
+                        "Reproduce every visible garment detail of Figure 1 precisely: same waistband, "
+                        "same seams, same pockets, authentic garment closures only, same fabric texture. "
+                        "Strictly NO anti-theft tags, security pins, or artificial metallic badges. "
+                        "The output garment must be a pixel-perfect match of Figure 1 (minus any store tags or alarm pins). "
+                    )
+                elif is_shorts:
+                    garment_fidelity = (
+                        "Dress the model in Figure 2 with the exact garment shown in Figure 1. "
+                        "CRITICAL LOWER BODY REPLACEMENT: Figure 1 is SHORTS. You MUST completely REMOVE and REPLACE "
+                        "the pants/jeans that the model in Figure 2 is wearing. The model MUST wear Figure 1 as shorts on her waist. "
+                        "LEG MANDATE: The model's legs below the shorts MUST BE NATURAL BARE LEGS with clean, realistic human skin tone. "
+                        "REMOVE the pants/jeans from Figure 2 completely! Strictly NO long pants, NO jeans, NO leggings underneath! "
+                        "Keep the model's face, hair, neutral upper top, and shoes from Figure 2. "
+                        "IMPORTANT: Ignore and remove any security tags, alarm tags, price tags, hangers, or store fixtures "
+                        "visible on Figure 1 — these are store artifacts, NOT part of the garment. "
+                        "The output garment must be a pixel-perfect match of Figure 1 (minus any store tags or alarm pins). "
+                    )
+                elif is_dress:
+                    garment_fidelity = (
+                        "Dress the model in Figure 2 with the exact garment shown in Figure 1. "
+                        "CRITICAL FULL BODY REPLACEMENT: Figure 1 is a DRESS. You MUST completely REMOVE and REPLACE "
+                        "both the upper top and the pants/jeans from Figure 2 with the dress from Figure 1. "
+                        "The model wears ONLY Figure 1. "
+                        "LEG MANDATE: The model's legs below the dress hemline MUST BE NATURAL BARE LEGS with clean, realistic human skin tone. "
+                        "REMOVE the pants/jeans from Figure 2 completely! Absolutely NO pants, NO jeans, NO leggings underneath the dress! "
+                        "Keep the model's face, hair, and shoes from Figure 2. "
+                        "IMPORTANT: Ignore and remove any security tags, alarm tags, price tags, hangers, or store fixtures "
+                        "visible on Figure 1 — these are store artifacts, NOT part of the garment. "
+                        "The output garment must be a pixel-perfect match of Figure 1 (minus any store tags or alarm pins). "
+                    )
+                elif is_bottom:
+                    garment_fidelity = (
+                        "Dress the model in Figure 2 with the exact garment shown in Figure 1. "
+                        "CRITICAL LOWER BODY REPLACEMENT: Figure 1 is trousers/pants/bottoms. You MUST completely REPLACE "
+                        "the pants/bottoms of Figure 2 with Figure 1. The model wears Figure 1 on the lower body. "
+                        "Keep the model's face, hair, neutral upper top, and shoes from Figure 2. "
+                        "IMPORTANT: Ignore and remove any security tags, alarm tags, price tags, hangers, or store fixtures "
+                        "visible on Figure 1 — these are store artifacts, NOT part of the garment. "
+                        "The output garment must be a pixel-perfect match of Figure 1 (minus any store tags or alarm pins). "
+                    )
+                else:
+                    garment_fidelity = (
+                        "Dress the model in Figure 2 with the exact garment shown in Figure 1. "
+                        "Figure 1 is an UPPER BODY garment. REPLACE the upper top of Figure 2 with Figure 1. "
+                        "Keep the model's face, hair, matching pants/bottoms, and shoes from Figure 2. "
+                        "IMPORTANT: Ignore and remove any security tags, alarm tags, price tags, hangers, or store fixtures "
+                        "visible on Figure 1 — these are store artifacts, NOT part of the garment. "
+                        "The output garment must be completely clean, tag-free, and alarm-free. "
+                        "Reproduce every visible garment detail of Figure 1 precisely: same waistband, "
+                        "same seams, same pockets, authentic garment closures only, same fabric texture. "
+                        "Strictly NO anti-theft tags, security pins, or artificial metallic badges. "
+                        "The output garment must be a pixel-perfect match of Figure 1 (minus any store tags or alarm pins). "
+                    )
             else:
-                garment_fidelity = (
-                    "GARMENT FIDELITY: The 1st reference image is the EXACT garment. "
-                    "IMPORTANT: Ignore and remove any security tags, alarm tags, anti-theft pins, price tags, hangers, or store fixtures "
-                    "visible on the 1st reference image — these are store artifacts, NOT part of the garment. "
-                    "The output garment must be completely clean, tag-free, and alarm-free. "
-                    "Reproduce every visible detail precisely: same waistband construction, "
-                    "same seams, same pockets, authentic garment closures only. "
-                    "Strictly NO security pins, anti-theft tags, or artificial rivets on the waistband. "
-                    "The output garment must be a pixel-perfect match of the 1st reference (minus any store tags or alarm pins). "
-                )
+                if is_skirt:
+                    garment_fidelity = (
+                        "GARMENT FIDELITY: The 1st reference image is a SKIRT. "
+                        "You MUST completely REPLACE any pants/jeans from the 2nd reference image with this skirt. "
+                        "The model MUST wear ONLY the skirt on the lower body with NATURAL BARE LEGS. "
+                        "Strictly NO pants, NO jeans, NO leggings underneath the skirt! "
+                        "IMPORTANT: Ignore and remove any security tags, alarm tags, anti-theft pins, price tags, hangers, or store fixtures "
+                        "visible on the 1st reference image — these are store artifacts, NOT part of the garment. "
+                        "The output garment must be completely clean, tag-free, and alarm-free. "
+                        "Reproduce every visible detail precisely: same waistband construction, "
+                        "same seams, same pockets, authentic garment closures only. "
+                        "The output garment must be a pixel-perfect match of the 1st reference (minus any store tags or alarm pins). "
+                    )
+                elif is_shorts:
+                    garment_fidelity = (
+                        "GARMENT FIDELITY: The 1st reference image is SHORTS. "
+                        "You MUST completely REPLACE any pants/jeans from the 2nd reference with these shorts. "
+                        "The model's legs below the shorts MUST BE NATURAL BARE LEGS. Strictly NO long pants underneath! "
+                        "IMPORTANT: Ignore and remove any security tags, alarm tags, anti-theft pins, price tags... "
+                        "The output garment must be a pixel-perfect match of the 1st reference. "
+                    )
+                elif is_dress:
+                    garment_fidelity = (
+                        "GARMENT FIDELITY: The 1st reference image is a DRESS. "
+                        "You MUST completely REPLACE both top and pants from the 2nd reference with this dress. "
+                        "The model's legs below the dress hemline MUST BE NATURAL BARE LEGS. Strictly NO pants underneath! "
+                        "IMPORTANT: Ignore and remove any security tags, alarm tags, anti-theft pins, price tags... "
+                        "The output garment must be a pixel-perfect match of the 1st reference. "
+                    )
+                elif is_bottom:
+                    garment_fidelity = (
+                        "GARMENT FIDELITY: The 1st reference image is PANTS/TROUSERS. "
+                        "You MUST completely REPLACE the bottoms of the 2nd reference with the pants from the 1st reference. "
+                        "The output garment must be a pixel-perfect match of the 1st reference. "
+                    )
+                else:
+                    garment_fidelity = (
+                        "GARMENT FIDELITY: The 1st reference image is the EXACT garment. "
+                        "IMPORTANT: Ignore and remove any security tags, alarm tags, anti-theft pins, price tags, hangers, or store fixtures "
+                        "visible on the 1st reference image — these are store artifacts, NOT part of the garment. "
+                        "The output garment must be completely clean, tag-free, and alarm-free. "
+                        "Reproduce every visible detail precisely: same waistband construction, "
+                        "same seams, same pockets, authentic garment closures only. "
+                        "Strictly NO security pins, anti-theft tags, or artificial rivets on the waistband. "
+                        "The output garment must be a pixel-perfect match of the 1st reference (minus any store tags or alarm pins). "
+                    )
 
             # Base View Hints
             if 'seedream' in endpoint:
@@ -237,6 +334,13 @@ class FalProvider(AIProviderBase):
                 "retail clip, button on back waistband, rivet on back waistband, misplaced rivet"
             )
             raw_neg = kwargs.get('negative_prompt', '') or ''
+            if is_skirt or is_dress or is_shorts:
+                for banned in ['bare legs', 'bare thighs', 'exposed legs', 'mini skirt', 'short shorts', 'hot pants']:
+                    raw_neg = raw_neg.replace(banned, '')
+                anti_alarm_tokens += (
+                    ", pants under skirt, jeans under skirt, trousers under skirt, leggings under skirt, "
+                    "denim under skirt, pants under dress, jeans under dress, double pants, double bottoms"
+                )
             if anti_alarm_tokens not in raw_neg:
                 arguments['negative_prompt'] = f"{raw_neg}, {anti_alarm_tokens}".strip(', ')
             else:

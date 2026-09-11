@@ -1406,8 +1406,17 @@ class AiStudioSession(models.Model):
                     tryon_resolution = '2K' if 'max' in tryon_model else '1K'
 
                 # category mapping
+                detected_cat = session._detect_garment_type()
                 from ..services.garment_analyzer import map_to_fashn_category
-                category_to_send = map_to_fashn_category(cached_analysis_data or {})
+                analysis_cat = map_to_fashn_category(cached_analysis_data or {})
+                if detected_cat in ('bottoms', 'one_piece', 'bags', 'shoes'):
+                    category_to_send = detected_cat
+                    if isinstance(cached_analysis_data, dict):
+                        cached_analysis_data['clothingCategory'] = 'bottoms' if detected_cat == 'bottoms' else ('dress' if detected_cat == 'one_piece' else detected_cat)
+                elif analysis_cat in ('bottoms', 'one-piece', 'full-body'):
+                    category_to_send = 'bottoms' if analysis_cat == 'bottoms' else 'one_piece'
+                else:
+                    category_to_send = detected_cat if detected_cat != 'auto' else analysis_cat
 
                 # ═══ VIEW-SPESİFİK PROMPT ═══
                 prompt_text = ""
@@ -2020,8 +2029,17 @@ class AiStudioSession(models.Model):
                         tryon_model = getattr(preset, f'fashn_model_{photo_type}', False) or preset.fashn_model_front or 'tryon-v1.6'
                         tryon_resolution = '2K' if 'max' in tryon_model else '1K'
 
+                    detected_cat = session._detect_garment_type()
                     from ..services.garment_analyzer import map_to_fashn_category
-                    category_to_send = map_to_fashn_category(cached_analysis or {})
+                    analysis_cat = map_to_fashn_category(cached_analysis or {})
+                    if detected_cat in ('bottoms', 'one_piece', 'bags', 'shoes'):
+                        category_to_send = detected_cat
+                        if isinstance(cached_analysis, dict):
+                            cached_analysis['clothingCategory'] = 'bottoms' if detected_cat == 'bottoms' else ('dress' if detected_cat == 'one_piece' else detected_cat)
+                    elif analysis_cat in ('bottoms', 'one-piece', 'full-body'):
+                        category_to_send = 'bottoms' if analysis_cat == 'bottoms' else 'one_piece'
+                    else:
+                        category_to_send = detected_cat if detected_cat != 'auto' else analysis_cat
 
                     # VIEW-SPESİFİK PROMPT OLUŞTURMA
                     prompt_text = ""
@@ -2519,30 +2537,22 @@ class AiStudioSession(models.Model):
 
                 model_url = provider.upload_image(model_image)
 
-                cat = session.category
-                if provider_type == 'fashn':
-                    if cat == 'auto':
-                        category_to_send = 'auto'
-                    else:
-                        category_to_send = {
-                            'tops': 'tops',
-                            'bottoms': 'bottoms',
-                            'one_piece': 'one-pieces',
-                        }.get(cat, 'tops')
+                detected_cat = session._detect_garment_type()
+                if detected_cat in ('bottoms', 'one_piece', 'bags', 'shoes'):
+                    category_to_send = 'bottoms' if detected_cat == 'bottoms' else ('one-piece' if provider_type != 'fashn' else 'one-pieces')
+                elif session.category and session.category != 'auto':
+                    category_to_send = {
+                        'tops': 'tops',
+                        'bottoms': 'bottoms',
+                        'one_piece': 'one-pieces' if provider_type == 'fashn' else 'one-piece',
+                    }.get(session.category, 'tops')
                 else:
-                    if cat == 'auto':
-                        cat_fallback = preset.garment_type or 'tops'
-                        category_to_send = {
-                            'tops': 'tops',
-                            'bottoms': 'bottoms',
-                            'one_piece': 'one-piece',
-                        }.get(cat_fallback, 'tops')
-                    else:
-                        category_to_send = {
-                            'tops': 'tops',
-                            'bottoms': 'bottoms',
-                            'one_piece': 'one-piece',
-                        }.get(cat, 'tops')
+                    cat_fallback = preset.garment_type or 'tops'
+                    category_to_send = {
+                        'tops': 'tops',
+                        'bottoms': 'bottoms',
+                        'one_piece': 'one-pieces' if provider_type == 'fashn' else 'one-piece',
+                    }.get(cat_fallback, 'tops')
 
                 # ═══ CROSS-VIEW TUTARLILIK VERİSİ VE BAZ CACHE (Retry İçin) ═══
                 outfit_consistency = None

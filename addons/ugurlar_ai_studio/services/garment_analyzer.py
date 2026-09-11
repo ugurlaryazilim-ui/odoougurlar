@@ -98,9 +98,14 @@ CRITICAL SECURITY ALARM & STORE TAG INSTRUCTION:
 
 CRITICAL NECKLINE INSTRUCTION: If the garment is hanging on a hanger, the front collar often drops down, revealing the INSIDE of the BACK panel (inner back lining, back collar label, or back keyhole). You MUST completely IGNORE anything visible through the neck hole. Do NOT describe the inner back lining as part of the front collar. If you see a keyhole or label through the neck opening, do NOT say the garment has a keyhole collar. Assume a clean, standard front neckline.
 
+CRITICAL CATEGORY INSTRUCTION:
+- If the garment is an etek (skirt), mini skirt, A-line skirt, pleated skirt, pencil skirt, şort (shorts), or pants/trousers: clothingCategory MUST be 'bottoms' (NEVER tops, NEVER outerwear)!
+- If the garment is an elbise (dress), abiye, or jumpsuit: clothingCategory MUST be 'dress'!
+- For skirts and dresses: garmentLength MUST accurately specify 'mini', 'midi', or 'maxi'.
+
 Analyze the garment and return a JSON with these fields:
 {
-  "garmentType": "string — type (e.g., T-Shirt, Gömlek, Pantolon, Elbise, Kazak, Ceket, Etek)",
+  "garmentType": "string — type (e.g., T-Shirt, Gömlek, Pantolon, Elbise, Kazak, Ceket, Etek, Mini Etek)",
   "clothingCategory": "string — tops/bottoms/dress/outerwear/knitwear",
   "primaryColor": "string — dominant color (e.g., Siyah, Beyaz, Lacivert, Kirmizi)",
   "colorHex": "string — approximate hex code (e.g., #1a1a2e)",
@@ -440,6 +445,13 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     if not isinstance(outfit_consistency, dict):
         outfit_consistency = {}
 
+    category = analysis.get('clothingCategory', 'tops')
+    garment_type = analysis.get('garmentType', 'garment')
+    garment_type_lower = f"{garment_type} {category}".lower()
+    is_skirt = any(k in garment_type_lower for k in ['etek', 'skirt'])
+    is_shorts = any(k in garment_type_lower for k in ['şort', 'sort', 'shorts', 'bermuda'])
+    is_dress = category in ['dress', 'one_piece', 'one-piece', 'full-body'] or any(k in garment_type_lower for k in ['elbise', 'dress', 'tulum', 'jumpsuit', 'abiye'])
+
     if provider_type == 'fashn':
         # Sablonu generic kelimelerle formatla (kiyafet detaylari prompta gitmesin)
         base_prompt = view_base.format(
@@ -452,7 +464,6 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         )
     else:
         # fal vb. modeller icin kisa ve olumlu prompt
-        garment_type = analysis.get('garmentType', 'garment')
         color = analysis.get('primaryColor', '')
         fabric = analysis.get('fabricType', '')
         pattern = analysis.get('pattern', 'Duz')
@@ -460,7 +471,6 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         fit = analysis.get('fitDetails', 'Regular Fit')
         collar = analysis.get('collarType', '')
         sleeve = analysis.get('sleeveType', '')
-        category = analysis.get('clothingCategory', 'tops')
 
         base_prompt = view_base.format(
             garment_type=garment_type,
@@ -542,17 +552,46 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         if photo_type in ['front', 'side', 'back']:
             base_prompt += "No handbag, no purse. Clean minimalist studio fashion posing, arms and hands relaxed naturally. "
 
-        # ═══ ALT KOMBİN — ÇIPLAKLIKLARI ÖNLE ═══
-        # Üst giyim / dış giyim kategorilerinde uygun alt kombin zorunlu
-        if category in ['tops', 'outerwear', 'knitwear']:
+        # ═══ OUTFIT KOMBİN & ALT/ÜST GİYİM DİREKTİFİ ═══
+        if is_skirt:
+            base_prompt += (
+                "LOWER BODY OUTFIT LOCK — SKIRT ONLY: The garment is a SKIRT worn on the lower body. "
+                "The model MUST wear ONLY this skirt around her waist. "
+                "LEG APPEARANCE: The model's legs below the skirt hemline MUST BE NATURAL BARE LEGS with clean, realistic human skin tone. "
+                "CRITICAL PROHIBITION: Absolutely NO pants, NO jeans, NO trousers, NO leggings underneath the skirt! "
+                "Under no circumstances should the model wear denim or pants under the skirt. "
+                "UPPER BODY MATCHING: The model wears a clean, neutral, simple fitted top (such as a solid white crewneck t-shirt) on the upper body. "
+            )
+        elif is_shorts:
+            base_prompt += (
+                "LOWER BODY OUTFIT LOCK — SHORTS ONLY: The garment is SHORTS worn on the lower body. "
+                "The model MUST wear ONLY these shorts on the lower body. "
+                "LEG APPEARANCE: The model's legs below the shorts hemline MUST BE NATURAL BARE LEGS with clean, realistic human skin tone. "
+                "CRITICAL PROHIBITION: Absolutely NO long pants, NO jeans, NO trousers, NO leggings underneath! "
+                "UPPER BODY MATCHING: The model wears a clean, neutral, simple fitted top on the upper body. "
+            )
+        elif is_dress:
+            base_prompt += (
+                "FULL BODY OUTFIT LOCK — DRESS ONLY: The garment is a ONE-PIECE DRESS. "
+                "The model wears ONLY this dress with appropriate footwear. "
+                "LEG APPEARANCE: The model's legs below the dress hemline MUST BE NATURAL BARE LEGS with clean, realistic human skin tone. "
+                "CRITICAL PROHIBITION: Absolutely NO pants, NO jeans, NO trousers, NO leggings underneath the dress! "
+            )
+        elif category == 'bottoms':
+            base_prompt += (
+                "LOWER BODY OUTFIT LOCK — PANTS: The garment is trousers/pants worn on the lower body. "
+                "The pants cover the legs completely as shown in the reference. "
+                "UPPER BODY MATCHING: The model wears a clean, neutral, simple fitted top on the upper body. "
+            )
+        elif category in ['tops', 'outerwear', 'knitwear']:
             recommended_bottoms = analysis.get('recommendedBottoms', 'dark blue skinny jeans')
             if not recommended_bottoms:
                 recommended_bottoms = 'dark blue skinny jeans'
             base_prompt += (
                 f"MANDATORY BOTTOM PAIRING: The model MUST wear {recommended_bottoms} on the lower body. "
                 "Full-length bottoms covering the entire leg are REQUIRED. "
-                "Absolutely NO bare legs, NO bare thighs, NO exposed skin, NO underwear, "
-                "NO shorts, NO mini skirts. The legs must be COMPLETELY COVERED. "
+                "Absolutely NO bare legs, NO bare thighs, NO exposed skin below the waist, NO underwear. "
+                "The legs must be COMPLETELY COVERED by the bottoms. "
             )
 
         # ═══ GÜVENLİK ETİKETİ / ALARM TAGI İGNORE ═══
@@ -612,6 +651,13 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
 
     # Negatif prompt
     negative = _VIEW_NEGATIVE_PROMPTS.get(photo_type, _VIEW_NEGATIVE_PROMPTS['front'])
+    if is_skirt or is_shorts or is_dress:
+        # Mini etek, sort veya elbiselerde bacak acilmasini engelleyen token'lari temizle ve altina pantolon giyilmesini kesin yasakla
+        for banned_token in ['mini skirt', 'short shorts', 'hot pants', 'bare legs', 'bare thighs', 'exposed legs']:
+            negative = negative.replace(banned_token, '')
+        negative = "pants under skirt, jeans under skirt, trousers under skirt, leggings under skirt, denim under skirt, double pants, double bottoms, pants under dress, jeans under dress, denim under dress, " + negative
+    elif category in ['tops', 'outerwear', 'knitwear']:
+        negative = "bare legs, bare thighs, exposed legs, no pants, shorts, mini skirt, " + negative
 
     _logger.info(
         'Prompt olusturuldu (photo_type=%s, provider=%s): %d karakter',
@@ -635,10 +681,6 @@ _VIEW_PROMPT_TEMPLATES = {
         "{fit}, {pattern} pattern. Clean white studio background, even lighting. "
         "Confident fashion pose, one hand on hip, slight S-curve silhouette. "
         "Sharp focus on garment details and fabric texture. "
-        "The model MUST be fully clothed with appropriate matching bottoms "
-        "(long pants, jeans, trousers, or full-length leggings). "
-        "Absolutely NO bare legs, NO bare thighs, NO exposed skin below the waist. "
-        "NO shorts, NO mini skirts, NO underwear visible. "
     ),
     'back': (
         "Professional e-commerce back view photography. "
@@ -652,10 +694,6 @@ _VIEW_PROMPT_TEMPLATES = {
         "IGNORE any fabric fold-over, overlapping layers, or double-layered appearance at the top of the garment "
         "caused by the hanger. Only reproduce the actual BACK PANEL of the garment — the single continuous surface "
         "below the shoulder seam line. The back of the garment should appear as ONE clean, single layer. "
-        "The model MUST be fully clothed with appropriate matching bottoms "
-        "(long pants, jeans, trousers, or full-length leggings). "
-        "Absolutely NO bare legs, NO bare thighs, NO exposed skin below the waist. "
-        "NO shorts, NO mini skirts, NO underwear visible. "
     ),
     'side': (
         "Professional e-commerce side view photography. "
@@ -663,10 +701,6 @@ _VIEW_PROMPT_TEMPLATES = {
         "{fit}, {pattern} pattern. Clean white studio background, even lighting. "
         "Three-quarter fashion pose, contrapposto stance, dynamic silhouette. "
         "Sharp focus on garment side profile and fit. "
-        "The model MUST be fully clothed with appropriate matching bottoms "
-        "(long pants, jeans, trousers, or full-length leggings). "
-        "Absolutely NO bare legs, NO bare thighs, NO exposed skin below the waist. "
-        "NO shorts, NO mini skirts, NO underwear visible. "
     ),
     'detail': (
         "Professional close-up detail shot of {color} {fabric} {garment_type} worn on a model. "
@@ -678,8 +712,7 @@ _VIEW_PROMPT_TEMPLATES = {
 
 _VIEW_NEGATIVE_PROMPTS = {
     'front': (
-        "nudity, naked, bare skin, bare legs, bare thighs, exposed legs, underwear, "
-        "lingerie, swimwear, bikini, mini skirt, short shorts, hot pants, "
+        "nudity, naked, underwear, lingerie, swimwear, bikini, "
         "no pants, panties, see-through clothing revealing skin, inappropriate, NSFW, "
         "security tag, alarm tag, anti-theft tag, EAS sensor, retail security badge, "
         "plastic alarm pin, ink tag, hard tag, security button, store tag, price tag, "
@@ -687,8 +720,8 @@ _VIEW_NEGATIVE_PROMPTS = {
         "handbag, purse, clutch, tote bag, bag held in hand, shopping bag, awkward accessories, floating bag"
     ),
     'back': (
-        "nudity, naked, bare skin, bare legs, bare thighs, bare back, exposed legs, "
-        "underwear, lingerie, swimwear, bikini, mini skirt, short shorts, hot pants, "
+        "nudity, naked, bare back, "
+        "underwear, lingerie, swimwear, bikini, "
         "no pants, panties, see-through clothing revealing skin, inappropriate, NSFW, "
         "crop top only, sports bra only, "
         "hanger, hanger hook, fabric fold-over, double-layered back, cape-like flap, "
@@ -700,8 +733,8 @@ _VIEW_NEGATIVE_PROMPTS = {
         "handbag, purse, clutch, tote bag, bag held in hand, shopping bag, awkward accessories, floating bag"
     ),
     'side': (
-        "nudity, naked, bare skin, bare legs, bare thighs, exposed legs, underwear, "
-        "lingerie, swimwear, bikini, mini skirt, short shorts, hot pants, "
+        "nudity, naked, "
+        "underwear, lingerie, swimwear, bikini, "
         "no pants, panties, see-through clothing revealing skin, inappropriate, NSFW, "
         "security tag, alarm tag, anti-theft tag, EAS sensor, retail security badge, "
         "plastic alarm pin, ink tag, hard tag, store tag, price tag, store fixture, retail clip, "
