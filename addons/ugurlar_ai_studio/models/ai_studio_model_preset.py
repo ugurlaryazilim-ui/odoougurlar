@@ -327,6 +327,10 @@ class AiStudioModelPreset(models.Model):
         "beauty filter, airbrushed, over-smooth, blurry, low quality, "
         "collage, split screen, multi-panel, grid layout, "
         "underwear look, nude model, hanger, flat-lay, product-only shot, "
+        "security tag, alarm tag, anti-theft tag, EAS sensor, retail security badge, "
+        "plastic alarm pin, ink tag, hard tag, store tag, price tag, store fixture, "
+        "retail clip, button on back waistband, rivet on back waistband, misplaced rivet, "
+        "handbag, purse, clutch, tote bag, bag held in hand, floating bag, awkward accessories, "
         "dress, gown, skirt, robe, one-shoulder dress, sleeveless dress, loose clothing, asymmetrical straps."
     )
 

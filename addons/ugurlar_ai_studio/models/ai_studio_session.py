@@ -941,7 +941,7 @@ class AiStudioSession(models.Model):
     # _retry_generation_thread_body tarafından ortak kullanılır
     # ═══════════════════════════════════════════════════════════════════
 
-    def _prepare_garment_for_tryon(self, source_image, provider, session, auto_bg=True):
+    def _prepare_garment_for_tryon(self, source_image, provider, session, auto_bg=True, security_tags=None):
         """Kaynak görseli AI try-on için hazırla: preprocess → bg_remove → hanger_remove → upload.
 
         Returns:
@@ -951,7 +951,7 @@ class AiStudioSession(models.Model):
             preprocess_garment_image,
             convert_birefnet_output_to_rgb,
         )
-        preprocessed = preprocess_garment_image(source_image, target_long_edge=1200)
+        preprocessed = preprocess_garment_image(source_image, target_long_edge=1200, security_tags=security_tags)
         processed_b64 = preprocessed['image_base64']
 
         if auto_bg and processed_b64:
@@ -1350,9 +1350,11 @@ class AiStudioSession(models.Model):
                     convert_birefnet_output_to_rgb,
                 )
 
+                security_tags = cached_analysis_data.get('securityTags') if isinstance(cached_analysis_data, dict) else None
                 preprocessed = preprocess_garment_image(
                     source_image,
                     target_long_edge=1200,  # Yuksek cozunurluk: detay korumasi icin
+                    security_tags=security_tags,
                 )
                 processed_b64 = preprocessed['image_base64']
 
@@ -1808,11 +1810,15 @@ class AiStudioSession(models.Model):
                     cached_analysis = analyze_garment(
                         fal_api_key, _pre_url, gemini_api_key=gemini_api_key
                     )
+                    _sec_tags = cached_analysis.get('securityTags') if isinstance(cached_analysis, dict) else None
+                    if _sec_tags:
+                        _logger.info('Kıyafet analizinde %d adet güvenlik alarmı/etiketi tespit edildi. Görsellerden temizlenecek.', len(_sec_tags))
                     _logger.info(
-                        'Kıyafet analizi tamamlandı: %s %s, hasGraphic=%s',
+                        'Kıyafet analizi tamamlandı: %s %s, hasGraphic=%s, securityTags=%d',
                         cached_analysis.get('garmentType', '?'),
                         cached_analysis.get('primaryColor', '?'),
                         cached_analysis.get('hasGraphic', False),
+                        len(_sec_tags) if _sec_tags else 0,
                     )
             except Exception as ae:
                 _logger.warning('Kıyafet analizi başarısız, varsayılan kullanılacak: %s', ae)
@@ -1872,7 +1878,12 @@ class AiStudioSession(models.Model):
                         convert_birefnet_output_to_rgb,
                     )
 
-                    preprocessed = preprocess_garment_image(source_image, target_long_edge=1200)
+                    security_tags = cached_analysis.get('securityTags') if isinstance(cached_analysis, dict) else None
+                    preprocessed = preprocess_garment_image(
+                        source_image,
+                        target_long_edge=1200,
+                        security_tags=security_tags,
+                    )
                     processed_b64 = preprocessed['image_base64']
 
                     # ═══ DETAY FOTOĞRAFI ═══
@@ -1997,8 +2008,9 @@ class AiStudioSession(models.Model):
                         except Exception:
                             pass
                     # Arka plan kaldırma ve askı temizleme (DRY helper)
+                    security_tags = cached_analysis.get('securityTags') if isinstance(cached_analysis, dict) else None
                     garment_url, _ = self._prepare_garment_for_tryon(
-                        source_image, provider, session, auto_bg=auto_bg
+                        source_image, provider, session, auto_bg=auto_bg, security_tags=security_tags
                     )
 
                     # Seedream v5 Pro — region-precise editing, kiafet sadakati icin
@@ -2350,22 +2362,25 @@ class AiStudioSession(models.Model):
         self.env.cr.postcommit.add(_start_retry_thread)
 
     def _retry_generation_thread(self, session_id, gen_id, api_key, uid):
-        """Tek generation retry thread'i (wrapper)."""
-        try:
-            self._retry_generation_thread_body(session_id, gen_id, api_key, uid)
-        except Exception as thread_err:
-            _logger.exception("AI Retry Thread: Beklenmeyen kritik hata olustu: %s", thread_err)
+        """Tek generation retry thread'i (wrapper). Kuyruk ve eszamanli limit icin semaphore kullanir."""
+        _logger.info("AI Retry Thread kuyrukta bekliyor (session_id=%s, gen_id=%s)", session_id, gen_id)
+        with _AI_SESSION_SEMAPHORE:
+            _logger.info("AI Retry Thread kilit aldi, isleme basliyor (session_id=%s, gen_id=%s)", session_id, gen_id)
             try:
-                with self.pool.cursor() as cr:
-                    env = api.Environment(cr, uid, {'lang': 'tr_TR'})
-                    gen = env['ai.studio.generation'].browse(gen_id)
-                    gen.write({
-                        'state': 'failed',
-                        'error_message': _('Kritik Sistem Hatası: %s') % str(thread_err),
-                    })
-                    cr.commit()
-            except Exception:
-                pass
+                self._retry_generation_thread_body(session_id, gen_id, api_key, uid)
+            except Exception as thread_err:
+                _logger.exception("AI Retry Thread: Beklenmeyen kritik hata olustu: %s", thread_err)
+                try:
+                    with self.pool.cursor() as cr:
+                        env = api.Environment(cr, uid, {'lang': 'tr_TR'})
+                        gen = env['ai.studio.generation'].browse(gen_id)
+                        gen.write({
+                            'state': 'failed',
+                            'error_message': _('Kritik Sistem Hatası: %s') % str(thread_err),
+                        })
+                        cr.commit()
+                except Exception:
+                    pass
 
     def _retry_generation_thread_body(self, session_id, gen_id, api_key, uid):
         """Tek generation retry thread'i (body)."""
@@ -2437,6 +2452,7 @@ class AiStudioSession(models.Model):
                                 'image_urls': [parent_url],
                                 'resolution': '2k',
                             },
+                            client_timeout=120,
                         )
 
                         edit_images = edit_result.get('images', []) if isinstance(edit_result, dict) else []
@@ -3068,7 +3084,7 @@ class AiStudioSession(models.Model):
         """
         from datetime import timedelta
 
-        # ═══ ADIM 1: İşlenmeyi bekleyen oturumları bul ve thread başlat ═══
+        # ═══ ADIM 1: İşlenmeyi bekleyen oturumları ve revizyonları bul ve kuyruktan başlat ═══
         # "processing" durumunda ve pending generation'ları olan oturumlar = kuyrukta bekleyenler
         # (action_retry_failed veya action_start_processing tarafından oluşturulmuş)
         pending_sessions = self.search([
@@ -3088,8 +3104,16 @@ class AiStudioSession(models.Model):
                       and s.write_date >= recently_active_cutoff
         )
         active_count = len(actively_processing)
+
+        # Aktif işlenen tekil revizyonları da say
+        actively_processing_gens = self.env['ai.studio.generation'].search_count([
+            ('session_id.state', '=', 'review'),
+            ('state', '=', 'processing'),
+            ('write_date', '>=', recently_active_cutoff),
+        ])
+        total_active_load = active_count + (1 if actively_processing_gens > 0 else 0)
         
-        if sessions_needing_processing and active_count < 2:
+        if total_active_load < 2:
             # API anahtarını al
             provider_type = self.env['ir.config_parameter'].sudo().get_param(
                 'ugurlar_ai_studio.default_provider', 'fashn'
@@ -3099,26 +3123,41 @@ class AiStudioSession(models.Model):
             )
             
             if api_key:
-                # Eşzamanlı limit: maks 2 aktif, kalan slotları doldur
-                slots_available = 2 - active_count
-                # write_date sırasına göre en eski oturumları seç (FIFO kuyruk)
-                to_process = sessions_needing_processing.sorted('write_date')[:slots_available]
+                slots_available = 2 - total_active_load
                 
-                _logger.info(
-                    'Cron Kuyruk: %d oturum bekliyor, %d aktif işleniyor, %d slot boş → %d oturum başlatılacak',
-                    len(sessions_needing_processing), active_count, slots_available, len(to_process)
-                )
+                # 1. Öncelik: Oturum seviyesinde bekleyenler
+                if sessions_needing_processing:
+                    to_process = sessions_needing_processing.sorted('write_date')[:slots_available]
+                    slots_available -= len(to_process)
+                    
+                    _logger.info(
+                        'Cron Kuyruk: %d oturum bekliyor, %d oturum başlatılacak',
+                        len(sessions_needing_processing), len(to_process)
+                    )
+                    session_ids = to_process.ids
+                    uid = self.env.uid or 1
+                    thread = threading.Thread(
+                        target=self._process_batch_ai_thread,
+                        args=(session_ids, api_key, uid),
+                    )
+                    thread.daemon = True
+                    thread.start()
                 
-                session_ids = to_process.ids
-                uid = self.env.uid or 1
-                thread = threading.Thread(
-                    target=self._process_batch_ai_thread,
-                    args=(session_ids, api_key, uid),
-                )
-                thread.daemon = True
-                thread.start()
+                # 2. Öncelik: Review durumundaki kuyrukta bekleyen / sahipsiz revizyonlar
+                if slots_available > 0:
+                    pending_revisions = self.env['ai.studio.generation'].search([
+                        ('session_id.state', '=', 'review'),
+                        ('state', '=', 'pending'),
+                    ], order='write_date asc, id asc', limit=slots_available)
+                    
+                    for rev_gen in pending_revisions:
+                        _logger.info(
+                            'Cron Kuyruk: Bekleyen revizyon başlatılıyor (gen_id=%s, session=%s)',
+                            rev_gen.id, rev_gen.session_id.name
+                        )
+                        rev_gen.session_id._process_single_generation(rev_gen)
             else:
-                _logger.warning('Cron Kuyruk: %d oturum bekliyor ama API anahtarı bulunamadı!', len(sessions_needing_processing))
+                _logger.warning('Cron Kuyruk: Bekleyen işlemler var ama API anahtarı bulunamadı!')
 
         # ═══ ADIM 2: Takılmış oturumları temizle (thread öldü, sunucu yeniden başladı) ═══
         stuck_cutoff = fields.Datetime.now() - timedelta(minutes=15)
@@ -3224,22 +3263,34 @@ class AiStudioSession(models.Model):
             except Exception:
                 pass
 
-        # ═══ ADIM 4: Review'daki takılmış revizyonları temizle ═══
-        revision_cutoff = fields.Datetime.now() - timedelta(minutes=15)
+        # ═══ ADIM 4: Review'daki takılmış revizyonları otomatik kurtar (6dk cutoff) ═══
+        stuck_revision_cutoff = fields.Datetime.now() - timedelta(minutes=6)
         stuck_revisions = self.env['ai.studio.generation'].search([
             ('session_id.state', '=', 'review'),
-            ('state', 'in', ['pending', 'processing']),
-            ('write_date', '<', revision_cutoff),
+            ('state', '=', 'processing'),
+            ('write_date', '<', stuck_revision_cutoff),
         ])
         for rev_gen in stuck_revisions:
-            rev_gen.write({
-                'state': 'failed',
-                'error_message': _('Zaman aşımı: Sunucu yeniden başlatıldığı veya servis yanıt vermediği için revizyon tamamlanamadı.'),
-            })
-            _logger.warning(
-                'Cron: Takılmış revizyon başarısız olarak işaretlendi (gen_id=%s, session=%s)',
-                rev_gen.id, rev_gen.session_id.name
-            )
+            if rev_gen.retry_count < 2:
+                # Otomatik kurtar: pending'e al ve retry sayacını artır
+                rev_gen.write({
+                    'state': 'pending',
+                    'error_message': False,
+                    'retry_count': rev_gen.retry_count + 1,
+                })
+                _logger.warning(
+                    'Cron: Takılmış revizyon otomatik kurtarıldı ve yeniden kuyruğa alındı (gen_id=%s, deneme %d/2)',
+                    rev_gen.id, rev_gen.retry_count
+                )
+            else:
+                rev_gen.write({
+                    'state': 'failed',
+                    'error_message': _('Zaman aşımı: Sunucu yeniden başlatıldığı veya servis yanıt vermediği için revizyon tamamlanamadı (2 deneme yapıldı). "Tekrar Dene" butonuyla yeniden başlatabilirsiniz.'),
+                })
+                _logger.warning(
+                    'Cron: Takılmış revizyon limit aşıldığı için başarısız işaretlendi (gen_id=%s, session=%s)',
+                    rev_gen.id, rev_gen.session_id.name
+                )
 
     def write(self, vals):
         res = super(AiStudioSession, self).write(vals)

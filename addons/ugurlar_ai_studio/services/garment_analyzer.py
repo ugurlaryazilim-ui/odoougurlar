@@ -89,7 +89,13 @@ def analyze_garment(api_key, image_url, gemini_api_key=None):
     """
     prompt = """You are a senior Fashion Merchandiser analyzing a product image.
 Ignore any hangers, clips, hands, or mannequins holding the garment. Focus ONLY on the garment's actual design.
-CRITICAL: If there are any plastic security tags, anti-theft alarms, or store price tags visible on the garment, completely IGNORE them. Do not describe them or treat them as part of the garment's design.
+
+CRITICAL SECURITY ALARM & STORE TAG INSTRUCTION:
+1. Retail garments frequently have store security alarm tags, anti-theft sensors, magnetic alarm pins, or round metal/plastic security tags pinned to the waistband, collar, pocket, or hemline.
+2. DO NOT describe security tags as part of the garment's design.
+3. DO NOT mistake any security alarm pin, sensor tag, or retail clip for a garment button, rivet, snap, or fastener! If an elastic waistband garment (or pants without a front fly button) has a metallic/plastic pin attached, closureType MUST be 'Yok' and buttonCount MUST be null.
+4. DETECT ALL SECURITY TAGS: In the "securityTags" field, locate and return the 2D bounding boxes of ALL visible store security tags, alarm sensors, metallic alarm pins, or plastic EAS hard tags in normalized coordinates [ymin, xmin, ymax, xmax] on a scale of 0 to 1000. If there are no security tags or alarms visible, return an empty array [].
+
 CRITICAL NECKLINE INSTRUCTION: If the garment is hanging on a hanger, the front collar often drops down, revealing the INSIDE of the BACK panel (inner back lining, back collar label, or back keyhole). You MUST completely IGNORE anything visible through the neck hole. Do NOT describe the inner back lining as part of the front collar. If you see a keyhole or label through the neck opening, do NOT say the garment has a keyhole collar. Assume a clean, standard front neckline.
 
 Analyze the garment and return a JSON with these fields:
@@ -117,7 +123,13 @@ Analyze the garment and return a JSON with these fields:
   "recommendedShoes": "string — Describe in English the most matching shoes style and color for this outfit (e.g. 'clean white minimalist leather sneakers', 'brown leather loafers', 'black high-top boots')",
   "waistbandType": "string — for bottoms: smooth/flat, belted, elasticated, drawstring. For tops: null",
   "hasBeltLoops": "boolean — true ONLY if belt loops are clearly visible on the garment",
-  "structuralDetails": "string — describe visible structural elements: pleats, darts, pintucks, piping"
+  "structuralDetails": "string — describe visible structural elements: pleats, darts, pintucks, piping",
+  "securityTags": [
+    {
+      "box_2d": [100, 200, 150, 250],
+      "label": "alarm_pin"
+    }
+  ]
 }
 
 Return ONLY valid JSON, no markdown."""
@@ -493,8 +505,17 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         # ═══ DONANIM KORUMA ═══
         closure = analysis.get('closureType', '')
         button_count = analysis.get('buttonCount')
+        waistband_type = analysis.get('waistbandType', '')
+        # Beli lastikli pantolonda 1 adet dugme algilanmissa bu neredeyse kesinlikle alarm pinidir
+        is_elastic_bottom = category == 'bottoms' and (
+            'elastic' in str(waistband_type).lower() or 'lastik' in str(waistband_type).lower()
+        )
+        if is_elastic_bottom and (button_count == 1 or str(button_count) == '1'):
+            closure = ''
+            button_count = None
+
         if closure and str(closure).lower() not in ['yok', 'none', 'null', 'false', '']:
-            base_prompt += f"Hardware: {closure}. Preserve all visible buttons, zippers, snaps exactly. "
+            base_prompt += f"Hardware: genuine garment {closure} only. Preserve authentic buttons/zippers. "
             if button_count and str(button_count).isdigit() and int(str(button_count)) > 0:
                 base_prompt += f"Exactly {button_count} buttons, matched precisely. "
 
@@ -516,9 +537,10 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
                 "Ignore any inner back lining visible through the neck opening. "
             )
 
-        # ═══ AKSESUAR (kisa) ═══
+        # ═══ AKSESUAR (Minimal ve Doğal) ═══
+        # Asla rastgele el çantası (handbag) eklenmemelidir: çantalar kıyafeti kapatır, uyumsuz durur ve elleri bozar.
         if photo_type in ['front', 'side', 'back']:
-            base_prompt += "Accessories: small handbag held at side, small earrings. "
+            base_prompt += "No handbag, no purse. Clean minimalist studio fashion posing, arms and hands relaxed naturally. "
 
         # ═══ ALT KOMBİN — ÇIPLAKLIKLARI ÖNLE ═══
         # Üst giyim / dış giyim kategorilerinde uygun alt kombin zorunlu
@@ -535,8 +557,10 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
 
         # ═══ GÜVENLİK ETİKETİ / ALARM TAGI İGNORE ═══
         base_prompt += (
-            "Ignore any security tags, alarm tags, price tags, hangers, or store fixtures "
-            "visible on the garment reference. The output garment must be clean and tag-free. "
+            "CRITICAL: Completely eliminate and remove any store security alarm tags, anti-theft pins, "
+            "plastic EAS sensors, hard tags, hangers, or store price tags visible on the garment reference. "
+            "The output garment must be completely clean, tag-free, and alarm-free. "
+            "Never render security pins or retail tags as decorative buttons or rivets. "
         )
 
     # Cift bosluklari temizle
@@ -554,6 +578,8 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         base_prompt += (
             "This is the BACK VIEW. The garment reference shows the back of the product. "
             "Reproduce the back design exactly as shown — same details, same surface. "
+            "WAISTBAND CLEANLINESS: The back waistband must be clean, smooth, continuous fabric — "
+            "absolutely NO buttons, NO rivets, NO metal pins, NO security tags on the back waistband. "
             "HANGER FOLD-OVER RULE: The reference garment was photographed hanging on a hanger. "
             "Any fabric visible at the top that appears as a second layer, a flap, or a fold-over "
             "above the natural shoulder line is the FRONT of the garment draped backward over the hanger — "
@@ -654,7 +680,11 @@ _VIEW_NEGATIVE_PROMPTS = {
     'front': (
         "nudity, naked, bare skin, bare legs, bare thighs, exposed legs, underwear, "
         "lingerie, swimwear, bikini, mini skirt, short shorts, hot pants, "
-        "no pants, panties, see-through clothing revealing skin, inappropriate, NSFW"
+        "no pants, panties, see-through clothing revealing skin, inappropriate, NSFW, "
+        "security tag, alarm tag, anti-theft tag, EAS sensor, retail security badge, "
+        "plastic alarm pin, ink tag, hard tag, security button, store tag, price tag, "
+        "store fixture, retail clip, fake waist rivet, misplaced rivet, extra buttons, "
+        "handbag, purse, clutch, tote bag, bag held in hand, shopping bag, awkward accessories, floating bag"
     ),
     'back': (
         "nudity, naked, bare skin, bare legs, bare thighs, bare back, exposed legs, "
@@ -662,14 +692,26 @@ _VIEW_NEGATIVE_PROMPTS = {
         "no pants, panties, see-through clothing revealing skin, inappropriate, NSFW, "
         "crop top only, sports bra only, "
         "hanger, hanger hook, fabric fold-over, double-layered back, cape-like flap, "
-        "extra fabric layer on back, wing-like extensions on shoulders, two-toned back panel"
+        "extra fabric layer on back, wing-like extensions on shoulders, two-toned back panel, "
+        "security tag, alarm tag, anti-theft tag, EAS sensor, retail security badge, "
+        "plastic alarm pin, ink tag, hard tag, store tag, price tag, store fixture, "
+        "retail clip, button on back waistband, rivet on back waistband, back waist button, "
+        "metal badge on waistband, back pocket rivet, fake waistband hardware, "
+        "handbag, purse, clutch, tote bag, bag held in hand, shopping bag, awkward accessories, floating bag"
     ),
     'side': (
         "nudity, naked, bare skin, bare legs, bare thighs, exposed legs, underwear, "
         "lingerie, swimwear, bikini, mini skirt, short shorts, hot pants, "
-        "no pants, panties, see-through clothing revealing skin, inappropriate, NSFW"
+        "no pants, panties, see-through clothing revealing skin, inappropriate, NSFW, "
+        "security tag, alarm tag, anti-theft tag, EAS sensor, retail security badge, "
+        "plastic alarm pin, ink tag, hard tag, store tag, price tag, store fixture, retail clip, "
+        "handbag, purse, clutch, tote bag, bag held in hand, shopping bag, awkward accessories, floating bag"
     ),
-    'detail': '',
+    'detail': (
+        "security tag, alarm tag, anti-theft tag, EAS sensor, retail security badge, "
+        "plastic alarm pin, ink tag, hard tag, store tag, price tag, store fixture, retail clip, "
+        "handbag, purse, clutch, tote bag, bag held in hand, awkward accessories"
+    ),
 }
 
 
@@ -697,6 +739,7 @@ def _default_analysis():
         'seoDescription': '',
         'recommendedBottoms': 'dark blue skinny jeans',
         'recommendedShoes': 'white sneakers',
+        'securityTags': [],
     }
 
 

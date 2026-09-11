@@ -106,6 +106,79 @@ def reduce_noise(img_array, d=9, sigma_color=75, sigma_space=75):
 
 
 # ---------------------------------------------------------------------------
+# 3.5 Güvenlik Etiketi / Alarm Pini Silme — Inpainting (Telea)
+# ---------------------------------------------------------------------------
+def inpaint_security_tags(img_bgr, tag_boxes):
+    """Giysi uzerindeki magazaya ait guvenlik etiketlerini ve alarm pinlerini
+    OpenCV Telea inpainting algoritmasi ile cevre kumas dokusuna gore siler.
+
+    Args:
+        img_bgr: numpy array (BGR, uint8)
+        tag_boxes: list of bounding boxes: [ymin, xmin, ymax, xmax] veya {'box_2d': [...]}
+    Returns:
+        numpy array (BGR, uint8) — etiketler silinmis gorsel
+    """
+    if cv2 is None or not tag_boxes:
+        return img_bgr
+
+    h, w = img_bgr.shape[:2]
+    mask = np.zeros((h, w), dtype=np.uint8)
+    tags_found = 0
+
+    for item in tag_boxes:
+        box = item.get('box_2d') if isinstance(item, dict) else item
+        if not box or len(box) < 4:
+            continue
+
+        try:
+            ymin, xmin, ymax, xmax = float(box[0]), float(box[1]), float(box[2]), float(box[3])
+        except (ValueError, TypeError):
+            continue
+
+        # Gemini 0..1000 normalize koordinatlarini 0.0..1.0 araligina cevir
+        if max(ymin, xmin, ymax, xmax) > 1.0:
+            ymin, xmin, ymax, xmax = ymin / 1000.0, xmin / 1000.0, ymax / 1000.0, xmax / 1000.0
+
+        # Piksel koordinatlarina donustur
+        px1 = max(0, int(xmin * w))
+        py1 = max(0, int(ymin * h))
+        px2 = min(w, int(xmax * w))
+        py2 = min(h, int(ymax * h))
+
+        if px2 <= px1 or py2 <= py1:
+            continue
+
+        # Alarm pininin metal/plastik kenarlarini tam kapsamak icin hafif padding ekle
+        bw = px2 - px1
+        bh = py2 - py1
+        pad_x = max(4, int(bw * 0.18))
+        pad_y = max(4, int(bh * 0.18))
+
+        x1 = max(0, px1 - pad_x)
+        y1 = max(0, py1 - pad_y)
+        x2 = min(w, px2 + pad_x)
+        y2 = min(h, py2 + pad_y)
+
+        # Alarm pinleri cogu zaman yuvarlak veya ovaldir, maskeye elips ciz
+        center_x = (x1 + x2) // 2
+        center_y = (y1 + y2) // 2
+        radius_x = max(2, (x2 - x1) // 2)
+        radius_y = max(2, (y2 - y1) // 2)
+        cv2.ellipse(mask, (center_x, center_y), (radius_x, radius_y), 0, 0, 360, 255, -1)
+        tags_found += 1
+
+    if tags_found > 0:
+        _logger.info('OpenCV inpainting: %d adet guvenlik/alarm etiketi gorselden siliniyor...', tags_found)
+        try:
+            # Telea inpaint kumas dokusunu puruzsuz harmanlar
+            return cv2.inpaint(img_bgr, mask, inpaintRadius=7, flags=cv2.INPAINT_TELEA)
+        except Exception as e:
+            _logger.warning('Guvenlik etiketi inpaint hatasi: %s', e)
+
+    return img_bgr
+
+
+# ---------------------------------------------------------------------------
 # 4. Akilli Boyutlandirma — Lanczos
 # ---------------------------------------------------------------------------
 def smart_resize(pil_image, target_long_edge=864):
@@ -231,10 +304,12 @@ def preprocess_garment_image(image_base64, target_long_edge=864,
                               apply_white_balance=True,
                               apply_exposure_norm=True,
                               apply_noise_reduction=True,
-                              apply_sharpening=True):
-    """Urun gorselini FASHN API'ye gondermeden once profesyonel sekilde hazirlar.
+                              apply_sharpening=True,
+                              security_tags=None):
+    """Urun gorselini FASHN/fal.ai API'ye gondermeden once profesyonel sekilde hazirlar.
 
-    7 adimli pipeline:
+    Adimlar:
+    0. Guvenlik etiketi / alarm pini silme (OpenCV Telea inpaint)
     1. Beyaz denge (Gray-World) — renk kaymasini duzeltir
     2. Pozlama normalizasyonu (CLAHE) — karanlik/parlak duzeltir
     3. Gurultu azaltma (bilateral) — telefon gurultusunu temizler
@@ -245,11 +320,12 @@ def preprocess_garment_image(image_base64, target_long_edge=864,
 
     Args:
         image_base64: str — base64 encoded gorsel
-        target_long_edge: int — hedef boyut (864 = FASHN v1.6 optimal)
+        target_long_edge: int — hedef boyut (864 = FASHN v1.6 optimal, 1200 = fal.ai)
         apply_white_balance: bool — beyaz denge uygulansin mi
         apply_exposure_norm: bool — pozlama normalizasyonu uygulansin mi
         apply_noise_reduction: bool — gurultu azaltma uygulansin mi
         apply_sharpening: bool — keskinlestirme uygulansin mi
+        security_tags: list — Gemini tarafindan tespit edilen guvenlik etiketi/alarm koordinatlari
 
     Returns:
         dict: {
@@ -280,11 +356,16 @@ def preprocess_garment_image(image_base64, target_long_edge=864,
         if pil_image.mode == 'RGBA':
             had_alpha = True
 
-        # --- OpenCV adimlari (1-3) ---
-        if cv2 is not None and (apply_white_balance or apply_exposure_norm or apply_noise_reduction):
+        # --- OpenCV adimlari (0-3: Alarm silme, Beyaz denge, Pozlama, Gurultu) ---
+        if cv2 is not None and (apply_white_balance or apply_exposure_norm or apply_noise_reduction or security_tags):
             # PIL -> numpy (BGR)
             rgb_array = np.array(rgba_to_rgb_white(pil_image) if had_alpha else pil_image.convert('RGB'))
             bgr_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
+
+            # 0. Guvenlik etiketi / Alarm pini silme
+            if security_tags:
+                bgr_array = inpaint_security_tags(bgr_array, security_tags)
+                steps_applied.append('alarm_inpaint')
 
             # 1. Beyaz denge
             if apply_white_balance:

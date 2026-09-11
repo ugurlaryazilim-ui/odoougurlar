@@ -75,6 +75,7 @@ class AiStudioGeneration(models.Model):
         ('failed', 'Başarısız'),
     ], string='Durum', default='pending')
     error_message = fields.Text(string='Hata Mesajı')
+    retry_count = fields.Integer(string='Tekrar Deneme Sayısı', default=0)
 
     # --- Onay ---
     is_approved = fields.Boolean(string='Onaylandı', default=False)
@@ -563,14 +564,14 @@ class AiStudioGeneration(models.Model):
         }
 
     def action_recover_stuck_revisions_server(self, *args, **kwargs):
-        """Takılmış revizeleri başarısız durumuna çekerek kurtar."""
+        """Takılmış revizeleri yeniden kuyruğa alarak kurtar."""
         from datetime import timedelta
         # Eğer kullanıcı belirli satırları seçip butona bastıysa doğrudan onları kurtar
         selected = self.filtered(lambda g: g.state in ('pending', 'processing'))
         if selected:
             selected.write({
-                'state': 'failed',
-                'error_message': _('Kullanıcı tarafından kurtarıldı. "Tekrar Dene" butonuyla yeniden başlatabilir veya iptal edebilirsiniz.'),
+                'state': 'pending',
+                'error_message': False,
             })
             count = len(selected)
         else:
@@ -581,20 +582,23 @@ class AiStudioGeneration(models.Model):
                 ('state', 'in', ['pending', 'processing']),
                 ('write_date', '<', cutoff),
             ])
-            stuck.write({
-                'state': 'failed',
-                'error_message': _('Zaman aşımı: Sunucu yeniden başlatıldığı veya servis yanıt vermediği için revizyon tamamlanamadı. "Tekrar Dene" butonuyla yeniden başlatabilir veya iptal edebilirsiniz.'),
-            })
+            if stuck:
+                stuck.write({
+                    'state': 'pending',
+                    'error_message': False,
+                })
             count = len(stuck)
-            # Ayrıca genel cron'u da çalıştır
+
+        if count:
+            # Hemen cron'u da tetikle ki beklemeden kuyruktan başlasın
             self.env['ai.studio.session']._cron_check_stuck_generations()
 
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
-                'title': _('Revizeler Kontrol Edildi'),
-                'message': _('%d adet takılmış revizyon düzeltildi.') % count if count else _('Takılmış revizyon bulunamadı, tüm işlemler güncel.'),
+                'title': _('Revizeler Kuyruğa Alındı'),
+                'message': _('%d adet takılmış revizyon yeniden kuyruğa alındı ve işlenmeye başlandı.') % count if count else _('Takılmış revizyon bulunamadı, tüm işlemler güncel.'),
                 'type': 'success',
                 'sticky': False,
                 'next': {'type': 'ir.actions.client', 'tag': 'reload'},
@@ -654,19 +658,21 @@ class AiStudioGeneration(models.Model):
     def _batch_retry_worker_thread(self, gen_ids, api_key, uid):
         """Toplu revizyonları sırayla işleyen arka plan thread'i."""
         import time
+        from .ai_studio_session import _AI_SESSION_SEMAPHORE
         _logger.info("Toplu revizyon tekrar deneme thread'i baslatildi: %d adet", len(gen_ids))
         for gen_id in gen_ids:
             try:
-                with self.pool.cursor() as cr:
-                    env = api.Environment(cr, uid, {'lang': 'tr_TR'})
-                    gen = env['ai.studio.generation'].browse(gen_id)
-                    if not gen.exists() or gen.state != 'pending':
-                        continue
-                    session = gen.session_id
-                    session_id = session.id
+                with _AI_SESSION_SEMAPHORE:
+                    with self.pool.cursor() as cr:
+                        env = api.Environment(cr, uid, {'lang': 'tr_TR'})
+                        gen = env['ai.studio.generation'].browse(gen_id)
+                        if not gen.exists() or gen.state != 'pending':
+                            continue
+                        session = gen.session_id
+                        session_id = session.id
 
-                # Session retry thread body'sini çağır
-                session._retry_generation_thread_body(session_id, gen_id, api_key, uid)
+                    # Session retry thread body'sini çağır
+                    session._retry_generation_thread_body(session_id, gen_id, api_key, uid)
                 time.sleep(1.0)
             except Exception as e:
                 _logger.error("Toplu tekrar deneme hatası (gen=%s): %s", gen_id, e)

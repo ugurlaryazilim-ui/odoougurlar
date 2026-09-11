@@ -117,19 +117,24 @@ class FalProvider(AIProviderBase):
                 # Seedream uses Figure references
                 garment_fidelity = (
                     "Dress the model in Figure 2 with the exact garment shown in Figure 1. "
-                    "IMPORTANT: Ignore any security tags, alarm tags, price tags, hangers, or store fixtures "
+                    "IMPORTANT: Ignore and remove any security tags, alarm tags, price tags, hangers, or store fixtures "
                     "visible on Figure 1 — these are store artifacts, NOT part of the garment. "
-                    "The output garment must be completely clean and tag-free. "
+                    "The output garment must be completely clean, tag-free, and alarm-free. "
                     "Reproduce every visible garment detail of Figure 1 precisely: same waistband, "
-                    "same seams, same pockets, same hardware, same fabric texture. "
-                    "The output garment must be a pixel-perfect match of Figure 1 (minus any store tags). "
+                    "same seams, same pockets, authentic garment closures only, same fabric texture. "
+                    "Strictly NO anti-theft tags, security pins, or artificial metallic badges. "
+                    "The output garment must be a pixel-perfect match of Figure 1 (minus any store tags or alarm pins). "
                 )
             else:
                 garment_fidelity = (
                     "GARMENT FIDELITY: The 1st reference image is the EXACT garment. "
+                    "IMPORTANT: Ignore and remove any security tags, alarm tags, anti-theft pins, price tags, hangers, or store fixtures "
+                    "visible on the 1st reference image — these are store artifacts, NOT part of the garment. "
+                    "The output garment must be completely clean, tag-free, and alarm-free. "
                     "Reproduce every visible detail precisely: same waistband construction, "
-                    "same seams, same pockets, same hardware. "
-                    "The output garment must be a pixel-perfect match of the 1st reference. "
+                    "same seams, same pockets, authentic garment closures only. "
+                    "Strictly NO security pins, anti-theft tags, or artificial rivets on the waistband. "
+                    "The output garment must be a pixel-perfect match of the 1st reference (minus any store tags or alarm pins). "
                 )
 
             # Base View Hints
@@ -138,6 +143,8 @@ class FalProvider(AIProviderBase):
                     'back': (
                         'Show the BACK view of the model from Figure 2, facing away from camera, wearing the garment from Figure 1. '
                         'Copy EVERY detail from Figure 1 exactly — same waistband, same pockets, same surface. '
+                        'WAISTBAND CLEANLINESS: The back waistband must be clean, smooth, uninterrupted fabric — '
+                        'absolutely NO buttons, NO rivets, NO metal pins, NO security tags on the back waistband. '
                         'IMPORTANT: Figure 1 was photographed on a hanger. Any fabric visible at the top/shoulder area that folds over '
                         'the hanger hook is the FRONT of the garment draped backward — it is NOT part of the back design. '
                         'IGNORE any fold-over, overlapping layers, or double-layered appearance at the top. '
@@ -150,19 +157,21 @@ class FalProvider(AIProviderBase):
                         'Copy EVERY structural detail from Figure 1: same waistband construction, same surface texture, same pockets. '
                         'The waistband must match Figure 1 exactly — if Figure 1 shows a smooth waistband, the side view must also have a smooth waistband. '
                     ),
-                    'detail': 'Close-up detail shot of the garment from Figure 1 on the model. ',
+                    'detail': 'Close-up detail shot of the garment from Figure 1 on the model. Strictly tag-free and alarm-free. ',
                 }
             else:
                 view_hints = {
                     'back': (
                         'IMPORTANT: Show the BACK view of the model, facing away from camera. '
+                        'WAISTBAND CLEANLINESS: The back waistband must be clean, smooth, uninterrupted fabric — '
+                        'absolutely NO buttons, NO rivets, NO metal pins, NO security tags on the back waistband. '
                         'The garment reference was photographed on a hanger. Any fabric at the top/shoulder area '
                         'that folds over the hanger hook is the FRONT side draped backward — NOT part of the back design. '
                         'IGNORE fold-over layers. Show ONLY the single back panel as one clean layer. '
                         'Do NOT add cape-like flaps, wing extensions, or double-layered fabric on the back. '
                     ),
                     'side': 'IMPORTANT: Show the SIDE view of the model, turned 45 degrees. ',
-                    'detail': 'IMPORTANT: Close-up detail shot showing fabric texture and details. ',
+                    'detail': 'IMPORTANT: Close-up detail shot showing fabric texture and details. Strictly tag-free and alarm-free. ',
                 }
             base_hint = view_hints.get(photo_type, '') if photo_type and photo_type != 'front' else ''
             dynamic_prompt = garment_fidelity + base_hint
@@ -222,8 +231,17 @@ class FalProvider(AIProviderBase):
                 arguments['safety_tolerance'] = '4'
                 arguments['limit_generations'] = True
                 arguments['enable_watermark'] = False
-            if 'negative_prompt' in kwargs and kwargs['negative_prompt']:
-                arguments['negative_prompt'] = kwargs['negative_prompt']
+            anti_alarm_tokens = (
+                "security tag, alarm tag, anti-theft tag, EAS sensor, retail security badge, "
+                "plastic alarm pin, ink tag, hard tag, store tag, price tag, store fixture, "
+                "retail clip, button on back waistband, rivet on back waistband, misplaced rivet"
+            )
+            raw_neg = kwargs.get('negative_prompt', '') or ''
+            if anti_alarm_tokens not in raw_neg:
+                arguments['negative_prompt'] = f"{raw_neg}, {anti_alarm_tokens}".strip(', ')
+            else:
+                arguments['negative_prompt'] = raw_neg
+
             if 'seed' in kwargs and kwargs['seed']:
                 arguments['seed'] = int(kwargs['seed'])
         else:
@@ -249,8 +267,17 @@ class FalProvider(AIProviderBase):
             }
             if prompt:
                 arguments['prompt'] = prompt
-            if 'negative_prompt' in kwargs and kwargs['negative_prompt']:
-                arguments['negative_prompt'] = kwargs['negative_prompt']
+            raw_neg = kwargs.get('negative_prompt', '') or ''
+            anti_alarm_tokens = (
+                "security tag, alarm tag, anti-theft tag, EAS sensor, retail security badge, "
+                "plastic alarm pin, ink tag, hard tag, store tag, price tag, store fixture, "
+                "retail clip, button on back waistband, rivet on back waistband, misplaced rivet"
+            )
+            if anti_alarm_tokens not in raw_neg:
+                arguments['negative_prompt'] = f"{raw_neg}, {anti_alarm_tokens}".strip(', ')
+            else:
+                arguments['negative_prompt'] = raw_neg
+
             if 'seed' in kwargs and kwargs['seed']:
                 arguments['seed'] = int(kwargs['seed'])
 
