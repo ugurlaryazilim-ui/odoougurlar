@@ -285,17 +285,26 @@ class TrendyolOrder(models.Model):
                 'stock_code': line.get('stockCode', ''),
                 'product_name': line.get('productName', ''),
                 'quantity': line.get('quantity', 1),
-                'unit_price': (line.get('price')
-                               or line.get('amount')
-                               or line.get('lineUnitPrice')
-                               or line.get('lineGrossAmount', 0)),
+            }
+            # discountDetails varsa kuruş doğruluğu için oradan birim fiyat hesapla
+            _dd = line.get('discountDetails') or []
+            _qty = line.get('quantity', 1)
+            if _dd and len(_dd) == _qty and _qty > 1:
+                _total_price = sum(d.get('lineItemPrice', 0) for d in _dd)
+                lv['unit_price'] = _total_price / _qty if _qty else _total_price
+            else:
+                lv['unit_price'] = (line.get('price')
+                                    or line.get('lineUnitPrice')
+                                    or line.get('amount')
+                                    or line.get('lineGrossAmount', 0))
+            lv.update({
                 'discount': (line.get('discount')
                              or line.get('lineTotalDiscount')
                              or line.get('lineSellerDiscount', 0)),
                 'vat_rate': line.get('vatRate', 0),
                 'product_size': line.get('productSize', ''),
                 'product_color': line.get('productColor', ''),
-            }
+            })
             # Komisyon oranı (API'den gelen değer ORAN'dır, tutar değil)
             if store.process_commission:
                 lv['commission_rate'] = line.get('commission', 0)
@@ -423,13 +432,23 @@ class TrendyolOrder(models.Model):
                 if not product:
                     product = Product.find_by_marketplace_barcode(sku) if sku else Product
 
-            # Trendyol price/lineUnitPrice KDV DAHİL tutardır (indirim sonrası)
-            price = (line.get('price')
-                     or line.get('amount')
-                     or line.get('lineUnitPrice')
-                     or line.get('lineGrossAmount', 0))
+            # Trendyol price/lineUnitPrice KDV DAHİL BİRİM tutardır (indirim sonrası)
+            # NOT: price zaten birim fiyattır, qty'ye bölmemek gerekir!
+            # discountDetails varsa her adet için ayrı kuruş yuvarlaması olabilir
+            # (ör: 2267.12 + 2267.13 = 4534.25) → toplamdan birim fiyat hesapla
             qty = line.get('quantity', 1)
-            unit_price = price / qty if qty else price
+            discount_details = line.get('discountDetails') or []
+
+            if discount_details and len(discount_details) == qty and qty > 1:
+                # Her adet için lineItemPrice topla → toplam satır fiyatını bul
+                total_line_price = sum(d.get('lineItemPrice', 0) for d in discount_details)
+                unit_price = total_line_price / qty if qty else total_line_price
+            else:
+                # discountDetails yoksa veya uyumsuzsa — price zaten birim fiyattır
+                unit_price = (line.get('price')
+                              or line.get('lineUnitPrice')
+                              or line.get('amount')
+                              or line.get('lineGrossAmount', 0))
 
             ol_vals = {
                 'name': line.get('productName', 'Bilinmeyen Ürün'),
