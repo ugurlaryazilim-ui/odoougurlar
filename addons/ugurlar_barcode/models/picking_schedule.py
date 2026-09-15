@@ -408,6 +408,23 @@ class PickingSchedule(models.Model):
                 "Toplama [%s] %s — %d orphan picking dahil ediliyor "
                 "(önceki pencerelerden kalan, batch'siz)",
                 self.name, window_label, len(orphan_pickings))
+            # Detaylı kaynak bilgisi logla — hangi pazaryerinden geldiği
+            for p in orphan_pickings:
+                source = 'Bilinmeyen'
+                so = p.sale_id
+                if not so and p.origin:
+                    so = self.env['sale.order'].sudo().search(
+                        [('name', '=', p.origin)], limit=1)
+                if so:
+                    if hasattr(so, 'amazon_store_id') and so.amazon_store_id:
+                        source = f'Amazon ({so.amazon_store_id.name})'
+                    elif hasattr(so, 'trendyol_store_id') and so.trendyol_store_id:
+                        source = f'Trendyol ({so.trendyol_store_id.name})'
+                    else:
+                        source = f'Odoo ({so.name})'
+                _logger.info(
+                    "  Orphan: %s | kaynak=%s | state=%s | create=%s",
+                    p.name, source, p.state, p.create_date)
             pickings |= orphan_pickings
 
         # ─── OTOMATİK BATCH SORUNU: Odoo'nun auto_batch'i picking'lere

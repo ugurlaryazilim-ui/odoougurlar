@@ -4,7 +4,7 @@
     'category': 'Sales/Integration',
     'summary': 'Amazon Selling Partner API (SP-API) entegrasyonu',
     'author': 'Odoo Ugurlar',
-    'depends': ['base', 'sale_management', 'stock', 'delivery'],
+    'depends': ['base', 'sale_management', 'sale_stock', 'stock', 'delivery'],
     'data': [
         'security/ir.model.access.csv',
         'data/cron_data.xml',

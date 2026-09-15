@@ -457,10 +457,19 @@ class AmazonOrderSync(models.Model):
                         f"Odoo'da bulunamadı — 'Amazon Ürünü (Eşleştirilmemiş)' ile oluşturuluyor."
                     )
                 else:
+                    # Fallback ürünü de bulunamadı — ürünsüz satır oluşturma!
+                    # product_id olmayan satır picking oluşturmaz.
                     msgs.append(
                         f"{amazon_order_id} siparişinde {sku} SKU'lu ürün bulunamadı, "
-                        f"fallback ürünü de yok — ürünsüz satır oluşturuluyor."
+                        f"fallback ürünü de yok — satır atlanıyor (picking oluşması için ürün gerekli)."
                     )
+                    _logger.error(
+                        "Amazon KRİTİK: SKU '%s', ASIN '%s' (Sipariş: %s) — "
+                        "fallback ürünü de bulunamadı! Satır atlanıyor. "
+                        "'AMAZON-UNKNOWN' kodlu ürün oluşturun.",
+                        sku, asin, amazon_order_id,
+                    )
+                    continue  # Bu satırı atla — ürünsüz satır oluşturma
                 _logger.warning(
                     "Amazon ADIM-3 FALLBACK: SKU '%s', ASIN '%s' (Sipariş: %s) — "
                     "eşleşme 3 adımda da başarısız, fallback ürünü kullanılıyor.",
@@ -473,9 +482,8 @@ class AmazonOrderSync(models.Model):
                 'product_uom_qty': qty,
                 'price_unit': unit_price_incl,
                 'name': item.get('Title', sku or 'Amazon Ürünü'),
+                'product_id': product.id,  # Her zaman ürün ataması yapılır
             }
-            if product:
-                ol_vals['product_id'] = product.id
 
             # ─── KDV Dahil Vergi Tespiti & Fiyat Ayarlaması ───
             vat_rate = 0.0
@@ -700,34 +708,34 @@ class AmazonOrderSync(models.Model):
                     existing_order.order_line.sudo().unlink()
                     existing_order.sudo().write({'order_line': new_lines})
 
-            # ─── Pending→Unshipped/Shipped geçişi: Sipariş hâlâ draft ise onayla ───
-            # Sipariş ilk geldiğinde Pending idi ve action_confirm yapılmadı.
-            # Şimdi PII tamamlandı ve sipariş draft durumunda → onayla (Nebim'e de gider)
+            # ─── Draft sipariş → Onayla (Picking oluşması için) ───
+            # Sipariş ilk geldiğinde Pending olmuş olabilir ve draft bırakılmış olabilir.
+            # Artık tüm draft siparişler (Pending dahil) onaylanır → picking oluşur.
             if existing_order.state == 'draft' and status not in ('Pending', 'Canceled'):
-                if order_data.get('FulfillmentChannel') == 'MFN':
-                    _logger.info(
-                        "Amazon sipariş %s Pending→%s geçişi: PII tamamlandı, action_confirm çağrılıyor.",
-                        amazon_order_id, status
-                    )
-                    existing_order.action_confirm()
-                    # ─── Picking debug logu ───
-                    if existing_order.picking_ids:
-                        for p in existing_order.picking_ids:
-                            _logger.info(
-                                "Amazon picking (force): %s | state=%s | type=%s (id:%d) | "
-                                "wh=%s | batch=%s | create=%s | Sipariş: %s",
-                                p.name, p.state,
-                                p.picking_type_id.display_name, p.picking_type_id.id,
-                                p.picking_type_id.warehouse_id.name if p.picking_type_id.warehouse_id else 'N/A',
-                                p.batch_id.name if p.batch_id else 'YOK',
-                                p.create_date, amazon_order_id)
-                    else:
-                        _logger.warning(
-                            "Amazon sipariş %s (force) onaylandı ama picking OLUŞMADI! "
-                            "Satır ürünleri: %s",
-                            amazon_order_id,
-                            [(l.product_id.display_name, l.product_id.type, l.product_id.id)
-                             for l in existing_order.order_line if l.product_id])
+                _logger.info(
+                    "Amazon sipariş %s draft→onay geçişi: action_confirm çağrılıyor. Statü: %s, Kanal: %s",
+                    amazon_order_id, status, order_data.get('FulfillmentChannel', 'N/A')
+                )
+                existing_order.action_confirm()
+                # ─── Picking debug logu ───
+                if existing_order.picking_ids:
+                    for p in existing_order.picking_ids:
+                        _logger.info(
+                            "Amazon picking (force): %s | state=%s | type=%s (id:%d) | "
+                            "wh=%s | batch=%s | create=%s | Sipariş: %s",
+                            p.name, p.state,
+                            p.picking_type_id.display_name, p.picking_type_id.id,
+                            p.picking_type_id.warehouse_id.name if p.picking_type_id.warehouse_id else 'N/A',
+                            p.batch_id.name if p.batch_id else 'YOK',
+                            p.create_date, amazon_order_id)
+                else:
+                    _logger.warning(
+                        "Amazon sipariş %s (force) onaylandı ama picking OLUŞMADI! "
+                        "Kanal: %s | Satır ürünleri: %s",
+                        amazon_order_id,
+                        order_data.get('FulfillmentChannel', 'N/A'),
+                        [(l.product_id.display_name, l.product_id.type, l.product_id.id)
+                         for l in existing_order.order_line if l.product_id])
 
             return processed, 0, 0, msgs
 
@@ -755,33 +763,37 @@ class AmazonOrderSync(models.Model):
         })
 
         amazon_order.write({'sale_order_id': sale_order.id})
-        
-        # ─── Pending Sipariş → Onaylama ───
-        # Pending siparişlerde PII yok → action_confirm YAPMA (Nebim'e yanlış bilgi gider)
-        # Unshipped/Shipped siparişlerde PII mevcut → action_confirm YAP
-        if order_data.get('FulfillmentChannel') == 'MFN' and status != 'Pending':
+
+        # ─── Sipariş Onaylama (Picking Oluşturma) ───
+        # Tüm siparişler (Pending dahil) hemen onaylanır → picking oluşur → toplama
+        # listesine düşer. PII (adres/müşteri) bilgisi eksikse sonraki cron'da
+        # güncellenecektir. Pending siparişleri draft bırakmak picking'in geç
+        # oluşmasına ve toplama zaman pencerelerinin kaçırılmasına neden oluyordu.
+        if status != 'Canceled':
             sale_order.action_confirm()
             # ─── Picking debug logu ───
             if sale_order.picking_ids:
                 for p in sale_order.picking_ids:
                     _logger.info(
                         "Amazon picking oluştu: %s | state=%s | type=%s (id:%d) | "
-                        "wh=%s | batch=%s | create=%s | Sipariş: %s",
+                        "wh=%s | batch=%s | create=%s | Sipariş: %s | Kanal: %s",
                         p.name, p.state,
                         p.picking_type_id.display_name, p.picking_type_id.id,
                         p.picking_type_id.warehouse_id.name if p.picking_type_id.warehouse_id else 'N/A',
                         p.batch_id.name if p.batch_id else 'YOK',
-                        p.create_date, amazon_order_id)
+                        p.create_date, amazon_order_id,
+                        order_data.get('FulfillmentChannel', 'N/A'))
             else:
                 _logger.warning(
                     "Amazon sipariş %s onaylandı ama picking OLUŞMADI! "
-                    "Satır ürünleri: %s",
+                    "Kanal: %s | Satır ürünleri: %s",
                     amazon_order_id,
+                    order_data.get('FulfillmentChannel', 'N/A'),
                     [(l.product_id.display_name, l.product_id.type, l.product_id.id)
                      for l in sale_order.order_line if l.product_id])
-        elif status == 'Pending':
+        else:
             _logger.info(
-                "Amazon sipariş %s Pending durumunda — draft olarak bırakılıyor (PII henüz mevcut değil).",
+                "Amazon sipariş %s Canceled durumunda — onaylanmıyor.",
                 amazon_order_id
             )
 
