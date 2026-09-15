@@ -28,7 +28,6 @@ export class SalesDiscount extends Component {
                                t-on-input="onCustomerInput"
                                t-on-keydown="(ev) => ev.key === 'Enter' and this.calculateDiscounts()"/>
                         
-                        <!-- Dropdown MUST be inside ub-input-group for position: absolute to work relative to the input! -->
                         <div class="ub-customer-dropdown" t-if="state.showCustomerDropdown">
                             <t t-if="state.customerSearchLoading">
                                 <div class="ub-customer-dropdown-item text-muted">
@@ -115,19 +114,19 @@ export class SalesDiscount extends Component {
                                 <span t-if="item.size_name"><i class="fa fa-arrows-alt"></i> Beden: <t t-esc="item.size_name"/></span>
                             </div>
 
-                            <!-- NAKİT / VADELİ FİYAT KUTUSU -->
-                            <div class="ub-dc-prices" t-if="item.retail_price > 0">
-                                <div class="ub-dc-price-row ub-dc-price-cash">
-                                    <span class="ub-dc-price-label">
-                                        <i class="fa fa-money"></i> Nakit
-                                    </span>
-                                    <span class="ub-dc-price-value" t-esc="formatPrice(item.retail_price)"/>
+                            <!-- NAKİT / VADELİ FİYAT TABLOSU -->
+                            <div class="ub-dc-price-table" t-if="item.retail_price > 0">
+                                <div class="ub-dc-pt-row">
+                                    <div class="ub-dc-pt-label">
+                                        <span class="ub-dc-pt-badge ub-badge-cash">NAKİT</span>
+                                    </div>
+                                    <div class="ub-dc-pt-value" t-esc="formatPrice(item.retail_price)"/>
                                 </div>
-                                <div class="ub-dc-price-row ub-dc-price-installment" t-if="item.installment_price > 0">
-                                    <span class="ub-dc-price-label">
-                                        <i class="fa fa-credit-card"></i> Vadeli
-                                    </span>
-                                    <span class="ub-dc-price-value" t-esc="formatPrice(item.installment_price)"/>
+                                <div class="ub-dc-pt-row" t-if="item.installment_price > 0">
+                                    <div class="ub-dc-pt-label">
+                                        <span class="ub-dc-pt-badge ub-badge-installment">VADELİ</span>
+                                    </div>
+                                    <div class="ub-dc-pt-value" t-esc="formatPrice(item.installment_price)"/>
                                 </div>
                             </div>
 
@@ -135,19 +134,19 @@ export class SalesDiscount extends Component {
                                 <i class="fa fa-star"></i> Kampanya: <t t-esc="item.campaign_name"/>
                             </div>
                             
-                            <!-- İNDİRİMLİ FİYATLAR -->
+                            <!-- İNDİRİMLİ SON FİYATLAR -->
                             <div class="ub-dc-totals" t-if="item.discount_amount > 0 or item.final_price > 0">
                                 <div class="ub-dc-discount" t-if="item.discount_amount > 0">
-                                    -<t t-esc="formatPrice(item.discount_amount)"/> İndirim
+                                    <i class="fa fa-arrow-down"></i> -<t t-esc="formatPrice(item.discount_amount)"/> İndirim
                                 </div>
-                                <div class="ub-dc-finals-box" t-if="item.final_price > 0">
-                                    <div class="ub-dc-final-row ub-dc-final-cash">
-                                        <span class="ub-dc-final-label"><i class="fa fa-money"></i></span>
-                                        <span class="ub-dc-final-value" t-esc="formatPrice(item.final_price)"/>
+                                <div class="ub-dc-final-prices" t-if="item.final_price > 0">
+                                    <div class="ub-dc-fp-item ub-dc-fp-cash">
+                                        <span class="ub-dc-fp-badge">NAKİT</span>
+                                        <span class="ub-dc-fp-amount"><t t-esc="formatPrice(item.final_price)"/></span>
                                     </div>
-                                    <div class="ub-dc-final-row ub-dc-final-installment" t-if="item.installment_final > 0">
-                                        <span class="ub-dc-final-label"><i class="fa fa-credit-card"></i></span>
-                                        <span class="ub-dc-final-value" t-esc="formatPrice(item.installment_final)"/>
+                                    <div class="ub-dc-fp-item ub-dc-fp-installment" t-if="item.installment_final > 0">
+                                        <span class="ub-dc-fp-badge">VADELİ</span>
+                                        <span class="ub-dc-fp-amount"><t t-esc="formatPrice(item.installment_final)"/></span>
                                     </div>
                                 </div>
                             </div>
@@ -179,30 +178,40 @@ export class SalesDiscount extends Component {
                             <span>-<t t-esc="formatPrice(camp.amount)"/></span>
                         </div>
                     </t>
-                    <div class="ub-ds-row ub-ds-discount" style="border-top: 1px dashed #dc3545; padding-top: 5px; margin-top: 5px; font-weight: bold;">
+                    <div class="ub-ds-row ub-ds-total-discount">
                         <span>Genel Toplam İndirim</span>
-                        <div>
+                        <div class="ub-ds-total-discount-right">
                             <span>-<t t-esc="formatPrice(state.summary.total_discount)"/></span>
                             <span class="ub-ds-savings-badge">%<t t-esc="savingsPercentage"/> Kazanç!</span>
                         </div>
                     </div>
                 </t>
 
-                <!-- NAKİT / VADELİ TOPLAM KUTUSU -->
-                <div class="ub-ds-payment-box">
-                    <div class="ub-ds-payment-row ub-ds-payment-cash">
-                        <div class="ub-ds-payment-left">
-                            <i class="fa fa-money"></i>
-                            <span class="ub-ds-payment-title">Nakit</span>
+                <!-- NAKİT / VADELİ ÖDEME KARTLARI -->
+                <div class="ub-ds-payment-cards">
+                    <div class="ub-ds-pcard ub-ds-pcard-cash">
+                        <div class="ub-ds-pcard-left">
+                            <div class="ub-ds-pcard-icon">
+                                <i class="fa fa-money"></i>
+                            </div>
+                            <div class="ub-ds-pcard-info">
+                                <div class="ub-ds-pcard-title">Nakit Ödeme</div>
+                                <div class="ub-ds-pcard-subtitle">Perakende satış fiyatı</div>
+                            </div>
                         </div>
-                        <span class="ub-ds-payment-amount"><t t-esc="formatPrice(state.summary.total_final)"/></span>
+                        <div class="ub-ds-pcard-amount"><t t-esc="formatPrice(state.summary.total_final)"/></div>
                     </div>
-                    <div class="ub-ds-payment-row ub-ds-payment-installment" t-if="state.summary.total_installment_final > 0">
-                        <div class="ub-ds-payment-left">
-                            <i class="fa fa-credit-card"></i>
-                            <span class="ub-ds-payment-title">Vadeli</span>
+                    <div class="ub-ds-pcard ub-ds-pcard-installment" t-if="state.summary.total_installment_final > 0">
+                        <div class="ub-ds-pcard-left">
+                            <div class="ub-ds-pcard-icon">
+                                <i class="fa fa-credit-card"></i>
+                            </div>
+                            <div class="ub-ds-pcard-info">
+                                <div class="ub-ds-pcard-title">Vadeli Ödeme</div>
+                                <div class="ub-ds-pcard-subtitle">Taksitli satış fiyatı</div>
+                            </div>
                         </div>
-                        <span class="ub-ds-payment-amount"><t t-esc="formatPrice(state.summary.total_installment_final)"/></span>
+                        <div class="ub-ds-pcard-amount"><t t-esc="formatPrice(state.summary.total_installment_final)"/></div>
                     </div>
                 </div>
 
@@ -240,7 +249,6 @@ export class SalesDiscount extends Component {
                 initialBasket = parsed.basket || [];
                 initialSummary = parsed.summary || initialSummary;
                 initialCustomerCode = parsed.customerCode || '';
-                // En büyük uid'yi bul
                 if (initialBasket.length > 0) {
                     this.uidCounter = Math.max(...initialBasket.map(i => i.uid || 0)) + 1;
                 }
@@ -261,7 +269,6 @@ export class SalesDiscount extends Component {
             lightboxImage: null
         });
 
-        // Fiziksel barkod okuyucu dinleyicisi
         this._unsubscribe = this.props.scanner.onScan(barcode => {
             this.handleScan(barcode);
         });
@@ -339,7 +346,7 @@ export class SalesDiscount extends Component {
                     this.state.customerSearchError = "Bağlantı veya Sunucu Hatası!";
                     console.warn("Customer search failed", e);
                 }
-            }, 500); // 500ms gecikme (debounce)
+            }, 500);
         } else {
             this.state.showCustomerDropdown = false;
         }
@@ -371,7 +378,6 @@ export class SalesDiscount extends Component {
     handleScan(barcode) {
         if (!barcode) return;
         
-        // Sepette varsa miktar artır, yoksa ekle
         const existing = this.state.basket.find(i => i.barcode === barcode);
         if (existing) {
             existing.quantity += 1;
@@ -399,7 +405,6 @@ export class SalesDiscount extends Component {
         this.state.barcodeValue = '';
         if (this.barcodeInputRef.el) this.barcodeInputRef.el.focus();
         
-        // Yeniden hesapla
         this.calculateDiscounts();
     }
 
@@ -429,7 +434,6 @@ export class SalesDiscount extends Component {
         this.state.error = null;
 
         try {
-            // Sadece barcode ve quantity gönderiyoruz
             const payload = this.state.basket.map(i => ({ barcode: i.barcode, quantity: i.quantity }));
             
             const result = await BarcodeService.calculateDiscounts(payload, this.state.customerCode);
@@ -438,15 +442,13 @@ export class SalesDiscount extends Component {
                 this.state.error = result.error;
                 AudioFeedback.playError();
             } else if (result.success) {
-                // Sepeti gelen sonuca göre güncelle (isim, fiyatlar, resim)
-                // Gelen liste ile sepeti eşleştir
                 const newBasket = [];
                 let notFoundItems = [];
                 for (let i = 0; i < result.lines.length; i++) {
                     const line = result.lines[i];
                     if (line.not_found) {
                         notFoundItems.push(line.barcode);
-                        continue; // Sepete ekleme
+                        continue;
                     }
                     newBasket.push({
                         uid: this.uidCounter++,
