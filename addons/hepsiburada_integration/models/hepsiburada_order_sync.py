@@ -624,8 +624,15 @@ class HepsiburadaOrderSync(models.AbstractModel):
                                line.merchant_sku, line.sku, line.product_name)
                 continue
 
-            # HB unitPrice KDV DAHİL tutardır
-            unit_price = line.price if line.price > 0 else line.merchant_unit_price
+            # HB line.price = totalPrice (satır toplamı, KDV DAHİL)
+            # qty > 1 olduğunda birim fiyatı bulmak için qty'ye bölmek gerekir
+            # merchant_unit_price zaten birim fiyat olduğu için bölmeye gerek yok
+            raw_price = line.price if line.price > 0 else line.merchant_unit_price
+            qty = line.quantity or 1
+            if line.price > 0 and qty > 1:
+                unit_price = raw_price / qty
+            else:
+                unit_price = raw_price
 
             ol_vals = {
                 'product_id': product.id,
