@@ -75,6 +75,10 @@ class DiscountApiController(BarcodeApiBase):
         total_retail = 0.0
         total_discount = 0.0
         total_final = 0.0
+        # Vadeli (taksitli) toplamlar
+        total_installment = 0.0
+        total_installment_discount = 0.0
+        total_installment_final = 0.0
 
         for row in results:
             if not isinstance(row, dict):
@@ -85,6 +89,10 @@ class DiscountApiController(BarcodeApiBase):
             retail_price = float(row.get('RetailPrice', 0.0))
             discount_amount = float(row.get('DiscountAmount', 0.0))
             final_total = float(row.get('FinalLineTotal', 0.0))
+            # Vadeli fiyat alanları
+            installment_price = float(row.get('RetailInstallmentPrice', 0.0))
+            installment_discount = float(row.get('InstallmentDiscountAmount', 0.0))
+            installment_final = float(row.get('InstallmentFinalLineTotal', 0.0))
             campaign_name = row.get('CampaignName', '')
             upsell_message = row.get('UpsellMessage', '')
             color_name = row.get('ColorName', '')
@@ -105,8 +113,11 @@ class DiscountApiController(BarcodeApiBase):
                 'name': product_name,
                 'quantity': qty,
                 'retail_price': retail_price,
+                'installment_price': installment_price,
                 'discount_amount': discount_amount,
+                'installment_discount': installment_discount,
                 'final_price': final_total,
+                'installment_final': installment_final,
                 'campaign_name': campaign_name,
                 'upsell_message': upsell_message,
                 'image_url': image_url,
@@ -119,6 +130,9 @@ class DiscountApiController(BarcodeApiBase):
             total_retail += (retail_price * qty)
             total_discount += discount_amount
             total_final += final_total
+            total_installment += (installment_price * qty)
+            total_installment_discount += installment_discount
+            total_installment_final += installment_final
 
         return {
             'success': True,
@@ -126,7 +140,10 @@ class DiscountApiController(BarcodeApiBase):
             'summary': {
                 'total_retail': total_retail,
                 'total_discount': total_discount,
-                'total_final': total_final
+                'total_final': total_final,
+                'total_installment': total_installment,
+                'total_installment_discount': total_installment_discount,
+                'total_installment_final': total_installment_final,
             }
         }
 

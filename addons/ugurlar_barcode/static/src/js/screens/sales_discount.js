@@ -105,7 +105,6 @@ export class SalesDiscount extends Component {
                             
                             <div class="ub-dc-qty-price">
                                 <span class="ub-dc-qty"><t t-esc="item.quantity"/> Adet</span>
-                                <span class="ub-dc-price" t-if="item.retail_price">x <t t-esc="formatPrice(item.retail_price)"/></span>
                             </div>
 
                             <div class="ub-dc-variant-info" t-if="item.stock_qty != null or item.color_name or item.size_name">
@@ -116,16 +115,40 @@ export class SalesDiscount extends Component {
                                 <span t-if="item.size_name"><i class="fa fa-arrows-alt"></i> Beden: <t t-esc="item.size_name"/></span>
                             </div>
 
+                            <!-- NAKİT / VADELİ FİYAT KUTUSU -->
+                            <div class="ub-dc-prices" t-if="item.retail_price > 0">
+                                <div class="ub-dc-price-row ub-dc-price-cash">
+                                    <span class="ub-dc-price-label">
+                                        <i class="fa fa-money"></i> Nakit
+                                    </span>
+                                    <span class="ub-dc-price-value" t-esc="formatPrice(item.retail_price)"/>
+                                </div>
+                                <div class="ub-dc-price-row ub-dc-price-installment" t-if="item.installment_price > 0">
+                                    <span class="ub-dc-price-label">
+                                        <i class="fa fa-credit-card"></i> Vadeli
+                                    </span>
+                                    <span class="ub-dc-price-value" t-esc="formatPrice(item.installment_price)"/>
+                                </div>
+                            </div>
+
                             <div class="ub-dc-campaign" t-if="item.campaign_name">
                                 <i class="fa fa-star"></i> Kampanya: <t t-esc="item.campaign_name"/>
                             </div>
                             
-                            <div class="ub-dc-totals">
+                            <!-- İNDİRİMLİ FİYATLAR -->
+                            <div class="ub-dc-totals" t-if="item.discount_amount > 0 or item.final_price > 0">
                                 <div class="ub-dc-discount" t-if="item.discount_amount > 0">
                                     -<t t-esc="formatPrice(item.discount_amount)"/> İndirim
                                 </div>
-                                <div class="ub-dc-final" t-if="item.final_price > 0">
-                                    <t t-esc="formatPrice(item.final_price)"/>
+                                <div class="ub-dc-finals-box" t-if="item.final_price > 0">
+                                    <div class="ub-dc-final-row ub-dc-final-cash">
+                                        <span class="ub-dc-final-label"><i class="fa fa-money"></i></span>
+                                        <span class="ub-dc-final-value" t-esc="formatPrice(item.final_price)"/>
+                                    </div>
+                                    <div class="ub-dc-final-row ub-dc-final-installment" t-if="item.installment_final > 0">
+                                        <span class="ub-dc-final-label"><i class="fa fa-credit-card"></i></span>
+                                        <span class="ub-dc-final-value" t-esc="formatPrice(item.installment_final)"/>
+                                    </div>
                                 </div>
                             </div>
                             
@@ -164,10 +187,25 @@ export class SalesDiscount extends Component {
                         </div>
                     </div>
                 </t>
-                <div class="ub-ds-row ub-ds-grand">
-                    <span>Ödenecek Tutar</span>
-                    <span><t t-esc="formatPrice(state.summary.total_final)"/></span>
+
+                <!-- NAKİT / VADELİ TOPLAM KUTUSU -->
+                <div class="ub-ds-payment-box">
+                    <div class="ub-ds-payment-row ub-ds-payment-cash">
+                        <div class="ub-ds-payment-left">
+                            <i class="fa fa-money"></i>
+                            <span class="ub-ds-payment-title">Nakit</span>
+                        </div>
+                        <span class="ub-ds-payment-amount"><t t-esc="formatPrice(state.summary.total_final)"/></span>
+                    </div>
+                    <div class="ub-ds-payment-row ub-ds-payment-installment" t-if="state.summary.total_installment_final > 0">
+                        <div class="ub-ds-payment-left">
+                            <i class="fa fa-credit-card"></i>
+                            <span class="ub-ds-payment-title">Vadeli</span>
+                        </div>
+                        <span class="ub-ds-payment-amount"><t t-esc="formatPrice(state.summary.total_installment_final)"/></span>
+                    </div>
                 </div>
+
                 <button class="btn btn-danger w-100 mt-2" t-on-click="clearBasket">
                     <i class="fa fa-refresh"></i> Sepeti Temizle
                 </button>
@@ -193,7 +231,7 @@ export class SalesDiscount extends Component {
         // localStorage'dan yükle
         const savedState = localStorage.getItem('ub_discount_state');
         let initialBasket = [];
-        let initialSummary = { total_retail: 0.0, total_discount: 0.0, total_final: 0.0 };
+        let initialSummary = { total_retail: 0.0, total_discount: 0.0, total_final: 0.0, total_installment: 0.0, total_installment_discount: 0.0, total_installment_final: 0.0 };
         let initialCustomerCode = '';
 
         if (savedState) {
@@ -345,8 +383,11 @@ export class SalesDiscount extends Component {
                 name: 'Hesaplanıyor...',
                 image_url: '',
                 retail_price: 0,
+                installment_price: 0,
                 discount_amount: 0,
+                installment_discount: 0,
                 final_price: 0,
+                installment_final: 0,
                 campaign_name: '',
                 upsell_message: '',
                 color_name: '',
@@ -368,14 +409,14 @@ export class SalesDiscount extends Component {
         if (this.state.basket.length > 0) {
             this.calculateDiscounts();
         } else {
-            this.state.summary = { total_retail: 0, total_discount: 0, total_final: 0 };
+            this.state.summary = { total_retail: 0, total_discount: 0, total_final: 0, total_installment: 0, total_installment_discount: 0, total_installment_final: 0 };
             this.saveState();
         }
     }
 
     clearBasket() {
         this.state.basket = [];
-        this.state.summary = { total_retail: 0, total_discount: 0, total_final: 0 };
+        this.state.summary = { total_retail: 0, total_discount: 0, total_final: 0, total_installment: 0, total_installment_discount: 0, total_installment_final: 0 };
         this.state.error = null;
         this.saveState();
         if (this.barcodeInputRef.el) this.barcodeInputRef.el.focus();
@@ -414,8 +455,11 @@ export class SalesDiscount extends Component {
                         name: line.name,
                         image_url: line.image_url,
                         retail_price: line.retail_price,
+                        installment_price: line.installment_price || 0,
                         discount_amount: line.discount_amount,
+                        installment_discount: line.installment_discount || 0,
                         final_price: line.final_price,
+                        installment_final: line.installment_final || 0,
                         campaign_name: line.campaign_name,
                         upsell_message: line.upsell_message,
                         color_name: line.color_name,

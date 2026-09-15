@@ -141,6 +141,106 @@
     margin-right: 5px;
 }
 
+/* ═══════════════════════════════════════════════════════
+   NAKİT / VADELİ FİYAT KUTUSU (Ürün Kartı İçi)
+   ═══════════════════════════════════════════════════════ */
+.ub-dc-prices {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin: 6px 0;
+}
+
+.ub-dc-price-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+}
+
+.ub-dc-price-row + .ub-dc-price-row {
+    border-top: 1px dashed #ced4da;
+    margin-top: 2px;
+    padding-top: 6px;
+}
+
+.ub-dc-price-label {
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.ub-dc-price-cash .ub-dc-price-label {
+    color: #198754;
+}
+
+.ub-dc-price-cash .ub-dc-price-label i {
+    color: #198754;
+    margin-right: 0;
+}
+
+.ub-dc-price-installment .ub-dc-price-label {
+    color: #0d6efd;
+}
+
+.ub-dc-price-installment .ub-dc-price-label i {
+    color: #0d6efd;
+    margin-right: 0;
+}
+
+.ub-dc-price-value {
+    font-size: 15px;
+    font-weight: 700;
+    color: #212529;
+}
+
+/* İndirimli son fiyatlar kutusu (her üründe) */
+.ub-dc-finals-box {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: flex-end;
+}
+
+.ub-dc-final-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.ub-dc-final-label {
+    font-size: 12px;
+}
+
+.ub-dc-final-cash .ub-dc-final-label i {
+    color: #198754;
+    margin-right: 0;
+}
+
+.ub-dc-final-installment .ub-dc-final-label i {
+    color: #0d6efd;
+    margin-right: 0;
+}
+
+.ub-dc-final-value {
+    font-weight: 700;
+    color: #212529;
+}
+
+.ub-dc-final-cash .ub-dc-final-value {
+    font-size: 16px;
+    color: #198754;
+}
+
+.ub-dc-final-installment .ub-dc-final-value {
+    font-size: 14px;
+    color: #0d6efd;
+}
+
+
 .ub-dc-campaign {
     font-size: 12px;
     color: #28a745;
@@ -236,19 +336,6 @@
     font-weight: 500;
 }
 
-.ub-ds-grand {
-    font-size: 18px;
-    font-weight: 700;
-    color: #212529;
-    border-top: 1px solid #e0e0e0;
-    padding-top: 8px;
-    margin-top: 5px;
-    margin-bottom: 5px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
 .ub-ds-savings-badge {
     background: #28a745;
     color: white;
@@ -258,6 +345,81 @@
     font-weight: bold;
     margin-left: 10px;
 }
+
+/* ═══════════════════════════════════════════════════════
+   NAKİT / VADELİ ÖDEME KUTUSU (Dip Toplam)
+   ═══════════════════════════════════════════════════════ */
+.ub-ds-payment-box {
+    border: 2px solid #dee2e6;
+    border-radius: 12px;
+    overflow: hidden;
+    margin-top: 10px;
+    margin-bottom: 5px;
+}
+
+.ub-ds-payment-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 16px;
+}
+
+.ub-ds-payment-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.ub-ds-payment-left i {
+    font-size: 18px;
+    margin-right: 0;
+}
+
+.ub-ds-payment-title {
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.ub-ds-payment-amount {
+    font-size: 20px;
+    font-weight: 800;
+}
+
+/* Nakit satırı — yeşil tema */
+.ub-ds-payment-cash {
+    background: linear-gradient(135deg, #d1e7dd 0%, #badbcc 100%);
+    border-bottom: 1px solid #a3cfbb;
+}
+
+.ub-ds-payment-cash .ub-ds-payment-left i {
+    color: #146c43;
+}
+
+.ub-ds-payment-cash .ub-ds-payment-title {
+    color: #146c43;
+}
+
+.ub-ds-payment-cash .ub-ds-payment-amount {
+    color: #0f5132;
+}
+
+/* Vadeli satırı — mavi tema */
+.ub-ds-payment-installment {
+    background: linear-gradient(135deg, #cfe2ff 0%, #b6d4fe 100%);
+}
+
+.ub-ds-payment-installment .ub-ds-payment-left i {
+    color: #084298;
+}
+
+.ub-ds-payment-installment .ub-ds-payment-title {
+    color: #084298;
+}
+
+.ub-ds-payment-installment .ub-ds-payment-amount {
+    color: #052c65;
+}
+
 
 /* Autocomplete Dropdown */
 .ub-customer-dropdown {
