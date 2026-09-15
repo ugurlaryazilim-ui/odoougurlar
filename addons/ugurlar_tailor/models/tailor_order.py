@@ -50,11 +50,13 @@ class UgurlarTailorOrder(models.Model):
         ('in_progress', 'Terzide'),
         ('completed', 'Hazır'),
         ('delivered', 'Teslim Edildi'),
+        ('cancelled', 'İptal Edildi'),
     ], string='Durum', default='pending', required=True, tracking=True, index=True)
 
     notes = fields.Text(string='Notlar')
     completed_at = fields.Datetime(string='Tamamlanma Tarihi', readonly=True)
     delivered_at = fields.Datetime(string='Teslim Tarihi', readonly=True)
+    cancelled_at = fields.Datetime(string='İptal Tarihi', readonly=True)
     create_date = fields.Datetime(string='Tarih', readonly=True)
 
     @api.depends('line_ids.price')
@@ -154,3 +156,15 @@ class UgurlarTailorOrder(models.Model):
     def action_print_label(self):
         """Etiket yazdır — 3 nüsha PDF döndürür."""
         return self.env.ref('ugurlar_tailor.action_report_tailor_label').report_action(self)
+
+    def action_cancel(self):
+        """Siparişi iptal et."""
+        for order in self:
+            order.write({
+                'state': 'cancelled',
+                'cancelled_at': fields.Datetime.now(),
+            })
+            order.message_post(
+                body='Sipariş iptal edildi.',
+                message_type='notification',
+            )

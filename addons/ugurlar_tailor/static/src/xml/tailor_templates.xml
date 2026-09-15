@@ -217,6 +217,7 @@
                     <option value="in_progress">Terzide</option>
                     <option value="completed">Hazir</option>
                     <option value="delivered">Teslim</option>
+                    <option value="cancelled">İptal</option>
                 </select>
             </div>
 
@@ -253,7 +254,7 @@
                             </div>
                         </div>
                         <div class="tailor-order-actions">
-                            <button t-if="order.state != 'waiting_approval'" class="tailor-btn tailor-btn-sm" style="background:#f39c12;color:#fff;"
+                            <button t-if="order.state != 'waiting_approval' and order.state != 'cancelled'" class="tailor-btn tailor-btn-sm" style="background:#f39c12;color:#fff;"
                                     t-on-click="() =&gt; this.printLabel(order.id)">
                                 Etiket Yazdir
                             </button>
@@ -261,6 +262,12 @@
                                     class="tailor-btn tailor-btn-sm tailor-btn-primary"
                                     t-on-click="() =&gt; this.updateStatus(order.id, this.getNextStatus(order.state))">
                                 <t t-esc="getStatusLabel(getNextStatus(order.state))"/>
+                            </button>
+                            <button t-if="order.state != 'delivered' and order.state != 'cancelled'"
+                                    class="tailor-btn tailor-btn-sm"
+                                    style="background:#e74c3c;color:#fff;"
+                                    t-on-click="() =&gt; this.cancelOrder(order.id)">
+                                İptal
                             </button>
                         </div>
                     </div>

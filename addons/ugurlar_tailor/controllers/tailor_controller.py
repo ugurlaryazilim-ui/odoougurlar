@@ -143,7 +143,7 @@ class TailorController(http.Controller):
             ['id', 'name', 'invoice_no', 'product_name', 'product_barcode',
              'customer_name', 'customer_phone', 'sales_person',
              'tailor_id', 'total_price', 'state', 'notes',
-             'create_date', 'completed_at', 'delivered_at'],
+             'create_date', 'completed_at', 'delivered_at', 'cancelled_at'],
             order='create_date desc',
             limit=int(limit),
             offset=offset,
@@ -180,6 +180,7 @@ class TailorController(http.Controller):
             'completed': 'action_mark_completed',
             'delivered': 'action_mark_delivered',
             'pending': 'action_reset_to_pending',
+            'cancelled': 'action_cancel',
         }
         method = action_map.get(status)
         if method:

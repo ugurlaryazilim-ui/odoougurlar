@@ -98,6 +98,7 @@ export class TailorOrderList extends Component {
             in_progress: _t("Terzide"),
             completed: _t("Hazir"),
             delivered: _t("Teslim"),
+            cancelled: _t("İptal"),
         };
         return labels[status] || status;
     }
@@ -108,6 +109,7 @@ export class TailorOrderList extends Component {
             in_progress: "badge-in-progress",
             completed: "badge-completed",
             delivered: "badge-delivered",
+            cancelled: "badge-cancelled",
         };
         return classes[status] || "";
     }
@@ -168,5 +170,27 @@ export class TailorOrderList extends Component {
             this.state.page = 1;
             this.loadOrders();
         }, { headerText: 'Fatura Barkodu Okut' });
+    }
+
+    async cancelOrder(orderId) {
+        this.dialog.add(ConfirmationDialog, {
+            title: _t("Sipariş İptali"),
+            body: _t("Bu siparişi iptal etmek istediğinize emin misiniz?"),
+            confirm: async () => {
+                try {
+                    const result = await rpc("/ugurlar_tailor/update_status", {
+                        order_id: orderId,
+                        status: "cancelled",
+                    });
+                    if (result.success) {
+                        this.notification.add(_t("Sipariş iptal edildi!"), { type: "warning" });
+                        await this.loadOrders();
+                    }
+                } catch (e) {
+                    this.notification.add(_t("İptal hatası: %(error)s", { error: e.message }), { type: "danger" });
+                }
+            },
+            cancel: () => {},
+        });
     }
 }

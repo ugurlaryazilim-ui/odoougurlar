@@ -5,7 +5,7 @@
         <field name="name">ugurlar.tailor.order.list</field>
         <field name="model">ugurlar.tailor.order</field>
         <field name="arch" type="xml">
-            <list decoration-info="state == 'pending'" decoration-warning="state == 'in_progress'" decoration-success="state == 'completed'" decoration-muted="state == 'delivered'">
+            <list decoration-info="state == 'pending'" decoration-warning="state == 'in_progress'" decoration-success="state == 'completed'" decoration-muted="state == 'delivered'" decoration-danger="state == 'cancelled'">
                 <field name="name"/>
                 <field name="invoice_no"/>
                 <field name="is_reyon" column_invisible="True"/>
@@ -31,8 +31,9 @@
                     <button name="action_send_to_tailor" string="Terziye Gönder" type="object" class="btn-primary" invisible="state != 'pending'"/>
                     <button name="action_mark_completed" string="Hazır" type="object" class="btn-primary" invisible="state != 'in_progress'"/>
                     <button name="action_mark_delivered" string="Teslim Edildi" type="object" class="btn-primary" invisible="state != 'completed'"/>
+                    <button name="action_cancel" string="İptal Et" type="object" class="btn-danger" invisible="state in ('delivered', 'cancelled')" confirm="Bu siparişi iptal etmek istediğinize emin misiniz?"/>
                     <button name="action_reset_to_pending" string="Sıfırla" type="object" class="btn-secondary" invisible="state == 'pending'"/>
-                    <button name="action_print_label" string="Etiket Yazdir" type="object" class="btn-warning" icon="fa-print" invisible="state == 'waiting_approval'"/>
+                    <button name="action_print_label" string="Etiket Yazdir" type="object" class="btn-warning" icon="fa-print" invisible="state in ('waiting_approval', 'cancelled')"/>
                     <field name="state" widget="statusbar" statusbar_visible="waiting_approval,pending,in_progress,completed,delivered"/>
                 </header>
                 <sheet>
@@ -60,6 +61,7 @@
                         <group>
                             <field name="completed_at"/>
                             <field name="delivered_at"/>
+                            <field name="cancelled_at" invisible="state != 'cancelled'"/>
                         </group>
                     </group>
                     <notebook>
@@ -98,6 +100,7 @@
                 <filter string="Terzide" name="in_progress" domain="[('state', '=', 'in_progress')]"/>
                 <filter string="Hazir" name="completed" domain="[('state', '=', 'completed')]"/>
                 <filter string="Teslim" name="delivered" domain="[('state', '=', 'delivered')]"/>
+                <filter string="İptal" name="cancelled" domain="[('state', '=', 'cancelled')]"/>
             </search>
         </field>
     </record>
@@ -107,5 +110,18 @@
         <field name="name">Siparisler</field>
         <field name="res_model">ugurlar.tailor.order</field>
         <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- ═══════════════ Toplu İptal Server Action ═══════════════ -->
+    <record id="action_tailor_order_cancel" model="ir.actions.server">
+        <field name="name">İptal Et</field>
+        <field name="model_id" ref="model_ugurlar_tailor_order"/>
+        <field name="binding_model_id" ref="model_ugurlar_tailor_order"/>
+        <field name="binding_view_types">list</field>
+        <field name="state">code</field>
+        <field name="code">
+if records:
+    records.filtered(lambda r: r.state not in ('delivered', 'cancelled')).action_cancel()
+        </field>
     </record>
 </odoo>
