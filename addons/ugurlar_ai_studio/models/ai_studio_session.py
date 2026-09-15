@@ -581,8 +581,10 @@ class AiStudioSession(models.Model):
                           'fular', 'atkı', 'atki', 'bere', 'şapka', 'sapka', 'gözlük', 'gozluk',
                           'saat', 'watch', 'bileklik', 'kolye', 'küpe', 'kupe', 'yüzük', 'yuzuk',
                           'cüzdan', 'cuzdan', 'eldiven']
-        BOTTOMS_KW = ['pantolon', 'jean', 'jeans', 'şort', 'sort', 'etek', 'tayt', 'eşofman altı',
-                      'alt giyim', 'bermuda', 'capri', 'jogger']
+        BOTTOMS_KW_SAFE = ['pantolon', 'jean', 'jeans', 'tayt', 'eşofman altı',
+                           'alt giyim', 'bermuda', 'capri', 'jogger']
+        # 'şort', 'sort', 'etek' — tişört/tisort false positive'ine düşebilir
+        BOTTOMS_KW_RISKY = ['şort', 'sort', 'etek']
         ONE_PIECE_KW = ['elbise', 'dress', 'tulum', 'jumpsuit', 'overall', 'abiye', 'tek parça']
         
         for kw in BAGS_KW:
@@ -601,9 +603,17 @@ class AiStudioSession(models.Model):
             if kw in combined:
                 _logger.info('_detect_garment_type: "%s" bulundu → one_piece', kw)
                 return 'one_piece'
-        for kw in BOTTOMS_KW:
+        for kw in BOTTOMS_KW_SAFE:
             if kw in combined:
                 _logger.info('_detect_garment_type: "%s" bulundu → bottoms', kw)
+                return 'bottoms'
+        # Riskli kelimeler: tişört/tisort false positive'lerini temizle
+        combined_clean = combined
+        for fp in ['tişört', 'tisort', 'tısört', 'tısort', 'tshirt', 't-shirt', 't shirt']:
+            combined_clean = combined_clean.replace(fp, '')
+        for kw in BOTTOMS_KW_RISKY:
+            if kw in combined_clean:
+                _logger.info('_detect_garment_type: "%s" bulundu (temizlenmiş) → bottoms', kw)
                 return 'bottoms'
         
         # 3. Fallback: preset veya tops
@@ -1491,6 +1501,7 @@ class AiStudioSession(models.Model):
                     resolution=tryon_resolution,
                     photo_type=photo_type,
                     seed=front_seed,
+                    garment_type=(cached_analysis_data or {}).get('garmentType', ''),
                 )
 
                 elapsed = time.time() - start_time
@@ -2111,6 +2122,7 @@ class AiStudioSession(models.Model):
                         resolution=tryon_resolution,
                         photo_type=photo_type,
                         seed=front_seed,
+                        garment_type=(cached_analysis_data or {}).get('garmentType', ''),
                     )
 
                     elapsed = time.time() - start_time
@@ -2648,6 +2660,7 @@ class AiStudioSession(models.Model):
                     resolution=tryon_resolution,
                     photo_type=photo_type,
                     seed=front_seed,
+                    garment_type=(cached_analysis_data or {}).get('garmentType', ''),
                 )
 
                 # ═══ SONUCU İNDİR (DRY helper) ═══

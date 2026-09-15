@@ -9,6 +9,7 @@ import threading
 import time
 
 from .ai_provider_base import AIProviderBase
+from .garment_analyzer import _safe_keyword_match
 
 _logger = logging.getLogger(__name__)
 
@@ -112,10 +113,12 @@ class FalProvider(AIProviderBase):
                 
             enhanced_prompt = prompt
             
-            prompt_lower = (prompt or '').lower()
-            is_skirt = any(k in prompt_lower for k in ['skirt', 'etek'])
-            is_shorts = any(k in prompt_lower for k in ['shorts', 'şort', 'sort', 'bermuda'])
-            is_dress = category in ('one-piece', 'one_piece', 'dress', 'full-body') or any(k in prompt_lower for k in ['dress', 'elbise', 'tulum', 'jumpsuit', 'abiye'])
+            # Kategori tespiti: prompt metni yerine garment_type kullan
+            # (prompt metni 'tişört' içerdiğinde 'şort' false positive verir)
+            garment_type_raw = (kwargs.get('garment_type', '') or '').lower()
+            is_skirt = _safe_keyword_match(garment_type_raw, ['skirt', 'etek'])
+            is_shorts = _safe_keyword_match(garment_type_raw, ['shorts', 'şort', 'sort', 'bermuda'])
+            is_dress = category in ('one-piece', 'one_piece', 'dress', 'full-body') or _safe_keyword_match(garment_type_raw, ['dress', 'elbise', 'tulum', 'jumpsuit', 'abiye'])
             is_bottom = category == 'bottoms' or is_skirt or is_shorts
 
             # ═══ GARMENT FIDELITY (OLUMLU ÇERÇEVELEME) ═══

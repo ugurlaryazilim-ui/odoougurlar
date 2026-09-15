@@ -14,6 +14,38 @@ import logging
 
 _logger = logging.getLogger(__name__)
 
+# ═══ Türkçe Substring Tuzağı Koruması ═══
+# "tişört" içinde "şort", "tisort" içinde "sort" gibi false positive'leri önler.
+_FALSE_POSITIVE_CLEAN = {
+    'şort': ['tişört', 'tısört'],
+    'sort': ['tisort', 'tısort', 'tshirt'],
+}
+
+
+def _safe_keyword_match(text, keywords):
+    """Substring tuzaklarını engelleyen güvenli kelime eşleme.
+
+    Türkçe'de 'tişört' kelimesinin içinde 'şort' alt dizgisi bulunur.
+    Basit `in` operatörü ile kontrol edildiğinde tişört yanlışlıkla
+    şort olarak sınıflandırılır. Bu fonksiyon bilinen false positive'leri
+    metinden temizleyerek güvenli eşleme yapar.
+
+    Args:
+        text: Aranacak metin (lowercase)
+        keywords: Aranacak anahtar kelimeler listesi
+
+    Returns:
+        bool: Herhangi bir kelime güvenli şekilde eşleşirse True
+    """
+    text_lower = text.lower()
+    for kw in keywords:
+        clean_text = text_lower
+        for fp in _FALSE_POSITIVE_CLEAN.get(kw, []):
+            clean_text = clean_text.replace(fp, '')
+        if kw in clean_text:
+            return True
+    return False
+
 try:
     import fal_client
 except ImportError:
@@ -448,9 +480,9 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     category = analysis.get('clothingCategory', 'tops')
     garment_type = analysis.get('garmentType', 'garment')
     garment_type_lower = f"{garment_type} {category}".lower()
-    is_skirt = any(k in garment_type_lower for k in ['etek', 'skirt'])
-    is_shorts = any(k in garment_type_lower for k in ['şort', 'sort', 'shorts', 'bermuda'])
-    is_dress = category in ['dress', 'one_piece', 'one-piece', 'full-body'] or any(k in garment_type_lower for k in ['elbise', 'dress', 'tulum', 'jumpsuit', 'abiye'])
+    is_skirt = _safe_keyword_match(garment_type_lower, ['etek', 'skirt'])
+    is_shorts = _safe_keyword_match(garment_type_lower, ['şort', 'sort', 'shorts', 'bermuda'])
+    is_dress = category in ['dress', 'one_piece', 'one-piece', 'full-body'] or _safe_keyword_match(garment_type_lower, ['elbise', 'dress', 'tulum', 'jumpsuit', 'abiye'])
 
     if provider_type == 'fashn':
         # Sablonu generic kelimelerle formatla (kiyafet detaylari prompta gitmesin)
