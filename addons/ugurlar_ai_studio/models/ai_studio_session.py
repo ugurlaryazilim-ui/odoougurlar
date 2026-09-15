@@ -768,10 +768,10 @@ class AiStudioSession(models.Model):
                 mask = np.zeros((h, w), dtype=np.uint8)
 
                 # Alpha kanalinda opak olan yerleri bul
-                _, binary = cv2.threshold(alpha[:top_region], 30, 255, cv2.THRESH_BINARY)
+                _ret, binary = cv2.threshold(alpha[:top_region], 30, 255, cv2.THRESH_BINARY)
 
                 # Kontur analizi — dar cikintilari bul
-                contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                contours, _hier = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
                 for cnt in contours:
                     x, y, cw, ch = cv2.boundingRect(cnt)
@@ -2029,7 +2029,7 @@ class AiStudioSession(models.Model):
                             pass
                     # Arka plan kaldırma ve askı temizleme (DRY helper)
                     security_tags = cached_analysis.get('securityTags') if isinstance(cached_analysis, dict) else None
-                    garment_url, _ = self._prepare_garment_for_tryon(
+                    garment_url, processed_garment_b64 = self._prepare_garment_for_tryon(
                         source_image, provider, session, auto_bg=auto_bg, security_tags=security_tags
                     )
 
@@ -2122,7 +2122,7 @@ class AiStudioSession(models.Model):
                         resolution=tryon_resolution,
                         photo_type=photo_type,
                         seed=front_seed,
-                        garment_type=(cached_analysis_data or {}).get('garmentType', ''),
+                        garment_type=(analysis_data or {}).get('garmentType', '') if isinstance(analysis_data, dict) else '',
                     )
 
                     elapsed = time.time() - start_time
@@ -2614,6 +2614,7 @@ class AiStudioSession(models.Model):
 
                 # ═══ VIEW-SPESİFİK PROMPT ═══
                 prompt_text = ""
+                analysis = None
                 try:
                     prompt_locks = global_prompt_locks
 
@@ -2660,7 +2661,7 @@ class AiStudioSession(models.Model):
                     resolution=tryon_resolution,
                     photo_type=photo_type,
                     seed=front_seed,
-                    garment_type=(cached_analysis_data or {}).get('garmentType', ''),
+                    garment_type=(analysis or {}).get('garmentType', '') if isinstance(analysis, dict) else '',
                 )
 
                 # ═══ SONUCU İNDİR (DRY helper) ═══
