@@ -78,7 +78,7 @@ export class InventoryMatrix extends Component {
                                     <td class="ub-matrix-row-title font-weight-bold" t-esc="wh.name"></td>
                                     <t t-foreach="state.sizes" t-as="size" t-key="size">
                                         <td class="ub-matrix-qty font-weight-bold" 
-                                            t-esc="wh.totals[size] || ''"></td>
+                                            t-esc="wh.totals[size] || '0'"></td>
                                     </t>
                                     <td class="ub-matrix-total" t-esc="wh.totalQty"></td>
                                 </tr>
@@ -90,7 +90,7 @@ export class InventoryMatrix extends Component {
                                         <t t-foreach="state.sizes" t-as="size" t-key="size">
                                             <t t-set="qty" t-value="color.sizes[size]"/>
                                             <td t-attf-class="ub-matrix-qty {{qty ? '' : 'ub-matrix-qty-zero'}}" 
-                                                t-esc="qty || '-'"></td>
+                                                t-esc="qty || '0'"></td>
                                         </t>
                                         <td class="font-weight-bold" t-esc="color.totalQty"></td>
                                     </tr>
