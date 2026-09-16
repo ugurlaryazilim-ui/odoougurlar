@@ -2,148 +2,97 @@
 <odoo>
     <data noupdate="0">
         <!-- ============================================================ -->
-        <!-- SaaS Prompt Lock Sistemi — Otomatik yuklenen sablonlar       -->
-        <!-- Kaynak: ai-fashion-studio/services/sharedPrompts.ts          -->
+        <!-- SaaS Prompt Lock Sistemi — Konsolide Kilitler (v2)           -->
+        <!-- 20 kilit → 6 kilit (~8500 ch → ~2000 ch)                    -->
         <!-- ============================================================ -->
 
-        <!-- 1. Fotorealizm Lock -->
+        <!-- 1. Fotorealizm + Kamera + Studio (eski 1, 2, 13, 16 birleşti) -->
         <record id="prompt_realism_lock" model="ai.studio.prompt.template">
             <field name="name">Fotorealizm Lock</field>
             <field name="scope">global</field>
-            <field name="prompt_text">PHOTOREALISM MANDATE — This must look like an unretouched RAW photograph taken with a Hasselblad X2D. FACE: The model's face must look like a REAL human being, not a 3D render or AI composite. Render visible pores on nose/cheeks/forehead, subtle undereye texture, natural lip dryness lines, real skin translucency with visible blood vessels under thin-skin areas. Slight facial asymmetry is MANDATORY. EYES: Wet corneal reflection, visible iris fibres, natural eyelid crease depth, realistic tear film. HAIR: Individually resolved strands with natural flyaways. SKIN: Subsurface scattering, vellus hair on cheeks and jawline. NO porcelain/waxy/airbrushed/plastic skin. FABRIC: Physically plausible weave, stitching, seams, gravity-driven drape.</field>
+            <field name="prompt_text">Zara-style editorial e-commerce photography. Hasselblad X2D quality, medium-format RAW look. Real human face with visible pores, slight asymmetry, wet corneal reflections, natural flyaway hair strands. Subsurface scattering skin, no plastic/waxy/airbrushed look. Seamless white studio cyclorama (#FFFFFF), high-key lighting, no visible equipment. Phase One IQ4 sharpness at focal plane with natural depth falloff.</field>
         </record>
 
-        <!-- 2. Studio Ortami Lock -->
-        <record id="prompt_studio_env_lock" model="ai.studio.prompt.template">
-            <field name="name">Studio Ortami Lock</field>
-            <field name="scope">global</field>
-            <field name="prompt_text">Environment: Pure, expansive, high-end minimalist fashion studio set. Bright, airy atmosphere with infinite white space. No visible wall seams, no horizontal floor lines, no architectural slices, no room corners. Clean floor-to-background transition with soft, natural bounce light. Background lock: seamless white studio cyclorama (#FFFFFF) only. STUDIO EQUIPMENT BAN: No visible studio equipment whatsoever — no softboxes, no flash heads, no light stands, no umbrellas, no reflectors, no C-stands. ONLY the model and the garment should exist in the frame.</field>
-        </record>
-
-        <!-- 3. Anatomi Butunluk Lock -->
+        <!-- 2. Anatomi + Kimlik + Saç (eski 3, 10, 18, 19, 20 birleşti) -->
         <record id="prompt_anatomy_lock" model="ai.studio.prompt.template">
-            <field name="name">Anatomi Butunluk Lock</field>
+            <field name="name">Anatomi ve Kimlik Lock</field>
             <field name="scope">global</field>
-            <field name="prompt_text">[ANATOMY LOCK] CRITICAL: Ensure exactly two arms, two legs, and one head. Do NOT generate extra limbs, extra fingers, extra toes, or ghosting effects. Hands must have exactly five fingers each. No double heads or double necks. No warped human proportions or detached limbs. Any anatomical hallucination is a failure. [POSTURE STABILITY LOCK] Maintain physically plausible human weight distribution and bone structure. Joints must be naturally articulated. No impossible leg or arm angles.</field>
+            <field name="prompt_text">ANATOMY: Exactly 2 arms, 2 legs, 1 head, 5 fingers per hand. No extra limbs, ghosting, or warped proportions. Natural joint articulation and weight distribution. IDENTITY: Preserve exact face geometry, body proportions, hair length/color/part across all views. Front view is the identity anchor. Do not alter age, ethnicity, or expression. STRUCTURE: Match shoulder padding, natural fabric drape, no ghost layering at collar/hem.</field>
         </record>
 
-        <!-- 4. Kiyafet Yapi Lock -->
+        <!-- 3. Kıyafet Yapı + Renk + Kumaş + Düğme (eski 4, 5, 6, 7, 9 birleşti) -->
         <record id="prompt_garment_lock" model="ai.studio.prompt.template">
-            <field name="name">Kiyafet Yapi Lock</field>
+            <field name="name">Kiyafet Sadakati Lock</field>
             <field name="scope">global</field>
-            <field name="prompt_text">GARMENT CONSTRUCTION IMMUTABLE LOCK: Every garment element must match the reference product images exactly. Collar type/shape, pocket count/type/placement, button count/spacing/style, zipper position, neckline cut, cuff style, sleeve length. Waistband type, leg opening, pleat structure, hem finish. Do NOT redesign, restyle, simplify, or reinterpret any garment piece. [STRICT RULE FOR BOTTOMS/PANTS]: Do NOT add fake pockets, cargo pockets, buttons, zippers, seams, or patterns if they are not CLEARLY visible in the original reference. If the pants are flat and plain, they MUST remain flat and plain. Do NOT hallucinate embellishments: no adding fringes, tassels, ruffles, patches that are not visible in the reference images.</field>
+            <field name="prompt_text">GARMENT FIDELITY: Match reference exactly — collar, pockets, buttons, zippers, seams, neckline, cuffs, hemline, waistband. Do not redesign or reinterpret any element. COLOR: Exact hue, saturation, brightness match. FABRIC: Same texture type (knit vs woven vs crepe). HARDWARE: Exact button count, size, material, spacing. Garment must look freshly steamed and pristine — no stains, wrinkles, lint, or hanger marks. Cross-view consistency required.</field>
         </record>
 
-        <!-- 5. Renk Sadakati Lock -->
-        <record id="prompt_color_lock" model="ai.studio.prompt.template">
-            <field name="name">Renk Sadakati Lock</field>
-            <field name="scope">global</field>
-            <field name="prompt_text">COLOR FIDELITY LOCK: The generated garment color MUST match the reference images EXACTLY. Do not shift hue, saturation, or brightness. Treat the source images as the definitive color truth. Match the exact color hex from analysis. Any color deviation is a critical failure. COLOR DEPTH: Match not just the hue but also the SATURATION and BRIGHTNESS. A washed-out/faded color MUST remain washed-out/faded. A deep/vivid color MUST remain deep/vivid.</field>
-        </record>
-
-        <!-- 6. Kumas Dokusu Lock -->
-        <record id="prompt_fabric_lock" model="ai.studio.prompt.template">
-            <field name="name">Kumas Dokusu Lock</field>
-            <field name="scope">global</field>
-            <field name="prompt_text">FABRIC TEXTURE FIDELITY LOCK: The generated fabric surface MUST match the reference images EXACTLY. Crinkle/crepe texture must NOT become corduroy. Smooth woven fabric must NOT become knitted. Ribbed knit must NOT become cable knit. The fabric's visual weight, drape behavior, and surface irregularity must match the reference. Any fabric texture substitution is a CRITICAL FAILURE.</field>
-        </record>
-
-        <!-- 7. Dugme ve Aksesuar Lock -->
-        <record id="prompt_button_lock" model="ai.studio.prompt.template">
-            <field name="name">Dugme ve Aksesuar Lock</field>
-            <field name="scope">global</field>
-            <field name="prompt_text">BUTTON and HARDWARE FIDELITY LOCK: Every button, zipper, snap, hook, and rivet MUST match the reference images EXACTLY. Button size, shape, material, finish, color, opacity, and hole count MUST be replicated precisely. Small semi-translucent buttons must NOT become large opaque contrasting buttons. Button count, spacing, and alignment MUST match exactly.</field>
-        </record>
-
-        <!-- 8. Anti-Halusinasyon Lock -->
+        <!-- 4. Anti-Halüsinasyon + Görünüm Bütünlüğü (eski 8, 14, 15 birleşti) -->
         <record id="prompt_anti_hallucination" model="ai.studio.prompt.template">
             <field name="name">Anti-Halusinasyon Lock</field>
             <field name="scope">global</field>
-            <field name="prompt_text">ANTI-HALLUCINATION LOCK: Do NOT invent or add any decorative element not visible in the reference product images. Banned hallucinations: fringes, tassels, ruffles, visible contrasting embroidery when original has tone-on-tone texture, patches, beading, ribbon trim, lace inserts, extra zippers, chains, FAKE POCKETS, FAKE BUTTONS, UNWANTED PATTERNS. The garment must look EXACTLY like the reference, not a creative interpretation of it. [NECKLINE LOCK] Ensure neckline stays true to garment input. [EDGE/HEM LOCK] Maintain continuous, unbroken hem details. [HARDWARE &amp; POCKET LOCK] Do NOT invent fake chest pockets, fake side pockets, back pockets, or extra buttons. If the garment (especially pants/bottoms) does not have a pattern, it MUST remain a solid color.</field>
+            <field name="prompt_text">Do NOT invent elements not in reference: no fake pockets, fringes, tassels, ruffles, patches, extra zippers, embroidery. Back view: do not mirror front artwork onto back. Keep each view truthful to its own reference. Detail view: model must wear full outfit, all closures fastened. Remove all store security tags, alarm pins, EAS sensors, price tags — output must be clean and tag-free.</field>
         </record>
 
-        <!-- 9. Kiyafet Idealizasyonu Lock -->
-        <record id="prompt_idealization_lock" model="ai.studio.prompt.template">
-            <field name="name">Kiyafet Idealizasyonu Lock</field>
-            <field name="scope">global</field>
-            <field name="prompt_text">GARMENT IDEALIZATION LOCK: The generated garment must look FRESHLY STEAMED and PRISTINE — as if it just came off a professional steamer in a luxury boutique. REMOVE ALL: stains, dirt marks, dust, lint, pet hair, loose threads, storage wrinkles, fold creases, packaging lines, hanger marks, ironing burns, water spots, makeup transfer marks. The fabric surface must be SMOOTH and CLEAN at the macro level. Think: the difference between a crinkle-textured shirt fresh from a steamer vs one pulled from a suitcase.</field>
-        </record>
-
-        <!-- 10. Kimlik Tutarliligi Lock -->
-        <record id="prompt_identity_lock" model="ai.studio.prompt.template">
-            <field name="name">Kimlik Tutarliligi Lock</field>
-            <field name="scope">global</field>
-            <field name="prompt_text">LOCKED FIDELITY MODE: Preserve model identity and garment construction with strict consistency. The garment must be a 100% literal copy of the reference garment. Keep body proportions, limb lengths, shoulder/hip balance, and silhouette natural. Hardware MUST match exactly: count the buttons, match zipper styles, preserve rivets/snaps. Keep garment geometry unchanged with precise fit, drape, seam placement, neckline, waistline, dart map, closure positions, slit position, and hemline level. CROSS-VIEW CONSISTENCY: The EXACT SAME garment must appear in ALL views with the same color, pattern, and fabric texture. IMPORTANT: Do NOT force front details (like front pockets, buttons, collar, chest graphics) onto the BACK or SIDE views. Each view MUST respect its own provided reference image as the absolute truth.</field>
-        </record>
-
-        <!-- 11. Tam Giyim Zorunlulugu Lock -->
+        <!-- 5. Tam Giyim Zorunluluğu (eski 11 — kritik, kendi başına kalır) -->
         <record id="prompt_full_outfit_lock" model="ai.studio.prompt.template">
             <field name="name">Tam Giyim Zorunlulugu Lock</field>
             <field name="scope">global</field>
-            <field name="prompt_text">FULL OUTFIT MANDATORY LOCK: The model MUST be properly dressed in ALL views. No bare midriff, no bare chest. If the reference is a SKIRT, SHORTS, or DRESS: the model wears ONLY the skirt/shorts/dress on the lower body with natural bare legs — strictly NO pants, NO jeans, NO trousers, NO leggings underneath the skirt or dress. If the reference is an UPPER garment or OUTERWEAR (coat, jacket, blazer, cardigan, sweater, top, blouse, shirt): the model MUST wear full-length dark tailored pants or denim jeans and shoes covering the entire legs down to the shoes, with absolutely NO bare legs, NO bare thighs, and NO shorts. If the reference is a LOWER garment (pants): model MUST also wear a complete neutral top and shoes.</field>
+            <field name="prompt_text">FULL OUTFIT: Model must be properly dressed in all views. SKIRT/SHORTS/DRESS: wear only the garment with natural bare legs, NO pants underneath. UPPER/OUTERWEAR: must wear full-length dark pants/jeans covering entire legs, NO bare legs. PANTS: must wear neutral top and shoes.</field>
         </record>
 
-        <!-- 12. Negatif Prompt (Unified) -->
+        <!-- 6. Birleşik Negatif Prompt (eski 12, 17 birleşti) -->
         <record id="prompt_negative_unified" model="ai.studio.prompt.template">
             <field name="name">Birlesik Negatif Prompt</field>
             <field name="scope">global</field>
-            <field name="prompt_text">NEGATIVE: extra arms, extra legs, extra fingers, duplicated face, double head, ghosting limbs, warped anatomy, deformed body, mannequin, doll, plastic/waxy/porcelain skin, CGI look, beauty filter, airbrushed, over-smooth, blurry, low quality, collage, split screen, multi-panel, grid layout, montage, interior room, furniture, flat-lay, hanger, product-only shot, softbox, light stand, flash head, studio equipment, security tag, alarm tag, anti-theft tag, EAS sensor, retail security badge, plastic alarm pin, ink tag, hard tag, security button, store tag, price tag, metal pin on waistband, button on back waistband, misplaced rivet, store fixture, retail clip, handbag, purse, clutch, tote bag, bag held in hand, floating bag, pants under skirt, jeans under skirt, trousers under skirt, leggings under skirt, denim under skirt, pants under dress, jeans under dress, double pants, double bottoms, altered garment design, changed collar, missing/added pockets, changed hemline, warped seams, missing/extra buttons, distorted neckline, front-print-on-back, logo hallucination, invented embroidery, bare midriff, bare chest, nude model, wrong garment color, wrong fabric texture, wrong button style.</field>
+            <field name="prompt_text">NEGATIVE: extra arms, extra legs, extra fingers, double head, ghosting limbs, warped anatomy, deformed body, mannequin, doll, plastic/waxy skin, CGI look, beauty filter, airbrushed, over-smooth, blurry, low quality, collage, split screen, multi-panel, montage, interior room, furniture, flat-lay, hanger, product-only shot, softbox, light stand, studio equipment, security tag, alarm tag, anti-theft tag, EAS sensor, price tag, store fixture, handbag, purse, clutch, tote bag, altered garment design, changed collar, missing/added pockets, changed hemline, wrong garment color, wrong fabric texture, wrong button style, front-print-on-back, invented embroidery, bare midriff, nude model, 3D render face, video game character, digital avatar, doll face, glass-marble eyes, blank AI stare, frozen smile, helmet hair.</field>
         </record>
 
-        <!-- 13. Editoryel Fotografcilik -->
+        <!-- ============================================================ -->
+        <!-- Eski konsolide edilen kayıtlar → Pasifleştir                 -->
+        <!-- noupdate=0 olduğu için modül güncellemesinde aktif=False olur -->
+        <!-- ============================================================ -->
+        <record id="prompt_studio_env_lock" model="ai.studio.prompt.template">
+            <field name="active" eval="False"/>
+        </record>
+        <record id="prompt_color_lock" model="ai.studio.prompt.template">
+            <field name="active" eval="False"/>
+        </record>
+        <record id="prompt_fabric_lock" model="ai.studio.prompt.template">
+            <field name="active" eval="False"/>
+        </record>
+        <record id="prompt_button_lock" model="ai.studio.prompt.template">
+            <field name="active" eval="False"/>
+        </record>
+        <record id="prompt_idealization_lock" model="ai.studio.prompt.template">
+            <field name="active" eval="False"/>
+        </record>
+        <record id="prompt_identity_lock" model="ai.studio.prompt.template">
+            <field name="active" eval="False"/>
+        </record>
         <record id="prompt_editorial_style" model="ai.studio.prompt.template">
-            <field name="name">Editoryel Fotografcilik</field>
-            <field name="scope">global</field>
-            <field name="prompt_text">Zara-style editorial high-fashion aesthetic. Effortless, slightly asymmetrical model posing, dynamic posture, high-energy but calm demeanor. High-key airy studio lighting, soft natural glow, cinematic depth. Bright minimalist set with no visible seams or artifacts. Professional high-end catalog look. Camera: Phase One XF IQ4 150MP, hyper-realistic skin texture on pure solid white background (#FFFFFF). GARMENT FIDELITY OVERRIDE: This style directive affects ONLY model pose, camera angle, lighting mood, and background atmosphere. It must NEVER alter the garment's color, fabric texture, button hardware, or construction details.</field>
+            <field name="active" eval="False"/>
         </record>
-
-        <!-- 14. Arka Gorunum Lock -->
         <record id="prompt_back_view_lock" model="ai.studio.prompt.template">
-            <field name="name">Arka Gorunum Lock</field>
-            <field name="scope">global</field>
-            <field name="prompt_text">Back-view integrity lock: if the back reference does NOT show logo/graphic/print/embroidery text, keep the back plain. Never mirror or copy front-only artwork onto the back panel. WAISTBAND CLEANLINESS: back waistband must be clean, seamless, uninterrupted fabric without any buttons, rivets, or metal badges. View integrity lock: front, side, back, and detail must remain physically truthful to references.</field>
+            <field name="active" eval="False"/>
         </record>
-
-        <!-- 15. Detay Gorunum Lock -->
         <record id="prompt_detail_view_lock" model="ai.studio.prompt.template">
-            <field name="name">Detay Gorunum Lock</field>
-            <field name="scope">global</field>
-            <field name="prompt_text">Detail fidelity lock: preserve authentic garment buttons, brand tags, stitching, seam lines, and neckline shape exactly. Strictly exclude any store security alarm tags, anti-theft pins, or price tags. Do not move, remove, or invent buttons/labels. DETAIL VIEW CLOTHING REQUIREMENT: In the detail/macro view, the model MUST be wearing the FULL outfit. ALL closures must be FASTENED as designed. Show a close-up of garment construction detail while the model wears the complete outfit. No bare skin beyond wrists, neck, and face.</field>
+            <field name="active" eval="False"/>
         </record>
-
-        <!-- 16. Premium Capture Lock -->
         <record id="prompt_capture_lock" model="ai.studio.prompt.template">
-            <field name="name">Premium Capture Lock</field>
-            <field name="scope">global</field>
-            <field name="prompt_text">Ultra premium capture lock: emulate top-tier medium-format RAW capture with physically plausible optics and high dynamic range. Preserve nuanced tonal roll-off, highlight retention, rich but natural blacks, and true color separation. Keep eyes, lashes, brows, lips, skin micro-relief, and garment weave tack-sharp at the focal plane while maintaining realistic depth falloff. No fake HDR halos, no clarity overdrive, no sharpening artifacts.</field>
+            <field name="active" eval="False"/>
         </record>
-
-        <!-- 17. Anti-Plastik Yuz Lock -->
         <record id="prompt_anti_plastic_lock" model="ai.studio.prompt.template">
-            <field name="name">Anti-Plastik Yuz Lock</field>
-            <field name="scope">global</field>
-            <field name="prompt_text">NEGATIVE LOCK — ANTI-PLASTIC FACE: beauty filter, airbrushed skin, frequency-separation retouch, plastic skin, waxy skin, porcelain skin, silicone skin, rubber skin, over-denoise, skin smoothing, fake CGI texture, doll face, mannequin face, glass-marble eyes, dead-doll eyes, perfectly symmetrical face, uncanny valley face, CG hair shader, helmet hair, painted-on eyebrows, blank AI stare, vacant expression, frozen smile, empty eyes, 3D render face, video game character, digital avatar.</field>
+            <field name="active" eval="False"/>
         </record>
-
-        <!-- 18. Sac Degismezlik Lock -->
         <record id="prompt_hair_lock" model="ai.studio.prompt.template">
-            <field name="name">Sac Degismezlik Lock</field>
-            <field name="scope">global</field>
-            <field name="prompt_text">Hair immutable lock: keep exact hair length class, color family, part direction, density, and nape/jawline silhouette across views. Do not add extensions or output longer hair than anchor. Canonical identity anchor lock: treat the first generated FRONT image/reference as the single source of truth for identity across all other views.</field>
+            <field name="active" eval="False"/>
         </record>
-
-        <!-- 19. Omuz ve Dusus Lock -->
         <record id="prompt_shoulder_drape_lock" model="ai.studio.prompt.template">
-            <field name="name">Omuz ve Dusus Lock</field>
-            <field name="scope">global</field>
-            <field name="prompt_text">[SHOULDER LOCK] Ensure shoulder structure matches the input explicitly (padded/structured, strong, or natural). Do NOT slope or soften shoulders if the input has clear structured shoulder padding. [DRAPE LOCK] Natural fabric drape conforming to human body; smooth out flat-lay packaging wrinkles completely. [LAYERING LOCK] No ghost layering. No undergarments, undershirts, or inner linings should be randomly visible at the collar or hem.</field>
+            <field name="active" eval="False"/>
         </record>
-
-        <!-- 20. Sosyal Tutarlilik Lock -->
         <record id="prompt_social_identity_lock" model="ai.studio.prompt.template">
-            <field name="name">Sosyal Tutarlilik Lock</field>
-            <field name="scope">global</field>
-            <field name="prompt_text">STRICT IDENTITY LOCK. The reference model is the single source of truth. Match face geometry exactly: skull/face shape, jawline, cheekbones, nose, lips, eyes, brows. Preserve facial proportions, symmetry/asymmetry, and distinctive marks. Match full-body identity: height, silhouette, shoulder/hip width, torso/limb lengths. Do not alter age, ethnicity, gender presentation, or expression. Do not stylize, beautify, or modify identity.</field>
+            <field name="active" eval="False"/>
         </record>
     </data>
 </odoo>

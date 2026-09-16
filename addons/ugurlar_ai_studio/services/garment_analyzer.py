@@ -622,52 +622,35 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         # ═══ OUTFIT KOMBİN & ALT/ÜST GİYİM DİREKTİFİ ═══
         if is_skirt:
             base_prompt += (
-                "LOWER BODY OUTFIT LOCK — SKIRT ONLY: The garment is a SKIRT worn on the lower body. "
-                "The model MUST wear ONLY this skirt around her waist. "
-                "LEG APPEARANCE: The model's legs below the skirt hemline MUST BE NATURAL BARE LEGS with clean, realistic human skin tone. "
-                "CRITICAL PROHIBITION: Absolutely NO pants, NO jeans, NO trousers, NO leggings underneath the skirt! "
-                "Under no circumstances should the model wear denim or pants under the skirt. "
-                "UPPER BODY MATCHING: The model wears a clean, neutral, simple fitted top (such as a solid white crewneck t-shirt) on the upper body. "
+                "SKIRT: Model wears ONLY this skirt. Natural bare legs below hemline. "
+                "NO pants, jeans, or leggings underneath. Neutral fitted top on upper body. "
             )
         elif is_shorts:
             base_prompt += (
-                "LOWER BODY OUTFIT LOCK — SHORTS ONLY: The garment is SHORTS worn on the lower body. "
-                "The model MUST wear ONLY these shorts on the lower body. "
-                "LEG APPEARANCE: The model's legs below the shorts hemline MUST BE NATURAL BARE LEGS with clean, realistic human skin tone. "
-                "CRITICAL PROHIBITION: Absolutely NO long pants, NO jeans, NO trousers, NO leggings underneath! "
-                "UPPER BODY MATCHING: The model wears a clean, neutral, simple fitted top on the upper body. "
+                "SHORTS: Model wears ONLY these shorts. Natural bare legs below hemline. "
+                "NO long pants or leggings underneath. Neutral fitted top on upper body. "
             )
         elif is_dress:
             base_prompt += (
-                "FULL BODY OUTFIT LOCK — DRESS ONLY: The garment is a ONE-PIECE DRESS. "
-                "The model wears ONLY this dress with appropriate footwear. "
-                "LEG APPEARANCE: The model's legs below the dress hemline MUST BE NATURAL BARE LEGS with clean, realistic human skin tone. "
-                "CRITICAL PROHIBITION: Absolutely NO pants, NO jeans, NO trousers, NO leggings underneath the dress! "
+                "DRESS: Model wears ONLY this dress with shoes. Natural bare legs below hemline. "
+                "NO pants, jeans, or leggings underneath. "
             )
         elif category == 'bottoms':
             base_prompt += (
-                "LOWER BODY OUTFIT LOCK — PANTS: The garment is trousers/pants worn on the lower body. "
-                "The pants cover the legs completely as shown in the reference. "
-                "UPPER BODY MATCHING: The model wears a clean, neutral, simple fitted top on the upper body. "
+                "PANTS: Legs fully covered as shown in reference. "
+                "Neutral fitted top on upper body. "
             )
         elif is_top_or_outerwear or category in ['tops', 'outerwear', 'knitwear']:
             recommended_bottoms = analysis.get('recommendedBottoms', 'dark blue skinny jeans')
             if not recommended_bottoms:
                 recommended_bottoms = 'dark blue skinny jeans'
             base_prompt += (
-                f"MANDATORY BOTTOM PAIRING: The model MUST wear {recommended_bottoms} on the lower body. "
-                "Full-length bottoms covering the entire leg are REQUIRED. "
-                "Absolutely NO bare legs, NO bare thighs, NO exposed skin below the waist, NO underwear. "
-                "The legs must be COMPLETELY COVERED by the bottoms. "
+                f"MANDATORY BOTTOM: Model MUST wear {recommended_bottoms}. "
+                "Full-length, covering entire legs. NO bare legs, NO shorts. "
             )
 
         # ═══ GÜVENLİK ETİKETİ / ALARM TAGI İGNORE ═══
-        base_prompt += (
-            "CRITICAL: Completely eliminate and remove any store security alarm tags, anti-theft pins, "
-            "plastic EAS sensors, hard tags, hangers, or store price tags visible on the garment reference. "
-            "The output garment must be completely clean, tag-free, and alarm-free. "
-            "Never render security pins or retail tags as decorative buttons or rivets. "
-        )
+        base_prompt += "Remove all store security tags, alarm pins, price tags. Output must be clean and tag-free. "
 
     # Cift bosluklari temizle
     base_prompt = " ".join(base_prompt.split()) + " "
@@ -682,34 +665,18 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
 
     if photo_type == 'back':
         base_prompt += (
-            "This is the BACK VIEW. The garment reference shows the back of the product. "
-            "Reproduce the back design exactly as shown — same details, same surface. "
-            "WAISTBAND CLEANLINESS: The back waistband must be clean, smooth, continuous fabric — "
-            "absolutely NO buttons, NO rivets, NO metal pins, NO security tags on the back waistband. "
-            "HANGER FOLD-OVER RULE: The reference garment was photographed hanging on a hanger. "
-            "Any fabric visible at the top that appears as a second layer, a flap, or a fold-over "
-            "above the natural shoulder line is the FRONT of the garment draped backward over the hanger — "
-            "it is NOT a cape, NOT a collar extension, and NOT part of the back design. "
-            "The model's back must show ONLY the single back panel of the garment as one clean, uninterrupted layer. "
-            "Do NOT add any extra fabric layers, wing-like extensions, or double-layered look on the model's back. "
+            "BACK VIEW. Reproduce back design exactly. "
+            "Back waistband must be clean — no buttons, rivets, or tags. "
+            "Hanger fold-over at shoulder is the FRONT side, not back design — show only single back panel. "
         )
     elif photo_type == 'side':
         if is_top_or_outerwear:
             base_prompt += (
-                "This is the 45-DEGREE THREE-QUARTER SIDE VIEW. "
-                "The model is turned at a 45-degree angle showing both the front opening/lapels and the side profile. "
-                "The model MUST wear the exact same neutral inner top/shirt underneath as established in the front view. "
-                "Do NOT put the back panel or back fabric on the chest! "
-                "The model MUST wear the exact same full-length dark tailored trousers or denim jeans established in the front view. "
-                "Strictly NO bare legs, NO shorts. "
-                "Reproduce every detail of the upper garment accurately from the 45-degree angle: collar, lapels, sleeves, pockets, belt, and fabric texture. "
+                "45-DEGREE SIDE VIEW. Same inner top and pants as front view. "
+                "Do NOT put back fabric on chest. No bare legs. "
             )
         else:
-            base_prompt += (
-                "This is the 45-DEGREE SIDE VIEW. "
-                "The model is turned 45 degrees. "
-                "Reproduce the garment design and fit accurately from the 45-degree angle. "
-            )
+            base_prompt += "45-DEGREE SIDE VIEW. Reproduce garment accurately from side angle. "
 
     # Preset bilgileri (manken tipi, cinsiyeti)
     if preset:
@@ -775,20 +742,14 @@ _VIEW_PROMPT_TEMPLATES = {
         "Professional e-commerce back view photography. "
         "Full-body model facing AWAY from camera showing the back of {color} {fabric} {garment_type}. "
         "{fit}, {pattern} pattern. Clean white studio background, even lighting. "
-        "Elegant back pose, slight contrapposto, head turned to show jawline profile. "
+        "Elegant back pose, slight contrapposto. "
         "Sharp focus on back details, seams, and garment shape. "
-        "CRITICAL HANGER ARTIFACT WARNING: The garment reference image was photographed on a hanger. "
-        "The fabric visible at the top/shoulder area that folds over the hanger is the FRONT side of the garment "
-        "folding backward over the hanger hook — it is NOT part of the back design. "
-        "IGNORE any fabric fold-over, overlapping layers, or double-layered appearance at the top of the garment "
-        "caused by the hanger. Only reproduce the actual BACK PANEL of the garment — the single continuous surface "
-        "below the shoulder seam line. The back of the garment should appear as ONE clean, single layer. "
     ),
     'side': (
         "Professional e-commerce side view photography. "
         "Full-body model turned 45 degrees showing profile of {color} {fabric} {garment_type}. "
         "{fit}, {pattern} pattern. Clean white studio background, even lighting. "
-        "Three-quarter fashion pose, contrapposto stance, dynamic silhouette. "
+        "Three-quarter fashion pose, contrapposto stance. "
         "Sharp focus on garment side profile and fit. "
     ),
     'detail': (

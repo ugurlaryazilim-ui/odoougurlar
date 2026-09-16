@@ -144,72 +144,41 @@ class FalProvider(AIProviderBase):
                 # Seedream uses Figure references
                 if is_skirt:
                     garment_fidelity = (
-                        "Dress the model in Figure 2 with the exact garment shown in Figure 1. "
-                        "CRITICAL LOWER BODY REPLACEMENT: Figure 1 is a SKIRT. You MUST completely REMOVE and REPLACE "
-                        "the pants/jeans that the model in Figure 2 is wearing. The model MUST wear Figure 1 as the skirt on her waist. "
-                        "LEG MANDATE: The model's legs below the skirt hemline MUST BE NATURAL BARE LEGS with clean, realistic human skin tone. "
-                        "REMOVE the pants/jeans from Figure 2 completely! Strictly NO pants, NO jeans, NO trousers, NO leggings underneath the skirt! "
-                        "Under no circumstances should the model wear denim or pants under the skirt. "
-                        "Keep the model's face, hair, neutral upper top, and shoes from Figure 2. "
-                        "IMPORTANT: Ignore and remove any security tags, alarm tags, price tags, hangers, or store fixtures "
-                        "visible on Figure 1 — these are store artifacts, NOT part of the garment. "
-                        "The output garment must be completely clean, tag-free, and alarm-free. "
-                        "Reproduce every visible garment detail of Figure 1 precisely: same waistband, "
-                        "same seams, same pockets, authentic garment closures only, same fabric texture. "
-                        "Strictly NO anti-theft tags, security pins, or artificial metallic badges. "
-                        "The output garment must be a pixel-perfect match of Figure 1 (minus any store tags or alarm pins). "
+                        "Dress model in Figure 2 with garment from Figure 1. "
+                        "Figure 1 is a SKIRT. REPLACE pants/jeans of Figure 2 with this skirt. "
+                        "Legs below skirt MUST be natural bare legs. NO pants underneath. "
+                        "Keep face, hair, neutral top, shoes from Figure 2. "
                     )
                 elif is_shorts:
                     garment_fidelity = (
-                        "Dress the model in Figure 2 with the exact garment shown in Figure 1. "
-                        "CRITICAL LOWER BODY REPLACEMENT: Figure 1 is SHORTS. You MUST completely REMOVE and REPLACE "
-                        "the pants/jeans that the model in Figure 2 is wearing. The model MUST wear Figure 1 as shorts on her waist. "
-                        "LEG MANDATE: The model's legs below the shorts MUST BE NATURAL BARE LEGS with clean, realistic human skin tone. "
-                        "REMOVE the pants/jeans from Figure 2 completely! Strictly NO long pants, NO jeans, NO leggings underneath! "
-                        "Keep the model's face, hair, neutral upper top, and shoes from Figure 2. "
-                        "IMPORTANT: Ignore and remove any security tags, alarm tags, price tags, hangers, or store fixtures "
-                        "visible on Figure 1 — these are store artifacts, NOT part of the garment. "
-                        "The output garment must be a pixel-perfect match of Figure 1 (minus any store tags or alarm pins). "
+                        "Dress model in Figure 2 with garment from Figure 1. "
+                        "Figure 1 is SHORTS. REPLACE pants of Figure 2 with these shorts. "
+                        "Legs below shorts MUST be natural bare legs. NO long pants underneath. "
+                        "Keep face, hair, neutral top, shoes from Figure 2. "
                     )
                 elif is_dress:
                     garment_fidelity = (
-                        "Dress the model in Figure 2 with the exact garment shown in Figure 1. "
-                        "CRITICAL FULL BODY REPLACEMENT: Figure 1 is a DRESS. You MUST completely REMOVE and REPLACE "
-                        "both the upper top and the pants/jeans from Figure 2 with the dress from Figure 1. "
-                        "The model wears ONLY Figure 1. "
-                        "LEG MANDATE: The model's legs below the dress hemline MUST BE NATURAL BARE LEGS with clean, realistic human skin tone. "
-                        "REMOVE the pants/jeans from Figure 2 completely! Absolutely NO pants, NO jeans, NO leggings underneath the dress! "
-                        "Keep the model's face, hair, and shoes from Figure 2. "
-                        "IMPORTANT: Ignore and remove any security tags, alarm tags, price tags, hangers, or store fixtures "
-                        "visible on Figure 1 — these are store artifacts, NOT part of the garment. "
-                        "The output garment must be a pixel-perfect match of Figure 1 (minus any store tags or alarm pins). "
+                        "Dress model in Figure 2 with garment from Figure 1. "
+                        "Figure 1 is a DRESS. REPLACE both top and pants of Figure 2 with this dress. "
+                        "Legs below dress MUST be natural bare legs. NO pants underneath. "
+                        "Keep face, hair, shoes from Figure 2. "
                     )
                 elif is_bottom:
                     garment_fidelity = (
-                        "Dress the model in Figure 2 with the exact garment shown in Figure 1. "
-                        "CRITICAL LOWER BODY REPLACEMENT: Figure 1 is trousers/pants/bottoms. You MUST completely REPLACE "
-                        "the pants/bottoms of Figure 2 with Figure 1. The model wears Figure 1 on the lower body. "
-                        "Keep the model's face, hair, neutral upper top, and shoes from Figure 2. "
-                        "IMPORTANT: Ignore and remove any security tags, alarm tags, price tags, hangers, or store fixtures "
-                        "visible on Figure 1 — these are store artifacts, NOT part of the garment. "
-                        "The output garment must be a pixel-perfect match of Figure 1 (minus any store tags or alarm pins). "
+                        "Dress model in Figure 2 with garment from Figure 1. "
+                        "Figure 1 is PANTS/TROUSERS. REPLACE bottoms of Figure 2 with Figure 1. "
+                        "Keep face, hair, neutral top, shoes from Figure 2. "
                     )
                 else:
                     garment_fidelity = (
-                        "Dress the model in Figure 2 with the exact garment shown in Figure 1. "
-                        "Figure 1 is an UPPER BODY / OUTERWEAR garment (coat, jacket, top, or sweater). "
-                        "REPLACE the upper top of Figure 2 with Figure 1. "
-                        "MANDATORY LOWER BODY ATTIRE: The model MUST wear full-length dark tailored trousers, pants, or denim jeans on the lower body covering her entire legs all the way down to the shoes. "
-                        "CRITICAL PROHIBITION: Absolutely NO bare legs, NO bare thighs, NO exposed skin below the garment hemline, NO shorts, NO cycling shorts, NO underwear, NO mini skirt appearance. The legs below the garment MUST BE FULLY COVERED by proper pants or jeans at all times under the coat/top. "
-                        "Keep the model's face, hair, and shoes from Figure 2. "
-                        "IMPORTANT: Ignore and remove any security tags, alarm tags, price tags, hangers, or store fixtures "
-                        "visible on Figure 1 — these are store artifacts, NOT part of the garment. "
-                        "The output garment must be completely clean, tag-free, and alarm-free. "
-                        "Reproduce every visible garment detail of Figure 1 precisely: same collar, "
-                        "same seams, same pockets, authentic garment closures and belt only, same fabric texture. "
-                        "Strictly NO anti-theft tags, security pins, or artificial metallic badges. "
-                        "The output garment must be a pixel-perfect match of Figure 1 (minus any store tags or alarm pins). "
+                        "Dress model in Figure 2 with garment from Figure 1. "
+                        "Figure 1 is UPPER BODY/OUTERWEAR. REPLACE upper top of Figure 2 with Figure 1. "
+                        "Model MUST wear full-length dark pants/jeans covering entire legs. NO bare legs. "
+                        "Keep face, hair, shoes from Figure 2. "
+                        "Match every garment detail: collar, seams, pockets, closures, fabric texture. "
                     )
+                # Tag removal applies to all categories
+                garment_fidelity += "Remove all store tags, alarm pins, security sensors from garment. "
             else:
                 if is_skirt:
                     garment_fidelity = (
@@ -264,52 +233,32 @@ class FalProvider(AIProviderBase):
             if 'seedream' in endpoint:
                 if is_top_or_outerwear:
                     back_hint = (
-                        'Show the BACK view of the model from Figure 2, facing away from camera, wearing the garment from Figure 1. '
-                        'Copy EVERY structural detail from Figure 1 exactly: same seams, same cut, same fabric texture. '
-                        'IMPORTANT: Figure 1 was photographed on a hanger. Any fabric visible at the top/shoulder area that folds over '
-                        'the hanger hook is the FRONT of the garment draped backward — it is NOT part of the back design. '
-                        'IGNORE any fold-over, overlapping layers, or double-layered appearance at the top. '
-                        'Show ONLY the single back panel as one clean, uninterrupted layer on the model. '
-                        'Do NOT add cape-like flaps, wing extensions, or extra fabric layers on the back. '
-                        'MANDATORY LOWER BODY: The model MUST wear the same full-length pants/jeans from Figure 3. Absolutely NO bare legs. '
+                        'BACK view: model facing away, wearing Figure 1. '
+                        'Hanger fold-over at shoulder is FRONT fabric, not back design — show single back panel only. '
+                        'Same pants/jeans from Figure 3. NO bare legs. '
                     )
                     side_hint = (
-                        'Show the 45-DEGREE THREE-QUARTER SIDE view of the model from Figure 2, turned 45 degrees. '
-                        'Figure 1 is an UPPER BODY / OUTERWEAR garment. '
-                        'Drape Figure 1 on the model accurately from the 45-degree angle: same collar, lapels, sleeves, pockets, belt, and fabric texture. '
-                        'CHEST & INNER ATTIRE FIDELITY: If the garment is open or semi-open at the front, '
-                        'the model MUST wear the EXACT SAME neutral inner top/shirt underneath as established in the front view (Figure 3). '
-                        'Strictly DO NOT put the back panel or back fabric onto the chest or front torso! '
-                        'MANDATORY LOWER BODY ATTIRE: The model MUST wear the exact same full-length tailored trousers/jeans established in Figure 3 down to the shoes. '
-                        'Strictly NO bare legs, NO bare thighs, NO shorts. '
+                        '45-DEGREE SIDE view of model wearing Figure 1. '
+                        'Same collar, lapels, sleeves, pockets from 45-degree angle. '
+                        'Same inner top and pants as Figure 3. Do NOT put back fabric on chest. '
                     )
                 elif is_skirt or is_shorts or is_bottom:
                     back_hint = (
-                        'Show the BACK view of the model from Figure 2, facing away from camera, wearing the garment from Figure 1. '
-                        'Copy EVERY detail from Figure 1 exactly — same waistband, same pockets, same surface. '
-                        'WAISTBAND CLEANLINESS: The back waistband must be clean, smooth, uninterrupted fabric — '
-                        'absolutely NO buttons, NO rivets, NO metal pins, NO security tags on the back waistband. '
+                        'BACK view: model facing away, wearing Figure 1. '
+                        'Same waistband, pockets, surface as Figure 1. Back waistband must be clean — no extra buttons/rivets. '
                     )
                     side_hint = (
-                        'Show the SIDE view of the model from Figure 2, turned 45 degrees. '
-                        'The garment is from Figure 1 — Figure 1 is the ONLY source of truth for the garment. '
-                        'Copy EVERY structural detail from Figure 1: same waistband construction, same surface texture, same pockets. '
-                        'The waistband must match Figure 1 exactly — if Figure 1 shows a smooth waistband, the side view must also have a smooth waistband. '
+                        'SIDE view: model turned 45 degrees, wearing Figure 1. '
+                        'Match waistband, surface, pockets from Figure 1. '
                     )
                 else:
-                    back_hint = (
-                        'Show the BACK view of the model from Figure 2, facing away from camera, wearing the garment from Figure 1. '
-                        'Copy EVERY detail from Figure 1 exactly. Clean single-layer back without fold-overs. '
-                    )
-                    side_hint = (
-                        'Show the SIDE view of the model from Figure 2, turned 45 degrees. '
-                        'The garment is from Figure 1. Copy EVERY detail from Figure 1 accurately. '
-                    )
+                    back_hint = 'BACK view: model facing away, wearing Figure 1. Single-layer back, no fold-overs. '
+                    side_hint = 'SIDE view: model turned 45 degrees, wearing Figure 1. Match all details. '
 
                 view_hints = {
                     'back': back_hint,
                     'side': side_hint,
-                    'detail': 'Close-up detail shot of the garment from Figure 1 on the model. Strictly tag-free and alarm-free. ',
+                    'detail': 'Close-up detail of garment from Figure 1 on model. Tag-free. ',
                 }
             else:
                 if is_top_or_outerwear:
@@ -346,12 +295,8 @@ class FalProvider(AIProviderBase):
             if front_output_url and photo_type in ('back', 'side'):
                 if 'seedream' in endpoint:
                     dynamic_prompt += (
-                        "Figure 3 is the FRONT generated view of this model. "
-                        "Use Figure 3 as the ABSOLUTE SOURCE OF TRUTH for model identity, hairstyle, skin tone, "
-                        "inner clothing under the coat/top, trousers/pants, and shoes. "
-                        "Maintain 100% outfit consistency with Figure 3: keep the exact same model, same inner top, same pants, same shoes, "
-                        "only rotate the camera to the requested view angle and apply the garment from Figure 1. "
-                        "DO NOT place back panel fabric on the chest. "
+                        "Figure 3 is the FRONT view. Use Figure 3 as identity anchor: same model, inner top, pants, shoes. "
+                        "Only rotate camera angle. Do NOT put back fabric on chest. "
                     )
                 else:
                     dynamic_prompt += (

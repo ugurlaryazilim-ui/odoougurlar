@@ -239,48 +239,44 @@ class AiStudioGeneration(models.Model):
         if not prompt_text or not prompt_text.strip():
             return ''
         
-        # ═══ YÖNTEM 1: deep-translator (ÜCRETSİZ) ═══
+        # ═══ YÖNTEM 1: Gemini Flash (BİRİNCİL — güvenilir) ═══
+        try:
+            gemini_key = self.env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.gemini_api_key', ''
+            )
+            if gemini_key:
+                import requests as _req
+                prompt = (
+                    "Translate this fashion image editing instruction to clear, precise English. "
+                    "Context: This is an edit request for a fashion e-commerce photo. "
+                    "Return ONLY the English translation, nothing else.\n\n"
+                    f"Turkish instruction: {prompt_text}"
+                )
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+                resp = _req.post(url, json={
+                    'contents': [{'parts': [{'text': prompt}]}],
+                }, headers={'Content-Type': 'application/json'}, timeout=10)
+                
+                if resp.status_code == 200:
+                    data = resp.json()
+                    candidates = data.get('candidates', [])
+                    if candidates:
+                        en_text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '').strip()
+                        if en_text:
+                            return en_text
+        except Exception:
+            pass  # Gemini başarısız, deep-translator dene
+        
+        # ═══ YÖNTEM 2: deep-translator (FALLBACK — ücretsiz) ═══
         try:
             from deep_translator import GoogleTranslator
             translated = GoogleTranslator(source='tr', target='en').translate(prompt_text)
             if translated:
                 return translated
-        except ImportError:
-            pass  # deep-translator kurulu değil, Gemini fallback
         except Exception:
-            pass  # Rate limit veya hata, Gemini fallback
+            pass
         
-        # ═══ YÖNTEM 2: Gemini Flash (FALLBACK — ~$0.001) ═══
-        try:
-            gemini_key = self.env['ir.config_parameter'].sudo().get_param(
-                'ugurlar_ai_studio.gemini_api_key', ''
-            )
-            if not gemini_key:
-                return prompt_text
-            
-            import requests as _req
-            prompt = (
-                "Translate this fashion image editing instruction to clear, precise English. "
-                "Context: This is an edit request for a fashion e-commerce photo. "
-                "Return ONLY the English translation, nothing else.\n\n"
-                f"Turkish instruction: {prompt_text}"
-            )
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
-            resp = _req.post(url, json={
-                'contents': [{'parts': [{'text': prompt}]}],
-            }, headers={'Content-Type': 'application/json'}, timeout=10)
-            
-            if resp.status_code == 200:
-                data = resp.json()
-                candidates = data.get('candidates', [])
-                if candidates:
-                    en_text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '').strip()
-                    if en_text:
-                        return en_text
-            
-            return prompt_text
-        except Exception:
-            return prompt_text
+        return prompt_text
 
     @api.onchange('revision_prompt')
     def _onchange_revision_prompt(self):

@@ -571,52 +571,50 @@ class AiStudioController(http.Controller):
     def translate_revision(self, text=''):
         """Türkçe revizyon metnini İngilizce'ye çevir.
         
-        Öncelik: deep-translator (ücretsiz)
-        Fallback: Gemini Flash (~$0.001)
+        Öncelik: Gemini Flash (güvenilir, ~$0.001)
+        Fallback: deep-translator (ücretsiz ama Docker'da rate limit riski)
         """
         if not text or not text.strip():
             return {'translated': ''}
         
-        # YÖNTEM 1: deep-translator (ÜCRETSİZ)
+        # YÖNTEM 1: Gemini Flash (BİRİNCİL — güvenilir)
+        try:
+            gemini_key = request.env['ir.config_parameter'].sudo().get_param(
+                'ugurlar_ai_studio.gemini_api_key', ''
+            )
+            if gemini_key:
+                prompt = (
+                    "Translate this fashion image editing instruction to clear, precise English. "
+                    "Context: This is an edit request for a fashion e-commerce photo. "
+                    "Return ONLY the English translation, nothing else.\n\n"
+                    f"Turkish instruction: {text}"
+                )
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+                resp = _req.post(url, json={
+                    'contents': [{'parts': [{'text': prompt}]}],
+                }, headers={'Content-Type': 'application/json'}, timeout=10)
+                
+                if resp.status_code == 200:
+                    data = resp.json()
+                    candidates = data.get('candidates', [])
+                    if candidates:
+                        en_text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '').strip()
+                        if en_text:
+                            return {'translated': en_text}
+                _logger.warning('Gemini ceviri basarisiz (status=%s), deep-translator deneniyor', resp.status_code if 'resp' in dir() else 'N/A')
+        except Exception as e:
+            _logger.warning('Gemini ceviri hatasi: %s — deep-translator deneniyor', e)
+        
+        # YÖNTEM 2: deep-translator (FALLBACK — ücretsiz ama rate limit riski)
         try:
             if GoogleTranslator:
                 translated = GoogleTranslator(source='tr', target='en').translate(text)
                 if translated:
                     return {'translated': translated}
-        except ImportError:
-            pass
         except Exception as e:
             _logger.warning('deep-translator hatasi: %s', e)
         
-        # YÖNTEM 2: Gemini Flash (FALLBACK)
-        try:
-            gemini_key = request.env['ir.config_parameter'].sudo().get_param(
-                'ugurlar_ai_studio.gemini_api_key', ''
-            )
-            if not gemini_key:
-                return {'translated': text}
-            
-            prompt = (
-                "Translate this fashion image editing instruction to clear, precise English. "
-                "Context: This is an edit request for a fashion e-commerce photo. "
-                "Return ONLY the English translation, nothing else.\n\n"
-                f"Turkish instruction: {text}"
-            )
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
-            resp = _req.post(url, json={
-                'contents': [{'parts': [{'text': prompt}]}],
-            }, headers={'Content-Type': 'application/json'}, timeout=10)
-            
-            if resp.status_code == 200:
-                data = resp.json()
-                candidates = data.get('candidates', [])
-                if candidates:
-                    en_text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '').strip()
-                    if en_text:
-                        return {'translated': en_text}
-        except Exception as e:
-            _logger.warning('Gemini ceviri hatasi: %s', e)
-        
+        _logger.error('Ceviri tamamen basarisiz, Turkce metin donuyor: %s', text[:100])
         return {'translated': text}
 
     @http.route('/ai_studio/retry_generation', type='jsonrpc', auth='user', methods=['POST'])
