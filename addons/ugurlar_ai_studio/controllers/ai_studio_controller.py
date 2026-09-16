@@ -68,7 +68,24 @@ class AiStudioController(http.Controller):
             if set_line_id:
                 photo_vals['set_line_id'] = int(set_line_id)
 
-            photo = request.env['ai.studio.photo'].create(photo_vals)
+            # 1'er adet sınırı: Varsa mevcut kaydı güncelle, yoksa yeni oluştur
+            domain = [
+                ('session_id', '=', session.id),
+                ('photo_type', '=', photo_type),
+            ]
+            if photo_type == 'detail':
+                domain.append(('detail_placement', '=', photo_vals.get('detail_placement', 'front')))
+            if set_line_id:
+                domain.append(('set_line_id', '=', int(set_line_id)))
+            else:
+                domain.append(('set_line_id', '=', False))
+
+            existing_photo = request.env['ai.studio.photo'].search(domain, limit=1)
+            if existing_photo:
+                existing_photo.write(photo_vals)
+                photo = existing_photo
+            else:
+                photo = request.env['ai.studio.photo'].create(photo_vals)
 
             return {
                 'success': True,

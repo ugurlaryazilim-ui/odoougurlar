@@ -135,11 +135,32 @@ export class CaptureScreen extends Component {
             this.state.photos.back = { data: base64Data, preview: dataUrl };
             this.state.hasBack = true;
         } else if (tab === "detail") {
-            this.state.photos.details.push({
+            const placement = this.state.detailPlacement || "front";
+            const existingIdx = this.state.photos.details.findIndex(d => d.placement === placement);
+            const detailObj = {
                 data: base64Data,
                 preview: dataUrl,
-                placement: this.state.detailPlacement,
-            });
+                placement: placement,
+            };
+            if (existingIdx !== -1) {
+                // Mevcut detayı güncelle (Maksimum 1 adet sınırı)
+                this.state.photos.details[existingIdx] = detailObj;
+                this.notification.add(
+                    placement === "front"
+                        ? _t("Ön yüz detayı güncellendi (1/1).")
+                        : _t("Arka yüz detayı güncellendi (1/1)."),
+                    { type: "info", sticky: false }
+                );
+            } else {
+                // Yeni detay ekle (bu konum için ilk ve tek)
+                this.state.photos.details.push(detailObj);
+                this.notification.add(
+                    placement === "front"
+                        ? _t("Ön yüz detayı kaydedildi (1/1).")
+                        : _t("Arka yüz detayı kaydedildi (1/1)."),
+                    { type: "success", sticky: false }
+                );
+            }
             this.state.detailCount = this.state.photos.details.length;
         }
     }
@@ -152,6 +173,13 @@ export class CaptureScreen extends Component {
         } else if (tab === "back") {
             this.state.photos.back = null;
             this.state.hasBack = false;
+        } else if (tab === "detail") {
+            const placement = this.state.detailPlacement || "front";
+            const idx = this.state.photos.details.findIndex(d => d.placement === placement);
+            if (idx !== -1) {
+                this.state.photos.details.splice(idx, 1);
+                this.state.detailCount = this.state.photos.details.length;
+            }
         }
     }
 
@@ -172,10 +200,22 @@ export class CaptureScreen extends Component {
         return true; // Düğme her zaman açık, uyarıları proceed içinde vereceğiz
     }
 
+    get hasDetailFront() {
+        return this.state.photos.details.some(d => d.placement === "front");
+    }
+
+    get hasDetailBack() {
+        return this.state.photos.details.some(d => d.placement === "back");
+    }
+
     get currentPhoto() {
         const tab = this.state.activeTab;
         if (tab === "front") return this.state.photos.front;
         if (tab === "back") return this.state.photos.back;
+        if (tab === "detail") {
+            const placement = this.state.detailPlacement || "front";
+            return this.state.photos.details.find(d => d.placement === placement) || null;
+        }
         return null;
     }
 

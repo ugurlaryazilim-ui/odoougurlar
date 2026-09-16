@@ -855,6 +855,14 @@ class AiStudioSession(models.Model):
                 raise UserError(_('Lütfen ürünün Önünü çekiniz!'))
             if not has_back:
                 raise UserError(_('Lütfen ürünün Arkasını çekiniz!'))
+
+            # Detay sınır kontrolü: Ön detay max 1, Arka detay max 1
+            front_details = session.photo_ids.filtered(lambda p: p.photo_type == 'detail' and (p.detail_placement or 'front') == 'front')
+            if len(front_details) > 1:
+                raise UserError(_('En fazla 1 adet Ön Yüz detay fotoğrafı eklenebilir.'))
+            back_details = session.photo_ids.filtered(lambda p: p.photo_type == 'detail' and p.detail_placement == 'back')
+            if len(back_details) > 1:
+                raise UserError(_('En fazla 1 adet Arka Yüz detay fotoğrafı eklenebilir.'))
                 
             session.state = 'photos_ready'
             session.date_photos_ready = fields.Datetime.now()

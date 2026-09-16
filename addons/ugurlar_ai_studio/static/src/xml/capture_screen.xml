@@ -77,40 +77,45 @@
                 <div class="ais-photo-tabs-glass">
                     <button t-attf-class="ais-tab-glass {{ state.activeTab === 'front' ? 'active' : '' }}"
                             t-on-click="() => this.setTab('front')">
-                        <span class="status-indicator" t-att-class="{ active: state.hasFront }"></span> Ön
+                        <span class="status-indicator" t-att-class="{ active: state.hasFront }"></span> Ön (<t t-out="state.hasFront ? '1/1' : '0/1'"/>)
                     </button>
                     <button t-attf-class="ais-tab-glass {{ state.activeTab === 'back' ? 'active' : '' }}"
                             t-on-click="() => this.setTab('back')">
-                        <span class="status-indicator" t-att-class="{ active: state.hasBack }"></span> Arka
+                        <span class="status-indicator" t-att-class="{ active: state.hasBack }"></span> Arka (<t t-out="state.hasBack ? '1/1' : '0/1'"/>)
                     </button>
                     <button t-attf-class="ais-tab-glass {{ state.activeTab === 'detail' ? 'active' : '' }}"
                             t-on-click="() => this.setTab('detail')">
-                        <span class="plus-icon">+</span> Detay (<t t-out="state.detailCount"/>)
+                        <span class="status-indicator" t-att-class="{ active: state.detailCount > 0 }"></span> Detay (<t t-out="state.detailCount"/>/2)
                     </button>
                 </div>
 
                 <!-- Çekilmiş Fotoğraf Önizleme -->
-                <t t-if="currentPhoto and state.activeTab !== 'detail'">
+                <t t-if="currentPhoto">
                     <div class="ais-preview-strip-glass">
                         <img t-att-src="currentPhoto.preview" class="ais-preview-thumb-glass"/>
                         <div class="ais-preview-info">
-                            <span class="text-white-50 small">Çekim Yapıldı</span>
+                            <span class="text-white-50 small">
+                                <t t-if="state.activeTab === 'front'">Ön Yüz Çekildi (1/1)</t>
+                                <t t-elif="state.activeTab === 'back'">Arka Yüz Çekildi (1/1)</t>
+                                <t t-elif="state.detailPlacement === 'front'">Ön Detay Çekildi (1/1)</t>
+                                <t t-else="">Arka Detay Çekildi (1/1)</t>
+                            </span>
                             <button class="btn btn-retake" t-on-click="retakePhoto">🔄 Yeniden Çek</button>
                         </div>
                     </div>
                 </t>
 
-                <!-- Detay Konum Seçici (Ön Yüz / Arka Yüz) -->
+                <!-- Detay Konum Seçici (Ön Yüz / Arka Yüz) (Max 1'er Adet) -->
                 <t t-if="state.activeTab === 'detail'">
                     <div class="ais-detail-placement-selector">
-                        <span class="ais-placement-label">Detay konumu:</span>
+                        <span class="ais-placement-label">Detay Konumu (Max 1):</span>
                         <button t-attf-class="ais-placement-btn {{ state.detailPlacement === 'front' ? 'active' : '' }}"
                                 t-on-click="() => this.setDetailPlacement('front')">
-                            👔 Ön Yüz
+                            👔 Ön Detay (<t t-out="hasDetailFront ? '1/1 ✓' : '0/1'"/>)
                         </button>
                         <button t-attf-class="ais-placement-btn {{ state.detailPlacement === 'back' ? 'active' : '' }}"
                                 t-on-click="() => this.setDetailPlacement('back')">
-                            🔙 Arka Yüz
+                            🔙 Arka Detay (<t t-out="hasDetailBack ? '1/1 ✓' : '0/1'"/>)
                         </button>
                     </div>
                 </t>

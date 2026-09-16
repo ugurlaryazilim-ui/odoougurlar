@@ -1,6 +1,7 @@
 import logging
 
-from odoo import models, fields
+from odoo import models, fields, api, _
+from odoo.exceptions import ValidationError
 
 _logger = logging.getLogger(__name__)
 
@@ -62,3 +63,36 @@ class AiStudioPhoto(models.Model):
         string='Ürün',
         store=True,
     )
+
+    @api.constrains('session_id', 'photo_type', 'detail_placement', 'set_line_id')
+    def _check_photo_limits(self):
+        """Bir oturumda (veya set parçasında) her açı ve detay konumundan en fazla 1 adet fotoğraf çekilebilir."""
+        for photo in self:
+            if not photo.session_id:
+                continue
+            domain = [
+                ('session_id', '=', photo.session_id.id),
+                ('photo_type', '=', photo.photo_type),
+                ('id', '!=', photo.id),
+            ]
+            if photo.set_line_id:
+                domain.append(('set_line_id', '=', photo.set_line_id.id))
+            else:
+                domain.append(('set_line_id', '=', False))
+
+            if photo.photo_type == 'detail':
+                placement = photo.detail_placement or 'front'
+                domain.append(('detail_placement', '=', placement))
+                existing = self.search_count(domain)
+                if existing > 0:
+                    placement_label = 'Ön Yüz Detayı' if placement == 'front' else 'Arka Yüz Detayı'
+                    raise ValidationError(
+                        _("Bu oturumda zaten 1 adet '%s' fotoğrafı mevcut! En fazla 1 adet Ön Detay ve 1 adet Arka Detay fotoğrafı eklenebilir.") % placement_label
+                    )
+            else:
+                existing = self.search_count(domain)
+                if existing > 0:
+                    type_label = dict(self._fields['photo_type'].selection).get(photo.photo_type, photo.photo_type)
+                    raise ValidationError(
+                        _("Bu oturumda zaten 1 adet '%s' fotoğrafı mevcut! Her açıdan en fazla 1 adet fotoğraf eklenebilir.") % type_label
+                    )
