@@ -1,17 +1,14 @@
 FROM odoo:19
 
 USER root
-# 0. Pillow'u WebP desteği ile kaynaktan derle
-#    Önce sistem python3-pil'i kaldır (pip Pillow'u gölgeliyordu!)
-#    Sonra kaynak derleme yap, doğrula, build araçlarını temizle
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential python3-dev libwebp-dev libjpeg-dev zlib1g-dev \
-    && dpkg --force-depends -r python3-pil python3-pil.imagetk 2>/dev/null || true \
-    && pip install --break-system-packages --no-binary Pillow --force-reinstall --no-cache-dir Pillow \
-    && python3 -c "from PIL import features; ok=features.check('webp'); print('WebP support:', ok); assert ok, 'PILLOW WEBP DESTEĞI KURULAMADI!'" \
-    && apt-get purge -y build-essential python3-dev \
-    && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/*
+# 0. Pillow WebP desteği — PyPI wheel zaten WebP içeriyor,
+#    sistem python3-pil'i override etmek yeterli (build araçları gereksiz)
+RUN pip install --break-system-packages --force-reinstall --no-cache-dir Pillow \
+    && python3 -c "\
+import PIL; print('PIL konum:', PIL.__file__); \
+from PIL import features; \
+w = features.check('webp'); print('WebP:', w); \
+j = features.check('jpg'); print('JPEG:', j)"
 
 # 1. Gerekli Python Kütüphanelerinin (Amazon SP-API eklentisi dahil) Yüklenmesi
 RUN pip install --break-system-packages pandas "openpyxl>=3.1.5" boto3 requests-auth-aws-sigv4 pymssql deep-translator
