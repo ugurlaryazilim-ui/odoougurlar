@@ -262,38 +262,81 @@ class FalProvider(AIProviderBase):
 
             # Base View Hints
             if 'seedream' in endpoint:
-                view_hints = {
-                    'back': (
+                if is_top_or_outerwear:
+                    back_hint = (
                         'Show the BACK view of the model from Figure 2, facing away from camera, wearing the garment from Figure 1. '
-                        'Copy EVERY detail from Figure 1 exactly — same waistband, same pockets, same surface. '
-                        'WAISTBAND CLEANLINESS: The back waistband must be clean, smooth, uninterrupted fabric — '
-                        'absolutely NO buttons, NO rivets, NO metal pins, NO security tags on the back waistband. '
+                        'Copy EVERY structural detail from Figure 1 exactly: same seams, same cut, same fabric texture. '
                         'IMPORTANT: Figure 1 was photographed on a hanger. Any fabric visible at the top/shoulder area that folds over '
                         'the hanger hook is the FRONT of the garment draped backward — it is NOT part of the back design. '
                         'IGNORE any fold-over, overlapping layers, or double-layered appearance at the top. '
                         'Show ONLY the single back panel as one clean, uninterrupted layer on the model. '
                         'Do NOT add cape-like flaps, wing extensions, or extra fabric layers on the back. '
-                    ),
-                    'side': (
+                        'MANDATORY LOWER BODY: The model MUST wear the same full-length pants/jeans from Figure 3. Absolutely NO bare legs. '
+                    )
+                    side_hint = (
+                        'Show the 45-DEGREE THREE-QUARTER SIDE view of the model from Figure 2, turned 45 degrees. '
+                        'Figure 1 is an UPPER BODY / OUTERWEAR garment. '
+                        'Drape Figure 1 on the model accurately from the 45-degree angle: same collar, lapels, sleeves, pockets, belt, and fabric texture. '
+                        'CHEST & INNER ATTIRE FIDELITY: If the garment is open or semi-open at the front, '
+                        'the model MUST wear the EXACT SAME neutral inner top/shirt underneath as established in the front view (Figure 3). '
+                        'Strictly DO NOT put the back panel or back fabric onto the chest or front torso! '
+                        'MANDATORY LOWER BODY ATTIRE: The model MUST wear the exact same full-length tailored trousers/jeans established in Figure 3 down to the shoes. '
+                        'Strictly NO bare legs, NO bare thighs, NO shorts. '
+                    )
+                elif is_skirt or is_shorts or is_bottom:
+                    back_hint = (
+                        'Show the BACK view of the model from Figure 2, facing away from camera, wearing the garment from Figure 1. '
+                        'Copy EVERY detail from Figure 1 exactly — same waistband, same pockets, same surface. '
+                        'WAISTBAND CLEANLINESS: The back waistband must be clean, smooth, uninterrupted fabric — '
+                        'absolutely NO buttons, NO rivets, NO metal pins, NO security tags on the back waistband. '
+                    )
+                    side_hint = (
                         'Show the SIDE view of the model from Figure 2, turned 45 degrees. '
                         'The garment is from Figure 1 — Figure 1 is the ONLY source of truth for the garment. '
                         'Copy EVERY structural detail from Figure 1: same waistband construction, same surface texture, same pockets. '
                         'The waistband must match Figure 1 exactly — if Figure 1 shows a smooth waistband, the side view must also have a smooth waistband. '
-                    ),
+                    )
+                else:
+                    back_hint = (
+                        'Show the BACK view of the model from Figure 2, facing away from camera, wearing the garment from Figure 1. '
+                        'Copy EVERY detail from Figure 1 exactly. Clean single-layer back without fold-overs. '
+                    )
+                    side_hint = (
+                        'Show the SIDE view of the model from Figure 2, turned 45 degrees. '
+                        'The garment is from Figure 1. Copy EVERY detail from Figure 1 accurately. '
+                    )
+
+                view_hints = {
+                    'back': back_hint,
+                    'side': side_hint,
                     'detail': 'Close-up detail shot of the garment from Figure 1 on the model. Strictly tag-free and alarm-free. ',
                 }
             else:
-                view_hints = {
-                    'back': (
+                if is_top_or_outerwear:
+                    back_hint_std = (
                         'IMPORTANT: Show the BACK view of the model, facing away from camera. '
-                        'WAISTBAND CLEANLINESS: The back waistband must be clean, smooth, uninterrupted fabric — '
-                        'absolutely NO buttons, NO rivets, NO metal pins, NO security tags on the back waistband. '
                         'The garment reference was photographed on a hanger. Any fabric at the top/shoulder area '
                         'that folds over the hanger hook is the FRONT side draped backward — NOT part of the back design. '
                         'IGNORE fold-over layers. Show ONLY the single back panel as one clean layer. '
-                        'Do NOT add cape-like flaps, wing extensions, or double-layered fabric on the back. '
-                    ),
-                    'side': 'IMPORTANT: Show the SIDE view of the model, turned 45 degrees. ',
+                        'MANDATORY LOWER BODY: The model MUST wear full-length pants/jeans. Strictly NO bare legs. '
+                    )
+                    side_hint_std = (
+                        'IMPORTANT: Show the 45-DEGREE THREE-QUARTER SIDE view of the model, turned 45 degrees. '
+                        'The model wears the upper body/outerwear garment from the reference. '
+                        'CHEST & INNER ATTIRE: If the coat/jacket is open, keep the exact same inner top as established in the front view. '
+                        'MANDATORY LOWER BODY: The model MUST wear full-length trousers/jeans. Strictly NO bare legs. '
+                    )
+                else:
+                    back_hint_std = (
+                        'IMPORTANT: Show the BACK view of the model, facing away from camera. '
+                        'WAISTBAND CLEANLINESS: The back waistband must be clean, smooth, uninterrupted fabric — '
+                        'absolutely NO buttons, NO rivets, NO metal pins, NO security tags on the back waistband. '
+                    )
+                    side_hint_std = 'IMPORTANT: Show the SIDE view of the model, turned 45 degrees. '
+
+                view_hints = {
+                    'back': back_hint_std,
+                    'side': side_hint_std,
                     'detail': 'IMPORTANT: Close-up detail shot showing fabric texture and details. Strictly tag-free and alarm-free. ',
                 }
             base_hint = view_hints.get(photo_type, '') if photo_type and photo_type != 'front' else ''
@@ -302,9 +345,20 @@ class FalProvider(AIProviderBase):
             detail_start_idx = 3
             if front_output_url and photo_type in ('back', 'side'):
                 if 'seedream' in endpoint:
-                    dynamic_prompt += "Figure 3 is the FRONT generated view of this model. Use Figure 3 as the source of truth for model identity, hairstyle, skin, and all outfit parts. Keep the same model and outfit, only rotate the camera to show the view and apply the garment from Figure 1. "
+                    dynamic_prompt += (
+                        "Figure 3 is the FRONT generated view of this model. "
+                        "Use Figure 3 as the ABSOLUTE SOURCE OF TRUTH for model identity, hairstyle, skin tone, "
+                        "inner clothing under the coat/top, trousers/pants, and shoes. "
+                        "Maintain 100% outfit consistency with Figure 3: keep the exact same model, same inner top, same pants, same shoes, "
+                        "only rotate the camera to the requested view angle and apply the garment from Figure 1. "
+                        "DO NOT place back panel fabric on the chest. "
+                    )
                 else:
-                    dynamic_prompt += "The THIRD reference image is the FRONT generated view of this model; use the THIRD image as the source of truth for the model identity, hairstyle, skin, and all other outfit parts (top, bottom, shoes). Keep the same model and outfit, only rotate the camera to show the view and apply the garment. "
+                    dynamic_prompt += (
+                        "The THIRD reference image is the FRONT generated view of this model; "
+                        "use the THIRD image as the source of truth for the model identity, hairstyle, skin, "
+                        "inner clothing under the top, trousers, and shoes. Maintain complete outfit consistency. "
+                    )
                 detail_start_idx = 4
                 
             if detail_urls:

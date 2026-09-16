@@ -694,10 +694,22 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
             "Do NOT add any extra fabric layers, wing-like extensions, or double-layered look on the model's back. "
         )
     elif photo_type == 'side':
-        base_prompt += (
-            "This is the SIDE VIEW. The garment reference shows the side of the product. "
-            "Reproduce the side design exactly as shown. "
-        )
+        if is_top_or_outerwear:
+            base_prompt += (
+                "This is the 45-DEGREE THREE-QUARTER SIDE VIEW. "
+                "The model is turned at a 45-degree angle showing both the front opening/lapels and the side profile. "
+                "The model MUST wear the exact same neutral inner top/shirt underneath as established in the front view. "
+                "Do NOT put the back panel or back fabric on the chest! "
+                "The model MUST wear the exact same full-length dark tailored trousers or denim jeans established in the front view. "
+                "Strictly NO bare legs, NO shorts. "
+                "Reproduce every detail of the upper garment accurately from the 45-degree angle: collar, lapels, sleeves, pockets, belt, and fabric texture. "
+            )
+        else:
+            base_prompt += (
+                "This is the 45-DEGREE SIDE VIEW. "
+                "The model is turned 45 degrees. "
+                "Reproduce the garment design and fit accurately from the 45-degree angle. "
+            )
 
     # Preset bilgileri (manken tipi, cinsiyeti)
     if preset:
