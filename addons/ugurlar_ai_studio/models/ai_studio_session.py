@@ -585,6 +585,13 @@ class AiStudioSession(models.Model):
                            'alt giyim', 'bermuda', 'capri', 'jogger']
         # 'şort', 'sort', 'etek' — tişört/tisort false positive'ine düşebilir
         BOTTOMS_KW_RISKY = ['şort', 'sort', 'etek']
+        OUTERWEAR_KW = ['manto', 'kaban', 'palto', 'mont', 'ceket', 'jacket', 'coat',
+                        'trenchcoat', 'trençkot', 'trench', 'pardösü', 'pardesu',
+                        'parka', 'anorak', 'yağmurluk', 'yagmurluk', 'blazer', 'rüzgarlık']
+        TOPS_KW = ['bluz', 'blouse', 'gömlek', 'gomlek', 'shirt', 'tişört', 'tisort', 't-shirt', 'tshirt',
+                   'kazak', 'sweater', 'hırka', 'hirka', 'cardigan', 'süveter', 'suveter',
+                   'yelek', 'vest', 'sweatshirt', 'hoodie', 'tunik', 'tunic', 'atlet', 'tank top',
+                   'crop top', 'bustiyer', 'büstiyer', 'üst giyim', 'body']
         ONE_PIECE_KW = ['elbise', 'dress', 'tulum', 'jumpsuit', 'overall', 'abiye', 'tek parça']
         
         for kw in BAGS_KW:
@@ -599,6 +606,15 @@ class AiStudioSession(models.Model):
             if kw in combined:
                 _logger.info('_detect_garment_type: "%s" bulundu → accessories', kw)
                 return 'accessories'
+        # Dış giyim ve üst giyim öncelikli kontrol edilir (manto/ceket/bluz elbiseyle karışmasın)
+        for kw in OUTERWEAR_KW:
+            if kw in combined:
+                _logger.info('_detect_garment_type: "%s" bulundu → tops (outerwear)', kw)
+                return 'tops'
+        for kw in TOPS_KW:
+            if kw in combined:
+                _logger.info('_detect_garment_type: "%s" bulundu → tops', kw)
+                return 'tops'
         for kw in ONE_PIECE_KW:
             if kw in combined:
                 _logger.info('_detect_garment_type: "%s" bulundu → one_piece', kw)
@@ -620,6 +636,45 @@ class AiStudioSession(models.Model):
         fallback = self.model_preset_id.garment_type if self.model_preset_id else 'tops'
         _logger.info('_detect_garment_type: Eşleşme yok, fallback=%s', fallback)
         return fallback
+
+    def _get_product_context_text(self):
+        """Ürün adı, kod, kategori ve nitelikleri metin olarak döndürür (Gemini & Prompt için)."""
+        self.ensure_one()
+        product = self.product_id
+        if not product:
+            return ""
+        parts = []
+        tmpl = product.product_tmpl_id
+        if tmpl and tmpl.name:
+            parts.append(f"Product Name: {tmpl.name}")
+        if product.default_code:
+            parts.append(f"Product Code / SKU: {product.default_code}")
+        if tmpl and tmpl.categ_id:
+            parts.append(f"Category: {tmpl.categ_id.complete_name or tmpl.categ_id.name}")
+        if self.category and self.category != 'auto':
+            cat_label = dict(self._fields['category'].selection).get(self.category, self.category)
+            parts.append(f"Session Chosen Category: {cat_label}")
+        # Nitelikler (Renk, Beden, Reyon, Ürün Grubu vb.)
+        attr_parts = []
+        if product.product_template_attribute_value_ids:
+            for ptav in product.product_template_attribute_value_ids:
+                attr_name = ptav.attribute_id.name
+                val_name = ptav.name
+                if attr_name and val_name:
+                    attr_parts.append(f"{attr_name}: {val_name}")
+        if tmpl:
+            try:
+                for line in tmpl.attribute_line_ids:
+                    attr_name = line.attribute_id.name or ''
+                    if attr_name in ('Reyon', 'Ürün Grubu', 'Kalıp', 'Kumaş', 'Materyal'):
+                        for val in line.value_ids:
+                            if val.name and f"{attr_name}: {val.name}" not in attr_parts:
+                                attr_parts.append(f"{attr_name}: {val.name}")
+            except Exception:
+                pass
+        if attr_parts:
+            parts.append(f"Attributes: {', '.join(attr_parts)}")
+        return " | ".join(parts)
 
     def _crop_image_detail(self, image_base64, category='tops'):
         """Base64 formatındaki resmi Pillow ile kırpar ve base64 döner.
@@ -1427,10 +1482,16 @@ class AiStudioSession(models.Model):
                 detected_cat = session._detect_garment_type()
                 from ..services.garment_analyzer import map_to_fashn_category
                 analysis_cat = map_to_fashn_category(cached_analysis_data or {})
-                if detected_cat in ('bottoms', 'one_piece', 'bags', 'shoes'):
+                if detected_cat in ('tops', 'bottoms', 'one_piece', 'bags', 'shoes'):
                     category_to_send = detected_cat
                     if isinstance(cached_analysis_data, dict):
-                        cached_analysis_data['clothingCategory'] = 'bottoms' if detected_cat == 'bottoms' else ('dress' if detected_cat == 'one_piece' else detected_cat)
+                        cached_analysis_data['clothingCategory'] = (
+                            'tops' if detected_cat == 'tops' else (
+                                'bottoms' if detected_cat == 'bottoms' else (
+                                    'dress' if detected_cat == 'one_piece' else detected_cat
+                                )
+                            )
+                        )
                 elif analysis_cat in ('bottoms', 'one-piece', 'full-body'):
                     category_to_send = 'bottoms' if analysis_cat == 'bottoms' else 'one_piece'
                 else:
@@ -1835,8 +1896,9 @@ class AiStudioSession(models.Model):
                     _pre_url = provider.upload_image(_pre['image_base64'])
 
                     from ..services.garment_analyzer import analyze_garment
+                    product_context = session._get_product_context_text()
                     cached_analysis = analyze_garment(
-                        fal_api_key, _pre_url, gemini_api_key=gemini_api_key
+                        fal_api_key, _pre_url, gemini_api_key=gemini_api_key, product_context=product_context
                     )
                     _sec_tags = cached_analysis.get('securityTags') if isinstance(cached_analysis, dict) else None
                     if _sec_tags:
@@ -2051,10 +2113,16 @@ class AiStudioSession(models.Model):
                     detected_cat = session._detect_garment_type()
                     from ..services.garment_analyzer import map_to_fashn_category
                     analysis_cat = map_to_fashn_category(cached_analysis or {})
-                    if detected_cat in ('bottoms', 'one_piece', 'bags', 'shoes'):
+                    if detected_cat in ('tops', 'bottoms', 'one_piece', 'bags', 'shoes'):
                         category_to_send = detected_cat
                         if isinstance(cached_analysis, dict):
-                            cached_analysis['clothingCategory'] = 'bottoms' if detected_cat == 'bottoms' else ('dress' if detected_cat == 'one_piece' else detected_cat)
+                            cached_analysis['clothingCategory'] = (
+                                'tops' if detected_cat == 'tops' else (
+                                    'bottoms' if detected_cat == 'bottoms' else (
+                                        'dress' if detected_cat == 'one_piece' else detected_cat
+                                    )
+                                )
+                            )
                     elif analysis_cat in ('bottoms', 'one-piece', 'full-body'):
                         category_to_send = 'bottoms' if analysis_cat == 'bottoms' else 'one_piece'
                     else:
@@ -2558,8 +2626,14 @@ class AiStudioSession(models.Model):
                 model_url = provider.upload_image(model_image)
 
                 detected_cat = session._detect_garment_type()
-                if detected_cat in ('bottoms', 'one_piece', 'bags', 'shoes'):
-                    category_to_send = 'bottoms' if detected_cat == 'bottoms' else ('one-piece' if provider_type != 'fashn' else 'one-pieces')
+                if detected_cat in ('tops', 'bottoms', 'one_piece', 'bags', 'shoes'):
+                    category_to_send = (
+                        'tops' if detected_cat == 'tops' else (
+                            'bottoms' if detected_cat == 'bottoms' else (
+                                ('one-piece' if provider_type != 'fashn' else 'one-pieces') if detected_cat == 'one_piece' else detected_cat
+                            )
+                        )
+                    )
                 elif session.category and session.category != 'auto':
                     category_to_send = {
                         'tops': 'tops',
@@ -2627,7 +2701,10 @@ class AiStudioSession(models.Model):
                     prompt_locks = global_prompt_locks
 
                     from ..services.garment_analyzer import analyze_garment, build_generation_prompt
-                    analysis = analyze_garment(fal_api_key, garment_url, gemini_api_key=gemini_api_key)
+                    product_context = session._get_product_context_text()
+                    analysis = analyze_garment(fal_api_key, garment_url, gemini_api_key=gemini_api_key, product_context=product_context)
+                    if detected_cat == 'tops' and isinstance(analysis, dict):
+                        analysis['clothingCategory'] = 'tops'
 
                     preset_data = {
                         'gender': preset.gender or 'female',

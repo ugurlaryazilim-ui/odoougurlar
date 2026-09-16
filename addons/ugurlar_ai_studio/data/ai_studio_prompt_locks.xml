@@ -80,7 +80,7 @@
         <record id="prompt_full_outfit_lock" model="ai.studio.prompt.template">
             <field name="name">Tam Giyim Zorunlulugu Lock</field>
             <field name="scope">global</field>
-            <field name="prompt_text">FULL OUTFIT MANDATORY LOCK: The model MUST be properly dressed in ALL views. No bare midriff, no bare chest. If the reference is a SKIRT, SHORTS, or DRESS: the model wears ONLY the skirt/shorts/dress on the lower body with natural bare legs — strictly NO pants, NO jeans, NO trousers, NO leggings underneath the skirt or dress. If the reference is an UPPER garment: model MUST also wear full-length bottoms and shoes. If the reference is a LOWER garment (pants): model MUST also wear a complete neutral top and shoes. Layering pants or jeans under a skirt or dress is a CRITICAL FAILURE.</field>
+            <field name="prompt_text">FULL OUTFIT MANDATORY LOCK: The model MUST be properly dressed in ALL views. No bare midriff, no bare chest. If the reference is a SKIRT, SHORTS, or DRESS: the model wears ONLY the skirt/shorts/dress on the lower body with natural bare legs — strictly NO pants, NO jeans, NO trousers, NO leggings underneath the skirt or dress. If the reference is an UPPER garment or OUTERWEAR (coat, jacket, blazer, cardigan, sweater, top, blouse, shirt): the model MUST wear full-length dark tailored pants or denim jeans and shoes covering the entire legs down to the shoes, with absolutely NO bare legs, NO bare thighs, and NO shorts. If the reference is a LOWER garment (pants): model MUST also wear a complete neutral top and shoes.</field>
         </record>
 
         <!-- 12. Negatif Prompt (Unified) -->

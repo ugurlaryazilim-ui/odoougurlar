@@ -105,7 +105,7 @@ def _prepare_gemini_image(image_url):
     return None, None
 
 
-def analyze_garment(api_key, image_url, gemini_api_key=None):
+def analyze_garment(api_key, image_url, gemini_api_key=None, product_context=None):
     """Kiyafet gorseli analiz et — tur, renk, kumas, detaylar.
 
     Gemini API anahtarı verilmişse doğrudan Google Gemini API kullanılır.
@@ -115,13 +115,25 @@ def analyze_garment(api_key, image_url, gemini_api_key=None):
         api_key: fal.ai API anahtari (fallback/any-llm için)
         image_url: Analiz edilecek gorsel URL'si veya base64 verisi
         gemini_api_key: Google Gemini API anahtarı (varsa doğrudan kullanım için)
+        product_context: Ürün adı, kodu, kategorisi ve nitelikleri (Odoo ERP'den)
 
     Returns:
         dict: Analiz sonuclari
     """
-    prompt = """You are a senior Fashion Merchandiser analyzing a product image.
-Ignore any hangers, clips, hands, or mannequins holding the garment. Focus ONLY on the garment's actual design.
+    context_section = ""
+    if product_context:
+        context_section = f"""
+OFFICIAL ERP / STORE PRODUCT INFORMATION (GROUND TRUTH):
+"{product_context}"
+Use this official product metadata as definitive context:
+- If product name/category indicates Manto, Kaban, Palto, Mont, Ceket, Blazer, Trençkot, Pardösü, Cardigan, Hırka, Kazak, Bluz, Gömlek, Tişört, Tunik: clothingCategory MUST be 'outerwear' or 'tops' (NEVER 'dress' and NEVER 'bottoms')! Even if long or belted, it is worn OVER pants/trousers, NOT as a dress.
+- If product name/category indicates Etek, Şort, Pantolon, Jean, Tayt: clothingCategory MUST be 'bottoms'!
+- If product name/category indicates Elbise, Abiye, Tulum: clothingCategory MUST be 'dress'!
+"""
 
+    prompt = f"""You are a senior Fashion Merchandiser analyzing a product image.
+Ignore any hangers, clips, hands, or mannequins holding the garment. Focus ONLY on the garment's actual design.
+{context_section}
 CRITICAL SECURITY ALARM & STORE TAG INSTRUCTION:
 1. Retail garments frequently have store security alarm tags, anti-theft sensors, magnetic alarm pins, or round metal/plastic security tags pinned to the waistband, collar, pocket, or hemline.
 2. DO NOT describe security tags as part of the garment's design.
@@ -133,6 +145,7 @@ CRITICAL NECKLINE INSTRUCTION: If the garment is hanging on a hanger, the front 
 CRITICAL CATEGORY INSTRUCTION:
 - If the garment is an etek (skirt), mini skirt, A-line skirt, pleated skirt, pencil skirt, şort (shorts), or pants/trousers: clothingCategory MUST be 'bottoms' (NEVER tops, NEVER outerwear)!
 - If the garment is an elbise (dress), abiye, or jumpsuit: clothingCategory MUST be 'dress'!
+- For coats, mantos, kabans, paltos, trench coats, parkas, jackets, blazers, mont, cardigans, sweaters, blouses, shirts, and t-shirts: clothingCategory MUST be 'outerwear' or 'tops'! DO NOT classify a coat, jacket, manto, or cardigan as a 'dress' even if it reaches mid-thigh or has a belt!
 - For skirts and dresses: garmentLength MUST accurately specify 'mini', 'midi', or 'maxi'.
 
 Analyze the garment and return a JSON with these fields:
@@ -480,9 +493,31 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     category = analysis.get('clothingCategory', 'tops')
     garment_type = analysis.get('garmentType', 'garment')
     garment_type_lower = f"{garment_type} {category}".lower()
-    is_skirt = _safe_keyword_match(garment_type_lower, ['etek', 'skirt'])
-    is_shorts = _safe_keyword_match(garment_type_lower, ['şort', 'sort', 'shorts', 'bermuda'])
-    is_dress = category in ['dress', 'one_piece', 'one-piece', 'full-body'] or _safe_keyword_match(garment_type_lower, ['elbise', 'dress', 'tulum', 'jumpsuit', 'abiye'])
+
+    # Dış giyim ve üst giyim koruması (manto, kaban, palto, ceket, bluz, gömlek ASLA elbise olamaz)
+    TOPS_AND_OUTERWEAR_KEYWORDS = [
+        'manto', 'kaban', 'palto', 'mont', 'ceket', 'jacket', 'coat',
+        'trenchcoat', 'trençkot', 'trench', 'pardösü', 'pardesu',
+        'parka', 'anorak', 'blazer', 'bluz', 'blouse', 'gömlek', 'shirt',
+        'tişört', 'tisort', 't-shirt', 'tshirt', 'kazak', 'sweater',
+        'hırka', 'hirka', 'cardigan', 'yelek', 'vest', 'sweatshirt',
+        'hoodie', 'tunik', 'tunic', 'atlet', 'süveter'
+    ]
+    is_top_or_outerwear = (
+        category in ['tops', 'outerwear', 'knitwear']
+        or _safe_keyword_match(garment_type_lower, TOPS_AND_OUTERWEAR_KEYWORDS)
+    )
+
+    if is_top_or_outerwear:
+        is_skirt = False
+        is_shorts = False
+        is_dress = False
+        if category not in ['tops', 'outerwear', 'knitwear']:
+            category = 'outerwear' if _safe_keyword_match(garment_type_lower, ['manto', 'kaban', 'palto', 'mont', 'ceket', 'coat', 'jacket', 'trençkot']) else 'tops'
+    else:
+        is_skirt = _safe_keyword_match(garment_type_lower, ['etek', 'skirt'])
+        is_shorts = _safe_keyword_match(garment_type_lower, ['şort', 'sort', 'shorts', 'bermuda'])
+        is_dress = category in ['dress', 'one_piece', 'one-piece', 'full-body'] or _safe_keyword_match(garment_type_lower, ['elbise', 'dress', 'tulum', 'jumpsuit', 'abiye'])
 
     if provider_type == 'fashn':
         # Sablonu generic kelimelerle formatla (kiyafet detaylari prompta gitmesin)
@@ -615,7 +650,7 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
                 "The pants cover the legs completely as shown in the reference. "
                 "UPPER BODY MATCHING: The model wears a clean, neutral, simple fitted top on the upper body. "
             )
-        elif category in ['tops', 'outerwear', 'knitwear']:
+        elif is_top_or_outerwear or category in ['tops', 'outerwear', 'knitwear']:
             recommended_bottoms = analysis.get('recommendedBottoms', 'dark blue skinny jeans')
             if not recommended_bottoms:
                 recommended_bottoms = 'dark blue skinny jeans'
@@ -673,23 +708,33 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         if audience:
             base_prompt += f"Target audience: {audience}. "
 
+    # Negatif prompt başlangıcı
+    negative = _VIEW_NEGATIVE_PROMPTS.get(photo_type, _VIEW_NEGATIVE_PROMPTS['front'])
+
     # Kalite ve kilit promptlar
     for lock in prompt_locks:
-        base_prompt += f" {lock}"
+        lock_str = str(lock).strip()
+        if lock_str.upper().startswith('NEGATIVE'):
+            # Negatif kilitler pozitif prompta değil, negatif prompta eklenmeli
+            neg_content = lock_str[8:].lstrip(': ')
+            negative = f"{negative}, {neg_content}"
+        else:
+            base_prompt += f" {lock}"
 
     # Kullanici ek promptu
     if extra_prompt:
         base_prompt += f" ADDITIONAL USER DIRECTIVE: {extra_prompt}"
 
-    # Negatif prompt
-    negative = _VIEW_NEGATIVE_PROMPTS.get(photo_type, _VIEW_NEGATIVE_PROMPTS['front'])
     if is_skirt or is_shorts or is_dress:
         # Mini etek, sort veya elbiselerde bacak acilmasini engelleyen token'lari temizle ve altina pantolon giyilmesini kesin yasakla
         for banned_token in ['mini skirt', 'short shorts', 'hot pants', 'bare legs', 'bare thighs', 'exposed legs']:
             negative = negative.replace(banned_token, '')
         negative = "pants under skirt, jeans under skirt, trousers under skirt, leggings under skirt, denim under skirt, double pants, double bottoms, pants under dress, jeans under dress, denim under dress, " + negative
-    elif category in ['tops', 'outerwear', 'knitwear']:
-        negative = "bare legs, bare thighs, exposed legs, no pants, shorts, mini skirt, " + negative
+    elif is_top_or_outerwear or category in ['tops', 'outerwear', 'knitwear']:
+        # Üst giyim ve dış giyimde (manto, mont, ceket, bluz vb.) pantolonsuz / çıplak bacak kesinlikle yasak!
+        for pants_banned in ['pants under dress', 'jeans under dress', 'trousers under dress', 'denim under dress']:
+            negative = negative.replace(pants_banned, '')
+        negative = "bare legs, bare thighs, exposed legs, no pants, shorts, cycling shorts, hot pants, underwear only, nude legs, bare knees, mini dress coat, " + negative
 
     _logger.info(
         'Prompt olusturuldu (photo_type=%s, provider=%s): %d karakter',
@@ -826,15 +871,16 @@ _FASHN_CATEGORY_MAP = {
 
 # Detayli garmentType -> FASHN category mapping (fallback)
 _GARMENT_TYPE_MAP = {
-    # Ust giyim
+    # Ust giyim / Dis giyim
+    'manto': 'tops', 'kaban': 'tops', 'palto': 'tops', 'mont': 'tops',
+    'ceket': 'tops', 'jacket': 'tops', 'coat': 'tops', 'trenchcoat': 'tops',
+    'trenckot': 'tops', 'pardesu': 'tops', 'parka': 'tops', 'blazer': 'tops',
     't-shirt': 'tops', 'tisort': 'tops', 'gomlek': 'tops',
-    'bluz': 'tops', 'kazak': 'tops', 'hirka': 'tops',
-    'ceket': 'tops', 'mont': 'tops', 'yelek': 'tops',
+    'bluz': 'tops', 'kazak': 'tops', 'hirka': 'tops', 'yelek': 'tops',
     'sweatshirt': 'tops', 'hoodie': 'tops', 'polo': 'tops',
     'atlet': 'tops', 'tank top': 'tops', 'crop top': 'tops',
-    'shirt': 'tops', 'blouse': 'tops', 'jacket': 'tops',
-    'coat': 'tops', 'sweater': 'tops', 'cardigan': 'tops',
-    'vest': 'tops', 'top': 'tops',
+    'shirt': 'tops', 'blouse': 'tops', 'sweater': 'tops', 'cardigan': 'tops',
+    'vest': 'tops', 'top': 'tops', 'tunik': 'tops',
     # Alt giyim
     'pantolon': 'bottoms', 'sort': 'bottoms', 'etek': 'bottoms',
     'jean': 'bottoms', 'denim': 'bottoms', 'tayt': 'bottoms',

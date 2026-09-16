@@ -116,10 +116,28 @@ class FalProvider(AIProviderBase):
             # Kategori tespiti: prompt metni yerine garment_type kullan
             # (prompt metni 'tişört' içerdiğinde 'şort' false positive verir)
             garment_type_raw = (kwargs.get('garment_type', '') or '').lower()
-            is_skirt = _safe_keyword_match(garment_type_raw, ['skirt', 'etek'])
-            is_shorts = _safe_keyword_match(garment_type_raw, ['shorts', 'şort', 'sort', 'bermuda'])
-            is_dress = category in ('one-piece', 'one_piece', 'dress', 'full-body') or _safe_keyword_match(garment_type_raw, ['dress', 'elbise', 'tulum', 'jumpsuit', 'abiye'])
-            is_bottom = category == 'bottoms' or is_skirt or is_shorts
+            TOPS_AND_OUTERWEAR_KEYWORDS = [
+                'manto', 'kaban', 'palto', 'mont', 'ceket', 'jacket', 'coat',
+                'trenchcoat', 'trençkot', 'trench', 'pardösü', 'pardesu',
+                'parka', 'anorak', 'blazer', 'bluz', 'blouse', 'gömlek', 'shirt',
+                'tişört', 'tisort', 't-shirt', 'tshirt', 'kazak', 'sweater',
+                'hırka', 'hirka', 'cardigan', 'yelek', 'vest', 'sweatshirt',
+                'hoodie', 'tunik', 'tunic', 'atlet', 'süveter'
+            ]
+            is_top_or_outerwear = (
+                category in ('tops', 'outerwear', 'knitwear')
+                or _safe_keyword_match(garment_type_raw, TOPS_AND_OUTERWEAR_KEYWORDS)
+            )
+            if is_top_or_outerwear:
+                is_skirt = False
+                is_shorts = False
+                is_dress = False
+                is_bottom = False
+            else:
+                is_skirt = _safe_keyword_match(garment_type_raw, ['skirt', 'etek'])
+                is_shorts = _safe_keyword_match(garment_type_raw, ['shorts', 'şort', 'sort', 'bermuda'])
+                is_dress = category in ('one-piece', 'one_piece', 'dress', 'full-body') or _safe_keyword_match(garment_type_raw, ['dress', 'elbise', 'tulum', 'jumpsuit', 'abiye'])
+                is_bottom = category == 'bottoms' or is_skirt or is_shorts
 
             # ═══ GARMENT FIDELITY (OLUMLU ÇERÇEVELEME) ═══
             if 'seedream' in endpoint:
@@ -179,13 +197,16 @@ class FalProvider(AIProviderBase):
                 else:
                     garment_fidelity = (
                         "Dress the model in Figure 2 with the exact garment shown in Figure 1. "
-                        "Figure 1 is an UPPER BODY garment. REPLACE the upper top of Figure 2 with Figure 1. "
-                        "Keep the model's face, hair, matching pants/bottoms, and shoes from Figure 2. "
+                        "Figure 1 is an UPPER BODY / OUTERWEAR garment (coat, jacket, top, or sweater). "
+                        "REPLACE the upper top of Figure 2 with Figure 1. "
+                        "MANDATORY LOWER BODY ATTIRE: The model MUST wear full-length dark tailored trousers, pants, or denim jeans on the lower body covering her entire legs all the way down to the shoes. "
+                        "CRITICAL PROHIBITION: Absolutely NO bare legs, NO bare thighs, NO exposed skin below the garment hemline, NO shorts, NO cycling shorts, NO underwear, NO mini skirt appearance. The legs below the garment MUST BE FULLY COVERED by proper pants or jeans at all times under the coat/top. "
+                        "Keep the model's face, hair, and shoes from Figure 2. "
                         "IMPORTANT: Ignore and remove any security tags, alarm tags, price tags, hangers, or store fixtures "
                         "visible on Figure 1 — these are store artifacts, NOT part of the garment. "
                         "The output garment must be completely clean, tag-free, and alarm-free. "
-                        "Reproduce every visible garment detail of Figure 1 precisely: same waistband, "
-                        "same seams, same pockets, authentic garment closures only, same fabric texture. "
+                        "Reproduce every visible garment detail of Figure 1 precisely: same collar, "
+                        "same seams, same pockets, authentic garment closures and belt only, same fabric texture. "
                         "Strictly NO anti-theft tags, security pins, or artificial metallic badges. "
                         "The output garment must be a pixel-perfect match of Figure 1 (minus any store tags or alarm pins). "
                     )
@@ -227,11 +248,13 @@ class FalProvider(AIProviderBase):
                     )
                 else:
                     garment_fidelity = (
-                        "GARMENT FIDELITY: The 1st reference image is the EXACT garment. "
+                        "GARMENT FIDELITY: The 1st reference image is an UPPER BODY / OUTERWEAR garment. "
+                        "MANDATORY LOWER BODY ATTIRE: The model MUST wear full-length dark pants or denim jeans covering her entire legs down to the shoes. "
+                        "Strictly NO bare legs, NO bare thighs, NO shorts, NO cycling shorts, NO underwear below the coat/top. "
                         "IMPORTANT: Ignore and remove any security tags, alarm tags, anti-theft pins, price tags, hangers, or store fixtures "
                         "visible on the 1st reference image — these are store artifacts, NOT part of the garment. "
                         "The output garment must be completely clean, tag-free, and alarm-free. "
-                        "Reproduce every visible detail precisely: same waistband construction, "
+                        "Reproduce every visible detail precisely: same collar, waistband construction, "
                         "same seams, same pockets, authentic garment closures only. "
                         "Strictly NO security pins, anti-theft tags, or artificial rivets on the waistband. "
                         "The output garment must be a pixel-perfect match of the 1st reference (minus any store tags or alarm pins). "
@@ -343,6 +366,13 @@ class FalProvider(AIProviderBase):
                 anti_alarm_tokens += (
                     ", pants under skirt, jeans under skirt, trousers under skirt, leggings under skirt, "
                     "denim under skirt, pants under dress, jeans under dress, double pants, double bottoms"
+                )
+            elif is_top_or_outerwear:
+                for pants_banned in ['pants under dress', 'jeans under dress', 'trousers under dress', 'denim under dress']:
+                    raw_neg = raw_neg.replace(pants_banned, '')
+                anti_alarm_tokens += (
+                    ", bare legs, bare thighs, exposed legs, no pants, shorts, cycling shorts, "
+                    "hot pants, underwear only, nude legs, bare knees, mini dress coat"
                 )
             if anti_alarm_tokens not in raw_neg:
                 arguments['negative_prompt'] = f"{raw_neg}, {anti_alarm_tokens}".strip(', ')
