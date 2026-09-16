@@ -2732,6 +2732,7 @@ class AiStudioSession(models.Model):
 
                 # ═══ VIEW-SPESİFİK PROMPT ═══
                 prompt_text = ""
+                negative_prompt_text = ""
                 analysis = None
                 try:
                     prompt_locks = global_prompt_locks
