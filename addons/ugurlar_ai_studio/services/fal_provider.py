@@ -634,13 +634,16 @@ class FalProvider(AIProviderBase):
                 raw_bytes = _out.getvalue()
                 content_type = 'image/webp'
                 _logger.info('fal CDN yükleme öncesi WebP formatına optimize edildi: %d KB (%dx%d)', len(raw_bytes) // 1024, _img.width, _img.height)
+            elif _fmt == 'WEBP':
+                content_type = 'image/webp'
         except Exception as _re:
             _logger.warning('Görsel WebP optimizasyonu başarısız, orijinal gönderilecek: %s', _re)
         
         # 1. fal_client.upload (HTTP REST - primary)
+        file_name = 'image.webp' if content_type == 'image/webp' else 'image.jpg'
         for attempt in range(3):
             try:
-                return fal_client.upload(raw_bytes, content_type)
+                return fal_client.upload(raw_bytes, content_type, file_name=file_name)
             except Exception as e:
                 _logger.warning('fal CDN yükleme denemesi %d/3 başarısız: %s', attempt + 1, e)
                 if attempt < 2:
@@ -652,7 +655,7 @@ class FalProvider(AIProviderBase):
             resp = _req.post(
                 'https://rest.alpha.fal.ai/storage/upload/initiate',
                 headers={'Authorization': f'Key {self.api_key}'},
-                json={'content_type': content_type, 'file_name': 'garment.jpg'},
+                json={'content_type': content_type, 'file_name': file_name},
                 timeout=15,
             )
             if resp.status_code in (200, 201):
