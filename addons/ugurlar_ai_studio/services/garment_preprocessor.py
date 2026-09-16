@@ -268,18 +268,27 @@ def sharpen_image(pil_image, amount=1.0, threshold=3):
 # ---------------------------------------------------------------------------
 def to_webp_base64(pil_image, quality=92):
     """PIL Image'i WebP base64 string'e donusturur.
+    Eger Pillow WebP destegi yoksa JPEG'e duser.
 
     Args:
         pil_image: PIL Image (RGB veya RGBA)
         quality: WebP kalite (92 = yuksek/kayipsiz hissi)
     Returns:
-        str — base64 encoded WebP
+        str — base64 encoded WebP (veya JPEG fallback)
     """
     if Image is None:
         return None
 
     buf = io.BytesIO()
-    pil_image.save(buf, format='WEBP', quality=quality, method=4)
+    # WebP desteği kontrolü
+    try:
+        pil_image.save(buf, format='WEBP', quality=quality, method=4)
+        _logger.debug('WebP cikti basarili: %d KB', len(buf.getvalue()) // 1024)
+    except (KeyError, OSError) as e:
+        _logger.warning('Pillow WebP destegi yok, JPEG fallback kullaniliyor: %s', e)
+        buf = io.BytesIO()
+        rgb_img = pil_image.convert('RGB') if pil_image.mode != 'RGB' else pil_image
+        rgb_img.save(buf, format='JPEG', quality=95, optimize=True)
     return base64.b64encode(buf.getvalue()).decode('ascii')
 
 

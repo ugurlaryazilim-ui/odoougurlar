@@ -630,14 +630,24 @@ class FalProvider(AIProviderBase):
                 if max(w, h) > 1600:
                     _img.thumbnail((1600, 1600), _PILImage.LANCZOS)
                 _out = _io.BytesIO()
-                _img.save(_out, format='WEBP', quality=92, method=4)
-                raw_bytes = _out.getvalue()
-                content_type = 'image/webp'
-                _logger.info('fal CDN yükleme öncesi WebP formatına optimize edildi: %d KB (%dx%d)', len(raw_bytes) // 1024, _img.width, _img.height)
+                # Önce WebP dene, yoksa JPEG'e düş
+                try:
+                    _img.save(_out, format='WEBP', quality=92, method=4)
+                    raw_bytes = _out.getvalue()
+                    content_type = 'image/webp'
+                    _logger.info('fal CDN yükleme öncesi WebP formatına optimize edildi: %d KB (%dx%d)', len(raw_bytes) // 1024, _img.width, _img.height)
+                except (KeyError, OSError):
+                    _logger.warning('Pillow WebP destegi yok, JPEG fallback ile optimize ediliyor')
+                    _out = _io.BytesIO()
+                    _rgb = _img.convert('RGB') if _img.mode != 'RGB' else _img
+                    _rgb.save(_out, format='JPEG', quality=92, optimize=True)
+                    raw_bytes = _out.getvalue()
+                    content_type = 'image/jpeg'
+                    _logger.info('fal CDN yükleme öncesi JPEG formatına optimize edildi: %d KB (%dx%d)', len(raw_bytes) // 1024, _img.width, _img.height)
             elif _fmt == 'WEBP':
                 content_type = 'image/webp'
         except Exception as _re:
-            _logger.warning('Görsel WebP optimizasyonu başarısız, orijinal gönderilecek: %s', _re)
+            _logger.warning('Görsel optimizasyonu başarısız, orijinal gönderilecek: %s', _re)
         
         # 1. fal_client.upload (HTTP REST - primary)
         file_name = 'image.webp' if content_type == 'image/webp' else 'image.jpg'
