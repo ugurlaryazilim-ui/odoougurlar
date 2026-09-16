@@ -1,8 +1,13 @@
 FROM odoo:19
 
 USER root
-# 0. Pillow'u WebP destekli güncel sürümle değiştir (PyPI wheel'leri WebP built-in içerir)
-RUN pip install --break-system-packages --force-reinstall Pillow
+# 0. Pillow'u WebP desteği ile kaynaktan derle
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential python3-dev libwebp-dev libjpeg-dev zlib1g-dev \
+    && pip install --break-system-packages --no-binary Pillow --force-reinstall --no-cache-dir Pillow \
+    && apt-get purge -y build-essential python3-dev \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
 
 # 1. Gerekli Python Kütüphanelerinin (Amazon SP-API eklentisi dahil) Yüklenmesi
 RUN pip install --break-system-packages pandas "openpyxl>=3.1.5" boto3 requests-auth-aws-sigv4 pymssql deep-translator
