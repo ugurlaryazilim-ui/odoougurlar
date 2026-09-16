@@ -956,7 +956,7 @@ class AiStudioSession(models.Model):
         self.ensure_one()
 
         retryable = self.generation_ids.filtered(
-            lambda g: g.state in ('failed', 'pending')
+            lambda g: g.state in ('failed', 'pending', 'processing')
         )
         if not retryable:
             # Tüm generation'lar zaten tamamlanmışsa oturumu hemen 'review' durumuna al
@@ -1160,8 +1160,10 @@ class AiStudioSession(models.Model):
         # Tamamlanmış/kaydedilmiş session'ları koruma altına al
         if self.state in ('done', 'saving'):
             raise UserError(_('Bu oturum zaten tamamlanmış. Onaylı görsellerin silinmemesi için yeniden başlatılamaz.'))
-        if self.state == 'processing':
-            raise UserError(_('Bu oturum zaten işleniyor.'))
+        with _ACTIVE_SESSIONS_LOCK:
+            is_active_in_memory = self.id in _ACTIVE_SESSIONS
+        if self.state == 'processing' and is_active_in_memory:
+            raise UserError(_('Bu oturum şu anda aktif bir arka plan işlemi tarafından yürütülüyor.'))
         if not self.model_preset_id:
             raise UserError(_('Lütfen bir manken preseti seçin.'))
         if not self.photo_ids:
@@ -3230,6 +3232,14 @@ class AiStudioSession(models.Model):
         """Oturumu iptal et."""
         for session in self:
             session.state = 'cancelled'
+            stuck_gens = session.generation_ids.filtered(
+                lambda g: g.state in ('pending', 'processing')
+            )
+            for g in stuck_gens:
+                g.write({
+                    'state': 'failed',
+                    'error_message': _('Kullanıcı tarafından oturum iptal edildi.'),
+                })
             session.message_post(body=_('Oturum iptal edildi.'))
 
     def action_reset_draft(self):
@@ -3331,11 +3341,15 @@ class AiStudioSession(models.Model):
                 _logger.warning('Cron Kuyruk: Bekleyen işlemler var ama API anahtarı bulunamadı!')
 
         # ═══ ADIM 2: Takılmış oturumları temizle (thread öldü, sunucu yeniden başladı) ═══
-        stuck_cutoff = fields.Datetime.now() - timedelta(minutes=15)
+        # AI istekleri (Seedream/FASHN) en fazla 120-180 saniye sürer.
+        # Hafızada aktif olmayan ve 4 dakikadan uzun süredir güncellenmeyen 'processing' kayıtları ölü thread'dir.
+        stuck_cutoff = fields.Datetime.now() - timedelta(minutes=4)
         stuck_sessions = self.search([
             ('state', 'in', ['preprocessing', 'processing']),
             ('write_date', '<', stuck_cutoff),
         ])
+        # Hafızada aktif thread'i olan oturumlara dokunma
+        stuck_sessions = stuck_sessions.filtered(lambda s: s.id not in current_active_ids)
         # Aktif kuyrukta olanlara dokunma (ADIM 1'de zaten işleme alındı)
         stuck_sessions = stuck_sessions - sessions_needing_processing
         
@@ -3346,7 +3360,7 @@ class AiStudioSession(models.Model):
             for gen in stuck_gens:
                 gen.write({
                     'state': 'failed',
-                    'error_message': _('Zaman aşımı: 15 dakika içinde AI servisinden yanıt alınamadı (sunucu yeniden başlamış olabilir).'),
+                    'error_message': _('Zaman aşımı: 4 dakika içinde AI servisinden yanıt alınamadı (sunucu yeniden başlamış olabilir).'),
                 })
 
             # Terk edilmiş pending üretimleri de failed yap
