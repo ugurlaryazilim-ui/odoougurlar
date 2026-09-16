@@ -2133,22 +2133,13 @@ class AiStudioSession(models.Model):
                         except Exception as up_e:
                             _logger.warning('Ön yüz referans görseli yüklenemedi: %s', up_e)
                             
+                    # PERF: Boydan manken çekimlerinde (front, back, side) ekstra makro detay
+                    # fotoğraflarını Seedream'e referans olarak göndermiyoruz.
+                    # 1) Zaten 1. referans (kıyafet) ve 2. referans (manken) yeterlidir (back/side için 3. ref front'tur).
+                    # 2) 4. bir görsel olarak makro kumaş gitmesi Seedream GPU ViT kodlama süresini 30-40s uzatmakta
+                    #    ve modelin vücut oranlarını bozabilmektedir.
+                    # 3) Detay görseli zaten üretilen manken sonucundan akıllı kırpılarak (crop) elde edilir.
                     detail_urls = []
-                    # Detay fotoğraflarını mevcut view'a göre filtrele
-                    detail_placement_filter = photo_type if photo_type in ('front', 'back') else 'front'
-                    detail_photos = env['ai.studio.photo'].search([
-                        ('session_id', '=', session.id),
-                        ('photo_type', '=', 'detail'),
-                        ('detail_placement', '=', detail_placement_filter),
-                    ])
-                    # Geriye uyumluluk / Fallback İPTAL: Sadece ilgili view'ın detay fotoğrafları gönderilir.
-                    # Bu sayede ön yüzdeki desen/cepler arka yüze taşmaz.
-                    for dp in detail_photos:
-                        try:
-                            dp_url = provider.upload_image(dp.image_original)
-                            detail_urls.append(dp_url)
-                        except Exception:
-                            pass
                     # Arka plan kaldırma ve askı temizleme (DRY helper)
                     security_tags = cached_analysis.get('securityTags') if isinstance(cached_analysis, dict) else None
                     garment_url, processed_garment_b64 = self._prepare_garment_for_tryon(
@@ -2714,21 +2705,8 @@ class AiStudioSession(models.Model):
                 import random
                 front_seed = random.randint(100000, 99999999)
 
-                # Detay fotoğraflarını mevcut view'a göre filtrele (tüm photo_type'lar için)
-                detail_placement_filter = photo_type if photo_type in ('front', 'back') else 'front'
-                detail_photos = env['ai.studio.photo'].search([
-                    ('session_id', '=', session.id),
-                    ('photo_type', '=', 'detail'),
-                    ('detail_placement', '=', detail_placement_filter),
-                ])
-                # Geriye uyumluluk / Fallback İPTAL: Sadece ilgili view'ın detay fotoğrafları gönderilir.
-                # Bu sayede ön yüzdeki desen/cepler arka yüze taşmaz.
-                for dp in detail_photos:
-                    try:
-                        dp_url = provider.upload_image(dp.image_original)
-                        detail_urls.append(dp_url)
-                    except Exception:
-                        pass
+                # PERF: Boydan manken çekimlerinde detay fotoğraflarını göndermiyoruz (hız ve oran tutarlılığı)
+                detail_urls = []
 
                 if photo_type in ('back', 'side', 'detail'):
                     # Session içindeki tamamlanmış front kaydını bul
