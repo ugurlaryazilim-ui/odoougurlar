@@ -690,6 +690,7 @@ class AmazonOrderSync(models.Model):
 
         # Mevcut sipariş güncelleniyorsa partner, amazon_order ve fiyatları tazele
         if existing_order:
+            old_partner_name = existing_order.partner_id.name if existing_order.partner_id else ''
             existing_order.sudo().write({
                 'partner_id': partner.id,
                 'partner_invoice_id': partner.id,
@@ -698,6 +699,18 @@ class AmazonOrderSync(models.Model):
                 'amazon_store_id': self.id,
             })
             amazon_order.write({'sale_order_id': existing_order.id})
+
+            # ─── PII Güncelleme: Picking'lerdeki müşteri bilgisini de güncelle ───
+            # Sipariş Pending→Unshipped geçişinde müşteri bilgisi gelir.
+            # Picking'lerin partner_id'si de güncellenmeli ki toplama listesinde
+            # "Amazon Müşterisi" yerine gerçek müşteri adı görünsün.
+            if old_partner_name in ('', 'Amazon Müşterisi') and partner.name not in ('', 'Amazon Müşterisi'):
+                _logger.info(
+                    "Amazon PII güncellendi: %s → müşteri '%s' → '%s'",
+                    amazon_order_id, old_partner_name, partner.name)
+                for picking in existing_order.picking_ids:
+                    if picking.state not in ('done', 'cancel'):
+                        picking.sudo().write({'partner_id': partner.id})
 
             # Fiyat ve KDV düzeltmesi (eğer tutar Amazon ile tutmuyorsa veya force_update ise)
             if items_val and (abs(existing_order.amount_total - total_order_amount) > 0.01 or force_update):
