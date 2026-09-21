@@ -72,6 +72,67 @@ class AmazonOrderSync(models.Model):
             _logger.error("AWS Auth Error: %s", e)
             return None
 
+    @api.private
+    def _get_restricted_data_token(self, session, auth, base_url, amazon_order_id):
+        """Amazon SP-API Restricted Data Token (RDT) alır.
+
+        PII (Kişisel Bilgi) verilerine erişim için gereklidir.
+        RDT olmadan ShippingAddress, BuyerInfo gibi alanlar BOŞ döner.
+
+        Tokens API: POST /tokens/2021-03-01/restrictedDataToken
+        Dönüş: RDT string veya None (hata durumunda).
+        """
+        endpoint = f"{base_url}/tokens/2021-03-01/restrictedDataToken"
+        payload = {
+            "restrictedResources": [
+                {
+                    "method": "GET",
+                    "path": f"/orders/v0/orders/{amazon_order_id}",
+                    "dataElements": ["buyerInfo", "shippingAddress"]
+                },
+                {
+                    "method": "GET",
+                    "path": f"/orders/v0/orders/{amazon_order_id}/address",
+                },
+                {
+                    "method": "GET",
+                    "path": f"/orders/v0/orders/{amazon_order_id}/buyerInfo",
+                },
+                {
+                    "method": "GET",
+                    "path": f"/orders/v0/orders/{amazon_order_id}/orderItems/buyerInfo",
+                },
+            ]
+        }
+        try:
+            res = session.post(endpoint, auth=auth, json=payload, timeout=20)
+            if res.status_code == 200:
+                rdt = res.json().get('restrictedDataToken')
+                if rdt:
+                    _logger.debug(
+                        "Amazon RDT alındı: %s (sipariş: %s)",
+                        rdt[:20] + '...', amazon_order_id)
+                    return rdt
+                else:
+                    _logger.warning(
+                        "Amazon RDT yanıtında token yok: %s",
+                        res.text[:200])
+            elif res.status_code == 403:
+                _logger.error(
+                    "Amazon RDT 403 Forbidden — SP-API uygulamanızda "
+                    "'Direct-to-Consumer Shipping' veya 'Tax Invoicing' "
+                    "rolü aktif olmalı! Seller Central > Developer Console > "
+                    "Uygulamanız > Data Access bölümünü kontrol edin. "
+                    "Sipariş: %s | Yanıt: %s",
+                    amazon_order_id, res.text[:300])
+            else:
+                _logger.warning(
+                    "Amazon RDT HTTP %s (sipariş: %s): %s",
+                    res.status_code, amazon_order_id, res.text[:300])
+        except Exception as e:
+            _logger.error("Amazon RDT fetch hatası (%s): %s", amazon_order_id, e)
+        return None
+
     @api.model
     def cron_sync_amazon_orders(self):
         """Cron ile otomatik senkronizasyon."""
@@ -289,7 +350,10 @@ class AmazonOrderSync(models.Model):
             raise UserError(str(e))
 
     def _refetch_single_amazon_order(self, amazon_order_id):
-        """Amazon'dan tek bir siparişi ve müşteri detaylarını yenile."""
+        """Amazon'dan tek bir siparişi ve müşteri detaylarını yenile.
+
+        RDT kullanarak PII bilgilerini de çeker.
+        """
         self.ensure_one()
         access_token = self.generate_access_token()
         session = requests.Session()
@@ -301,10 +365,20 @@ class AmazonOrderSync(models.Model):
         auth = self._get_aws_auth()
         base_url = self.get_api_endpoint()
 
+        # RDT al — PII bilgileri (ad, adres, telefon) için gerekli
+        rdt = self._get_restricted_data_token(session, auth, base_url, amazon_order_id)
+
+        # RDT varsa header'da kullan
+        headers = {}
+        if rdt:
+            headers['x-amz-access-token'] = rdt
+
         endpoint = f"{base_url}/orders/v0/orders/{amazon_order_id}"
-        res = session.get(endpoint, auth=auth, timeout=20)
+        res = session.get(endpoint, auth=auth, headers=headers, timeout=20)
         if res.status_code != 200:
-            raise UserError(_("Amazon sipariş bilgisi alınamadı (HTTP %s): %s") % (res.status_code, res.text))
+            raise UserError(_(
+                "Amazon sipariş bilgisi alınamadı (HTTP %s): %s") % (
+                res.status_code, res.text))
 
         order_data = res.json().get('payload', {})
         self._process_single_order(order_data, session, auth, base_url, force_update=True)
@@ -581,16 +655,39 @@ class AmazonOrderSync(models.Model):
             return processed, 0, 0, msgs
 
         # ─── PII (Adres ve Müşteri) Detaylarını Çek ───
+        # Amazon SP-API PII verilerine erişim için Restricted Data Token (RDT) gerektirir.
+        # RDT olmadan ShippingAddress ve BuyerInfo alanları BOŞ döner.
         buyer_info = dict(order_data.get('BuyerInfo') or {})
         shipping_address = dict(order_data.get('ShippingAddress') or {})
-        
+
+        # PII eksikse RDT al ve yeniden çek
+        needs_pii = (
+            not shipping_address or not shipping_address.get('Name')
+            or not shipping_address.get('AddressLine1')
+            or not buyer_info or not buyer_info.get('BuyerName')
+        )
+        rdt = None
+        if needs_pii:
+            rdt = self._get_restricted_data_token(session, auth, base_url, amazon_order_id)
+            if rdt:
+                _logger.info(
+                    "Amazon PII için RDT alındı, adres/alıcı bilgisi çekiliyor: %s",
+                    amazon_order_id)
+            else:
+                _logger.warning(
+                    "Amazon RDT alınamadı — PII eksik kalacak: %s "
+                    "(SP-API 'Direct-to-Consumer Shipping' rolü kontrol edin)",
+                    amazon_order_id)
+
         if not shipping_address or not shipping_address.get('Name') or not shipping_address.get('AddressLine1'):
-            fetched_address = self._fetch_order_address(amazon_order_id, session, auth, base_url)
+            fetched_address = self._fetch_order_address(
+                amazon_order_id, session, auth, base_url, rdt=rdt)
             if fetched_address:
                 shipping_address.update(fetched_address)
 
         if not buyer_info or not buyer_info.get('BuyerName') or not buyer_info.get('BuyerEmail'):
-            fetched_buyer = self._fetch_order_buyer_info(amazon_order_id, session, auth, base_url)
+            fetched_buyer = self._fetch_order_buyer_info(
+                amazon_order_id, session, auth, base_url, rdt=rdt)
             if fetched_buyer:
                 buyer_info.update(fetched_buyer)
 
@@ -870,23 +967,78 @@ class AmazonOrderSync(models.Model):
         return ''
 
     @api.private
-    def _fetch_order_address(self, amazon_order_id, session, auth, base_url):
+    def _fetch_order_address(self, amazon_order_id, session, auth, base_url, rdt=None):
+        """Sipariş teslimat adresini çeker. RDT (Restricted Data Token) gerektirir.
+
+        RDT olmadan Amazon boş yanıt döner (PII koruması).
+        """
         endpoint = f"{base_url}/orders/v0/orders/{amazon_order_id}/address"
         try:
-            res = session.get(endpoint, auth=auth, timeout=20)
+            # RDT varsa header'a ekle (LWA token yerine)
+            headers = {}
+            if rdt:
+                headers['x-amz-access-token'] = rdt
+
+            res = session.get(endpoint, auth=auth, headers=headers, timeout=20)
             if res.status_code == 200:
-                return res.json().get('payload', {}).get('ShippingAddress', {})
+                address = res.json().get('payload', {}).get('ShippingAddress', {})
+                if address and address.get('Name'):
+                    _logger.info(
+                        "Amazon adres bilgisi alındı: %s → %s (%s)",
+                        amazon_order_id, address.get('Name', '?'), address.get('City', '?'))
+                else:
+                    _logger.info(
+                        "Amazon adres yanıtı boş (Pending olabilir): %s | RDT: %s",
+                        amazon_order_id, 'Var' if rdt else 'YOK')
+                return address
+            elif res.status_code == 403:
+                _logger.error(
+                    "Amazon Address API 403 Forbidden (%s) — "
+                    "RDT: %s | SP-API 'Direct-to-Consumer Shipping' rolü kontrol edin. "
+                    "Yanıt: %s",
+                    amazon_order_id, 'Var' if rdt else 'YOK', res.text[:200])
+            else:
+                _logger.warning(
+                    "Amazon Address API HTTP %s (%s): %s",
+                    res.status_code, amazon_order_id, res.text[:200])
         except Exception as e:
             _logger.error("Amazon Address fetch hatası (%s): %s", amazon_order_id, e)
         return {}
 
     @api.private
-    def _fetch_order_buyer_info(self, amazon_order_id, session, auth, base_url):
+    def _fetch_order_buyer_info(self, amazon_order_id, session, auth, base_url, rdt=None):
+        """Alıcı bilgilerini çeker. RDT (Restricted Data Token) gerektirir.
+
+        RDT olmadan Amazon boş yanıt döner (PII koruması).
+        """
         endpoint = f"{base_url}/orders/v0/orders/{amazon_order_id}/buyerInfo"
         try:
-            res = session.get(endpoint, auth=auth, timeout=20)
+            headers = {}
+            if rdt:
+                headers['x-amz-access-token'] = rdt
+
+            res = session.get(endpoint, auth=auth, headers=headers, timeout=20)
             if res.status_code == 200:
-                return res.json().get('payload', {})
+                buyer = res.json().get('payload', {})
+                if buyer and (buyer.get('BuyerName') or buyer.get('BuyerEmail')):
+                    _logger.info(
+                        "Amazon alıcı bilgisi alındı: %s → %s",
+                        amazon_order_id, buyer.get('BuyerName', '?'))
+                else:
+                    _logger.info(
+                        "Amazon alıcı yanıtı boş (Pending olabilir): %s | RDT: %s",
+                        amazon_order_id, 'Var' if rdt else 'YOK')
+                return buyer
+            elif res.status_code == 403:
+                _logger.error(
+                    "Amazon BuyerInfo API 403 Forbidden (%s) — "
+                    "RDT: %s | SP-API 'Direct-to-Consumer Shipping' rolü kontrol edin. "
+                    "Yanıt: %s",
+                    amazon_order_id, 'Var' if rdt else 'YOK', res.text[:200])
+            else:
+                _logger.warning(
+                    "Amazon BuyerInfo API HTTP %s (%s): %s",
+                    res.status_code, amazon_order_id, res.text[:200])
         except Exception as e:
             _logger.error("Amazon BuyerInfo fetch hatası (%s): %s", amazon_order_id, e)
         return {}
