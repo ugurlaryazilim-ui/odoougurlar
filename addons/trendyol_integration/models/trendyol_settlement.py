@@ -219,7 +219,15 @@ class TrendyolSettlement(models.Model):
         # 5) Sipariş bazlı finansal özet güncelle
         self._update_order_financial_summary(store)
 
-        store.sudo().write({'last_financial_sync': fields.Datetime.now()})
+        for _attempt in range(3):
+            try:
+                with self.env.cr.savepoint():
+                    store.sudo().write({'last_financial_sync': fields.Datetime.now()})
+                break
+            except Exception as e:
+                self.env.invalidate_all(flush=False)
+                if _attempt == 2:
+                    _logger.warning("last_financial_sync güncelleme atlandı (%s, 3 deneme sonrası): %s", store.name, e)
         _logger.info("Finansal senkronizasyon [%s]: %s yeni kayıt, %s hata",
                       store.name, created, len(errors))
 

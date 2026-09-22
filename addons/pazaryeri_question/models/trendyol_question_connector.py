@@ -76,26 +76,24 @@ class TrendyolQuestionConnector(models.AbstractModel):
                 break
             page += 1
         
-        # last_question_sync — ayrı cursor ile güncelle
-        # Trendyol sipariş sync cron'u da trendyol_store'a yazıyor,
-        # aynı anda çalışınca PostgreSQL serialization hatası oluşuyor
-        # ve tüm transaction (sorular dahil) rollback ediliyor.
-        # Ayrı cursor kullanarak bu çakışmayı önlüyoruz.
-        store_id = store.id
-        try:
-            new_cr = self.pool.cursor()
-            new_cr.execute(
-                "UPDATE trendyol_store SET last_question_sync = %s, write_date = %s WHERE id = %s",
-                (fields.Datetime.now(), fields.Datetime.now(), store_id)
-            )
-            new_cr.commit()
-            new_cr.close()
-        except Exception as e:
-            _logger.warning("last_question_sync güncellenemedi (mağaza: %s): %s", store.name, e)
+        # last_question_sync — savepoint + retry ile güncelle
+        # Ayrı cursor (self.pool.cursor()) kullanımı kaldırıldı çünkü
+        # bağımsız transaction'ın commit etmesi, diğer açık transaction'ların
+        # aynı satırda serialization hatası almasını GARANTİ ediyordu.
+        # Şimdi ana transaction içinde savepoint ile güncelliyoruz;
+        # çakışma olursa sadece savepoint geri alınıp tekrar denenir.
+        for _attempt in range(3):
             try:
-                new_cr.close()
-            except Exception:
-                pass
+                with self.env.cr.savepoint():
+                    store.sudo().write({'last_question_sync': fields.Datetime.now()})
+                break
+            except Exception as e:
+                self.env.invalidate_all(flush=False)
+                if _attempt == 2:
+                    _logger.warning(
+                        "last_question_sync güncellenemedi (mağaza: %s, 3 deneme sonrası): %s",
+                        store.name, e,
+                    )
         
         _logger.info("Trendyol soru sync tamamlandı (mağaza: %s) | Yeni: %d | Güncellenen: %d",
                      store.name, total_created, total_updated)

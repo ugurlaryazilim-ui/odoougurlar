@@ -149,11 +149,15 @@ class TrendyolOrderSync(models.Model):
                     error_details.append(f"İade sync: {str(e)}")
                     _logger.error("İade sync hatası [%s]: %s", store_name, str(e))
 
-            try:
-                with self.env.cr.savepoint():
-                    store.sudo().write({'last_sync': fields.Datetime.now()})
-            except Exception as store_e:
-                _logger.warning("Mağaza last_sync güncelleme atlandı (%s): %s", store_name, str(store_e))
+            for _attempt in range(3):
+                try:
+                    with self.env.cr.savepoint():
+                        store.sudo().write({'last_sync': fields.Datetime.now()})
+                    break
+                except Exception as store_e:
+                    self.env.invalidate_all(flush=False)
+                    if _attempt == 2:
+                        _logger.warning("Mağaza last_sync güncelleme atlandı (%s, 3 deneme sonrası): %s", store_name, str(store_e))
 
             try:
                 with self.env.cr.savepoint():
