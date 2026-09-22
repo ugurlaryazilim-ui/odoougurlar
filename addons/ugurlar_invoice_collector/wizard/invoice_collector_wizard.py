@@ -406,19 +406,35 @@ class UgurlarInvoiceCollectorWizard(models.Model):
             # Yol 2: e-Fatura ETTN al (gelen alış faturaları)
             if not pdf_content:
                 try:
-                    params = [{'Name': 'DocumentNumber', 'Value': doc_num}]
-                    res = connector.run_proc('usp_PurchaseInvoice_EFaturaURL', params)
-                    ettn = str(res[0].get('ETTN', '')).strip() if (res and isinstance(res, list) and isinstance(res[0], dict)) else ''
+                    sp_name = self.env['ir.config_parameter'].sudo().get_param(
+                        'odoougurlar.nebim_sp_efatura_url', 'usp_PurchaseInvoice_EFaturaURL'
+                    )
+                    res = None
+                    # 1. Öncelik: Nebim iç evrak numarası (RefNumber: örn. 1-BP-7-13211)
+                    # Nebim'deki usp_PurchaseInvoice_EFaturaURL prosedürü @DocumentNumber parametresinde
+                    # Nebim'in iç belge referansını bekler.
+                    if line.ref_number:
+                        res = connector.run_proc(sp_name, [{'Name': 'DocumentNumber', 'Value': line.ref_number.strip()}])
+                    
+                    # 2. Öncelik: Bulunamazsa belge numarası (örn. EKL...) ile de dene
+                    if (not res or not isinstance(res, list) or len(res) == 0) and line.document_number:
+                        res = connector.run_proc(sp_name, [{'Name': 'DocumentNumber', 'Value': line.document_number.strip()}])
+                    
+                    ettn = ''
+                    if res and isinstance(res, list) and len(res) > 0 and isinstance(res[0], dict):
+                        row = res[0]
+                        ettn = str(row.get('ETTN') or row.get('UUID') or row.get('InvoiceUUID') or row.get('EInvoiceUUID') or '').strip()
                     
                     if ettn:
                         line.invoice_url = f"ETTN: {ettn}"
                         ettn_to_line[ettn] = line
+                        _logger.info("e-Fatura ETTN bulundu: doc=%s, ref=%s -> ETTN: %s", doc_num, line.ref_number, ettn)
                     else:
                         line.write({
                             'download_status': 'error',
                             'error_message': 'Nebim ETTN bulunamadı.'
                         })
-                        _logger.warning("e-Fatura ETTN bulunamadı: %s", doc_num)
+                        _logger.warning("e-Fatura ETTN bulunamadı: doc_num=%s, ref=%s", doc_num, line.ref_number)
                 except Exception as e:
                     line.write({
                         'download_status': 'error',
