@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <template id="report_campaign_performance">
+        <t t-call="web.html_container">
+            <t t-foreach="docs" t-as="doc">
+                <t t-call="web.external_layout">
+                    <div class="page">
+                        <h2>Campaign Performance: <t t-out="doc.name"/></h2>
+                        
+                        <div class="row mt-4 mb-4">
+                            <div class="col-3">
+                                <strong>Platform:</strong> <t t-out="doc.platform"/>
+                            </div>
+                            <div class="col-3">
+                                <strong>Status:</strong> <t t-out="doc.state"/>
+                            </div>
+                            <div class="col-3">
+                                <strong>Budget:</strong> <t t-out="doc.daily_budget"/>
+                            </div>
+                            <div class="col-3">
+                                <strong>Account:</strong> <t t-out="doc.account_id.name"/>
+                            </div>
+                        </div>
+
+                        <h3>KPI Summary</h3>
+                        <div class="row mt-3 mb-4 text-center">
+                            <div class="col-3 border p-3">
+                                <h5>Total Spend</h5>
+                                <h4 class="text-primary"><t t-out="doc.total_spend"/></h4>
+                            </div>
+                            <div class="col-3 border p-3">
+                                <h5>Total Clicks</h5>
+                                <h4 class="text-primary"><t t-out="doc.total_clicks"/></h4>
+                            </div>
+                            <div class="col-3 border p-3">
+                                <h5>Average ROAS</h5>
+                                <h4 class="text-primary"><t t-out="doc.avg_roas"/></h4>
+                            </div>
+                            <div class="col-3 border p-3">
+                                <h5>Average CPA</h5>
+                                <h4 class="text-primary"><t t-out="doc.avg_cpa"/></h4>
+                            </div>
+                        </div>
+
+                        <h3>Daily Metrics</h3>
+                        <table class="table table-sm table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th class="text-end">Spend</th>
+                                    <th class="text-end">Clicks</th>
+                                    <th class="text-end">Conversions</th>
+                                    <th class="text-end">Revenue</th>
+                                    <th class="text-end">ROAS</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <t t-foreach="doc.metric_ids" t-as="metric">
+                                    <tr>
+                                        <td><t t-out="metric.date"/></td>
+                                        <td class="text-end"><t t-out="metric.spend"/></td>
+                                        <td class="text-end"><t t-out="metric.clicks"/></td>
+                                        <td class="text-end"><t t-out="metric.conversions"/></td>
+                                        <td class="text-end"><t t-out="metric.revenue"/></td>
+                                        <td class="text-end">
+                                            <span t-attf-class="badge {{'bg-success' if metric.roas > 2.0 else 'bg-warning' if metric.roas > 1.0 else 'bg-danger'}}">
+                                                <t t-out="metric.roas"/>
+                                            </span>
+                                        </td>
+                                    </tr>
+                                </t>
+                            </tbody>
+                        </table>
+
+                        <t t-if="doc.recommendation_ids">
+                            <h3 class="mt-4">Active Recommendations</h3>
+                            <ul>
+                                <t t-foreach="doc.recommendation_ids.filtered(lambda r: r.state == 'draft')" t-as="rec">
+                                    <li>
+                                        <strong><t t-out="rec.name"/>:</strong> <t t-out="rec.description"/>
+                                    </li>
+                                </t>
+                            </ul>
+                        </t>
+                    </div>
+                </t>
+            </t>
+        </t>
+    </template>
+</odoo>

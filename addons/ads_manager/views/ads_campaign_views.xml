@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_ads_campaign_form" model="ir.ui.view">
+        <field name="name">ads.campaign.form</field>
+        <field name="model">ads.campaign</field>
+        <field name="arch" type="xml">
+            <form string="Ads Campaign">
+                <header>
+                    <field name="status" widget="statusbar" statusbar_visible="active,paused,archived"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_view_metrics" type="object" class="oe_stat_button" icon="fa-line-chart">
+                            <field name="metric_count" widget="statinfo" string="Metrics"/>
+                        </button>
+                        <button name="action_view_recommendations" type="object" class="oe_stat_button" icon="fa-lightbulb-o">
+                            <field name="recommendation_count" widget="statinfo" string="Recommendations"/>
+                        </button>
+                    </div>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" placeholder="Campaign Name"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group string="General">
+                            <field name="account_id"/>
+                            <field name="platform" widget="badge"/>
+                            <field name="objective"/>
+                            <field name="user_id" widget="many2one_avatar_user"/>
+                        </group>
+                        <group string="Budget">
+                            <field name="currency_id" invisible="1"/>
+                            <field name="daily_budget" widget="monetary" options="{'currency_field': 'currency_id'}"/>
+                            <field name="lifetime_budget" widget="monetary" options="{'currency_field': 'currency_id'}"/>
+                            <field name="total_spend" widget="monetary" options="{'currency_field': 'currency_id'}"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Ad Sets" name="adsets">
+                            <field name="adset_ids" readonly="1">
+                                <list>
+                                    <field name="name"/>
+                                    <field name="status" widget="badge"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Daily Metrics" name="daily_metrics">
+                            <field name="metric_daily_ids" readonly="1">
+                                <list>
+                                    <field name="date"/>
+                                    <field name="impressions"/>
+                                    <field name="clicks"/>
+                                    <field name="spend" widget="monetary" options="{'currency_field': 'currency_id'}"/>
+                                    <field name="currency_id" column_invisible="True"/>
+                                    <field name="roas" decoration-danger="roas &lt; 1" decoration-success="roas &gt;= 2"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Recommendations" name="recommendations">
+                            <field name="recommendation_ids" readonly="1">
+                                <list>
+                                    <field name="name"/>
+                                    <field name="severity" widget="badge"/>
+                                    <field name="status" widget="badge"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_ads_campaign_list" model="ir.ui.view">
+        <field name="name">ads.campaign.list</field>
+        <field name="model">ads.campaign</field>
+        <field name="arch" type="xml">
+            <list string="Ads Campaigns" decoration-danger="status == 'paused'" decoration-muted="status == 'archived'">
+                <field name="name"/>
+                <field name="account_id"/>
+                <field name="platform" widget="badge"/>
+                <field name="objective"/>
+                <field name="currency_id" column_invisible="True"/>
+                <field name="daily_budget" widget="monetary" options="{'currency_field': 'currency_id'}"/>
+                <field name="total_spend" widget="monetary" options="{'currency_field': 'currency_id'}" sum="Total Spend"/>
+                <field name="avg_roas" decoration-danger="avg_roas &lt; 1" decoration-success="avg_roas &gt;= 2"/>
+                <field name="status" widget="badge" decoration-success="status == 'active'" decoration-danger="status == 'paused'" decoration-muted="status == 'archived'"/>
+                <field name="user_id" widget="many2one_avatar_user"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_ads_campaign_kanban" model="ir.ui.view">
+        <field name="name">ads.campaign.kanban</field>
+        <field name="model">ads.campaign</field>
+        <field name="arch" type="xml">
+            <kanban default_group_by="status" class="o_kanban_mobile">
+                <templates>
+                    <t t-name="card">
+                        <div class="oe_kanban_global_click">
+                            <div class="o_kanban_record_top mb-2">
+                                <div class="o_kanban_record_headings">
+                                    <strong class="o_kanban_record_title">
+                                        <field name="name"/>
+                                    </strong>
+                                </div>
+                                <field name="platform" widget="badge"/>
+                            </div>
+                            <div class="o_kanban_record_body">
+                                <div>
+                                    Budget: <field name="daily_budget" widget="monetary" options="{'currency_field': 'currency_id'}"/>
+                                </div>
+                                <div>
+                                    Spend: <field name="total_spend" widget="monetary" options="{'currency_field': 'currency_id'}"/>
+                                </div>
+                                <div>
+                                    ROAS: <field name="avg_roas" decoration-danger="avg_roas &lt; 1" decoration-success="avg_roas &gt;= 2"/>
+                                </div>
+                            </div>
+                            <div class="o_kanban_record_bottom mt-2">
+                                <div class="oe_kanban_bottom_left">
+                                </div>
+                                <div class="oe_kanban_bottom_right">
+                                    <field name="user_id" widget="many2one_avatar_user"/>
+                                </div>
+                            </div>
+                        </div>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <record id="view_ads_campaign_search" model="ir.ui.view">
+        <field name="name">ads.campaign.search</field>
+        <field name="model">ads.campaign</field>
+        <field name="arch" type="xml">
+            <search string="Ads Campaigns">
+                <field name="name"/>
+                <field name="account_id"/>
+                <field name="user_id"/>
+                <filter string="Active" name="filter_active" domain="[('status', '=', 'active')]"/>
+                <filter string="Paused" name="filter_paused" domain="[('status', '=', 'paused')]"/>
+                <group expand="0" string="Group By">
+                    <filter string="Platform" name="group_by_platform" context="{'group_by': 'platform'}"/>
+                    <filter string="Status" name="group_by_status" context="{'group_by': 'status'}"/>
+                    <filter string="Account" name="group_by_account" context="{'group_by': 'account_id'}"/>
+                    <filter string="Objective" name="group_by_objective" context="{'group_by': 'objective'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_ads_campaign" model="ir.actions.act_window">
+        <field name="name">Ads Campaigns</field>
+        <field name="res_model">ads.campaign</field>
+        <field name="view_mode">list,kanban,form,graph,pivot</field>
+        <field name="context">{'search_default_filter_active': 1}</field>
+        <field name="search_view_id" ref="view_ads_campaign_search"/>
+    </record>
+</odoo>

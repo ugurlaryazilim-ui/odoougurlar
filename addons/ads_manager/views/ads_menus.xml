@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Placeholder Actions for Adset and Ad to make the menu items work -->
+    <record id="action_ads_adset" model="ir.actions.act_window">
+        <field name="name">Ad Sets</field>
+        <field name="res_model">ads.adset</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <record id="action_ads_ad" model="ir.actions.act_window">
+        <field name="name">Reklamlar</field>
+        <field name="res_model">ads.ad</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- Client Action for Dashboard -->
+    <record id="action_ads_dashboard" model="ir.actions.client">
+        <field name="name">Ads Dashboard</field>
+        <field name="tag">ads_manager_dashboard</field>
+    </record>
+
+    <!-- Menus -->
+    <!-- Root Menu -->
+    <menuitem id="menu_ads_manager_root" 
+              name="Ads Manager" 
+              sequence="25" 
+              web_icon="ads_manager,static/description/icon.png"/>
+
+    <!-- Dashboard -->
+    <menuitem id="menu_ads_dashboard" 
+              name="Dashboard" 
+              parent="menu_ads_manager_root" 
+              action="action_ads_dashboard" 
+              sequence="10"/>
+
+    <!-- Kampanyalar -->
+    <menuitem id="menu_ads_campaigns_main" 
+              name="Kampanyalar" 
+              parent="menu_ads_manager_root" 
+              sequence="20"/>
+              
+    <menuitem id="menu_ads_campaigns_all" 
+              name="Tüm Kampanyalar" 
+              parent="menu_ads_campaigns_main" 
+              action="action_ads_campaign" 
+              sequence="10"/>
+              
+    <menuitem id="menu_ads_adsets" 
+              name="Ad Sets" 
+              parent="menu_ads_campaigns_main" 
+              action="action_ads_adset" 
+              sequence="20"/>
+              
+    <menuitem id="menu_ads_ads" 
+              name="Reklamlar" 
+              parent="menu_ads_campaigns_main" 
+              action="action_ads_ad" 
+              sequence="30"/>
+
+    <!-- Analitik -->
+    <menuitem id="menu_ads_analytics" 
+              name="Analitik" 
+              parent="menu_ads_manager_root" 
+              sequence="30"/>
+              
+    <menuitem id="menu_ads_metrics_daily" 
+              name="Günlük Metrikler" 
+              parent="menu_ads_analytics" 
+              action="action_ads_metric_daily" 
+              sequence="10"/>
+              
+    <menuitem id="menu_ads_metrics_monthly" 
+              name="Aylık Özet" 
+              parent="menu_ads_analytics" 
+              action="action_ads_metric_monthly" 
+              sequence="20"/>
+
+    <!-- Optimizasyon -->
+    <menuitem id="menu_ads_optimization" 
+              name="Optimizasyon" 
+              parent="menu_ads_manager_root" 
+              sequence="40"/>
+              
+    <menuitem id="menu_ads_recommendations" 
+              name="Öneriler" 
+              parent="menu_ads_optimization" 
+              action="action_ads_recommendation" 
+              sequence="10"/>
+              
+    <menuitem id="menu_ads_rules" 
+              name="Otomatik Kurallar" 
+              parent="menu_ads_optimization" 
+              action="action_ads_rule" 
+              sequence="20"/>
+
+    <!-- Yapılandırma -->
+    <menuitem id="menu_ads_configuration" 
+              name="Yapılandırma" 
+              parent="menu_ads_manager_root" 
+              sequence="100"/>
+              
+    <menuitem id="menu_ads_accounts" 
+              name="Reklam Hesapları" 
+              parent="menu_ads_configuration" 
+              action="action_ads_account" 
+              sequence="10"/>
+              
+    <menuitem id="menu_ads_sync_logs" 
+              name="Senkronizasyon Logları" 
+              parent="menu_ads_configuration" 
+              action="action_ads_sync_log" 
+              sequence="20"/>
+              
+    <menuitem id="menu_ads_settings" 
+              name="Ayarlar" 
+              parent="menu_ads_configuration" 
+              action="action_ads_manager_config_settings" 
+              groups="ads_manager.group_ads_manager"
+              sequence="30"/>
+</odoo>

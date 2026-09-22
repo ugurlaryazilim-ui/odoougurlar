@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+        <record id="ads_rule_high_cpa_alert" model="ads.rule">
+            <field name="name">High CPA Alert</field>
+            <field name="metric">cpa</field>
+            <field name="operator">&gt;</field>
+            <field name="value">50.0</field>
+            <field name="lookback_days">3</field>
+            <field name="consecutive_days">3</field>
+            <field name="severity">warning</field>
+            <field name="category">performance</field>
+            <field name="action_type">create_recommendation</field>
+            <field name="active" eval="True"/>
+        </record>
+
+        <record id="ads_rule_cpa_crisis" model="ads.rule">
+            <field name="name">CPA Crisis</field>
+            <field name="metric">cpa</field>
+            <field name="operator">&gt;</field>
+            <field name="value">100.0</field>
+            <field name="lookback_days">1</field>
+            <field name="consecutive_days">2</field>
+            <field name="severity">critical</field>
+            <field name="category">performance</field>
+            <field name="action_type">create_recommendation_notify</field>
+            <field name="active" eval="True"/>
+        </record>
+
+        <record id="ads_rule_low_roas_warning" model="ads.rule">
+            <field name="name">Low ROAS Warning</field>
+            <field name="metric">roas</field>
+            <field name="operator">&lt;</field>
+            <field name="value">1.0</field>
+            <field name="lookback_days">3</field>
+            <field name="consecutive_days">3</field>
+            <field name="severity">warning</field>
+            <field name="category">performance</field>
+            <field name="action_type">none</field>
+            <field name="active" eval="True"/>
+        </record>
+
+        <record id="ads_rule_zero_roas" model="ads.rule">
+            <field name="name">Zero ROAS</field>
+            <field name="metric">roas</field>
+            <field name="operator">&lt;</field>
+            <field name="value">0.5</field>
+            <field name="lookback_days">1</field>
+            <field name="consecutive_days">2</field>
+            <field name="severity">critical</field>
+            <field name="category">performance</field>
+            <field name="action_type">create_recommendation_email</field>
+            <field name="active" eval="True"/>
+        </record>
+
+        <record id="ads_rule_ctr_drop" model="ads.rule">
+            <field name="name">CTR Drop</field>
+            <field name="metric">ctr_change_pct</field>
+            <field name="operator">&lt;</field>
+            <field name="value">-30.0</field>
+            <field name="lookback_days">7</field>
+            <field name="consecutive_days">1</field>
+            <field name="severity">warning</field>
+            <field name="category">creative</field>
+            <field name="action_type">none</field>
+            <field name="active" eval="True"/>
+        </record>
+
+        <record id="ads_rule_budget_overspend" model="ads.rule">
+            <field name="name">Budget Overspend</field>
+            <field name="metric">budget_pace</field>
+            <field name="operator">&gt;</field>
+            <field name="value">115.0</field>
+            <field name="lookback_days">1</field>
+            <field name="consecutive_days">1</field>
+            <field name="severity">warning</field>
+            <field name="category">budget</field>
+            <field name="action_type">none</field>
+            <field name="active" eval="True"/>
+        </record>
+
+        <record id="ads_rule_budget_underspend" model="ads.rule">
+            <field name="name">Budget Underspend</field>
+            <field name="metric">budget_pace</field>
+            <field name="operator">&lt;</field>
+            <field name="value">70.0</field>
+            <field name="lookback_days">1</field>
+            <field name="consecutive_days">3</field>
+            <field name="severity">info</field>
+            <field name="category">budget</field>
+            <field name="action_type">none</field>
+            <field name="active" eval="True"/>
+        </record>
+
+        <record id="ads_rule_high_frequency" model="ads.rule">
+            <field name="name">High Frequency</field>
+            <field name="metric">frequency</field>
+            <field name="operator">&gt;</field>
+            <field name="value">3.0</field>
+            <field name="lookback_days">5</field>
+            <field name="consecutive_days">5</field>
+            <field name="severity">warning</field>
+            <field name="category">audience</field>
+            <field name="action_type">none</field>
+            <field name="active" eval="True"/>
+        </record>
+
+        <record id="ads_rule_conversion_rate_drop" model="ads.rule">
+            <field name="name">Conversion Rate Drop</field>
+            <field name="metric">conversion_rate_change_pct</field>
+            <field name="operator">&lt;</field>
+            <field name="value">-25.0</field>
+            <field name="lookback_days">7</field>
+            <field name="consecutive_days">1</field>
+            <field name="severity">warning</field>
+            <field name="category">performance</field>
+            <field name="action_type">none</field>
+            <field name="active" eval="True"/>
+        </record>
+
+        <record id="ads_rule_performance_breakthrough" model="ads.rule">
+            <field name="name">Performance Breakthrough</field>
+            <field name="metric">roas</field>
+            <field name="operator">&gt;</field>
+            <field name="value">3.0</field>
+            <field name="lookback_days">1</field>
+            <field name="consecutive_days">3</field>
+            <field name="severity">info</field>
+            <field name="category">performance</field>
+            <field name="action_type">create_recommendation</field>
+            <field name="active" eval="True"/>
+        </record>
+    </data>
+</odoo>

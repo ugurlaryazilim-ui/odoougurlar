@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+        <!-- Sync Campaigns Cron -->
+        <record id="ir_cron_ads_sync_campaigns" model="ir.cron">
+            <field name="name">Ads Manager: Sync Campaigns</field>
+            <field name="model_id" ref="model_ads_account"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_sync_all_accounts()</field>
+            <field name="interval_number">4</field>
+            <field name="interval_type">hours</field>
+            <field name="numbercall">-1</field>
+            <field name="active" eval="False"/>
+        </record>
+
+        <!-- Sync Metrics Cron -->
+        <record id="ir_cron_ads_sync_metrics" model="ir.cron">
+            <field name="name">Ads Manager: Sync Metrics Daily</field>
+            <field name="model_id" ref="model_ads_account"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_sync_metrics()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="numbercall">-1</field>
+            <field name="nextcall" eval="(DateTime.now() + relativedelta(days=1)).strftime('%Y-%m-%d 02:00:00')"/>
+            <field name="active" eval="False"/>
+        </record>
+
+        <!-- Evaluate Rules Cron -->
+        <record id="ir_cron_ads_evaluate_rules" model="ir.cron">
+            <field name="name">Ads Manager: Evaluate Rules</field>
+            <field name="model_id" ref="model_ads_rule"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_evaluate_rules()</field>
+            <field name="interval_number">6</field>
+            <field name="interval_type">hours</field>
+            <field name="numbercall">-1</field>
+            <field name="active" eval="False"/>
+        </record>
+
+        <!-- Refresh Tokens Cron -->
+        <record id="ir_cron_ads_refresh_tokens" model="ir.cron">
+            <field name="name">Ads Manager: Refresh Tokens</field>
+            <field name="model_id" ref="model_ads_account"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_refresh_tokens()</field>
+            <field name="interval_number">12</field>
+            <field name="interval_type">hours</field>
+            <field name="numbercall">-1</field>
+            <field name="active" eval="False"/>
+        </record>
+
+        <!-- AI Analysis Cron -->
+        <record id="ir_cron_ads_ai_analysis" model="ir.cron">
+            <field name="name">Ads Manager: Weekly AI Analysis</field>
+            <field name="model_id" ref="model_ads_ai_provider"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_ai_analysis()</field>
+            <field name="interval_number">7</field>
+            <field name="interval_type">days</field>
+            <field name="numbercall">-1</field>
+            <field name="active" eval="False"/>
+        </record>
+
+        <!-- Send Weekly Reports Cron -->
+        <record id="ir_cron_ads_send_weekly_reports" model="ir.cron">
+            <field name="name">Ads Manager: Send Weekly Reports</field>
+            <field name="model_id" ref="model_ads_campaign"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_send_weekly_reports()</field>
+            <field name="interval_number">7</field>
+            <field name="interval_type">days</field>
+            <field name="numbercall">-1</field>
+            <field name="active" eval="False"/>
+        </record>
+
+        <!-- Archive Metrics Cron -->
+        <record id="ir_cron_ads_archive_metrics" model="ir.cron">
+            <field name="name">Ads Manager: Archive Old Metrics</field>
+            <field name="model_id" ref="model_ads_metric_daily"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_archive_old_metrics()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">months</field>
+            <field name="numbercall">-1</field>
+            <field name="active" eval="False"/>
+        </record>
+    </data>
+</odoo>

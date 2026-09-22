@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="0">
+        <!-- Module Category -->
+        <record id="module_category_ads_manager" model="ir.module.category">
+            <field name="name">Ads Manager</field>
+            <field name="sequence">25</field>
+        </record>
+
+        <!-- Privilege -->
+        <record id="privilege_ads" model="res.groups.privilege">
+            <field name="name">Ads Management</field>
+            <field name="category_id" ref="module_category_ads_manager"/>
+        </record>
+
+        <!-- Groups -->
+        <record id="group_ads_user" model="res.groups">
+            <field name="name">User</field>
+            <field name="privilege_id" ref="privilege_ads"/>
+            <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
+        </record>
+
+        <record id="group_ads_manager" model="res.groups">
+            <field name="name">Manager</field>
+            <field name="privilege_id" ref="privilege_ads"/>
+            <field name="implied_ids" eval="[(4, ref('group_ads_user'))]"/>
+            <field name="users" eval="[(4, ref('base.user_root')), (4, ref('base.user_admin'))]"/>
+        </record>
+    </data>
+
+    <data noupdate="1">
+        <!-- Multi-Company Rules -->
+        <record id="ads_account_company_rule" model="ir.rule">
+            <field name="name">Ads Account Multi-Company</field>
+            <field name="model_id" ref="model_ads_account"/>
+            <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]</field>
+        </record>
+        <record id="ads_campaign_company_rule" model="ir.rule">
+            <field name="name">Ads Campaign Multi-Company</field>
+            <field name="model_id" ref="model_ads_campaign"/>
+            <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]</field>
+        </record>
+        <record id="ads_adset_company_rule" model="ir.rule">
+            <field name="name">Ads Adset Multi-Company</field>
+            <field name="model_id" ref="model_ads_adset"/>
+            <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]</field>
+        </record>
+        <record id="ads_ad_company_rule" model="ir.rule">
+            <field name="name">Ads Ad Multi-Company</field>
+            <field name="model_id" ref="model_ads_ad"/>
+            <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]</field>
+        </record>
+        <record id="ads_metric_daily_company_rule" model="ir.rule">
+            <field name="name">Ads Metric Daily Multi-Company</field>
+            <field name="model_id" ref="model_ads_metric_daily"/>
+            <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]</field>
+        </record>
+        <record id="ads_metric_monthly_company_rule" model="ir.rule">
+            <field name="name">Ads Metric Monthly Multi-Company</field>
+            <field name="model_id" ref="model_ads_metric_monthly"/>
+            <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]</field>
+        </record>
+        <record id="ads_recommendation_company_rule" model="ir.rule">
+            <field name="name">Ads Recommendation Multi-Company</field>
+            <field name="model_id" ref="model_ads_recommendation"/>
+            <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]</field>
+        </record>
+        
+        <record id="ads_sync_log_company_rule" model="ir.rule">
+            <field name="name">Ads Sync Log Multi-Company</field>
+            <field name="model_id" ref="model_ads_sync_log"/>
+            <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]</field>
+        </record>
+    </data>
+</odoo>

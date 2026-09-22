@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_ads_recommendation_form" model="ir.ui.view">
+        <field name="name">ads.recommendation.form</field>
+        <field name="model">ads.recommendation</field>
+        <field name="arch" type="xml">
+            <form string="Recommendation">
+                <header>
+                    <button name="action_apply" type="object" string="Apply" class="oe_highlight" invisible="status != 'new'"/>
+                    <button name="action_review" type="object" string="Review" invisible="status != 'new'"/>
+                    <button name="action_dismiss" type="object" string="Dismiss" invisible="status not in ('new', 'reviewed')"/>
+                    <field name="status" widget="statusbar" statusbar_visible="new,reviewed,applied,dismissed"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" placeholder="Recommendation Title"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="campaign_id"/>
+                            <field name="rule_id"/>
+                            <field name="category"/>
+                        </group>
+                        <group>
+                            <field name="severity" widget="badge"/>
+                            <field name="estimated_impact"/>
+                        </group>
+                    </group>
+                    <group>
+                        <field name="description"/>
+                        <field name="ai_explanation"/>
+                        <field name="proposed_action"/>
+                    </group>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_ads_recommendation_list" model="ir.ui.view">
+        <field name="name">ads.recommendation.list</field>
+        <field name="model">ads.recommendation</field>
+        <field name="arch" type="xml">
+            <list string="Recommendations" decoration-danger="severity == 'critical'" decoration-warning="severity == 'warning'">
+                <field name="create_date"/>
+                <field name="name"/>
+                <field name="campaign_id"/>
+                <field name="severity" widget="badge" decoration-danger="severity == 'critical'" decoration-warning="severity == 'warning'" decoration-info="severity == 'info'"/>
+                <field name="category"/>
+                <field name="status" widget="badge" decoration-success="status == 'applied'" decoration-muted="status == 'dismissed'"/>
+                <field name="estimated_impact"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_ads_recommendation_kanban" model="ir.ui.view">
+        <field name="name">ads.recommendation.kanban</field>
+        <field name="model">ads.recommendation</field>
+        <field name="arch" type="xml">
+            <kanban default_group_by="status" class="o_kanban_mobile">
+                <templates>
+                    <t t-name="card">
+                        <div class="oe_kanban_global_click">
+                            <div class="o_kanban_record_top mb-2">
+                                <div class="o_kanban_record_headings">
+                                    <strong class="o_kanban_record_title">
+                                        <field name="name"/>
+                                    </strong>
+                                </div>
+                                <field name="severity" widget="badge" decoration-danger="severity == 'critical'" decoration-warning="severity == 'warning'" decoration-info="severity == 'info'"/>
+                            </div>
+                            <div class="o_kanban_record_body">
+                                <div><field name="campaign_id"/></div>
+                                <div><field name="category"/></div>
+                            </div>
+                        </div>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <record id="view_ads_recommendation_search" model="ir.ui.view">
+        <field name="name">ads.recommendation.search</field>
+        <field name="model">ads.recommendation</field>
+        <field name="arch" type="xml">
+            <search string="Recommendations">
+                <field name="name"/>
+                <field name="campaign_id"/>
+                <filter string="New" name="filter_new" domain="[('status', '=', 'new')]"/>
+                <group expand="0" string="Group By">
+                    <filter string="Severity" name="group_by_severity" context="{'group_by': 'severity'}"/>
+                    <filter string="Status" name="group_by_status" context="{'group_by': 'status'}"/>
+                    <filter string="Category" name="group_by_category" context="{'group_by': 'category'}"/>
+                    <filter string="Campaign" name="group_by_campaign" context="{'group_by': 'campaign_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_ads_recommendation" model="ir.actions.act_window">
+        <field name="name">Recommendations</field>
+        <field name="res_model">ads.recommendation</field>
+        <field name="view_mode">list,kanban,form</field>
+        <field name="context">{'search_default_filter_new': 1}</field>
+        <field name="search_view_id" ref="view_ads_recommendation_search"/>
+    </record>
+</odoo>

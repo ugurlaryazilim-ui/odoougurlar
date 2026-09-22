@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_ads_account_form" model="ir.ui.view">
+        <field name="name">ads.account.form</field>
+        <field name="model">ads.account</field>
+        <field name="arch" type="xml">
+            <form string="Ads Account">
+                <header>
+                    <button name="action_connect" type="object" string="Connect" class="oe_highlight" invisible="state != 'draft'"/>
+                    <button name="action_test_connection" type="object" string="Test Connection" invisible="state == 'draft'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,connected,error"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_view_campaigns" type="object" class="oe_stat_button" icon="fa-bullhorn">
+                            <field name="campaign_count" widget="statinfo" string="Campaigns"/>
+                        </button>
+                    </div>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" placeholder="Account Name"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group string="Platform Info">
+                            <field name="platform" widget="badge"/>
+                            <field name="platform_account_id"/>
+                            <field name="company_id" groups="base.group_multi_company"/>
+                        </group>
+                        <group string="Credentials">
+                            <field name="api_key" password="True"/>
+                            <field name="api_secret" password="True"/>
+                            <field name="access_token" password="True"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Campaigns" name="campaigns">
+                            <field name="campaign_ids" readonly="1">
+                                <list>
+                                    <field name="name"/>
+                                    <field name="status" widget="badge"/>
+                                    <field name="daily_budget" widget="monetary" options="{'currency_field': 'currency_id'}"/>
+                                    <field name="currency_id" column_invisible="True"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Sync History" name="sync_history">
+                            <field name="sync_log_ids" readonly="1">
+                                <list>
+                                    <field name="sync_date"/>
+                                    <field name="sync_type"/>
+                                    <field name="status" widget="badge"/>
+                                    <field name="duration_seconds"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_ads_account_list" model="ir.ui.view">
+        <field name="name">ads.account.list</field>
+        <field name="model">ads.account</field>
+        <field name="arch" type="xml">
+            <list string="Ads Accounts">
+                <field name="name"/>
+                <field name="platform" widget="badge"/>
+                <field name="platform_account_id"/>
+                <field name="campaign_count"/>
+                <field name="state" widget="badge" decoration-success="state == 'connected'" decoration-info="state == 'draft'" decoration-danger="state == 'error'"/>
+                <field name="last_sync_date"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_ads_account_search" model="ir.ui.view">
+        <field name="name">ads.account.search</field>
+        <field name="model">ads.account</field>
+        <field name="arch" type="xml">
+            <search string="Ads Accounts">
+                <field name="name"/>
+                <field name="platform"/>
+                <filter string="Connected" name="connected" domain="[('state', '=', 'connected')]"/>
+                <filter string="Error" name="error" domain="[('state', '=', 'error')]"/>
+                <group expand="0" string="Group By">
+                    <filter string="Platform" name="group_by_platform" context="{'group_by': 'platform'}"/>
+                    <filter string="State" name="group_by_state" context="{'group_by': 'state'}"/>
+                    <filter string="Company" name="group_by_company" context="{'group_by': 'company_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_ads_account" model="ir.actions.act_window">
+        <field name="name">Ads Accounts</field>
+        <field name="res_model">ads.account</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_ads_account_search"/>
+    </record>
+</odoo>

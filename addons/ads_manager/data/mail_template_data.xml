@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+        <record id="email_template_ads_critical_alert" model="mail.template">
+            <field name="name">Ads Manager: Critical Alert</field>
+            <field name="model_id" ref="model_ads_recommendation"/>
+            <field name="subject">⚠️ Kritik Reklam Uyarısı: ${object.campaign_id.name}</field>
+            <field name="email_from">${(object.company_id.email or user.email_formatted) | safe}</field>
+            <field name="email_to">${object.campaign_id.account_id.responsible_id.email_formatted | safe}</field>
+            <field name="auto_delete" eval="True"/>
+            <field name="body_html" type="html">
+                <div style="margin: 0px; padding: 0px;">
+                    <p style="margin: 0px; padding: 0px; font-size: 13px;">
+                        Merhaba,<br/><br/>
+                        Reklam kampanyanızda kritik bir durum tespit edildi:<br/>
+                        <strong>Kampanya:</strong> ${object.campaign_id.name}<br/>
+                        <strong>Uyarı:</strong> ${object.description}<br/><br/>
+                        Lütfen Odoo üzerinden durumu kontrol edip gerekli aksiyonu alınız.<br/>
+                        <br/>
+                        İyi çalışmalar,<br/>
+                        Ads Manager
+                    </p>
+                </div>
+            </field>
+        </record>
+
+        <record id="email_template_ads_weekly_report" model="mail.template">
+            <field name="name">Ads Manager: Weekly Report</field>
+            <field name="model_id" ref="model_ads_campaign"/>
+            <field name="subject">📊 Haftalık Reklam Raporu: ${object.name}</field>
+            <field name="email_from">${(object.company_id.email or user.email_formatted) | safe}</field>
+            <field name="email_to">${object.account_id.responsible_id.email_formatted | safe}</field>
+            <field name="auto_delete" eval="True"/>
+            <field name="body_html" type="html">
+                <div style="margin: 0px; padding: 0px;">
+                    <p style="margin: 0px; padding: 0px; font-size: 13px;">
+                        Merhaba,<br/><br/>
+                        ${object.name} kampanyası için haftalık performans raporu ektedir.<br/>
+                        <br/>
+                        İyi çalışmalar,<br/>
+                        Ads Manager
+                    </p>
+                </div>
+            </field>
+        </record>
+    </data>
+</odoo>

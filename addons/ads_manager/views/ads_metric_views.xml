@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Daily Metrics Views -->
+    <record id="view_ads_metric_daily_list" model="ir.ui.view">
+        <field name="name">ads.metric.daily.list</field>
+        <field name="model">ads.metric.daily</field>
+        <field name="arch" type="xml">
+            <list string="Daily Metrics">
+                <field name="date"/>
+                <field name="campaign_id"/>
+                <field name="account_id"/>
+                <field name="impressions"/>
+                <field name="clicks"/>
+                <field name="ctr" widget="percentage"/>
+                <field name="currency_id" column_invisible="True"/>
+                <field name="spend" widget="monetary" options="{'currency_field': 'currency_id'}"/>
+                <field name="cpc" widget="monetary" options="{'currency_field': 'currency_id'}"/>
+                <field name="conversions"/>
+                <field name="cpa" widget="monetary" options="{'currency_field': 'currency_id'}"/>
+                <field name="roas" decoration-danger="roas &lt; 1" decoration-success="roas &gt;= 2"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_ads_metric_daily_graph" model="ir.ui.view">
+        <field name="name">ads.metric.daily.graph</field>
+        <field name="model">ads.metric.daily</field>
+        <field name="arch" type="xml">
+            <graph string="Daily Metrics" type="line">
+                <field name="date" interval="day"/>
+                <field name="spend" type="measure"/>
+                <field name="clicks" type="measure"/>
+                <field name="conversions" type="measure"/>
+                <field name="roas" type="measure"/>
+            </graph>
+        </field>
+    </record>
+
+    <record id="view_ads_metric_daily_pivot" model="ir.ui.view">
+        <field name="name">ads.metric.daily.pivot</field>
+        <field name="model">ads.metric.daily</field>
+        <field name="arch" type="xml">
+            <pivot string="Daily Metrics">
+                <field name="campaign_id" type="row"/>
+                <field name="date" interval="week" type="col"/>
+                <field name="spend" type="measure"/>
+                <field name="clicks" type="measure"/>
+                <field name="impressions" type="measure"/>
+                <field name="conversions" type="measure"/>
+                <field name="roas" type="measure"/>
+            </pivot>
+        </field>
+    </record>
+
+    <record id="view_ads_metric_daily_search" model="ir.ui.view">
+        <field name="name">ads.metric.daily.search</field>
+        <field name="model">ads.metric.daily</field>
+        <field name="arch" type="xml">
+            <search string="Daily Metrics">
+                <field name="campaign_id"/>
+                <field name="account_id"/>
+                <field name="date"/>
+                <filter string="Today" name="today" domain="[('date', '=', context_today().strftime('%Y-%m-%d'))]"/>
+                <filter string="This Week" name="this_week" domain="[('date', '&gt;=', (context_today() - datetime.timedelta(days=context_today().weekday())).strftime('%Y-%m-%d'))]"/>
+                <filter string="This Month" name="this_month" domain="[('date', '&gt;=', context_today().strftime('%Y-%m-01'))]"/>
+                <filter string="Archived" name="archived" domain="[('active', '=', False)]"/>
+                <group expand="0" string="Group By">
+                    <filter string="Campaign" name="group_by_campaign" context="{'group_by': 'campaign_id'}"/>
+                    <filter string="Account" name="group_by_account" context="{'group_by': 'account_id'}"/>
+                    <filter string="Month" name="group_by_date_month" context="{'group_by': 'date:month'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_ads_metric_daily" model="ir.actions.act_window">
+        <field name="name">Daily Metrics</field>
+        <field name="res_model">ads.metric.daily</field>
+        <field name="view_mode">list,graph,pivot</field>
+        <field name="search_view_id" ref="view_ads_metric_daily_search"/>
+    </record>
+
+    <!-- Monthly Metrics Views -->
+    <record id="view_ads_metric_monthly_list" model="ir.ui.view">
+        <field name="name">ads.metric.monthly.list</field>
+        <field name="model">ads.metric.monthly</field>
+        <field name="arch" type="xml">
+            <list string="Monthly Metrics">
+                <field name="year_month"/>
+                <field name="campaign_id"/>
+                <field name="account_id"/>
+                <field name="currency_id" column_invisible="True"/>
+                <field name="total_spend" widget="monetary" options="{'currency_field': 'currency_id'}"/>
+                <field name="total_clicks"/>
+                <field name="total_conversions"/>
+                <field name="avg_roas"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="action_ads_metric_monthly" model="ir.actions.act_window">
+        <field name="name">Monthly Metrics</field>
+        <field name="res_model">ads.metric.monthly</field>
+        <field name="view_mode">list,pivot</field>
+    </record>
+</odoo>
