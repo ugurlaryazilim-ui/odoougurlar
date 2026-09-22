@@ -140,7 +140,7 @@ class DoganEInvoiceConnector:
                 self.efatura_url,
                 data=envelope.encode('utf-8'),
                 headers={'Content-Type': 'text/xml;charset=UTF-8'},
-                timeout=30
+                timeout=10
             )
             
             _logger.info("Doğan API GetInvoiceWithType (PDF, IN) status: %s, body (first 2000): %s",
@@ -182,7 +182,7 @@ class DoganEInvoiceConnector:
                 self.efatura_url,
                 data=envelope.encode('utf-8'),
                 headers={'Content-Type': 'text/xml;charset=UTF-8'},
-                timeout=30
+                timeout=10
             )
             
             _logger.info("Doğan API GetInvoiceWithType (HTML, IN) status: %s, body (first 2000): %s",
@@ -222,7 +222,7 @@ class DoganEInvoiceConnector:
                 self.efatura_url,
                 data=envelope.encode('utf-8'),
                 headers={'Content-Type': 'text/xml;charset=UTF-8'},
-                timeout=30
+                timeout=10
             )
             
             _logger.info("Doğan API GetInvoice (raw, IN) status: %s, body (first 2000): %s",

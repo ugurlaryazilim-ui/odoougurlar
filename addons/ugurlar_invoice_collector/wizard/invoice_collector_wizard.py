@@ -40,7 +40,7 @@ class UgurlarInvoiceCollectorWizard(models.Model):
     
     batch_size = fields.Integer(
         string='Paket İndirme Boyutu (Batch)',
-        default=15,
+        default=10,
         help='Her mikro-adımda işlenecek fatura sayısı.'
     )
 
@@ -179,14 +179,17 @@ class UgurlarInvoiceCollectorWizard(models.Model):
         """Birden fazla PDF içeriğini (bytes) PyMuPDF (fitz) veya PyPDF2 kullanarak tek bir PDF'te birleştirir."""
         if not pdf_bytes_list:
             return None
-        if len(pdf_bytes_list) == 1:
-            return pdf_bytes_list[0]
+        valid_pdfs = [b for b in pdf_bytes_list if b and len(b) > 10 and b.startswith(b'%PDF-')]
+        if not valid_pdfs:
+            return None
+        if len(valid_pdfs) == 1:
+            return valid_pdfs[0]
         
         # 1. Öncelik: PyMuPDF (fitz) - yüksek hız ve performans
         try:
             import fitz
             master_doc = fitz.open()
-            for pdf_bytes in pdf_bytes_list:
+            for pdf_bytes in valid_pdfs:
                 try:
                     sub_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
                     master_doc.insert_pdf(sub_doc)
@@ -265,26 +268,44 @@ class UgurlarInvoiceCollectorWizard(models.Model):
 
         connector = self.env['odoougurlar.nebim.connector'].sudo()
         all_results = []
-        batch_sz = 20
         code_list = list(item_codes)
         
         try:
-            for i in range(0, len(code_list), batch_sz):
-                batch = code_list[i:i + batch_sz]
-                batch_str = ','.join(batch)
-                _logger.info("Fatura Tarama - Batch %d/%d: %d kod gönderiliyor...", 
-                           (i // batch_sz) + 1, 
-                           (len(code_list) + batch_sz - 1) // batch_sz,
-                           len(batch))
-                
-                sp_params = [{'Name': '@ItemCode', 'Value': batch_str}]
-                batch_results = connector.run_proc('usp_GetPurchaseInvoices_Ugurlar', sp_params)
-                
-                if batch_results and isinstance(batch_results, list):
-                    _logger.info("Fatura Tarama - Batch sonucu: %d kayıt", len(batch_results))
-                    all_results.extend(batch_results)
-                else:
-                    _logger.info("Fatura Tarama - Batch sonucu: 0 kayıt (boş veya dict)")
+            # OPTİMİZASYON: Nebim usp_GetPurchaseInvoices_Ugurlar boş parametre [] ile
+            # çağrıldığında tablodaki tüm faturaları 1.4 saniyede döner.
+            # Kodları 125 kez 20'şerli parça parça sormak yerine (225 saniye / timeout / bağlantı kopması),
+            # tek seferde çekip bellek içinde Python set ile 0.003 saniyede filtreliyoruz.
+            _logger.info("Fatura Tarama: %d adet benzersiz ana ürün kodu için Nebim SP çağrılıyor...", len(item_codes))
+            raw_invoices = None
+            try:
+                raw_invoices = connector.run_proc('usp_GetPurchaseInvoices_Ugurlar', [])
+            except Exception as e_proc:
+                _logger.warning("Boş parametreli SP çağrısı başarısız oldu (%s), parametreli batch yöntemine geçiliyor.", e_proc)
+
+            if raw_invoices and isinstance(raw_invoices, list) and len(raw_invoices) > 0:
+                item_code_set = set(item_codes)
+                all_results = [
+                    inv for inv in raw_invoices 
+                    if str(inv.get('ItemCode', '')).strip() in item_code_set
+                ]
+                _logger.info(
+                    "Fatura Tarama: %d toplam Nebim kaydı içinden %d adet eşleşen kayıt saniyeler içinde bulundu.",
+                    len(raw_invoices), len(all_results)
+                )
+            else:
+                # Fallback: Eğer tek seferde gelmezse 50'şerli batch halinde çağır
+                batch_sz = 50
+                for i in range(0, len(code_list), batch_sz):
+                    batch = code_list[i:i + batch_sz]
+                    batch_str = ','.join(batch)
+                    _logger.info("Fatura Tarama - Fallback Batch %d/%d: %d kod gönderiliyor...", 
+                               (i // batch_sz) + 1, 
+                               (len(code_list) + batch_sz - 1) // batch_sz,
+                               len(batch))
+                    sp_params = [{'Name': '@ItemCode', 'Value': batch_str}]
+                    batch_results = connector.run_proc('usp_GetPurchaseInvoices_Ugurlar', sp_params)
+                    if batch_results and isinstance(batch_results, list):
+                        all_results.extend(batch_results)
         except Exception as e:
             raise UserError(f'Nebim prosedürü çalıştırılırken hata oluştu: {str(e)}')
 
@@ -372,7 +393,7 @@ class UgurlarInvoiceCollectorWizard(models.Model):
         return None
 
     def _process_batch_lines(self, batch_lines):
-        """15-20 adetlik bir fatura paketinin indirme işlemini gerçekleştirir."""
+        """10-15 adetlik bir fatura paketinin indirme işlemini gerçekleştirir."""
         connector = self.env['odoougurlar.nebim.connector'].sudo()
         ettn_to_line = {}
 
@@ -380,54 +401,32 @@ class UgurlarInvoiceCollectorWizard(models.Model):
             doc_num = line.document_number
             pdf_content = None
             
-            # Yol 1: e-Arşiv URL'ini dene (giden satış faturaları)
-            try:
-                params = [{'Name': 'DocumentNumber', 'Value': doc_num}]
-                res = connector.run_proc('usp_Invoice_EArchieveURL', params)
-                invoice_url = res[0].get('InvoiceURL', '') if (res and isinstance(res, list) and isinstance(res[0], dict)) else ''
-
-                if invoice_url:
-                    line.invoice_url = invoice_url
-                    pdf_url = invoice_url.replace('view-earchive', 'pdf-earchive') if 'view-earchive' in invoice_url else invoice_url
-                    pdf_content = self._try_download_pdf(pdf_url)
-                    if pdf_content:
-                        safe_vendor = re.sub(r'[^\w\s-]', '', line.vendor_name or '').strip().replace(' ', '_')[:30]
-                        file_name = f"{doc_num}_{safe_vendor}.pdf"
-                        line.write({
-                            'pdf_file': base64.b64encode(pdf_content),
-                            'pdf_filename': file_name,
-                            'download_status': 'success',
-                            'error_message': False,
-                        })
-                        _logger.info("e-Arşiv PDF başarıyla indirildi: %s", doc_num)
-            except Exception as e:
-                _logger.warning("e-Arşiv PDF sorgu uyarısı (%s): %s", doc_num, str(e))
-
-            # Yol 2: e-Fatura ETTN al (gelen alış faturaları)
-            if not pdf_content:
+            # 1. Önceden ETTN bulunmuş ve önbelleğe alınmış mı?
+            ettn = ''
+            if line.invoice_url and line.invoice_url.startswith('ETTN:'):
+                ettn = line.invoice_url.replace('ETTN:', '').strip()
+            
+            # 2. Önbellekte yoksa Nebim'den e-Fatura ETTN al (Gelen Toptan Alış Faturaları)
+            if not ettn:
                 try:
                     sp_name = self.env['ir.config_parameter'].sudo().get_param(
                         'odoougurlar.nebim_sp_efatura_url', 'usp_PurchaseInvoice_EFaturaURL'
                     )
                     res = None
                     # 1. Öncelik: Nebim iç evrak numarası (RefNumber: örn. 1-BP-7-13211)
-                    # Nebim'deki usp_PurchaseInvoice_EFaturaURL prosedürü @DocumentNumber parametresinde
-                    # Nebim'in iç belge referansını bekler.
                     if line.ref_number:
                         res = connector.run_proc(sp_name, [{'Name': 'DocumentNumber', 'Value': line.ref_number.strip()}])
                     
-                    # 2. Öncelik: Bulunamazsa belge numarası (örn. EKL...) ile de dene
+                    # 2. Öncelik: Belge numarası (örn. EKL...) ile de dene
                     if (not res or not isinstance(res, list) or len(res) == 0) and line.document_number:
                         res = connector.run_proc(sp_name, [{'Name': 'DocumentNumber', 'Value': line.document_number.strip()}])
                     
-                    ettn = ''
                     if res and isinstance(res, list) and len(res) > 0 and isinstance(res[0], dict):
                         row = res[0]
                         ettn = str(row.get('ETTN') or row.get('UUID') or row.get('InvoiceUUID') or row.get('EInvoiceUUID') or '').strip()
                     
                     if ettn:
                         line.invoice_url = f"ETTN: {ettn}"
-                        ettn_to_line[ettn] = line
                         _logger.info("e-Fatura ETTN bulundu: doc=%s, ref=%s -> ETTN: %s", doc_num, line.ref_number, ettn)
                     else:
                         line.write({
@@ -440,6 +439,9 @@ class UgurlarInvoiceCollectorWizard(models.Model):
                         'download_status': 'error',
                         'error_message': f'Nebim ETTN sorgu hatası: {str(e)}'
                     })
+
+            if ettn:
+                ettn_to_line[ettn] = line
 
         # Doğan SOAP API üzerinden toplu indirme (TEK SOAP LOGIN OTURUMUNDA)
         if ettn_to_line:
@@ -462,31 +464,10 @@ class UgurlarInvoiceCollectorWizard(models.Model):
                         })
                         _logger.info("e-Fatura PDF Doğan API'den indirildi (%s)", line.document_number)
                     else:
-                        # Fallback: portal URLs
-                        dogan_urls = [
-                            f"https://portal.dogandonusum.com/einvoice/view-einvoice/view-pdf-einvoice.xhtml?uuid={ettn}",
-                            f"https://portal.dogandonusum.com/fatura/pdf/download?ettn={ettn}",
-                            f"https://portal.dogandonusum.com/fatura/pdf/{ettn}",
-                            f"https://portal.dogandonusum.com/einvoice/pdf-einvoice/{ettn}",
-                        ]
-                        for try_url in dogan_urls:
-                            pdf_content = self._try_download_pdf(try_url)
-                            if pdf_content:
-                                safe_vendor = re.sub(r'[^\w\s-]', '', line.vendor_name or '').strip().replace(' ', '_')[:30]
-                                file_name = f"{line.document_number}_{safe_vendor}.pdf"
-                                line.write({
-                                    'pdf_file': base64.b64encode(pdf_content),
-                                    'pdf_filename': file_name,
-                                    'download_status': 'success',
-                                    'error_message': False,
-                                })
-                                break
-                        
-                        if not pdf_content:
-                            line.write({
-                                'download_status': 'error',
-                                'error_message': f'Doğan API PDF indiremedi (ETTN: {ettn})'
-                            })
+                        line.write({
+                            'download_status': 'error',
+                            'error_message': f'Doğan API PDF içeriği dönemedi (ETTN: {ettn})'
+                        })
             except Exception as e:
                 _logger.error("Doğan SOAP API Batch Hatası: %s", str(e))
                 for ettn, line in ettn_to_line.items():
