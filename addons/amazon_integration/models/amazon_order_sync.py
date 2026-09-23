@@ -849,7 +849,20 @@ class AmazonOrderSync(models.Model):
 
             return processed, 0, 0, msgs
 
-        # ─── Odoo Siparişi Oluştur ───
+        # ─── PENDING SİPARİŞ: Sadece amazon.order kaydı oluştur ───
+        # Amazon SP-API, Pending siparişlerde PII (ad, adres, telefon) vermez.
+        # Profesyonel yaklaşım: Pending → sadece amazon.order (takip için)
+        #                       Unshipped → sale.order + confirm + picking
+        # Böylece "Amazon Müşterisi" sorunu ortadan kalkar.
+        if status == 'Pending':
+            _logger.info(
+                "Amazon sipariş %s Pending durumunda — amazon.order kaydı oluşturuldu, "
+                "sale.order oluşturulmayacak (PII henüz mevcut değil). "
+                "Unshipped olduğunda otomatik oluşturulacak.",
+                amazon_order_id)
+            return processed, 0, 0, msgs
+
+        # ─── Odoo Siparişi Oluştur (Sadece Unshipped/Shipped) ───
         if not items_val:
             return processed, 0, 1, [f"{amazon_order_id} ürün detayları alınamadı, atlandı."]
 
@@ -875,10 +888,8 @@ class AmazonOrderSync(models.Model):
         amazon_order.write({'sale_order_id': sale_order.id})
 
         # ─── Sipariş Onaylama (Picking Oluşturma) ───
-        # Tüm siparişler (Pending dahil) hemen onaylanır → picking oluşur → toplama
-        # listesine düşer. PII (adres/müşteri) bilgisi eksikse sonraki cron'da
-        # güncellenecektir. Pending siparişleri draft bırakmak picking'in geç
-        # oluşmasına ve toplama zaman pencerelerinin kaçırılmasına neden oluyordu.
+        # Sadece Unshipped/Shipped siparişler buraya ulaşır (Pending yukarıda filtrelendi).
+        # Bu noktada PII mevcut → müşteri bilgisi doğru → onaylanabilir.
         if status != 'Canceled':
             sale_order.action_confirm()
             # ─── Picking debug logu ───
@@ -886,13 +897,14 @@ class AmazonOrderSync(models.Model):
                 for p in sale_order.picking_ids:
                     _logger.info(
                         "Amazon picking oluştu: %s | state=%s | type=%s (id:%d) | "
-                        "wh=%s | batch=%s | create=%s | Sipariş: %s | Kanal: %s",
+                        "wh=%s | batch=%s | create=%s | Sipariş: %s | Kanal: %s | Müşteri: %s",
                         p.name, p.state,
                         p.picking_type_id.display_name, p.picking_type_id.id,
                         p.picking_type_id.warehouse_id.name if p.picking_type_id.warehouse_id else 'N/A',
                         p.batch_id.name if p.batch_id else 'YOK',
                         p.create_date, amazon_order_id,
-                        order_data.get('FulfillmentChannel', 'N/A'))
+                        order_data.get('FulfillmentChannel', 'N/A'),
+                        partner.name)
             else:
                 _logger.warning(
                     "Amazon sipariş %s onaylandı ama picking OLUŞMADI! "
