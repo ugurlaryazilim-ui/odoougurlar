@@ -2,55 +2,41 @@
 <odoo>
     <data noupdate="0">
         <!-- ============================================================ -->
-        <!-- SaaS Prompt Lock Sistemi — Konsolide Kilitler (v2)           -->
-        <!-- 20 kilit → 6 kilit (~8500 ch → ~2000 ch)                    -->
+        <!-- SaaS Prompt Lock Sistemi — Minimal Lock (v3)                 -->
+        <!-- Prompt mantığı artık garment_analyzer.py'de merkezi           -->
+        <!-- Sadece 1 aktif lock: fotorealizm kalite cümlesi              -->
         <!-- ============================================================ -->
 
-        <!-- 1. Fotorealizm + Kamera + Studio (eski 1, 2, 13, 16 birleşti) -->
+        <!-- 1. Fotorealizm kalite lock — TEK AKTİF LOCK -->
         <record id="prompt_realism_lock" model="ai.studio.prompt.template">
             <field name="name">Fotorealizm Lock</field>
             <field name="scope">global</field>
-            <field name="prompt_text">Zara-style editorial e-commerce photography. Hasselblad X2D quality, medium-format RAW look. Real human face with visible pores, slight asymmetry, wet corneal reflections, natural flyaway hair strands. Subsurface scattering skin, no plastic/waxy/airbrushed look. Seamless white studio cyclorama (#FFFFFF), high-key lighting, no visible equipment. Phase One IQ4 sharpness at focal plane with natural depth falloff.</field>
-        </record>
-
-        <!-- 2. Anatomi + Kimlik + Saç (eski 3, 10, 18, 19, 20 birleşti) -->
-        <record id="prompt_anatomy_lock" model="ai.studio.prompt.template">
-            <field name="name">Anatomi ve Kimlik Lock</field>
-            <field name="scope">global</field>
-            <field name="prompt_text">ANATOMY: Exactly 2 arms, 2 legs, 1 head, 5 fingers per hand. No extra limbs, ghosting, or warped proportions. Natural joint articulation and weight distribution. IDENTITY: Preserve exact face geometry, body proportions, hair length/color/part across all views. Front view is the identity anchor. Do not alter age, ethnicity, or expression. STRUCTURE: Match shoulder padding, natural fabric drape, no ghost layering at collar/hem.</field>
-        </record>
-
-        <!-- 3. Kıyafet Yapı + Renk + Kumaş + Düğme (eski 4, 5, 6, 7, 9 birleşti) -->
-        <record id="prompt_garment_lock" model="ai.studio.prompt.template">
-            <field name="name">Kiyafet Sadakati Lock</field>
-            <field name="scope">global</field>
-            <field name="prompt_text">GARMENT FIDELITY: Match reference exactly — collar, pockets, buttons, zippers, seams, neckline, cuffs, hemline, waistband. Do not redesign or reinterpret any element. COLOR: Exact hue, saturation, brightness match. FABRIC: Same texture type (knit vs woven vs crepe). HARDWARE: Exact button count, size, material, spacing. Garment must look freshly steamed and pristine — no stains, wrinkles, lint, or hanger marks. Cross-view consistency required.</field>
-        </record>
-
-        <!-- 4. Anti-Halüsinasyon + Görünüm Bütünlüğü (eski 8, 14, 15 birleşti) -->
-        <record id="prompt_anti_hallucination" model="ai.studio.prompt.template">
-            <field name="name">Anti-Halusinasyon Lock</field>
-            <field name="scope">global</field>
-            <field name="prompt_text">Do NOT invent elements not in reference: no fake pockets, fringes, tassels, ruffles, patches, extra zippers, embroidery. Back view: do not mirror front artwork onto back. Keep each view truthful to its own reference. Detail view: model must wear full outfit, all closures fastened. Remove all store security tags, alarm pins, EAS sensors, price tags — output must be clean and tag-free.</field>
-        </record>
-
-        <!-- 5. Tam Giyim Zorunluluğu (eski 11 — kritik, kendi başına kalır) -->
-        <record id="prompt_full_outfit_lock" model="ai.studio.prompt.template">
-            <field name="name">Tam Giyim Zorunlulugu Lock</field>
-            <field name="scope">global</field>
-            <field name="prompt_text">FULL OUTFIT: Model must be properly dressed in all views. SKIRT/SHORTS/DRESS: wear only the garment with natural bare legs, NO pants underneath. UPPER/OUTERWEAR: must wear full-length dark pants/jeans covering entire legs, NO bare legs. PANTS: must wear neutral top and shoes.</field>
-        </record>
-
-        <!-- 6. Birleşik Negatif Prompt (eski 12, 17 birleşti) -->
-        <record id="prompt_negative_unified" model="ai.studio.prompt.template">
-            <field name="name">Birlesik Negatif Prompt</field>
-            <field name="scope">global</field>
-            <field name="prompt_text">NEGATIVE: extra arms, extra legs, extra fingers, double head, ghosting limbs, warped anatomy, deformed body, mannequin, doll, plastic/waxy skin, CGI look, beauty filter, airbrushed, over-smooth, blurry, low quality, collage, split screen, multi-panel, montage, interior room, furniture, flat-lay, hanger, product-only shot, softbox, light stand, studio equipment, security tag, alarm tag, anti-theft tag, EAS sensor, price tag, store fixture, handbag, purse, clutch, tote bag, altered garment design, changed collar, missing/added pockets, changed hemline, wrong garment color, wrong fabric texture, wrong button style, front-print-on-back, invented embroidery, bare midriff, nude model, 3D render face, video game character, digital avatar, doll face, glass-marble eyes, blank AI stare, frozen smile, helmet hair.</field>
+            <field name="prompt_text">Hasselblad editorial photography, natural human skin with visible pores, seamless white cyclorama studio, high-key even lighting.</field>
         </record>
 
         <!-- ============================================================ -->
-        <!-- Eski konsolide edilen kayıtlar → Pasifleştir                 -->
-        <!-- noupdate=0 olduğu için modül güncellemesinde aktif=False olur -->
+        <!-- Eski lock'lar → Pasifleştir                                  -->
+        <!-- Prompt mantığı artık category_constants.py şablonlarında      -->
+        <!-- ============================================================ -->
+        <record id="prompt_anatomy_lock" model="ai.studio.prompt.template">
+            <field name="active" eval="False"/>
+        </record>
+        <record id="prompt_garment_lock" model="ai.studio.prompt.template">
+            <field name="active" eval="False"/>
+        </record>
+        <record id="prompt_anti_hallucination" model="ai.studio.prompt.template">
+            <field name="active" eval="False"/>
+        </record>
+        <!-- KRİTİK: Bu lock elbise+pantolon sorununun kök nedeniydi! -->
+        <record id="prompt_full_outfit_lock" model="ai.studio.prompt.template">
+            <field name="active" eval="False"/>
+        </record>
+        <record id="prompt_negative_unified" model="ai.studio.prompt.template">
+            <field name="active" eval="False"/>
+        </record>
+
+        <!-- ============================================================ -->
+        <!-- v1 eski kayıtlar (zaten pasif)                               -->
         <!-- ============================================================ -->
         <record id="prompt_studio_env_lock" model="ai.studio.prompt.template">
             <field name="active" eval="False"/>

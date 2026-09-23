@@ -1,4 +1,4 @@
-"""AI gorsel analiz servisi — kiyafet analizi ve prompt olusturma.
+﻿"""AI gorsel analiz servisi — kiyafet analizi ve prompt olusturma.
 
 SaaS ai-fashion-studio/services/geminiService.ts'den uyarlanmistir.
 fal.ai any-llm + vision API kullanir.
@@ -465,24 +465,30 @@ def _build_consistency_prompt(outfit_data):
 def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
                             photo_type='front', outfit_consistency=None, provider_type='fashn'):
     """Analiz sonuclarina gore AI gorsel uretim promptu olustur.
-    
-    FASHN ve virtual try-on modellerinde kiyafetin rengi, deseni veya baski grafik
-    detaylari prompta yazilmamalidir. Ancak 'fal' (nano-banana-2/edit vb.) gibi
-    genel inpainting modellerinde bu detaylar gereklidir.
+
+    Seedream v5 Pro icin kisa, kategori-bazli prompt sablonlari kullanir.
+    Hedef: 40-65 kelime, < 500 karakter (Seedream optimal araliği).
+    FASHN icin minimal prompt — kendi try-on modelini kullanir.
 
     Args:
         analysis: Kiyafet analiz sonuclari (dict)
         preset: Manken preset bilgileri (dict)
-        prompt_locks: Aktif prompt lock listesi (list of str)
+        prompt_locks: Aktif prompt lock listesi (list of str) — sadece kalite lock
         extra_prompt: Ek kullanici promptu
         photo_type: str — 'front', 'back', 'side', 'detail'
-        outfit_consistency: dict — outfit tutarlilik verileri
+        outfit_consistency: dict — outfit tutarlilik verileri (back/side view icin)
         provider_type: str — 'fashn', 'fal', vb.
 
     Returns:
         dict: {'positive': str, 'negative': str}
     """
-    view_base = _VIEW_PROMPT_TEMPLATES.get(photo_type, _VIEW_PROMPT_TEMPLATES['front'])
+    from .category_constants import (
+        SEEDREAM_TEMPLATES, SEEDREAM_DETAIL_TEMPLATE, SEEDREAM_NEGATIVES,
+        LEG_RULES, HAND_POSES, QUALITY_SUFFIX,
+        FASHN_VIEW_TEMPLATES, FASHN_NEGATIVE,
+        TOPS_AND_OUTERWEAR_KW,
+    )
+
     if not isinstance(analysis, dict):
         analysis = _default_analysis()
     if not isinstance(preset, dict):
@@ -494,230 +500,150 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     garment_type = analysis.get('garmentType', 'garment')
     garment_type_lower = f"{garment_type} {category}".lower()
 
-    # Dış giyim ve üst giyim koruması (manto, kaban, palto, ceket, bluz, gömlek ASLA elbise olamaz)
-    TOPS_AND_OUTERWEAR_KEYWORDS = [
-        'manto', 'kaban', 'palto', 'mont', 'ceket', 'jacket', 'coat',
-        'trenchcoat', 'trençkot', 'trench', 'pardösü', 'pardesu',
-        'parka', 'anorak', 'blazer', 'bluz', 'blouse', 'gömlek', 'shirt',
-        'tişört', 'tisort', 't-shirt', 'tshirt', 'kazak', 'sweater',
-        'hırka', 'hirka', 'cardigan', 'yelek', 'vest', 'sweatshirt',
-        'hoodie', 'tunik', 'tunic', 'atlet', 'süveter'
-    ]
+    # ═══ ALT TİP ALGILA (dress / skirt / shorts / tops / bottoms) ═══
     is_top_or_outerwear = (
         category in ['tops', 'outerwear', 'knitwear']
-        or _safe_keyword_match(garment_type_lower, TOPS_AND_OUTERWEAR_KEYWORDS)
+        or _safe_keyword_match(garment_type_lower, TOPS_AND_OUTERWEAR_KW)
     )
 
     if is_top_or_outerwear:
-        is_skirt = False
-        is_shorts = False
-        is_dress = False
-        if category not in ['tops', 'outerwear', 'knitwear']:
-            category = 'outerwear' if _safe_keyword_match(garment_type_lower, ['manto', 'kaban', 'palto', 'mont', 'ceket', 'coat', 'jacket', 'trençkot']) else 'tops'
+        sub_type = 'tops'
+    elif _safe_keyword_match(garment_type_lower, ['etek', 'skirt']):
+        sub_type = 'skirt'
+    elif _safe_keyword_match(garment_type_lower, ['şort', 'sort', 'shorts', 'bermuda']):
+        sub_type = 'shorts'
+    elif category in ['dress', 'one_piece', 'one-piece', 'full-body'] or \
+         _safe_keyword_match(garment_type_lower, ['elbise', 'dress', 'tulum', 'jumpsuit', 'abiye']):
+        sub_type = 'dress'
+    elif category == 'bottoms':
+        sub_type = 'bottoms'
     else:
-        is_skirt = _safe_keyword_match(garment_type_lower, ['etek', 'skirt'])
-        is_shorts = _safe_keyword_match(garment_type_lower, ['şort', 'sort', 'shorts', 'bermuda'])
-        is_dress = category in ['dress', 'one_piece', 'one-piece', 'full-body'] or _safe_keyword_match(garment_type_lower, ['elbise', 'dress', 'tulum', 'jumpsuit', 'abiye'])
+        sub_type = 'tops'  # Safe fallback
 
+    # ═══ FASHN PROVIDER (minimal prompt, kendi try-on modeli) ═══
     if provider_type == 'fashn':
-        # Sablonu generic kelimelerle formatla (kiyafet detaylari prompta gitmesin)
-        base_prompt = view_base.format(
-            garment_type="garment",
-            color="",
-            fabric="",
-            pattern="plain",
-            style="casual",
-            fit="standard fit",
+        base_prompt = FASHN_VIEW_TEMPLATES.get(photo_type, FASHN_VIEW_TEMPLATES['front'])
+        negative = FASHN_NEGATIVE
+
+        # Fashn icin outfit directive ve prompt locks
+        if sub_type in ('dress', 'skirt', 'shorts'):
+            base_prompt += " Natural bare legs below garment hemline."
+        elif sub_type == 'tops':
+            base_prompt += " Model wears full-length dark trousers."
+        elif sub_type == 'bottoms':
+            base_prompt += " Full trouser length visible to shoes."
+
+        for lock in prompt_locks:
+            lock_str = str(lock).strip()
+            if not lock_str.upper().startswith('NEGATIVE'):
+                base_prompt += f" {lock_str}"
+
+        if extra_prompt:
+            base_prompt += f" {extra_prompt}"
+
+        _logger.info(
+            'Prompt olusturuldu (photo_type=%s, provider=%s, sub_type=%s): %d karakter',
+            photo_type, provider_type, sub_type, len(base_prompt),
         )
+        return {'positive': base_prompt, 'negative': negative}
+
+    # ═══ SEEDREAM / FAL PROVIDER (kategori-bazlı kısa template) ═══
+    color = analysis.get('primaryColor', '')
+    fabric = analysis.get('fabricType', '')
+    garment_length = analysis.get('garmentLength', 'default') or 'default'
+
+    # Bacak kuralı — uzunluğa göre
+    leg_rules_for_type = LEG_RULES.get(sub_type, {})
+    leg_rule = leg_rules_for_type.get(garment_length, leg_rules_for_type.get('default', ''))
+
+    # El pozu
+    hand_pose = HAND_POSES.get(photo_type, '')
+
+    # Yaka/kol notu (kısa)
+    collar_note = ''
+    collar = analysis.get('collarType', '')
+    sleeve = analysis.get('sleeveType', '')
+    if collar and sub_type in ('tops', 'dress') and photo_type == 'front':
+        collar_note = f"{collar} neckline. "
+    if sleeve and sub_type in ('tops', 'dress') and photo_type == 'front':
+        sleeve_lower = sleeve.lower()
+        if any(k in sleeve_lower for k in ['strapless', 'askisiz', 'askısız', 'sleeveless', 'kolsuz']):
+            collar_note += "Bare shoulders, strapless design. "
+        elif any(k in sleeve_lower for k in ['ince askı', 'spaghetti', 'thin strap']):
+            collar_note += "Thin spaghetti straps. "
+
+    # Grafik/baskı notu
+    graphic_note = ''
+    if analysis.get('hasGraphic') and analysis.get('graphicDescription'):
+        graphic_note = f"Preserve the graphic print: '{analysis['graphicDescription']}'. "
+    elif analysis.get('hasGraphic'):
+        graphic_note = "Preserve the graphic print exactly as in Figure 1. "
+
+    # Extra prompt
+    extra = ''
+    if extra_prompt:
+        extra = extra_prompt.strip()
+
+    # ═══ TEMPLATE SEÇ VE FORMAT ET ═══
+    if photo_type == 'detail':
+        template = SEEDREAM_DETAIL_TEMPLATE
     else:
-        # fal vb. modeller icin kisa ve olumlu prompt
-        color = analysis.get('primaryColor', '')
-        fabric = analysis.get('fabricType', '')
-        pattern = analysis.get('pattern', 'Duz')
-        style = analysis.get('style', 'Casual')
-        fit = analysis.get('fitDetails', 'Regular Fit')
-        collar = analysis.get('collarType', '')
-        sleeve = analysis.get('sleeveType', '')
+        template = SEEDREAM_TEMPLATES.get((sub_type, photo_type))
+        if not template:
+            # Fallback: front template
+            template = SEEDREAM_TEMPLATES.get((sub_type, 'front'), SEEDREAM_TEMPLATES[('tops', 'front')])
 
-        base_prompt = view_base.format(
-            garment_type=garment_type,
-            color=color,
-            fabric=fabric,
-            pattern=pattern,
-            style=style,
-            fit=fit,
-        )
+    base_prompt = template.format(
+        garment_type=garment_type,
+        color=color,
+        fabric=fabric,
+        leg_rule=leg_rule,
+        hand_pose=hand_pose,
+        collar_note=collar_note,
+        graphic_note=graphic_note,
+        extra_prompt=extra,
+    )
 
-        # Yaka/kol bilgisi (sadece ust giyim)
-        if collar and category not in ['bottoms']:
-            base_prompt += f"Collar: {collar}. "
-        if sleeve and category not in ['bottoms']:
-            base_prompt += f"Sleeves: {sleeve}. "
+    # Kalite suffix ve tek prompt lock (fotorealizm)
+    for lock in prompt_locks:
+        lock_str = str(lock).strip()
+        if not lock_str.upper().startswith('NEGATIVE'):
+            base_prompt += f" {lock_str}"
 
-            # Strapless / Sleeveless — olumlu cerceleme
-            sleeve_lower = sleeve.lower()
-            if any(k in sleeve_lower for k in ['strapless', 'askisiz', 'askısız', 'sleeveless', 'kolsuz', 'tube']):
-                base_prompt += (
-                    "This garment is strapless with completely bare shoulders. "
-                    "The model has bare upper arms with clean, exposed shoulders. "
-                )
-
-            # Ince askili — olumlu cerceleme
-            if any(k in sleeve_lower for k in ['ince askı', 'ince aski', 'spaghetti', 'thin strap', 'askili', 'askılı']):
-                base_prompt += (
-                    "This garment has single thin spaghetti straps — exactly one delicate strap per shoulder. "
-                )
-
-        # ═══ BASKI / GRAFIK KORUMA ═══
-        has_graphic = analysis.get('hasGraphic', False)
-        graphic_desc = analysis.get('graphicDescription', '')
-        if has_graphic and graphic_desc:
-            base_prompt += (
-                f"This garment has a graphic print: '{graphic_desc}'. "
-                f"Preserve the print exactly as shown — same position, colors, proportions. "
-            )
-        elif has_graphic:
-            base_prompt += "Preserve the graphic print exactly as shown in the reference. "
-
-        # ═══ DONANIM KORUMA ═══
-        closure = analysis.get('closureType', '')
-        button_count = analysis.get('buttonCount')
-        waistband_type = analysis.get('waistbandType', '')
-        # Beli lastikli pantolonda 1 adet dugme algilanmissa bu neredeyse kesinlikle alarm pinidir
-        is_elastic_bottom = category == 'bottoms' and (
-            'elastic' in str(waistband_type).lower() or 'lastik' in str(waistband_type).lower()
-        )
-        if is_elastic_bottom and (button_count == 1 or str(button_count) == '1'):
-            closure = ''
-            button_count = None
-
-        if closure and str(closure).lower() not in ['yok', 'none', 'null', 'false', '']:
-            base_prompt += f"Hardware: genuine garment {closure} only. Preserve authentic buttons/zippers. "
-            if button_count and str(button_count).isdigit() and int(str(button_count)) > 0:
-                base_prompt += f"Exactly {button_count} buttons, matched precisely. "
-
-        # ═══ WAISTBAND / ALT GİYİM DETAYLARI (Gemini analizinden) ═══
-        if category == 'bottoms':
-            waistband_type = analysis.get('waistbandType', '')
-            has_belt_loops = analysis.get('hasBeltLoops', False)
-            if has_belt_loops:
-                base_prompt += "The waistband has belt loops as visible in the reference image. "
-            elif waistband_type:
-                base_prompt += f"The waistband is {waistband_type}, smooth and uninterrupted. "
-            else:
-                base_prompt += "The waistband is smooth, clean, and continuous as shown in the reference. "
-
-        # ═══ YAKA KORUMA (sadece ust giyim) ═══
-        if photo_type in ['front', 'side'] and category not in ['bottoms']:
-            base_prompt += (
-                "The front neckline is clean and single-layered. "
-                "Ignore any inner back lining visible through the neck opening. "
-            )
-
-        # ═══ AKSESUAR (Minimal ve Doğal) ═══
-        # Asla rastgele el çantası (handbag) eklenmemelidir: çantalar kıyafeti kapatır, uyumsuz durur ve elleri bozar.
-        if photo_type in ['front', 'side', 'back']:
-            base_prompt += "No handbag, no purse. Clean minimalist studio fashion posing, arms and hands relaxed naturally. "
-
-        # ═══ OUTFIT KOMBİN & ALT/ÜST GİYİM DİREKTİFİ ═══
-        if is_skirt:
-            base_prompt += (
-                "SKIRT: Model wears ONLY this skirt. Natural bare legs below hemline. "
-                "NO pants, jeans, or leggings underneath. Neutral fitted top on upper body. "
-            )
-        elif is_shorts:
-            base_prompt += (
-                "SHORTS: Model wears ONLY these shorts. Natural bare legs below hemline. "
-                "NO long pants or leggings underneath. Neutral fitted top on upper body. "
-            )
-        elif is_dress:
-            base_prompt += (
-                "DRESS: Model wears ONLY this dress with shoes. Natural bare legs below hemline. "
-                "NO pants, jeans, or leggings underneath. "
-            )
-        elif category == 'bottoms':
-            base_prompt += (
-                "PANTS: Legs fully covered as shown in reference. "
-                "Neutral fitted top on upper body. "
-            )
-        elif is_top_or_outerwear or category in ['tops', 'outerwear', 'knitwear']:
-            recommended_bottoms = analysis.get('recommendedBottoms', 'dark blue skinny jeans')
-            if not recommended_bottoms:
-                recommended_bottoms = 'dark blue skinny jeans'
-            base_prompt += (
-                f"MANDATORY BOTTOM: Model MUST wear {recommended_bottoms}. "
-                "Full-length, covering entire legs. NO bare legs, NO shorts. "
-            )
-
-        # ═══ GÜVENLİK ETİKETİ / ALARM TAGI İGNORE ═══
-        base_prompt += "Remove all store security tags, alarm pins, price tags. Output must be clean and tag-free. "
-
-    # Cift bosluklari temizle
-    base_prompt = " ".join(base_prompt.split()) + " "
+    # Çift boşlukları temizle
+    base_prompt = " ".join(base_prompt.split())
 
     # ═══ CROSS-VIEW OUTFIT TUTARLILIĞI ═══
-    # Front haric diger acilarda alt kombin (pantolon, ayakkabi) tutarlilik talimatini
-    # prompt'un EN BASINA yerlestir — nano-banana-2 modeli bu talimati once gormeli.
+    # Back/side view'da front view'daki outfit bilgisini kısa ekle
     if outfit_consistency and photo_type != 'front':
-        consistency_prompt = outfit_consistency.get('fullOutfitPrompt', '')
-        if consistency_prompt:
-            base_prompt = consistency_prompt + base_prompt
+        consistency_data = outfit_consistency
+        # Kısa tutarlılık notu (uzun _build_consistency_prompt yerine)
+        bottoms_info = consistency_data.get('bottomsType', '')
+        bottoms_color = consistency_data.get('bottomsColor', '')
+        shoes_info = consistency_data.get('shoesType', '')
+        shoes_color = consistency_data.get('shoesColor', '')
+        consistency_parts = []
+        if bottoms_info:
+            consistency_parts.append(f"{bottoms_color} {bottoms_info}".strip())
+        if shoes_info:
+            consistency_parts.append(f"{shoes_color} {shoes_info}".strip())
+        if consistency_parts:
+            base_prompt += f" Same outfit as front view: {', '.join(consistency_parts)}."
 
-    if photo_type == 'back':
-        base_prompt += (
-            "BACK VIEW. Reproduce back design exactly. "
-            "Back waistband must be clean — no buttons, rivets, or tags. "
-            "Hanger fold-over at shoulder is the FRONT side, not back design — show only single back panel. "
-        )
-    elif photo_type == 'side':
-        if is_top_or_outerwear:
-            base_prompt += (
-                "45-DEGREE SIDE VIEW. Same inner top and pants as front view. "
-                "Do NOT put back fabric on chest. No bare legs. "
-            )
-        else:
-            base_prompt += "45-DEGREE SIDE VIEW. Reproduce garment accurately from side angle. "
+    # ═══ NEGATİF PROMPT ═══
+    negative = SEEDREAM_NEGATIVES.get(sub_type, SEEDREAM_NEGATIVES['tops'])
 
-    # Preset bilgileri (manken tipi, cinsiyeti)
-    if preset:
-        gender = preset.get('gender', 'female')
-        body = preset.get('body_type', 'average')
-        audience = preset.get('target_audience', '')
-        base_prompt += f"Model: {gender}, {body} body type. "
-        if audience:
-            base_prompt += f"Target audience: {audience}. "
-
-    # Negatif prompt başlangıcı
-    negative = _VIEW_NEGATIVE_PROMPTS.get(photo_type, _VIEW_NEGATIVE_PROMPTS['front'])
-
-    # Kalite ve kilit promptlar
+    # Scene negatif eklemeleri
     for lock in prompt_locks:
         lock_str = str(lock).strip()
         if lock_str.upper().startswith('NEGATIVE'):
-            # Negatif kilitler pozitif prompta değil, negatif prompta eklenmeli
             neg_content = lock_str[8:].lstrip(': ')
-            negative = f"{negative}, {neg_content}"
-        else:
-            base_prompt += f" {lock}"
-
-    # Kullanici ek promptu
-    if extra_prompt:
-        base_prompt += f" ADDITIONAL USER DIRECTIVE: {extra_prompt}"
-
-    if is_skirt or is_shorts or is_dress:
-        # Mini etek, sort veya elbiselerde bacak acilmasini engelleyen token'lari temizle ve altina pantolon giyilmesini kesin yasakla
-        for banned_token in ['mini skirt', 'short shorts', 'hot pants', 'bare legs', 'bare thighs', 'exposed legs']:
-            negative = negative.replace(banned_token, '')
-        negative = "pants under skirt, jeans under skirt, trousers under skirt, leggings under skirt, denim under skirt, double pants, double bottoms, pants under dress, jeans under dress, denim under dress, " + negative
-    elif is_top_or_outerwear or category in ['tops', 'outerwear', 'knitwear']:
-        # Üst giyim ve dış giyimde (manto, mont, ceket, bluz vb.) pantolonsuz / çıplak bacak kesinlikle yasak!
-        for pants_banned in ['pants under dress', 'jeans under dress', 'trousers under dress', 'denim under dress']:
-            negative = negative.replace(pants_banned, '')
-        negative = "bare legs, bare thighs, exposed legs, no pants, shorts, cycling shorts, hot pants, underwear only, nude legs, bare knees, mini dress coat, " + negative
+            if neg_content:
+                negative = f"{negative}, {neg_content}"
 
     _logger.info(
-        'Prompt olusturuldu (photo_type=%s, provider=%s): %d karakter',
-        photo_type, provider_type, len(base_prompt),
+        'Prompt olusturuldu (photo_type=%s, provider=%s, sub_type=%s): %d karakter, %d kelime',
+        photo_type, provider_type, sub_type, len(base_prompt), len(base_prompt.split()),
     )
 
     return {
@@ -726,76 +652,6 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     }
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# VIEW-SPESIFIK PROMPT SABLONLARI
-# ═══════════════════════════════════════════════════════════════════════════
-
-_VIEW_PROMPT_TEMPLATES = {
-    'front': (
-        "Professional e-commerce front view photography. "
-        "Full-body model facing camera wearing {color} {fabric} {garment_type}. "
-        "{fit}, {pattern} pattern. Clean white studio background, even lighting. "
-        "Confident fashion pose, one hand on hip, slight S-curve silhouette. "
-        "Sharp focus on garment details and fabric texture. "
-    ),
-    'back': (
-        "Professional e-commerce back view photography. "
-        "Full-body model facing AWAY from camera showing the back of {color} {fabric} {garment_type}. "
-        "{fit}, {pattern} pattern. Clean white studio background, even lighting. "
-        "Elegant back pose, slight contrapposto. "
-        "Sharp focus on back details, seams, and garment shape. "
-    ),
-    'side': (
-        "Professional e-commerce side view photography. "
-        "Full-body model turned 45 degrees showing profile of {color} {fabric} {garment_type}. "
-        "{fit}, {pattern} pattern. Clean white studio background, even lighting. "
-        "Three-quarter fashion pose, contrapposto stance. "
-        "Sharp focus on garment side profile and fit. "
-    ),
-    'detail': (
-        "Professional close-up detail shot of {color} {fabric} {garment_type} worn on a model. "
-        "Tight crop on chest/torso area. {pattern} pattern. "
-        "Focus on fabric texture, stitching quality, and material details. "
-        "Studio macro lighting, extreme sharp focus. "
-    ),
-}
-
-_VIEW_NEGATIVE_PROMPTS = {
-    'front': (
-        "nudity, naked, underwear, lingerie, swimwear, bikini, "
-        "no pants, panties, see-through clothing revealing skin, inappropriate, NSFW, "
-        "security tag, alarm tag, anti-theft tag, EAS sensor, retail security badge, "
-        "plastic alarm pin, ink tag, hard tag, security button, store tag, price tag, "
-        "store fixture, retail clip, fake waist rivet, misplaced rivet, extra buttons, "
-        "handbag, purse, clutch, tote bag, bag held in hand, shopping bag, awkward accessories, floating bag"
-    ),
-    'back': (
-        "nudity, naked, bare back, "
-        "underwear, lingerie, swimwear, bikini, "
-        "no pants, panties, see-through clothing revealing skin, inappropriate, NSFW, "
-        "crop top only, sports bra only, "
-        "hanger, hanger hook, fabric fold-over, double-layered back, cape-like flap, "
-        "extra fabric layer on back, wing-like extensions on shoulders, two-toned back panel, "
-        "security tag, alarm tag, anti-theft tag, EAS sensor, retail security badge, "
-        "plastic alarm pin, ink tag, hard tag, store tag, price tag, store fixture, "
-        "retail clip, button on back waistband, rivet on back waistband, back waist button, "
-        "metal badge on waistband, back pocket rivet, fake waistband hardware, "
-        "handbag, purse, clutch, tote bag, bag held in hand, shopping bag, awkward accessories, floating bag"
-    ),
-    'side': (
-        "nudity, naked, "
-        "underwear, lingerie, swimwear, bikini, "
-        "no pants, panties, see-through clothing revealing skin, inappropriate, NSFW, "
-        "security tag, alarm tag, anti-theft tag, EAS sensor, retail security badge, "
-        "plastic alarm pin, ink tag, hard tag, store tag, price tag, store fixture, retail clip, "
-        "handbag, purse, clutch, tote bag, bag held in hand, shopping bag, awkward accessories, floating bag"
-    ),
-    'detail': (
-        "security tag, alarm tag, anti-theft tag, EAS sensor, retail security badge, "
-        "plastic alarm pin, ink tag, hard tag, store tag, price tag, store fixture, retail clip, "
-        "handbag, purse, clutch, tote bag, bag held in hand, awkward accessories"
-    ),
-}
 
 
 def _default_analysis():

@@ -8,8 +8,8 @@ import logging
 import threading
 import time
 
+
 from .ai_provider_base import AIProviderBase
-from .garment_analyzer import _safe_keyword_match
 
 _logger = logging.getLogger(__name__)
 
@@ -77,10 +77,16 @@ class FalProvider(AIProviderBase):
 
     def virtual_tryon(self, model_image_url, garment_image_url,
                       category='tops', mode='balanced', **kwargs):
-        # Manken uzerine giydirme.
+        """Manken uzerine giydirme — thin API client.
+
+        Prompt mantigi garment_analyzer.py'de merkezi olarak olusturulur.
+        Bu fonksiyon sadece:
+        1. Image URL'leri hazirlar (Figure indexleme)
+        2. Detail referans Figure notlarini ekler
+        3. fal_client.subscribe() ile API cagrisini yapar
+        """
         self._check_client()
 
-        # default endpoint mapping based on model_name
         model_name = kwargs.get('model_name') or 'tryon-v1.6'
         endpoint = kwargs.get('endpoint')
         if not endpoint:
@@ -93,253 +99,33 @@ class FalProvider(AIProviderBase):
             elif 'v1.6' in model_name or 'v1-6' in model_name:
                 endpoint = self.ENDPOINTS['tryon_fashn']
             else:
-                endpoint = self.ENDPOINTS['tryon_fashn']  # Default to FASHN v1.6 for best quality
+                endpoint = self.ENDPOINTS['tryon_fashn']
 
         prompt = kwargs.get('prompt', '')
+        negative_prompt = kwargs.get('negative_prompt', '')
+        photo_type = kwargs.get('photo_type', 'front')
 
         if 'nano-banana' in endpoint or 'seedream' in endpoint:
-            # nano-banana-2/edit formatı
-            # View-spesifik prompt bilgisini ekle
-            photo_type = kwargs.get('photo_type', 'front')
-            front_output_url = kwargs.get('front_output_url')
-            detail_urls = kwargs.get('detail_urls') or []
-            
+            # ═══ SEEDREAM / NANO-BANANA PATH ═══
+            # Image URL'leri hazirla: [Figure 1=garment, Figure 2=model, Figure 3=front_view?, ...]
             image_urls_list = [garment_image_url, model_image_url]
+
+            front_output_url = kwargs.get('front_output_url')
             if front_output_url and photo_type in ('back', 'side'):
                 image_urls_list.append(front_output_url)
-                
+
+            detail_urls = kwargs.get('detail_urls') or []
             for du in detail_urls:
                 image_urls_list.append(du)
-                
+
+            # Detail figure referanslari prompt'a ekle
             enhanced_prompt = prompt
-            
-            # Kategori tespiti: prompt metni yerine garment_type kullan
-            # (prompt metni 'tişört' içerdiğinde 'şort' false positive verir)
-            garment_type_raw = (kwargs.get('garment_type', '') or '').lower()
-            TOPS_AND_OUTERWEAR_KEYWORDS = [
-                'manto', 'kaban', 'palto', 'mont', 'ceket', 'jacket', 'coat',
-                'trenchcoat', 'trençkot', 'trench', 'pardösü', 'pardesu',
-                'parka', 'anorak', 'blazer', 'bluz', 'blouse', 'gömlek', 'shirt',
-                'tişört', 'tisort', 't-shirt', 'tshirt', 'kazak', 'sweater',
-                'hırka', 'hirka', 'cardigan', 'yelek', 'vest', 'sweatshirt',
-                'hoodie', 'tunik', 'tunic', 'atlet', 'süveter'
-            ]
-            is_top_or_outerwear = (
-                category in ('tops', 'outerwear', 'knitwear')
-                or _safe_keyword_match(garment_type_raw, TOPS_AND_OUTERWEAR_KEYWORDS)
-            )
-            if is_top_or_outerwear:
-                is_skirt = False
-                is_shorts = False
-                is_dress = False
-                is_bottom = False
-            else:
-                is_skirt = _safe_keyword_match(garment_type_raw, ['skirt', 'etek'])
-                is_shorts = _safe_keyword_match(garment_type_raw, ['shorts', 'şort', 'sort', 'bermuda'])
-                is_dress = category in ('one-piece', 'one_piece', 'dress', 'full-body') or _safe_keyword_match(garment_type_raw, ['dress', 'elbise', 'tulum', 'jumpsuit', 'abiye'])
-                is_bottom = category == 'bottoms' or is_skirt or is_shorts
-
-            # ═══ GARMENT FIDELITY (OLUMLU ÇERÇEVELEME) ═══
-            if 'seedream' in endpoint:
-                # Seedream uses Figure references
-                if is_skirt:
-                    garment_fidelity = (
-                        "Dress model in Figure 2 with garment from Figure 1. "
-                        "Figure 1 is a SKIRT. REPLACE pants/jeans of Figure 2 with this skirt. "
-                        "Legs below skirt MUST be natural bare legs. NO pants underneath. "
-                        "Keep face, hair, neutral top, shoes from Figure 2. "
-                    )
-                elif is_shorts:
-                    garment_fidelity = (
-                        "Dress model in Figure 2 with garment from Figure 1. "
-                        "Figure 1 is SHORTS. REPLACE pants of Figure 2 with these shorts. "
-                        "Legs below shorts MUST be natural bare legs. NO long pants underneath. "
-                        "Keep face, hair, neutral top, shoes from Figure 2. "
-                    )
-                elif is_dress:
-                    garment_fidelity = (
-                        "Dress model in Figure 2 with garment from Figure 1. "
-                        "Figure 1 is a DRESS. REPLACE both top and pants of Figure 2 with this dress. "
-                        "Legs below dress MUST be natural bare legs. NO pants underneath. "
-                        "Keep face, hair, shoes from Figure 2. "
-                    )
-                elif is_bottom:
-                    garment_fidelity = (
-                        "Dress model in Figure 2 with garment from Figure 1. "
-                        "Figure 1 is PANTS/TROUSERS. REPLACE bottoms of Figure 2 with Figure 1. "
-                        "Keep face, hair, neutral top, shoes from Figure 2. "
-                    )
-                else:
-                    garment_fidelity = (
-                        "Dress model in Figure 2 with garment from Figure 1. "
-                        "Figure 1 is UPPER BODY/OUTERWEAR. REPLACE upper top of Figure 2 with Figure 1. "
-                        "Model MUST wear full-length dark pants/jeans covering entire legs. NO bare legs. "
-                        "Keep face, hair, shoes from Figure 2. "
-                        "Match every garment detail: collar, seams, pockets, closures, fabric texture. "
-                    )
-                # Tag removal applies to all categories
-                garment_fidelity += "Remove all store tags, alarm pins, security sensors from garment. "
-            else:
-                if is_skirt:
-                    garment_fidelity = (
-                        "GARMENT FIDELITY: The 1st reference image is a SKIRT. "
-                        "You MUST completely REPLACE any pants/jeans from the 2nd reference image with this skirt. "
-                        "The model MUST wear ONLY the skirt on the lower body with NATURAL BARE LEGS. "
-                        "Strictly NO pants, NO jeans, NO leggings underneath the skirt! "
-                        "IMPORTANT: Ignore and remove any security tags, alarm tags, anti-theft pins, price tags, hangers, or store fixtures "
-                        "visible on the 1st reference image — these are store artifacts, NOT part of the garment. "
-                        "The output garment must be completely clean, tag-free, and alarm-free. "
-                        "Reproduce every visible detail precisely: same waistband construction, "
-                        "same seams, same pockets, authentic garment closures only. "
-                        "The output garment must be a pixel-perfect match of the 1st reference (minus any store tags or alarm pins). "
-                    )
-                elif is_shorts:
-                    garment_fidelity = (
-                        "GARMENT FIDELITY: The 1st reference image is SHORTS. "
-                        "You MUST completely REPLACE any pants/jeans from the 2nd reference with these shorts. "
-                        "The model's legs below the shorts MUST BE NATURAL BARE LEGS. Strictly NO long pants underneath! "
-                        "IMPORTANT: Ignore and remove any security tags, alarm tags, anti-theft pins, price tags... "
-                        "The output garment must be a pixel-perfect match of the 1st reference. "
-                    )
-                elif is_dress:
-                    garment_fidelity = (
-                        "GARMENT FIDELITY: The 1st reference image is a DRESS. "
-                        "You MUST completely REPLACE both top and pants from the 2nd reference with this dress. "
-                        "The model's legs below the dress hemline MUST BE NATURAL BARE LEGS. Strictly NO pants underneath! "
-                        "IMPORTANT: Ignore and remove any security tags, alarm tags, anti-theft pins, price tags... "
-                        "The output garment must be a pixel-perfect match of the 1st reference. "
-                    )
-                elif is_bottom:
-                    garment_fidelity = (
-                        "GARMENT FIDELITY: The 1st reference image is PANTS/TROUSERS. "
-                        "You MUST completely REPLACE the bottoms of the 2nd reference with the pants from the 1st reference. "
-                        "The output garment must be a pixel-perfect match of the 1st reference. "
-                    )
-                else:
-                    garment_fidelity = (
-                        "GARMENT FIDELITY: The 1st reference image is an UPPER BODY / OUTERWEAR garment. "
-                        "MANDATORY LOWER BODY ATTIRE: The model MUST wear full-length dark pants or denim jeans covering her entire legs down to the shoes. "
-                        "Strictly NO bare legs, NO bare thighs, NO shorts, NO cycling shorts, NO underwear below the coat/top. "
-                        "IMPORTANT: Ignore and remove any security tags, alarm tags, anti-theft pins, price tags, hangers, or store fixtures "
-                        "visible on the 1st reference image — these are store artifacts, NOT part of the garment. "
-                        "The output garment must be completely clean, tag-free, and alarm-free. "
-                        "Reproduce every visible detail precisely: same collar, waistband construction, "
-                        "same seams, same pockets, authentic garment closures only. "
-                        "Strictly NO security pins, anti-theft tags, or artificial rivets on the waistband. "
-                        "The output garment must be a pixel-perfect match of the 1st reference (minus any store tags or alarm pins). "
-                    )
-
-            # Base View Hints
-            if 'seedream' in endpoint:
-                if is_top_or_outerwear:
-                    back_hint = (
-                        'BACK view: model facing away, wearing Figure 1. '
-                        'Hanger fold-over at shoulder is FRONT fabric, not back design — show single back panel only. '
-                        'Same pants/jeans from Figure 3. NO bare legs. '
-                    )
-                    side_hint = (
-                        '45-DEGREE SIDE view of model wearing Figure 1. '
-                        'Same collar, lapels, sleeves, pockets from 45-degree angle. '
-                        'Same inner top and pants as Figure 3. Do NOT put back fabric on chest. '
-                    )
-                elif is_skirt or is_shorts or is_bottom:
-                    back_hint = (
-                        'BACK view: model facing away, wearing Figure 1. '
-                        'Same waistband, pockets, surface as Figure 1. Back waistband must be clean — no extra buttons/rivets. '
-                    )
-                    side_hint = (
-                        'SIDE view: model turned 45 degrees, wearing Figure 1. '
-                        'Match waistband, surface, pockets from Figure 1. '
-                    )
-                else:
-                    back_hint = 'BACK view: model facing away, wearing Figure 1. Single-layer back, no fold-overs. '
-                    side_hint = 'SIDE view: model turned 45 degrees, wearing Figure 1. Match all details. '
-
-                view_hints = {
-                    'back': back_hint,
-                    'side': side_hint,
-                    'detail': 'Close-up detail of garment from Figure 1 on model. Tag-free. ',
-                }
-            else:
-                if is_top_or_outerwear:
-                    back_hint_std = (
-                        'IMPORTANT: Show the BACK view of the model, facing away from camera. '
-                        'The garment reference was photographed on a hanger. Any fabric at the top/shoulder area '
-                        'that folds over the hanger hook is the FRONT side draped backward — NOT part of the back design. '
-                        'IGNORE fold-over layers. Show ONLY the single back panel as one clean layer. '
-                        'MANDATORY LOWER BODY: The model MUST wear full-length pants/jeans. Strictly NO bare legs. '
-                    )
-                    side_hint_std = (
-                        'IMPORTANT: Show the 45-DEGREE THREE-QUARTER SIDE view of the model, turned 45 degrees. '
-                        'The model wears the upper body/outerwear garment from the reference. '
-                        'CHEST & INNER ATTIRE: If the coat/jacket is open, keep the exact same inner top as established in the front view. '
-                        'MANDATORY LOWER BODY: The model MUST wear full-length trousers/jeans. Strictly NO bare legs. '
-                    )
-                else:
-                    back_hint_std = (
-                        'IMPORTANT: Show the BACK view of the model, facing away from camera. '
-                        'WAISTBAND CLEANLINESS: The back waistband must be clean, smooth, uninterrupted fabric — '
-                        'absolutely NO buttons, NO rivets, NO metal pins, NO security tags on the back waistband. '
-                    )
-                    side_hint_std = 'IMPORTANT: Show the SIDE view of the model, turned 45 degrees. '
-
-                view_hints = {
-                    'back': back_hint_std,
-                    'side': side_hint_std,
-                    'detail': 'IMPORTANT: Close-up detail shot showing fabric texture and details. Strictly tag-free and alarm-free. ',
-                }
-            base_hint = view_hints.get(photo_type, '') if photo_type and photo_type != 'front' else ''
-            dynamic_prompt = garment_fidelity + base_hint
-            
-            detail_start_idx = 3
-            if front_output_url and photo_type in ('back', 'side'):
-                if 'seedream' in endpoint:
-                    dynamic_prompt += (
-                        "Figure 3 is the FRONT view. Use Figure 3 as identity anchor: same model, inner top, pants, shoes. "
-                        "Only rotate camera angle. Do NOT put back fabric on chest. "
-                    )
-                else:
-                    dynamic_prompt += (
-                        "The THIRD reference image is the FRONT generated view of this model; "
-                        "use the THIRD image as the source of truth for the model identity, hairstyle, skin, "
-                        "inner clothing under the top, trousers, and shoes. Maintain complete outfit consistency. "
-                    )
-                detail_start_idx = 4
-                
             if detail_urls:
+                detail_start_idx = 4 if front_output_url and photo_type in ('back', 'side') else 3
                 for i in range(len(detail_urls)):
                     idx = detail_start_idx + i
-                    
-                    # Sayı sonlarına uygun ek getirme (1st, 2nd, 3rd, 4th, vb.)
-                    suffix = "th"
-                    if idx % 10 == 1 and idx % 100 != 11:
-                        suffix = "st"
-                    elif idx % 10 == 2 and idx % 100 != 12:
-                        suffix = "nd"
-                    elif idx % 10 == 3 and idx % 100 != 13:
-                        suffix = "rd"
-                        
-                    if 'seedream' in endpoint:
-                        dynamic_prompt += f"Figure {idx} is a MACRO DETAIL shot of the garment showing fabric texture and patterns. Apply this exact texture and detail precisely. "
-                    else:
-                        dynamic_prompt += f"The {idx}{suffix} reference image is a MACRO DETAIL shot of the garment showing fabric texture and specific patterns. Apply this exact texture and detail to the garment precisely. Copy the exact pattern, texture, and construction details from this reference. "
-                
-                # Detail shot oldugunda full body ciktisi icin yonlendirme
-                if 'seedream' in endpoint:
-                    dynamic_prompt += (
-                        "The final output is a FULL BODY photograph of the model wearing the garment from Figure 1. "
-                        "Detail figures are for texture reference only. "
-                    )
-                else:
-                    dynamic_prompt += (
-                        "The final output is a FULL BODY photograph of the model wearing the garment. "
-                        "The detail images are for texture reference only. "
-                        "The garment in the output is a pixel-perfect match of the 1st reference image. "
-                        "Match every pattern, texture, and construction detail exactly as shown. "
-                    )
-                    
-            if dynamic_prompt:
-                enhanced_prompt = dynamic_prompt + "\n" + enhanced_prompt
+                    enhanced_prompt += f" Figure {idx} is a detail texture reference for the garment."
+                enhanced_prompt += " Output is full-body photo with Figure 1 garment texture."
 
             arguments = {
                 'prompt': enhanced_prompt,
@@ -348,48 +134,22 @@ class FalProvider(AIProviderBase):
                 'output_format': 'jpeg',
                 'resolution': kwargs.get('resolution', '2k'),
             }
+
             if 'nano-banana' in endpoint:
                 arguments['num_images'] = kwargs.get('num_samples', 1)
                 arguments['safety_tolerance'] = '4'
                 arguments['limit_generations'] = True
                 arguments['enable_watermark'] = False
-            anti_alarm_tokens = (
-                "security tag, alarm tag, anti-theft tag, EAS sensor, retail security badge, "
-                "plastic alarm pin, ink tag, hard tag, store tag, price tag, store fixture, "
-                "retail clip, button on back waistband, rivet on back waistband, misplaced rivet"
-            )
-            raw_neg = kwargs.get('negative_prompt', '') or ''
-            if is_skirt or is_dress or is_shorts:
-                for banned in ['bare legs', 'bare thighs', 'exposed legs', 'mini skirt', 'short shorts', 'hot pants']:
-                    raw_neg = raw_neg.replace(banned, '')
-                anti_alarm_tokens += (
-                    ", pants under skirt, jeans under skirt, trousers under skirt, leggings under skirt, "
-                    "denim under skirt, pants under dress, jeans under dress, double pants, double bottoms"
-                )
-            elif is_top_or_outerwear:
-                for pants_banned in ['pants under dress', 'jeans under dress', 'trousers under dress', 'denim under dress']:
-                    raw_neg = raw_neg.replace(pants_banned, '')
-                anti_alarm_tokens += (
-                    ", bare legs, bare thighs, exposed legs, no pants, shorts, cycling shorts, "
-                    "hot pants, underwear only, nude legs, bare knees, mini dress coat"
-                )
 
-            # Negatif prompt tokenlerini birleştir ve tekilleştir (token bloat ve tekrarı önle)
-            combined_neg_str = f"{raw_neg}, {anti_alarm_tokens}"
-            tokens = [t.strip() for t in combined_neg_str.split(',') if t.strip()]
-            seen_tokens = set()
-            unique_tokens = []
-            for t in tokens:
-                t_lower = t.lower()
-                if t_lower not in seen_tokens:
-                    seen_tokens.add(t_lower)
-                    unique_tokens.append(t)
-            arguments['negative_prompt'] = ', '.join(unique_tokens)
+            # Negatif prompt — garment_analyzer'dan gelir, ek manipulasyon yok
+            if negative_prompt:
+                arguments['negative_prompt'] = negative_prompt
 
-            if 'seed' in kwargs and kwargs['seed']:
+            if kwargs.get('seed'):
                 arguments['seed'] = int(kwargs['seed'])
+
         else:
-            # FASHN v1.6 veya Kolors formatı
+            # ═══ FASHN PATH ═══
             fal_category = {
                 'tops': 'tops',
                 'bottoms': 'bottoms',
@@ -411,21 +171,13 @@ class FalProvider(AIProviderBase):
             }
             if prompt:
                 arguments['prompt'] = prompt
-            raw_neg = kwargs.get('negative_prompt', '') or ''
-            anti_alarm_tokens = (
-                "security tag, alarm tag, anti-theft tag, EAS sensor, retail security badge, "
-                "plastic alarm pin, ink tag, hard tag, store tag, price tag, store fixture, "
-                "retail clip, button on back waistband, rivet on back waistband, misplaced rivet"
-            )
-            if anti_alarm_tokens not in raw_neg:
-                arguments['negative_prompt'] = f"{raw_neg}, {anti_alarm_tokens}".strip(', ')
-            else:
-                arguments['negative_prompt'] = raw_neg
+            if negative_prompt:
+                arguments['negative_prompt'] = negative_prompt
 
-            if 'seed' in kwargs and kwargs['seed']:
+            if kwargs.get('seed'):
                 arguments['seed'] = int(kwargs['seed'])
 
-        # Rate Limit / Concurrency Limit Retry Mekanizması
+        # ═══ RATE LIMIT RETRY ═══
         import time
         max_retries = 2
         backoff_factor = 4
@@ -456,6 +208,7 @@ class FalProvider(AIProviderBase):
                 else:
                     raise
 
+        # ═══ SONUÇ PARSE ═══
         image_urls = []
         if isinstance(result, dict):
             if 'images' in result and isinstance(result['images'], list):
@@ -476,8 +229,7 @@ class FalProvider(AIProviderBase):
 
         image_url = image_urls[0] if image_urls else ''
         request_id = result.get('request_id', '') if isinstance(result, dict) else ''
-        
-        # fal.ai base response'dan veya result dict'ten seed oku
+
         seed_val = None
         if isinstance(result, dict):
             seed_val = result.get('seed')
@@ -491,7 +243,6 @@ class FalProvider(AIProviderBase):
             'request_id': request_id,
             'seed': seed_val,
         }
-
     def remove_background(self, image_base64):
         # Arka plan kaldirma - birefnet.
         self._check_client()
