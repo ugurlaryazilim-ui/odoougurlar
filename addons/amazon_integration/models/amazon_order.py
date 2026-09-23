@@ -80,8 +80,12 @@ class AmazonOrder(models.Model):
         
         msg = _('Sipariş ve müşteri bilgileri Amazon SP-API üzerinden yenilendi.')
         msg_type = 'success'
-        if self.order_status == 'Pending' and not self.shipping_address:
-            msg = _('Bu sipariş Amazon tarafında henüz "Pending" (Ödeme Bekliyor) durumundadır. Amazon PII politikası gereği ödeme onaylanana kadar adres ve müşteri bilgileri API üzerinden verilmeyebilir. Ödeme onaylandığında bilgiler otomatik olarak aktarılacaktır.')
+        if self.order_status == 'Pending':
+            msg = _(
+                'Bu sipariş henüz "Pending" (Ödeme Bekliyor) durumundadır. '
+                'Amazon, ödeme onaylanmadan müşteri bilgilerini paylaşmaz. '
+                'Sipariş "Unshipped" olduğunda otomatik olarak işlenecek ve '
+                'sale.order + picking oluşturulacaktır.')
             msg_type = 'warning'
 
         return {

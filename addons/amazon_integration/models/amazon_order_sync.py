@@ -276,6 +276,7 @@ class AmazonOrderSync(models.Model):
             params = {
                 'MarketplaceIds': self.marketplace_id,
                 'CreatedAfter': created_after,
+                'OrderStatuses': 'Unshipped,PartiallyShipped,Shipped,Canceled',
                 'MaxResultsPerPage': 50
             }
             
@@ -654,6 +655,18 @@ class AmazonOrderSync(models.Model):
         if status == 'Canceled' and not existing_order:
             return processed, 0, 0, msgs
 
+        # ─── PENDING SİPARİŞ: API çağrıları yapmadan atla ───
+        # Amazon, Pending siparişlerde PII vermez (ad, adres, telefon boş gelir).
+        # GetOrders API'de OrderStatuses filtresi Pending'i zaten hariç tutar,
+        # ama "Amazon'dan Bilgileri Yenile" butonu veya force_update ile
+        # Pending sipariş buraya ulaşabilir → boşuna API çağrısı yapma.
+        if status == 'Pending' and not existing_order:
+            _logger.info(
+                "Amazon sipariş %s Pending — PII mevcut değil, atlanıyor. "
+                "Unshipped olduğunda otomatik işlenecek.",
+                amazon_order_id)
+            return processed, 0, 0, msgs
+
         # ─── PII (Adres ve Müşteri) Detaylarını Çek ───
         # Amazon SP-API PII verilerine erişim için Restricted Data Token (RDT) gerektirir.
         # RDT olmadan ShippingAddress ve BuyerInfo alanları BOŞ döner.
@@ -847,19 +860,6 @@ class AmazonOrderSync(models.Model):
                         [(l.product_id.display_name, l.product_id.type, l.product_id.id)
                          for l in existing_order.order_line if l.product_id])
 
-            return processed, 0, 0, msgs
-
-        # ─── PENDING SİPARİŞ: Sadece amazon.order kaydı oluştur ───
-        # Amazon SP-API, Pending siparişlerde PII (ad, adres, telefon) vermez.
-        # Profesyonel yaklaşım: Pending → sadece amazon.order (takip için)
-        #                       Unshipped → sale.order + confirm + picking
-        # Böylece "Amazon Müşterisi" sorunu ortadan kalkar.
-        if status == 'Pending':
-            _logger.info(
-                "Amazon sipariş %s Pending durumunda — amazon.order kaydı oluşturuldu, "
-                "sale.order oluşturulmayacak (PII henüz mevcut değil). "
-                "Unshipped olduğunda otomatik oluşturulacak.",
-                amazon_order_id)
             return processed, 0, 0, msgs
 
         # ─── Odoo Siparişi Oluştur (Sadece Unshipped/Shipped) ───
