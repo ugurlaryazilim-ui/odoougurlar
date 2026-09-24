@@ -517,6 +517,72 @@ class AiStudioSession(models.Model):
 
             session.review_status_display = ' · '.join(parts) if parts else ''
 
+    def _auto_select_preset(self):
+        """Ürün kategorisine göre doğru manken preset'ini otomatik seç.
+        
+        Eğer tespit edilen ürün tipi (elbise/tops/bottoms) mevcut preset'in
+        garment_type'ı ile uyuşmuyorsa, aynı cinsiyet ve vücut tipindeki
+        uygun preset'i bulup otomatik değiştirir.
+        
+        Bu sayede elbise ürünleri jean'li manken yerine bare-legs manken
+        kullanır ve bleed-through önlenir.
+        """
+        self.ensure_one()
+        if not self.model_preset_id:
+            return
+        
+        detected_cat = self._detect_garment_type()
+        current_preset = self.model_preset_id
+        
+        # Kategori eşleştirme: detected_cat → preset garment_type
+        cat_to_garment = {
+            'tops': 'tops',
+            'bottoms': 'bottoms',
+            'one_piece': 'one_piece',
+            'shoes': 'shoes',
+            'bags': 'bags',
+            'accessories': 'accessories',
+        }
+        needed_garment = cat_to_garment.get(detected_cat, 'tops')
+        
+        # Mevcut preset zaten doğru tipteyse değişiklik gereksiz
+        if current_preset.garment_type == needed_garment:
+            _logger.info(
+                'Preset uyumlu: %s (garment_type=%s, algılanan=%s)',
+                current_preset.name, current_preset.garment_type, detected_cat,
+            )
+            return
+        
+        # Uygun preset ara: aynı cinsiyet + aynı vücut tipi + doğru garment_type
+        domain = [
+            ('garment_type', '=', needed_garment),
+            ('gender', '=', current_preset.gender),
+            ('model_image_front', '!=', False),  # Manken görseli olmalı
+        ]
+        # Vücut tipi varsa filtrele
+        if current_preset.body_type:
+            domain.append(('body_type', '=', current_preset.body_type))
+        
+        matching_preset = self.env['ai.studio.model.preset'].search(domain, limit=1)
+        
+        if matching_preset:
+            _logger.info(
+                'Otomatik preset değişimi: %s (%s) → %s (%s) [ürün tipi: %s]',
+                current_preset.name, current_preset.garment_type,
+                matching_preset.name, matching_preset.garment_type,
+                detected_cat,
+            )
+            self.write({'model_preset_id': matching_preset.id})
+        else:
+            _logger.warning(
+                'Uygun preset bulunamadı: garment_type=%s, gender=%s. '
+                'Mevcut preset (%s, garment_type=%s) kullanılıyor. '
+                'Daha iyi sonuç için "%s" tipinde yeni bir preset oluşturun.',
+                needed_garment, current_preset.gender,
+                current_preset.name, current_preset.garment_type,
+                needed_garment,
+            )
+
     def _detect_garment_type(self):
         """Ürünün gerçek tipini otomatik algılar.
         
@@ -1169,6 +1235,10 @@ class AiStudioSession(models.Model):
             raise UserError(_('Lütfen bir manken preseti seçin.'))
         if not self.photo_ids:
             raise UserError(_('Fotoğraf yok. Önce fotoğraf çekin.'))
+
+        # ═══ OTOMATİK PRESET SEÇİMİ ═══
+        # Ürün kategorisine göre doğru manken preset'ini seç
+        self._auto_select_preset()
 
         # Provider secimi ve API key kontrolu
         provider_type = self.env['ir.config_parameter'].sudo().get_param(
@@ -1906,6 +1976,10 @@ class AiStudioSession(models.Model):
                     _logger.warning('Oturum processing durumu kilit çakışması (session_id=%s, deneme %d/3): %s', session_id, attempt + 1, start_err)
                     time.sleep(1.5)
 
+            # ═══ OTOMATİK PRESET SEÇİMİ (Batch) ═══
+            session._auto_select_preset()
+            cr.commit()
+            
             preset = session.model_preset_id
             generations = session.generation_ids.filtered(
                 lambda g: g.state == 'pending'
