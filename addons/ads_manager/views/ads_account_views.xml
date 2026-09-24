@@ -28,11 +28,25 @@
                             <field name="company_id" groups="base.group_multi_company"/>
                         </group>
                         <group string="Credentials">
-                            <field name="api_key" password="True"/>
-                            <field name="api_secret" password="True"/>
-                            <field name="access_token" password="True"/>
+                            <field name="access_token" password="True" groups="base.group_system"/>
+                            <field name="refresh_token" password="True" groups="base.group_system"/>
+                            <field name="token_expiry" groups="base.group_system"/>
                         </group>
                     </group>
+                    <group>
+                        <group string="Meta Settings" invisible="platform != 'meta'">
+                            <field name="meta_app_id"/>
+                            <field name="meta_app_secret" password="True" groups="base.group_system"/>
+                            <field name="meta_business_id"/>
+                            <field name="meta_api_version"/>
+                        </group>
+                        <group string="Google Settings" invisible="platform != 'google'">
+                            <field name="google_client_id"/>
+                            <field name="google_client_secret" password="True" groups="base.group_system"/>
+                            <field name="google_developer_token" password="True" groups="base.group_system"/>
+                            <field name="google_manager_id"/>
+                            <field name="google_api_version"/>
+                        </group>
                     <notebook>
                         <page string="Campaigns" name="campaigns">
                             <field name="campaign_ids" readonly="1">
