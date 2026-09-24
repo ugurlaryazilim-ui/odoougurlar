@@ -283,22 +283,12 @@ class OdooSyncApp(ctk.CTk):
                 
             except Exception as e:
                 err_str = str(e)
-                _logger.error("Ajan çalışırken ağ hatası / kritik hata: %s", err_str)
-                # Ağ / sunucu hatalarında çökmek yerine biraz bekleyip tekrar deniyoruz
-                recoverable_keywords = [
-                    "502", "503", "504", "ProtocolError", "ConnectionReset",
-                    "ConnectionError", "JSONDecodeError", "Expecting value",
-                    "RemoteDisconnected", "ConnectionAborted", "Timeout",
-                    "Sunucu hatası",
-                ]
-                if any(kw in err_str for kw in recoverable_keywords):
-                    _logger.info("🔄 Sunucu geçici olarak meşgul veya ulaşılamıyor. 30 saniye sonra tekrar denenecek...")
-                    self.agent = None  # Bağlantıyı sıfırla
-                    self.stop_event.wait(30.0)
-                else:
-                    _logger.error(traceback.format_exc())
-                    self.after(0, self._reset_ui_on_error)
-                    break
+                _logger.error("Ajan çalışırken hata: %s", err_str)
+                _logger.error(traceback.format_exc())
+                # ── TÜM HATALARI KURTAR — asla çökme ──
+                _logger.info("🔄 30 saniye sonra tekrar denenecek...")
+                self.agent = None  # Bağlantıyı sıfırla, yeniden oluşturulsun
+                self.stop_event.wait(30.0)
 
     def _reset_ui_on_error(self):
         self.status_label.configure(text="Durum: HATA OLUŞTU", text_color="red")
@@ -309,6 +299,9 @@ class OdooSyncApp(ctk.CTk):
     def start_sync(self):
         if self.is_running:
             return
+        
+        # Eski agent'ı temizle — yeni thread'de temiz başlasın
+        self.agent = None
             
         self.is_running = True
         self.stop_event.clear()

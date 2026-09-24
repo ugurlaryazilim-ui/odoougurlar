@@ -196,7 +196,8 @@ class JsonRpcHelper:
                 res = resp.json()
             except (requests.exceptions.ConnectionError,
                     requests.exceptions.Timeout,
-                    requests.exceptions.JSONDecodeError) as e:
+                    requests.exceptions.JSONDecodeError,
+                    OSError) as e:
                 if attempt < max_retries - 1:
                     wait = (attempt + 1) * 5  # 5s, 10s, 15s
                     _logger.warning(
@@ -495,7 +496,7 @@ class OdooImageSync:
     def _init_db(self):
         """SQLite veritabanını başlat ve tabloyu oluştur."""
         db_path = self._db_path()
-        self._db = sqlite3.connect(db_path)
+        self._db = sqlite3.connect(db_path, check_same_thread=False)
         self._db.execute('PRAGMA journal_mode=WAL')   # Yazma sırasında okuma yapılabilsin
         self._db.execute('PRAGMA synchronous=NORMAL') # Performans vs güvenlik dengesi
         self._db.execute('''
@@ -913,6 +914,10 @@ class OdooImageSync:
             image_data = []
             for order, fpath in items:
                 fname = os.path.basename(fpath)
+                # Ağ sürücüsü kopmuş olabilir — dosya hâlâ var mı?
+                if not os.path.exists(fpath):
+                    _logger.warning("⚠️ Dosya artık mevcut değil (ağ kopmuş?): %s", fname)
+                    continue
                 file_size, file_mtime = self._get_file_meta(fpath)
                 try:
                     img_b64 = compress_image(fpath)
