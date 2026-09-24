@@ -77,7 +77,15 @@ class AdsAccount(models.Model):
                 'target': 'self',
             }
         elif self.platform == 'google':
-            raise UserError(_('Google Ads connection will be available in a future update.'))
+            if not self.google_client_id or not self.google_client_secret:
+                raise UserError(_('Please configure Google Client ID and Client Secret first.'))
+            if not self.google_developer_token:
+                raise UserError(_('Please configure Google Developer Token first.'))
+            return {
+                'type': 'ir.actions.act_url',
+                'url': f'/ads_manager/google/login?account_id={self.id}',
+                'target': 'self',
+            }
 
     def action_test_connection(self):
         self.ensure_one()
@@ -111,14 +119,39 @@ class AdsAccount(models.Model):
                 self.message_post(body=_('Connection test failed: %s') % str(e))
                 raise UserError(_('Connection test failed: %s') % str(e))
         elif self.platform == 'google':
-            raise UserError(_('Google Ads connection will be available in a future update.'))
+            if not self.access_token:
+                raise UserError(_('No access token. Please connect first.'))
+            from ..services.google_client import GoogleAdsClient, GoogleAdsError
+            client = GoogleAdsClient(
+                access_token=self.access_token,
+                developer_token=self.google_developer_token,
+                customer_id=self.platform_account_id,
+                manager_id=self.google_manager_id,
+            )
+            try:
+                customers = client.list_accessible_customers()
+                self.message_post(body=_('Google Ads connection test successful! Accessible customers: %s') % len(customers))
+                return {
+                    'type': 'ir.actions.client',
+                    'tag': 'display_notification',
+                    'params': {
+                        'title': _('Success'),
+                        'message': _('Connection successful.'),
+                        'type': 'success',
+                        'sticky': False,
+                    }
+                }
+            except GoogleAdsError as e:
+                self.state = 'error'
+                self.message_post(body=_('Google Ads test failed: %s') % str(e))
+                raise UserError(str(e))
 
     def action_sync_campaigns(self):
         self.ensure_one()
         if self.platform == 'meta':
             self._sync_meta_full()
         elif self.platform == 'google':
-            raise UserError(_('Google sync not implemented yet.'))
+            self._sync_google_full()
 
     @api.private
     def _sync_meta_full(self):
@@ -160,6 +193,37 @@ class AdsAccount(models.Model):
             raise UserError(str(e))
 
     @api.private
+    def _sync_google_full(self):
+        start_time = time.time()
+        from ..services.google_client import GoogleAdsClient, GoogleAdsError
+        client = GoogleAdsClient(
+            access_token=self.access_token,
+            developer_token=self.google_developer_token,
+            customer_id=self.platform_account_id,
+            manager_id=self.google_manager_id,
+        )
+        created = updated = 0
+        try:
+            c, u = self._sync_google_campaigns(client)
+            created += c; updated += u
+            c, u = self._sync_google_ad_groups(client)
+            created += c; updated += u
+            c, u = self._sync_google_ads(client)
+            created += c; updated += u
+            
+            duration = time.time() - start_time
+            self._create_sync_log('campaigns', 'success', 
+                f'Google sync: {created} new, {updated} updated', created, updated, duration)
+            self.last_sync_date = fields.Datetime.now()
+            self.message_post(body=f'Google Ads senkronize edildi: {created} yeni, {updated} güncellendi.')
+        except GoogleAdsError as e:
+            duration = time.time() - start_time
+            self._create_sync_log('campaigns', 'error', str(e), created, updated, duration)
+            self.state = 'error'
+            self.message_post(body=f'Google Ads senkronizasyon hatası: {str(e)}')
+            raise UserError(str(e))
+
+    @api.private
     def _sync_meta_campaigns(self, client):
         """Sync campaigns from Meta. Returns (created_count, updated_count)"""
         raw_campaigns = client.get_campaigns()
@@ -177,6 +241,40 @@ class AdsAccount(models.Model):
                 'name': normalized['name'],
                 'status': normalized['status'],
                 'objective': normalized['objective'],
+                'daily_budget': normalized.get('daily_budget', 0),
+                'lifetime_budget': normalized.get('lifetime_budget', 0),
+            }
+            
+            if existing:
+                existing.write(vals)
+                updated += 1
+            else:
+                vals.update({
+                    'account_id': self.id,
+                    'platform_campaign_id': normalized['platform_campaign_id'],
+                })
+                Campaign.create(vals)
+                created += 1
+        
+        return created, updated
+
+    @api.private
+    def _sync_google_campaigns(self, client):
+        raw_campaigns = client.get_campaigns()
+        created = updated = 0
+        Campaign = self.env['ads.campaign']
+        
+        for raw in raw_campaigns:
+            normalized = raw  # Google returns already-normalized data
+            existing = Campaign.search([
+                ('account_id', '=', self.id),
+                ('platform_campaign_id', '=', normalized['platform_campaign_id']),
+            ], limit=1)
+            
+            vals = {
+                'name': normalized['name'],
+                'status': normalized['status'],
+                'objective': normalized.get('objective'),
                 'daily_budget': normalized.get('daily_budget', 0),
                 'lifetime_budget': normalized.get('lifetime_budget', 0),
             }
@@ -236,6 +334,47 @@ class AdsAccount(models.Model):
         return created, updated
 
     @api.private
+    def _sync_google_ad_groups(self, client):
+        raw_adsets = client.get_ad_groups()
+        created = updated = 0
+        Adset = self.env['ads.adset']
+        Campaign = self.env['ads.campaign']
+        
+        for raw in raw_adsets:
+            normalized = raw  # already normalized
+            campaign = Campaign.search([
+                ('account_id', '=', self.id),
+                ('platform_campaign_id', '=', raw.get('campaign_id')),
+            ], limit=1)
+            if not campaign:
+                continue
+            
+            existing = Adset.search([
+                ('campaign_id', '=', campaign.id),
+                ('platform_adset_id', '=', normalized['platform_adset_id']),
+            ], limit=1)
+            
+            vals = {
+                'name': normalized['name'],
+                'status': normalized['status'],
+                'daily_budget': normalized.get('daily_budget', 0),
+                'lifetime_budget': normalized.get('lifetime_budget', 0),
+            }
+            
+            if existing:
+                existing.write(vals)
+                updated += 1
+            else:
+                vals.update({
+                    'campaign_id': campaign.id,
+                    'platform_adset_id': normalized['platform_adset_id'],
+                })
+                Adset.create(vals)
+                created += 1
+        
+        return created, updated
+
+    @api.private
     def _sync_meta_ads(self, client):
         raw_ads = client.get_ads()
         created = updated = 0
@@ -244,6 +383,44 @@ class AdsAccount(models.Model):
         
         for raw in raw_ads:
             normalized = client.normalize_ad(raw)
+            adset = Adset.search([
+                ('platform_adset_id', '=', raw.get('adset_id')),
+            ], limit=1)
+            if not adset:
+                continue
+            
+            existing = Ad.search([
+                ('adset_id', '=', adset.id),
+                ('platform_ad_id', '=', normalized['platform_ad_id']),
+            ], limit=1)
+            
+            vals = {
+                'name': normalized['name'],
+                'status': normalized['status'],
+            }
+            
+            if existing:
+                existing.write(vals)
+                updated += 1
+            else:
+                vals.update({
+                    'adset_id': adset.id,
+                    'platform_ad_id': normalized['platform_ad_id'],
+                })
+                Ad.create(vals)
+                created += 1
+        
+        return created, updated
+
+    @api.private
+    def _sync_google_ads(self, client):
+        raw_ads = client.get_ads()
+        created = updated = 0
+        Ad = self.env['ads.ad']
+        Adset = self.env['ads.adset']
+        
+        for raw in raw_ads:
+            normalized = raw  # already normalized
             adset = Adset.search([
                 ('platform_adset_id', '=', raw.get('adset_id')),
             ], limit=1)
@@ -335,12 +512,70 @@ class AdsAccount(models.Model):
         return created, updated
 
     @api.private
+    def _sync_google_metrics(self, client, date_from=None, date_to=None):
+        if not date_from:
+            date_from = (date.today() - timedelta(days=7)).isoformat()
+        if not date_to:
+            date_to = date.today().isoformat()
+        
+        raw_insights = client.get_campaign_metrics(date_from=date_from, date_to=date_to)
+        
+        Metric = self.env['ads.metric.daily']
+        created = updated = 0
+        
+        for raw in raw_insights:
+            normalized = raw  # already normalized
+            campaign = self.env['ads.campaign'].search([
+                ('account_id', '=', self.id),
+                ('platform_campaign_id', '=', raw.get('campaign_id')),
+            ], limit=1)
+            
+            if not campaign:
+                continue
+            
+            existing = Metric.search([
+                ('campaign_id', '=', campaign.id),
+                ('date', '=', normalized['date']),
+                ('adset_id', '=', False),
+                ('ad_id', '=', False),
+            ], limit=1)
+            
+            vals = {
+                'impressions': normalized.get('impressions', 0),
+                'clicks': normalized.get('clicks', 0),
+                'spend': normalized.get('spend', 0.0),
+                'conversions': normalized.get('conversions', 0.0),
+                'conversion_value': normalized.get('conversion_value', 0.0),
+                'link_clicks': normalized.get('link_clicks', 0),
+                'landing_page_views': normalized.get('landing_page_views', 0),
+                'add_to_cart': normalized.get('add_to_cart', 0),
+                'initiate_checkout': normalized.get('initiate_checkout', 0),
+                'purchases': normalized.get('purchases', 0),
+                'reach': normalized.get('reach', 0),
+                'frequency': normalized.get('frequency', 0.0),
+            }
+            
+            if existing:
+                existing.write(vals)
+                updated += 1
+            else:
+                vals.update({
+                    'account_id': self.id,
+                    'campaign_id': campaign.id,
+                    'date': normalized['date'],
+                })
+                Metric.create(vals)
+                created += 1
+        
+        return created, updated
+
+    @api.private
     def _refresh_access_token(self):
         self.ensure_one()
         if self.platform == 'meta':
             self._refresh_meta_token()
         elif self.platform == 'google':
-            pass
+            self._refresh_google_token()
 
     @api.private
     def _refresh_meta_token(self):
@@ -367,6 +602,27 @@ class AdsAccount(models.Model):
             self.message_post(body=_('Meta token yenileme hatası: %s') % str(e))
 
     @api.private
+    def _refresh_google_token(self):
+        import requests as req_lib
+        url = 'https://oauth2.googleapis.com/token'
+        data = {
+            'client_id': self.google_client_id,
+            'client_secret': self.google_client_secret,
+            'refresh_token': self.refresh_token,
+            'grant_type': 'refresh_token',
+        }
+        resp = req_lib.post(url, data=data)
+        token_data = resp.json()
+        if 'access_token' in token_data:
+            self.sudo().write({
+                'access_token': token_data['access_token'],
+                'token_expiry': fields.Datetime.now() + timedelta(seconds=token_data.get('expires_in', 3600)),
+            })
+        else:
+            self.state = 'error'
+            self.message_post(body=_('Google token refresh failed: %s') % token_data)
+
+    @api.private
     def _create_sync_log(self, sync_type, status, message, created=0, updated=0, duration=0):
         self.env['ads.sync.log'].create({
             'account_id': self.id,
@@ -388,7 +644,7 @@ class AdsAccount(models.Model):
                     if account.platform == 'meta':
                         account._sync_meta_full()
                     elif account.platform == 'google':
-                        pass  # M2
+                        account._sync_google_full()
                 except Exception as e:
                     _logger.error('Cron sync failed for %s: %s', account.name, e)
             self.env['ir.cron']._commit_progress(done=idx+1, remaining=total-idx-1)
@@ -408,6 +664,15 @@ class AdsAccount(models.Model):
                             business_id=account.meta_business_id,
                         )
                         account._sync_meta_metrics(client)
+                    elif account.platform == 'google':
+                        from ..services.google_client import GoogleAdsClient
+                        client = GoogleAdsClient(
+                            access_token=account.access_token,
+                            developer_token=account.google_developer_token,
+                            customer_id=account.platform_account_id,
+                            manager_id=account.google_manager_id,
+                        )
+                        account._sync_google_metrics(client)
                 except Exception as e:
                     _logger.error('Metric sync failed for %s: %s', account.name, e)
 
@@ -420,64 +685,216 @@ class AdsAccount(models.Model):
             except Exception as e:
                 _logger.error(f"Failed to refresh token for account {account.name}: {str(e)}")
 
+    @api.model
     def get_dashboard_data(self, period='7d', platform='all', account_id=None, compare=False):
-        domain = []
-        if platform != 'all':
-            domain.append(('account_id.platform', '=', platform))
-        if account_id:
-            domain.append(('account_id', '=', account_id))
-            
+        """
+        Comprehensive dashboard analytics aggregation for OWL frontend.
+        """
         today = date.today()
         if period == '7d':
+            delta_days = 7
             start_date = today - timedelta(days=7)
         elif period == '30d':
+            delta_days = 30
             start_date = today - timedelta(days=30)
         elif period == '90d':
+            delta_days = 90
             start_date = today - timedelta(days=90)
         elif period == 'mtd':
             start_date = today.replace(day=1)
+            delta_days = (today - start_date).days + 1
         elif period == 'ytd':
             start_date = today.replace(month=1, day=1)
+            delta_days = (today - start_date).days + 1
         else:
+            delta_days = 7
             start_date = today - timedelta(days=7)
-            
-        date_domain = domain + [('date', '>=', start_date), ('date', '<=', today)]
-        
-        metrics = self.env['ads.metric.daily'].search(date_domain)
-        
-        total_spend = sum(metrics.mapped('spend'))
-        total_impressions = sum(metrics.mapped('impressions'))
-        total_clicks = sum(metrics.mapped('clicks'))
-        total_conversions = sum(metrics.mapped('conversions'))
-        
+
+        prev_end_date = start_date - timedelta(days=1)
+        prev_start_date = prev_end_date - timedelta(days=delta_days)
+
+        base_domain = []
+        if platform != 'all':
+            base_domain.append(('campaign_id.account_id.platform', '=', platform))
+        if account_id:
+            base_domain.append(('campaign_id.account_id', '=', int(account_id)))
+
+        curr_domain = base_domain + [('date', '>=', start_date), ('date', '<=', today)]
+        prev_domain = base_domain + [('date', '>=', prev_start_date), ('date', '<=', prev_end_date)]
+
+        MetricModel = self.env['ads.metric.daily']
+
+        # 1. Current Period Aggregates
+        curr_res = MetricModel._read_group(
+            domain=curr_domain,
+            groupby=[],
+            aggregates=['spend:sum', 'impressions:sum', 'clicks:sum', 'conversions:sum', 'conversion_value:sum']
+        )
+        if curr_res and curr_res[0]:
+            spend, impressions, clicks, conversions, conv_value = curr_res[0]
+            spend = spend or 0.0
+            impressions = impressions or 0
+            clicks = clicks or 0
+            conversions = conversions or 0.0
+            conv_value = conv_value or 0.0
+        else:
+            spend = impressions = clicks = conversions = conv_value = 0.0
+
+        # 2. Previous Period Aggregates for Deltas
+        prev_res = MetricModel._read_group(
+            domain=prev_domain,
+            groupby=[],
+            aggregates=['spend:sum', 'impressions:sum', 'clicks:sum', 'conversions:sum', 'conversion_value:sum']
+        )
+        if prev_res and prev_res[0]:
+            p_spend, p_impressions, p_clicks, p_conversions, p_conv_value = prev_res[0]
+            p_spend = p_spend or 0.0
+            p_clicks = p_clicks or 0
+            p_conversions = p_conversions or 0.0
+            p_conv_value = p_conv_value or 0.0
+        else:
+            p_spend = p_clicks = p_conversions = p_conv_value = 0.0
+
+        # Helper for % delta
+        def calc_delta(curr, prev):
+            if not prev:
+                return 100.0 if curr > 0 else 0.0
+            return ((curr - prev) / prev) * 100.0
+
+        ctr = (clicks / impressions * 100.0) if impressions else 0.0
+        cpc = (spend / clicks) if clicks else 0.0
+        cpa = (spend / conversions) if conversions else 0.0
+        roas = (conv_value / spend) if spend else 0.0
+
+        p_roas = (p_conv_value / p_spend) if p_spend else 0.0
+
+        # 3. Daily time-series chart data
+        chart_groups = MetricModel._read_group(
+            domain=curr_domain,
+            groupby=['date'],
+            aggregates=['spend:sum', 'conversion_value:sum', 'clicks:sum', 'conversions:sum'],
+            order='date asc'
+        )
         chart_data = []
-        if metrics:
-            groups = self.env['ads.metric.daily']._read_group(
-                domain=date_domain,
-                groupby=['date'],
-                aggregates=['spend:sum', 'impressions:sum', 'clicks:sum', 'conversions:sum']
-            )
-            for group in groups:
-                chart_data.append({
-                    'date': str(group[0]),
-                    'spend': group[1],
-                    'impressions': group[2],
-                    'clicks': group[3],
-                    'conversions': group[4]
-                })
+        for g in chart_groups:
+            chart_data.append({
+                'date': str(g[0]),
+                'spend': round(g[1] or 0.0, 2),
+                'revenue': round(g[2] or 0.0, 2),
+                'clicks': g[3] or 0,
+                'conversions': round(g[4] or 0.0, 2),
+            })
+
+        # 4. Platform Breakdown
+        platform_groups = MetricModel._read_group(
+            domain=curr_domain,
+            groupby=['campaign_id.account_id.platform'],
+            aggregates=['spend:sum', 'conversion_value:sum', 'conversions:sum', 'clicks:sum']
+        )
+        platform_data = {}
+        for p_grp in platform_groups:
+            p_name = p_grp[0] or 'unknown'
+            p_sp = p_grp[1] or 0.0
+            p_rev = p_grp[2] or 0.0
+            p_cv = p_grp[3] or 0.0
+            p_cl = p_grp[4] or 0
+            platform_data[p_name] = {
+                'spend': round(p_sp, 2),
+                'revenue': round(p_rev, 2),
+                'conversions': round(p_cv, 2),
+                'clicks': p_cl,
+                'roas': round(p_rev / p_sp, 2) if p_sp else 0.0,
+            }
+
+        # 5. Top Campaigns
+        camp_domain = []
+        if platform != 'all':
+            camp_domain.append(('account_id.platform', '=', platform))
+        if account_id:
+            camp_domain.append(('account_id', '=', int(account_id)))
+        
+        top_camps = self.env['ads.campaign'].search(camp_domain, order='total_spend desc', limit=8)
+        top_campaigns_list = []
+        for c in top_camps:
+            top_campaigns_list.append({
+                'id': c.id,
+                'name': c.name,
+                'platform': c.platform,
+                'status': c.status,
+                'approval_status': getattr(c, 'approval_status', 'draft'),
+                'daily_budget': c.daily_budget,
+                'total_spend': round(c.total_spend, 2),
+                'conversions': round(c.total_conversions, 1),
+                'avg_roas': round(c.avg_roas, 2),
+                'currency': c.currency_id.symbol or '₺',
+            })
+
+        # 6. Active Recommendations
+        rec_domain = [('status', 'in', ['new', 'in_review'])]
+        if platform != 'all':
+            rec_domain.append(('campaign_id.account_id.platform', '=', platform))
+        if account_id:
+            rec_domain.append(('campaign_id.account_id', '=', int(account_id)))
+
+        recs = self.env['ads.recommendation'].search(rec_domain, order='severity_order desc, create_date desc', limit=6)
+        recommendations_list = []
+        for r in recs:
+            recommendations_list.append({
+                'id': r.id,
+                'name': r.name,
+                'campaign_id': r.campaign_id.id,
+                'campaign_name': r.campaign_id.name,
+                'severity': r.severity,
+                'category': r.category,
+                'status': r.status,
+                'description': r.description or '',
+                'proposed_action': r.proposed_action or '',
+            })
+
+        # 7. Connected accounts summary
+        accounts = self.search([])
+        account_summary = {
+            'total': len(accounts),
+            'connected': len(accounts.filtered(lambda a: a.state == 'connected')),
+            'error': len(accounts.filtered(lambda a: a.state == 'error')),
+        }
+
+        # 8. Pacing Summary
+        active_campaigns = self.env['ads.campaign'].search([('status', '=', 'active')])
+        pacing_summary = {
+            'total_active': len(active_campaigns),
+            'on_track': len(active_campaigns.filtered(lambda c: c.budget_pace_status == 'on_track')),
+            'over': len(active_campaigns.filtered(lambda c: c.budget_pace_status == 'over')),
+            'under': len(active_campaigns.filtered(lambda c: c.budget_pace_status == 'under')),
+        }
+
+        company_currency = self.env.company.currency_id.symbol or '₺'
 
         return {
             'period': period,
             'platform': platform,
             'account_id': account_id,
-            'compare': compare,
+            'currency_symbol': company_currency,
             'kpis': {
-                'spend': total_spend,
-                'impressions': total_impressions,
-                'clicks': total_clicks,
-                'conversions': total_conversions,
+                'spend': round(spend, 2),
+                'spend_delta': round(calc_delta(spend, p_spend), 1),
+                'conversion_value': round(conv_value, 2),
+                'revenue_delta': round(calc_delta(conv_value, p_conv_value), 1),
+                'clicks': clicks,
+                'clicks_delta': round(calc_delta(clicks, p_clicks), 1),
+                'impressions': impressions,
+                'conversions': round(conversions, 1),
+                'conversions_delta': round(calc_delta(conversions, p_conversions), 1),
+                'ctr': round(ctr, 2),
+                'cpc': round(cpc, 2),
+                'cpa': round(cpa, 2),
+                'roas': round(roas, 2),
+                'roas_delta': round(roas - p_roas, 2),
             },
             'charts': chart_data,
-            'top_campaigns': [],
-            'recommendations': []
+            'platform_breakdown': platform_data,
+            'top_campaigns': top_campaigns_list,
+            'recommendations': recommendations_list,
+            'accounts': account_summary,
+            'pacing': pacing_summary,
         }

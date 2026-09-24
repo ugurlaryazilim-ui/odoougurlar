@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_ads_ai_provider_form" model="ir.ui.view">
+        <field name="name">ads.ai.provider.form</field>
+        <field name="model">ads.ai.provider</field>
+        <field name="arch" type="xml">
+            <form string="AI Provider">
+                <header>
+                    <button name="action_test_provider" string="Bağlantı Test Et" type="object" class="oe_highlight" icon="fa-flask"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" placeholder="Provider Name"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group string="Provider Configuration">
+                            <field name="provider_type" widget="radio"/>
+                            <field name="model_name"/>
+                            <field name="api_key" password="True"/>
+                            <field name="endpoint_url" placeholder="Custom endpoint (optional)"/>
+                            <field name="active" widget="boolean_toggle"/>
+                        </group>
+                        <group string="Generation Settings">
+                            <field name="temperature"/>
+                            <field name="max_tokens"/>
+                        </group>
+                    </group>
+                    <group string="Usage Statistics">
+                        <group>
+                            <field name="usage_count"/>
+                            <field name="total_tokens_used"/>
+                            <field name="last_used"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_ads_ai_provider_list" model="ir.ui.view">
+        <field name="name">ads.ai.provider.list</field>
+        <field name="model">ads.ai.provider</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name"/>
+                <field name="provider_type"/>
+                <field name="model_name"/>
+                <field name="active" widget="boolean_toggle"/>
+                <field name="usage_count"/>
+                <field name="last_used"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="action_ads_ai_provider" model="ir.actions.act_window">
+        <field name="name">AI Providers</field>
+        <field name="res_model">ads.ai.provider</field>
+        <field name="view_mode">list,form</field>
+    </record>
+</odoo>

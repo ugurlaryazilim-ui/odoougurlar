@@ -1,0 +1,92 @@
+.ads-dashboard-wrapper {
+    background-color: #F8FAFC;
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+    .ads-control-panel {
+        background-color: #FFFFFF;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+
+        .dashboard-title-box h4 {
+            font-size: 1.25rem;
+            letter-spacing: -0.02em;
+        }
+    }
+
+    .kpi-card {
+        border-radius: 12px;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+        background: #FFFFFF;
+
+        &:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08) !important;
+        }
+
+        .kpi-icon-box {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        h3 {
+            font-size: 1.6rem;
+            letter-spacing: -0.03em;
+        }
+
+        .text-xs {
+            font-size: 0.75rem;
+        }
+    }
+
+    /* 5 Columns layout for XL screens */
+    @media (min-width: 1200px) {
+        .col-xl-2-4 {
+            flex: 0 0 auto;
+            width: 20%;
+        }
+    }
+
+    .card {
+        border-radius: 12px;
+        overflow: hidden;
+    }
+
+    .bg-purple-subtle {
+        background-color: #F3E8FF;
+    }
+
+    .text-purple {
+        color: #9333EA;
+    }
+
+    .recommendation-item {
+        transition: background-color 0.15s ease;
+
+        &:hover {
+            background-color: #F1F5F9 !important;
+        }
+
+        .text-truncate-2 {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+    }
+
+    .btn-xs {
+        padding: 0.2rem 0.45rem;
+        font-size: 0.75rem;
+        border-radius: 4px;
+    }
+
+    table tbody tr {
+        transition: background-color 0.1s ease;
+        cursor: pointer;
+    }
+}

@@ -6,9 +6,17 @@
         <field name="arch" type="xml">
             <form string="Ads Campaign">
                 <header>
-                    <field name="status" widget="statusbar" statusbar_visible="active,paused,archived"/>
+                    <button name="action_submit_for_approval" string="Onaya Gönder" type="object" class="oe_highlight" invisible="approval_status != 'draft' or not is_local"/>
+                    <button name="action_approve" string="Onayla" type="object" class="oe_highlight" invisible="approval_status != 'pending'" groups="ads_manager.group_ads_manager"/>
+                    <button name="action_reject" string="Reddet" type="object" invisible="approval_status != 'pending'" groups="ads_manager.group_ads_manager"/>
+                    <button name="action_publish" string="Yayınla" type="object" class="oe_highlight" invisible="approval_status != 'approved'"/>
+                    <button name="action_reset_to_draft" string="Taslak'a Dön" type="object" invisible="approval_status not in ('pending', 'rejected')"/>
+                    <button name="action_ai_analyze" string="AI Analiz" type="object" icon="fa-robot"/>
+                    <field name="approval_status" widget="statusbar" statusbar_visible="draft,pending,approved,published" invisible="not is_local"/>
+                    <field name="status" widget="statusbar" statusbar_visible="active,paused,archived" invisible="is_local"/>
                 </header>
                 <sheet>
+                    <field name="is_local" invisible="1"/>
                     <div class="oe_button_box" name="button_box">
                         <button name="action_view_metrics" type="object" class="oe_stat_button" icon="fa-line-chart">
                             <field name="metric_count" widget="statinfo" string="Metrics"/>
@@ -34,6 +42,11 @@
                             <field name="daily_budget" widget="monetary" options="{'currency_field': 'currency_id'}"/>
                             <field name="lifetime_budget" widget="monetary" options="{'currency_field': 'currency_id'}"/>
                             <field name="total_spend" widget="monetary" options="{'currency_field': 'currency_id'}"/>
+                        </group>
+                        <group string="Approval Info" invisible="not is_local">
+                            <field name="approved_by" readonly="1" invisible="not approved_by"/>
+                            <field name="approved_date" readonly="1" invisible="not approved_date"/>
+                            <field name="rejection_reason" readonly="1" invisible="approval_status != 'rejected'"/>
                         </group>
                     </group>
                     <notebook>

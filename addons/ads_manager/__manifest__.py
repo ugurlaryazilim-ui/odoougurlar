@@ -25,6 +25,8 @@
         'views/ads_metric_views.xml',
         'views/ads_recommendation_views.xml',
         'views/ads_rule_views.xml',
+        'views/ads_ai_provider_views.xml',
+        'views/ads_wizard_views.xml',
         'views/ads_sync_log_views.xml',
         'views/res_config_settings_views.xml',
         'views/ads_menus.xml',

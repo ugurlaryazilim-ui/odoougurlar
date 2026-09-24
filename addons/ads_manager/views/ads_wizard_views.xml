@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Campaign Reject Wizard -->
+    <record id="view_ads_campaign_reject_wizard_form" model="ir.ui.view">
+        <field name="name">ads.campaign.reject.wizard.form</field>
+        <field name="model">ads.campaign.reject.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Kampanya Reddetme">
+                <group>
+                    <field name="campaign_id" readonly="1"/>
+                    <field name="rejection_reason" placeholder="Red sebebini yazın..."/>
+                </group>
+                <footer>
+                    <button name="action_reject" string="Reddet" type="object" class="btn-danger"/>
+                    <button string="İptal" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- Budget Adjustment Wizard -->
+    <record id="view_ads_budget_wizard_form" model="ir.ui.view">
+        <field name="name">ads.budget.wizard.form</field>
+        <field name="model">ads.budget.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Bütçe Ayarlama">
+                <group>
+                    <group>
+                        <field name="campaign_id" readonly="1"/>
+                        <field name="recommendation_id" readonly="1" invisible="not recommendation_id"/>
+                        <field name="currency_id" invisible="1"/>
+                    </group>
+                    <group>
+                        <field name="current_budget" readonly="1"/>
+                        <field name="new_budget"/>
+                        <field name="change_pct" widget="percentage"/>
+                    </group>
+                </group>
+                <group>
+                    <field name="reason" placeholder="Değişiklik sebebi..."/>
+                    <field name="apply_to_platform" widget="boolean_toggle"/>
+                </group>
+                <footer>
+                    <button name="action_apply" string="Uygula" type="object" class="oe_highlight"/>
+                    <button string="İptal" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- Sync Wizard -->
+    <record id="view_ads_sync_wizard_form" model="ir.ui.view">
+        <field name="name">ads.sync.wizard.form</field>
+        <field name="model">ads.sync.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Senkronizasyon">
+                <group>
+                    <group>
+                        <field name="account_id"/>
+                        <field name="sync_type"/>
+                    </group>
+                    <group>
+                        <field name="date_from"/>
+                        <field name="date_to"/>
+                    </group>
+                </group>
+                <footer>
+                    <button name="action_sync" string="Senkronize Et" type="object" class="oe_highlight"/>
+                    <button string="İptal" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- Sync Wizard Action -->
+    <record id="action_ads_sync_wizard" model="ir.actions.act_window">
+        <field name="name">Senkronizasyon</field>
+        <field name="res_model">ads.sync.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <!-- Recommendation Apply Wizard -->
+    <record id="view_ads_recommendation_apply_wizard_form" model="ir.ui.view">
+        <field name="name">ads.recommendation.apply.wizard.form</field>
+        <field name="model">ads.recommendation.apply.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Öneri Uygulama">
+                <group>
+                    <field name="recommendation_id" readonly="1"/>
+                    <field name="confirm_text" widget="text" readonly="1"/>
+                    <field name="auto_apply" widget="boolean_toggle"/>
+                    <field name="notes" placeholder="Notlarınız..."/>
+                </group>
+                <footer>
+                    <button name="action_confirm_apply" string="Onayla ve Uygula" type="object" class="oe_highlight"/>
+                    <button string="İptal" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- Platform Comparison Wizard -->
+    <record id="view_ads_platform_comparison_form" model="ir.ui.view">
+        <field name="name">ads.platform.comparison.form</field>
+        <field name="model">ads.platform.comparison</field>
+        <field name="arch" type="xml">
+            <form string="Platform Karşılaştırma (Meta vs Google)">
+                <sheet>
+                    <div class="alert alert-info" role="alert">
+                        Meta Ads ve Google Ads arasındaki harcama, dönüşüm, CPA ve ROAS metriklerini doğrudan karşılaştırın.
+                    </div>
+                    <group>
+                        <group string="Tarih Aralığı">
+                            <field name="date_from"/>
+                            <field name="date_to"/>
+                        </group>
+                        <group string="Para Birimi">
+                            <field name="currency_id" readonly="1"/>
+                        </group>
+                    </group>
+                    <div class="text-center my-3">
+                        <button name="action_compute" string="Karşılaştırmayı Hesapla" type="object" class="btn-primary" icon="fa-balance-scale"/>
+                    </div>
+                    <group string="Platform Karşılaştırma Sonuçları" invisible="not meta_spend and not google_spend">
+                        <group string="Meta Ads">
+                            <field name="meta_spend" widget="monetary"/>
+                            <field name="meta_conversions"/>
+                            <field name="meta_roas"/>
+                            <field name="meta_cpa" widget="monetary"/>
+                        </group>
+                        <group string="Google Ads">
+                            <field name="google_spend" widget="monetary"/>
+                            <field name="google_conversions"/>
+                            <field name="google_roas"/>
+                            <field name="google_cpa" widget="monetary"/>
+                        </group>
+                    </group>
+                    <group string="AI Strateji Önerisi" invisible="not recommendation">
+                        <field name="recommendation" readonly="1" nolabel="1"/>
+                    </group>
+                </sheet>
+                <footer>
+                    <button string="Kapat" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_ads_platform_comparison" model="ir.actions.act_window">
+        <field name="name">Platform Karşılaştırma</field>
+        <field name="res_model">ads.platform.comparison</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+</odoo>

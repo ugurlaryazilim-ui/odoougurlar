@@ -67,3 +67,75 @@ class AdsMetricDaily(models.Model):
             record.roas = record.conversion_value / record.spend if record.spend else 0.0
             record.cpm = (record.spend / record.impressions) * 1000 if record.impressions else 0.0
             record.conversion_rate = (record.conversions / record.clicks) * 100 if record.clicks else 0.0
+
+    @api.model
+    def _cron_archive_old_metrics(self, days_retention=90):
+        """
+        Cron: Aggregate daily metrics older than retention period into monthly summaries,
+        and mark daily records as archived.
+        """
+        import logging
+        from datetime import date, timedelta
+        _logger = logging.getLogger(__name__)
+
+        cutoff_date = date.today() - timedelta(days=days_retention)
+        old_metrics = self.search([
+            ('date', '<', cutoff_date),
+            ('is_archived', '=', False)
+        ])
+
+        if not old_metrics:
+            _logger.info("No old metrics to archive.")
+            return
+
+        _logger.info("Archiving %d daily metrics older than %s", len(old_metrics), cutoff_date)
+
+        # Group by campaign and year_month
+        campaign_months = {}
+        for m in old_metrics:
+            ym = m.date.strftime('%Y-%m')
+            key = (m.campaign_id.id, m.account_id.id, ym)
+            if key not in campaign_months:
+                campaign_months[key] = []
+            campaign_months[key].append(m)
+
+        MonthlyModel = self.env['ads.metric.monthly']
+        for (campaign_id, account_id, ym), metrics_list in campaign_months.items():
+            tot_spend = sum(m.spend for m in metrics_list)
+            tot_imp = sum(m.impressions for m in metrics_list)
+            tot_clicks = sum(m.clicks for m in metrics_list)
+            tot_conv = sum(m.conversions for m in metrics_list)
+            tot_val = sum(m.conversion_value for m in metrics_list)
+            tot_purchases = sum(m.purchases for m in metrics_list)
+            days_count = len(set(m.date for m in metrics_list))
+
+            existing = MonthlyModel.search([
+                ('campaign_id', '=', campaign_id),
+                ('year_month', '=', ym)
+            ], limit=1)
+
+            vals = {
+                'account_id': account_id,
+                'campaign_id': campaign_id,
+                'year_month': ym,
+                'total_spend': tot_spend,
+                'total_impressions': tot_imp,
+                'total_clicks': tot_clicks,
+                'total_conversions': tot_conv,
+                'total_conversion_value': tot_val,
+                'total_purchases': tot_purchases,
+                'avg_ctr': (tot_clicks / tot_imp * 100) if tot_imp else 0.0,
+                'avg_cpc': (tot_spend / tot_clicks) if tot_clicks else 0.0,
+                'avg_cpa': (tot_spend / tot_conv) if tot_conv else 0.0,
+                'avg_roas': (tot_val / tot_spend) if tot_spend else 0.0,
+                'days_active': days_count,
+            }
+
+            if existing:
+                existing.write(vals)
+            else:
+                MonthlyModel.create(vals)
+
+        # Mark all processed daily records as archived
+        old_metrics.write({'is_archived': True})
+        _logger.info("Archiving complete: %d records marked as archived.", len(old_metrics))

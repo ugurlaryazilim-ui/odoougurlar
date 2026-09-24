@@ -28,15 +28,15 @@ class AdsPlatformComparison(models.TransientModel):
         self.ensure_one()
         domain = [('date', '>=', self.date_from), ('date', '<=', self.date_to)]
         
-        # Read group by platform
+        # Read group by platform (via campaign relation)
         groups = self.env['ads.metric.daily']._read_group(
             domain=domain,
-            groupby=['platform'],
-            aggregates=['spend:sum', 'conversions:sum', 'revenue:sum']
+            groupby=['campaign_id.account_id.platform'],
+            aggregates=['spend:sum', 'conversions:sum', 'conversion_value:sum']
         )
         
-        for platform, spend, conversions, revenue in groups:
-            roas = (revenue / spend) if spend else 0.0
+        for platform, spend, conversions, conversion_value in groups:
+            roas = (conversion_value / spend) if spend else 0.0
             cpa = (spend / conversions) if conversions else 0.0
             
             if platform == 'meta':

@@ -75,6 +75,12 @@
               action="action_ads_metric_monthly" 
               sequence="20"/>
 
+    <menuitem id="menu_ads_platform_comparison" 
+              name="Platform Karşılaştırma" 
+              parent="menu_ads_analytics" 
+              action="action_ads_platform_comparison" 
+              sequence="30"/>
+
     <!-- Optimizasyon -->
     <menuitem id="menu_ads_optimization" 
               name="Optimizasyon" 
@@ -117,4 +123,11 @@
               action="action_ads_manager_config_settings" 
               groups="ads_manager.group_ads_manager"
               sequence="30"/>
+
+    <menuitem id="menu_ads_ai_providers" 
+              name="AI Sağlayıcılar" 
+              parent="menu_ads_configuration" 
+              action="action_ads_ai_provider" 
+              groups="ads_manager.group_ads_manager"
+              sequence="25"/>
 </odoo>

@@ -4,67 +4,131 @@
         <t t-call="web.html_container">
             <t t-foreach="docs" t-as="doc">
                 <t t-call="web.external_layout">
-                    <div class="page">
-                        <h2>Campaign Performance: <t t-out="doc.name"/></h2>
-                        
-                        <div class="row mt-4 mb-4">
-                            <div class="col-3">
-                                <strong>Platform:</strong> <t t-out="doc.platform"/>
+                    <div class="page" style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #2D3748;">
+                        <!-- Header Banner -->
+                        <div class="d-flex justify-content-between align-items-center pb-3 mb-4 border-bottom" style="border-color: #E2E8F0 !important;">
+                            <div>
+                                <h2 class="mb-1" style="font-weight: 700; color: #1A202C;">
+                                    <t t-out="doc.name"/>
+                                </h2>
+                                <span class="text-muted" style="font-size: 14px;">
+                                    Kampanya Performans &amp; Analitik Raporu
+                                </span>
                             </div>
-                            <div class="col-3">
-                                <strong>Status:</strong> <t t-out="doc.state"/>
-                            </div>
-                            <div class="col-3">
-                                <strong>Budget:</strong> <t t-out="doc.daily_budget"/>
-                            </div>
-                            <div class="col-3">
-                                <strong>Account:</strong> <t t-out="doc.account_id.name"/>
-                            </div>
-                        </div>
-
-                        <h3>KPI Summary</h3>
-                        <div class="row mt-3 mb-4 text-center">
-                            <div class="col-3 border p-3">
-                                <h5>Total Spend</h5>
-                                <h4 class="text-primary"><t t-out="doc.total_spend"/></h4>
-                            </div>
-                            <div class="col-3 border p-3">
-                                <h5>Total Clicks</h5>
-                                <h4 class="text-primary"><t t-out="doc.total_clicks"/></h4>
-                            </div>
-                            <div class="col-3 border p-3">
-                                <h5>Average ROAS</h5>
-                                <h4 class="text-primary"><t t-out="doc.avg_roas"/></h4>
-                            </div>
-                            <div class="col-3 border p-3">
-                                <h5>Average CPA</h5>
-                                <h4 class="text-primary"><t t-out="doc.avg_cpa"/></h4>
+                            <div class="text-end">
+                                <span t-attf-class="badge px-3 py-2 text-uppercase {{'bg-success' if doc.status == 'active' else 'bg-secondary'}}" style="font-size: 12px; letter-spacing: 0.5px;">
+                                    <t t-out="doc.status"/>
+                                </span>
                             </div>
                         </div>
 
-                        <h3>Daily Metrics</h3>
-                        <table class="table table-sm table-striped">
-                            <thead>
+                        <!-- Meta Info Cards -->
+                        <div class="row g-3 mb-4">
+                            <div class="col-3">
+                                <div class="p-3 rounded" style="background-color: #F7FAFC; border: 1px solid #EDF2F7;">
+                                    <div class="text-muted small text-uppercase fw-bold" style="font-size: 10px;">Platform</div>
+                                    <div class="fs-6 fw-bold mt-1 text-capitalize" style="color: #2B6CB0;">
+                                        <t t-if="doc.platform == 'meta'">Meta Ads (Facebook/Instagram)</t>
+                                        <t t-elif="doc.platform == 'google'">Google Ads</t>
+                                        <t t-else=""><t t-out="doc.platform"/></t>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-3">
+                                <div class="p-3 rounded" style="background-color: #F7FAFC; border: 1px solid #EDF2F7;">
+                                    <div class="text-muted small text-uppercase fw-bold" style="font-size: 10px;">Hesap</div>
+                                    <div class="fs-6 fw-bold mt-1" style="color: #2D3748;">
+                                        <t t-out="doc.account_id.name"/>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-3">
+                                <div class="p-3 rounded" style="background-color: #F7FAFC; border: 1px solid #EDF2F7;">
+                                    <div class="text-muted small text-uppercase fw-bold" style="font-size: 10px;">Günlük Bütçe</div>
+                                    <div class="fs-6 fw-bold mt-1 text-dark">
+                                        <t t-out="doc.daily_budget" t-options="{'widget': 'monetary', 'display_currency': doc.currency_id}"/>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-3">
+                                <div class="p-3 rounded" style="background-color: #F7FAFC; border: 1px solid #EDF2F7;">
+                                    <div class="text-muted small text-uppercase fw-bold" style="font-size: 10px;">Hedef</div>
+                                    <div class="fs-6 fw-bold mt-1 text-capitalize" style="color: #2D3748;">
+                                        <t t-out="doc.objective or 'Standart'"/>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- KPI Summary Cards -->
+                        <h4 class="mb-3" style="font-weight: 600; color: #2D3748;">Temel Performans Göstergeleri (KPI)</h4>
+                        <div class="row g-3 mb-4 text-center">
+                            <div class="col-3">
+                                <div class="p-3 rounded shadow-sm" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                                    <div class="small text-uppercase opacity-75 fw-bold" style="font-size: 10px;">Toplam Harcama</div>
+                                    <div class="fs-4 fw-bold mt-1">
+                                        <t t-out="doc.total_spend" t-options="{'widget': 'monetary', 'display_currency': doc.currency_id}"/>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-3">
+                                <div class="p-3 rounded shadow-sm" style="background: linear-gradient(135deg, #2af598 0%, #009efd 100%); color: white;">
+                                    <div class="small text-uppercase opacity-75 fw-bold" style="font-size: 10px;">Ortalama ROAS</div>
+                                    <div class="fs-4 fw-bold mt-1">
+                                        <t t-out="'%.2f' % doc.avg_roas"/>x
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-3">
+                                <div class="p-3 rounded shadow-sm" style="background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 99%); color: #742A2A;">
+                                    <div class="small text-uppercase opacity-75 fw-bold" style="font-size: 10px;">Toplam Tıklama</div>
+                                    <div class="fs-4 fw-bold mt-1">
+                                        <t t-out="doc.total_clicks"/>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-3">
+                                <div class="p-3 rounded shadow-sm" style="background: linear-gradient(135deg, #f6d365 0%, #fda085 100%); color: #7B341E;">
+                                    <div class="small text-uppercase opacity-75 fw-bold" style="font-size: 10px;">Ortalama CPA</div>
+                                    <div class="fs-4 fw-bold mt-1">
+                                        <t t-out="doc.avg_cpa" t-options="{'widget': 'monetary', 'display_currency': doc.currency_id}"/>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Daily Metrics Table -->
+                        <h4 class="mb-3" style="font-weight: 600; color: #2D3748;">Günlük Metrik Geçmişi</h4>
+                        <table class="table table-sm table-striped align-middle" style="font-size: 12px;">
+                            <thead style="background-color: #EDF2F7; color: #4A5568;">
                                 <tr>
-                                    <th>Date</th>
-                                    <th class="text-end">Spend</th>
-                                    <th class="text-end">Clicks</th>
-                                    <th class="text-end">Conversions</th>
-                                    <th class="text-end">Revenue</th>
-                                    <th class="text-end">ROAS</th>
+                                    <th style="padding: 8px;">Tarih</th>
+                                    <th class="text-end" style="padding: 8px;">Harcama</th>
+                                    <th class="text-end" style="padding: 8px;">Gösterim</th>
+                                    <th class="text-end" style="padding: 8px;">Tıklama</th>
+                                    <th class="text-end" style="padding: 8px;">CTR (%)</th>
+                                    <th class="text-end" style="padding: 8px;">Dönüşüm</th>
+                                    <th class="text-end" style="padding: 8px;">Gelir</th>
+                                    <th class="text-end" style="padding: 8px;">ROAS</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <t t-foreach="doc.metric_ids" t-as="metric">
                                     <tr>
-                                        <td><t t-out="metric.date"/></td>
-                                        <td class="text-end"><t t-out="metric.spend"/></td>
-                                        <td class="text-end"><t t-out="metric.clicks"/></td>
-                                        <td class="text-end"><t t-out="metric.conversions"/></td>
-                                        <td class="text-end"><t t-out="metric.revenue"/></td>
-                                        <td class="text-end">
-                                            <span t-attf-class="badge {{'bg-success' if metric.roas > 2.0 else 'bg-warning' if metric.roas > 1.0 else 'bg-danger'}}">
-                                                <t t-out="metric.roas"/>
+                                        <td style="padding: 6px 8px;"><t t-out="metric.date"/></td>
+                                        <td class="text-end fw-semibold" style="padding: 6px 8px;">
+                                            <t t-out="metric.spend" t-options="{'widget': 'monetary', 'display_currency': doc.currency_id}"/>
+                                        </td>
+                                        <td class="text-end" style="padding: 6px 8px;"><t t-out="metric.impressions"/></td>
+                                        <td class="text-end" style="padding: 6px 8px;"><t t-out="metric.clicks"/></td>
+                                        <td class="text-end" style="padding: 6px 8px;"><t t-out="'%.2f' % metric.ctr"/>%</td>
+                                        <td class="text-end" style="padding: 6px 8px;"><t t-out="'%.1f' % metric.conversions"/></td>
+                                        <td class="text-end" style="padding: 6px 8px;">
+                                            <t t-out="metric.conversion_value" t-options="{'widget': 'monetary', 'display_currency': doc.currency_id}"/>
+                                        </td>
+                                        <td class="text-end" style="padding: 6px 8px;">
+                                            <span t-attf-class="badge {{'bg-success' if metric.roas >= 2.0 else 'bg-warning' if metric.roas >= 1.0 else 'bg-danger'}}">
+                                                <t t-out="'%.2f' % metric.roas"/>x
                                             </span>
                                         </td>
                                     </tr>
@@ -72,16 +136,36 @@
                             </tbody>
                         </table>
 
-                        <t t-if="doc.recommendation_ids">
-                            <h3 class="mt-4">Active Recommendations</h3>
-                            <ul>
-                                <t t-foreach="doc.recommendation_ids.filtered(lambda r: r.state == 'draft')" t-as="rec">
-                                    <li>
-                                        <strong><t t-out="rec.name"/>:</strong> <t t-out="rec.description"/>
-                                    </li>
+                        <!-- Active Recommendations Section -->
+                        <t t-set="active_recs" t-value="doc.recommendation_ids.filtered(lambda r: r.status in ('new', 'in_review'))"/>
+                        <t t-if="active_recs">
+                            <h4 class="mt-4 mb-3" style="font-weight: 600; color: #2D3748;">Aktif Optimizasyon Önerileri</h4>
+                            <div class="row g-2">
+                                <t t-foreach="active_recs" t-as="rec">
+                                    <div class="col-12">
+                                        <div class="p-3 rounded mb-2" t-attf-style="border-left: 4px solid {{'#E53E3E' if rec.severity == 'critical' else '#DD6B20' if rec.severity == 'warning' else '#3182CE'}}; background-color: #F7FAFC;">
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <strong style="color: #2D3748;"><t t-out="rec.name"/></strong>
+                                                <span t-attf-class="badge text-uppercase {{'bg-danger' if rec.severity == 'critical' else 'bg-warning' if rec.severity == 'warning' else 'bg-info'}}">
+                                                    <t t-out="rec.severity"/>
+                                                </span>
+                                            </div>
+                                            <p class="mb-1 text-muted small mt-1"><t t-out="rec.description"/></p>
+                                            <t t-if="rec.proposed_action">
+                                                <div class="small fw-semibold text-primary">
+                                                    <strong>Önerilen Aksiyon:</strong> <t t-out="rec.proposed_action"/>
+                                                </div>
+                                            </t>
+                                        </div>
+                                    </div>
                                 </t>
-                            </ul>
+                            </div>
                         </t>
+
+                        <!-- Footer Note -->
+                        <div class="mt-4 pt-3 border-top text-center text-muted small" style="font-size: 10px;">
+                            Bu rapor Odoo 19 Ads Manager modülü tarafından otomatik olarak oluşturulmuştur.
+                        </div>
                     </div>
                 </t>
             </t>

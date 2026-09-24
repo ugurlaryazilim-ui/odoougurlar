@@ -1,0 +1,432 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="ads_manager.Dashboard" owl="1">
+        <div class="ads-dashboard-wrapper">
+            <!-- Control Panel Header -->
+            <div class="ads-control-panel d-flex flex-wrap align-items-center justify-content-between p-3 border-bottom bg-view">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="dashboard-title-box">
+                        <h4 class="mb-0 fw-bold text-dark d-flex align-items-center gap-2">
+                            <i class="fa fa-line-chart text-primary"/>
+                            <span>Ads Manager Performans Dashboard</span>
+                        </h4>
+                        <span class="text-muted small">Meta Ads ve Google Ads Birleşik Reklam Zekası</span>
+                    </div>
+
+                    <!-- Account Status Pills -->
+                    <div class="d-none d-md-flex align-items-center gap-2 ms-2">
+                        <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1">
+                            <i class="fa fa-check-circle me-1"/>
+                            <t t-esc="state.accounts.connected"/>/<t t-esc="state.accounts.total"/> Hesap Aktif
+                        </span>
+                        <t t-if="state.accounts.error > 0">
+                            <span class="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1">
+                                <i class="fa fa-exclamation-triangle me-1"/>
+                                <t t-esc="state.accounts.error"/> Bağlantı Hatası
+                            </span>
+                        </t>
+                    </div>
+                </div>
+
+                <!-- Controls & Filters -->
+                <div class="d-flex align-items-center gap-2 mt-2 mt-md-0">
+                    <!-- Platform Filter -->
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button type="button" 
+                                t-attf-class="btn {{state.platform === 'all' ? 'btn-primary' : 'btn-outline-secondary'}}"
+                                t-on-click="() => this.setPlatform('all')">
+                            Tümü
+                        </button>
+                        <button type="button" 
+                                t-attf-class="btn {{state.platform === 'meta' ? 'btn-primary' : 'btn-outline-secondary'}}"
+                                t-on-click="() => this.setPlatform('meta')">
+                            <i class="fa fa-facebook-square me-1"/> Meta
+                        </button>
+                        <button type="button" 
+                                t-attf-class="btn {{state.platform === 'google' ? 'btn-primary' : 'btn-outline-secondary'}}"
+                                t-on-click="() => this.setPlatform('google')">
+                            <i class="fa fa-google me-1"/> Google
+                        </button>
+                    </div>
+
+                    <!-- Period Filter -->
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button type="button" 
+                                t-attf-class="btn {{state.period === '7d' ? 'btn-dark' : 'btn-outline-secondary'}}"
+                                t-on-click="() => this.setPeriod('7d')">
+                            Son 7 Gün
+                        </button>
+                        <button type="button" 
+                                t-attf-class="btn {{state.period === '30d' ? 'btn-dark' : 'btn-outline-secondary'}}"
+                                t-on-click="() => this.setPeriod('30d')">
+                            Son 30 Gün
+                        </button>
+                        <button type="button" 
+                                t-attf-class="btn {{state.period === 'mtd' ? 'btn-dark' : 'btn-outline-secondary'}}"
+                                t-on-click="() => this.setPeriod('mtd')">
+                            Bu Ay
+                        </button>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <button class="btn btn-sm btn-outline-primary" t-on-click="() => this.openSyncWizard()" title="Hızlı Senkronizasyon">
+                        <i class="fa fa-refresh me-1"/> Senkronize Et
+                    </button>
+                    <button class="btn btn-sm btn-outline-info" t-on-click="() => this.openPlatformComparison()" title="Meta vs Google Karşılaştır">
+                        <i class="fa fa-balance-scale me-1"/> Karşılaştır
+                    </button>
+                    <button class="btn btn-sm btn-light border" t-on-click="() => this.refresh()" title="Verileri Güncelle">
+                        <i class="fa fa-repeat"/>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Dashboard Content Container -->
+            <div class="ads-dashboard-content p-3">
+
+                <!-- Loading State -->
+                <t t-if="state.loading">
+                    <div class="d-flex flex-column align-items-center justify-content-center p-5">
+                        <div class="spinner-border text-primary mb-3" role="status"/>
+                        <span class="text-muted">Metrikler ve yapay zeka analizleri yükleniyor...</span>
+                    </div>
+                </t>
+
+                <!-- Loaded View -->
+                <t t-else="">
+                    <!-- 1. KPI Cards Row -->
+                    <div class="row g-3 mb-4">
+                        <!-- Harcama -->
+                        <div class="col-12 col-sm-6 col-xl-2-4">
+                            <div class="card h-100 border-0 shadow-sm kpi-card">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-center mb-1">
+                                        <span class="text-muted small fw-semibold text-uppercase">Toplam Harcama</span>
+                                        <div class="kpi-icon-box bg-primary-subtle text-primary">
+                                            <i class="fa fa-credit-card"/>
+                                        </div>
+                                    </div>
+                                    <h3 class="fw-bold mb-1 text-dark">
+                                        <t t-esc="formatCurrency(state.kpis.spend)"/>
+                                    </h3>
+                                    <div class="small d-flex align-items-center gap-1">
+                                        <t t-if="state.kpis.spend_delta >= 0">
+                                            <span class="text-danger fw-semibold">
+                                                <i class="fa fa-arrow-up"/> %<t t-esc="state.kpis.spend_delta"/>
+                                            </span>
+                                        </t>
+                                        <t t-else="">
+                                            <span class="text-success fw-semibold">
+                                                <i class="fa fa-arrow-down"/> %<t t-esc="Math.abs(state.kpis.spend_delta)"/>
+                                            </span>
+                                        </t>
+                                        <span class="text-muted text-xs ms-1">önceki döneme göre</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Dönüşüm Değeri / Ciro -->
+                        <div class="col-12 col-sm-6 col-xl-2-4">
+                            <div class="card h-100 border-0 shadow-sm kpi-card">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-center mb-1">
+                                        <span class="text-muted small fw-semibold text-uppercase">Dönüşüm Değeri</span>
+                                        <div class="kpi-icon-box bg-success-subtle text-success">
+                                            <i class="fa fa-money"/>
+                                        </div>
+                                    </div>
+                                    <h3 class="fw-bold mb-1 text-success">
+                                        <t t-esc="formatCurrency(state.kpis.conversion_value)"/>
+                                    </h3>
+                                    <div class="small d-flex align-items-center gap-1">
+                                        <t t-if="state.kpis.revenue_delta >= 0">
+                                            <span class="text-success fw-semibold">
+                                                <i class="fa fa-arrow-up"/> +%<t t-esc="state.kpis.revenue_delta"/>
+                                            </span>
+                                        </t>
+                                        <t t-else="">
+                                            <span class="text-danger fw-semibold">
+                                                <i class="fa fa-arrow-down"/> -%<t t-esc="Math.abs(state.kpis.revenue_delta)"/>
+                                            </span>
+                                        </t>
+                                        <span class="text-muted text-xs ms-1">dönüşüm cirosu</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ROAS -->
+                        <div class="col-12 col-sm-6 col-xl-2-4">
+                            <div class="card h-100 border-0 shadow-sm kpi-card">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-center mb-1">
+                                        <span class="text-muted small fw-semibold text-uppercase">Ortalama ROAS</span>
+                                        <div class="kpi-icon-box bg-warning-subtle text-warning">
+                                            <i class="fa fa-bullseye"/>
+                                        </div>
+                                    </div>
+                                    <h3 class="fw-bold mb-1 text-dark">
+                                        <t t-esc="state.kpis.roas"/>x
+                                    </h3>
+                                    <div class="small d-flex align-items-center gap-1">
+                                        <t t-if="state.kpis.roas_delta >= 0">
+                                            <span class="text-success fw-semibold">
+                                                <i class="fa fa-arrow-up"/> +<t t-esc="state.kpis.roas_delta"/>
+                                            </span>
+                                        </t>
+                                        <t t-else="">
+                                            <span class="text-danger fw-semibold">
+                                                <i class="fa fa-arrow-down"/> <t t-esc="state.kpis.roas_delta"/>
+                                            </span>
+                                        </t>
+                                        <span class="text-muted text-xs ms-1">harcama getirisi</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Tıklama & CTR -->
+                        <div class="col-12 col-sm-6 col-xl-2-4">
+                            <div class="card h-100 border-0 shadow-sm kpi-card">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-center mb-1">
+                                        <span class="text-muted small fw-semibold text-uppercase">Tıklama / CTR</span>
+                                        <div class="kpi-icon-box bg-info-subtle text-info">
+                                            <i class="fa fa-mouse-pointer"/>
+                                        </div>
+                                    </div>
+                                    <h3 class="fw-bold mb-1 text-dark">
+                                        <t t-esc="formatNumber(state.kpis.clicks)"/>
+                                    </h3>
+                                    <div class="small d-flex align-items-center gap-1">
+                                        <span class="badge bg-secondary-subtle text-dark">CTR: %<t t-esc="state.kpis.ctr"/></span>
+                                        <span class="text-muted text-xs">CPC: <t t-esc="formatCurrency(state.kpis.cpc)"/></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Dönüşümler & CPA -->
+                        <div class="col-12 col-sm-6 col-xl-2-4">
+                            <div class="card h-100 border-0 shadow-sm kpi-card">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-center mb-1">
+                                        <span class="text-muted small fw-semibold text-uppercase">Dönüşüm / CPA</span>
+                                        <div class="kpi-icon-box bg-purple-subtle text-purple">
+                                            <i class="fa fa-shopping-cart"/>
+                                        </div>
+                                    </div>
+                                    <h3 class="fw-bold mb-1 text-dark">
+                                        <t t-esc="state.kpis.conversions"/>
+                                    </h3>
+                                    <div class="small d-flex align-items-center gap-1">
+                                        <span class="badge bg-secondary-subtle text-dark">CPA: <t t-esc="formatCurrency(state.kpis.cpa)"/></span>
+                                        <t t-if="state.kpis.conversions_delta >= 0">
+                                            <span class="text-success fw-semibold text-xs">+%<t t-esc="state.kpis.conversions_delta"/></span>
+                                        </t>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 2. Charts Row -->
+                    <div class="row g-3 mb-4">
+                        <!-- Spend vs Revenue Trend Chart -->
+                        <div class="col-12 col-lg-8">
+                            <div class="card border-0 shadow-sm h-100">
+                                <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center pt-3 px-3">
+                                    <h6 class="fw-bold mb-0 text-dark">
+                                        <i class="fa fa-area-chart text-primary me-2"/>
+                                        Harcama ve Gelir Trendi
+                                    </h6>
+                                    <span class="badge bg-light text-muted border">Günlük Dağılım</span>
+                                </div>
+                                <div class="card-body p-3">
+                                    <div class="chart-container" style="position: relative; height: 320px;">
+                                        <canvas t-ref="trendChart"/>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Platform Breakdown Donut Chart -->
+                        <div class="col-12 col-lg-4">
+                            <div class="card border-0 shadow-sm h-100">
+                                <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center pt-3 px-3">
+                                    <h6 class="fw-bold mb-0 text-dark">
+                                        <i class="fa fa-pie-chart text-info me-2"/>
+                                        Platform Harcama Payı
+                                    </h6>
+                                </div>
+                                <div class="card-body p-3 d-flex flex-column justify-content-between">
+                                    <div class="chart-container" style="position: relative; height: 210px;">
+                                        <canvas t-ref="platformChart"/>
+                                    </div>
+                                    <!-- Platform Mini Stats -->
+                                    <div class="platform-mini-stats border-top pt-2 mt-2">
+                                        <div class="row text-center g-2">
+                                            <t t-foreach="Object.keys(state.platform_breakdown)" t-as="p" t-key="p">
+                                                <div class="col-6">
+                                                    <div class="p-2 rounded bg-light">
+                                                        <div class="small fw-bold text-uppercase" t-att-style="p === 'meta' ? 'color: #1877F2;' : 'color: #EA4335;'">
+                                                            <i t-attf-class="fa {{p === 'meta' ? 'fa-facebook-square' : 'fa-google'}} me-1"/>
+                                                            <t t-esc="p"/>
+                                                        </div>
+                                                        <div class="fw-semibold fs-6">
+                                                            <t t-esc="formatCurrency(state.platform_breakdown[p].spend)"/>
+                                                        </div>
+                                                        <div class="text-muted text-xs">
+                                                            ROAS: <strong><t t-esc="state.platform_breakdown[p].roas"/>x</strong>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </t>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3. Bottom Row: Top Campaigns & Recommendations -->
+                    <div class="row g-3">
+                        <!-- Top Campaigns Table -->
+                        <div class="col-12 col-lg-7">
+                            <div class="card border-0 shadow-sm h-100">
+                                <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center pt-3 px-3">
+                                    <h6 class="fw-bold mb-0 text-dark">
+                                        <i class="fa fa-flag text-warning me-2"/>
+                                        En Çok Harcayan Kampanyalar
+                                    </h6>
+                                    <button class="btn btn-sm btn-link text-decoration-none" t-on-click="() => this.openAllCampaigns()">
+                                        Tümünü Gör <i class="fa fa-arrow-right ms-1"/>
+                                    </button>
+                                </div>
+                                <div class="card-body p-0">
+                                    <div class="table-responsive">
+                                        <table class="table table-hover align-middle mb-0" style="font-size: 13px;">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th>Kampanya</th>
+                                                    <th>Platform</th>
+                                                    <th>Durum</th>
+                                                    <th class="text-end">Bütçe</th>
+                                                    <th class="text-end">Harcama</th>
+                                                    <th class="text-end">Dönüşüm</th>
+                                                    <th class="text-end">ROAS</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <t t-if="state.top_campaigns.length === 0">
+                                                    <tr>
+                                                        <td colspan="7" class="text-center py-4 text-muted">
+                                                            Kampanya verisi bulunamadı.
+                                                        </td>
+                                                    </tr>
+                                                </t>
+                                                <t t-foreach="state.top_campaigns" t-as="c" t-key="c.id">
+                                                    <tr role="button" t-on-click="() => this.openCampaign(c.id)">
+                                                        <td class="fw-semibold text-dark text-truncate" style="max-width: 200px;">
+                                                            <t t-esc="c.name"/>
+                                                        </td>
+                                                        <td>
+                                                            <t t-if="c.platform === 'meta'">
+                                                                <span class="badge text-bg-primary-subtle text-primary border border-primary-subtle">
+                                                                    <i class="fa fa-facebook-square me-1"/> Meta
+                                                                </span>
+                                                            </t>
+                                                            <t t-else="">
+                                                                <span class="badge text-bg-danger-subtle text-danger border border-danger-subtle">
+                                                                    <i class="fa fa-google me-1"/> Google
+                                                                </span>
+                                                            </t>
+                                                        </td>
+                                                        <td>
+                                                            <span t-attf-class="badge {{c.status === 'active' ? 'bg-success' : 'bg-secondary'}}">
+                                                                <t t-esc="c.status"/>
+                                                            </span>
+                                                        </td>
+                                                        <td class="text-end text-muted">
+                                                            <t t-esc="c.daily_budget"/> <t t-esc="c.currency"/>
+                                                        </td>
+                                                        <td class="text-end fw-bold text-dark">
+                                                            <t t-esc="c.total_spend"/> <t t-esc="c.currency"/>
+                                                        </td>
+                                                        <td class="text-end">
+                                                            <t t-esc="c.conversions"/>
+                                                        </td>
+                                                        <td class="text-end">
+                                                            <span t-attf-class="badge {{c.avg_roas >= 2.0 ? 'bg-success' : c.avg_roas >= 1.0 ? 'bg-warning' : 'bg-danger'}}">
+                                                                <t t-esc="c.avg_roas"/>x
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                </t>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Active Recommendations & AI Alerts -->
+                        <div class="col-12 col-lg-5">
+                            <div class="card border-0 shadow-sm h-100">
+                                <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center pt-3 px-3">
+                                    <h6 class="fw-bold mb-0 text-dark">
+                                        <i class="fa fa-magic text-purple me-2"/>
+                                        Aktif Optimizasyon Önerileri
+                                    </h6>
+                                    <button class="btn btn-sm btn-link text-decoration-none" t-on-click="() => this.openAllRecommendations()">
+                                        Tümü <i class="fa fa-arrow-right ms-1"/>
+                                    </button>
+                                </div>
+                                <div class="card-body p-3">
+                                    <t t-if="state.recommendations.length === 0">
+                                        <div class="text-center py-5 text-muted">
+                                            <i class="fa fa-check-circle-o fa-2x text-success mb-2"/>
+                                            <p class="mb-0">Harika! Bekleyen kritik kural veya AI uyarısı yok.</p>
+                                        </div>
+                                    </t>
+                                    <t t-foreach="state.recommendations" t-as="r" t-key="r.id">
+                                        <div class="recommendation-item p-2 mb-2 rounded border"
+                                             t-attf-style="border-left: 4px solid {{r.severity === 'critical' ? '#EF4444' : r.severity === 'warning' ? '#F59E0B' : '#3B82F6'}} !important; background-color: #FAFAFA;">
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <span class="fw-semibold text-dark small" role="button" t-on-click="() => this.openRecommendation(r.id)">
+                                                    <t t-esc="r.name"/>
+                                                </span>
+                                                <span t-attf-class="badge text-uppercase {{r.severity === 'critical' ? 'bg-danger' : r.severity === 'warning' ? 'bg-warning' : 'bg-info'}}">
+                                                    <t t-esc="r.severity"/>
+                                                </span>
+                                            </div>
+                                            <p class="text-muted small mb-1 mt-1 text-truncate-2">
+                                                <t t-esc="r.description"/>
+                                            </p>
+                                            <t t-if="r.proposed_action">
+                                                <div class="small fw-semibold text-primary mb-2">
+                                                    💡 <t t-esc="r.proposed_action"/>
+                                                </div>
+                                            </t>
+                                            <div class="d-flex justify-content-end gap-1 mt-1">
+                                                <button class="btn btn-xs btn-outline-success" t-on-click="() => this.quickApplyRecommendation(r.id)">
+                                                    <i class="fa fa-check me-1"/> Uygula
+                                                </button>
+                                                <button class="btn btn-xs btn-outline-secondary" t-on-click="() => this.quickDismissRecommendation(r.id)">
+                                                    <i class="fa fa-times"/>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </t>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </t>
+            </div>
+        </div>
+    </t>
+
+</templates>

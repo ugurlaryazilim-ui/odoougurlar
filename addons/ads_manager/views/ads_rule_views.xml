@@ -5,6 +5,11 @@
         <field name="model">ads.rule</field>
         <field name="arch" type="xml">
             <form string="Ads Rule">
+                <header>
+                    <button name="action_evaluate_now" string="Şimdi Değerlendir" type="object" class="oe_highlight" icon="fa-play"/>
+                    <button name="action_reset_cooldown" string="Cooldown Sıfırla" type="object" invisible="not is_in_cooldown" icon="fa-refresh"/>
+                    <field name="is_in_cooldown" invisible="1"/>
+                </header>
                 <sheet>
                     <div class="oe_title">
                         <h1>
@@ -35,8 +40,10 @@
                         <page string="Actions" name="actions">
                             <field name="action_ids">
                                 <list editable="bottom">
-                                    <field name="name"/>
-                                    <!-- Add other fields as needed based on the model -->
+                                    <field name="action_type"/>
+                                    <field name="adjustment_value" invisible="action_type != 'adjust_budget_pct'"/>
+                                    <field name="max_single_adjustment" invisible="action_type != 'adjust_budget_pct'"/>
+                                    <field name="require_approval"/>
                                 </list>
                             </field>
                         </page>

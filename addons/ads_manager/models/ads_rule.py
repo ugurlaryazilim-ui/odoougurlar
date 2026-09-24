@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
+import logging
 from odoo import models, fields, api, _
+
+_logger = logging.getLogger(__name__)
 
 class AdsRule(models.Model):
     _name = 'ads.rule'
@@ -37,3 +40,65 @@ class AdsRule(models.Model):
         ('audience', 'Audience')
     ])
     trigger_count = fields.Integer(readonly=True, default=0)
+    is_in_cooldown = fields.Boolean(compute='_compute_is_in_cooldown')
+
+    def _compute_is_in_cooldown(self):
+        now = fields.Datetime.now()
+        for rule in self:
+            if rule.last_triggered and rule.cooldown_hours:
+                from datetime import timedelta
+                cooldown_end = rule.last_triggered + timedelta(hours=rule.cooldown_hours)
+                rule.is_in_cooldown = now < cooldown_end
+            else:
+                rule.is_in_cooldown = False
+
+    @api.model
+    def _cron_evaluate_rules(self):
+        """Cron job entry point: evaluate all active rules."""
+        from ..services.rule_engine import RuleEngine
+        engine = RuleEngine(self.env)
+        result = engine.evaluate_all_rules()
+        _logger.info(
+            'Rule evaluation complete: %d evaluated, %d triggered, %d skipped, %d errors',
+            result.get('evaluated', 0),
+            result.get('triggered', 0),
+            result.get('skipped', 0),
+            result.get('errors', 0),
+        )
+
+    def action_evaluate_now(self):
+        """Manually evaluate this rule immediately against all matching campaigns."""
+        self.ensure_one()
+        from ..services.rule_engine import RuleEngine
+        engine = RuleEngine(self.env)
+        
+        # Get matching campaigns
+        campaign_domain = [('status', '=', 'active')]
+        if self.platform_filter != 'all':
+            campaign_domain.append(('account_id.platform', '=', self.platform_filter))
+        if self.campaign_ids:
+            campaign_domain.append(('id', 'in', self.campaign_ids.ids))
+        campaigns = self.env['ads.campaign'].search(campaign_domain)
+        
+        triggered = 0
+        for campaign in campaigns:
+            met, metric_data = engine._evaluate_rule_conditions(self, campaign)
+            if met:
+                engine._execute_rule_actions(self, campaign, metric_data)
+                triggered += 1
+        
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Rule Evaluation Complete'),
+                'message': _('%d campaigns evaluated, %d triggered.') % (len(campaigns), triggered),
+                'type': 'info' if triggered == 0 else 'warning',
+                'sticky': False,
+            }
+        }
+
+    def action_reset_cooldown(self):
+        """Reset the cooldown timer."""
+        self.ensure_one()
+        self.write({'last_triggered': False})
