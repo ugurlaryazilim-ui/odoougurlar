@@ -1,134 +1,196 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <data noupdate="1">
+        <!-- Rule 1: High CPA Alert -->
         <record id="ads_rule_high_cpa_alert" model="ads.rule">
             <field name="name">High CPA Alert</field>
-            <field name="metric">cpa</field>
-            <field name="operator">&gt;</field>
-            <field name="value">50.0</field>
-            <field name="lookback_days">3</field>
-            <field name="consecutive_days">3</field>
             <field name="severity">warning</field>
             <field name="category">performance</field>
-            <field name="action_type">create_recommendation</field>
+            <field name="condition_logic">all</field>
+            <field name="min_impressions">100</field>
+            <field name="cooldown_hours">24</field>
             <field name="active" eval="True"/>
         </record>
+        <record id="ads_rule_high_cpa_alert_cond1" model="ads.rule.condition">
+            <field name="rule_id" ref="ads_rule_high_cpa_alert"/>
+            <field name="metric">cpa</field>
+            <field name="operator">gt</field>
+            <field name="threshold">50.0</field>
+            <field name="lookback_days">3</field>
+            <field name="consecutive_days">3</field>
+        </record>
+        <record id="ads_rule_high_cpa_alert_act1" model="ads.rule.action">
+            <field name="rule_id" ref="ads_rule_high_cpa_alert"/>
+            <field name="action_type">create_recommendation</field>
+        </record>
 
+        <!-- Rule 2: CPA Crisis -->
         <record id="ads_rule_cpa_crisis" model="ads.rule">
             <field name="name">CPA Crisis</field>
-            <field name="metric">cpa</field>
-            <field name="operator">&gt;</field>
-            <field name="value">100.0</field>
-            <field name="lookback_days">1</field>
-            <field name="consecutive_days">2</field>
             <field name="severity">critical</field>
             <field name="category">performance</field>
-            <field name="action_type">create_recommendation_notify</field>
+            <field name="condition_logic">all</field>
+            <field name="min_impressions">100</field>
+            <field name="cooldown_hours">12</field>
             <field name="active" eval="True"/>
         </record>
+        <record id="ads_rule_cpa_crisis_cond1" model="ads.rule.condition">
+            <field name="rule_id" ref="ads_rule_cpa_crisis"/>
+            <field name="metric">cpa</field>
+            <field name="operator">gt</field>
+            <field name="threshold">100.0</field>
+            <field name="lookback_days">1</field>
+            <field name="consecutive_days">2</field>
+        </record>
+        <record id="ads_rule_cpa_crisis_act1" model="ads.rule.action">
+            <field name="rule_id" ref="ads_rule_cpa_crisis"/>
+            <field name="action_type">create_recommendation</field>
+        </record>
+        <record id="ads_rule_cpa_crisis_act2" model="ads.rule.action">
+            <field name="rule_id" ref="ads_rule_cpa_crisis"/>
+            <field name="action_type">notify_email</field>
+        </record>
 
+        <!-- Rule 3: Low ROAS Warning -->
         <record id="ads_rule_low_roas_warning" model="ads.rule">
             <field name="name">Low ROAS Warning</field>
+            <field name="severity">warning</field>
+            <field name="category">performance</field>
+            <field name="condition_logic">all</field>
+            <field name="min_impressions">100</field>
+            <field name="cooldown_hours">24</field>
+            <field name="active" eval="True"/>
+        </record>
+        <record id="ads_rule_low_roas_warning_cond1" model="ads.rule.condition">
+            <field name="rule_id" ref="ads_rule_low_roas_warning"/>
             <field name="metric">roas</field>
-            <field name="operator">&lt;</field>
-            <field name="value">1.0</field>
+            <field name="operator">lt</field>
+            <field name="threshold">1.0</field>
             <field name="lookback_days">3</field>
             <field name="consecutive_days">3</field>
-            <field name="severity">warning</field>
-            <field name="category">performance</field>
-            <field name="action_type">none</field>
-            <field name="active" eval="True"/>
+        </record>
+        <record id="ads_rule_low_roas_warning_act1" model="ads.rule.action">
+            <field name="rule_id" ref="ads_rule_low_roas_warning"/>
+            <field name="action_type">create_recommendation</field>
         </record>
 
+        <!-- Rule 4: Zero ROAS -->
         <record id="ads_rule_zero_roas" model="ads.rule">
             <field name="name">Zero ROAS</field>
-            <field name="metric">roas</field>
-            <field name="operator">&lt;</field>
-            <field name="value">0.5</field>
-            <field name="lookback_days">1</field>
-            <field name="consecutive_days">2</field>
             <field name="severity">critical</field>
             <field name="category">performance</field>
-            <field name="action_type">create_recommendation_email</field>
+            <field name="condition_logic">all</field>
+            <field name="min_impressions">100</field>
+            <field name="cooldown_hours">24</field>
             <field name="active" eval="True"/>
         </record>
-
-        <record id="ads_rule_ctr_drop" model="ads.rule">
-            <field name="name">CTR Drop</field>
-            <field name="metric">ctr_change_pct</field>
-            <field name="operator">&lt;</field>
-            <field name="value">-30.0</field>
-            <field name="lookback_days">7</field>
-            <field name="consecutive_days">1</field>
-            <field name="severity">warning</field>
-            <field name="category">creative</field>
-            <field name="action_type">none</field>
-            <field name="active" eval="True"/>
+        <record id="ads_rule_zero_roas_cond1" model="ads.rule.condition">
+            <field name="rule_id" ref="ads_rule_zero_roas"/>
+            <field name="metric">roas</field>
+            <field name="operator">lt</field>
+            <field name="threshold">0.5</field>
+            <field name="lookback_days">1</field>
+            <field name="consecutive_days">2</field>
+        </record>
+        <record id="ads_rule_zero_roas_act1" model="ads.rule.action">
+            <field name="rule_id" ref="ads_rule_zero_roas"/>
+            <field name="action_type">create_recommendation</field>
+        </record>
+        <record id="ads_rule_zero_roas_act2" model="ads.rule.action">
+            <field name="rule_id" ref="ads_rule_zero_roas"/>
+            <field name="action_type">notify_email</field>
         </record>
 
+        <!-- Rule 5: Budget Overspend -->
         <record id="ads_rule_budget_overspend" model="ads.rule">
             <field name="name">Budget Overspend</field>
-            <field name="metric">budget_pace</field>
-            <field name="operator">&gt;</field>
-            <field name="value">115.0</field>
-            <field name="lookback_days">1</field>
-            <field name="consecutive_days">1</field>
             <field name="severity">warning</field>
             <field name="category">budget</field>
-            <field name="action_type">none</field>
+            <field name="condition_logic">all</field>
+            <field name="min_impressions">0</field>
+            <field name="cooldown_hours">24</field>
             <field name="active" eval="True"/>
         </record>
+        <record id="ads_rule_budget_overspend_cond1" model="ads.rule.condition">
+            <field name="rule_id" ref="ads_rule_budget_overspend"/>
+            <field name="metric">budget_pace</field>
+            <field name="operator">gt</field>
+            <field name="threshold">115.0</field>
+            <field name="lookback_days">1</field>
+            <field name="consecutive_days">1</field>
+        </record>
+        <record id="ads_rule_budget_overspend_act1" model="ads.rule.action">
+            <field name="rule_id" ref="ads_rule_budget_overspend"/>
+            <field name="action_type">create_recommendation</field>
+        </record>
 
+        <!-- Rule 6: Budget Underspend -->
         <record id="ads_rule_budget_underspend" model="ads.rule">
             <field name="name">Budget Underspend</field>
-            <field name="metric">budget_pace</field>
-            <field name="operator">&lt;</field>
-            <field name="value">70.0</field>
-            <field name="lookback_days">1</field>
-            <field name="consecutive_days">3</field>
             <field name="severity">info</field>
             <field name="category">budget</field>
-            <field name="action_type">none</field>
+            <field name="condition_logic">all</field>
+            <field name="min_impressions">0</field>
+            <field name="cooldown_hours">48</field>
             <field name="active" eval="True"/>
         </record>
-
-        <record id="ads_rule_high_frequency" model="ads.rule">
-            <field name="name">High Frequency</field>
-            <field name="metric">frequency</field>
-            <field name="operator">&gt;</field>
-            <field name="value">3.0</field>
-            <field name="lookback_days">5</field>
-            <field name="consecutive_days">5</field>
-            <field name="severity">warning</field>
-            <field name="category">audience</field>
-            <field name="action_type">none</field>
-            <field name="active" eval="True"/>
-        </record>
-
-        <record id="ads_rule_conversion_rate_drop" model="ads.rule">
-            <field name="name">Conversion Rate Drop</field>
-            <field name="metric">conversion_rate_change_pct</field>
-            <field name="operator">&lt;</field>
-            <field name="value">-25.0</field>
-            <field name="lookback_days">7</field>
-            <field name="consecutive_days">1</field>
-            <field name="severity">warning</field>
-            <field name="category">performance</field>
-            <field name="action_type">none</field>
-            <field name="active" eval="True"/>
-        </record>
-
-        <record id="ads_rule_performance_breakthrough" model="ads.rule">
-            <field name="name">Performance Breakthrough</field>
-            <field name="metric">roas</field>
-            <field name="operator">&gt;</field>
-            <field name="value">3.0</field>
+        <record id="ads_rule_budget_underspend_cond1" model="ads.rule.condition">
+            <field name="rule_id" ref="ads_rule_budget_underspend"/>
+            <field name="metric">budget_pace</field>
+            <field name="operator">lt</field>
+            <field name="threshold">70.0</field>
             <field name="lookback_days">1</field>
             <field name="consecutive_days">3</field>
+        </record>
+        <record id="ads_rule_budget_underspend_act1" model="ads.rule.action">
+            <field name="rule_id" ref="ads_rule_budget_underspend"/>
+            <field name="action_type">create_recommendation</field>
+        </record>
+
+        <!-- Rule 7: High Frequency -->
+        <record id="ads_rule_high_frequency" model="ads.rule">
+            <field name="name">High Frequency</field>
+            <field name="severity">warning</field>
+            <field name="category">audience</field>
+            <field name="condition_logic">all</field>
+            <field name="min_impressions">100</field>
+            <field name="cooldown_hours">48</field>
+            <field name="active" eval="True"/>
+        </record>
+        <record id="ads_rule_high_frequency_cond1" model="ads.rule.condition">
+            <field name="rule_id" ref="ads_rule_high_frequency"/>
+            <field name="metric">frequency</field>
+            <field name="operator">gt</field>
+            <field name="threshold">3.0</field>
+            <field name="lookback_days">5</field>
+            <field name="consecutive_days">5</field>
+        </record>
+        <record id="ads_rule_high_frequency_act1" model="ads.rule.action">
+            <field name="rule_id" ref="ads_rule_high_frequency"/>
+            <field name="action_type">create_recommendation</field>
+        </record>
+
+        <!-- Rule 8: Performance Breakthrough -->
+        <record id="ads_rule_performance_breakthrough" model="ads.rule">
+            <field name="name">Performance Breakthrough</field>
             <field name="severity">info</field>
             <field name="category">performance</field>
-            <field name="action_type">create_recommendation</field>
+            <field name="condition_logic">all</field>
+            <field name="min_impressions">100</field>
+            <field name="cooldown_hours">72</field>
             <field name="active" eval="True"/>
+        </record>
+        <record id="ads_rule_performance_breakthrough_cond1" model="ads.rule.condition">
+            <field name="rule_id" ref="ads_rule_performance_breakthrough"/>
+            <field name="metric">roas</field>
+            <field name="operator">gt</field>
+            <field name="threshold">3.0</field>
+            <field name="lookback_days">1</field>
+            <field name="consecutive_days">3</field>
+        </record>
+        <record id="ads_rule_performance_breakthrough_act1" model="ads.rule.action">
+            <field name="rule_id" ref="ads_rule_performance_breakthrough"/>
+            <field name="action_type">create_recommendation</field>
         </record>
     </data>
 </odoo>
