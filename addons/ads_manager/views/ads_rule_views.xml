@@ -32,8 +32,12 @@
                         <page string="Conditions" name="conditions">
                             <field name="condition_ids">
                                 <list editable="bottom">
-                                    <field name="name"/>
-                                    <!-- Add other fields as needed based on the model -->
+                                    <field name="sequence" widget="handle"/>
+                                    <field name="metric"/>
+                                    <field name="operator"/>
+                                    <field name="threshold"/>
+                                    <field name="lookback_days"/>
+                                    <field name="consecutive_days"/>
                                 </list>
                             </field>
                         </page>

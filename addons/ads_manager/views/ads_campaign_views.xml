@@ -59,7 +59,7 @@
                             </field>
                         </page>
                         <page string="Daily Metrics" name="daily_metrics">
-                            <field name="metric_daily_ids" readonly="1">
+                            <field name="metric_ids" readonly="1">
                                 <list>
                                     <field name="date"/>
                                     <field name="impressions"/>

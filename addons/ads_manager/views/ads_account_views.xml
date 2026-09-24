@@ -47,6 +47,7 @@
                             <field name="google_manager_id"/>
                             <field name="google_api_version"/>
                         </group>
+                    </group>
                     <notebook>
                         <page string="Campaigns" name="campaigns">
                             <field name="campaign_ids" readonly="1">

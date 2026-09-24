@@ -8,8 +8,8 @@
                 <header>
                     <button name="action_apply" type="object" string="Apply" class="oe_highlight" invisible="status != 'new'"/>
                     <button name="action_review" type="object" string="Review" invisible="status != 'new'"/>
-                    <button name="action_dismiss" type="object" string="Dismiss" invisible="status not in ('new', 'reviewed')"/>
-                    <field name="status" widget="statusbar" statusbar_visible="new,reviewed,applied,dismissed"/>
+                    <button name="action_dismiss" type="object" string="Dismiss" invisible="status not in ('new', 'in_review')"/>
+                    <field name="status" widget="statusbar" statusbar_visible="new,in_review,applied,dismissed"/>
                 </header>
                 <sheet>
                     <div class="oe_title">
