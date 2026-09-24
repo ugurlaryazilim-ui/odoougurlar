@@ -58,7 +58,7 @@ class OdooSyncApp(ctk.CTk):
         self.configure(fg_color="#F9F9F9") # Odoo Light Background
         
         self.title("Uğurlar Odoo Image Sync Agent")
-        self.geometry("900x700")
+        self.geometry("900x800")
         
         try:
             self.iconbitmap(resource_path("icon.ico"))
@@ -120,9 +120,44 @@ class OdooSyncApp(ctk.CTk):
         self.status_label = ctk.CTkLabel(self.control_frame, text="Durum: BEKLİYOR", text_color="#F59E0B", font=ctk.CTkFont(size=15, weight="bold"))
         self.status_label.pack(side=ctk.RIGHT)
         
+        # ═══ İlerleme Paneli ═══
+        self.progress_frame = ctk.CTkFrame(self, fg_color="#FFFFFF", corner_radius=10, border_width=1, border_color="#E5E7EB")
+        self.progress_frame.pack(fill=ctk.X, padx=20, pady=(15, 5))
+
+        # Üst satır: başlık + sayaç
+        self.progress_header = ctk.CTkFrame(self.progress_frame, fg_color="transparent")
+        self.progress_header.pack(fill=ctk.X, padx=15, pady=(10, 2))
+
+        self.progress_title = ctk.CTkLabel(self.progress_header, text="📊 İşlem İlerlemesi", text_color="#111827", font=ctk.CTkFont(size=14, weight="bold"))
+        self.progress_title.pack(side=ctk.LEFT)
+
+        self.progress_counter = ctk.CTkLabel(self.progress_header, text="0 / 0 barkod", text_color="#6B7280", font=ctk.CTkFont(size=13))
+        self.progress_counter.pack(side=ctk.RIGHT)
+
+        # Progress bar satırı
+        self.progress_bar_frame = ctk.CTkFrame(self.progress_frame, fg_color="transparent")
+        self.progress_bar_frame.pack(fill=ctk.X, padx=15, pady=(2, 2))
+
+        self.progress_bar = ctk.CTkProgressBar(self.progress_bar_frame, height=18, corner_radius=9, fg_color="#E5E7EB", progress_color="#714B67")
+        self.progress_bar.pack(side=ctk.LEFT, fill=ctk.X, expand=True, padx=(0, 10))
+        self.progress_bar.set(0)
+
+        self.progress_pct = ctk.CTkLabel(self.progress_bar_frame, text="0%", text_color="#714B67", font=ctk.CTkFont(size=14, weight="bold"), width=50)
+        self.progress_pct.pack(side=ctk.RIGHT)
+
+        # Alt satır: şu anki barkod + başarılı sayısı
+        self.progress_detail = ctk.CTkFrame(self.progress_frame, fg_color="transparent")
+        self.progress_detail.pack(fill=ctk.X, padx=15, pady=(0, 10))
+
+        self.progress_current = ctk.CTkLabel(self.progress_detail, text="Bekleniyor...", text_color="#9CA3AF", font=ctk.CTkFont(size=12))
+        self.progress_current.pack(side=ctk.LEFT)
+
+        self.progress_success = ctk.CTkLabel(self.progress_detail, text="✅ 0 başarılı", text_color="#10B981", font=ctk.CTkFont(size=12, weight="bold"))
+        self.progress_success.pack(side=ctk.RIGHT)
+
         # Log Paneli
         self.log_label = ctk.CTkLabel(self, text="İşlem Logları:", text_color="#111827", font=ctk.CTkFont(size=16, weight="bold"))
-        self.log_label.pack(anchor="w", padx=20, pady=(15, 5))
+        self.log_label.pack(anchor="w", padx=20, pady=(10, 5))
         
         # Koyu gri terminal gibi log kutusu (beyaz tema içinde kontrast)
         self.log_box = ctk.CTkTextbox(self, state="normal", wrap="word", fg_color="#1E1E1E", text_color="#E0E0E0", font=ctk.CTkFont(family="Consolas", size=13))
@@ -207,6 +242,30 @@ class OdooSyncApp(ctk.CTk):
         save_btn = ctk.CTkButton(settings_win, text="AYARLARI KAYDET", fg_color="#2e7d32", hover_color="#1b5e20", font=ctk.CTkFont(weight="bold"), command=save_settings)
         save_btn.pack(pady=10)
 
+    def _update_progress(self, processed, total, barcode, success_count):
+        """progress_callback: arka plan thread'inden GUI'yi günceller."""
+        pct = processed / total if total > 0 else 0
+        def _update():
+            self.progress_bar.set(pct)
+            self.progress_pct.configure(text=f"{int(pct * 100)}%")
+            self.progress_counter.configure(text=f"{processed} / {total} barkod")
+            self.progress_current.configure(
+                text=f"📦 {barcode}" if processed < total else "✔ Tamamlandı",
+                text_color="#374151" if processed < total else "#10B981",
+            )
+            self.progress_success.configure(text=f"✅ {success_count} başarılı")
+        self.after(0, _update)
+
+    def _reset_progress(self):
+        """İlerleme panelini sıfırla."""
+        def _update():
+            self.progress_bar.set(0)
+            self.progress_pct.configure(text="0%")
+            self.progress_counter.configure(text="0 / 0 barkod")
+            self.progress_current.configure(text="Taranıyor...", text_color="#9CA3AF")
+            self.progress_success.configure(text="✅ 0 başarılı")
+        self.after(0, _update)
+
     def run_agent_loop(self):
         # Ajanı başlat
         while not self.stop_event.is_set():
@@ -215,7 +274,8 @@ class OdooSyncApp(ctk.CTk):
                     self.agent = OdooImageSync(self.config)
                     
                 self.agent.optimize_large_local_images()  # Önce büyük dosyaları küçült
-                self.agent.process_folder()                # Sonra Odoo'ya yükle
+                self._reset_progress()
+                self.agent.process_folder(progress_callback=self._update_progress)  # Sonra Odoo'ya yükle
                 self.agent.download_ai_exports()           # AI görsellerini indir
                 
                 # Her döngüde 3 saniye bekle (event set edilirse anında çıkar)
@@ -224,14 +284,19 @@ class OdooSyncApp(ctk.CTk):
             except Exception as e:
                 err_str = str(e)
                 _logger.error("Ajan çalışırken ağ hatası / kritik hata: %s", err_str)
-                # 502 Bad Gateway gibi ağ hatalarında çökmek yerine biraz bekleyip tekrar deniyoruz
-                if "502" in err_str or "ProtocolError" in err_str or "ConnectionReset" in err_str:
-                    _logger.info("Sunucu geçici olarak meşgul veya ulaşılamıyor. 30 saniye sonra tekrar denenecek...")
-                    self.agent = None # Bağlantıyı sıfırla, tekrar bağlanmayı denesin
+                # Ağ / sunucu hatalarında çökmek yerine biraz bekleyip tekrar deniyoruz
+                recoverable_keywords = [
+                    "502", "503", "504", "ProtocolError", "ConnectionReset",
+                    "ConnectionError", "JSONDecodeError", "Expecting value",
+                    "RemoteDisconnected", "ConnectionAborted", "Timeout",
+                    "Sunucu hatası",
+                ]
+                if any(kw in err_str for kw in recoverable_keywords):
+                    _logger.info("🔄 Sunucu geçici olarak meşgul veya ulaşılamıyor. 30 saniye sonra tekrar denenecek...")
+                    self.agent = None  # Bağlantıyı sıfırla
                     self.stop_event.wait(30.0)
                 else:
                     _logger.error(traceback.format_exc())
-                    # Bilinmeyen kritik bir hataysa durdur
                     self.after(0, self._reset_ui_on_error)
                     break
 

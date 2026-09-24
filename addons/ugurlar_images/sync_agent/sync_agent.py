@@ -180,12 +180,41 @@ class JsonRpcHelper:
                 'kwargs': kwargs,
             }
         }
-        res = self.session.post(f'{self.url}/web/dataset/call_kw/{model}/{method}', json=payload).json()
-        if 'error' in res:
-            err_data = res['error'].get('data', {}) if isinstance(res['error'], dict) else {}
-            err_msg = err_data.get('message') or (res['error'].get('message') if isinstance(res['error'], dict) else str(res['error']))
-            raise Exception(err_msg)
-        return res.get('result')
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                resp = self.session.post(
+                    f'{self.url}/web/dataset/call_kw/{model}/{method}',
+                    json=payload,
+                    timeout=120,
+                )
+                # Boş yanıt veya sunucu hatası kontrolü
+                if resp.status_code >= 500:
+                    raise requests.exceptions.ConnectionError(
+                        f"Sunucu hatası: HTTP {resp.status_code}"
+                    )
+                res = resp.json()
+            except (requests.exceptions.ConnectionError,
+                    requests.exceptions.Timeout,
+                    requests.exceptions.JSONDecodeError) as e:
+                if attempt < max_retries - 1:
+                    wait = (attempt + 1) * 5  # 5s, 10s, 15s
+                    _logger.warning(
+                        "⚠️ Odoo bağlantı hatası (%s/%s), %ds sonra tekrar denenecek: %s",
+                        attempt + 1, max_retries, wait, e
+                    )
+                    time.sleep(wait)
+                    continue
+                raise
+            # Odoo business error — retry etme
+            if 'error' in res:
+                err_data = res['error'].get('data', {}) if isinstance(res['error'], dict) else {}
+                err_msg = err_data.get('message') or (
+                    res['error'].get('message') if isinstance(res['error'], dict)
+                    else str(res['error'])
+                )
+                raise Exception(err_msg)
+            return res.get('result')
 
 
 class OdooImageSync:
@@ -745,7 +774,7 @@ class OdooImageSync:
         except Exception as e:
             _logger.error("Klasör optimizasyonu sırasında hata: %s", e)
 
-    def process_folder(self):
+    def process_folder(self, progress_callback=None):
         """Klasördeki tüm görselleri tarar ve işler.
         
         HİBRİT MOD:
@@ -841,6 +870,8 @@ class OdooImageSync:
                 barcode_groups.setdefault(barcode, []).append((order, fpath))
 
         _logger.info("── %d yeni görsel bulundu (%d barkod) ──", len(new_files), len(barcode_groups))
+        total_barcodes = len(barcode_groups)
+        processed_barcodes = 0
 
         success = 0
         for barcode, items in barcode_groups.items():
@@ -929,6 +960,10 @@ class OdooImageSync:
                     sibling_count=sibling_count,
                 )
                 success += 1
+
+            processed_barcodes += 1
+            if progress_callback:
+                progress_callback(processed_barcodes, total_barcodes, barcode, success)
 
         # SQLite zaten her dosyada commit ediyor, ekstra save gerekmez
         _logger.info("── Tamamlandı: %d/%d başarılı ──", success, len(new_files))
