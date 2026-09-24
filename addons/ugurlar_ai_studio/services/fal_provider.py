@@ -156,6 +156,7 @@ class FalProvider(AIProviderBase):
                 'one_piece': 'one-piece',
                 'one-piece': 'one-piece',
                 'full-body': 'one-piece',
+                'dress': 'one-piece',
                 'shoes': 'tops',
                 'bags': 'tops',
                 'accessories': 'tops',

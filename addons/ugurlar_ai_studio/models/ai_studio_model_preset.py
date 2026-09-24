@@ -439,7 +439,7 @@ class AiStudioModelPreset(models.Model):
             outfit_hints_front = {
                 'tops': 'wearing a simple tight form-fitting solid-colored tank top, matching blue denim jeans, and clean white sneakers',
                 'bottoms': 'wearing a simple tight form-fitting solid-colored tank top, matching blue denim jeans, and clean white sneakers',
-                'one_piece': 'wearing a simple tight form-fitting solid-colored tank top, matching blue denim jeans, and clean white sneakers',
+                'one_piece': 'wearing a simple form-fitting solid-colored bodysuit with natural bare legs and nude heeled pumps',
                 'shoes': 'wearing a simple tight form-fitting solid-colored tank top, matching blue denim jeans, and clean white sneakers',
                 'bags': 'wearing a simple tight form-fitting solid-colored tank top, matching blue denim jeans, and clean white sneakers',
                 'accessories': 'wearing a simple tight form-fitting solid-colored tank top, matching blue denim jeans, and clean white sneakers',
@@ -448,7 +448,7 @@ class AiStudioModelPreset(models.Model):
             outfit_hints_back = {
                 'tops': 'wearing a simple tight form-fitting solid-colored tank top seen from behind, matching blue denim jeans, and clean white sneakers',
                 'bottoms': 'wearing a simple tight form-fitting solid-colored tank top seen from behind, matching blue denim jeans, and clean white sneakers',
-                'one_piece': 'wearing a simple tight form-fitting solid-colored tank top seen from behind, matching blue denim jeans, and clean white sneakers',
+                'one_piece': 'wearing a simple form-fitting solid-colored bodysuit seen from behind with natural bare legs and nude heeled pumps',
                 'shoes': 'wearing a simple tight form-fitting solid-colored tank top seen from behind, matching blue denim jeans, and clean white sneakers',
                 'bags': 'wearing a simple tight form-fitting solid-colored tank top seen from behind, matching blue denim jeans, and clean white sneakers',
                 'accessories': 'wearing a simple tight form-fitting solid-colored tank top seen from behind, matching blue denim jeans, and clean white sneakers',

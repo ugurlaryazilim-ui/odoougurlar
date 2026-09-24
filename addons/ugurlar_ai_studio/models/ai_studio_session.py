@@ -610,7 +610,12 @@ class AiStudioSession(models.Model):
             if kw in combined:
                 _logger.info('_detect_garment_type: "%s" bulundu → accessories', kw)
                 return 'accessories'
-        # Dış giyim ve üst giyim öncelikli kontrol edilir (manto/ceket/bluz elbiseyle karışmasın)
+        # ONE_PIECE (elbise/dress) ÖNCELİKLİ — çünkü ürün adında "elbise" varsa bu kesindir
+        for kw in ONE_PIECE_KW:
+            if kw in combined:
+                _logger.info('_detect_garment_type: "%s" bulundu → one_piece', kw)
+                return 'one_piece'
+        # Dış giyim ve üst giyim (manto/ceket/bluz)
         for kw in OUTERWEAR_KW:
             if kw in combined:
                 _logger.info('_detect_garment_type: "%s" bulundu → tops (outerwear)', kw)
@@ -619,10 +624,6 @@ class AiStudioSession(models.Model):
             if kw in combined:
                 _logger.info('_detect_garment_type: "%s" bulundu → tops', kw)
                 return 'tops'
-        for kw in ONE_PIECE_KW:
-            if kw in combined:
-                _logger.info('_detect_garment_type: "%s" bulundu → one_piece', kw)
-                return 'one_piece'
         for kw in BOTTOMS_KW_SAFE:
             if kw in combined:
                 _logger.info('_detect_garment_type: "%s" bulundu → bottoms', kw)
@@ -1495,6 +1496,16 @@ class AiStudioSession(models.Model):
                 detected_cat = session._detect_garment_type()
                 from ..services.garment_analyzer import map_to_fashn_category
                 analysis_cat = map_to_fashn_category(cached_analysis_data or {})
+                
+                # Gemini analizi dress/one_piece diyorsa ama keyword fallback tops dönüyorsa → Gemini'ye güven
+                gemini_clothing_cat = (cached_analysis_data or {}).get('clothingCategory', '')
+                if detected_cat == 'tops' and gemini_clothing_cat in ('dress', 'one_piece', 'one-piece', 'full-body'):
+                    _logger.info(
+                        'Category override: _detect_garment_type=%s AMMA Gemini=%s → one_piece olarak değiştiriliyor',
+                        detected_cat, gemini_clothing_cat,
+                    )
+                    detected_cat = 'one_piece'
+                
                 if detected_cat in ('tops', 'bottoms', 'one_piece', 'bags', 'shoes'):
                     category_to_send = detected_cat
                     if isinstance(cached_analysis_data, dict):
@@ -2156,6 +2167,16 @@ class AiStudioSession(models.Model):
                     detected_cat = session._detect_garment_type()
                     from ..services.garment_analyzer import map_to_fashn_category
                     analysis_cat = map_to_fashn_category(cached_analysis or {})
+                    
+                    # Gemini analizi dress/one_piece diyorsa ama keyword fallback tops dönüyorsa → Gemini'ye güven
+                    gemini_clothing_cat = (cached_analysis or {}).get('clothingCategory', '')
+                    if detected_cat == 'tops' and gemini_clothing_cat in ('dress', 'one_piece', 'one-piece', 'full-body'):
+                        _logger.info(
+                            'Batch category override: _detect=%s AMMA Gemini=%s → one_piece',
+                            detected_cat, gemini_clothing_cat,
+                        )
+                        detected_cat = 'one_piece'
+                    
                     if detected_cat in ('tops', 'bottoms', 'one_piece', 'bags', 'shoes'):
                         category_to_send = detected_cat
                         if isinstance(cached_analysis, dict):
@@ -2675,6 +2696,21 @@ class AiStudioSession(models.Model):
                 model_url = provider.upload_image(model_image)
 
                 detected_cat = session._detect_garment_type()
+
+                # Retry: ilk prompt oluşturma öncesi analiz cache'i kontrol et
+                # (NOT: Henüz analyze_garment çağrılmadı, ama session'ın cached verisinden kontrol)
+                _retry_cached = session.cached_analysis_data
+                if _retry_cached and detected_cat == 'tops':
+                    try:
+                        import json
+                        _retry_analysis = json.loads(_retry_cached) if isinstance(_retry_cached, str) else _retry_cached
+                        _retry_gemini_cat = (_retry_analysis or {}).get('clothingCategory', '')
+                        if _retry_gemini_cat in ('dress', 'one_piece', 'one-piece', 'full-body'):
+                            _logger.info('Retry category override: keyword=%s Gemini=%s → one_piece', detected_cat, _retry_gemini_cat)
+                            detected_cat = 'one_piece'
+                    except Exception:
+                        pass
+
                 if detected_cat in ('tops', 'bottoms', 'one_piece', 'bags', 'shoes'):
                     category_to_send = (
                         'tops' if detected_cat == 'tops' else (
@@ -2740,8 +2776,20 @@ class AiStudioSession(models.Model):
                     from ..services.garment_analyzer import analyze_garment, build_generation_prompt
                     product_context = session._get_product_context_text()
                     analysis = analyze_garment(fal_api_key, garment_url, gemini_api_key=gemini_api_key, product_context=product_context)
-                    if detected_cat == 'tops' and isinstance(analysis, dict):
-                        analysis['clothingCategory'] = 'tops'
+                    if isinstance(analysis, dict):
+                        gemini_cat = analysis.get('clothingCategory', '')
+                        # Gemini dress diyorsa → Gemini'ye güven, detected_cat'i override et
+                        if gemini_cat in ('dress', 'one_piece', 'one-piece', 'full-body'):
+                            detected_cat = 'one_piece'
+                            analysis['clothingCategory'] = 'dress'
+                            _logger.info('Retry: Gemini dress algıladı → one_piece override')
+                        elif detected_cat in ('tops', 'bottoms', 'one_piece'):
+                            # Keyword eşleşmesi varsa ve Gemini çelişmiyorsa keyword'e güven
+                            analysis['clothingCategory'] = (
+                                'tops' if detected_cat == 'tops' else (
+                                    'bottoms' if detected_cat == 'bottoms' else 'dress'
+                                )
+                            )
 
                     preset_data = {
                         'gender': preset.gender or 'female',

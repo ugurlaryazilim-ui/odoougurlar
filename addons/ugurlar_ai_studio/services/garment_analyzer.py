@@ -1,4 +1,4 @@
-﻿"""AI gorsel analiz servisi — kiyafet analizi ve prompt olusturma.
+"""AI gorsel analiz servisi — kiyafet analizi ve prompt olusturma.
 
 SaaS ai-fashion-studio/services/geminiService.ts'den uyarlanmistir.
 fal.ai any-llm + vision API kullanir.
@@ -501,20 +501,18 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     garment_type_lower = f"{garment_type} {category}".lower()
 
     # ═══ ALT TİP ALGILA (dress / skirt / shorts / tops / bottoms) ═══
-    is_top_or_outerwear = (
-        category in ['tops', 'outerwear', 'knitwear']
-        or _safe_keyword_match(garment_type_lower, TOPS_AND_OUTERWEAR_KW)
-    )
-
-    if is_top_or_outerwear:
-        sub_type = 'tops'
+    # ÖNCELİK: dress > skirt > shorts > tops/outerwear > bottoms
+    # "Gömlek Elbise" gibi bileşik isimler dress olarak algılanmalı
+    if category in ['dress', 'one_piece', 'one-piece', 'full-body'] or \
+         _safe_keyword_match(garment_type_lower, ['elbise', 'dress', 'tulum', 'jumpsuit', 'abiye']):
+        sub_type = 'dress'
     elif _safe_keyword_match(garment_type_lower, ['etek', 'skirt']):
         sub_type = 'skirt'
     elif _safe_keyword_match(garment_type_lower, ['şort', 'sort', 'shorts', 'bermuda']):
         sub_type = 'shorts'
-    elif category in ['dress', 'one_piece', 'one-piece', 'full-body'] or \
-         _safe_keyword_match(garment_type_lower, ['elbise', 'dress', 'tulum', 'jumpsuit', 'abiye']):
-        sub_type = 'dress'
+    elif category in ['tops', 'outerwear', 'knitwear'] or \
+         _safe_keyword_match(garment_type_lower, TOPS_AND_OUTERWEAR_KW):
+        sub_type = 'tops'
     elif category == 'bottoms':
         sub_type = 'bottoms'
     else:
@@ -617,14 +615,15 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     # Back/side view'da front view'daki outfit bilgisini kısa ekle
     if outfit_consistency and photo_type != 'front':
         consistency_data = outfit_consistency
-        # Kısa tutarlılık notu (uzun _build_consistency_prompt yerine)
-        bottoms_info = consistency_data.get('bottomsType', '')
-        bottoms_color = consistency_data.get('bottomsColor', '')
+        consistency_parts = []
+        # Dress/etek ise pantolon bilgisi EKLEME — çünkü elbise bacak görünümünü değiştirir
+        if sub_type not in ('dress', 'skirt', 'shorts'):
+            bottoms_info = consistency_data.get('bottomsType', '')
+            bottoms_color = consistency_data.get('bottomsColor', '')
+            if bottoms_info:
+                consistency_parts.append(f"{bottoms_color} {bottoms_info}".strip())
         shoes_info = consistency_data.get('shoesType', '')
         shoes_color = consistency_data.get('shoesColor', '')
-        consistency_parts = []
-        if bottoms_info:
-            consistency_parts.append(f"{bottoms_color} {bottoms_info}".strip())
         if shoes_info:
             consistency_parts.append(f"{shoes_color} {shoes_info}".strip())
         if consistency_parts:
