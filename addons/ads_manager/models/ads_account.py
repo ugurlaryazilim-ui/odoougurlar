@@ -66,6 +66,17 @@ class AdsAccount(models.Model):
             record.campaign_count = len(record.campaign_ids)
             record.active_campaign_count = len(record.campaign_ids.filtered(lambda c: c.status == 'active'))
 
+    def action_view_campaigns(self):
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.act_window',
+            'name': _('Campaigns'),
+            'res_model': 'ads.campaign',
+            'view_mode': 'list,form',
+            'domain': [('account_id', '=', self.id)],
+            'context': {'default_account_id': self.id},
+        }
+
     def action_connect(self):
         self.ensure_one()
         if self.platform == 'meta':
