@@ -90,12 +90,11 @@
                 <field name="name"/>
                 <field name="campaign_id"/>
                 <filter string="New" name="filter_new" domain="[('status', '=', 'new')]"/>
-                <group string="Group By">
-                    <filter string="Severity" name="group_by_severity" context="{'group_by': 'severity'}"/>
-                    <filter string="Status" name="group_by_status" context="{'group_by': 'status'}"/>
-                    <filter string="Category" name="group_by_category" context="{'group_by': 'category'}"/>
-                    <filter string="Campaign" name="group_by_campaign" context="{'group_by': 'campaign_id'}"/>
-                </group>
+                <separator/>
+                <filter string="Severity" name="group_by_severity" context="{'group_by': 'severity'}"/>
+                <filter string="Status" name="group_by_status" context="{'group_by': 'status'}"/>
+                <filter string="Category" name="group_by_category" context="{'group_by': 'category'}"/>
+                <filter string="Campaign" name="group_by_campaign" context="{'group_by': 'campaign_id'}"/>
             </search>
         </field>
     </record>

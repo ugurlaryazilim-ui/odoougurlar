@@ -100,11 +100,10 @@
                 <field name="platform"/>
                 <filter string="Connected" name="connected" domain="[('state', '=', 'connected')]"/>
                 <filter string="Error" name="error" domain="[('state', '=', 'error')]"/>
-                <group string="Group By">
-                    <filter string="Platform" name="group_by_platform" context="{'group_by': 'platform'}"/>
-                    <filter string="State" name="group_by_state" context="{'group_by': 'state'}"/>
-                    <filter string="Company" name="group_by_company" context="{'group_by': 'company_id'}"/>
-                </group>
+                <separator/>
+                <filter string="Platform" name="group_by_platform" context="{'group_by': 'platform'}"/>
+                <filter string="State" name="group_by_state" context="{'group_by': 'state'}"/>
+                <filter string="Company" name="group_by_company" context="{'group_by': 'company_id'}"/>
             </search>
         </field>
     </record>

@@ -28,11 +28,10 @@
                 <filter string="Success" name="filter_success" domain="[('status', '=', 'success')]"/>
                 <filter string="Error" name="filter_error" domain="[('status', '=', 'error')]"/>
                 <filter string="Partial" name="filter_partial" domain="[('status', '=', 'partial')]"/>
-                <group string="Group By">
-                    <filter string="Account" name="group_by_account" context="{'group_by': 'account_id'}"/>
-                    <filter string="Status" name="group_by_status" context="{'group_by': 'status'}"/>
-                    <filter string="Date" name="group_by_date" context="{'group_by': 'sync_date:day'}"/>
-                </group>
+                <separator/>
+                <filter string="Account" name="group_by_account" context="{'group_by': 'account_id'}"/>
+                <filter string="Status" name="group_by_status" context="{'group_by': 'status'}"/>
+                <filter string="Date" name="group_by_date" context="{'group_by': 'sync_date:day'}"/>
             </search>
         </field>
     </record>

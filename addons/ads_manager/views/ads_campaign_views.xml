@@ -156,12 +156,11 @@
                 <field name="user_id"/>
                 <filter string="Active" name="filter_active" domain="[('status', '=', 'active')]"/>
                 <filter string="Paused" name="filter_paused" domain="[('status', '=', 'paused')]"/>
-                <group string="Group By">
-                    <filter string="Platform" name="group_by_platform" context="{'group_by': 'platform'}"/>
-                    <filter string="Status" name="group_by_status" context="{'group_by': 'status'}"/>
-                    <filter string="Account" name="group_by_account" context="{'group_by': 'account_id'}"/>
-                    <filter string="Objective" name="group_by_objective" context="{'group_by': 'objective'}"/>
-                </group>
+                <separator/>
+                <filter string="Platform" name="group_by_platform" context="{'group_by': 'platform'}"/>
+                <filter string="Status" name="group_by_status" context="{'group_by': 'status'}"/>
+                <filter string="Account" name="group_by_account" context="{'group_by': 'account_id'}"/>
+                <filter string="Objective" name="group_by_objective" context="{'group_by': 'objective'}"/>
             </search>
         </field>
     </record>
