@@ -100,9 +100,14 @@ def load_config(path='config.json'):
 def compress_image(filepath):
     """Görseli sıkıştırarak base64 olarak döner. Pillow varsa optimize eder."""
     try:
-        from PIL import Image
+        from PIL import Image, ImageFile
+
+        # Eksik/kesik görselleri yine de yükle (ağ sürücüsünden kopyalama sırasında
+        # dosya tam inmemiş olabilir — Pillow varsayılanda bunu reddeder)
+        ImageFile.LOAD_TRUNCATED_IMAGES = True
 
         img = Image.open(filepath)
+        img.load()  # Tüm piksel verisini belleğe al — bozuksa burada yakalarız
 
         # EXIF rotasyonu uygula
         try:
