@@ -134,15 +134,19 @@ class AdsAccount(models.Model):
                 self.message_post(body=_('Connection test failed: %s') % str(e))
                 raise UserError(_('Connection test failed: %s') % str(e))
         elif self.platform == 'google':
-            if not acc.access_token:
-                raise UserError(_('No access token. Please connect first.'))
+            self._ensure_google_token_valid()
+            acc = self.sudo()
             from ..services.google_client import GoogleAdsClient, GoogleAdsError
             client = GoogleAdsClient(
                 access_token=acc.access_token,
                 developer_token=acc.google_developer_token,
                 customer_id=self.platform_account_id,
                 manager_id=self.google_manager_id,
+                refresh_token=acc.refresh_token,
+                client_id=acc.google_client_id,
+                client_secret=acc.google_client_secret,
                 api_version=acc.google_api_version or 'v25',
+                on_token_refreshed=self._save_google_refreshed_token,
             )
             try:
                 customers = client.list_accessible_customers()
@@ -162,6 +166,43 @@ class AdsAccount(models.Model):
                 self.state = 'error'
                 self.message_post(body=_('Google Ads test failed: %s') % str(e))
                 raise UserError(str(e))
+
+    def _save_google_refreshed_token(self, new_token, expires_in):
+        self.sudo().write({
+            'access_token': new_token,
+            'token_expiry': fields.Datetime.now() + timedelta(seconds=expires_in),
+        })
+
+    def _ensure_google_token_valid(self):
+        """Ensure Google access token is valid, refreshing it if expired or expiring soon."""
+        self.ensure_one()
+        acc = self.sudo()
+        now = fields.Datetime.now()
+        is_expired = False
+        if not acc.access_token:
+            is_expired = True
+        elif acc.token_expiry and acc.token_expiry <= now + timedelta(minutes=5):
+            is_expired = True
+            
+        if is_expired and acc.refresh_token and acc.google_client_id and acc.google_client_secret:
+            from ..services.google_client import GoogleAdsClient, GoogleAdsError
+            client = GoogleAdsClient(
+                access_token=acc.access_token,
+                developer_token=acc.google_developer_token,
+                customer_id=self.platform_account_id,
+                manager_id=self.google_manager_id,
+                refresh_token=acc.refresh_token,
+                client_id=acc.google_client_id,
+                client_secret=acc.google_client_secret,
+                api_version=acc.google_api_version or 'v25',
+                on_token_refreshed=self._save_google_refreshed_token,
+            )
+            try:
+                new_token, expires_in = client.refresh_access_token()
+                self._save_google_refreshed_token(new_token, expires_in)
+                _logger.info("Successfully refreshed Google Ads access token for account %s", self.id)
+            except Exception as e:
+                _logger.warning("Could not auto-refresh Google access token: %s", str(e))
 
     def action_sync_campaigns(self):
         self.ensure_one()
@@ -212,6 +253,7 @@ class AdsAccount(models.Model):
     @api.private
     def _sync_google_full(self):
         start_time = time.time()
+        self._ensure_google_token_valid()
         from ..services.google_client import GoogleAdsClient, GoogleAdsError
         acc = self.sudo()
         client = GoogleAdsClient(
@@ -219,7 +261,11 @@ class AdsAccount(models.Model):
             developer_token=acc.google_developer_token,
             customer_id=self.platform_account_id,
             manager_id=self.google_manager_id,
+            refresh_token=acc.refresh_token,
+            client_id=acc.google_client_id,
+            client_secret=acc.google_client_secret,
             api_version=acc.google_api_version or 'v25',
+            on_token_refreshed=self._save_google_refreshed_token,
         )
         created = updated = 0
         try:

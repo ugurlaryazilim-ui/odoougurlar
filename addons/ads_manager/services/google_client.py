@@ -18,7 +18,7 @@ class GoogleAdsClient:
     API_VERSION = 'v25'
     MICROS = 1_000_000
 
-    def __init__(self, access_token, developer_token, customer_id, manager_id=None, refresh_token=None, client_id=None, client_secret=None, api_version=None):
+    def __init__(self, access_token, developer_token, customer_id, manager_id=None, refresh_token=None, client_id=None, client_secret=None, api_version=None, on_token_refreshed=None):
         self.access_token = access_token
         self.developer_token = developer_token
         self.customer_id = str(customer_id).replace('-', '') if customer_id else None
@@ -27,6 +27,7 @@ class GoogleAdsClient:
         self.client_id = client_id
         self.client_secret = client_secret
         self.api_version = api_version or self.API_VERSION
+        self.on_token_refreshed = on_token_refreshed
 
     def _get_headers(self):
         """Build headers with optional developer-token and optional login-customer-id for MCC"""
@@ -41,7 +42,7 @@ class GoogleAdsClient:
         return headers
 
     def _make_request(self, method, endpoint, data=None, retries=3):
-        """Make HTTP request with retry + exponential backoff"""
+        """Make HTTP request with retry + exponential backoff + 401 auto token refresh"""
         url = f"{self.BASE_URL}/{self.api_version}/{endpoint}"
         headers = self._get_headers()
         
@@ -49,6 +50,16 @@ class GoogleAdsClient:
             try:
                 response = requests.request(method, url, headers=headers, json=data)
                 
+                # Check for token expiration (401) and auto refresh
+                if response.status_code == 401 and self.refresh_token and attempt == 0:
+                    try:
+                        _logger.info("Google access token expired (HTTP 401). Refreshing token...")
+                        self.refresh_access_token()
+                        headers = self._get_headers()
+                        continue
+                    except Exception as ref_err:
+                        _logger.warning("Auto refresh Google token failed: %s", str(ref_err))
+
                 if response.status_code in (429, 500, 503) and attempt < retries - 1:
                     time.sleep(2 ** attempt)
                     continue
@@ -231,7 +242,7 @@ class GoogleAdsClient:
     def refresh_access_token(self):
         """Refresh OAuth2 access token using refresh_token"""
         if not all([self.client_id, self.client_secret, self.refresh_token]):
-            raise ValueError("Missing credentials for token refresh")
+            raise ValueError("Missing credentials for token refresh (client_id, client_secret, refresh_token required)")
             
         url = "https://oauth2.googleapis.com/token"
         data = {
@@ -247,7 +258,13 @@ class GoogleAdsClient:
             
         token_data = response.json()
         self.access_token = token_data.get('access_token')
-        return self.access_token
+        expires_in = token_data.get('expires_in', 3599)
+        if self.on_token_refreshed and callable(self.on_token_refreshed):
+            try:
+                self.on_token_refreshed(self.access_token, expires_in)
+            except Exception as e:
+                _logger.warning("on_token_refreshed callback failed: %s", str(e))
+        return self.access_token, expires_in
         
     @staticmethod
     def _extract_id_from_resource_name(resource_name):
