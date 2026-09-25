@@ -25,6 +25,7 @@ services:
         condition: service_healthy
     ports:
       - "8069:8069"
+      - "8072:8072"
     volumes:
       - odoo-data:/var/lib/odoo
     environment:
