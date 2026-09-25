@@ -21,8 +21,8 @@ class GoogleAdsClient:
     def __init__(self, access_token, developer_token, customer_id, manager_id=None, refresh_token=None, client_id=None, client_secret=None, api_version=None, on_token_refreshed=None):
         self.access_token = access_token
         self.developer_token = developer_token
-        self.customer_id = str(customer_id).replace('-', '') if customer_id else None
-        self.manager_id = str(manager_id).replace('-', '') if manager_id else None
+        self.customer_id = str(customer_id).replace('-', '').strip() if customer_id else None
+        self.manager_id = str(manager_id).replace('-', '').strip() if manager_id else None
         self.refresh_token = refresh_token
         self.client_id = client_id
         self.client_secret = client_secret

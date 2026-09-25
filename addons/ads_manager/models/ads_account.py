@@ -140,8 +140,8 @@ class AdsAccount(models.Model):
             client = GoogleAdsClient(
                 access_token=acc.access_token,
                 developer_token=acc.google_developer_token,
-                customer_id=self.platform_account_id,
-                manager_id=self.google_manager_id,
+                customer_id=acc.platform_account_id,
+                manager_id=acc.google_manager_id,
                 refresh_token=acc.refresh_token,
                 client_id=acc.google_client_id,
                 client_secret=acc.google_client_secret,
@@ -189,8 +189,8 @@ class AdsAccount(models.Model):
             client = GoogleAdsClient(
                 access_token=acc.access_token,
                 developer_token=acc.google_developer_token,
-                customer_id=self.platform_account_id,
-                manager_id=self.google_manager_id,
+                customer_id=acc.platform_account_id,
+                manager_id=acc.google_manager_id,
                 refresh_token=acc.refresh_token,
                 client_id=acc.google_client_id,
                 client_secret=acc.google_client_secret,
@@ -259,8 +259,8 @@ class AdsAccount(models.Model):
         client = GoogleAdsClient(
             access_token=acc.access_token,
             developer_token=acc.google_developer_token,
-            customer_id=self.platform_account_id,
-            manager_id=self.google_manager_id,
+            customer_id=acc.platform_account_id,
+            manager_id=acc.google_manager_id,
             refresh_token=acc.refresh_token,
             client_id=acc.google_client_id,
             client_secret=acc.google_client_secret,
