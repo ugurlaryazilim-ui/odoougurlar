@@ -348,18 +348,15 @@ class OdooImageSync:
             return self._product_cache[barcode]
 
         field = self.config['match_field']
-        ids = self.env['product.product'].search(
+        products = self.env['product.product'].search_read(
             [(field, '=', barcode)],
+            fields=['id', 'name', 'barcode', 'product_tmpl_id',
+                    'product_template_attribute_value_ids'],
+            limit=1,
         )
-        if ids:
-            products = self.env['product.product'].read(
-                ids[:1],
-                fields=['id', 'name', 'barcode', 'product_tmpl_id',
-                        'image_1920', 'product_template_attribute_value_ids'],
-            )
-            if products:
-                self._product_cache[barcode] = products[0]
-                return products[0]
+        if products:
+            self._product_cache[barcode] = products[0]
+            return products[0]
         return None
 
     def find_color_siblings(self, product):
@@ -407,20 +404,14 @@ class OdooImageSync:
             return []
 
         # Aynı template + aynı renk PTAV'ına sahip varyantları bul
-        sibling_ids = self.env['product.product'].search(
+        siblings = self.env['product.product'].search_read(
             [
                 ('product_tmpl_id', '=', tmpl_id),
                 ('product_template_attribute_value_ids', 'in', [color_ptav['id']]),
                 ('id', '!=', variant_id),
             ],
+            fields=['id', 'name', 'barcode', 'product_tmpl_id'],
         )
-
-        siblings = []
-        if sibling_ids:
-            siblings = self.env['product.product'].read(
-                sibling_ids,
-                fields=['id', 'name', 'barcode', 'product_tmpl_id'],
-            )
 
         self._sibling_cache[variant_id] = siblings
         if siblings:
@@ -478,7 +469,7 @@ class OdooImageSync:
                         {'image_1920': img_b64},
                     )
                     _logger.info("🖼️ Template kapak görseli ayarlandı (tmpl_id=%d)", tmpl_id)
-            time.sleep(0.5) # Odoo'yu yormamak için kısa bekleme
+            time.sleep(0.1)
         else:
             # Ek resim
             name_label = f"Ek Görsel {order}"
@@ -488,7 +479,7 @@ class OdooImageSync:
                 'name': name_label,
                 'image_1920': img_b64,
             })
-            time.sleep(0.5) # Odoo'yu yormamak için kısa bekleme
+            time.sleep(0.1)
 
     # ═══════════════════════════════════════════════════════════════
     # SQLite CACHE — her dosya anında diske yazılır, crash-safe
@@ -937,6 +928,7 @@ class OdooImageSync:
 
             # Her hedef varyanta yükle
             sibling_count = len(target_variants) - 1
+            failed_files = set()  # Başarısız dosyaları takip et
             for tv in target_variants:
                 tv_barcode = tv.get('barcode') or tv['name']
                 tv_id = tv['id']
@@ -955,21 +947,26 @@ class OdooImageSync:
                             _logger.info("  🎨 %s → %s (renk kardeşi)", label, tv_barcode)
                     except Exception as e:
                         _logger.error("Yükleme hatası (%s → %s): %s", fname, tv_barcode, str(e))
+                        failed_files.add(fname)
 
-            # ── Başarılı dosyaları kaydet (lokal + Odoo) ──
+            # ── Başarılı dosyaları kaydet, başarısız olanları hata olarak kaydet ──
             for order, fname, fpath, img_b64, file_size, file_mtime in image_data:
                 is_main = (str(order) == main_index)
                 image_type = 'main' if is_main else 'extra'
-                self._record_success(
-                    fname, barcode, file_size, file_mtime,
-                    product_id=product['id'],
-                    tmpl_id=tmpl_id,
-                    image_type=image_type,
-                    order=order,
-                    color_propagated=color_propagation and sibling_count > 0,
-                    sibling_count=sibling_count,
-                )
-                success += 1
+                if fname in failed_files:
+                    self._record_error(fname, barcode, file_size, file_mtime,
+                                       "Bir veya daha fazla varyanta yüklenemedi")
+                else:
+                    self._record_success(
+                        fname, barcode, file_size, file_mtime,
+                        product_id=product['id'],
+                        tmpl_id=tmpl_id,
+                        image_type=image_type,
+                        order=order,
+                        color_propagated=color_propagation and sibling_count > 0,
+                        sibling_count=sibling_count,
+                    )
+                    success += 1
 
             processed_barcodes += 1
             if progress_callback:

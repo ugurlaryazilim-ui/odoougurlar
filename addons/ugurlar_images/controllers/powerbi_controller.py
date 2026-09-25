@@ -33,8 +33,14 @@ class PowerBIController(http.Controller):
     """
 
     def _validate_token(self, token):
-        """API token doğrulaması yapar."""
+        """API token doğrulaması yapar. Power BI kapalıysa erişimi engeller."""
         if not token:
+            return False
+        # Power BI entegrasyonu aktif mi?
+        enabled = request.env['ir.config_parameter'].sudo().get_param(
+            'ugurlar_images.powerbi_enabled', 'False'
+        )
+        if enabled not in ('True', 'true', '1'):
             return False
         stored_token = request.env['ir.config_parameter'].sudo().get_param(
             'ugurlar_images.powerbi_api_key', ''
@@ -89,7 +95,7 @@ class PowerBIController(http.Controller):
                     pp.product_tmpl_id AS template_id,
                     pp.barcode,
                     pp.default_code,
-                    pt.name->>'en_US' AS template_name
+                    COALESCE(pt.name->>'tr_TR', pt.name->>'en_US', (SELECT value FROM jsonb_each_text(pt.name) LIMIT 1)) AS template_name
                 FROM product_product pp
                 JOIN product_template pt ON pt.id = pp.product_tmpl_id
                 WHERE pp.active = true

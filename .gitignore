@@ -4,12 +4,21 @@ config.json
 
 # Sync Agent logs
 addons/ugurlar_images/sync_agent/sync_agent.log
+addons/ugurlar_images/sync_agent/*.log
 sync_agent.log
 
 # Sync Agent SQLite cache (machine-local)
 addons/ugurlar_images/sync_agent/processed_cache.db
 addons/ugurlar_images/sync_agent/processed_cache.db-shm
 addons/ugurlar_images/sync_agent/processed_cache.db-wal
+
+# Sync Agent build artifacts
+addons/ugurlar_images/sync_agent/build/
+addons/ugurlar_images/sync_agent/dist/
+addons/ugurlar_images/sync_agent/*.exe
+
+# Sync Agent image folders (user data)
+addons/ugurlar_images/sync_agent/images/
 
 # Python
 __pycache__/

@@ -10,34 +10,32 @@ class ProductImage(models.Model):
     """Ürünlere birden fazla alternatif görsel ekleme desteği."""
     _inherit = 'product.image'
 
-    @api.constrains('product_variant_id', 'name')
-    def _check_unique_variant_name(self):
-        for image in self:
-            if image.product_variant_id and image.name:
-                duplicates = self.search_count([
-                    ('product_variant_id', '=', image.product_variant_id.id),
-                    ('name', '=', image.name),
-                    ('id', '!=', image.id),
-                ])
-                if duplicates > 0:
-                    raise ValidationError(_('Bu varyant için bu isimde sadece bir görsel olabilir!'))
-
-    _logged_debug = False
+    @api.model_create_multi
+    def create(self, vals_list):
+        """Aynı isimde görsel varsa otomatik numaralandır."""
+        for vals in vals_list:
+            variant_id = vals.get('product_variant_id')
+            name = vals.get('name')
+            # product_tmpl_id otomatik doldur
+            if variant_id and not vals.get('product_tmpl_id'):
+                variant = self.env['product.product'].browse(variant_id)
+                if variant.product_tmpl_id:
+                    vals['product_tmpl_id'] = variant.product_tmpl_id.id
+            # İsim çakışması varsa numara ekle
+            if variant_id and name:
+                counter = 1
+                original_name = name
+                while self.search_count([
+                    ('product_variant_id', '=', variant_id),
+                    ('name', '=', name),
+                ]) > 0:
+                    counter += 1
+                    name = f"{original_name} ({counter})"
+                vals['name'] = name
+        return super().create(vals_list)
 
     def _compute_can_image_1024_be_zoomed(self):
-        """
-        Görsel boyut kontrolü.
-        MemoryError hatasını önlemek için doğrudan True set edilir.
-        Görsel sorunlarını teşhis etmek için veri tabanındaki kayıtları loglar.
-        """
-        if not ProductImage._logged_debug:
-            ProductImage._logged_debug = True
-            # HATALI KOD (İşlemi kilitler):
-            # Odoo'da image_1920 veritabanı kolonu olmayabilir (attachment'ta tutulur). 
-            # Raw SQL exception fırlattığında ve savepoint olmadığında tüm transaction iptal olur!
-            # Bu yüzden bu log satırını kapattık.
-            _logger.info("📸 DATABASE IMAGE COUNT CHECK DISABLED TO PREVENT TRANSACTION ABORT")
-                
+        """MemoryError önlemi: doğrudan True set edilir."""
         for image in self:
             image.can_image_1024_be_zoomed = True
 

@@ -85,9 +85,7 @@ class BulkImageWizard(models.TransientModel):
             return 0
 
         old_images = self.env['product.image'].search([
-            '|',
             ('product_variant_id', '=', variant.id),
-            ('product_tmpl_id', '=', variant.product_tmpl_id.id),
         ])
         count = len(old_images)
         if old_images:

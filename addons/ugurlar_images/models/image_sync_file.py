@@ -62,6 +62,7 @@ class ImageSyncFile(models.Model):
     sync_date = fields.Datetime(
         string='İşlenme Tarihi',
         default=fields.Datetime.now,
+        index=True,
     )
     color_propagated = fields.Boolean(
         string='Renk Yayma Yapıldı',

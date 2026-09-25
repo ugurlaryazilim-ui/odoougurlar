@@ -134,7 +134,7 @@ class ImageFixJob(models.Model):
 
         start_time = time.time()
         MAX_SECONDS = 15
-        BATCH_SIZE = 2  # Her turda sadece 2 görsel — güvenli
+        BATCH_SIZE = 50  # Performans: turda 50 görsel
 
         ProductImage = self.env['product.image'].sudo()
 
@@ -200,6 +200,7 @@ class ImageFixJob(models.Model):
             img_id = img.id
             _logger.info("Thumbnail işleniyor: id=%d", img_id)
 
+            self.env.cr.execute('SAVEPOINT img_fix')
             try:
                 # ── ORM ile image_1920 oku (attachment desteği) ──
                 raw_data = img.image_1920
@@ -245,7 +246,8 @@ class ImageFixJob(models.Model):
 
             except Exception as e:
                 _logger.exception("Thumbnail HATASI id=%d: %s", img_id, e)
-                self.env.cr.rollback()
+                # Sadece bu görselin transaction'ını geri al, diğerlerini etkileme
+                self.env.cr.execute('ROLLBACK TO SAVEPOINT img_fix')
 
             # ── Her görselden sonra ilerlemeyi kaydet ve commit ──
             self._update_progress_sql(
@@ -253,7 +255,7 @@ class ImageFixJob(models.Model):
                 total_remaining - processed, job_id,
             )
 
-        self.env.invalidate_all()
+        self.env.invalidate_model('product.image')
         _logger.info(
             "Görsel düzeltme batch bitti: %d işlendi (%.0fs), kalan: ~%d",
             processed, time.time() - start_time,

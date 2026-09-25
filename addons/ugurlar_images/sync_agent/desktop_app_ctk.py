@@ -41,11 +41,20 @@ class CTkLogHandler(logging.Handler):
     def emit(self, record):
         try:
             msg = self.format(record)
-            # GUI güncellemelerini ana thread'de yapmak için .after kullanılır, 
-            # CustomTkinter arka planda .after sarmalayıcısına sahiptir veya 
-            # thread safe (event tabanlı) yazdırma yaparız.
-            # En yeni log en üstte çıksın diye "1.0" (en başa) ekliyoruz.
+            # Thread-safe: GUI güncellemelerini ana Tk thread'inde yap
+            self.textbox.after(0, self._safe_insert, msg)
+        except Exception:
+            pass
+
+    def _safe_insert(self, msg):
+        """Ana thread'de güvenli log ekleme + bellek sızıntısı önleme."""
+        try:
             self.textbox.insert("1.0", msg + "\n")
+            # Max 500 satır tut — 7/24 çalışmada RAM şişmesini önle
+            content = self.textbox.get("1.0", "end")
+            lines = content.split("\n")
+            if len(lines) > 500:
+                self.textbox.delete(f"{501}.0", "end")
         except Exception:
             pass
 
