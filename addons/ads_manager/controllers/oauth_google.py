@@ -29,13 +29,16 @@ class AdsGoogleOAuthController(http.Controller):
             if not account.google_client_id or not account.google_client_secret:
                 raise UserError("Google Client ID and Client Secret must be set before connecting.")
                 
-            base_url = request.env['ir.config_parameter'].sudo().get_param('web.base.url')
+            base_url = request.env['ir.config_parameter'].sudo().get_param('web.base.url') or ''
+            if not base_url.startswith('https://') and 'localhost' not in base_url and '127.0.0.1' not in base_url:
+                base_url = base_url.replace('http://', 'https://')
             redirect_uri = f"{base_url}/ads_manager/google/callback"
             
             # Generate CSRF state token
             state_token = secrets.token_hex(20)
             request.session['google_oauth_state'] = state_token
             request.session['google_oauth_account_id'] = account_id
+            request.session['google_oauth_redirect_uri'] = redirect_uri
             
             params = {
                 'client_id': account.google_client_id,
@@ -84,8 +87,12 @@ class AdsGoogleOAuthController(http.Controller):
             if not code:
                 raise UserError("Missing authorization code.")
                 
-            base_url = request.env['ir.config_parameter'].sudo().get_param('web.base.url')
-            redirect_uri = f"{base_url}/ads_manager/google/callback"
+            redirect_uri = request.session.pop('google_oauth_redirect_uri', None)
+            if not redirect_uri:
+                base_url = request.env['ir.config_parameter'].sudo().get_param('web.base.url') or ''
+                if not base_url.startswith('https://') and 'localhost' not in base_url and '127.0.0.1' not in base_url:
+                    base_url = base_url.replace('http://', 'https://')
+                redirect_uri = f"{base_url}/ads_manager/google/callback"
             
             # Step 1: Exchange code for tokens
             token_url = "https://oauth2.googleapis.com/token"
