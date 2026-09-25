@@ -90,8 +90,6 @@ class AdsAccount(models.Model):
         elif self.platform == 'google':
             if not self.google_client_id or not self.google_client_secret:
                 raise UserError(_('Please configure Google Client ID and Client Secret first.'))
-            if not self.google_developer_token:
-                raise UserError(_('Please configure Google Developer Token first.'))
             return {
                 'type': 'ir.actions.act_url',
                 'url': f'/ads_manager/google/login?account_id={self.id}',

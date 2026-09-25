@@ -28,12 +28,13 @@ class GoogleAdsClient:
         self.client_secret = client_secret
 
     def _get_headers(self):
-        """Build headers with developer-token and optional login-customer-id for MCC"""
+        """Build headers with optional developer-token and optional login-customer-id for MCC"""
         headers = {
             'Authorization': f'Bearer {self.access_token}',
-            'developer-token': self.developer_token,
             'Content-Type': 'application/json',
         }
+        if self.developer_token:
+            headers['developer-token'] = self.developer_token
         if self.manager_id:
             headers['login-customer-id'] = self.manager_id
         return headers

@@ -26,8 +26,8 @@ class AdsGoogleOAuthController(http.Controller):
             if not account.exists() or account.platform != 'google':
                 raise UserError("Invalid account or account is not a Google Ads account.")
                 
-            if not account.google_client_id or not account.google_developer_token:
-                raise UserError("Google Client ID and Developer Token must be set before connecting.")
+            if not account.google_client_id or not account.google_client_secret:
+                raise UserError("Google Client ID and Client Secret must be set before connecting.")
                 
             base_url = request.env['ir.config_parameter'].sudo().get_param('web.base.url')
             redirect_uri = f"{base_url}/ads_manager/google/callback"
