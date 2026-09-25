@@ -20,9 +20,12 @@ class BudgetPacer:
             return 'underspending'
         return 'on_track'
 
-    def calculate_pacing(self, campaign):
+    def calculate_pacing(self, campaign, today_spend_override=None):
         """Calculate current budget pacing for a campaign.
-        Returns dict with pacing details."""
+        Returns dict with pacing details.
+        Args:
+            today_spend_override: If provided, skip DB query for today's spend (batch optimization).
+        """
         today = date.today()
         daily_budget = float(campaign.daily_budget) if getattr(campaign, 'daily_budget', 0) else 0.0
         lifetime_budget = float(campaign.lifetime_budget) if getattr(campaign, 'lifetime_budget', 0) else 0.0
@@ -47,12 +50,15 @@ class BudgetPacer:
             budget_type = 'daily'
             budget_amount = daily_budget
             
-            # Today's spend
-            today_metrics = MetricDaily.search([
-                ('campaign_id', '=', campaign.id),
-                ('date', '=', today)
-            ])
-            spent_today = sum(today_metrics.mapped('spend'))
+            # Today's spend — use override if available (batch optimization)
+            if today_spend_override is not None:
+                spent_today = today_spend_override
+            else:
+                today_metrics = MetricDaily.search([
+                    ('campaign_id', '=', campaign.id),
+                    ('date', '=', today)
+                ])
+                spent_today = sum(today_metrics.mapped('spend'))
             
             # Spent total is same as today for daily pacing context
             spent_total = spent_today
@@ -178,22 +184,19 @@ class BudgetPacer:
         today = date.today()
         
         # Fetch today's spend using _read_group (Odoo 19+)
-        # We group by campaign_id and sum 'spend'
         daily_groups = self.env['ads.metric.daily']._read_group(
             [('campaign_id', 'in', campaigns.ids), ('date', '=', today)],
             ['campaign_id'],
             ['spend:sum']
         )
         
-        today_spend_map = {cam.id: spend_sum for cam, spend_sum in daily_groups}
+        today_spend_map = {cam.id: spend_sum or 0.0 for cam, spend_sum in daily_groups}
         
         results = {}
         for campaign in campaigns:
-            # Note: For full accuracy in lifetime pacing we would need lifetime spend.
-            # To stay efficient we defer to calculate_pacing for edge cases or full detail, 
-            # or replicate logic here. We'll call calculate_pacing individually for simplicity,
-            # as a fully optimized version would replicate the whole logic but with batched groups.
-            results[campaign.id] = self.calculate_pacing(campaign)
+            # Use pre-aggregated today spend to avoid per-campaign DB queries
+            pacing = self.calculate_pacing(campaign, today_spend_override=today_spend_map.get(campaign.id))
+            results[campaign.id] = pacing
             
         return results
 

@@ -28,6 +28,7 @@ class AdsRule(models.Model):
     action_ids = fields.One2many('ads.rule.action', 'rule_id')
     min_impressions = fields.Integer(default=100)
     cooldown_hours = fields.Integer(default=24)
+    company_id = fields.Many2one('res.company', string='Company', default=lambda self: self.env.company)
     last_triggered = fields.Datetime(readonly=True)
     severity = fields.Selection([
         ('info', 'Info'),

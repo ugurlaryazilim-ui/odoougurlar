@@ -109,7 +109,7 @@ class AdsAccount(models.Model):
             url = f'https://graph.facebook.com/{self.meta_api_version}/me'
             params = {'access_token': acc.access_token}
             try:
-                resp = req.get(url, params=params)
+                resp = req.get(url, params=params, timeout=(5, 15))
                 data = resp.json()
                 if 'id' in data:
                     self.write({'state': 'connected'})
@@ -376,12 +376,16 @@ class AdsAccount(models.Model):
         created = updated = 0
         Campaign = self.env['ads.campaign']
         
+        # Pre-fetch existing campaigns into dictionary to avoid N+1
+        existing_campaigns = {
+            c.platform_campaign_id: c 
+            for c in Campaign.search([('account_id', '=', self.id)])
+        }
+        
+        to_create = []
         for raw in raw_campaigns:
             normalized = client.normalize_campaign(raw)
-            existing = Campaign.search([
-                ('account_id', '=', self.id),
-                ('platform_campaign_id', '=', normalized['platform_campaign_id']),
-            ], limit=1)
+            camp_pid = normalized['platform_campaign_id']
             
             vals = {
                 'name': normalized['name'],
@@ -391,16 +395,20 @@ class AdsAccount(models.Model):
                 'lifetime_budget': normalized.get('lifetime_budget', 0),
             }
             
+            existing = existing_campaigns.get(camp_pid)
             if existing:
                 existing.write(vals)
                 updated += 1
             else:
                 vals.update({
                     'account_id': self.id,
-                    'platform_campaign_id': normalized['platform_campaign_id'],
+                    'platform_campaign_id': camp_pid,
                 })
-                Campaign.create(vals)
-                created += 1
+                to_create.append(vals)
+        
+        if to_create:
+            Campaign.create(to_create)
+            created = len(to_create)
         
         return created, updated
 
@@ -453,20 +461,30 @@ class AdsAccount(models.Model):
         Adset = self.env['ads.adset']
         Campaign = self.env['ads.campaign']
         
+        # Pre-fetch campaigns and adsets into dictionaries
+        campaigns_by_pid = {
+            c.platform_campaign_id: c
+            for c in Campaign.search([('account_id', '=', self.id)])
+        }
+        if not campaigns_by_pid:
+            return 0, 0
+        
+        existing_adsets = {
+            a.platform_adset_id: a
+            for a in Adset.search([('campaign_id', 'in', [c.id for c in campaigns_by_pid.values()])])
+        }
+        
+        to_create = []
         for raw in raw_adsets:
             normalized = client.normalize_adset(raw)
-            campaign = Campaign.search([
-                ('account_id', '=', self.id),
-                ('platform_campaign_id', '=', raw.get('campaign_id')),
-            ], limit=1)
+            campaign = campaigns_by_pid.get(raw.get('campaign_id'))
+            if not campaign:
+                # Try normalized platform_campaign_id
+                campaign = campaigns_by_pid.get(normalized.get('platform_campaign_id'))
             if not campaign:
                 continue
             
-            existing = Adset.search([
-                ('campaign_id', '=', campaign.id),
-                ('platform_adset_id', '=', normalized['platform_adset_id']),
-            ], limit=1)
-            
+            adset_pid = normalized['platform_adset_id']
             vals = {
                 'name': normalized['name'],
                 'status': normalized['status'],
@@ -474,16 +492,20 @@ class AdsAccount(models.Model):
                 'lifetime_budget': normalized.get('lifetime_budget', 0),
             }
             
+            existing = existing_adsets.get(adset_pid)
             if existing:
                 existing.write(vals)
                 updated += 1
             else:
                 vals.update({
                     'campaign_id': campaign.id,
-                    'platform_adset_id': normalized['platform_adset_id'],
+                    'platform_adset_id': adset_pid,
                 })
-                Adset.create(vals)
-                created += 1
+                to_create.append(vals)
+        
+        if to_create:
+            Adset.create(to_create)
+            created = len(to_create)
         
         return created, updated
 
@@ -549,34 +571,48 @@ class AdsAccount(models.Model):
         Ad = self.env['ads.ad']
         Adset = self.env['ads.adset']
         
+        # Pre-fetch adsets and ads into dictionaries
+        adsets_by_pid = {
+            a.platform_adset_id: a
+            for a in Adset.search([('campaign_id.account_id', '=', self.id)])
+        }
+        if not adsets_by_pid:
+            return 0, 0
+        
+        existing_ads = {
+            ad.platform_ad_id: ad
+            for ad in Ad.search([('adset_id', 'in', [a.id for a in adsets_by_pid.values()])])
+        }
+        
+        to_create = []
         for raw in raw_ads:
             normalized = client.normalize_ad(raw)
-            adset = Adset.search([
-                ('platform_adset_id', '=', raw.get('adset_id')),
-            ], limit=1)
+            adset = adsets_by_pid.get(raw.get('adset_id'))
+            if not adset:
+                adset = adsets_by_pid.get(normalized.get('platform_adset_id'))
             if not adset:
                 continue
             
-            existing = Ad.search([
-                ('adset_id', '=', adset.id),
-                ('platform_ad_id', '=', normalized['platform_ad_id']),
-            ], limit=1)
-            
+            ad_pid = normalized['platform_ad_id']
             vals = {
                 'name': normalized['name'],
                 'status': normalized['status'],
             }
             
+            existing = existing_ads.get(ad_pid)
             if existing:
                 existing.write(vals)
                 updated += 1
             else:
                 vals.update({
                     'adset_id': adset.id,
-                    'platform_ad_id': normalized['platform_ad_id'],
+                    'platform_ad_id': ad_pid,
                 })
-                Ad.create(vals)
-                created += 1
+                to_create.append(vals)
+        
+        if to_create:
+            Ad.create(to_create)
+            created = len(to_create)
         
         return created, updated
 
@@ -650,22 +686,36 @@ class AdsAccount(models.Model):
         Metric = self.env['ads.metric.daily']
         created = updated = 0
         
+        # Pre-fetch campaigns and existing metrics into dictionaries
+        campaigns_by_pid = {
+            c.platform_campaign_id: c
+            for c in self.env['ads.campaign'].search([('account_id', '=', self.id)])
+        }
+        if not campaigns_by_pid:
+            return 0, 0
+        
+        existing_metrics = {
+            (m.campaign_id.id, str(m.date)): m
+            for m in Metric.search([
+                ('account_id', '=', self.id),
+                ('date', '>=', date_from),
+                ('date', '<=', date_to),
+                ('adset_id', '=', False),
+                ('ad_id', '=', False),
+            ])
+        }
+        
+        to_create = []
         for raw in raw_insights:
             normalized = client.normalize_insights(raw)
-            campaign = self.env['ads.campaign'].search([
-                ('account_id', '=', self.id),
-                ('platform_campaign_id', '=', raw.get('campaign_id')),
-            ], limit=1)
+            campaign = campaigns_by_pid.get(raw.get('campaign_id'))
             
             if not campaign:
                 continue
             
-            existing = Metric.search([
-                ('campaign_id', '=', campaign.id),
-                ('date', '=', normalized['date']),
-                ('adset_id', '=', False),
-                ('ad_id', '=', False),
-            ], limit=1)
+            metric_date = str(normalized.get('date', ''))
+            if not metric_date:
+                continue
             
             vals = {
                 'impressions': normalized['impressions'],
@@ -682,6 +732,7 @@ class AdsAccount(models.Model):
                 'frequency': normalized.get('frequency', 0.0),
             }
             
+            existing = existing_metrics.get((campaign.id, metric_date))
             if existing:
                 existing.write(vals)
                 updated += 1
@@ -689,10 +740,13 @@ class AdsAccount(models.Model):
                 vals.update({
                     'account_id': self.id,
                     'campaign_id': campaign.id,
-                    'date': normalized['date'],
+                    'date': metric_date,
                 })
-                Metric.create(vals)
-                created += 1
+                to_create.append(vals)
+        
+        if to_create:
+            Metric.create(to_create)
+            created = len(to_create)
         
         return created, updated
 
@@ -788,7 +842,7 @@ class AdsAccount(models.Model):
             'fb_exchange_token': self.access_token,
         }
         try:
-            resp = req.get(url, params=params)
+            resp = req.get(url, params=params, timeout=(5, 15))
             data = resp.json()
             if 'access_token' in data:
                 self.sudo().write({
@@ -812,7 +866,7 @@ class AdsAccount(models.Model):
             'refresh_token': self.refresh_token,
             'grant_type': 'refresh_token',
         }
-        resp = req_lib.post(url, data=data)
+        resp = req_lib.post(url, data=data, timeout=(5, 15))
         token_data = resp.json()
         if 'access_token' in token_data:
             self.sudo().write({
@@ -1028,7 +1082,7 @@ class AdsAccount(models.Model):
                 'total_spend': round(c.total_spend, 2),
                 'conversions': round(c.total_conversions, 1),
                 'avg_roas': round(c.avg_roas, 2),
-                'currency': c.currency_id.symbol or '₺',
+                'currency': c.currency_id.symbol or '',
             })
 
         # 6. Active Recommendations
@@ -1070,7 +1124,7 @@ class AdsAccount(models.Model):
             'under': len(active_campaigns.filtered(lambda c: c.budget_pace_status == 'under')),
         }
 
-        company_currency = self.env.company.currency_id.symbol or '₺'
+        company_currency = self.env.company.currency_id.symbol or ''
 
         return {
             'period': period,

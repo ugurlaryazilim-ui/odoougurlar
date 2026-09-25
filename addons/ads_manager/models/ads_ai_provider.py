@@ -28,6 +28,7 @@ class AdsAiProvider(models.Model):
     usage_count = fields.Integer('API Calls', readonly=True, default=0)
     total_tokens_used = fields.Integer('Total Tokens', readonly=True, default=0)
     last_used = fields.Datetime('Last Used', readonly=True)
+    company_id = fields.Many2one('res.company', string='Company', default=lambda self: self.env.company)
 
     @api.model
     def _cron_ai_analysis(self):

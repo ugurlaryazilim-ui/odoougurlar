@@ -48,7 +48,7 @@ class GoogleAdsClient:
         
         for attempt in range(retries):
             try:
-                response = requests.request(method, url, headers=headers, json=data)
+                response = requests.request(method, url, headers=headers, json=data, timeout=(5, 30))
                 
                 # Check for token expiration (401) and auto refresh
                 if response.status_code == 401 and self.refresh_token and attempt == 0:
@@ -254,7 +254,7 @@ class GoogleAdsClient:
             'grant_type': 'refresh_token'
         }
         
-        response = requests.post(url, data=data)
+        response = requests.post(url, data=data, timeout=(5, 15))
         if not response.ok:
             raise GoogleAdsError(f"Failed to refresh token: {response.text}")
             

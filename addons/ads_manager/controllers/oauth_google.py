@@ -114,10 +114,12 @@ class AdsGoogleOAuthController(http.Controller):
             session_account_id = request.session.pop('google_oauth_account_id', None)
             
             verified_account_id = _verify_signed_state(request.env, state)
-            account_id = verified_account_id or session_account_id
             
-            if not account_id:
-                raise UserError("Invalid or expired OAuth state token.")
+            # STRICT: Only accept HMAC-verified account_id — no fallback to session
+            if not verified_account_id:
+                _logger.warning("OAuth CSRF check failed: HMAC state verification failed (state=%s)", state)
+                return request.redirect('/web#action=ads_manager.action_ads_account')
+            account_id = verified_account_id
                 
             account = request.env['ads.account'].sudo().browse(int(account_id))
             if not account.exists():
@@ -149,7 +151,7 @@ class AdsGoogleOAuthController(http.Controller):
                 'grant_type': 'authorization_code'
             }
             
-            token_res = requests.post(token_url, data=token_data)
+            token_res = requests.post(token_url, data=token_data, timeout=(5, 15))
             if not token_res.ok:
                 raise UserError(f"Failed to exchange token: {token_res.text}")
                 

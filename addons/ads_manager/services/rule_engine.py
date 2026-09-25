@@ -76,28 +76,30 @@ class RuleEngine:
 
     def _evaluate_rule_conditions(self, rule, campaign):
         """Evaluate all conditions for a rule against a campaign.
-        Returns (bool, dict) - (conditions_met, metric_data_snapshot)"""
+        Returns (bool, dict) - (conditions_met, metric_data_snapshot)
+        Uses short-circuit evaluation to avoid unnecessary DB queries."""
         if not rule.condition_ids:
             return False, {}
 
         metric_data = {}
-        results = []
+        logic = rule.condition_logic if hasattr(rule, 'condition_logic') else 'all'
         
         for condition in rule.condition_ids:
             met, val = self._evaluate_single_condition(condition, campaign)
-            results.append(met)
             metric_data[condition.metric] = val
+            
+            # Short-circuit: stop early when result is already determined
+            if logic == 'all' and not met:
+                return False, metric_data
+            if logic == 'any' and met:
+                return True, metric_data
 
-        logic = rule.condition_logic if hasattr(rule, 'condition_logic') else 'all'
-        
         if logic == 'all':
-            conditions_met = all(results)
+            return True, metric_data
         elif logic == 'any':
-            conditions_met = any(results)
+            return False, metric_data
         else:
-            conditions_met = all(results)
-
-        return conditions_met, metric_data
+            return True, metric_data  # default to 'all' behavior
 
     def _evaluate_single_condition(self, condition, campaign):
         """Evaluate a single condition against campaign metrics.

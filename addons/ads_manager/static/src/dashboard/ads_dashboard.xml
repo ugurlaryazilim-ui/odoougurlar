@@ -18,12 +18,12 @@
                     <div class="d-none d-md-flex align-items-center gap-2 ms-2">
                         <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1">
                             <i class="fa fa-check-circle me-1"/>
-                            <t t-esc="state.accounts.connected"/>/<t t-esc="state.accounts.total"/> Hesap Aktif
+                            <t t-out="state.accounts.connected"/>/<t t-out="state.accounts.total"/> Hesap Aktif
                         </span>
                         <t t-if="state.accounts.error > 0">
                             <span class="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1">
                                 <i class="fa fa-exclamation-triangle me-1"/>
-                                <t t-esc="state.accounts.error"/> Bağlantı Hatası
+                                <t t-out="state.accounts.error"/> Bağlantı Hatası
                             </span>
                         </t>
                     </div>
@@ -108,17 +108,17 @@
                                         </div>
                                     </div>
                                     <h3 class="fw-bold mb-1 text-dark">
-                                        <t t-esc="formatCurrency(state.kpis.spend)"/>
+                                        <t t-out="formatCurrency(state.kpis.spend)"/>
                                     </h3>
                                     <div class="small d-flex align-items-center gap-1">
                                         <t t-if="state.kpis.spend_delta >= 0">
                                             <span class="text-danger fw-semibold">
-                                                <i class="fa fa-arrow-up"/> %<t t-esc="state.kpis.spend_delta"/>
+                                                <i class="fa fa-arrow-up"/> %<t t-out="state.kpis.spend_delta"/>
                                             </span>
                                         </t>
                                         <t t-else="">
                                             <span class="text-success fw-semibold">
-                                                <i class="fa fa-arrow-down"/> %<t t-esc="Math.abs(state.kpis.spend_delta)"/>
+                                                <i class="fa fa-arrow-down"/> %<t t-out="Math.abs(state.kpis.spend_delta)"/>
                                             </span>
                                         </t>
                                         <span class="text-muted text-xs ms-1">önceki döneme göre</span>
@@ -138,17 +138,17 @@
                                         </div>
                                     </div>
                                     <h3 class="fw-bold mb-1 text-success">
-                                        <t t-esc="formatCurrency(state.kpis.conversion_value)"/>
+                                        <t t-out="formatCurrency(state.kpis.conversion_value)"/>
                                     </h3>
                                     <div class="small d-flex align-items-center gap-1">
                                         <t t-if="state.kpis.revenue_delta >= 0">
                                             <span class="text-success fw-semibold">
-                                                <i class="fa fa-arrow-up"/> +%<t t-esc="state.kpis.revenue_delta"/>
+                                                <i class="fa fa-arrow-up"/> +%<t t-out="state.kpis.revenue_delta"/>
                                             </span>
                                         </t>
                                         <t t-else="">
                                             <span class="text-danger fw-semibold">
-                                                <i class="fa fa-arrow-down"/> -%<t t-esc="Math.abs(state.kpis.revenue_delta)"/>
+                                                <i class="fa fa-arrow-down"/> -%<t t-out="Math.abs(state.kpis.revenue_delta)"/>
                                             </span>
                                         </t>
                                         <span class="text-muted text-xs ms-1">dönüşüm cirosu</span>
@@ -168,17 +168,17 @@
                                         </div>
                                     </div>
                                     <h3 class="fw-bold mb-1 text-dark">
-                                        <t t-esc="state.kpis.roas"/>x
+                                        <t t-out="state.kpis.roas"/>x
                                     </h3>
                                     <div class="small d-flex align-items-center gap-1">
                                         <t t-if="state.kpis.roas_delta >= 0">
                                             <span class="text-success fw-semibold">
-                                                <i class="fa fa-arrow-up"/> +<t t-esc="state.kpis.roas_delta"/>
+                                                <i class="fa fa-arrow-up"/> +<t t-out="state.kpis.roas_delta"/>
                                             </span>
                                         </t>
                                         <t t-else="">
                                             <span class="text-danger fw-semibold">
-                                                <i class="fa fa-arrow-down"/> <t t-esc="state.kpis.roas_delta"/>
+                                                <i class="fa fa-arrow-down"/> <t t-out="state.kpis.roas_delta"/>
                                             </span>
                                         </t>
                                         <span class="text-muted text-xs ms-1">harcama getirisi</span>
@@ -198,11 +198,11 @@
                                         </div>
                                     </div>
                                     <h3 class="fw-bold mb-1 text-dark">
-                                        <t t-esc="formatNumber(state.kpis.clicks)"/>
+                                        <t t-out="formatNumber(state.kpis.clicks)"/>
                                     </h3>
                                     <div class="small d-flex align-items-center gap-1">
-                                        <span class="badge bg-secondary-subtle text-dark">CTR: %<t t-esc="state.kpis.ctr"/></span>
-                                        <span class="text-muted text-xs">CPC: <t t-esc="formatCurrency(state.kpis.cpc)"/></span>
+                                        <span class="badge bg-secondary-subtle text-dark">CTR: %<t t-out="state.kpis.ctr"/></span>
+                                        <span class="text-muted text-xs">CPC: <t t-out="formatCurrency(state.kpis.cpc)"/></span>
                                     </div>
                                 </div>
                             </div>
@@ -219,12 +219,12 @@
                                         </div>
                                     </div>
                                     <h3 class="fw-bold mb-1 text-dark">
-                                        <t t-esc="state.kpis.conversions"/>
+                                        <t t-out="state.kpis.conversions"/>
                                     </h3>
                                     <div class="small d-flex align-items-center gap-1">
-                                        <span class="badge bg-secondary-subtle text-dark">CPA: <t t-esc="formatCurrency(state.kpis.cpa)"/></span>
+                                        <span class="badge bg-secondary-subtle text-dark">CPA: <t t-out="formatCurrency(state.kpis.cpa)"/></span>
                                         <t t-if="state.kpis.conversions_delta >= 0">
-                                            <span class="text-success fw-semibold text-xs">+%<t t-esc="state.kpis.conversions_delta"/></span>
+                                            <span class="text-success fw-semibold text-xs">+%<t t-out="state.kpis.conversions_delta"/></span>
                                         </t>
                                     </div>
                                 </div>
@@ -273,13 +273,13 @@
                                                     <div class="p-2 rounded bg-light">
                                                         <div class="small fw-bold text-uppercase" t-att-style="p === 'meta' ? 'color: #1877F2;' : 'color: #EA4335;'">
                                                             <i t-attf-class="fa {{p === 'meta' ? 'fa-facebook-square' : 'fa-google'}} me-1"/>
-                                                            <t t-esc="p"/>
+                                                            <t t-out="p"/>
                                                         </div>
                                                         <div class="fw-semibold fs-6">
-                                                            <t t-esc="formatCurrency(state.platform_breakdown[p].spend)"/>
+                                                            <t t-out="formatCurrency(state.platform_breakdown[p].spend)"/>
                                                         </div>
                                                         <div class="text-muted text-xs">
-                                                            ROAS: <strong><t t-esc="state.platform_breakdown[p].roas"/>x</strong>
+                                                            ROAS: <strong><t t-out="state.platform_breakdown[p].roas"/>x</strong>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -330,7 +330,7 @@
                                                 <t t-foreach="state.top_campaigns" t-as="c" t-key="c.id">
                                                     <tr role="button" t-on-click="() => this.openCampaign(c.id)">
                                                         <td class="fw-semibold text-dark text-truncate" style="max-width: 200px;">
-                                                            <t t-esc="c.name"/>
+                                                            <t t-out="c.name"/>
                                                         </td>
                                                         <td>
                                                             <t t-if="c.platform === 'meta'">
@@ -346,21 +346,21 @@
                                                         </td>
                                                         <td>
                                                             <span t-attf-class="badge {{c.status === 'active' ? 'bg-success' : 'bg-secondary'}}">
-                                                                <t t-esc="c.status"/>
+                                                                <t t-out="c.status"/>
                                                             </span>
                                                         </td>
                                                         <td class="text-end text-muted">
-                                                            <t t-esc="c.daily_budget"/> <t t-esc="c.currency"/>
+                                                            <t t-out="c.daily_budget"/> <t t-out="c.currency"/>
                                                         </td>
                                                         <td class="text-end fw-bold text-dark">
-                                                            <t t-esc="c.total_spend"/> <t t-esc="c.currency"/>
+                                                            <t t-out="c.total_spend"/> <t t-out="c.currency"/>
                                                         </td>
                                                         <td class="text-end">
-                                                            <t t-esc="c.conversions"/>
+                                                            <t t-out="c.conversions"/>
                                                         </td>
                                                         <td class="text-end">
                                                             <span t-attf-class="badge {{c.avg_roas >= 2.0 ? 'bg-success' : c.avg_roas >= 1.0 ? 'bg-warning' : 'bg-danger'}}">
-                                                                <t t-esc="c.avg_roas"/>x
+                                                                <t t-out="c.avg_roas"/>x
                                                             </span>
                                                         </td>
                                                     </tr>
@@ -396,18 +396,18 @@
                                              t-attf-style="border-left: 4px solid {{r.severity === 'critical' ? '#EF4444' : r.severity === 'warning' ? '#F59E0B' : '#3B82F6'}} !important; background-color: #FAFAFA;">
                                             <div class="d-flex justify-content-between align-items-center">
                                                 <span class="fw-semibold text-dark small" role="button" t-on-click="() => this.openRecommendation(r.id)">
-                                                    <t t-esc="r.name"/>
+                                                    <t t-out="r.name"/>
                                                 </span>
                                                 <span t-attf-class="badge text-uppercase {{r.severity === 'critical' ? 'bg-danger' : r.severity === 'warning' ? 'bg-warning' : 'bg-info'}}">
-                                                    <t t-esc="r.severity"/>
+                                                    <t t-out="r.severity"/>
                                                 </span>
                                             </div>
                                             <p class="text-muted small mb-1 mt-1 text-truncate-2">
-                                                <t t-esc="r.description"/>
+                                                <t t-out="r.description"/>
                                             </p>
                                             <t t-if="r.proposed_action">
                                                 <div class="small fw-semibold text-primary mb-2">
-                                                    💡 <t t-esc="r.proposed_action"/>
+                                                    💡 <t t-out="r.proposed_action"/>
                                                 </div>
                                             </t>
                                             <div class="d-flex justify-content-end gap-1 mt-1">

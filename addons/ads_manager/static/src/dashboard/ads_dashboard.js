@@ -8,6 +8,7 @@ import { Component, onWillStart, onWillUnmount, useState, useRef, useEffect } fr
 
 export class AdsManagerDashboard extends Component {
     setup() {
+        super.setup();
         this.orm = useService("orm");
         this.actionService = useService("action");
         this.notification = useService("notification");
@@ -21,7 +22,7 @@ export class AdsManagerDashboard extends Component {
             loading: true,
             period: "7d",
             platform: "all",
-            currency_symbol: "₺",
+            currency_symbol: "",
             kpis: {
                 spend: 0,
                 spend_delta: 0,
@@ -84,9 +85,9 @@ export class AdsManagerDashboard extends Component {
             const data = await this.orm.call("ads.account", "get_dashboard_data", [], {
                 period: this.state.period,
                 platform: this.state.platform,
-            });
+            }, { silent: true });
 
-            this.state.currency_symbol = data.currency_symbol || "₺";
+            this.state.currency_symbol = data.currency_symbol || "";
             this.state.kpis = data.kpis || this.state.kpis;
             this.state.charts = data.charts || [];
             this.state.platform_breakdown = data.platform_breakdown || {};

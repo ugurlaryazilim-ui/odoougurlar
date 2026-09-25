@@ -66,8 +66,8 @@ class MetaAdsClient:
                         call_count = limit.get('call_count', 0)
                         total_cputime = limit.get('total_cputime', 0)
                         if call_count > 80 or total_cputime > 80:
-                            wait_time = max(limit.get('estimated_time_to_regain_access', 60), 60)
-                            _logger.warning('Meta BUC rate limit near threshold (%s%%), waiting %ds', call_count, wait_time)
+                            wait_time = min(max(limit.get('estimated_time_to_regain_access', 5), 1), 5)
+                            _logger.warning('Meta BUC rate limit near threshold (%s%%), waiting %ds (capped)', call_count, wait_time)
                             time.sleep(wait_time)
             except (json.JSONDecodeError, TypeError, ValueError) as e:
                 _logger.debug("Failed to parse Meta rate limit header: %s", e)
@@ -82,7 +82,7 @@ class MetaAdsClient:
         backoff = 1
         for attempt in range(retries):
             try:
-                response = self.session.request(method, url, params=req_params, json=data)
+                response = self.session.request(method, url, params=req_params, json=data, timeout=(5, 30))
                 self._check_rate_limit(response)
                 
                 if response.status_code in [429, 500, 502, 503, 504]:
@@ -121,7 +121,7 @@ class MetaAdsClient:
             if next_url:
                 req_params = {'access_token': self.access_token}
                 try:
-                    response = self.session.get(next_url, params=req_params)
+                    response = self.session.get(next_url, params=req_params, timeout=(5, 30))
                     self._check_rate_limit(response)
                     response.raise_for_status()
                     data = response.json()
@@ -211,22 +211,31 @@ class MetaAdsClient:
         else:
             return self._fetch_all_pages(endpoint, params)
 
-    def _poll_async_report(self, report_run_id: str, max_wait: int = 600, poll_interval: int = 10) -> List[Dict]:
-        """Poll async report until completion, then fetch results with cursor pagination"""
+    def _poll_async_report(self, report_run_id: str, max_wait: int = 60, poll_interval: int = 5) -> List[Dict]:
+        """Poll async report with safe timeout to prevent worker exhaustion.
+        
+        Max wait is capped at 60 seconds (Odoo worker safe limit).
+        For reports taking longer, the caller should use cron-based retrieval.
+        """
         start_time = time.time()
         
         while time.time() - start_time < max_wait:
             status_data = self._make_request('GET', report_run_id)
             status = status_data.get('async_status')
+            pct = status_data.get('async_percent_completion', 0)
             
             if status == 'Job Completed':
                 return self._fetch_all_pages(f"{report_run_id}/insights", {})
             elif status == 'Job Failed':
                 raise MetaApiError(f"Async report {report_run_id} failed")
-                
+            
+            _logger.info("Meta async report %s: %s (%s%% complete)", report_run_id, status, pct)
             time.sleep(poll_interval)
             
-        raise MetaApiError(f"Async report {report_run_id} timed out after {max_wait}s")
+        raise MetaApiError(
+            f"Async report {report_run_id} still running after {max_wait}s. "
+            f"Use synchronous mode or retry later via cron."
+        )
 
     def normalize_campaign(self, raw_campaign: Dict) -> Dict:
         """Normalize Meta campaign data to standard format"""

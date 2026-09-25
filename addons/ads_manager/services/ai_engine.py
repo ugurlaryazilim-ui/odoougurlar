@@ -410,7 +410,8 @@ Lütfen reklam yöneticisinin anlayacağı dilde, bu önerinin neden önemli old
                     rec._notify_critical()
                     stats['recommendations_created'] += 1
                     
-            self.env.cr.commit() # Commit progress
+            with self.env.cr.savepoint():
+                pass  # Savepoint ensures atomicity per campaign iteration
             
         return stats
 

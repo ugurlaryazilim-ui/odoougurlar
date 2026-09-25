@@ -70,5 +70,17 @@
             <field name="model_id" ref="model_ads_sync_log"/>
             <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]</field>
         </record>
+
+        <record id="ads_rule_company_rule" model="ir.rule">
+            <field name="name">Ads Rule Multi-Company</field>
+            <field name="model_id" ref="model_ads_rule"/>
+            <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]</field>
+        </record>
+
+        <record id="ads_ai_provider_company_rule" model="ir.rule">
+            <field name="name">Ads AI Provider Multi-Company</field>
+            <field name="model_id" ref="model_ads_ai_provider"/>
+            <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]</field>
+        </record>
     </data>
 </odoo>

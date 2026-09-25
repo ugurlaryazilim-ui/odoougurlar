@@ -112,6 +112,16 @@ class AdsMetricDaily(models.Model):
             campaign_months[key].append(m)
 
         MonthlyModel = self.env['ads.metric.monthly']
+        
+        # Pre-fetch existing monthly records to avoid N+1 queries
+        all_campaign_ids = list(set(k[0] for k in campaign_months.keys()))
+        all_yms = list(set(k[2] for k in campaign_months.keys()))
+        existing_monthly_records = MonthlyModel.search([
+            ('campaign_id', 'in', all_campaign_ids),
+            ('year_month', 'in', all_yms),
+        ])
+        monthly_map = {(m.campaign_id.id, m.year_month): m for m in existing_monthly_records}
+        
         for (campaign_id, account_id, ym), metrics_list in campaign_months.items():
             tot_spend = sum(m.spend for m in metrics_list)
             tot_imp = sum(m.impressions for m in metrics_list)
@@ -121,10 +131,7 @@ class AdsMetricDaily(models.Model):
             tot_purchases = sum(m.purchases for m in metrics_list)
             days_count = len(set(m.date for m in metrics_list))
 
-            existing = MonthlyModel.search([
-                ('campaign_id', '=', campaign_id),
-                ('year_month', '=', ym)
-            ], limit=1)
+            existing = monthly_map.get((campaign_id, ym))
 
             vals = {
                 'account_id': account_id,

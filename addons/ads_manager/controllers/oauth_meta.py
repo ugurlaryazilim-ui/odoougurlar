@@ -15,7 +15,7 @@ import time
 
 _logger = logging.getLogger(__name__)
 
-GRAPH_API_VERSION = "v26.0"
+DEFAULT_GRAPH_API_VERSION = "v26.0"
 
 def _get_oauth_secret(env):
     secret = env['ir.config_parameter'].sudo().get_param('database.secret') or 'ads_oauth_default_secret'
@@ -95,7 +95,7 @@ class MetaAdsOAuthController(http.Controller):
             'state': state
         }
         
-        oauth_url = f"https://www.facebook.com/{GRAPH_API_VERSION}/dialog/oauth?{urlencode(params)}"
+        oauth_url = f"https://www.facebook.com/{DEFAULT_GRAPH_API_VERSION}/dialog/oauth?{urlencode(params)}"
         return request.redirect(oauth_url)
 
     @http.route('/ads_manager/meta/callback', type='http', auth='public', csrf=False)
@@ -114,10 +114,12 @@ class MetaAdsOAuthController(http.Controller):
         request.session.pop('ads_meta_redirect_uri', None)
         
         verified_account_id = _verify_signed_state(request.env, state)
-        account_id = verified_account_id or session_account_id
         
-        if not account_id:
+        # STRICT: Only accept HMAC-verified account_id — no fallback to session
+        if not verified_account_id:
+            _logger.warning("Meta OAuth CSRF check failed: HMAC state verification failed (state=%s)", state)
             return request.redirect('/web')
+        account_id = verified_account_id
             
         account = request.env['ads.account'].sudo().browse(int(account_id))
         if not account.exists():
@@ -151,8 +153,8 @@ class MetaAdsOAuthController(http.Controller):
                 'client_secret': app_secret,
                 'code': code
             }
-            token_url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/oauth/access_token"
-            token_res = requests.get(token_url, params=token_params)
+            token_url = f"https://graph.facebook.com/{DEFAULT_GRAPH_API_VERSION}/oauth/access_token"
+            token_res = requests.get(token_url, params=token_params, timeout=(5, 15))
             token_res.raise_for_status()
             token_data = token_res.json()
             short_token = token_data.get('access_token')
@@ -167,7 +169,7 @@ class MetaAdsOAuthController(http.Controller):
                 'client_secret': app_secret,
                 'fb_exchange_token': short_token
             }
-            exchange_res = requests.get(token_url, params=exchange_params)
+            exchange_res = requests.get(token_url, params=exchange_params, timeout=(5, 15))
             exchange_res.raise_for_status()
             exchange_data = exchange_res.json()
             long_token = exchange_data.get('access_token')
@@ -176,12 +178,12 @@ class MetaAdsOAuthController(http.Controller):
                 raise ValueError('Uzun ömürlü token alınamadı.')
 
             # Step 3: Validate token and get ad account info
-            adaccounts_url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/me/adaccounts"
+            adaccounts_url = f"https://graph.facebook.com/{DEFAULT_GRAPH_API_VERSION}/me/adaccounts"
             ad_params = {
                 'fields': 'account_id,name,currency,timezone_name,account_status',
                 'access_token': long_token
             }
-            ad_res = requests.get(adaccounts_url, params=ad_params)
+            ad_res = requests.get(adaccounts_url, params=ad_params, timeout=(5, 15))
             ad_res.raise_for_status()
             ad_data = ad_res.json()
             
