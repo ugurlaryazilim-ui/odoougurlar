@@ -214,11 +214,6 @@ class AdsAccount(models.Model):
         start_time = time.time()
         from ..services.google_client import GoogleAdsClient, GoogleAdsError
         acc = self.sudo()
-        if not acc.google_developer_token:
-            raise UserError(_(
-                "Google Ads kampanyalarını çekebilmek için 'Google Developer Token' zorunludur.\n\n"
-                "Lütfen Google Ads Yönetici Hesabınızdan (MCC > Araçlar ve Ayarlar > API Merkezi) aldığınız Developer Token'ı forma giriniz."
-            ))
         client = GoogleAdsClient(
             access_token=acc.access_token,
             developer_token=acc.google_developer_token,
