@@ -142,6 +142,7 @@ class AdsAccount(models.Model):
                 developer_token=acc.google_developer_token,
                 customer_id=self.platform_account_id,
                 manager_id=self.google_manager_id,
+                api_version=acc.google_api_version or 'v25',
             )
             try:
                 customers = client.list_accessible_customers()
@@ -205,7 +206,6 @@ class AdsAccount(models.Model):
         except MetaApiError as e:
             duration = time.time() - start_time
             self._create_sync_log('campaigns', 'error', str(e), created, updated, duration)
-            self.state = 'error'
             self.message_post(body=f'Meta senkronizasyon hatası: {str(e)}')
             raise UserError(str(e))
 
@@ -214,11 +214,17 @@ class AdsAccount(models.Model):
         start_time = time.time()
         from ..services.google_client import GoogleAdsClient, GoogleAdsError
         acc = self.sudo()
+        if not acc.google_developer_token:
+            raise UserError(_(
+                "Google Ads kampanyalarını çekebilmek için 'Google Developer Token' zorunludur.\n\n"
+                "Lütfen Google Ads Yönetici Hesabınızdan (MCC > Araçlar ve Ayarlar > API Merkezi) aldığınız Developer Token'ı forma giriniz."
+            ))
         client = GoogleAdsClient(
             access_token=acc.access_token,
             developer_token=acc.google_developer_token,
             customer_id=self.platform_account_id,
             manager_id=self.google_manager_id,
+            api_version=acc.google_api_version or 'v25',
         )
         created = updated = 0
         try:
@@ -234,10 +240,9 @@ class AdsAccount(models.Model):
                 f'Google sync: {created} new, {updated} updated', created, updated, duration)
             self.last_sync_date = fields.Datetime.now()
             self.message_post(body=f'Google Ads senkronize edildi: {created} yeni, {updated} güncellendi.')
-        except GoogleAdsError as e:
+        except (GoogleAdsError, Exception) as e:
             duration = time.time() - start_time
             self._create_sync_log('campaigns', 'error', str(e), created, updated, duration)
-            self.state = 'error'
             self.message_post(body=f'Google Ads senkronizasyon hatası: {str(e)}')
             raise UserError(str(e))
 

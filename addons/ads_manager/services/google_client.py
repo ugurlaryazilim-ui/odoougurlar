@@ -18,7 +18,7 @@ class GoogleAdsClient:
     API_VERSION = 'v25'
     MICROS = 1_000_000
 
-    def __init__(self, access_token, developer_token, customer_id, manager_id=None, refresh_token=None, client_id=None, client_secret=None):
+    def __init__(self, access_token, developer_token, customer_id, manager_id=None, refresh_token=None, client_id=None, client_secret=None, api_version=None):
         self.access_token = access_token
         self.developer_token = developer_token
         self.customer_id = str(customer_id).replace('-', '') if customer_id else None
@@ -26,6 +26,7 @@ class GoogleAdsClient:
         self.refresh_token = refresh_token
         self.client_id = client_id
         self.client_secret = client_secret
+        self.api_version = api_version or self.API_VERSION
 
     def _get_headers(self):
         """Build headers with optional developer-token and optional login-customer-id for MCC"""
@@ -34,14 +35,14 @@ class GoogleAdsClient:
             'Content-Type': 'application/json',
         }
         if self.developer_token:
-            headers['developer-token'] = self.developer_token
+            headers['developer-token'] = str(self.developer_token)
         if self.manager_id:
-            headers['login-customer-id'] = self.manager_id
+            headers['login-customer-id'] = str(self.manager_id)
         return headers
 
     def _make_request(self, method, endpoint, data=None, retries=3):
         """Make HTTP request with retry + exponential backoff"""
-        url = f"{self.BASE_URL}/{self.API_VERSION}/{endpoint}"
+        url = f"{self.BASE_URL}/{self.api_version}/{endpoint}"
         headers = self._get_headers()
         
         for attempt in range(retries):
@@ -53,9 +54,41 @@ class GoogleAdsClient:
                     continue
                     
                 if not response.ok:
-                    error_data = response.json() if response.content else {}
-                    error_msg = error_data.get('error', {}).get('message', response.text)
-                    error_details = error_data.get('error', {}).get('details', [])
+                    error_data = {}
+                    try:
+                        error_data = response.json() if response.content else {}
+                    except Exception:
+                        pass
+                    
+                    error_msg = response.text
+                    error_details = []
+                    
+                    if isinstance(error_data, list) and error_data:
+                        first = error_data[0]
+                        if isinstance(first, dict):
+                            err_obj = first.get('error', first)
+                            if isinstance(err_obj, dict):
+                                error_msg = err_obj.get('message', response.text)
+                                error_details = err_obj.get('details', [])
+                            else:
+                                error_msg = str(err_obj)
+                        else:
+                            error_msg = str(first)
+                    elif isinstance(error_data, dict):
+                        err_obj = error_data.get('error', error_data)
+                        if isinstance(err_obj, dict):
+                            error_msg = err_obj.get('message', response.text)
+                            error_details = err_obj.get('details', [])
+                        else:
+                            error_msg = str(err_obj)
+
+                    # Extract more descriptive Google error message if present in details
+                    for detail in error_details:
+                        if isinstance(detail, dict) and 'errors' in detail:
+                            sub_msgs = [e.get('message') for e in detail['errors'] if isinstance(e, dict) and e.get('message')]
+                            if sub_msgs:
+                                error_msg += " (" + ", ".join(sub_msgs) + ")"
+                                
                     raise GoogleAdsError(f"HTTP {response.status_code}: {error_msg}", errors=error_details)
                     
                 return response.json() if response.content else {}
@@ -78,7 +111,7 @@ class GoogleAdsClient:
             batches = self._make_request('POST', endpoint, data=data)
             if isinstance(batches, list):
                 for batch in batches:
-                    if 'results' in batch:
+                    if isinstance(batch, dict) and 'results' in batch:
                         results.extend(batch['results'])
             elif isinstance(batches, dict) and 'results' in batches:
                 results.extend(batches['results'])
