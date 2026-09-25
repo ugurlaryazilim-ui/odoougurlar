@@ -146,12 +146,32 @@ class PowerBIController(http.Controller):
                     'image_url': image_url,
                 })
 
-            return Response(
-                json.dumps(data, ensure_ascii=False),
-                status=200,
-                content_type='application/json; charset=utf-8',
-                headers={'Access-Control-Allow-Origin': '*'},
-            )
+            json_bytes = json.dumps(data, ensure_ascii=False).encode('utf-8')
+
+            # ETag kontrolü (Veri değişmemişse 304 Not Modified dön)
+            etag = hashlib.md5(json_bytes).hexdigest()
+            if_none_match = request.httprequest.headers.get('If-None-Match', '')
+            if if_none_match == etag:
+                return Response(status=304)
+
+            # İstemci gzip destekliyorsa anında sıkıştır (18MB -> ~2MB)
+            accept_encoding = request.httprequest.headers.get('Accept-Encoding', '')
+            headers = {
+                'Content-Type': 'application/json; charset=utf-8',
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'public, max-age=300',
+                'ETag': etag,
+            }
+
+            if 'gzip' in accept_encoding:
+                import gzip
+                compressed = gzip.compress(json_bytes)
+                headers['Content-Encoding'] = 'gzip'
+                headers['Content-Length'] = str(len(compressed))
+                return Response(compressed, status=200, headers=headers)
+
+            headers['Content-Length'] = str(len(json_bytes))
+            return Response(json_bytes, status=200, headers=headers)
 
         except Exception as e:
             _logger.exception("Power BI urun listesi hatasi")
