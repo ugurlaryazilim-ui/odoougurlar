@@ -276,6 +276,15 @@ class AdsAccount(models.Model):
             c, u = self._sync_google_ads(client)
             created += c; updated += u
             
+            # Also sync metrics for the last 30 days
+            try:
+                date_from = (fields.Date.today() - timedelta(days=30)).isoformat()
+                date_to = fields.Date.today().isoformat()
+                mc, mu = self._sync_google_metrics(client, date_from=date_from, date_to=date_to)
+                created += mc; updated += mu
+            except Exception as me:
+                _logger.warning("Could not sync Google metrics during full sync: %s", str(me))
+            
             duration = time.time() - start_time
             self._create_sync_log('campaigns', 'success', 
                 f'Google sync: {created} new, {updated} updated', created, updated, duration)
@@ -286,6 +295,60 @@ class AdsAccount(models.Model):
             self._create_sync_log('campaigns', 'error', str(e), created, updated, duration)
             self.message_post(body=f'Google Ads senkronizasyon hatası: {str(e)}')
             raise UserError(str(e))
+
+    def action_sync_metrics(self):
+        """Manually sync metrics for the connected account"""
+        self.ensure_one()
+        if self.platform == 'google':
+            self._ensure_google_token_valid()
+            from ..services.google_client import GoogleAdsClient
+            acc = self.sudo()
+            client = GoogleAdsClient(
+                access_token=acc.access_token,
+                developer_token=acc.google_developer_token,
+                customer_id=acc.platform_account_id,
+                manager_id=acc.google_manager_id,
+                refresh_token=acc.refresh_token,
+                client_id=acc.google_client_id,
+                client_secret=acc.google_client_secret,
+                api_version=acc.google_api_version or 'v25',
+                on_token_refreshed=self._save_google_refreshed_token,
+            )
+            date_from = (fields.Date.today() - timedelta(days=30)).isoformat()
+            date_to = fields.Date.today().isoformat()
+            c, u = self._sync_google_metrics(client, date_from=date_from, date_to=date_to)
+            self.message_post(body=f'Google Ads metrikleri senkronize edildi: {c} yeni, {u} güncellendi.')
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': _('Metrics Synced'),
+                    'message': _('Successfully synced %d new, %d updated metrics.') % (c, u),
+                    'type': 'success',
+                    'sticky': False,
+                }
+            }
+        elif self.platform == 'meta':
+            from ..services.meta_client import MetaAdsClient
+            acc = self.sudo()
+            client = MetaAdsClient(
+                access_token=acc.access_token,
+                api_version=self.meta_api_version,
+                account_id=f'act_{self.platform_account_id}',
+                business_id=self.meta_business_id,
+            )
+            c, u = self._sync_meta_metrics(client)
+            self.message_post(body=f'Meta metrikleri senkronize edildi: {c} yeni, {u} güncellendi.')
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': _('Metrics Synced'),
+                    'message': _('Successfully synced %d new, %d updated metrics.') % (c, u),
+                    'type': 'success',
+                    'sticky': False,
+                }
+            }
 
     @api.private
     def _sync_meta_campaigns(self, client):
@@ -406,9 +469,10 @@ class AdsAccount(models.Model):
         
         for raw in raw_adsets:
             normalized = raw  # already normalized
+            camp_pid = raw.get('platform_campaign_id') or raw.get('campaign_id')
             campaign = Campaign.search([
                 ('account_id', '=', self.id),
-                ('platform_campaign_id', '=', raw.get('campaign_id')),
+                ('platform_campaign_id', '=', camp_pid),
             ], limit=1)
             if not campaign:
                 continue
@@ -485,8 +549,9 @@ class AdsAccount(models.Model):
         
         for raw in raw_ads:
             normalized = raw  # already normalized
+            adset_pid = raw.get('platform_adset_id') or raw.get('adset_id')
             adset = Adset.search([
-                ('platform_adset_id', '=', raw.get('adset_id')),
+                ('platform_adset_id', '=', adset_pid),
             ], limit=1)
             if not adset:
                 continue
@@ -589,9 +654,10 @@ class AdsAccount(models.Model):
         
         for raw in raw_insights:
             normalized = raw  # already normalized
+            camp_pid = raw.get('platform_campaign_id') or raw.get('campaign_id')
             campaign = self.env['ads.campaign'].search([
                 ('account_id', '=', self.id),
-                ('platform_campaign_id', '=', raw.get('campaign_id')),
+                ('platform_campaign_id', '=', camp_pid),
             ], limit=1)
             
             if not campaign:
