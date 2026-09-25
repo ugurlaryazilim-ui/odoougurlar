@@ -36,8 +36,8 @@ services:
     restart: unless-stopped
     depends_on:
       - odoo
-    ports:
-      - "80:80"
+    expose:
+      - "80"
 
 volumes:
   db-data:
