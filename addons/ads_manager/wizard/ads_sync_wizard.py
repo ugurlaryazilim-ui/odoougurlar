@@ -21,7 +21,7 @@ class AdsSyncWizard(models.TransientModel):
 
     def action_sync(self):
         self.ensure_one()
-        account = self.account_id
+        account = self.account_id.sudo()
         
         try:
             if self.sync_type in ('campaigns', 'full'):

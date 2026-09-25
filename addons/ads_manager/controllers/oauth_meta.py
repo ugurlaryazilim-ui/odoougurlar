@@ -15,7 +15,7 @@ GRAPH_API_VERSION = "v26.0"
 
 class MetaAdsOAuthController(http.Controller):
 
-    @http.route('/ads_manager/meta/login', type='http', auth='user', website=True)
+    @http.route('/ads_manager/meta/login', type='http', auth='user')
     def meta_login(self, account_id, **kw):
         """Initiate the Meta Ads OAuth flow"""
         if not account_id:
@@ -56,9 +56,9 @@ class MetaAdsOAuthController(http.Controller):
         
         oauth_url = f"https://www.facebook.com/{GRAPH_API_VERSION}/dialog/oauth?{urlencode(params)}"
         
-        return werkzeug.utils.redirect(oauth_url)
+        return request.redirect(oauth_url)
 
-    @http.route('/ads_manager/meta/callback', type='http', auth='user', website=True)
+    @http.route('/ads_manager/meta/callback', type='http', auth='user')
     def meta_callback(self, **kw):
         """Handle the Meta Ads OAuth callback"""
         state = kw.get('state')

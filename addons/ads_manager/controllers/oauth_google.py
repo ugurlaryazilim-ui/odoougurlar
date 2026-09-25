@@ -5,6 +5,7 @@ import logging
 import urllib.parse
 import requests
 from datetime import timedelta
+import secrets
 import werkzeug
 
 from odoo import http, fields
@@ -32,7 +33,7 @@ class AdsGoogleOAuthController(http.Controller):
             redirect_uri = f"{base_url}/ads_manager/google/callback"
             
             # Generate CSRF state token
-            state_token = werkzeug.security.gen_salt(40)
+            state_token = secrets.token_hex(20)
             request.session['google_oauth_state'] = state_token
             request.session['google_oauth_account_id'] = account_id
             
@@ -52,7 +53,7 @@ class AdsGoogleOAuthController(http.Controller):
             
         except Exception as e:
             _logger.exception("Error initiating Google OAuth flow")
-            return werkzeug.utils.redirect('/web#action=ads_manager.action_ads_account_list')
+            return request.redirect('/web#action=ads_manager.action_ads_account')
 
     @http.route('/ads_manager/google/callback', type='http', auth='user')
     def google_callback(self, **kw):
@@ -155,16 +156,16 @@ class AdsGoogleOAuthController(http.Controller):
             account.message_post(body="Successfully connected to Google Ads API.")
             
             # Redirect back to the account form view
-            action = request.env.ref('ads_manager.action_ads_account_list', raise_if_not_found=False)
+            action = request.env.ref('ads_manager.action_ads_account', raise_if_not_found=False)
             if action:
                 url = f"/web#id={account.id}&model=ads.account&view_type=form&action={action.id}"
             else:
                 url = f"/web#id={account.id}&model=ads.account&view_type=form"
-            return werkzeug.utils.redirect(url)
+            return request.redirect(url)
             
         except Exception as e:
             _logger.exception("Error in Google OAuth callback")
             if account and account.exists():
                 account.sudo().write({'state': 'error'})
                 account.message_post(body=f"Failed to connect to Google Ads: {str(e)}")
-            return werkzeug.utils.redirect('/web#action=ads_manager.action_ads_account_list')
+            return request.redirect('/web#action=ads_manager.action_ads_account')

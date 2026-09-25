@@ -33,7 +33,7 @@
                     <group>
                         <field name="current_budget" readonly="1"/>
                         <field name="new_budget"/>
-                        <field name="change_pct" widget="percentage"/>
+                        <field name="change_pct"/>
                     </group>
                 </group>
                 <group>
@@ -88,7 +88,7 @@
             <form string="Öneri Uygulama">
                 <group>
                     <field name="recommendation_id" readonly="1"/>
-                    <field name="confirm_text" widget="text" readonly="1"/>
+                    <field name="confirm_text" readonly="1"/>
                     <field name="auto_apply" widget="boolean_toggle"/>
                     <field name="notes" placeholder="Notlarınız..."/>
                 </group>

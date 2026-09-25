@@ -8,7 +8,7 @@ _logger = logging.getLogger(__name__)
 class AdsCampaign(models.Model):
     _name = 'ads.campaign'
     _description = 'Advertising Campaign'
-    _inherit = ['mail.thread']
+    _inherit = ['mail.thread', 'mail.activity.mixin']
     _order = 'total_spend desc'
 
     _unique_platform_campaign = models.Constraint(
@@ -20,6 +20,8 @@ class AdsCampaign(models.Model):
     account_id = fields.Many2one('ads.account', string='Account', required=True, ondelete='cascade', index=True)
     platform = fields.Selection(related='account_id.platform', store=True)
     platform_campaign_id = fields.Char(string='Platform Campaign ID', index=True)
+    start_date = fields.Date(string='Start Date', tracking=True)
+    end_date = fields.Date(string='End Date', tracking=True)
     
     objective = fields.Selection([
         ('awareness', 'Awareness'),
@@ -68,9 +70,12 @@ class AdsCampaign(models.Model):
     avg_cpa = fields.Monetary(string='Avg CPA', currency_field='currency_id', compute='_compute_totals', store=True)
     
     budget_pace_status = fields.Selection([
-        ('under', 'Under Pacing'),
+        ('critical_overspend', 'Critical Overspend'),
+        ('overspending', 'Overspending'),
         ('on_track', 'On Track'),
-        ('over', 'Over Pacing')
+        ('underspending', 'Underspending'),
+        ('under', 'Under Pacing'),
+        ('over', 'Over Pacing'),
     ], string='Budget Pace Status', compute='_compute_budget_pacing', store=True)
     budget_pace_pct = fields.Float(string='Budget Pace %', compute='_compute_budget_pacing', store=True)
     projected_monthly_spend = fields.Monetary(string='Projected Monthly Spend', currency_field='currency_id', compute='_compute_budget_pacing', store=True)
@@ -110,6 +115,7 @@ class AdsCampaign(models.Model):
             record.budget_pace_pct = 100.0
             record.budget_pace_status = 'on_track'
 
+    @api.depends('metric_ids', 'recommendation_ids')
     def _compute_stat_counts(self):
         for record in self:
             record.metric_count = len(record.metric_ids)
@@ -215,7 +221,7 @@ class AdsCampaign(models.Model):
     def _publish_to_meta(self):
         """Create or update campaign on Meta Ads platform."""
         from ..services.meta_client import MetaAdsClient, MetaApiError
-        account = self.account_id
+        account = self.account_id.sudo()
         client = MetaAdsClient(
             access_token=account.access_token,
             api_version=account.meta_api_version,
@@ -254,7 +260,7 @@ class AdsCampaign(models.Model):
     def _publish_to_google(self):
         """Create or update campaign on Google Ads platform."""
         from ..services.google_client import GoogleAdsClient, GoogleAdsError
-        account = self.account_id
+        account = self.account_id.sudo()
         client = GoogleAdsClient(
             access_token=account.access_token,
             developer_token=account.google_developer_token,
@@ -349,7 +355,7 @@ class AdsCampaign(models.Model):
     @api.private
     def _update_meta_budget(self, new_budget):
         from ..services.meta_client import MetaAdsClient
-        account = self.account_id
+        account = self.account_id.sudo()
         client = MetaAdsClient(
             access_token=account.access_token,
             api_version=account.meta_api_version,
@@ -362,7 +368,7 @@ class AdsCampaign(models.Model):
     @api.private
     def _update_google_budget(self, new_budget):
         from ..services.google_client import GoogleAdsClient
-        account = self.account_id
+        account = self.account_id.sudo()
         client = GoogleAdsClient(
             access_token=account.access_token,
             developer_token=account.google_developer_token,

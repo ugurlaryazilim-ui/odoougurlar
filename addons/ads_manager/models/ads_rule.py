@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import logging
+from datetime import timedelta
 from odoo import models, fields, api, _
 
 _logger = logging.getLogger(__name__)
@@ -42,11 +43,11 @@ class AdsRule(models.Model):
     trigger_count = fields.Integer(readonly=True, default=0)
     is_in_cooldown = fields.Boolean(compute='_compute_is_in_cooldown')
 
+    @api.depends('last_triggered', 'cooldown_hours')
     def _compute_is_in_cooldown(self):
         now = fields.Datetime.now()
         for rule in self:
             if rule.last_triggered and rule.cooldown_hours:
-                from datetime import timedelta
                 cooldown_end = rule.last_triggered + timedelta(hours=rule.cooldown_hours)
                 rule.is_in_cooldown = now < cooldown_end
             else:

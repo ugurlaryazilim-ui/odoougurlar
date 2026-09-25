@@ -301,7 +301,7 @@ class RuleEngine:
 
     def _notify_via_email(self, campaign, rule):
         """Send email notification via mail template."""
-        template = self.env.ref('ads_manager.mail_template_rule_triggered', raise_if_not_found=False)
+        template = self.env.ref('ads_manager.email_template_ads_critical_alert', raise_if_not_found=False)
         if template:
             template.send_mail(campaign.id, force_send=True)
 

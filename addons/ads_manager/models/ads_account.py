@@ -100,15 +100,17 @@ class AdsAccount(models.Model):
 
     def action_test_connection(self):
         self.ensure_one()
+        acc = self.sudo()
         if self.platform == 'meta':
-            if not self.access_token:
+            if not acc.access_token:
                 raise UserError(_('No access token available. Please connect first.'))
             url = f'https://graph.facebook.com/{self.meta_api_version}/me'
-            params = {'access_token': self.access_token}
+            params = {'access_token': acc.access_token}
             try:
                 resp = req.get(url, params=params)
                 data = resp.json()
                 if 'id' in data:
+                    self.write({'state': 'connected'})
                     self.message_post(body=_('Connection test successful!'))
                     return {
                         'type': 'ir.actions.client',
@@ -130,17 +132,18 @@ class AdsAccount(models.Model):
                 self.message_post(body=_('Connection test failed: %s') % str(e))
                 raise UserError(_('Connection test failed: %s') % str(e))
         elif self.platform == 'google':
-            if not self.access_token:
+            if not acc.access_token:
                 raise UserError(_('No access token. Please connect first.'))
             from ..services.google_client import GoogleAdsClient, GoogleAdsError
             client = GoogleAdsClient(
-                access_token=self.access_token,
-                developer_token=self.google_developer_token,
+                access_token=acc.access_token,
+                developer_token=acc.google_developer_token,
                 customer_id=self.platform_account_id,
                 manager_id=self.google_manager_id,
             )
             try:
                 customers = client.list_accessible_customers()
+                self.write({'state': 'connected'})
                 self.message_post(body=_('Google Ads connection test successful! Accessible customers: %s') % len(customers))
                 return {
                     'type': 'ir.actions.client',
@@ -169,8 +172,9 @@ class AdsAccount(models.Model):
         start_time = time.time()
         from ..services.meta_client import MetaAdsClient, MetaApiError
         
+        acc = self.sudo()
         client = MetaAdsClient(
-            access_token=self.access_token,
+            access_token=acc.access_token,
             api_version=self.meta_api_version,
             account_id=f'act_{self.platform_account_id}',
             business_id=self.meta_business_id,
@@ -207,9 +211,10 @@ class AdsAccount(models.Model):
     def _sync_google_full(self):
         start_time = time.time()
         from ..services.google_client import GoogleAdsClient, GoogleAdsError
+        acc = self.sudo()
         client = GoogleAdsClient(
-            access_token=self.access_token,
-            developer_token=self.google_developer_token,
+            access_token=acc.access_token,
+            developer_token=acc.google_developer_token,
             customer_id=self.platform_account_id,
             manager_id=self.google_manager_id,
         )

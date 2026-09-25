@@ -21,7 +21,7 @@ class AdsAIEngine:
     @property
     def provider(self):
         if not self._provider:
-            self._provider = self.env['ads.ai.provider'].search([('active', '=', True)], limit=1)
+            self._provider = self.env['ads.ai.provider'].sudo().search([('active', '=', True)], limit=1)
             if not self._provider:
                 raise ValueError('No active AI provider configured.')
         return self._provider
@@ -376,7 +376,7 @@ Lütfen reklam yöneticisinin anlayacağı dilde, bu önerinin neden önemli old
 
     def run_deep_analysis(self):
         """Weekly deep analysis cron - analyze all campaigns and create recommendations."""
-        campaigns = self.env['ads.campaign'].search([('status', '=', 'ACTIVE')])
+        campaigns = self.env['ads.campaign'].search([('status', '=', 'active')])
         stats = {'analyzed': 0, 'high_risk': 0, 'recommendations_created': 0}
         
         Recommendation = self.env['ads.recommendation']

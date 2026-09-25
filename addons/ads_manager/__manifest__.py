@@ -22,6 +22,8 @@
         'reports/ads_report_templates.xml',
         'views/ads_account_views.xml',
         'views/ads_campaign_views.xml',
+        'views/ads_adset_views.xml',
+        'views/ads_ad_views.xml',
         'views/ads_metric_views.xml',
         'views/ads_recommendation_views.xml',
         'views/ads_rule_views.xml',

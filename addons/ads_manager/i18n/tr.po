@@ -1,0 +1,155 @@
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* ads_manager
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 19.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-09-24 10:00+0000\n"
+"PO-Revision-Date: 2026-09-24 10:00+0000\n"
+"Last-Translator: Uğurlar Yazılım\n"
+"Language-Team: Turkish\n"
+"Language: tr_TR\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+#. module: ads_manager
+#: model:ir.ui.menu,name:ads_manager.menu_ads_manager_root
+msgid "Ads Manager"
+msgstr "Reklam Yöneticisi"
+
+#. module: ads_manager
+#: model:ir.ui.menu,name:ads_manager.menu_ads_dashboard
+#: model:ir.actions.client,name:ads_manager.action_ads_dashboard
+msgid "Dashboard"
+msgstr "Kontrol Paneli"
+
+#. module: ads_manager
+#: model:ir.ui.menu,name:ads_manager.menu_ads_campaigns_main
+#: model:ir.ui.menu,name:ads_manager.menu_ads_campaigns_all
+#: model:ir.actions.act_window,name:ads_manager.action_ads_campaign
+msgid "Kampanyalar"
+msgstr "Kampanyalar"
+
+#. module: ads_manager
+#: model:ir.ui.menu,name:ads_manager.menu_ads_adsets
+#: model:ir.actions.act_window,name:ads_manager.action_ads_adset
+msgid "Ad Sets"
+msgstr "Reklam Setleri"
+
+#. module: ads_manager
+#: model:ir.ui.menu,name:ads_manager.menu_ads_ads
+#: model:ir.actions.act_window,name:ads_manager.action_ads_ad
+msgid "Reklamlar"
+msgstr "Reklamlar"
+
+#. module: ads_manager
+#: model:ir.ui.menu,name:ads_manager.menu_ads_analytics
+msgid "Analitik"
+msgstr "Analitik"
+
+#. module: ads_manager
+#: model:ir.ui.menu,name:ads_manager.menu_ads_metrics_daily
+#: model:ir.actions.act_window,name:ads_manager.action_ads_metric_daily
+msgid "Günlük Metrikler"
+msgstr "Günlük Metrikler"
+
+#. module: ads_manager
+#: model:ir.ui.menu,name:ads_manager.menu_ads_metrics_monthly
+#: model:ir.actions.act_window,name:ads_manager.action_ads_metric_monthly
+msgid "Aylık Özet"
+msgstr "Aylık Özet"
+
+#. module: ads_manager
+#: model:ir.ui.menu,name:ads_manager.menu_ads_platform_comparison
+#: model:ir.actions.act_window,name:ads_manager.action_ads_platform_comparison
+msgid "Platform Karşılaştırma"
+msgstr "Platform Karşılaştırma"
+
+#. module: ads_manager
+#: model:ir.ui.menu,name:ads_manager.menu_ads_optimization
+msgid "Optimizasyon"
+msgstr "Optimizasyon"
+
+#. module: ads_manager
+#: model:ir.ui.menu,name:ads_manager.menu_ads_recommendations
+#: model:ir.actions.act_window,name:ads_manager.action_ads_recommendation
+msgid "Öneriler"
+msgstr "Öneriler"
+
+#. module: ads_manager
+#: model:ir.ui.menu,name:ads_manager.menu_ads_rules
+#: model:ir.actions.act_window,name:ads_manager.action_ads_rule
+msgid "Otomatik Kurallar"
+msgstr "Otomatik Kurallar"
+
+#. module: ads_manager
+#: model:ir.ui.menu,name:ads_manager.menu_ads_configuration
+msgid "Yapılandırma"
+msgstr "Yapılandırma"
+
+#. module: ads_manager
+#: model:ir.ui.menu,name:ads_manager.menu_ads_accounts
+#: model:ir.actions.act_window,name:ads_manager.action_ads_account
+msgid "Reklam Hesapları"
+msgstr "Reklam Hesapları"
+
+#. module: ads_manager
+#: model:ir.ui.menu,name:ads_manager.menu_ads_sync_logs
+#: model:ir.actions.act_window,name:ads_manager.action_ads_sync_log
+msgid "Senkronizasyon Logları"
+msgstr "Senkronizasyon Logları"
+
+#. module: ads_manager
+#: model:ir.ui.menu,name:ads_manager.menu_ads_ai_providers
+#: model:ir.actions.act_window,name:ads_manager.action_ads_ai_provider
+msgid "AI Sağlayıcılar"
+msgstr "AI Sağlayıcılar"
+
+#. module: ads_manager
+#: model:ir.ui.menu,name:ads_manager.menu_ads_settings
+msgid "Ayarlar"
+msgstr "Ayarlar"
+
+#. module: ads_manager
+#: model:ir.model.fields,field_description:ads_manager.field_ads_campaign__daily_budget
+msgid "Daily Budget"
+msgstr "Günlük Bütçe"
+
+#. module: ads_manager
+#: model:ir.model.fields,field_description:ads_manager.field_ads_campaign__total_spend
+msgid "Total Spend"
+msgstr "Toplam Harcama"
+
+#. module: ads_manager
+#: model:ir.model.fields,field_description:ads_manager.field_ads_campaign__total_clicks
+msgid "Total Clicks"
+msgstr "Toplam Tıklama"
+
+#. module: ads_manager
+#: model:ir.model.fields,field_description:ads_manager.field_ads_campaign__total_impressions
+msgid "Total Impressions"
+msgstr "Toplam Gösterim"
+
+#. module: ads_manager
+#: model:ir.model.fields,field_description:ads_manager.field_ads_campaign__total_conversions
+msgid "Total Conversions"
+msgstr "Toplam Dönüşüm"
+
+#. module: ads_manager
+#: model:ir.model.fields,field_description:ads_manager.field_ads_campaign__avg_roas
+msgid "Avg ROAS"
+msgstr "Ortalama ROAS"
+
+#. module: ads_manager
+#: model:ir.model.fields,field_description:ads_manager.field_ads_campaign__avg_cpa
+msgid "Avg CPA"
+msgstr "Ortalama CPA"
+
+#. module: ads_manager
+#: model:ir.model.fields,field_description:ads_manager.field_ads_campaign__approval_status
+msgid "Approval Status"
+msgstr "Onay Durumu"

@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Ads List View -->
+    <record id="view_ads_ad_list" model="ir.ui.view">
+        <field name="name">ads.ad.list</field>
+        <field name="model">ads.ad</field>
+        <field name="arch" type="xml">
+            <list string="Ads">
+                <field name="name"/>
+                <field name="adset_id"/>
+                <field name="campaign_id"/>
+                <field name="status" widget="badge" decoration-success="status == 'active'" decoration-muted="status == 'paused'"/>
+                <field name="ad_type"/>
+                <field name="preview_url" widget="url"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Ads Form View -->
+    <record id="view_ads_ad_form" model="ir.ui.view">
+        <field name="name">ads.ad.form</field>
+        <field name="model">ads.ad</field>
+        <field name="arch" type="xml">
+            <form string="Ad">
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" placeholder="Ad Name"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group string="Relationship">
+                            <field name="adset_id"/>
+                            <field name="campaign_id"/>
+                            <field name="account_id"/>
+                            <field name="company_id" groups="base.group_multi_company"/>
+                        </group>
+                        <group string="Ad Details">
+                            <field name="platform_ad_id"/>
+                            <field name="status"/>
+                            <field name="ad_type"/>
+                            <field name="creative_id"/>
+                            <field name="preview_url" widget="url"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Ads Search View -->
+    <record id="view_ads_ad_search" model="ir.ui.view">
+        <field name="name">ads.ad.search</field>
+        <field name="model">ads.ad</field>
+        <field name="arch" type="xml">
+            <search string="Ads">
+                <field name="name"/>
+                <field name="adset_id"/>
+                <field name="campaign_id"/>
+                <filter string="Active" name="filter_active" domain="[('status', '=', 'active')]"/>
+                <filter string="Paused" name="filter_paused" domain="[('status', '=', 'paused')]"/>
+                <separator/>
+                <filter string="Ad Set" name="group_by_adset" context="{'group_by': 'adset_id'}"/>
+                <filter string="Campaign" name="group_by_campaign" context="{'group_by': 'campaign_id'}"/>
+                <filter string="Status" name="group_by_status" context="{'group_by': 'status'}"/>
+            </search>
+        </field>
+    </record>
+</odoo>

@@ -11,7 +11,7 @@
                 <field name="account_id"/>
                 <field name="impressions"/>
                 <field name="clicks"/>
-                <field name="ctr" widget="percentage"/>
+                <field name="ctr"/>
                 <field name="currency_id" column_invisible="True"/>
                 <field name="spend" widget="monetary" options="{'currency_field': 'currency_id'}"/>
                 <field name="cpc" widget="monetary" options="{'currency_field': 'currency_id'}"/>

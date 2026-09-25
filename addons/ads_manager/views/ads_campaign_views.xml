@@ -146,6 +146,33 @@
         </field>
     </record>
 
+    <record id="view_ads_campaign_graph" model="ir.ui.view">
+        <field name="name">ads.campaign.graph</field>
+        <field name="model">ads.campaign</field>
+        <field name="arch" type="xml">
+            <graph string="Campaigns Performance" type="bar">
+                <field name="name"/>
+                <field name="total_spend" type="measure"/>
+                <field name="total_conversion_value" type="measure"/>
+            </graph>
+        </field>
+    </record>
+
+    <record id="view_ads_campaign_pivot" model="ir.ui.view">
+        <field name="name">ads.campaign.pivot</field>
+        <field name="model">ads.campaign</field>
+        <field name="arch" type="xml">
+            <pivot string="Campaigns Analysis">
+                <field name="account_id" type="row"/>
+                <field name="name" type="row"/>
+                <field name="total_spend" type="measure"/>
+                <field name="total_clicks" type="measure"/>
+                <field name="total_conversions" type="measure"/>
+                <field name="total_conversion_value" type="measure"/>
+            </pivot>
+        </field>
+    </record>
+
     <record id="view_ads_campaign_search" model="ir.ui.view">
         <field name="name">ads.campaign.search</field>
         <field name="model">ads.campaign</field>
