@@ -785,9 +785,9 @@ class AdsAccount(models.Model):
         # 3. Daily time-series chart data
         chart_groups = MetricModel._read_group(
             domain=curr_domain,
-            groupby=['date'],
+            groupby=['date:day'],
             aggregates=['spend:sum', 'conversion_value:sum', 'clicks:sum', 'conversions:sum'],
-            order='date asc'
+            order='date:day asc'
         )
         chart_data = []
         for g in chart_groups:
@@ -802,23 +802,24 @@ class AdsAccount(models.Model):
         # 4. Platform Breakdown
         platform_groups = MetricModel._read_group(
             domain=curr_domain,
-            groupby=['campaign_id.account_id.platform'],
+            groupby=['account_id'],
             aggregates=['spend:sum', 'conversion_value:sum', 'conversions:sum', 'clicks:sum']
         )
         platform_data = {}
         for p_grp in platform_groups:
-            p_name = p_grp[0] or 'unknown'
+            acc_rec = p_grp[0]
+            p_name = acc_rec.platform if acc_rec else 'unknown'
             p_sp = p_grp[1] or 0.0
             p_rev = p_grp[2] or 0.0
             p_cv = p_grp[3] or 0.0
             p_cl = p_grp[4] or 0
-            platform_data[p_name] = {
-                'spend': round(p_sp, 2),
-                'revenue': round(p_rev, 2),
-                'conversions': round(p_cv, 2),
-                'clicks': p_cl,
-                'roas': round(p_rev / p_sp, 2) if p_sp else 0.0,
-            }
+            if p_name not in platform_data:
+                platform_data[p_name] = {'spend': 0.0, 'revenue': 0.0, 'conversions': 0.0, 'clicks': 0}
+            platform_data[p_name]['spend'] += round(p_sp, 2)
+            platform_data[p_name]['revenue'] += round(p_rev, 2)
+            platform_data[p_name]['conversions'] += round(p_cv, 2)
+            platform_data[p_name]['clicks'] += p_cl
+            platform_data[p_name]['roas'] = round(platform_data[p_name]['revenue'] / platform_data[p_name]['spend'], 2) if platform_data[p_name]['spend'] else 0.0
 
         # 5. Top Campaigns
         camp_domain = []

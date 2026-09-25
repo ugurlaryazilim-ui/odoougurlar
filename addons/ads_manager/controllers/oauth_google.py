@@ -116,43 +116,36 @@ class AdsGoogleOAuthController(http.Controller):
             if not access_token:
                 raise UserError("No access token returned from Google.")
                 
-            # Step 2: Validate by fetching accessible customer IDs
-            api_version = account.google_api_version or 'v25'
-            customers_url = f"https://googleads.googleapis.com/{api_version}/customers:listAccessibleCustomers"
+            # Step 2: Validate / discover customer IDs
             headers = {
                 'Authorization': f'Bearer {access_token}',
-                'developer-token': account.google_developer_token
             }
-            
-            customers_res = requests.get(customers_url, headers=headers)
-            if not customers_res.ok:
-                raise UserError(f"Failed to fetch accessible customers: {customers_res.text}")
+            if account.google_developer_token:
+                headers['developer-token'] = str(account.google_developer_token)
                 
-            customers_json = customers_res.json()
-            resource_names = customers_json.get('resourceNames', [])
-            
-            if not resource_names:
-                raise UserError("No accessible Google Ads customers found for this account.")
-                
-            # Step 3: Match customer ID or use first accessible one
-            customer_id = None
-            if account.platform_account_id:
-                formatted_search = f"customers/{account.platform_account_id.replace('-', '')}"
-                if formatted_search in resource_names:
-                    customer_id = account.platform_account_id
-            
-            if not customer_id:
-                # Use the first one
-                first_resource = resource_names[0]
-                customer_id = first_resource.split('/')[1]
+            customer_id = account.platform_account_id
+            api_version = account.google_api_version or 'v25'
+            customers_url = f"https://googleads.googleapis.com/{api_version}/customers:listAccessibleCustomers"
+            try:
+                customers_res = requests.get(customers_url, headers=headers, timeout=10)
+                if customers_res.ok:
+                    customers_json = customers_res.json()
+                    resource_names = customers_json.get('resourceNames', [])
+                    if resource_names and not customer_id:
+                        customer_id = resource_names[0].split('/')[-1]
+                else:
+                    _logger.warning("List accessible customers returned %s: %s", customers_res.status_code, customers_res.text)
+            except Exception as ex:
+                _logger.warning("Error calling listAccessibleCustomers: %s", str(ex))
                 
             # Write to account
             update_vals = {
                 'access_token': access_token,
                 'token_expiry': fields.Datetime.now() + timedelta(seconds=expires_in),
                 'state': 'connected',
-                'platform_account_id': customer_id,
             }
+            if customer_id:
+                update_vals['platform_account_id'] = customer_id
             
             if refresh_token:
                 update_vals['refresh_token'] = refresh_token
