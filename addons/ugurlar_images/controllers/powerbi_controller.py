@@ -36,11 +36,11 @@ class PowerBIController(http.Controller):
         """API token doğrulaması yapar. Power BI kapalıysa erişimi engeller."""
         if not token:
             return False
-        # Power BI entegrasyonu aktif mi?
+        # Power BI entegrasyonu aktif mi? (Varsayılan: aktif — sadece açıkça kapatılırsa engelle)
         enabled = request.env['ir.config_parameter'].sudo().get_param(
-            'ugurlar_images.powerbi_enabled', 'False'
+            'ugurlar_images.powerbi_enabled', 'True'
         )
-        if enabled not in ('True', 'true', '1'):
+        if enabled in ('False', 'false', '0'):
             return False
         stored_token = request.env['ir.config_parameter'].sudo().get_param(
             'ugurlar_images.powerbi_api_key', ''
