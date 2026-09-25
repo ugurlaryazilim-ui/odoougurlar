@@ -23,21 +23,14 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    ports:
+      - "8069:8069"
     volumes:
       - odoo-data:/var/lib/odoo
     environment:
       HOST: db
       USER: odoo
       PASSWORD: ${DB_PASSWORD:-odoo}
-
-  nginx:
-    build: ./nginx
-    container_name: odoougurlar-nginx-prod
-    restart: unless-stopped
-    depends_on:
-      - odoo
-    expose:
-      - "80"
 
 volumes:
   db-data:
