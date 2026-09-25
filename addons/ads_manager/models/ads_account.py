@@ -77,6 +77,10 @@ class AdsAccount(models.Model):
             'context': {'default_account_id': self.id},
         }
 
+    def action_reset_to_draft(self):
+        self.ensure_one()
+        self.write({'state': 'draft'})
+
     def action_connect(self):
         self.ensure_one()
         if self.platform == 'meta':
