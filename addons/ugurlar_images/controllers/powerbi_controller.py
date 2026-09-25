@@ -95,7 +95,7 @@ class PowerBIController(http.Controller):
                     pp.product_tmpl_id AS template_id,
                     pp.barcode,
                     pp.default_code,
-                    COALESCE(pt.name->>'tr_TR', pt.name->>'en_US', (SELECT value FROM jsonb_each_text(pt.name) LIMIT 1)) AS template_name
+                    COALESCE(pt.name->>'tr_TR', pt.name->>'en_US', pt.name->>'tr') AS template_name
                 FROM product_product pp
                 JOIN product_template pt ON pt.id = pp.product_tmpl_id
                 WHERE pp.active = true
