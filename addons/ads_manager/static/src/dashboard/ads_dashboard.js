@@ -2,7 +2,9 @@
 
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
-import { Component, onWillStart, useState, useRef, useEffect } from "@odoo/owl";
+import { loadJS } from "@web/core/assets";
+import { user } from "@web/core/user";
+import { Component, onWillStart, onWillUnmount, useState, useRef, useEffect } from "@odoo/owl";
 
 export class AdsManagerDashboard extends Component {
     setup() {
@@ -49,6 +51,17 @@ export class AdsManagerDashboard extends Component {
             await this.loadData();
         });
 
+        onWillUnmount(() => {
+            if (this.trendChartInstance) {
+                this.trendChartInstance.destroy();
+                this.trendChartInstance = null;
+            }
+            if (this.platformChartInstance) {
+                this.platformChartInstance.destroy();
+                this.platformChartInstance = null;
+            }
+        });
+
         useEffect(() => {
             if (!this.state.loading) {
                 this.renderCharts();
@@ -58,13 +71,11 @@ export class AdsManagerDashboard extends Component {
 
     async loadChartJS() {
         if (window.Chart) return;
-        return new Promise((resolve, reject) => {
-            const script = document.createElement("script");
-            script.src = "/web/static/lib/Chart/Chart.js";
-            script.onload = resolve;
-            script.onerror = reject;
-            document.head.appendChild(script);
-        });
+        try {
+            await loadJS("/web/static/lib/Chart/Chart.js");
+        } catch (e) {
+            console.warn("Chart.js failed to load via loadJS:", e);
+        }
     }
 
     async loadData() {
@@ -338,8 +349,9 @@ export class AdsManagerDashboard extends Component {
 
     formatCurrency(amount) {
         if (amount === undefined || amount === null) return "0.00 " + this.state.currency_symbol;
+        const locale = user.lang ? user.lang.replace('_', '-') : "tr-TR";
         return (
-            Number(amount).toLocaleString("tr-TR", {
+            Number(amount).toLocaleString(locale, {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
             }) +
@@ -350,7 +362,8 @@ export class AdsManagerDashboard extends Component {
 
     formatNumber(num) {
         if (num === undefined || num === null) return "0";
-        return Number(num).toLocaleString("tr-TR");
+        const locale = user.lang ? user.lang.replace('_', '-') : "tr-TR";
+        return Number(num).toLocaleString(locale);
     }
 }
 

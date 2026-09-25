@@ -9,9 +9,58 @@ from urllib.parse import urlencode
 from odoo import http, fields
 from odoo.http import request
 
+import hmac
+import hashlib
+import time
+
 _logger = logging.getLogger(__name__)
 
 GRAPH_API_VERSION = "v26.0"
+
+def _get_oauth_secret(env):
+    secret = env['ir.config_parameter'].sudo().get_param('database.secret') or 'ads_oauth_default_secret'
+    return secret.encode('utf-8')
+
+def _generate_signed_state(env, account_id):
+    salt = secrets.token_hex(8)
+    ts = str(int(time.time()))
+    payload = f"{account_id}:{ts}:{salt}"
+    sig = hmac.new(_get_oauth_secret(env), payload.encode('utf-8'), hashlib.sha256).hexdigest()
+    return f"{payload}:{sig}"
+
+def _verify_signed_state(env, state_str, max_age_seconds=900):
+    """Verify HMAC signed state. Returns account_id if valid, None otherwise."""
+    if not state_str or ':' not in state_str:
+        return None
+    parts = state_str.split(':')
+    if len(parts) != 4:
+        return None
+    account_id_str, ts_str, salt, sig = parts
+    payload = f"{account_id_str}:{ts_str}:{salt}"
+    expected_sig = hmac.new(_get_oauth_secret(env), payload.encode('utf-8'), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected_sig):
+        return None
+    try:
+        ts = int(ts_str)
+        if time.time() - ts > max_age_seconds:
+            _logger.warning("OAuth state expired (age: %s seconds)", time.time() - ts)
+            return None
+        return int(account_id_str)
+    except (ValueError, TypeError):
+        return None
+
+def _get_clean_base_url():
+    base_url = request.httprequest.url_root.rstrip('/')
+    forwarded_proto = request.httprequest.headers.get('X-Forwarded-Proto')
+    if forwarded_proto == 'https' and base_url.startswith('http://'):
+        base_url = 'https://' + base_url[7:]
+    elif not base_url.startswith('https://') and 'localhost' not in base_url and '127.0.0.1' not in base_url:
+        param_url = request.env['ir.config_parameter'].sudo().get_param('web.base.url') or ''
+        if param_url.startswith('https://'):
+            base_url = param_url.rstrip('/')
+        else:
+            base_url = base_url.replace('http://', 'https://')
+    return base_url
 
 class MetaAdsOAuthController(http.Controller):
 
@@ -30,22 +79,14 @@ class MetaAdsOAuthController(http.Controller):
             account.message_post(body='Meta App ID is missing. Cannot initiate login.')
             return request.redirect(f'/web#id={account_id}&model=ads.account&view_type=form')
 
-        # Get base URL, ensure HTTPS in production
-        base_url = request.env['ir.config_parameter'].sudo().get_param('web.base.url')
-        if not base_url.startswith('https://') and 'localhost' not in base_url and '127.0.0.1' not in base_url:
-            base_url = base_url.replace('http://', 'https://')
-
+        base_url = _get_clean_base_url()
         redirect_uri = f"{base_url}/ads_manager/meta/callback"
         
-        # Generate CSRF token
-        state = secrets.token_hex(16)
-        
-        # Store in session
+        state = _generate_signed_state(request.env, account.id)
         request.session['ads_meta_account_id'] = account.id
         request.session['ads_meta_oauth_state'] = state
         request.session['ads_meta_redirect_uri'] = redirect_uri
 
-        # Build OAuth URL
         params = {
             'client_id': app_id,
             'redirect_uri': redirect_uri,
@@ -55,10 +96,9 @@ class MetaAdsOAuthController(http.Controller):
         }
         
         oauth_url = f"https://www.facebook.com/{GRAPH_API_VERSION}/dialog/oauth?{urlencode(params)}"
-        
         return request.redirect(oauth_url)
 
-    @http.route('/ads_manager/meta/callback', type='http', auth='user')
+    @http.route('/ads_manager/meta/callback', type='http', auth='public', csrf=False)
     def meta_callback(self, **kw):
         """Handle the Meta Ads OAuth callback"""
         state = kw.get('state')
@@ -66,18 +106,20 @@ class MetaAdsOAuthController(http.Controller):
         error = kw.get('error')
         
         session_state = request.session.get('ads_meta_oauth_state')
-        account_id = request.session.get('ads_meta_account_id')
+        session_account_id = request.session.get('ads_meta_account_id')
         redirect_uri = request.session.get('ads_meta_redirect_uri')
         
-        # Clean up session
         request.session.pop('ads_meta_oauth_state', None)
         request.session.pop('ads_meta_account_id', None)
         request.session.pop('ads_meta_redirect_uri', None)
         
+        verified_account_id = _verify_signed_state(request.env, state)
+        account_id = verified_account_id or session_account_id
+        
         if not account_id:
             return request.redirect('/web')
             
-        account = request.env['ads.account'].browse(account_id)
+        account = request.env['ads.account'].sudo().browse(int(account_id))
         if not account.exists():
             return request.redirect('/web')
             
@@ -87,10 +129,10 @@ class MetaAdsOAuthController(http.Controller):
             if error:
                 error_msg = kw.get('error_description', error)
                 account.sudo().write({'state': 'error'})
-                account.message_post(body=f'Meta Ads OAuth hatası (Kullanıcı reddetti veya hata oluştu): {error_msg}')
+                account.message_post(body=f'Meta Ads OAuth hatası: {error_msg}')
                 return request.redirect(base_redirect_url)
                 
-            if not state or state != session_state:
+            if not verified_account_id and (not state or state != session_state):
                 raise ValueError('Geçersiz state parametresi. Olası CSRF saldırısı.')
                 
             if not code:

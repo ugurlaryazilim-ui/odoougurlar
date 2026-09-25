@@ -42,12 +42,18 @@ class AdsSyncWizard(models.TransientModel):
                         date_to=self.date_to.isoformat(),
                     )
                 elif account.platform == 'google':
+                    account._ensure_google_token_valid()
                     from ..services.google_client import GoogleAdsClient
                     client = GoogleAdsClient(
                         access_token=account.access_token,
                         developer_token=account.google_developer_token,
                         customer_id=account.platform_account_id,
                         manager_id=account.google_manager_id,
+                        refresh_token=account.refresh_token,
+                        client_id=account.google_client_id,
+                        client_secret=account.google_client_secret,
+                        api_version=account.google_api_version or 'v25',
+                        on_token_refreshed=account._save_google_refreshed_token,
                     )
                     account._sync_google_metrics(
                         client,

@@ -196,13 +196,15 @@ class GoogleAdsClient:
         return [self.normalize_ad_group(r) for r in results]
 
     def get_ads(self, ad_group_id=None):
-        """Fetch ads"""
+        """Fetch ads with headlines and landing page URLs"""
         query = """
             SELECT
                 ad_group_ad.ad.id,
                 ad_group_ad.ad.name,
                 ad_group_ad.status,
                 ad_group_ad.ad.type,
+                ad_group_ad.ad.final_urls,
+                ad_group_ad.ad.responsive_search_ad.headlines,
                 ad_group_ad.ad_group
             FROM ad_group_ad
             WHERE ad_group_ad.status != 'REMOVED'
@@ -332,7 +334,7 @@ class GoogleAdsClient:
         }
         
     def normalize_ad(self, raw_result):
-        """Normalize Google ad"""
+        """Normalize Google ad with rich title and preview URL"""
         ad_group_ad = raw_result.get('adGroupAd', {})
         ad = ad_group_ad.get('ad', {})
         
@@ -346,12 +348,39 @@ class GoogleAdsClient:
         ad_group_resource = ad_group_ad.get('adGroup')
         platform_adset_id = self._extract_id_from_resource_name(ad_group_resource)
         
+        # Determine rich name from headlines
+        ad_name = ad.get('name')
+        if not ad_name:
+            rsa = ad.get('responsiveSearchAd', {})
+            headlines = rsa.get('headlines', [])
+            headline_texts = [h.get('text', '').strip() for h in headlines if h.get('text')]
+            if headline_texts:
+                ad_name = " | ".join(headline_texts[:2])
+            else:
+                ad_name = f"Ad {ad.get('id', '')}"
+
+        # Determine ad type
+        raw_type = ad.get('type', '')
+        type_map = {
+            'RESPONSIVE_SEARCH_AD': 'text',
+            'EXPANDED_TEXT_AD': 'text',
+            'RESPONSIVE_DISPLAY_AD': 'dynamic',
+            'IMAGE_AD': 'image',
+            'VIDEO_AD': 'video',
+            'SHOPPING_PRODUCT_AD': 'dynamic',
+        }
+        ad_type = type_map.get(raw_type, 'text')
+        
+        final_urls = ad.get('finalUrls', [])
+        preview_url = final_urls[0] if final_urls else False
+        
         return {
             'platform_ad_id': str(ad.get('id', '')),
             'platform_adset_id': platform_adset_id,
-            'name': ad.get('name') or f"Ad {ad.get('id', '')}",
+            'name': ad_name,
             'status': status,
-            'ad_type': ad.get('type', 'UNKNOWN')
+            'ad_type': ad_type,
+            'preview_url': preview_url,
         }
         
     def normalize_metrics(self, raw_result):

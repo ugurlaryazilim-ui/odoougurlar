@@ -6,9 +6,9 @@ class AdsMetricDaily(models.Model):
     _description = 'Daily Performance Metrics'
     _order = 'date desc, campaign_id'
 
-    _unique_metric = models.Constraint(
-        'UNIQUE(campaign_id, adset_id, ad_id, date)',
-        'Metrics must be unique per campaign/adset/ad and date!',
+    _unique_metric = models.Index(
+        '(campaign_id, COALESCE(adset_id, 0), COALESCE(ad_id, 0), date)',
+        unique=True,
     )
 
     _check_non_negative = models.Constraint(
@@ -57,6 +57,21 @@ class AdsMetricDaily(models.Model):
     
     company_id = fields.Many2one('res.company', related='account_id.company_id', store=True)
     is_archived = fields.Boolean(string='Archived', default=False, index=True)
+
+    @api.constrains('campaign_id', 'adset_id', 'ad_id', 'date')
+    def _check_unique_metric(self):
+        for record in self:
+            domain = [
+                ('id', '!=', record.id),
+                ('campaign_id', '=', record.campaign_id.id),
+                ('date', '=', record.date),
+                ('adset_id', '=', record.adset_id.id if record.adset_id else False),
+                ('ad_id', '=', record.ad_id.id if record.ad_id else False),
+            ]
+            if self.search_count(domain):
+                raise models.ValidationError(
+                    f"A performance metric record already exists for Campaign '{record.campaign_id.name}' on {record.date}!"
+                )
 
     @api.depends('impressions', 'clicks', 'spend', 'conversions', 'conversion_value')
     def _compute_kpis(self):

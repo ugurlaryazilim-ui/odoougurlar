@@ -429,11 +429,11 @@ class AdsCampaign(models.Model):
             try:
                 # If responsible user has an email, send email or post to chatter
                 if template and campaign.user_id and campaign.user_id.email:
-                    template.send_mail(campaign.id, force_send=True)
+                    template.sudo().send_mail(campaign.id, force_send=True)
                     sent_count += 1
                 else:
                     # Fallback to chatter post
-                    campaign.message_post(
+                    campaign.sudo().message_post(
                         body=_("Haftalık performans raporu hazırlandı. Toplam harcama: %s, ROAS: %s") % (
                             campaign.total_spend, campaign.avg_roas
                         ),

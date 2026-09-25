@@ -167,6 +167,25 @@ class AdsAccount(models.Model):
                 self.message_post(body=_('Google Ads test failed: %s') % str(e))
                 raise UserError(str(e))
 
+    def write(self, vals):
+        res = super().write(vals)
+        if vals.get('state') == 'connected':
+            self._activate_sync_crons()
+        return res
+
+    def _activate_sync_crons(self):
+        """Automatically activate synchronization and token refresh crons when an account connects."""
+        cron_xml_ids = [
+            'ads_manager.ir_cron_ads_sync_campaigns',
+            'ads_manager.ir_cron_ads_sync_metrics',
+            'ads_manager.ir_cron_ads_refresh_tokens',
+        ]
+        for xml_id in cron_xml_ids:
+            cron = self.env.ref(xml_id, raise_if_not_found=False)
+            if cron and not cron.active:
+                cron.sudo().write({'active': True})
+                _logger.info("Automatically activated cron: %s", xml_id)
+
     def _save_google_refreshed_token(self, new_token, expires_in):
         self.sudo().write({
             'access_token': new_token,
@@ -390,14 +409,18 @@ class AdsAccount(models.Model):
         raw_campaigns = client.get_campaigns()
         created = updated = 0
         Campaign = self.env['ads.campaign']
+        existing_campaigns = {
+            c.platform_campaign_id: c 
+            for c in Campaign.search([('account_id', '=', self.id)])
+        }
         
+        to_create = []
         for raw in raw_campaigns:
             normalized = raw  # Google returns already-normalized data
-            existing = Campaign.search([
-                ('account_id', '=', self.id),
-                ('platform_campaign_id', '=', normalized['platform_campaign_id']),
-            ], limit=1)
-            
+            camp_pid = normalized.get('platform_campaign_id')
+            if not camp_pid:
+                continue
+                
             vals = {
                 'name': normalized['name'],
                 'status': normalized['status'],
@@ -406,16 +429,20 @@ class AdsAccount(models.Model):
                 'lifetime_budget': normalized.get('lifetime_budget', 0),
             }
             
+            existing = existing_campaigns.get(camp_pid)
             if existing:
                 existing.write(vals)
                 updated += 1
             else:
                 vals.update({
                     'account_id': self.id,
-                    'platform_campaign_id': normalized['platform_campaign_id'],
+                    'platform_campaign_id': camp_pid,
                 })
-                Campaign.create(vals)
-                created += 1
+                to_create.append(vals)
+                
+        if to_create:
+            created_records = Campaign.create(to_create)
+            created += len(created_records)
         
         return created, updated
 
@@ -467,21 +494,30 @@ class AdsAccount(models.Model):
         Adset = self.env['ads.adset']
         Campaign = self.env['ads.campaign']
         
+        campaigns_by_pid = {
+            c.platform_campaign_id: c
+            for c in Campaign.search([('account_id', '=', self.id)])
+        }
+        if not campaigns_by_pid:
+            return 0, 0
+            
+        existing_adsets = {
+            a.platform_adset_id: a
+            for a in Adset.search([('campaign_id', 'in', [c.id for c in campaigns_by_pid.values()])])
+        }
+        
+        to_create = []
         for raw in raw_adsets:
             normalized = raw  # already normalized
             camp_pid = raw.get('platform_campaign_id') or raw.get('campaign_id')
-            campaign = Campaign.search([
-                ('account_id', '=', self.id),
-                ('platform_campaign_id', '=', camp_pid),
-            ], limit=1)
+            campaign = campaigns_by_pid.get(camp_pid)
             if not campaign:
                 continue
-            
-            existing = Adset.search([
-                ('campaign_id', '=', campaign.id),
-                ('platform_adset_id', '=', normalized['platform_adset_id']),
-            ], limit=1)
-            
+                
+            adset_pid = normalized.get('platform_adset_id')
+            if not adset_pid:
+                continue
+                
             vals = {
                 'name': normalized['name'],
                 'status': normalized['status'],
@@ -489,16 +525,20 @@ class AdsAccount(models.Model):
                 'lifetime_budget': normalized.get('lifetime_budget', 0),
             }
             
+            existing = existing_adsets.get(adset_pid)
             if existing:
                 existing.write(vals)
                 updated += 1
             else:
                 vals.update({
                     'campaign_id': campaign.id,
-                    'platform_adset_id': normalized['platform_adset_id'],
+                    'platform_adset_id': adset_pid,
                 })
-                Adset.create(vals)
-                created += 1
+                to_create.append(vals)
+                
+        if to_create:
+            created_records = Adset.create(to_create)
+            created += len(created_records)
         
         return created, updated
 
@@ -547,35 +587,51 @@ class AdsAccount(models.Model):
         Ad = self.env['ads.ad']
         Adset = self.env['ads.adset']
         
+        adsets_by_pid = {
+            a.platform_adset_id: a
+            for a in Adset.search([('campaign_id.account_id', '=', self.id)])
+        }
+        if not adsets_by_pid:
+            return 0, 0
+            
+        existing_ads = {
+            ad.platform_ad_id: ad
+            for ad in Ad.search([('adset_id', 'in', [a.id for a in adsets_by_pid.values()])])
+        }
+        
+        to_create = []
         for raw in raw_ads:
             normalized = raw  # already normalized
             adset_pid = raw.get('platform_adset_id') or raw.get('adset_id')
-            adset = Adset.search([
-                ('platform_adset_id', '=', adset_pid),
-            ], limit=1)
+            adset = adsets_by_pid.get(adset_pid)
             if not adset:
                 continue
-            
-            existing = Ad.search([
-                ('adset_id', '=', adset.id),
-                ('platform_ad_id', '=', normalized['platform_ad_id']),
-            ], limit=1)
-            
+                
+            ad_pid = normalized.get('platform_ad_id')
+            if not ad_pid:
+                continue
+                
             vals = {
                 'name': normalized['name'],
                 'status': normalized['status'],
+                'ad_type': normalized.get('ad_type', 'text'),
+                'preview_url': normalized.get('preview_url') or False,
             }
             
+            existing = existing_ads.get(ad_pid)
             if existing:
                 existing.write(vals)
                 updated += 1
             else:
                 vals.update({
                     'adset_id': adset.id,
-                    'platform_ad_id': normalized['platform_ad_id'],
+                    'platform_ad_id': ad_pid,
                 })
-                Ad.create(vals)
-                created += 1
+                to_create.append(vals)
+                
+        if to_create:
+            created_records = Ad.create(to_create)
+            created += len(created_records)
         
         return created, updated
 
@@ -648,28 +704,39 @@ class AdsAccount(models.Model):
             date_to = date.today().isoformat()
         
         raw_insights = client.get_campaign_metrics(date_from=date_from, date_to=date_to)
-        
         Metric = self.env['ads.metric.daily']
         created = updated = 0
         
+        campaigns_by_pid = {
+            c.platform_campaign_id: c
+            for c in self.env['ads.campaign'].search([('account_id', '=', self.id)])
+        }
+        if not campaigns_by_pid:
+            return 0, 0
+            
+        existing_metrics = {
+            (m.campaign_id.id, str(m.date)): m
+            for m in Metric.search([
+                ('account_id', '=', self.id),
+                ('date', '>=', date_from),
+                ('date', '<=', date_to),
+                ('adset_id', '=', False),
+                ('ad_id', '=', False),
+            ])
+        }
+        
+        to_create = []
         for raw in raw_insights:
             normalized = raw  # already normalized
             camp_pid = raw.get('platform_campaign_id') or raw.get('campaign_id')
-            campaign = self.env['ads.campaign'].search([
-                ('account_id', '=', self.id),
-                ('platform_campaign_id', '=', camp_pid),
-            ], limit=1)
-            
+            campaign = campaigns_by_pid.get(camp_pid)
             if not campaign:
                 continue
-            
-            existing = Metric.search([
-                ('campaign_id', '=', campaign.id),
-                ('date', '=', normalized['date']),
-                ('adset_id', '=', False),
-                ('ad_id', '=', False),
-            ], limit=1)
-            
+                
+            metric_date = str(normalized.get('date', ''))
+            if not metric_date:
+                continue
+                
             vals = {
                 'impressions': normalized.get('impressions', 0),
                 'clicks': normalized.get('clicks', 0),
@@ -685,6 +752,7 @@ class AdsAccount(models.Model):
                 'frequency': normalized.get('frequency', 0.0),
             }
             
+            existing = existing_metrics.get((campaign.id, metric_date))
             if existing:
                 existing.write(vals)
                 updated += 1
@@ -692,10 +760,13 @@ class AdsAccount(models.Model):
                 vals.update({
                     'account_id': self.id,
                     'campaign_id': campaign.id,
-                    'date': normalized['date'],
+                    'date': metric_date,
                 })
-                Metric.create(vals)
-                created += 1
+                to_create.append(vals)
+                
+        if to_create:
+            created_records = Metric.create(to_create)
+            created += len(created_records)
         
         return created, updated
 
@@ -777,7 +848,7 @@ class AdsAccount(models.Model):
                         account._sync_google_full()
                 except Exception as e:
                     _logger.error('Cron sync failed for %s: %s', account.name, e)
-            self.env['ir.cron']._commit_progress(done=idx+1, remaining=total-idx-1)
+
 
     @api.model
     def _cron_sync_metrics(self):

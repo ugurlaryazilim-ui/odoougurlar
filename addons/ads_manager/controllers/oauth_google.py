@@ -12,7 +12,56 @@ from odoo import http, fields
 from odoo.http import request
 from odoo.exceptions import UserError, AccessError
 
+import hmac
+import hashlib
+import time
+
 _logger = logging.getLogger(__name__)
+
+def _get_oauth_secret(env):
+    secret = env['ir.config_parameter'].sudo().get_param('database.secret') or 'ads_oauth_default_secret'
+    return secret.encode('utf-8')
+
+def _generate_signed_state(env, account_id):
+    salt = secrets.token_hex(8)
+    ts = str(int(time.time()))
+    payload = f"{account_id}:{ts}:{salt}"
+    sig = hmac.new(_get_oauth_secret(env), payload.encode('utf-8'), hashlib.sha256).hexdigest()
+    return f"{payload}:{sig}"
+
+def _verify_signed_state(env, state_str, max_age_seconds=900):
+    """Verify HMAC signed state. Returns account_id if valid, None otherwise."""
+    if not state_str or ':' not in state_str:
+        return None
+    parts = state_str.split(':')
+    if len(parts) != 4:
+        return None
+    account_id_str, ts_str, salt, sig = parts
+    payload = f"{account_id_str}:{ts_str}:{salt}"
+    expected_sig = hmac.new(_get_oauth_secret(env), payload.encode('utf-8'), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected_sig):
+        return None
+    try:
+        ts = int(ts_str)
+        if time.time() - ts > max_age_seconds:
+            _logger.warning("OAuth state expired (age: %s seconds)", time.time() - ts)
+            return None
+        return int(account_id_str)
+    except (ValueError, TypeError):
+        return None
+
+def _get_clean_base_url():
+    base_url = request.httprequest.url_root.rstrip('/')
+    forwarded_proto = request.httprequest.headers.get('X-Forwarded-Proto')
+    if forwarded_proto == 'https' and base_url.startswith('http://'):
+        base_url = 'https://' + base_url[7:]
+    elif not base_url.startswith('https://') and 'localhost' not in base_url and '127.0.0.1' not in base_url:
+        param_url = request.env['ir.config_parameter'].sudo().get_param('web.base.url') or ''
+        if param_url.startswith('https://'):
+            base_url = param_url.rstrip('/')
+        else:
+            base_url = base_url.replace('http://', 'https://')
+    return base_url
 
 class AdsGoogleOAuthController(http.Controller):
 
@@ -29,13 +78,10 @@ class AdsGoogleOAuthController(http.Controller):
             if not account.google_client_id or not account.google_client_secret:
                 raise UserError("Google Client ID and Client Secret must be set before connecting.")
                 
-            base_url = request.env['ir.config_parameter'].sudo().get_param('web.base.url') or ''
-            if not base_url.startswith('https://') and 'localhost' not in base_url and '127.0.0.1' not in base_url:
-                base_url = base_url.replace('http://', 'https://')
+            base_url = _get_clean_base_url()
             redirect_uri = f"{base_url}/ads_manager/google/callback"
             
-            # Generate CSRF state token
-            state_token = secrets.token_hex(20)
+            state_token = _generate_signed_state(request.env, account_id)
             request.session['google_oauth_state'] = state_token
             request.session['google_oauth_account_id'] = account_id
             request.session['google_oauth_redirect_uri'] = redirect_uri
@@ -51,30 +97,29 @@ class AdsGoogleOAuthController(http.Controller):
             }
             
             auth_url = 'https://accounts.google.com/o/oauth2/v2/auth?' + urllib.parse.urlencode(params)
-            
             return werkzeug.utils.redirect(auth_url)
             
         except Exception as e:
             _logger.exception("Error initiating Google OAuth flow")
             return request.redirect('/web#action=ads_manager.action_ads_account')
 
-    @http.route('/ads_manager/google/callback', type='http', auth='user')
+    @http.route('/ads_manager/google/callback', type='http', auth='public', csrf=False)
     def google_callback(self, **kw):
         """Handles the Google OAuth 2.0 callback."""
-        account = request.env['ads.account']
+        account = request.env['ads.account'].sudo()
         try:
-            # 1. Verify CSRF state token
+            # 1. Verify CSRF state token using HMAC and/or session
             state = kw.get('state')
             session_state = request.session.pop('google_oauth_state', None)
-            account_id = request.session.pop('google_oauth_account_id', None)
+            session_account_id = request.session.pop('google_oauth_account_id', None)
             
-            if not state or not session_state or state != session_state:
-                raise UserError("Invalid or missing CSRF token.")
-                
+            verified_account_id = _verify_signed_state(request.env, state)
+            account_id = verified_account_id or session_account_id
+            
             if not account_id:
-                raise UserError("Missing account ID in session.")
+                raise UserError("Invalid or expired OAuth state token.")
                 
-            account = request.env['ads.account'].browse(int(account_id))
+            account = request.env['ads.account'].sudo().browse(int(account_id))
             if not account.exists():
                 raise UserError("Account not found.")
                 

@@ -73,7 +73,7 @@ class AdsAiProvider(models.Model):
         elif self.provider_type == 'openai':
             response = self._call_openai(prompt, context)
         elif self.provider_type == 'claude':
-            response = self._call_openai(prompt, context)  # Claude uses OpenAI-compatible API
+            response = self._call_claude(prompt, context)
         elif self.provider_type == 'ollama':
             response = self._call_ollama(prompt, context)
         else:
@@ -147,6 +147,39 @@ class AdsAiProvider(models.Model):
         except requests.exceptions.RequestException as e:
             _logger.error('OpenAI API error: %s', e)
             raise UserError(_('Failed to communicate with OpenAI API: %s') % str(e))
+
+    @api.private
+    def _call_claude(self, prompt, context):
+        """Call Anthropic Claude Messages API natively."""
+        api_key = self.api_key or self.env['ir.config_parameter'].sudo().get_param('ads_manager.claude_api_key')
+        if not api_key:
+            raise UserError(_('Claude API key is not configured.'))
+            
+        endpoint = self.endpoint_url or 'https://api.anthropic.com/v1/messages'
+        headers = {
+            'x-api-key': api_key,
+            'anthropic-version': '2023-06-01',
+            'content-type': 'application/json',
+        }
+        payload = {
+            'model': self.model_name or 'claude-3-5-sonnet-20241022',
+            'max_tokens': self.max_tokens or 1024,
+            'temperature': self.temperature,
+            'system': 'Sen bir dijital reklam analiz uzmanısın. Türkçe yanıt ver. Somut, veri odaklı öneriler sun.',
+            'messages': [
+                {'role': 'user', 'content': prompt}
+            ]
+        }
+        try:
+            response = requests.post(endpoint, headers=headers, json=payload, timeout=60)
+            response.raise_for_status()
+            data = response.json()
+            if 'content' in data and data['content']:
+                return data['content'][0].get('text', '')
+            return ''
+        except requests.exceptions.RequestException as e:
+            _logger.error('Claude API error: %s', e)
+            raise UserError(_('Failed to communicate with Claude API: %s') % str(e))
 
     @api.private
     def _call_ollama(self, prompt, context):
