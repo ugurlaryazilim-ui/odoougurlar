@@ -6,10 +6,7 @@ class AdsMetricDaily(models.Model):
     _description = 'Daily Performance Metrics'
     _order = 'date desc, campaign_id'
 
-    _unique_metric = models.Index(
-        '(campaign_id, COALESCE(adset_id, 0), COALESCE(ad_id, 0), date)',
-        unique=True,
-    )
+    _metric_lookup_idx = models.Index('(campaign_id, date, adset_id, ad_id)')
 
     _check_non_negative = models.Constraint(
         'CHECK(impressions >= 0 AND clicks >= 0 AND spend >= 0)',
