@@ -38,6 +38,14 @@
                                 <field name="ads_claude_api_key" password="True"/>
                             </div>
                         </div>
+                        <div class="col-12 col-lg-6 o_setting_box">
+                            <div class="o_setting_left_pane"/>
+                            <div class="o_setting_right_pane">
+                                <span class="o_form_label">AI Analiz Sıklığı</span>
+                                <div class="text-muted">Yapay zeka reklam analizini ne sıklıkla çalıştırsın?</div>
+                                <field name="ads_ai_analysis_frequency"/>
+                            </div>
+                        </div>
                     </div>
 
                     <h2>Sync Settings</h2>

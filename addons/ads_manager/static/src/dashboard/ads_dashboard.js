@@ -23,6 +23,10 @@ export class AdsManagerDashboard extends Component {
             period: "7d",
             platform: "all",
             currency_symbol: "",
+            // Custom date range
+            customDateFrom: "",
+            customDateTo: "",
+            showDatePicker: false,
             kpis: {
                 spend: 0,
                 spend_delta: 0,
@@ -82,10 +86,16 @@ export class AdsManagerDashboard extends Component {
     async loadData() {
         this.state.loading = true;
         try {
-            const data = await this.orm.call("ads.account", "get_dashboard_data", [], {
+            const params = {
                 period: this.state.period,
                 platform: this.state.platform,
-            }, { silent: true });
+            };
+            // Pass custom date range if selected
+            if (this.state.period === "custom" && this.state.customDateFrom && this.state.customDateTo) {
+                params.date_from = this.state.customDateFrom;
+                params.date_to = this.state.customDateTo;
+            }
+            const data = await this.orm.call("ads.account", "get_dashboard_data", [], params, { silent: true });
 
             this.state.currency_symbol = data.currency_symbol || "";
             this.state.kpis = data.kpis || this.state.kpis;
@@ -106,10 +116,38 @@ export class AdsManagerDashboard extends Component {
     }
 
     async setPeriod(period) {
+        if (period === "custom") {
+            this.state.showDatePicker = !this.state.showDatePicker;
+            // Don't reload data yet — wait for user to pick dates
+            return;
+        }
+        this.state.showDatePicker = false;
         if (this.state.period !== period) {
             this.state.period = period;
             await this.loadData();
         }
+    }
+
+    async applyCustomDateRange() {
+        if (!this.state.customDateFrom || !this.state.customDateTo) {
+            this.notification.add("Lütfen başlangıç ve bitiş tarihini seçin.", { type: "warning" });
+            return;
+        }
+        if (this.state.customDateFrom > this.state.customDateTo) {
+            this.notification.add("Başlangıç tarihi bitiş tarihinden sonra olamaz.", { type: "warning" });
+            return;
+        }
+        this.state.period = "custom";
+        this.state.showDatePicker = false;
+        await this.loadData();
+    }
+
+    onDateFromChange(ev) {
+        this.state.customDateFrom = ev.target.value;
+    }
+
+    onDateToChange(ev) {
+        this.state.customDateTo = ev.target.value;
     }
 
     async setPlatform(platform) {

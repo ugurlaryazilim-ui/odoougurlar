@@ -67,6 +67,21 @@
                                 t-on-click="() => this.setPeriod('mtd')">
                             Bu Ay
                         </button>
+                        <button type="button" 
+                                t-attf-class="btn {{state.period === '90d' ? 'btn-dark' : 'btn-outline-secondary'}}"
+                                t-on-click="() =&gt; this.setPeriod('90d')">
+                            90 Gün
+                        </button>
+                        <button type="button" 
+                                t-attf-class="btn {{state.period === 'ytd' ? 'btn-dark' : 'btn-outline-secondary'}}"
+                                t-on-click="() =&gt; this.setPeriod('ytd')">
+                            Bu Yıl
+                        </button>
+                        <button type="button" 
+                                t-attf-class="btn {{state.period === 'custom' || state.showDatePicker ? 'btn-dark' : 'btn-outline-secondary'}}"
+                                t-on-click="() =&gt; this.setPeriod('custom')">
+                            <i class="fa fa-calendar me-1"/> Özel
+                        </button>
                     </div>
 
                     <!-- Action Buttons -->
@@ -81,6 +96,23 @@
                     </button>
                 </div>
             </div>
+
+            <!-- Custom Date Range Picker -->
+            <t t-if="state.showDatePicker">
+                <div class="d-flex align-items-center gap-2 px-3 py-2 bg-light border-bottom">
+                    <span class="text-muted small fw-semibold">Tarih Aralığı:</span>
+                    <input type="date" class="form-control form-control-sm" style="max-width: 160px;"
+                           t-att-value="state.customDateFrom"
+                           t-on-change="(ev) =&gt; this.onDateFromChange(ev)"/>
+                    <span class="text-muted">—</span>
+                    <input type="date" class="form-control form-control-sm" style="max-width: 160px;"
+                           t-att-value="state.customDateTo"
+                           t-on-change="(ev) =&gt; this.onDateToChange(ev)"/>
+                    <button class="btn btn-sm btn-primary" t-on-click="() =&gt; this.applyCustomDateRange()">
+                        <i class="fa fa-check me-1"/> Uygula
+                    </button>
+                </div>
+            </t>
 
             <!-- Dashboard Content Container -->
             <div class="ads-dashboard-content p-3">

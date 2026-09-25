@@ -941,12 +941,19 @@ class AdsAccount(models.Model):
                 _logger.error(f"Failed to refresh token for account {account.name}: {str(e)}")
 
     @api.model
-    def get_dashboard_data(self, period='7d', platform='all', account_id=None, compare=False):
+    def get_dashboard_data(self, period='7d', platform='all', account_id=None, compare=False, date_from=None, date_to=None):
         """
         Comprehensive dashboard analytics aggregation for OWL frontend.
+        Supports custom date range with date_from/date_to parameters.
         """
         today = date.today()
-        if period == '7d':
+        if period == 'custom' and date_from and date_to:
+            # Custom date range
+            start_date = date.fromisoformat(str(date_from))
+            end_date = date.fromisoformat(str(date_to))
+            delta_days = (end_date - start_date).days + 1
+            today = end_date  # Use end_date as reference point
+        elif period == '7d':
             delta_days = 7
             start_date = today - timedelta(days=7)
         elif period == '30d':
