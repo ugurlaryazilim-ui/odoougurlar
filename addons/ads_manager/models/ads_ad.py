@@ -31,5 +31,6 @@ class AdsAd(models.Model):
         ('dynamic', 'Dynamic')
     ], string='Ad Type')
     
+    creative_id = fields.Char(string='Creative ID')
     preview_url = fields.Char(string='Preview URL')
     company_id = fields.Many2one('res.company', related='adset_id.company_id', store=True)
