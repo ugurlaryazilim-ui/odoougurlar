@@ -274,6 +274,63 @@ class FalProvider(AIProviderBase):
             'request_id': request_id,
             'seed': seed_val,
         }
+    ERASE_APP = 'fal-ai/flux-pro/v1/fill'
+    ERASE_PROMPT = (
+        "The same garment fabric continuing seamlessly, matching the surrounding color, "
+        "texture, weave and pattern exactly. No tag, label, pin, plastic or paper object."
+    )
+
+    def erase_regions(self, image_base64, tag_boxes, prompt=None, timeout=120):
+        """Etiket kutularını maskeleyip FLUX.1 Pro Fill ile kumaşla doldur.
+
+        upload_image görseli küçültüp WebP'ye çevirdiği için kullanılmaz: Fill görsel
+        ve maskenin birebir aynı boyutta olmasını ister; ikisi de burada yüklenir.
+
+        Returns:
+            (bytes veya None, float cost)
+        """
+        self._check_client()
+        import io
+        import requests as req_lib
+        from PIL import Image, ImageDraw
+        from .garment_preprocessor import tag_box_to_pixels
+
+        raw = image_base64.decode('ascii') if isinstance(image_base64, bytes) else image_base64
+        img = Image.open(io.BytesIO(base64.b64decode(raw))).convert('RGB')
+        if max(img.size) > 2048:
+            img.thumbnail((2048, 2048), Image.LANCZOS)
+        w, h = img.size
+        mask = Image.new('L', (w, h), 0)
+        draw = ImageDraw.Draw(mask)
+        drawn = 0
+        for item in tag_boxes or []:
+            rect = tag_box_to_pixels(item, w, h)
+            if rect:
+                draw.rectangle(rect, fill=255)  # beyaz = doldurulacak alan
+                drawn += 1
+        if not drawn:
+            return None, 0.0
+
+        img_buf, mask_buf = io.BytesIO(), io.BytesIO()
+        img.save(img_buf, format='JPEG', quality=95)
+        mask.save(mask_buf, format='PNG')
+        image_url = fal_client.upload(img_buf.getvalue(), 'image/jpeg', file_name='garment.jpg')
+        mask_url = fal_client.upload(mask_buf.getvalue(), 'image/png', file_name='mask.png')
+        result = fal_client.subscribe(self.ERASE_APP, arguments={
+            'prompt': prompt or self.ERASE_PROMPT,
+            'image_url': image_url,
+            'mask_url': mask_url,
+            'output_format': 'png',
+            'safety_tolerance': '5',
+        }, client_timeout=timeout)
+        images = (result or {}).get('images') or []
+        out_url = images[0].get('url') if images and isinstance(images[0], dict) else ''
+        if not out_url:
+            return None, 0.0
+        cost = round(0.05 * max(1.0, w * h / 1e6), 4)
+        _logger.info('FLUX Fill ile %d etiket bölgesi silindi (%dx%d, $%.3f)', drawn, w, h, cost)
+        return req_lib.get(out_url, timeout=60).content, cost
+
     def single_image_edit(self, image_base64, prompt, timeout=120):
         """Tek görseli Seedream ile düzenle (etiket silme, manken bacak düzeltme vb.).
 

@@ -14,7 +14,9 @@ from ..services.fal_error_handler import parse_fal_error
 from ..services.fal_provider import FalProvider
 from ..services import garment_analyzer as analyzer_module
 from ..services.garment_analyzer import build_generation_prompt, detect_image_tags
-from ..services.garment_preprocessor import inpaint_security_tags, preprocess_garment_image
+from ..services.garment_preprocessor import (
+    crop_to_content, inpaint_security_tags, preprocess_garment_image, tag_box_to_pixels,
+)
 from ..services.quality_checker import compute_quality_score, delta_e_ciede2000
 
 try:
@@ -225,6 +227,57 @@ class TestTagDetection(BaseCase):
             result = analyzer_module._gemini_json('k', 'p', 'IMG', schema={'type': 'OBJECT'})
         self.assertEqual(result, {'securityTags': []})
         self.assertEqual(calls, [True, False])
+
+
+@tagged('post_install', '-at_install', 'ugurlar_ai_studio')
+class TestTagErasing(BaseCase):
+
+    def test_box_filtering(self):
+        self.assertIsNone(tag_box_to_pixels({'box_2d': [100, 100, 150, 150], 'label': 'design_label'}, 1000, 1000))
+        self.assertIsNone(tag_box_to_pixels({'box_2d': [100, 100, 150, 150], 'confidence': 0.2}, 1000, 1000))
+        self.assertIsNone(tag_box_to_pixels({'box_2d': [0, 0, 700, 700], 'confidence': 0.9}, 1000, 1000))
+        rect = tag_box_to_pixels({'box_2d': [100, 200, 150, 260], 'label': 'alarm_tag', 'confidence': 0.9}, 1000, 1000)
+        x1, y1, x2, y2 = rect
+        self.assertTrue(x1 < 200 and y1 < 100 and x2 > 260 and y2 > 150, 'kutu dolgulu olmalı')
+
+    def test_crop_to_content(self):
+        img = Image.new('RGB', (1000, 1600), 'white')
+        ImageDraw.Draw(img).rectangle([400, 600, 600, 1000], fill=(60, 30, 20))
+        out = Image.open(io.BytesIO(base64.b64decode(crop_to_content(_jpeg_b64(img)))))
+        self.assertLess(out.size[0], 400)
+        self.assertLess(out.size[1], 600)
+
+    def test_erase_regions_sends_matching_mask(self):
+        uploads = []
+
+        def fake_upload(data, content_type, file_name=None):
+            uploads.append(Image.open(io.BytesIO(data)))
+            return 'https://cdn/%d' % len(uploads)
+
+        class FakeResp:
+            content = b'PNGDATA'
+
+        img = Image.new('RGB', (800, 1200), (60, 30, 20))
+        with patch.object(fal_provider_module, 'fal_client') as fc,                 patch('requests.get', return_value=FakeResp()):
+            fc.upload.side_effect = fake_upload
+            fc.subscribe.return_value = {'images': [{'url': 'https://out'}]}
+            data, cost = FalProvider('k').erase_regions(
+                _jpeg_b64(img), [{'box_2d': [100, 100, 150, 200], 'label': 'alarm_tag', 'confidence': 0.9}])
+            args = fc.subscribe.call_args.kwargs['arguments']
+        self.assertEqual(data, b'PNGDATA')
+        self.assertGreater(cost, 0)
+        image, mask = uploads
+        self.assertEqual(image.size, mask.size, 'FLUX Fill görsel ve maskenin aynı boyutta olmasını ister')
+        self.assertEqual(mask.getpixel((120, 150)), 255, 'etiket bölgesi beyaz (doldurulacak)')
+        self.assertEqual(mask.getpixel((700, 1100)), 0)
+        self.assertEqual(args['mask_url'], 'https://cdn/2')
+
+    def test_erase_regions_skips_design_labels(self):
+        with patch.object(fal_provider_module, 'fal_client') as fc:
+            data, cost = FalProvider('k').erase_regions(
+                _jpeg_b64(Image.new('RGB', (100, 100))), [{'box_2d': [10, 10, 20, 20], 'label': 'design_label'}])
+        self.assertIsNone(data)
+        fc.subscribe.assert_not_called()
 
 
 @tagged('post_install', '-at_install', 'ugurlar_ai_studio')

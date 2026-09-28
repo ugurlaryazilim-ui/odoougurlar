@@ -198,28 +198,51 @@ AUTO_FIX_INSTRUCTIONS = {
 
 
 def _auto_fix_defects(env, generated_b64, codes):
-    """Denetimin bulduğu düzeltilebilir hataları tek Seedream düzenlemesiyle gider.
+    """Denetimin bulduğu düzeltilebilir hataları gider.
+
+    - Elbise altı pantolon: Seedream düzenlemesi (bütünsel değişiklik)
+    - Görünür etiket: sonuçta kutular tespit edilip maskeli FLUX Fill ile silinir
+      (maskesiz düzenleme bel bandındaki alarmı çoğu zaman tasarım sanıp korur);
+      kutu bulunamazsa Seedream düzenlemesi yedek olarak denenir.
 
     Returns:
         (bytes base64, float cost, list fixed_codes) veya (None, 0.0, [])
     """
     fixable = [c for c in codes if c in AUTO_FIX_INSTRUCTIONS]
-    fal_key = env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fal_api_key')
+    icp = env['ir.config_parameter'].sudo()
+    fal_key = icp.get_param('ugurlar_ai_studio.fal_api_key')
     if not fixable or not fal_key:
         return None, 0.0, []
     from ..services.fal_provider import FalProvider
-    prompt = ("Image 1 is a fashion e-commerce photo. "
-              + ' '.join(AUTO_FIX_INSTRUCTIONS[c] for c in fixable)
-              + " Keep everything else exactly the same: the model, face, pose, garment shape "
-                "and details, background and lighting.")
+    provider = FalProvider(fal_key)
+    current, total_cost, fixed = generated_b64, 0.0, []
+
+    def _seedream(instructions):
+        prompt = ("Image 1 is a fashion e-commerce photo. " + ' '.join(instructions)
+                  + " Keep everything else exactly the same: the model, face, pose, garment shape "
+                    "and details, background and lighting.")
+        return provider.single_image_edit(current, prompt)
+
     try:
-        data, cost = FalProvider(fal_key).single_image_edit(generated_b64, prompt)
+        if 'pants_under_dress' in fixable:
+            data, cost = _seedream([AUTO_FIX_INSTRUCTIONS['pants_under_dress']])
+            if data:
+                current, total_cost = base64.b64encode(_convert_to_jpeg(data)), total_cost + cost
+                fixed.append('pants_under_dress')
+        if 'store_tag_visible' in fixable:
+            from ..services.garment_analyzer import detect_image_tags
+            tags = detect_image_tags(None, current, gemini_api_key=icp.get_param('ugurlar_ai_studio.gemini_api_key', ''))
+            data, cost = provider.erase_regions(current, tags) if tags else (None, 0.0)
+            if not data:
+                data, cost = _seedream([AUTO_FIX_INSTRUCTIONS['store_tag_visible']])
+            if data:
+                current, total_cost = base64.b64encode(_convert_to_jpeg(data)), total_cost + cost
+                fixed.append('store_tag_visible')
     except Exception as e:
         _logger.warning('Otomatik düzeltme başarısız (%s): %s', fixable, e)
+    if not fixed:
         return None, 0.0, []
-    if not data:
-        return None, 0.0, []
-    return base64.b64encode(_convert_to_jpeg(data)), cost, fixable
+    return current, total_cost, fixed
 
 
 def _needs_bare_legs(session, analysis=None):
@@ -1279,16 +1302,14 @@ class AiStudioSession(models.Model):
         Returns:
             tuple: (garment_url, processed_b64) — CDN URL ve işlenmiş base64
         """
-        # Etiketler her fotoğrafta ayrı, odaklı bir taramayla bulunur
-        if security_tags is None and source_image:
-            security_tags = self._detect_security_tags(session, source_image)
-
         from ..services.garment_preprocessor import (
             preprocess_garment_image,
             convert_birefnet_output_to_rgb,
+            crop_to_content,
         )
-        preprocessed = preprocess_garment_image(source_image, target_long_edge=1600, security_tags=security_tags)
+        preprocessed = preprocess_garment_image(source_image, target_long_edge=1600)
         processed_b64 = preprocessed['image_base64']
+        garment_b64 = processed_b64
 
         if auto_bg and processed_b64:
             try:
@@ -1299,15 +1320,47 @@ class AiStudioSession(models.Model):
                     rgb_b64 = base64.b64encode(rgb_data)
                 except Exception:
                     rgb_b64 = bg_removed_b64
-                cleaned_b64 = session._remove_hanger_hook(rgb_b64)
-                garment_url = provider.upload_image(cleaned_b64)
+                garment_b64 = session._remove_hanger_hook(rgb_b64)
+                # Oda gidince ürün kadrajı doldurur: alarm görece büyür, tespit ve silme isabetlenir
+                garment_b64 = crop_to_content(garment_b64)
             except Exception as e:
                 _logger.warning('BG remove başarısız, orijinal kullanılacak: %s', e)
-                garment_url = provider.upload_image(processed_b64)
-        else:
-            garment_url = provider.upload_image(processed_b64)
+                garment_b64 = processed_b64
 
+        # Mağaza alarmı / fiyat etiketi: ürüne kırpılmış görselde bul, maskeli AI ile sil
+        garment_b64 = self._remove_store_tags(session, garment_b64, security_tags)
+
+        garment_url = provider.upload_image(garment_b64)
         return garment_url, processed_b64
+
+    def _remove_store_tags(self, session, image_b64, tags=None):
+        """Görseldeki mağaza etiketlerini sil (FLUX Fill; olmazsa OpenCV Telea).
+
+        Returns:
+            base64 görsel (etiket yoksa / silinemezse girdinin kendisi)
+        """
+        if not image_b64:
+            return image_b64
+        if tags is None:
+            tags = self._detect_security_tags(session, image_b64)
+        if not tags:
+            _logger.info('Ürün görselinde mağaza etiketi bulunamadı (session=%s)', session.id)
+            return image_b64
+        fal_key = session.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fal_api_key')
+        if fal_key:
+            from ..services.fal_provider import FalProvider
+            try:
+                data, _cost = FalProvider(fal_key).erase_regions(image_b64, tags)
+                if data:
+                    return base64.b64encode(_convert_to_jpeg(data, quality=95))
+            except Exception as e:
+                _logger.warning('AI etiket silme başarısız, OpenCV kullanılacak: %s', e)
+        from ..services.garment_preprocessor import inpaint_tags_base64
+        try:
+            return inpaint_tags_base64(image_b64, tags)
+        except Exception as e:
+            _logger.warning('OpenCV etiket silme başarısız: %s', e)
+            return image_b64
 
     def _process_detail_generation(self, gen, session, provider, source_image, auto_bg, provider_type, preset):
         """Detay fotoğrafı generation'ını işle (crop veya BG remove).

@@ -268,7 +268,8 @@ _TAG_SCHEMA = {
                 "type": "OBJECT",
                 "properties": {
                     "box_2d": {"type": "ARRAY", "items": {"type": "INTEGER"}},
-                    "label": {"type": "STRING", "enum": ["alarm_tag", "price_tag", "hangtag", "tag_pin"]},
+                    "label": {"type": "STRING",
+                              "enum": ["alarm_tag", "price_tag", "hangtag", "tag_pin", "design_label"]},
                     "confidence": {"type": "NUMBER"},
                 },
                 "required": ["box_2d", "label"],
@@ -278,13 +279,14 @@ _TAG_SCHEMA = {
     "required": ["securityTags"],
 }
 
-_TAG_PROMPT = """Detect every retail store item attached to this garment that must be removed before a product photo:
-- alarm_tag: plastic security / EAS hard tag (round, oval or rectangular, often grey or white), ink tag, magnetic sensor clip
-- price_tag: paper or cardboard price / barcode tag
+_TAG_PROMPT = """This garment was photographed inside a clothing store. Find every store item attached to it that must be removed before the product photo is published:
+- alarm_tag: store security (EAS) hard tag. A rigid plastic piece, usually grey, white or black, round, oval or rectangular, about 2-6 cm, clipped ON TOP of the fabric with a pin. Very often on the waistband (front or back), hem, side seam or cuff.
+- price_tag: paper or cardboard price or barcode tag, or a price sticker
 - hangtag: brand hangtag hanging on a string, plastic fastener or safety pin
 - tag_pin: the pin, plastic loop or string that attaches a tag
-Include the whole object and its attachment. Do NOT report the garment's own buttons, rivets, zipper pulls, buckles, brooches, sewn-in labels or prints.
-Give each item a confidence from 0.0 to 1.0 and report anything at least 50% likely.
+Also report the garment's own sewn-flat design elements that look similar (woven brand patch, leather patch) as "design_label", but ONLY when you are sure they are stitched into the garment. If you are unsure whether a small rectangle on the waistband is a store alarm tag or a brand patch, report it as "alarm_tag".
+Never report buttons, rivets, zipper pulls, buckles, drawstrings or prints.
+Include the whole object and its attachment in the box. Give each item a confidence from 0.0 to 1.0 and report anything at least 50% likely.
 box_2d is [ymin, xmin, ymax, xmax] normalized to 0-1000.
 Return JSON: {"securityTags": [{"box_2d": [ymin, xmin, ymax, xmax], "label": "alarm_tag", "confidence": 0.9}]}
 Return {"securityTags": []} if there is none."""

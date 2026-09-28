@@ -115,6 +115,78 @@ MIN_TAG_CONFIDENCE = 0.5
 MAX_TAG_AREA_RATIO = 0.15
 
 
+def tag_box_to_pixels(item, w, h, pad_ratio=0.25, min_pad=10):
+    """Gemini kutusunu ([ymin, xmin, ymax, xmax], 0-1000) dolgulu piksel dikdörtgenine çevir.
+
+    Returns:
+        (x1, y1, x2, y2) veya None (geçersiz / silinmemeli)
+    """
+    box = item.get('box_2d') if isinstance(item, dict) else item
+    if not box or len(box) < 4:
+        return None
+    if isinstance(item, dict):
+        if item.get('label') == 'design_label':
+            return None  # ürünün kendi tasarım etiketi — dokunma
+        if item.get('confidence') is not None:
+            try:
+                if float(item['confidence']) < MIN_TAG_CONFIDENCE:
+                    return None
+            except (TypeError, ValueError):
+                pass
+    try:
+        ymin, xmin, ymax, xmax = (float(v) for v in box[:4])
+    except (TypeError, ValueError):
+        return None
+    if max(ymin, xmin, ymax, xmax) > 1.0:
+        ymin, xmin, ymax, xmax = ymin / 1000.0, xmin / 1000.0, ymax / 1000.0, xmax / 1000.0
+    px1, py1 = max(0, int(xmin * w)), max(0, int(ymin * h))
+    px2, py2 = min(w, int(xmax * w)), min(h, int(ymax * h))
+    if px2 <= px1 or py2 <= py1:
+        return None
+    if (px2 - px1) * (py2 - py1) > MAX_TAG_AREA_RATIO * w * h:
+        return None  # etiket değil (cep, logo, baskı...)
+    pad_x = max(min_pad, int((px2 - px1) * pad_ratio))
+    pad_y = max(min_pad, int((py2 - py1) * pad_ratio))
+    return (max(0, px1 - pad_x), max(0, py1 - pad_y), min(w, px2 + pad_x), min(h, py2 + pad_y))
+
+
+def crop_to_content(image_base64, margin_ratio=0.04, threshold=245):
+    """Beyaz zeminli (arka planı kaldırılmış) ürün görselini ürüne kırp.
+
+    Mağaza fotoğrafında ürün kadrajın küçük bir kısmıdır; kırpmak hem etiket
+    tespitinde alarmı büyütür hem de try-on'a daha net ürün görseli gider.
+    """
+    if Image is None:
+        return image_base64
+    try:
+        img = Image.open(io.BytesIO(base64.b64decode(image_base64))).convert('RGB')
+        arr = np.array(img)
+        content = np.where(arr.min(axis=2) < threshold)
+        if content[0].size == 0:
+            return image_base64
+        y1, y2 = int(content[0].min()), int(content[0].max())
+        x1, x2 = int(content[1].min()), int(content[1].max())
+        w, h = img.size
+        if (x2 - x1) * (y2 - y1) > 0.9 * w * h:
+            return image_base64  # zaten sıkı kadraj
+        mx, my = int(w * margin_ratio), int(h * margin_ratio)
+        img = img.crop((max(0, x1 - mx), max(0, y1 - my), min(w, x2 + mx), min(h, y2 + my)))
+        return to_jpeg_base64(img, quality=95)
+    except Exception as e:
+        _logger.warning('Ürüne kırpma başarısız: %s', e)
+        return image_base64
+
+
+def inpaint_tags_base64(image_base64, tag_boxes):
+    """Base64 görsel üzerinde OpenCV Telea ile etiket silme (AI silme yedeği)."""
+    if cv2 is None or not tag_boxes:
+        return image_base64
+    img = Image.open(io.BytesIO(base64.b64decode(image_base64))).convert('RGB')
+    bgr = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+    bgr = inpaint_security_tags(bgr, tag_boxes)
+    return to_jpeg_base64(Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)), quality=95)
+
+
 def inpaint_security_tags(img_bgr, tag_boxes):
     """Giysi uzerindeki magazaya ait guvenlik etiketlerini ve alarm pinlerini
     OpenCV Telea inpainting algoritmasi ile cevre kumas dokusuna gore siler.
@@ -136,6 +208,8 @@ def inpaint_security_tags(img_bgr, tag_boxes):
         box = item.get('box_2d') if isinstance(item, dict) else item
         if not box or len(box) < 4:
             continue
+        if isinstance(item, dict) and item.get('label') == 'design_label':
+            continue  # ürünün kendi tasarım etiketi
         # Düşük güvenli tespitleri atla (yanlış pozitif = kumaşta leke)
         if isinstance(item, dict) and item.get('confidence') is not None:
             try:
