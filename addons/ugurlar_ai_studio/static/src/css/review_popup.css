@@ -322,6 +322,17 @@
     background: rgba(124, 58, 237, 0.06);
 }
 
+/* AI görsel denetimin bulduğu hatalar */
+.ais-rp-qc-warning {
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    color: #92400e;
+    background: #fef3c7;
+    border-bottom: 1px solid #fcd34d;
+}
+
 .ais-rp-img-wrap {
     flex: 1;
     display: flex;

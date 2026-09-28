@@ -74,6 +74,14 @@ class ResConfigSettings(models.TransientModel):
         help='Seedream v5 Pro çıktı boyutu (2:3). Her iki boyut da Trendyol 1200×1800 '
              'gereksinimini karşılar; yüksek detay zoom kalitesi için daha iyidir.',
     )
+    ai_studio_visual_qc = fields.Boolean(
+        string='AI Görsel Denetim',
+        default=True,
+        config_parameter='ugurlar_ai_studio.visual_qc',
+        help='Her üretimi Gemini ile elbise altında pantolon, bozuk el, görünür etiket gibi '
+             'hatalara karşı denetler; bulunan hatalar kalite skorunu düşürür ve '
+             'kalite detayında listelenir (görsel başına ~$0.001).',
+    )
     ai_studio_auto_bg_remove = fields.Boolean(
         string='Otomatik Arka Plan Kaldırma',
         default=True,

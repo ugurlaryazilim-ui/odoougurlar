@@ -1,14 +1,15 @@
 # Garment (urun gorseli) on isleme pipeline'i.
 #
-# FASHN API'ye gonderilmeden once urun gorsellerini profesyonel
-# sekilde hazirlayan 7 adimli pipeline:
-#   1. Beyaz denge duzeltme (Gray-World)
+# AI try-on'a gonderilmeden once urun gorsellerini hazirlayan pipeline:
+#   0. Guvenlik etiketi silme (inpaint)
+#   1. Beyaz denge (Gray-World) — VARSAYILAN KAPALI: tek renkli (ör. kirmizi)
+#      giysilerde ortalamayi griye cekip urun rengini bozuyordu
 #   2. Pozlama normalizasyonu (CLAHE)
-#   3. Gurultu azaltma (bilateral filter)
-#   4. Akilli boyutlandirma (Lanczos, 864px hedef)
+#   3. Gurultu azaltma (bilateral) — VARSAYILAN KAPALI: orgu/tvit dokusunu yumusatiyordu
+#   4. Akilli boyutlandirma (Lanczos)
 #   5. RGBA -> RGB beyaz zemin donusumu
 #   6. Hafif keskinlestirme (unsharp mask)
-#   7. JPEG cikti (%95 kalite)
+#   7. WebP cikti (%95 kalite)
 
 import base64
 import io
@@ -108,6 +109,11 @@ def reduce_noise(img_array, d=9, sigma_color=75, sigma_space=75):
 # ---------------------------------------------------------------------------
 # 3.5 Güvenlik Etiketi / Alarm Pini Silme — Inpainting (Telea)
 # ---------------------------------------------------------------------------
+# Etiket inpaint eşikleri
+MIN_TAG_CONFIDENCE = 0.7
+MAX_TAG_AREA_RATIO = 0.08
+
+
 def inpaint_security_tags(img_bgr, tag_boxes):
     """Giysi uzerindeki magazaya ait guvenlik etiketlerini ve alarm pinlerini
     OpenCV Telea inpainting algoritmasi ile cevre kumas dokusuna gore siler.
@@ -129,6 +135,13 @@ def inpaint_security_tags(img_bgr, tag_boxes):
         box = item.get('box_2d') if isinstance(item, dict) else item
         if not box or len(box) < 4:
             continue
+        # Düşük güvenli tespitleri atla (yanlış pozitif = kumaşta leke)
+        if isinstance(item, dict) and item.get('confidence') is not None:
+            try:
+                if float(item['confidence']) < MIN_TAG_CONFIDENCE:
+                    continue
+            except (TypeError, ValueError):
+                pass
 
         try:
             ymin, xmin, ymax, xmax = float(box[0]), float(box[1]), float(box[2]), float(box[3])
@@ -146,6 +159,11 @@ def inpaint_security_tags(img_bgr, tag_boxes):
         py2 = min(h, int(ymax * h))
 
         if px2 <= px1 or py2 <= py1:
+            continue
+        # Görselin büyük bölümünü kaplayan kutu etiket değildir (ör. cep, logo);
+        # inpaint geniş desenli alanı bulanık lekeye çevirir
+        if (px2 - px1) * (py2 - py1) > MAX_TAG_AREA_RATIO * w * h:
+            _logger.info('Inpaint: aşırı büyük etiket kutusu atlandı (%dx%d)', px2 - px1, py2 - py1)
             continue
 
         # Etiketin/pinin metal/plastik ve kağıt kenarlarını tam kapsamak için %20 padding ekle
@@ -324,10 +342,10 @@ def to_png_bytes(pil_image):
 # ANA PIPELINE
 # ===========================================================================
 
-def preprocess_garment_image(image_base64, target_long_edge=864,
-                              apply_white_balance=True,
+def preprocess_garment_image(image_base64, target_long_edge=1600,
+                              apply_white_balance=False,
                               apply_exposure_norm=True,
-                              apply_noise_reduction=True,
+                              apply_noise_reduction=False,
                               apply_sharpening=True,
                               security_tags=None):
     """Urun gorselini FASHN/fal.ai API'ye gondermeden once profesyonel sekilde hazirlar.
@@ -431,7 +449,7 @@ def preprocess_garment_image(image_base64, target_long_edge=864,
         final_size = pil_image.size
 
         # 7. Cikti (WebP: Fal CDN ve GPU transferinde %80-90 daha hafif ve hızlı)
-        result_b64 = to_webp_base64(pil_image, quality=92)
+        result_b64 = to_webp_base64(pil_image, quality=95)
         result_bytes = to_png_bytes(pil_image)
 
         _logger.info(

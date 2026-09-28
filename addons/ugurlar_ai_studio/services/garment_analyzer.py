@@ -137,7 +137,8 @@ Ignore any hangers, clips, hands, or mannequins holding the garment. Focus ONLY 
 STORE SECURITY & PRICE TAG DETECTION:
 1. Detect any retail store security alarm devices (round/oval/rectangular plastic EAS hard tags, magnetic sensor clips, alarm pins) AND any paper/cardboard store price tags, barcode hangtags, or brand labels attached with pins/strings to the garment (waistband, collar, hem, or pocket).
 2. Do NOT report real garment design elements: regular buttons, denim rivets, grommets, zipper pulls, belt buckles, or brooches.
-3. In the "securityTags" field, return the 2D bounding boxes of all detected security alarms, sensor tags, and store price hangtags in normalized coordinates [ymin, xmin, ymax, xmax] on a scale of 0 to 1000. If none found, return [].
+3. For each item give "confidence" (0.0-1.0). Only report items you are at least 70% sure are store tags, not garment design.
+4. In the "securityTags" field, return the 2D bounding boxes of all detected security alarms, sensor tags, and store price hangtags in normalized coordinates [ymin, xmin, ymax, xmax] on a scale of 0 to 1000. If none found, return [].
 
 CRITICAL NECKLINE INSTRUCTION: If the garment is hanging on a hanger, the front collar often drops down, revealing the INSIDE of the BACK panel (inner back lining, back collar label, or back keyhole). You MUST completely IGNORE anything visible through the neck hole. Do NOT describe the inner back lining as part of the front collar. If you see a keyhole or label through the neck opening, do NOT say the garment has a keyhole collar. Assume a clean, standard front neckline.
 
@@ -183,7 +184,8 @@ Analyze the garment and return a JSON with these fields:
   "securityTags": [
     {
       "box_2d": [100, 200, 150, 250],
-      "label": "alarm_pin"
+      "label": "alarm_pin",
+      "confidence": 0.95
     }
   ]
 }
@@ -265,12 +267,14 @@ def detect_image_tags(api_key, image_url, gemini_api_key=None):
 
     tag_prompt = """Locate all retail store security alarm devices (EAS tags, magnetic sensor pins) and paper/cardboard store price tags, barcode hangtags pinned or clipped to the garment.
 Do NOT report garment buttons, rivets, zipper pulls, or belt buckles.
+For each item give "confidence" (0.0-1.0); only report items you are at least 70% sure are store tags.
 Return valid JSON only:
 {
   "securityTags": [
     {
       "box_2d": [ymin, xmin, ymax, xmax],
-      "label": "alarm_or_tag"
+      "label": "alarm_or_tag",
+      "confidence": 0.95
     }
   ]
 }
@@ -804,6 +808,72 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         photo_type, provider_type, sub_type, len(base_prompt), len(base_prompt.split()),
     )
     return {'positive': base_prompt, 'negative': negative}
+
+
+
+# Görsel denetim hata kodları → reviewer'a gösterilecek Türkçe metin
+VISUAL_QC_ISSUES = {
+    'pants_under_dress': 'Elbise/etek altında pantolon veya tayt var',
+    'bad_hands': 'El veya parmak bozuk',
+    'store_tag_visible': 'Mağaza/alarm etiketi görünüyor',
+    'extra_limbs_or_person': 'Fazla uzuv veya ikinci kişi var',
+    'text_or_watermark': 'Görselde yazı veya filigran var',
+    'garment_mismatch': 'Kıyafet ürünle uyuşmuyor',
+}
+
+
+def visual_quality_check(gemini_api_key, generated_image, garment_hint='', timeout=25):
+    """AI çıktısını Gemini ile gerçek üretim hatalarına karşı denetle.
+
+    Renk/keskinlik metrikleri "elbise altında pantolon" veya "altı parmak" gibi
+    hataları yakalayamaz; bu kontrol reviewer'ın gözünü sorunlu görsellere çevirir.
+
+    Args:
+        gemini_api_key: Google Gemini API anahtarı (yoksa kontrol atlanır)
+        generated_image: AI çıktısı (base64 / bytes)
+        garment_hint: ürün tarifi, ör. "Siyah Midi Elbise (one_piece)"
+
+    Returns:
+        dict: {'issues': [Türkçe metin, ...], 'codes': [kod, ...]} veya None (kontrol yapılamadı)
+    """
+    if not gemini_api_key or not generated_image or requests is None:
+        return None
+    mime_type, base64_data = _prepare_gemini_image(generated_image)
+    if not base64_data:
+        return None
+
+    codes_doc = '\n'.join(f'- "{code}"' for code in VISUAL_QC_ISSUES)
+    prompt = f"""You are a strict QA reviewer for AI-generated fashion e-commerce photos.
+The product being modeled: {garment_hint or 'a garment'}.
+Check the photo ONLY for these defects and report a code only when it is clearly present:
+{codes_doc}
+Rules:
+- "pants_under_dress": only for dresses/skirts — trousers, jeans, leggings or tights visible under the hem. Jumpsuits are NOT dresses.
+- "bad_hands": extra, missing, fused or malformed fingers, or deformed hands.
+- "store_tag_visible": a security alarm tag, price tag or hangtag attached to the garment.
+Return JSON only: {{"defects": ["code", ...]}}. Return {{"defects": []}} if the photo is clean."""
+
+    try:
+        resp = requests.post(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+            json={
+                "contents": [{"parts": [
+                    {"text": prompt},
+                    {"inlineData": {"mimeType": mime_type, "data": base64_data}},
+                ]}],
+                "generationConfig": {"responseMimeType": "application/json", "temperature": 0},
+            },
+            headers={'Content-Type': 'application/json', 'x-goog-api-key': gemini_api_key},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        text = resp.json()['candidates'][0]['content']['parts'][0]['text']
+        codes = [c for c in (json.loads(text).get('defects') or []) if c in VISUAL_QC_ISSUES]
+    except Exception as e:
+        status = getattr(getattr(e, 'response', None), 'status_code', None)
+        _logger.warning('Görsel kalite denetimi başarısız (%s, status=%s)', e.__class__.__name__, status)
+        return None
+    return {'codes': codes, 'issues': [VISUAL_QC_ISSUES[c] for c in codes]}
 
 
 def _default_analysis():

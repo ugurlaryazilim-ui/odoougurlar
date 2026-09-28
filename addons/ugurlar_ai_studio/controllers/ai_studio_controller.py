@@ -912,6 +912,12 @@ class AiStudioController(http.Controller):
                     'generated_url': gen_url,
                     'generated_url_full': gen_url,
                     'error_message': gen.error_message or '',
+                    'quality_score': gen.quality_score,
+                    # Görsel denetimin bulduğu hatalar ("⚠ a; b" biçiminde saklanır)
+                    'qc_issues': [
+                        i.strip() for i in (gen.quality_details or '').split('⚠', 1)[-1].split(';')
+                        if i.strip()
+                    ] if '⚠' in (gen.quality_details or '') else [],
                     'pending_revision': gen.state in ('pending', 'processing'),
                     'is_excluded': gen.is_excluded,
                 })

@@ -89,6 +89,10 @@
                                 </div>
                             </div>
                         </setting>
+                        <setting string="AI Görsel Denetim"
+                                 help="Üretimleri Gemini ile pantolon/el/etiket hatalarına karşı denetle">
+                            <field name="ai_studio_visual_qc"/>
+                        </setting>
                         <setting string="Otomatik Arka Plan Kaldirma"
                                  help="Fotograflari AI ya gondermeden once arka plani otomatik kaldir">
                             <field name="ai_studio_auto_bg_remove"/>

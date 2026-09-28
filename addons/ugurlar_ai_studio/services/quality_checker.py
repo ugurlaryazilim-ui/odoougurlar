@@ -1,10 +1,14 @@
 # Kalite kontrol servisi — AI ciktisi dogrulama.
 #
-# Orijinal urun gorseli ile AI ciktisini karsilastirarak
-# kalite skoru hesaplar:
-#   1. Delta-E (CIEDE2000) — renk dogrulugu
-#   2. Gorsel boyut kontrolu
-#   3. Toplam kalite skoru
+# Orijinal urun gorseli ile AI ciktisini karsilastirarak kalite skoru hesaplar:
+#   1. Renk dogrulugu — arka plan maskelenmis dominant renkler, CIEDE2000
+#   2. Keskinlik — Laplacian variance
+#   3. Cozunurluk — pazaryeri (Trendyol 1200x1800) esigi
+#   4. (Opsiyonel) Gorsel denetim — Gemini'nin buldugu gercek hatalar
+#      (elbise altinda pantolon, bozuk parmak, etiket kalintisi...)
+#
+# NOT: Duz urun fotografi ile manken fotografi arasinda SSIM anlamsizdir
+# (farkli kompozisyon); bu yuzden kaldirildi.
 
 import base64
 import io
@@ -24,348 +28,207 @@ try:
 except ImportError:
     cv2 = None
 
+# Pazaryeri minimumu (Trendyol onerisi 1200x1800)
+MIN_MARKETPLACE_SIZE = (1200, 1800)
+# Gorsel denetimde bulunan her hata icin puan cezasi
+VISUAL_ISSUE_PENALTY = 25
+ACCEPTABLE_SCORE = 60
+
+
+def _decode_rgb(image_b64, max_side=256):
+    raw = base64.b64decode(image_b64)
+    img = Image.open(io.BytesIO(raw)).convert('RGB')
+    img.thumbnail((max_side, max_side), Image.LANCZOS)
+    return np.array(img)
+
 
 def _rgb_to_lab(rgb_array):
-    """RGB numpy array'i CIELAB'e donusturur (OpenCV ile).
-
-    Args:
-        rgb_array: numpy array (RGB, uint8)
-    Returns:
-        numpy array (LAB, float32) veya None
-    """
-    if cv2 is None:
-        return None
-
-    bgr = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
-    lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
-    # OpenCV LAB: L [0,255], a [0,255], b [0,255]
-    # Standart LAB: L [0,100], a [-128,127], b [-128,127]
-    lab[:, :, 0] = lab[:, :, 0] * 100.0 / 255.0
-    lab[:, :, 1] = lab[:, :, 1] - 128.0
-    lab[:, :, 2] = lab[:, :, 2] - 128.0
+    """RGB (uint8, ...x3) -> standart CIELAB (float)."""
+    flat = rgb_array.reshape(-1, 1, 3).astype(np.uint8)
+    lab = cv2.cvtColor(flat, cv2.COLOR_RGB2LAB).astype(np.float64).reshape(-1, 3)
+    lab[:, 0] = lab[:, 0] * 100.0 / 255.0
+    lab[:, 1] -= 128.0
+    lab[:, 2] -= 128.0
     return lab
 
 
-def _extract_dominant_color_lab(image_base64, num_clusters=3):
-    """Gorselden dominant renkleri cikarir (LAB uzayinda).
-
-    K-means clustering ile en baskin renkleri bulur.
-
-    Args:
-        image_base64: str — base64 encoded gorsel
-        num_clusters: int — kac renk kümesi cikarilacak
-
-    Returns:
-        numpy array (num_clusters, 3) — LAB degerleri
-        veya None (hata durumunda)
-    """
-    if cv2 is None or Image is None:
-        return None
-
-    try:
-        raw = base64.b64decode(image_base64)
-        pil_img = Image.open(io.BytesIO(raw)).convert('RGB')
-
-        # Islem hizi icin kucult
-        pil_img = pil_img.resize((100, 100), Image.LANCZOS)
-        rgb = np.array(pil_img).reshape(-1, 3).astype(np.float32)
-
-        # K-means clustering
-        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 1.0)
-        _, labels, centers = cv2.kmeans(
-            rgb, num_clusters, None, criteria, 5, cv2.KMEANS_RANDOM_CENTERS
-        )
-
-        # Her cluster'in buyuklugune gore sirala (en buyuk = dominant)
-        label_counts = np.bincount(labels.flatten())
-        sorted_indices = np.argsort(-label_counts)
-        sorted_centers = centers[sorted_indices]
-
-        # RGB -> LAB
-        lab_centers = []
-        for center in sorted_centers:
-            center_img = center.reshape(1, 1, 3).astype(np.uint8)
-            lab = _rgb_to_lab(center_img)
-            if lab is not None:
-                lab_centers.append(lab[0, 0])
-
-        return np.array(lab_centers) if lab_centers else None
-
-    except Exception as e:
-        _logger.warning('Dominant renk cikarma hatasi: %s', e)
-        return None
+def _foreground_mask(lab):
+    """Stüdyo arka planını (çok açık ve renksiz pikseller) dışarıda bırak."""
+    chroma = np.hypot(lab[:, 1], lab[:, 2])
+    return ~((lab[:, 0] > 88) & (chroma < 8))
 
 
-def delta_e_ciede2000_simple(lab1, lab2):
-    """Basitlestirilmis CIEDE2000 Delta-E hesaplama.
+def _dominant_colors_lab(image_b64, num_clusters=4):
+    """Arka plan hariç dominant renkler (LAB) ve ağırlıkları, büyükten küçüğe."""
+    lab = _rgb_to_lab(_decode_rgb(image_b64))
+    fg = lab[_foreground_mask(lab)]
+    if len(fg) < 50:
+        return None, None
+    k = min(num_clusters, len(fg))
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 1.0)
+    _, labels, centers = cv2.kmeans(fg.astype(np.float32), k, None, criteria, 3,
+                                    cv2.KMEANS_PP_CENTERS)
+    counts = np.bincount(labels.flatten(), minlength=k)
+    order = np.argsort(-counts)
+    return centers[order].astype(np.float64), counts[order] / counts.sum()
 
-    Tam CIEDE2000 formulu yerine CIE76 (Euclidean LAB distance)
-    kullanir — yeterince dogru ve hizli.
 
-    Args:
-        lab1, lab2: numpy array (3,) — LAB degerleri
+def delta_e_ciede2000(lab1, lab2):
+    """CIEDE2000 renk farkı (Sharma et al. 2005)."""
+    L1, a1, b1 = lab1
+    L2, a2, b2 = lab2
+    C1 = np.hypot(a1, b1)
+    C2 = np.hypot(a2, b2)
+    C_bar = (C1 + C2) / 2.0
+    G = 0.5 * (1 - np.sqrt(C_bar ** 7 / (C_bar ** 7 + 25.0 ** 7)))
+    a1p, a2p = (1 + G) * a1, (1 + G) * a2
+    C1p, C2p = np.hypot(a1p, b1), np.hypot(a2p, b2)
+    h1p = np.degrees(np.arctan2(b1, a1p)) % 360
+    h2p = np.degrees(np.arctan2(b2, a2p)) % 360
 
-    Returns:
-        float — Delta-E degeri
-            < 1: Fark gorulemez
-            1-5: Hafif fark
-            5-15: Belirgin fark
-            > 15: Ciddi renk kaymasi
-    """
-    return float(np.sqrt(np.sum((lab1 - lab2) ** 2)))
+    dLp = L2 - L1
+    dCp = C2p - C1p
+    if C1p * C2p == 0:
+        dhp = 0.0
+    else:
+        dhp = h2p - h1p
+        if dhp > 180:
+            dhp -= 360
+        elif dhp < -180:
+            dhp += 360
+    dHp = 2 * np.sqrt(C1p * C2p) * np.sin(np.radians(dhp / 2.0))
+
+    Lp_bar = (L1 + L2) / 2.0
+    Cp_bar = (C1p + C2p) / 2.0
+    if C1p * C2p == 0:
+        hp_bar = h1p + h2p
+    elif abs(h1p - h2p) <= 180:
+        hp_bar = (h1p + h2p) / 2.0
+    elif h1p + h2p < 360:
+        hp_bar = (h1p + h2p + 360) / 2.0
+    else:
+        hp_bar = (h1p + h2p - 360) / 2.0
+
+    T = (1 - 0.17 * np.cos(np.radians(hp_bar - 30)) + 0.24 * np.cos(np.radians(2 * hp_bar))
+         + 0.32 * np.cos(np.radians(3 * hp_bar + 6)) - 0.20 * np.cos(np.radians(4 * hp_bar - 63)))
+    d_theta = 30 * np.exp(-(((hp_bar - 275) / 25) ** 2))
+    R_C = 2 * np.sqrt(Cp_bar ** 7 / (Cp_bar ** 7 + 25.0 ** 7))
+    S_L = 1 + (0.015 * (Lp_bar - 50) ** 2) / np.sqrt(20 + (Lp_bar - 50) ** 2)
+    S_C = 1 + 0.045 * Cp_bar
+    S_H = 1 + 0.015 * Cp_bar * T
+    R_T = -np.sin(np.radians(2 * d_theta)) * R_C
+    return float(np.sqrt(
+        (dLp / S_L) ** 2 + (dCp / S_C) ** 2 + (dHp / S_H) ** 2
+        + R_T * (dCp / S_C) * (dHp / S_H)
+    ))
 
 
 def check_color_accuracy(original_b64, generated_b64):
-    """Orijinal urun ile AI ciktisi arasindaki renk dogrlugunu kontrol eder.
+    """Ürünün dominant rengi AI çıktısında korunmuş mu?
 
-    Args:
-        original_b64: str — orijinal urun gorseli (base64)
-        generated_b64: str — AI ciktisi (base64)
-
-    Returns:
-        dict: {
-            'delta_e': float — ortalama Delta-E (dusuk = iyi),
-            'rating': str — 'mukemmel'/'iyi'/'kabul_edilebilir'/'renk_kaymasi',
-            'details': str — Turkce aciklama,
-        }
-    """
-    if cv2 is None:
-        return {
-            'delta_e': -1,
-            'rating': 'bilinmiyor',
-            'details': 'OpenCV kurulu degil, renk kontrolu yapilamadi.',
-        }
-
-    orig_colors = _extract_dominant_color_lab(original_b64)
-    gen_colors = _extract_dominant_color_lab(generated_b64)
-
-    if orig_colors is None or gen_colors is None:
-        return {
-            'delta_e': -1,
-            'rating': 'bilinmiyor',
-            'details': 'Renk cikarma basarisiz.',
-        }
-
-    # Her dominant renk icin en yakin eslemeyi bul
-    total_delta_e = 0
-    count = 0
-    for orig_lab in orig_colors:
-        min_de = float('inf')
-        for gen_lab in gen_colors:
-            de = delta_e_ciede2000_simple(orig_lab, gen_lab)
-            if de < min_de:
-                min_de = de
-        total_delta_e += min_de
-        count += 1
-
-    avg_delta_e = total_delta_e / count if count > 0 else 999
-
-    # Degerlendirme
-    if avg_delta_e < 5:
-        rating = 'mukemmel'
-        details = 'Renk dogrulugu mukemmel — neredeyse ayni.'
-    elif avg_delta_e < 10:
-        rating = 'iyi'
-        details = 'Renk dogrulugu iyi — hafif fark var ama kabul edilebilir.'
-    elif avg_delta_e < 20:
-        rating = 'kabul_edilebilir'
-        details = 'Renk dogrulugu orta — belirgin fark var.'
-    else:
-        rating = 'renk_kaymasi'
-        details = 'Renk kaymasi tespit edildi — urun rengi korunmamis.'
-
-    return {
-        'delta_e': round(avg_delta_e, 2),
-        'rating': rating,
-        'details': details,
-    }
-
-
-def compute_quality_score(original_b64, generated_b64):
-    """Genel kalite skoru hesaplar.
-
-    Bilesenler:
-    - Renk dogrulugu (%40 agirlik)
-    - SSIM yapisal benzerlik (%25 agirlik)
-    - Bulaniklik tespiti (%15 agirlik)
-    - Gorsel boyut + format (%20 agirlik)
-
-    Args:
-        original_b64: str — orijinal urun gorseli (base64)
-        generated_b64: str — AI ciktisi (base64)
-
-    Returns:
-        dict: {
-            'score': float (0-100),
-            'color_accuracy': dict — check_color_accuracy sonucu,
-            'ssim_score': float (0-1, 1=ayni),
-            'blur_score': float (Laplacian variance, yuksek=keskin),
-            'is_acceptable': bool,
-            'details': str,
-        }
-    """
-    score = 0.0
-    details_parts = []
-    ssim_val = -1.0
-    blur_val = -1.0
-
-    # 1. Renk dogrulugu (%40)
-    color_result = check_color_accuracy(original_b64, generated_b64)
-    if color_result['delta_e'] >= 0:
-        color_score = max(0, 100 - (color_result['delta_e'] * 3))
-        score += color_score * 0.40
-        details_parts.append(
-            'Renk: %s (Delta-E: %.1f, puan: %.0f)' % (
-                color_result['rating'], color_result['delta_e'], color_score
-            )
-        )
-    else:
-        score += 50 * 0.40  # Bilinmiyor — orta skor
-        details_parts.append('Renk kontrolu yapilamadi')
-
-    # 2. SSIM Yapisal Benzerlik (%25)
-    try:
-        ssim_val = _compute_ssim(original_b64, generated_b64)
-        if ssim_val >= 0:
-            # SSIM 0-1 arasi, 0.3+ iyi (try-on icin tam eslesme beklenmez)
-            ssim_score = min(100, ssim_val * 200)  # 0.5 = 100 puan
-            score += ssim_score * 0.25
-            details_parts.append('SSIM: %.3f (puan: %.0f)' % (ssim_val, ssim_score))
-        else:
-            score += 50 * 0.25
-    except Exception:
-        score += 50 * 0.25
-        details_parts.append('SSIM hesaplanamadi')
-
-    # 3. Bulaniklik Tespiti — Laplacian Variance (%15)
-    try:
-        blur_val = _compute_blur_score(generated_b64)
-        if blur_val >= 0:
-            # Laplacian variance: <50 = bulanik, 100+ = keskin, 200+ = cok keskin
-            if blur_val >= 100:
-                blur_score = 100
-            elif blur_val >= 50:
-                blur_score = 50 + (blur_val - 50)
-            else:
-                blur_score = max(0, blur_val)
-            score += blur_score * 0.15
-            details_parts.append('Keskinlik: %.0f (puan: %.0f)' % (blur_val, blur_score))
-        else:
-            score += 50 * 0.15
-    except Exception:
-        score += 50 * 0.15
-
-    # 4. Gorsel boyut + format (%20)
-    try:
-        gen_bytes = base64.b64decode(generated_b64)
-        size_kb = len(gen_bytes) / 1024
-        pil_img = Image.open(io.BytesIO(gen_bytes))
-        w, h = pil_img.size
-
-        size_format_score = 100
-        if size_kb < 20:
-            size_format_score -= 40
-            details_parts.append('Cikti cok kucuk (%.1fKB)' % size_kb)
-        if w < 200 or h < 200:
-            size_format_score -= 40
-            details_parts.append('Cozunurluk cok dusuk (%dx%d)' % (w, h))
-        else:
-            details_parts.append('Boyut: %dx%d (%.1fKB)' % (w, h, size_kb))
-
-        score += max(0, size_format_score) * 0.20
-    except Exception:
-        score += 30 * 0.20
-        details_parts.append('Gorsel acilamadi')
-
-    final_score = max(0, min(100, score))
-
-    return {
-        'score': round(final_score, 1),
-        'color_accuracy': color_result,
-        'ssim_score': round(ssim_val, 4) if ssim_val >= 0 else -1,
-        'blur_score': round(blur_val, 1) if blur_val >= 0 else -1,
-        'is_acceptable': final_score >= 50,
-        'details': ' | '.join(details_parts),
-    }
-
-
-def _compute_ssim(original_b64, generated_b64):
-    """SSIM (Structural Similarity Index) hesapla.
-
-    Iki gorsel arasindaki yapisal benzerligi olcer.
-    Virtual try-on icin dusuk SSIM beklenir (farkli arka plan/vucut),
-    ama kiyafet bolgesi yuksek olmali.
-
-    Returns:
-        float: 0-1 arasi SSIM degeri, veya -1 (hesaplanamadiysa)
+    Orijinal görseldeki arka plan dışı en baskın renkler (ürün), çıktıdaki
+    renk kümelerinin en yakınıyla CIEDE2000 ile karşılaştırılır. Çıktıda cilt,
+    saç vb. ek renkler olacağından yalnızca orijinal → çıktı yönü ölçülür.
     """
     if cv2 is None or Image is None:
-        return -1.0
-
+        return {'delta_e': -1, 'rating': 'bilinmiyor', 'details': 'OpenCV/Pillow kurulu degil.'}
     try:
-        orig_bytes = base64.b64decode(original_b64)
-        gen_bytes = base64.b64decode(generated_b64)
-
-        orig_img = Image.open(io.BytesIO(orig_bytes)).convert('RGB')
-        gen_img = Image.open(io.BytesIO(gen_bytes)).convert('RGB')
-
-        # Ayni boyuta getir (kucuk, hizli hesaplama)
-        target_size = (256, 256)
-        orig_resized = orig_img.resize(target_size, Image.LANCZOS)
-        gen_resized = gen_img.resize(target_size, Image.LANCZOS)
-
-        orig_gray = cv2.cvtColor(np.array(orig_resized), cv2.COLOR_RGB2GRAY)
-        gen_gray = cv2.cvtColor(np.array(gen_resized), cv2.COLOR_RGB2GRAY)
-
-        # Mean SSIM hesapla (pencere bazli)
-        C1 = (0.01 * 255) ** 2
-        C2 = (0.03 * 255) ** 2
-
-        orig_f = orig_gray.astype(np.float64)
-        gen_f = gen_gray.astype(np.float64)
-
-        mu1 = cv2.GaussianBlur(orig_f, (11, 11), 1.5)
-        mu2 = cv2.GaussianBlur(gen_f, (11, 11), 1.5)
-
-        mu1_sq = mu1 ** 2
-        mu2_sq = mu2 ** 2
-        mu1_mu2 = mu1 * mu2
-
-        sigma1_sq = cv2.GaussianBlur(orig_f ** 2, (11, 11), 1.5) - mu1_sq
-        sigma2_sq = cv2.GaussianBlur(gen_f ** 2, (11, 11), 1.5) - mu2_sq
-        sigma12 = cv2.GaussianBlur(orig_f * gen_f, (11, 11), 1.5) - mu1_mu2
-
-        ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / \
-                   ((mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2))
-
-        return float(np.mean(ssim_map))
-
+        orig_c, orig_w = _dominant_colors_lab(original_b64, num_clusters=3)
+        gen_c, _ = _dominant_colors_lab(generated_b64, num_clusters=6)
     except Exception as e:
-        _logger.debug('SSIM hesaplama hatasi: %s', e)
-        return -1.0
+        _logger.warning('Renk cikarma hatasi: %s', e)
+        orig_c = gen_c = None
+    if orig_c is None or gen_c is None:
+        return {'delta_e': -1, 'rating': 'bilinmiyor', 'details': 'Renk cikarma basarisiz.'}
+
+    # Ağırlıklı ortalama: ürünün ana rengi daha önemli
+    total, weight_sum = 0.0, 0.0
+    for c, w in zip(orig_c, orig_w):
+        if w < 0.1:
+            continue  # gölge / küçük detay
+        total += w * min(delta_e_ciede2000(c, g) for g in gen_c)
+        weight_sum += w
+    avg = total / weight_sum if weight_sum else 999.0
+
+    if avg < 3:
+        rating, details = 'mukemmel', 'Renk neredeyse ayni.'
+    elif avg < 6:
+        rating, details = 'iyi', 'Hafif renk farki.'
+    elif avg < 12:
+        rating, details = 'kabul_edilebilir', 'Belirgin renk farki.'
+    else:
+        rating, details = 'renk_kaymasi', 'Renk kaymasi — urun rengi korunmamis.'
+    return {'delta_e': round(avg, 2), 'rating': rating, 'details': details}
 
 
 def _compute_blur_score(image_b64):
-    """Laplacian Variance ile bulaniklik skoru hesapla.
-
-    Yuksek deger = keskin gorsel, dusuk deger = bulanik gorsel.
-
-    Returns:
-        float: Laplacian variance degeri, veya -1
-    """
+    """Laplacian variance (yüksek = keskin). Hata durumunda -1."""
     if cv2 is None or Image is None:
         return -1.0
-
     try:
-        gen_bytes = base64.b64decode(image_b64)
-        pil_img = Image.open(io.BytesIO(gen_bytes)).convert('RGB')
-
-        # Olcekle (hiz icin)
-        pil_img = pil_img.resize((512, 512), Image.LANCZOS)
-        gray = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2GRAY)
-        laplacian = cv2.Laplacian(gray, cv2.CV_64F)
-        return float(laplacian.var())
-
+        gray = cv2.cvtColor(_decode_rgb(image_b64, max_side=768), cv2.COLOR_RGB2GRAY)
+        return float(cv2.Laplacian(gray, cv2.CV_64F).var())
     except Exception as e:
         _logger.debug('Bulaniklik tespiti hatasi: %s', e)
         return -1.0
+
+
+def compute_quality_score(original_b64, generated_b64, visual_qc=None):
+    """Genel kalite skoru (0-100).
+
+    Ağırlıklar: renk %50, keskinlik %20, çözünürlük %30. Görsel denetim
+    (visual_qc) verildiyse bulunan her hata için VISUAL_ISSUE_PENALTY düşülür.
+
+    Args:
+        original_b64: orijinal ürün görseli (base64)
+        generated_b64: AI çıktısı (base64)
+        visual_qc: garment_analyzer.visual_quality_check() sonucu veya None
+
+    Returns:
+        dict: score, color_accuracy, blur_score, issues, is_acceptable, details
+    """
+    score = 0.0
+    details = []
+
+    color = check_color_accuracy(original_b64, generated_b64)
+    if color['delta_e'] >= 0:
+        color_score = max(0.0, 100 - color['delta_e'] * 5)
+        details.append('Renk: %s (ΔE2000 %.1f)' % (color['rating'], color['delta_e']))
+    else:
+        color_score = 50.0
+        details.append('Renk kontrolu yapilamadi')
+    score += color_score * 0.50
+
+    blur_val = _compute_blur_score(generated_b64)
+    if blur_val >= 0:
+        blur_score = 100.0 if blur_val >= 100 else max(0.0, blur_val)
+        details.append('Keskinlik: %.0f' % blur_val)
+    else:
+        blur_score = 50.0
+    score += blur_score * 0.20
+
+    try:
+        w, h = Image.open(io.BytesIO(base64.b64decode(generated_b64))).size
+        min_w, min_h = MIN_MARKETPLACE_SIZE
+        size_score = 100.0 * min(1.0, min(w / min_w, h / min_h))
+        details.append('Boyut: %dx%d' % (w, h))
+    except Exception:
+        size_score = 30.0
+        details.append('Gorsel acilamadi')
+    score += size_score * 0.30
+
+    issues = list((visual_qc or {}).get('issues') or [])
+    if issues:
+        score -= VISUAL_ISSUE_PENALTY * len(issues)
+        details.append('⚠ ' + '; '.join(issues))
+
+    final = round(max(0.0, min(100.0, score)), 1)
+    return {
+        'score': final,
+        'color_accuracy': color,
+        'ssim_score': -1,
+        'blur_score': round(blur_val, 1) if blur_val >= 0 else -1,
+        'issues': issues,
+        'is_acceptable': final >= ACCEPTABLE_SCORE and not issues,
+        'details': ' | '.join(details),
+    }

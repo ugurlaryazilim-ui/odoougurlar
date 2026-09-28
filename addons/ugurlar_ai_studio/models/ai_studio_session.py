@@ -90,6 +90,25 @@ def _get_seedream_image_size(env):
     return FalProvider.SEEDREAM_IMAGE_SIZES.get(key, FalProvider.SEEDREAM_IMAGE_SIZES['hd'])
 
 
+def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', analysis=None, category=''):
+    """Kalite skoru + (ayar açıksa) Gemini görsel denetimi.
+
+    Returns:
+        dict: {'quality_score': float, 'quality_details': str} — generation'a yazılacak değerler
+    """
+    from ..services.quality_checker import compute_quality_score
+    visual_qc = None
+    enabled = env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.visual_qc', 'True') == 'True'
+    if enabled and gemini_api_key:
+        from ..services.garment_analyzer import visual_quality_check
+        analysis = analysis if isinstance(analysis, dict) else {}
+        hint = ' '.join(filter(None, [analysis.get('primaryColor'), analysis.get('garmentType')]))
+        visual_qc = visual_quality_check(gemini_api_key, generated_b64,
+                                         garment_hint=f"{hint} ({category})".strip())
+    qc = compute_quality_score(source_image, generated_b64, visual_qc=visual_qc)
+    return {'quality_score': qc['score'], 'quality_details': qc['details']}
+
+
 def _build_revision_instruction(gen):
     """Red sonrası revizyon talimatını İngilizce tek cümle olarak kur."""
     parts = []
@@ -1064,12 +1083,11 @@ class AiStudioSession(models.Model):
         # doğrudan bu görsel üzerinde etiket/alarm tespiti yap
         if security_tags is None and source_image:
             try:
-                gemini_api_key = self.env['ir.config_parameter'].sudo().get_param(
-                    'ugurlar_ai_studio.gemini_api_key', ''
-                )
-                fal_api_key = self.env['ir.config_parameter'].sudo().get_param(
-                    'ugurlar_ai_studio.fal_api_key', ''
-                )
+                # Thread içinde çağrılır: self.env'in cursor'ı kapalı olabilir,
+                # session thread'in kendi env'ine bağlıdır
+                icp = session.env['ir.config_parameter'].sudo()
+                gemini_api_key = icp.get_param('ugurlar_ai_studio.gemini_api_key', '')
+                fal_api_key = icp.get_param('ugurlar_ai_studio.fal_api_key', '')
                 if gemini_api_key or fal_api_key:
                     from ..services.garment_analyzer import detect_image_tags
                     security_tags = detect_image_tags(fal_api_key, source_image, gemini_api_key=gemini_api_key)
@@ -1082,7 +1100,7 @@ class AiStudioSession(models.Model):
             preprocess_garment_image,
             convert_birefnet_output_to_rgb,
         )
-        preprocessed = preprocess_garment_image(source_image, target_long_edge=1200, security_tags=security_tags)
+        preprocessed = preprocess_garment_image(source_image, target_long_edge=1600, security_tags=security_tags)
         processed_b64 = preprocessed['image_base64']
 
         if auto_bg and processed_b64:
@@ -1119,7 +1137,7 @@ class AiStudioSession(models.Model):
                      session.product_id.display_name, garment_cat,
                      preset.garment_type if preset else 'yok')
 
-        preprocessed = preprocess_garment_image(source_image, target_long_edge=1200)
+        preprocessed = preprocess_garment_image(source_image, target_long_edge=1600)
         processed_b64 = preprocessed['image_base64']
 
         # Ayakkabı/Çanta/Aksesuar → doğrudan ürün fotoğrafından kırp
@@ -1501,7 +1519,7 @@ class AiStudioSession(models.Model):
 
                 preprocessed = preprocess_garment_image(
                     source_image,
-                    target_long_edge=1200,  # Yuksek cozunurluk: detay korumasi icin
+                    target_long_edge=1600,  # Yuksek cozunurluk: detay korumasi icin
                     security_tags=security_tags,
                 )
                 processed_b64 = preprocessed['image_base64']
@@ -2001,7 +2019,7 @@ class AiStudioSession(models.Model):
                 front_img = front_gen and (front_gen[0].original_image or (front_gen[0].source_photo_id and front_gen[0].source_photo_id.image_original))
                 if front_gen and front_img:
                     from ..services.garment_preprocessor import preprocess_garment_image
-                    _pre = preprocess_garment_image(front_img, target_long_edge=1200)
+                    _pre = preprocess_garment_image(front_img, target_long_edge=1600)
                     _pre_url = provider.upload_image(_pre['image_base64'])
 
                     from ..services.garment_analyzer import analyze_garment
@@ -2098,10 +2116,13 @@ class AiStudioSession(models.Model):
                         convert_birefnet_output_to_rgb,
                     )
 
-                    security_tags = cached_analysis.get('securityTags') if isinstance(cached_analysis, dict) else None
+                    # Etiket kutuları ÖN fotoğrafın analizinden gelir; başka fotoğrafa
+                    # uygulanırsa alakasız bölgeler inpaint edilir
+                    security_tags = (cached_analysis.get('securityTags')
+                                     if photo_type == 'front' and isinstance(cached_analysis, dict) else None)
                     preprocessed = preprocess_garment_image(
                         source_image,
-                        target_long_edge=1200,
+                        target_long_edge=1600,
                         security_tags=security_tags,
                     )
                     processed_b64 = preprocessed['image_base64']
@@ -2470,16 +2491,14 @@ class AiStudioSession(models.Model):
                                 except Exception as pp_e:
                                     _logger.warning('Post-processing outfit tutarlılığı başarısız (gen=%s): %s', gen.id, pp_e)
 
-                        # KALİTE KONTROL
+                        # KALİTE KONTROL (+ Gemini görsel denetim)
                         try:
-                            from ..services.quality_checker import compute_quality_score
-                            qc = compute_quality_score(source_image, gen_b64)
-                            gen.write({
-                                'quality_score': qc['score'],
-                                'quality_details': qc['details'],
-                            })
+                            gen.write(_run_quality_check(
+                                env, source_image, gen_b64, gemini_api_key,
+                                analysis=cached_analysis, category=category_to_send,
+                            ))
                         except Exception as qe:
-                            _logger.debug('Kalite kontrol hatası: %s', qe)
+                            _logger.warning('Kalite kontrol hatası (gen=%s): %s', gen.id, qe)
 
                     else:
                         gen.write({
@@ -2756,7 +2775,7 @@ class AiStudioSession(models.Model):
                 try:
                     from ..services.garment_analyzer import analyze_garment
                     from ..services.garment_preprocessor import preprocess_garment_image
-                    _pre_check = preprocess_garment_image(source_image, target_long_edge=1200)
+                    _pre_check = preprocess_garment_image(source_image, target_long_edge=1600)
                     _pre_url = provider.upload_image(_pre_check['image_base64'])
                     product_context = session._get_product_context_text()
                     _pre_analysis = analyze_garment(fal_api_key, _pre_url, gemini_api_key=gemini_api_key, product_context=product_context)
@@ -3036,14 +3055,14 @@ class AiStudioSession(models.Model):
                             except Exception as pp_e:
                                 _logger.warning('Retry post-processing outfit tutarlılığı başarısız: %s', pp_e)
 
-                    # Kalite kontrol
+                    # Kalite kontrol (+ Gemini görsel denetim)
                     try:
-                        from ..services.quality_checker import compute_quality_score
-                        qc = compute_quality_score(source_image, gen_b64)
-                        gen_vals['quality_score'] = qc['score']
-                        gen_vals['quality_details'] = qc['details']
-                    except Exception:
-                        pass
+                        gen_vals.update(_run_quality_check(
+                            env, source_image, gen_b64, gemini_api_key,
+                            analysis=analysis, category=category_to_send,
+                        ))
+                    except Exception as qe:
+                        _logger.warning('Retry kalite kontrol hatası (gen=%s): %s', gen.id, qe)
 
                     _safe_write_and_commit(cr, gen, gen_vals)
                 else:
