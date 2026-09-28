@@ -149,8 +149,18 @@ class AiStudioGeneration(models.Model):
             rec.effective_reject_reason_id = reason or False
 
     # --- fal.ai Bilgileri ---
-    fal_request_id = fields.Char(string='fal.ai İstek ID')
+    fal_request_id = fields.Char(string='fal.ai İstek ID', copy=False)
     fal_endpoint = fields.Char(string='Kullanılan Endpoint')
+    fal_app = fields.Char(
+        string='fal.ai Uygulama', copy=False,
+        help='request_id ile birlikte sonucu fal kuyruğundan geri almak için gereken endpoint',
+    )
+    submitted_at = fields.Datetime(string='fal.ai Gönderim Zamanı', copy=False)
+    error_type = fields.Char(string='Hata Tipi', copy=False)
+    is_retryable = fields.Boolean(
+        string='Yeniden Denenebilir', default=True, copy=False,
+        help='Kalıcı hatalar (içerik politikası, geçersiz parametre...) otomatik yeniden denenmez',
+    )
     generation_time_seconds = fields.Float(string='Üretim Süresi (sn)')
     seed = fields.Integer(string='AI Seed', help='Üretimde kullanılan seed değeri')
     provider = fields.Selection([
@@ -295,18 +305,6 @@ class AiStudioGeneration(models.Model):
         """Türkçe revizyon metnini İngilizce'ye çevir (UI'dan tetiklenir)."""
         self.revision_prompt_en = self._translate_prompt(self.revision_prompt)
 
-    def write(self, vals):
-        # Programatik write'larda çeviri sadece deep-translator ile dene
-        # (hızlı, <100ms). Başarısız olursa orijinal metni kullan — transaction'ı bloke etme.
-        if 'revision_prompt' in vals and vals.get('revision_prompt') and 'revision_prompt_en' not in vals:
-            try:
-                from deep_translator import GoogleTranslator
-                translated = GoogleTranslator(source='tr', target='en').translate(vals['revision_prompt'])
-                if translated:
-                    vals['revision_prompt_en'] = translated
-            except Exception:
-                pass  # Çeviri başarısız — orijinal metin kalır, transaction bloke olmaz
-        return super().write(vals)
 
     @api.model_create_multi
     def create(self, vals_list):
@@ -579,7 +577,10 @@ class AiStudioGeneration(models.Model):
         self._check_ai_studio_group('reviewer')
         from datetime import timedelta
         # Eğer kullanıcı belirli satırları seçip butona bastıysa doğrudan onları kurtar
-        selected = self.filtered(lambda g: g.state in ('pending', 'processing'))
+        # fal'e gönderilmiş (request_id'li) işler yeniden kuyruğa ALINMAZ: sonuçları
+        # cron tarafından fal'den okunur, yeniden göndermek ikinci kez ücret demektir
+        submitted = lambda g: g.state == 'processing' and g.fal_request_id
+        selected = self.filtered(lambda g: g.state in ('pending', 'processing') and not submitted(g))
         if selected:
             selected.write({
                 'state': 'pending',
@@ -593,7 +594,9 @@ class AiStudioGeneration(models.Model):
                 ('session_id.state', '=', 'review'),
                 ('state', 'in', ['pending', 'processing']),
                 ('write_date', '<', cutoff),
-            ])
+                '|', ('session_id.ai_lease_until', '=', False),
+                ('session_id.ai_lease_until', '<', fields.Datetime.now()),
+            ]).filtered(lambda g: not submitted(g))
             if stuck:
                 stuck.write({
                     'state': 'pending',
@@ -671,21 +674,20 @@ class AiStudioGeneration(models.Model):
     def _batch_retry_worker_thread(self, gen_ids, api_key, uid):
         """Toplu revizyonları sırayla işleyen arka plan thread'i."""
         import time
-        from .ai_studio_session import _AI_SESSION_SEMAPHORE
         _logger.info("Toplu revizyon tekrar deneme thread'i baslatildi: %d adet", len(gen_ids))
         for gen_id in gen_ids:
             try:
-                with _AI_SESSION_SEMAPHORE:
-                    with self.pool.cursor() as cr:
-                        env = api.Environment(cr, uid, {'lang': 'tr_TR'})
-                        gen = env['ai.studio.generation'].browse(gen_id)
-                        if not gen.exists() or gen.state != 'pending':
-                            continue
-                        session = gen.session_id
-                        session_id = session.id
+                with self.pool.cursor() as cr:
+                    env = api.Environment(cr, uid, {'lang': 'tr_TR'})
+                    gen = env['ai.studio.generation'].browse(gen_id)
+                    if not gen.exists() or gen.state != 'pending':
+                        continue
+                    session_model = gen.session_id
+                    session_id = session_model.id
 
-                    # Session retry thread body'sini çağır
-                    session._retry_generation_thread_body(session_id, gen_id, api_key, uid)
+                # Kira + semaphore sarmalayıcısı: oturum başka yerde işleniyorsa
+                # generation 'pending' kalır ve cron devralır
+                session_model._retry_generation_thread(session_id, gen_id, api_key, uid)
                 time.sleep(1.0)
             except Exception as e:
                 _logger.error("Toplu tekrar deneme hatası (gen=%s): %s", gen_id, e)

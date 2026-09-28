@@ -213,12 +213,17 @@ class FalProvider(AIProviderBase):
         max_retries = 2
         backoff_factor = 4
         result = None
+        # fal kuyruğa aldığı anda request_id'yi çağırana bildir: worker ölse bile
+        # sonuç cron tarafından fal'den geri alınabilir (yeniden ücret ödenmez)
+        on_enqueue = kwargs.get('on_enqueue')
+        enqueue_cb = (lambda request_id: on_enqueue(request_id, endpoint)) if on_enqueue else None
         for attempt in range(max_retries):
             try:
                 result = fal_client.subscribe(
                     endpoint,
                     arguments=arguments,
                     client_timeout=180,
+                    on_enqueue=enqueue_cb,
                 )
                 break
             except Exception as e:
