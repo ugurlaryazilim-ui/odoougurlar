@@ -87,8 +87,10 @@ LEG_RULES = {
 }
 
 # El pozları — view'e göre
+# NOT: "one hand on hip" gibi detaylı poz talimatları Seedream'de
+# fazla/kaynaşmış parmak sorununa yol açar. Basit tutulmalı.
 HAND_POSES = {
-    'front': 'One hand resting on hip, other arm relaxed at side.',
+    'front': 'Arms relaxed naturally at sides, hands visible with five fingers each.',
     'back':  '',
     'side':  'Arms relaxed naturally at sides.',
     'detail': '',
@@ -115,7 +117,7 @@ SEEDREAM_TEMPLATES = {
         "Professional e-commerce photo, white studio, even lighting. "
         "{hand_pose} "
         "{collar_note}{graphic_note}"
-        "Remove any store tags or security pins from garment. "
+        ""
         "{extra_prompt}"
     ),
     # DRESS — BACK
@@ -124,7 +126,7 @@ SEEDREAM_TEMPLATES = {
         "Model facing away from camera, showing back of this {color} {fabric} {garment_type}. "
         "Same model, hair, shoes as Figure 3. {leg_rule} "
         "White studio background, even lighting. "
-        "Remove any store tags. "
+        ""
         "{extra_prompt}"
     ),
     # DRESS — SIDE
@@ -148,7 +150,7 @@ SEEDREAM_TEMPLATES = {
         "Professional e-commerce photo, white studio, even lighting. "
         "{hand_pose} "
         "{collar_note}{graphic_note}"
-        "Remove any store tags or security pins from garment. "
+        ""
         "{extra_prompt}"
     ),
     # TOPS — BACK
@@ -158,7 +160,7 @@ SEEDREAM_TEMPLATES = {
         "Same dark trousers and shoes as Figure 3. "
         "Show single back panel only, ignore any hanger fold-over at shoulders. "
         "White studio background, even lighting. "
-        "Remove any store tags. "
+        ""
         "{extra_prompt}"
     ),
     # TOPS — SIDE
@@ -181,7 +183,7 @@ SEEDREAM_TEMPLATES = {
         "Neutral fitted top on upper body. Keep face, hair from Figure 2. "
         "Professional e-commerce photo, white studio, even lighting. "
         "{hand_pose} "
-        "Remove any store tags. "
+        ""
         "{extra_prompt}"
     ),
     # BOTTOMS — BACK
@@ -190,7 +192,7 @@ SEEDREAM_TEMPLATES = {
         "Model facing away, showing back of this {color} {fabric} {garment_type}. "
         "Same top and shoes as Figure 3. Back waistband clean with no extra hardware. "
         "White studio background, even lighting. "
-        "Remove any store tags. "
+        ""
         "{extra_prompt}"
     ),
     # BOTTOMS — SIDE
@@ -213,7 +215,7 @@ SEEDREAM_TEMPLATES = {
         "Neutral fitted top on upper body. Keep face, hair, shoes from Figure 2. "
         "Professional e-commerce photo, white studio, even lighting. "
         "{hand_pose} "
-        "Remove any store tags. "
+        ""
         "{extra_prompt}"
     ),
     # SKIRT — BACK
@@ -222,7 +224,7 @@ SEEDREAM_TEMPLATES = {
         "Model facing away, showing back of this {color} {fabric} skirt. "
         "Same top and shoes as Figure 3. {leg_rule} "
         "White studio background, even lighting. "
-        "Remove any store tags. "
+        ""
         "{extra_prompt}"
     ),
     # SKIRT — SIDE
@@ -244,7 +246,7 @@ SEEDREAM_TEMPLATES = {
         "Neutral fitted top on upper body. Keep face, hair, shoes from Figure 2. "
         "Professional e-commerce photo, white studio, even lighting. "
         "{hand_pose} "
-        "Remove any store tags. "
+        ""
         "{extra_prompt}"
     ),
     # SHORTS — BACK
@@ -253,7 +255,7 @@ SEEDREAM_TEMPLATES = {
         "Model facing away, showing back of these {color} {fabric} shorts. "
         "Same top and shoes as Figure 3. Natural bare legs below shorts. "
         "White studio background, even lighting. "
-        "Remove any store tags. "
+        ""
         "{extra_prompt}"
     ),
     # SHORTS — SIDE
@@ -270,7 +272,7 @@ SEEDREAM_DETAIL_TEMPLATE = (
     "Close-up detail shot of the {garment_type} from Figure 1 being worn by the model. "
     "Sharp focus on fabric texture, stitching, and construction details. "
     "Model wearing complete outfit. White studio background. "
-    "Remove any store tags. "
+    ""
     "{extra_prompt}"
 )
 
@@ -285,35 +287,35 @@ SEEDREAM_NEGATIVES = {
     'dress': (
         "pants underneath, trousers underneath, leggings underneath, jeans underneath, "
         "tights under dress, double-layered bottoms, "
-        "security tag, alarm pin, price tag, "
-        "extra fingers, fused fingers, extra arms, missing fingers, "
+        "security tag, price tag, "
+        "extra fingers, fused fingers, missing fingers, deformed hands, extra hand, mutated hands, "
         "mannequin, CGI, plastic skin, blurry, low resolution"
     ),
     'skirt': (
         "pants underneath, trousers underneath, leggings underneath, "
         "tights under skirt, double-layered bottoms, "
-        "security tag, alarm pin, price tag, "
-        "extra fingers, fused fingers, extra arms, missing fingers, "
+        "security tag, price tag, "
+        "extra fingers, fused fingers, missing fingers, deformed hands, extra hand, mutated hands, "
         "mannequin, CGI, plastic skin, blurry, low resolution"
     ),
     'shorts': (
         "long pants underneath, trousers underneath, leggings underneath, "
-        "security tag, alarm pin, price tag, "
-        "extra fingers, fused fingers, extra arms, missing fingers, "
+        "security tag, price tag, "
+        "extra fingers, fused fingers, missing fingers, deformed hands, extra hand, mutated hands, "
         "mannequin, CGI, plastic skin, blurry, low resolution"
     ),
     'tops': (
         "bare legs, exposed thighs, shorts visible, underwear visible, "
         "missing pants, "
-        "security tag, alarm pin, price tag, "
-        "extra fingers, fused fingers, extra arms, missing fingers, "
+        "security tag, price tag, "
+        "extra fingers, fused fingers, missing fingers, deformed hands, extra hand, mutated hands, "
         "mannequin, CGI, plastic skin, blurry, low resolution"
     ),
     'bottoms': (
         "wrong waistband, altered pockets, changed fabric texture, "
         "cropped hemline, "
-        "security tag, alarm pin, price tag, "
-        "extra fingers, fused fingers, extra arms, missing fingers, "
+        "security tag, price tag, "
+        "extra fingers, fused fingers, missing fingers, deformed hands, extra hand, mutated hands, "
         "mannequin, CGI, plastic skin, blurry, low resolution"
     ),
 }

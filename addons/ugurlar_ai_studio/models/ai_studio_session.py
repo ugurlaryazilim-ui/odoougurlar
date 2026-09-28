@@ -2754,8 +2754,25 @@ class AiStudioSession(models.Model):
                     'ugurlar_ai_studio.auto_bg_remove', 'True'
                 ) == 'True'
 
+                # ═══ ÖNCELİKLE ANALİZ YAP → security_tags çıkar ═══
+                # Garment preprocessing'den ÖNCE yapılmalı ki alarm etiketleri temizlenebilsin
+                _retry_security_tags = None
+                try:
+                    from ..services.garment_analyzer import analyze_garment
+                    from ..services.garment_preprocessor import preprocess_garment_image
+                    _pre_check = preprocess_garment_image(source_image, target_long_edge=1200)
+                    _pre_url = provider.upload_image(_pre_check['image_base64'])
+                    product_context = session._get_product_context_text()
+                    _pre_analysis = analyze_garment(fal_api_key, _pre_url, gemini_api_key=gemini_api_key, product_context=product_context)
+                    if isinstance(_pre_analysis, dict):
+                        _retry_security_tags = _pre_analysis.get('securityTags')
+                        if _retry_security_tags:
+                            _logger.info('Retry: %d adet güvenlik etiketi tespit edildi, temizlenecek.', len(_retry_security_tags))
+                except Exception as pre_err:
+                    _logger.warning('Retry pre-analysis başarısız: %s', pre_err)
+
                 garment_url, processed_b64 = self._prepare_garment_for_tryon(
-                    source_image, provider, session, auto_bg=auto_bg
+                    source_image, provider, session, auto_bg=auto_bg, security_tags=_retry_security_tags
                 )
 
                 model_image_field = 'model_image_front'
@@ -2771,9 +2788,9 @@ class AiStudioSession(models.Model):
 
                 detected_cat = session._detect_garment_type()
 
-                # Retry: ilk prompt oluşturma öncesi analiz cache'i kontrol et
-                # (NOT: Henüz analyze_garment çağrılmadı, ama session'ın cached verisinden kontrol)
-                _retry_cached = session.cached_analysis_data
+                # Retry: ilk prompt oluşturma öncesi Gemini analiz
+                # NOT: cached_analysis_data bir Odoo field değil, güvenli erişim gerekli
+                _retry_cached = getattr(session, '_cached_analysis_data_runtime', None)
                 if _retry_cached and detected_cat == 'tops':
                     try:
                         import json

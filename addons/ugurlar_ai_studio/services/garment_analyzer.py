@@ -134,11 +134,12 @@ Use this official product metadata as definitive context:
     prompt = f"""You are a senior Fashion Merchandiser analyzing a product image.
 Ignore any hangers, clips, hands, or mannequins holding the garment. Focus ONLY on the garment's actual design.
 {context_section}
-CRITICAL SECURITY ALARM & STORE TAG INSTRUCTION:
-1. Retail garments frequently have store security alarm tags, anti-theft sensors, magnetic alarm pins, or round metal/plastic security tags pinned to the waistband, collar, pocket, or hemline.
-2. DO NOT describe security tags as part of the garment's design.
-3. DO NOT mistake any security alarm pin, sensor tag, or retail clip for a garment button, rivet, snap, or fastener! If an elastic waistband garment (or pants without a front fly button) has a metallic/plastic pin attached, closureType MUST be 'Yok' and buttonCount MUST be null.
-4. DETECT ALL SECURITY TAGS: In the "securityTags" field, locate and return the 2D bounding boxes of ALL visible store security tags, alarm sensors, metallic alarm pins, or plastic EAS hard tags in normalized coordinates [ymin, xmin, ymax, xmax] on a scale of 0 to 1000. If there are no security tags or alarms visible, return an empty array [].
+SECURITY TAG DETECTION (be VERY conservative — false positives damage the image):
+1. ONLY report actual retail store security alarm devices: large round/oval plastic EAS hard tags (typically 4-6cm diameter, white/grey/beige), or rectangular magnetic alarm sensors clipped to fabric edges.
+2. Do NOT report any of these as security tags: buttons (including metal/snap buttons), rivets, grommets, eyelets, zipper pulls, decorative clasps, brooches, belt buckles, logo hardware, or any design element that is SYMMETRICALLY placed or appears in multiples across the garment.
+3. A genuine security tag is typically: a single isolated device, NOT part of a pattern, round/oval shaped, 3-6cm in size, attached by a metal pin through the fabric, usually near the waistband, collar, or hemline edge.
+4. If you are NOT at least 90% confident that an item is a retail security tag, return an EMPTY array []. When in doubt, do NOT flag it.
+5. In the "securityTags" field, return bounding boxes ONLY for items you are highly confident are actual store security devices. Format: [ymin, xmin, ymax, xmax] normalized 0-1000. If none found, return [].
 
 CRITICAL NECKLINE INSTRUCTION: If the garment is hanging on a hanger, the front collar often drops down, revealing the INSIDE of the BACK panel (inner back lining, back collar label, or back keyhole). You MUST completely IGNORE anything visible through the neck hole. Do NOT describe the inner back lining as part of the front collar. If you see a keyhole or label through the neck opening, do NOT say the garment has a keyhole collar. Assume a clean, standard front neckline.
 
