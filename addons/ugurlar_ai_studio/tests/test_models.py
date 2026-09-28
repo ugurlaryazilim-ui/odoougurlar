@@ -7,7 +7,9 @@ from odoo import fields
 from odoo.exceptions import UserError
 from odoo.tests import TransactionCase, new_test_user, tagged
 
-from ..models.ai_studio_session import _try_acquire_lease
+from unittest.mock import patch
+
+from ..models.ai_studio_session import _get_extra_prompt_en, _try_acquire_lease
 
 try:
     from PIL import Image
@@ -69,6 +71,18 @@ class TestAiStudioModels(TransactionCase):
         session = self._session(self.red, state='review')
         with self.assertRaises(UserError):
             session.action_start_processing()
+
+    # ── İlave talimat çevirisi (oturum başına bir kez) ───────────────
+    def test_extra_prompt_translated_once_and_refreshed_on_change(self):
+        session = self._session(self.red, extra_prompt='Kollar kıvrık olsun')
+        Gen = type(self.env['ai.studio.generation'])
+        with patch.object(Gen, '_translate_prompt', return_value='Sleeves rolled up') as tr:
+            self.assertEqual(_get_extra_prompt_en(session), 'Sleeves rolled up')
+            self.assertEqual(_get_extra_prompt_en(session), 'Sleeves rolled up')
+            self.assertEqual(tr.call_count, 1, 'aynı metin tekrar çevrilmemeli')
+            session.extra_prompt = 'Yaka açık olsun'
+            _get_extra_prompt_en(session)
+            self.assertEqual(tr.call_count, 2, 'metin değişince yeniden çevrilmeli')
 
     # ── Aylık bütçe ──────────────────────────────────────────────────
     def test_monthly_budget_blocks_new_processing(self):

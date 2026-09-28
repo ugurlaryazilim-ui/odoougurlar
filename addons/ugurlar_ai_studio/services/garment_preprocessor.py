@@ -109,9 +109,10 @@ def reduce_noise(img_array, d=9, sigma_color=75, sigma_space=75):
 # ---------------------------------------------------------------------------
 # 3.5 Güvenlik Etiketi / Alarm Pini Silme — Inpainting (Telea)
 # ---------------------------------------------------------------------------
-# Etiket inpaint eşikleri
-MIN_TAG_CONFIDENCE = 0.7
-MAX_TAG_AREA_RATIO = 0.08
+# Etiket inpaint eşikleri. Tespit promptu da %50 eşiği kullanır (çift süzme yok).
+# Alan sınırı yakın çekim detay fotoğraflarında gerçek alarmı atmayacak kadar geniş.
+MIN_TAG_CONFIDENCE = 0.5
+MAX_TAG_AREA_RATIO = 0.15
 
 
 def inpaint_security_tags(img_bgr, tag_boxes):

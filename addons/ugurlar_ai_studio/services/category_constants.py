@@ -177,6 +177,15 @@ DEFAULT_BACKGROUND = 'Clean white studio background with soft, even lighting.'
 DEFAULT_BOTTOMS = 'dark tailored full-length trousers'
 # Alt giyim / etek / şort çekimlerinde sabit üst kombin
 DEFAULT_TOP = 'a plain fitted neutral top'
+# Üst giyimde kumaş pantolonla uyumlu ayakkabı (manken spor ayakkabı giyiyor olabilir)
+DEFAULT_TOPS_SHOES = 'simple dark leather shoes'
+
+# Mağaza etiketleri: negative_prompt desteklenmediği için bunu pozitif cümleyle söylemek
+# zorundayız; aksi halde "yapısal detayları birebir kopyala" talimatı etiketi de kopyalatır
+CLEAN_PRODUCT = (
+    "Show the garment as a clean, finished retail product with no security tags, "
+    "alarm pins, price tags or hangtags attached."
+)
 
 _FRONT_INTRO = (
     "Image 1 shows the model. Image 2 shows the {garment} product. "
@@ -186,14 +195,15 @@ _FRONT_INTRO = (
 _BACK_INTRO = (
     "Image 1 shows the model from behind. Image 2 shows the back of the {garment} product. "
     "Back view of the same model, facing away from the camera, "
-    "wearing the {desc} from Image 2 with its exact back design. {front_ref}"
+    "wearing the {desc} from Image 2 with its exact back design. "
+    "Take the back design only from Image 2; do not copy prints or details from the front. {front_ref}"
 )
 _SIDE_INTRO = (
     "Image 1 shows the model. Image 2 shows the {garment} product. "
     "Three-quarter side view, about 45 degrees, of the same model "
     "wearing the {desc} from Image 2, showing its side profile and drape. {front_ref}"
 )
-_OUTRO = "E-commerce catalog photo, full body. {background} {extra_prompt}"
+_OUTRO = CLEAN_PRODUCT + " E-commerce catalog photo, full body. {background} {extra_prompt}"
 
 # Key: (sub_type, photo_type)
 # sub_type: 'dress', 'jumpsuit', 'tops', 'bottoms', 'skirt', 'shorts'
@@ -220,7 +230,7 @@ SEEDREAM_TEMPLATES = {
     # ── TOPS / OUTERWEAR ──
     ('tops', 'front'): _FRONT_INTRO + (
         "{inner_top_note}{collar_note}{graphic_note}"
-        "Styled with " + DEFAULT_BOTTOMS + " and the same shoes as in Image 1. {hand_pose} "
+        "Styled with " + DEFAULT_BOTTOMS + " and " + DEFAULT_TOPS_SHOES + ". {hand_pose} "
     ) + _OUTRO,
     ('tops', 'back'): _BACK_INTRO + (
         "Styled with " + DEFAULT_BOTTOMS + ". Show a single clean back panel. "
@@ -258,12 +268,6 @@ SEEDREAM_TEMPLATES = {
     ('shorts', 'side'): _SIDE_INTRO + "{leg_rule} " + _OUTRO,
 }
 
-# Detail view — tüm kategoriler için ortak
-SEEDREAM_DETAIL_TEMPLATE = (
-    "Close-up detail photo of the {desc} from Image 2 worn by the model from Image 1. "
-    "Sharp focus on fabric texture, stitching and construction details. {background} {extra_prompt}"
-)
-
 # Back/side görünümlerde ön görünüm referansı (Image 3) varsa eklenen cümle
 FRONT_REF_SENTENCE = (
     "Image 3 is the finished front view: keep the same model, hair, outfit styling and shoes as Image 3. "
@@ -290,8 +294,6 @@ SEEDREAM_NEGATIVES = {
     'bottoms': "wrong waistband, altered pockets, changed fabric texture, cropped hemline, " + _COMMON_NEG,
 }
 
-# Fotorealizm kalite cümlesi — prompt sonuna eklenir (tek kısa cümle)
-QUALITY_SUFFIX = "Hasselblad editorial photography, natural human skin, seamless white cyclorama."
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -303,7 +305,7 @@ FASHN_VIEW_TEMPLATES = {
         "Professional e-commerce front view photography. "
         "Full-body model facing camera wearing garment. "
         "Standard fit, plain pattern. Clean white studio background, even lighting. "
-        "Confident fashion pose, one hand on hip."
+        "Natural relaxed standing pose, arms at the sides."
     ),
     'back': (
         "Professional e-commerce back view photography. "

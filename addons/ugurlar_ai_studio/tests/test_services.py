@@ -12,7 +12,8 @@ from ..services import category_constants as cc
 from ..services import fal_provider as fal_provider_module
 from ..services.fal_error_handler import parse_fal_error
 from ..services.fal_provider import FalProvider
-from ..services.garment_analyzer import build_generation_prompt
+from ..services import garment_analyzer as analyzer_module
+from ..services.garment_analyzer import build_generation_prompt, detect_image_tags
 from ..services.garment_preprocessor import inpaint_security_tags, preprocess_garment_image
 from ..services.quality_checker import compute_quality_score, delta_e_ciede2000
 
@@ -82,7 +83,7 @@ class TestPromptBuilder(BaseCase):
         self.assertNotIn('knit knit', p)
         self.assertNotIn('Figure', p)
         self.assertLessEqual(p.lower().count('trousers'), 1, 'istenmeyen nesne tekrar edilmemeli')
-        self.assertLessEqual(len(p.split()), 110)
+        self.assertLessEqual(len(p.split()), 125)
 
     def test_jumpsuit_does_not_get_bare_legs(self):
         p = self._build({'garmentType': 'Tulum', 'clothingCategory': 'dress', 'garmentLength': 'maxi'})
@@ -101,6 +102,26 @@ class TestPromptBuilder(BaseCase):
         analysis = {'garmentType': 'Bluz', 'clothingCategory': 'tops'}
         self.assertIn('Image 3', self._build(analysis, 'back', has_front_ref=True))
         self.assertNotIn('Image 3', self._build(analysis, 'back', has_front_ref=False))
+
+    def test_every_view_asks_for_clean_product(self):
+        # negative_prompt desteklenmiyor: etiket kuralı pozitif cümleyle HER şablonda olmalı
+        for (sub_type, photo_type) in cc.SEEDREAM_TEMPLATES:
+            category = {'dress': 'dress', 'jumpsuit': 'dress', 'bottoms': 'bottoms'}.get(sub_type, 'tops')
+            p = self._build({'garmentType': 'Ürün', 'clothingCategory': category}, photo_type)
+            self.assertIn('no security tags', p, (sub_type, photo_type))
+
+    def test_back_view_takes_design_from_back_photo(self):
+        p = self._build({'garmentType': 'Bluz', 'clothingCategory': 'tops'}, 'back')
+        self.assertIn('back design only from Image 2', p)
+
+    def test_no_turkish_leaks_into_prompt(self):
+        analysis = {'garmentType': 'Çiçekli Şifon Elbise', 'garmentTypeEn': 'floral chiffon dress',
+                    'clothingCategory': 'dress', 'primaryColor': 'Kırmızı', 'primaryColorEn': 'red',
+                    'fabricType': 'Şifon', 'fabricTypeEn': 'chiffon', 'collarType': 'Kayık Yaka',
+                    'collarTypeEn': 'boat', 'garmentLength': 'midi'}
+        for view in ('front', 'back', 'side'):
+            p = self._build(analysis, view)
+            self.assertFalse(set(p) & set('çğıöşüÇĞİÖŞÜ'), (view, p))
 
     def test_all_templates_format(self):
         for (sub_type, photo_type) in cc.SEEDREAM_TEMPLATES:
@@ -158,6 +179,45 @@ class TestSeedreamArguments(BaseCase):
         captured, _result = self._call(photo_type='front', on_enqueue=lambda rid, app: seen.append((rid, app)))
         captured['on_enqueue']('req-1')
         self.assertEqual(seen, [('req-1', 'bytedance/seedream/v5/pro/edit')])
+
+
+@tagged('post_install', '-at_install', 'ugurlar_ai_studio')
+class TestTagDetection(BaseCase):
+
+    def test_invalid_boxes_are_dropped(self):
+        fake = {'securityTags': [
+            {'box_2d': [100, 100, 150, 150], 'label': 'alarm_tag', 'confidence': 0.9},
+            {'box_2d': [1, 2], 'label': 'price_tag'},
+            'garbage',
+        ]}
+        with patch.object(analyzer_module, '_gemini_json', return_value=fake) as gj:
+            tags = detect_image_tags(None, 'IMG', gemini_api_key='k')
+        self.assertEqual(len(tags), 1)
+        self.assertTrue(gj.call_args.kwargs['deterministic'], 'tespit deterministik olmalı')
+
+    def test_schema_rejection_retries_without_schema(self):
+        class Resp:
+            def __init__(self, code, payload=None):
+                self.status_code, self._payload = code, payload
+
+            def raise_for_status(self):
+                if self.status_code >= 400:
+                    raise Exception('HTTP %s' % self.status_code)
+
+            def json(self):
+                return self._payload
+
+        ok = Resp(200, {'candidates': [{'content': {'parts': [{'text': '{"securityTags": []}'}]}}]})
+        calls = []
+
+        def fake_post(url, json=None, **kw):
+            calls.append('responseSchema' in json['generationConfig'])
+            return Resp(400) if len(calls) == 1 else ok
+
+        with patch.object(analyzer_module, '_prepare_gemini_image', return_value=('image/jpeg', 'AAAA')),                 patch.object(analyzer_module.requests, 'post', side_effect=fake_post):
+            result = analyzer_module._gemini_json('k', 'p', 'IMG', schema={'type': 'OBJECT'})
+        self.assertEqual(result, {'securityTags': []})
+        self.assertEqual(calls, [True, False])
 
 
 @tagged('post_install', '-at_install', 'ugurlar_ai_studio')

@@ -256,89 +256,34 @@ class AiStudioModelPreset(models.Model):
             },
         }
 
-    # ─── SaaS Prompt Lock Sistemi (20+ Lock) ──────────────────────────
-    # SaaS projesinin sharedPrompts.ts'inden birebir uyarlanmıştır.
+    # ─── Manken üretim promptları ────────────────────────────────────
+    # Try-on şablonlarıyla (services/category_constants.py) uyumlu kıyafetler:
+    # üst giyim çekiminde koyu kumaş pantolon + deri ayakkabı, alt giyimde sade üst,
+    # elbisede çıplak bacak + topuklu. Böylece try-on modelin mankendeki pantolonu
+    # "silmesine" gerek kalmaz. Seedream/FLUX negative_prompt desteklemediği için
+    # istenmeyen şeyler listelenmez; istenen sonuç tarif edilir.
+    MANNEQUIN_OUTFITS = {
+        'tops': 'a plain fitted solid-color tank top, slim dark tailored trousers and simple dark leather shoes',
+        'bottoms': 'a plain fitted neutral tank top, slim light-grey trousers and clean white minimal sneakers',
+        'one_piece': 'a plain fitted solid-color sleeveless bodysuit, bare legs and simple nude high-heeled pumps',
+        'shoes': 'a plain fitted solid-color tank top, slim dark trousers ending above the ankle',
+        'bags': 'a plain fitted solid-color tank top, slim dark tailored trousers and simple dark leather shoes',
+        'accessories': 'a plain fitted solid-color tank top, slim dark tailored trousers and simple dark leather shoes',
+    }
 
-    # 1. Photorealism
-    REALISM_LOCK = (
-        "RAW photograph, photorealistic, shot on Hasselblad X2D 100C, "
-        "real human being, NOT illustration, NOT cartoon, NOT 3D render, NOT anime, NOT drawing, NOT digital art, "
-        "visible skin pores, natural skin texture with subsurface scattering, "
-        "real facial asymmetry, wet corneal reflections, individual hair strands with flyaways, "
-        "natural makeup, authentic editorial expression. "
-        "CAMERA: 85mm f/1.8 lens, shallow depth of field, natural sensor grain."
-    )
+    MANNEQUIN_VIEWS = {
+        'front': 'front view, facing the camera',
+        'back': 'back view, facing away from the camera, the whole back visible',
+        # Try-on yan şablonu 45 derece ister; manken de aynı açıda olmalı
+        'side': 'three-quarter side view, turned about 45 degrees',
+    }
 
-    # 2. Studio Environment
-    STUDIO_LOCK = (
-        "Environment: Pure, expansive, high-end minimalist fashion studio set. "
-        "Bright, airy atmosphere with infinite white space. "
-        "Seamless white studio cyclorama (#FFFFFF) only. "
-        "Clean floor-to-background transition with soft, natural bounce light. "
-        "No visible wall seams, no horizontal floor lines, no room corners. "
-        "STUDIO EQUIPMENT BAN: No softboxes, no flash heads, no light stands, "
-        "no umbrellas, no reflectors, no C-stands, no tripods, no cables. "
-        "ONLY the model should exist in the frame."
-    )
-
-    # 3. Anatomy
-    ANATOMY_LOCK = (
-        "ANATOMY LOCK CRITICAL: Ensure exactly two arms, two legs, and one head. "
-        "Hands must have exactly five fingers each. No double heads or double necks. "
-        "No extra limbs, extra fingers, extra toes, or ghosting effects. "
-        "No warped human proportions or detached limbs. "
-        "Maintain physically plausible human weight distribution and bone structure. "
-        "Joints must be naturally articulated. No impossible leg or arm angles."
-    )
-
-    # 4. Anti-Nude / Full Outfit (Profesyonel Tam Giyim Modu)
-    ANTI_NUDE_LOCK = (
-        "OUTFIT MANDATORY LOCK: The model MUST wear a professional neutral matching outfit. "
-        "Model MUST wear: a simple solid-colored form-fitting crop top / sports bra, paired with casual long trousers (like beige or grey cotton pants), and clean white sneakers. "
-        "No bare chest, no bare legs, no underwear look, no swimsuit look. The model must look fully clothed on the lower body. "
-        "The crop top is form-fitting to facilitate virtual try-on, and the trousers and sneakers provide a complete professional look. "
-        "ANY underwear-only look or barefoot look is a CRITICAL FAILURE."
-    )
-
-    # 5. Posture
-    POSTURE_LOCK = (
-        "Relaxed contrapposto with natural weight shift, slight shoulder drop, "
-        "authentic core engagement. No stiff/mannequin/robotic pose. "
-        "Effortless high-end editorial model with a relaxed, confident stance."
-    )
-
-    # 6. Identity Consistency (ön-arka tutarlılık)
-    IDENTITY_LOCK = (
-        "IDENTITY LOCK: Replicate the EXACT same model across all views: "
-        "face shape, skin tone, hair (color, style, length, curl pattern), "
-        "body proportions, age cues, and physical build. "
-        "Replicate the EXACT same outfit across all views. "
-        "Hair immutable: keep exact hair length, color, part direction, density. "
-        "Do not add extensions or change style. "
-        "Any deviation in identity is a CRITICAL FAILURE."
-    )
-
-    # 7. Negative Prompt
-    NEGATIVE_LOCK = (
-        "NEGATIVE: illustration, cartoon, anime, 3D render, digital painting, CGI, "
-        "vector art, sketch, drawing, oil painting, watercolor, comic book style, "
-        "extra arms, extra legs, extra fingers, duplicated face, double head, "
-        "warped anatomy, deformed body, mannequin, doll, plastic skin, waxy skin, "
-        "beauty filter, airbrushed, over-smooth, blurry, low quality, "
-        "collage, split screen, multi-panel, grid layout, "
-        "underwear look, nude model, hanger, flat-lay, product-only shot, "
-        "security tag, alarm tag, anti-theft tag, EAS sensor, retail security badge, "
-        "plastic alarm pin, ink tag, hard tag, store tag, price tag, store fixture, "
-        "retail clip, button on back waistband, rivet on back waistband, misplaced rivet, "
-        "handbag, purse, clutch, tote bag, bag held in hand, floating bag, awkward accessories, "
-        "dress, gown, skirt, robe, one-shoulder dress, sleeveless dress, loose clothing, asymmetrical straps."
-    )
-
-    # 8. Premium Capture
-    CAPTURE_LOCK = (
-        "Ultra premium fashion photography, shot in professional studio, "
-        "soft diffused key light, subtle fill light, clean white background. "
-        "8K resolution, sharp focus on subject, photographic realism."
+    MANNEQUIN_STYLE = (
+        "Relaxed natural standing pose, arms at the sides, natural hands. "
+        "The whole body from head to feet in frame with a little space above and below. "
+        "Plain seamless white studio background, soft even lighting. "
+        "Real person with natural skin texture, photorealistic editorial catalog photo. "
+        "Only the model in the frame, no props, bags, studio equipment or text."
     )
 
     @staticmethod
@@ -393,28 +338,19 @@ class AiStudioModelPreset(models.Model):
             return None
 
     def _build_full_prompt(self, base_prompt, view='front'):
-        """Tüm lock'ları birleştirerek tam prompt oluştur."""
-        if view == 'front':
-            view_desc = 'front view, facing camera directly'
-        elif view == 'back':
-            view_desc = (
-                'back view, facing away from camera, showing full back. '
-                'The garment reference was photographed on a hanger — any fabric folding over the hanger hook at the top '
-                'is the front side draped backward and must be IGNORED. Show only the single back panel as one clean layer'
-            )
-        else:
-            view_desc = 'side profile view, standing profile at 90 degree angle'
-
+        """Manken için metinden görsel promptu (~90 kelime; FLUX metin sınırına sığar)."""
         return (
-            f"RAW photo, photorealistic, real human being, {base_prompt}, {view_desc}, "
-            f"full body shot from head to feet, standing pose, high-end fashion model photography. "
-            f"{self.REALISM_LOCK} "
-            f"{self.STUDIO_LOCK} "
-            f"{self.ANATOMY_LOCK} "
-            f"{self.ANTI_NUDE_LOCK} "
-            f"{self.POSTURE_LOCK} "
-            f"{self.CAPTURE_LOCK} "
-            f"{self.NEGATIVE_LOCK}"
+            f"Photorealistic full-body fashion catalog photo of {base_prompt}, "
+            f"{self.MANNEQUIN_VIEWS.get(view, self.MANNEQUIN_VIEWS['front'])}. "
+            f"{self.MANNEQUIN_STYLE}"
+        )
+
+    def _mannequin_view_edit_prompt(self, view, outfit):
+        """Ön mankenden (Image 1) aynı kişinin arka/yan görünümünü üreten edit promptu."""
+        return (
+            f"Image 1 shows a fashion model. Show the same person, "
+            f"{self.MANNEQUIN_VIEWS[view]}, wearing the same outfit ({outfit}) "
+            f"with the same hair, face, body and skin tone. {self.MANNEQUIN_STYLE}"
         )
 
     def _generate_mannequin_thread(self, preset_id, prompt, api_key,
@@ -435,50 +371,27 @@ class AiStudioModelPreset(models.Model):
                 'petite': 'petite, slender build, 158cm height',
             }
 
-            # Ürün tipine göre kıyafet belirleme (Tam giyinik profesyonel model)
-            outfit_hints_front = {
-                'tops': 'wearing a simple tight form-fitting solid-colored tank top, matching blue denim jeans, and clean white sneakers',
-                'bottoms': 'wearing a simple tight form-fitting solid-colored tank top, matching blue denim jeans, and clean white sneakers',
-                'one_piece': 'wearing a simple form-fitting solid-colored bodysuit with natural bare legs and nude heeled pumps',
-                'shoes': 'wearing a simple tight form-fitting solid-colored tank top, matching blue denim jeans, and clean white sneakers',
-                'bags': 'wearing a simple tight form-fitting solid-colored tank top, matching blue denim jeans, and clean white sneakers',
-                'accessories': 'wearing a simple tight form-fitting solid-colored tank top, matching blue denim jeans, and clean white sneakers',
-            }
-
-            outfit_hints_back = {
-                'tops': 'wearing a simple tight form-fitting solid-colored tank top seen from behind, matching blue denim jeans, and clean white sneakers',
-                'bottoms': 'wearing a simple tight form-fitting solid-colored tank top seen from behind, matching blue denim jeans, and clean white sneakers',
-                'one_piece': 'wearing a simple form-fitting solid-colored bodysuit seen from behind with natural bare legs and nude heeled pumps',
-                'shoes': 'wearing a simple tight form-fitting solid-colored tank top seen from behind, matching blue denim jeans, and clean white sneakers',
-                'bags': 'wearing a simple tight form-fitting solid-colored tank top seen from behind, matching blue denim jeans, and clean white sneakers',
-                'accessories': 'wearing a simple tight form-fitting solid-colored tank top seen from behind, matching blue denim jeans, and clean white sneakers',
-            }
-
             garment_type = 'tops'
             try:
                 with self.pool.cursor() as cr:
                     env = api.Environment(cr, uid, {'lang': 'tr_TR'})
                     p = env['ai.studio.model.preset'].browse(preset_id)
                     garment_type = p.garment_type or 'tops'
+                    # Kullanıcının Türkçe manken tarifi İngilizce prompta çevrilmeden girmesin
+                    if prompt and prompt.strip():
+                        prompt = env['ai.studio.generation']._translate_prompt(prompt) or prompt
             except Exception:
                 pass
 
-            enhanced_prompt_front = (
-                f"{prompt}, {gender_hints.get(gender, 'young adult')}, "
-                f"{body_hints.get(body_type, 'standard build')}, "
-                f"{outfit_hints_front.get(garment_type, outfit_hints_front['tops'])}"
-            )
-
-            enhanced_prompt_back = (
-                f"{prompt}, {gender_hints.get(gender, 'young adult')}, "
-                f"{body_hints.get(body_type, 'standard build')}, "
-                f"{outfit_hints_back.get(garment_type, outfit_hints_back['tops'])}"
-            )
-
-            enhanced_prompt_side = (
-                f"{prompt}, {gender_hints.get(gender, 'young adult')}, "
-                f"{body_hints.get(body_type, 'standard build')}, "
-                f"{outfit_hints_front.get(garment_type, outfit_hints_front['tops'])}"
+            outfit = self.MANNEQUIN_OUTFITS.get(garment_type, self.MANNEQUIN_OUTFITS['tops'])
+            # Aynı kişi/kıyafet tarifi tüm açılarda; açı _build_full_prompt'ta eklenir
+            person = ', '.join(filter(None, [
+                gender_hints.get(gender, 'young adult'),
+                body_hints.get(body_type, 'standard build'),
+                (prompt or '').strip(),
+            ]))
+            enhanced_prompt_front = enhanced_prompt_back = enhanced_prompt_side = (
+                f"a {person}, wearing {outfit}"
             )
 
             if provider_type == 'fashn':
@@ -534,19 +447,7 @@ class AiStudioModelPreset(models.Model):
 
                 if front_fal_url:
                     _logger.info('seedream/v5/pro/edit ile tutarli arka gorsel')
-                    back_prompt = (
-                        f"RAW photo, photorealistic, real human being, NOT illustration, NOT cartoon. "
-                        f"OUTPUT EXACTLY ONE IMAGE. "
-                        f"Show the EXACT SAME person from the reference image, "
-                        f"but from the BACK VIEW — facing away from camera. "
-                        f"SAME person, SAME trousers, SAME hair, SAME body, SAME skin tone. "
-                        f"The top she is wearing is a simple tight form-fitting solid-colored tank top "
-                        f"covering the entire back and torso, matching blue denim jeans covering both legs completely. "
-                        f"NO bare back, NO exposed skin, NO crop top, NO sports bra. "
-                        f"Only the camera angle changes to show the back. "
-                        f"Professional studio fashion photography, white background. "
-                        f"{self.IDENTITY_LOCK} {self.ANATOMY_LOCK}"
-                    )
+                    back_prompt = self._mannequin_view_edit_prompt('back', outfit)
 
                     back_result = self._fal_api_call(
                         'bytedance/seedream/v5/pro/edit',
@@ -566,7 +467,7 @@ class AiStudioModelPreset(models.Model):
                         'fal-ai/flux-pro/v1.1',
                         {
                             'prompt': back_full_prompt,
-                            'image_size': {'width': 768, 'height': 1152},
+                            'image_size': {'width': 864, 'height': 1296},
                             'num_images': 1,
                             'safety_tolerance': 5,
                             'output_format': 'png',
@@ -586,16 +487,7 @@ class AiStudioModelPreset(models.Model):
                 side_data = False
                 if front_fal_url:
                     _logger.info('seedream/v5/pro/edit ile tutarli yan gorsel')
-                    side_prompt = (
-                        f"RAW photo, photorealistic, real human being, NOT illustration, NOT cartoon. "
-                        f"OUTPUT EXACTLY ONE IMAGE. "
-                        f"Show the EXACT SAME person from the reference image, "
-                        f"but from the SIDE PROFILE VIEW — standing profile, 90 degree angle. "
-                        f"SAME person, SAME clothes, SAME hair, SAME body, SAME skin tone. "
-                        f"Only the camera angle changes to show the side profile. "
-                        f"Professional studio fashion photography, white background. "
-                        f"{self.IDENTITY_LOCK} {self.ANATOMY_LOCK}"
-                    )
+                    side_prompt = self._mannequin_view_edit_prompt('side', outfit)
 
                     try:
                         side_result = self._fal_api_call(

@@ -102,6 +102,10 @@
                                  help="Üretimleri Gemini ile pantolon/el/etiket hatalarına karşı denetle">
                             <field name="ai_studio_visual_qc"/>
                         </setting>
+                        <setting string="Görünür Etiketi Otomatik Sil"
+                                 help="Denetim sonuçta alarm/fiyat etiketi görürse tek seferlik AI düzenlemesiyle temizle (AI Görsel Denetim açık olmalı)">
+                            <field name="ai_studio_auto_tag_fix"/>
+                        </setting>
                         <setting string="Otomatik Arka Plan Kaldırma"
                                  help="Fotoğrafları AI'ya göndermeden önce arka planı otomatik kaldır">
                             <field name="ai_studio_auto_bg_remove"/>

@@ -11,7 +11,7 @@
         <record id="prompt_realism_lock" model="ai.studio.prompt.template">
             <field name="name">Fotorealizm Lock</field>
             <field name="scope">global</field>
-            <field name="prompt_text">Hasselblad editorial photography, natural human skin with visible pores, seamless white cyclorama studio, high-key even lighting.</field>
+            <field name="prompt_text">Photorealistic editorial fashion photograph, natural skin texture, true-to-life fabric detail.</field>
         </record>
 
         <!-- ============================================================ -->

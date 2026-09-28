@@ -105,16 +105,99 @@ def _prepare_gemini_image(image_url):
     return None, None
 
 
+_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+
+
+def _gemini_json(gemini_api_key, prompt, image, schema=None, timeout=30, deterministic=False):
+    """Görsel + prompt ile Gemini'den JSON al.
+
+    Args:
+        schema: Gemini responseSchema (OpenAPI alt kümesi). API reddederse (400)
+            şemasız bir kez daha denenir.
+        deterministic: temperature 0 ve "thinking" kapalı — Google'ın nesne
+            tespiti (bounding box) önerisi.
+
+    Returns:
+        dict veya None (başarısız)
+    """
+    if not gemini_api_key or requests is None:
+        return None
+    mime_type, base64_data = _prepare_gemini_image(image)
+    if not base64_data:
+        _logger.warning('Görsel Gemini için hazırlanamadı')
+        return None
+
+    def _call(with_schema):
+        config = {"responseMimeType": "application/json"}
+        if with_schema and schema:
+            config["responseSchema"] = schema
+        if deterministic:
+            config["temperature"] = 0
+            config["thinkingConfig"] = {"thinkingBudget": 0}
+        return requests.post(
+            _GEMINI_URL,
+            json={
+                "contents": [{"parts": [
+                    {"text": prompt},
+                    {"inlineData": {"mimeType": mime_type, "data": base64_data}},
+                ]}],
+                "generationConfig": config,
+            },
+            headers={'Content-Type': 'application/json', 'x-goog-api-key': gemini_api_key},
+            timeout=timeout,
+        )
+
+    try:
+        resp = _call(True)
+        if resp.status_code == 400 and schema:
+            _logger.warning('Gemini responseSchema reddedildi, şemasız tekrar deneniyor')
+            resp = _call(False)
+        resp.raise_for_status()
+        text = resp.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+        if text.startswith('```'):
+            text = text.strip('`')
+            if text.startswith('json'):
+                text = text[4:]
+        parsed = json.loads(text.strip())
+        return parsed if isinstance(parsed, dict) else None
+    except Exception as e:
+        status = getattr(getattr(e, 'response', None), 'status_code', None)
+        _logger.warning('Gemini çağrısı başarısız (%s, status=%s)', e.__class__.__name__, status)
+        return None
+
+
+# Analizden gerçekten kullanılan alanlar (prompt kurucu + QC ipucu + log)
+_ANALYSIS_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "garmentType": {"type": "STRING"},
+        "garmentTypeEn": {"type": "STRING"},
+        "clothingCategory": {"type": "STRING", "enum": ["tops", "bottoms", "dress", "outerwear", "knitwear"]},
+        "primaryColor": {"type": "STRING"},
+        "primaryColorEn": {"type": "STRING"},
+        "fabricType": {"type": "STRING"},
+        "fabricTypeEn": {"type": "STRING"},
+        "collarType": {"type": "STRING"},
+        "collarTypeEn": {"type": "STRING"},
+        "sleeveType": {"type": "STRING"},
+        "hasGraphic": {"type": "BOOLEAN"},
+        "graphicDescriptionEn": {"type": "STRING"},
+        "garmentLength": {"type": "STRING", "enum": ["mini", "knee", "midi", "maxi", "standard"]},
+    },
+    "required": ["garmentType", "garmentTypeEn", "clothingCategory", "primaryColorEn", "garmentLength"],
+}
+
+
 def analyze_garment(api_key, image_url, gemini_api_key=None, product_context=None):
     """Kiyafet gorseli analiz et — tur, renk, kumas, detaylar.
 
-    Gemini API anahtarı verilmişse doğrudan Google Gemini API kullanılır.
-    Aksi halde fal.ai proxy/any-llm kullanılır.
+    Mağaza etiketi tespiti burada YAPILMAZ: ayrı ve odaklı detect_image_tags()
+    çağrısı çok daha doğru kutu verir.
 
     Args:
-        api_key: fal.ai API anahtari (fallback/any-llm için)
+        api_key: fal.ai API anahtari (Gemini yoksa any-llm fallback)
         image_url: Analiz edilecek gorsel URL'si veya base64 verisi
-        gemini_api_key: Google Gemini API anahtarı (varsa doğrudan kullanım için)
+        gemini_api_key: Google Gemini API anahtarı
         product_context: Ürün adı, kodu, kategorisi ve nitelikleri (Odoo ERP'den)
 
     Returns:
@@ -123,199 +206,107 @@ def analyze_garment(api_key, image_url, gemini_api_key=None, product_context=Non
     context_section = ""
     if product_context:
         context_section = f"""
-OFFICIAL ERP / STORE PRODUCT INFORMATION (GROUND TRUTH):
+OFFICIAL STORE PRODUCT INFORMATION (ground truth for the category):
 "{product_context}"
-Use this official product metadata as definitive context:
-- If product name/category indicates Manto, Kaban, Palto, Mont, Ceket, Blazer, Trençkot, Pardösü, Cardigan, Hırka, Kazak, Bluz, Gömlek, Tişört, Tunik: clothingCategory MUST be 'outerwear' or 'tops' (NEVER 'dress' and NEVER 'bottoms')! Even if long or belted, it is worn OVER pants/trousers, NOT as a dress.
-- If product name/category indicates Etek, Şort, Pantolon, Jean, Tayt: clothingCategory MUST be 'bottoms'!
-- If product name/category indicates Elbise, Abiye, Tulum: clothingCategory MUST be 'dress'!
+- Manto, Kaban, Palto, Mont, Ceket, Blazer, Trençkot, Pardösü, Hırka, Kazak, Bluz, Gömlek, Tişört, Tunik → 'outerwear' or 'tops', never 'dress' (worn over trousers even if long or belted).
+- Etek, Şort, Pantolon, Jean, Tayt → 'bottoms'.
+- Elbise, Abiye, Tulum → 'dress'.
 """
 
-    prompt = f"""You are a senior Fashion Merchandiser analyzing a product image.
-Ignore any hangers, clips, hands, or mannequins holding the garment. Focus ONLY on the garment's actual design.
+    prompt = f"""You are a senior fashion merchandiser analyzing a product photo.
+Ignore hangers, clips, hands, mannequins and any store tags; describe only the garment's own design.
 {context_section}
-STORE SECURITY & PRICE TAG DETECTION:
-1. Detect any retail store security alarm devices (round/oval/rectangular plastic EAS hard tags, magnetic sensor clips, alarm pins) AND any paper/cardboard store price tags, barcode hangtags, or brand labels attached with pins/strings to the garment (waistband, collar, hem, or pocket).
-2. Do NOT report real garment design elements: regular buttons, denim rivets, grommets, zipper pulls, belt buckles, or brooches.
-3. For each item give "confidence" (0.0-1.0). Only report items you are at least 70% sure are store tags, not garment design.
-4. In the "securityTags" field, return the 2D bounding boxes of all detected security alarms, sensor tags, and store price hangtags in normalized coordinates [ymin, xmin, ymax, xmax] on a scale of 0 to 1000. If none found, return [].
+If the garment hangs on a hanger, the front neckline may reveal the inside of the back panel (lining, back label, keyhole). Ignore anything seen through the neck opening and assume a clean standard front neckline.
 
-CRITICAL NECKLINE INSTRUCTION: If the garment is hanging on a hanger, the front collar often drops down, revealing the INSIDE of the BACK panel (inner back lining, back collar label, or back keyhole). You MUST completely IGNORE anything visible through the neck hole. Do NOT describe the inner back lining as part of the front collar. If you see a keyhole or label through the neck opening, do NOT say the garment has a keyhole collar. Assume a clean, standard front neckline.
+Category rules:
+- Skirts, shorts, trousers, jeans → 'bottoms'.
+- Dresses, evening dresses, jumpsuits → 'dress'.
+- Coats, jackets, cardigans, sweaters, blouses, shirts, t-shirts → 'outerwear' or 'tops', even if long or belted.
+- For dresses and skirts, garmentLength must be 'mini', 'knee', 'midi' or 'maxi'; otherwise 'standard'.
 
-CRITICAL CATEGORY INSTRUCTION:
-- If the garment is an etek (skirt), mini skirt, A-line skirt, pleated skirt, pencil skirt, şort (shorts), or pants/trousers: clothingCategory MUST be 'bottoms' (NEVER tops, NEVER outerwear)!
-- If the garment is an elbise (dress), abiye, or jumpsuit: clothingCategory MUST be 'dress'!
-- For coats, mantos, kabans, paltos, trench coats, parkas, jackets, blazers, mont, cardigans, sweaters, blouses, shirts, and t-shirts: clothingCategory MUST be 'outerwear' or 'tops'! DO NOT classify a coat, jacket, manto, or cardigan as a 'dress' even if it reaches mid-thigh or has a belt!
-- For skirts and dresses: garmentLength MUST accurately specify 'mini', 'knee', 'midi', or 'maxi'.
+Fields ending in "En" must be plain lowercase English; they go straight into an English image prompt.
+The other text fields are in Turkish.
 
-The *En fields MUST be plain English (they are inserted directly into an English image-generation prompt); the other descriptive fields stay in Turkish.
-
-Analyze the garment and return a JSON with these fields:
-{
-  "garmentType": "string — type (e.g., T-Shirt, Gömlek, Pantolon, Elbise, Kazak, Ceket, Etek, Mini Etek)",
-  "garmentTypeEn": "string — the same garment type in English, lowercase (e.g., 'shirt', 'knit dress', 'wide-leg trousers', 'mini skirt', 'jumpsuit')",
-  "clothingCategory": "string — tops/bottoms/dress/outerwear/knitwear",
-  "primaryColor": "string — dominant color (e.g., Siyah, Beyaz, Lacivert, Kirmizi)",
-  "primaryColorEn": "string — dominant color in English, lowercase (e.g., 'black', 'navy', 'burgundy')",
-  "colorHex": "string — approximate hex code (e.g., #1a1a2e)",
-  "secondaryColors": ["array of other colors present"],
-  "fabricType": "string — fabric (e.g., Pamuk, Polyester, Keten, Denim, Triko, Saten)",
-  "fabricTypeEn": "string — fabric in English, lowercase (e.g., 'cotton', 'knit', 'satin', 'denim')",
-  "pattern": "string — pattern (e.g., Duz, Cizgili, Kareli, Cicekli, Baskili)",
-  "style": "string — style (e.g., Casual, Formal, Sporcu, Elegance)",
-  "fitDetails": "string — fit description (e.g., Regular Fit, Slim Fit, Oversize)",
-  "collarType": "string — collar/neckline if visible",
-  "collarTypeEn": "string — collar/neckline in English without the word 'neckline' (e.g., 'V', 'crew', 'shirt collar', 'turtleneck')",
-  "sleeveType": "string — sleeve type if visible",
-  "closureType": "string — closure type (Dugme, Fermuar, Yok)",
-  "buttonCount": "number or null",
-  "hasGraphic": "boolean — has print/graphic",
-  "graphicDescription": "string — describe any print/graphic",
-  "graphicDescriptionEn": "string — short English description of the print/graphic, or empty",
-  "garmentLength": "string — mini/knee/midi/maxi/standard",
-  "hemline": "string — hem description",
-  "seoTitle": "string — SEO optimized Turkish title",
-  "seoDescription": "string — SEO optimized Turkish description (50-100 words)",
-  "recommendedBottoms": "string — Describe in English the most matching pants/trousers/jeans style and color to build a stylish outfit with this product (e.g. 'dark blue slim-fit denim jeans', 'beige tailored cotton trousers', 'black cargo pants')",
-  "recommendedShoes": "string — Describe in English the most matching shoes style and color for this outfit (e.g. 'clean white minimalist leather sneakers', 'brown leather loafers', 'black high-top boots')",
-  "waistbandType": "string — for bottoms: smooth/flat, belted, elasticated, drawstring. For tops: null",
-  "hasBeltLoops": "boolean — true ONLY if belt loops are clearly visible on the garment",
-  "structuralDetails": "string — describe visible structural elements: pleats, darts, pintucks, piping",
-  "securityTags": [
-    {
-      "box_2d": [100, 200, 150, 250],
-      "label": "alarm_pin",
-      "confidence": 0.95
-    }
-  ]
-}
-
-Return ONLY valid JSON, no markdown."""
+Return JSON:
+{{
+  "garmentType": "Turkish type, e.g. Gömlek, Pantolon, Triko Elbise, Mini Etek",
+  "garmentTypeEn": "e.g. 'shirt', 'knit dress', 'wide-leg trousers', 'mini skirt', 'jumpsuit'",
+  "clothingCategory": "tops | bottoms | dress | outerwear | knitwear",
+  "primaryColor": "Turkish dominant color, e.g. Siyah, Lacivert",
+  "primaryColorEn": "e.g. 'black', 'navy', 'burgundy'",
+  "fabricType": "Turkish fabric, e.g. Pamuk, Triko, Saten",
+  "fabricTypeEn": "e.g. 'cotton', 'knit', 'satin', 'denim'",
+  "collarType": "Turkish collar/neckline if visible",
+  "collarTypeEn": "without the word 'neckline', e.g. 'V', 'crew', 'shirt collar', 'turtleneck'",
+  "sleeveType": "sleeve type if visible (e.g. uzun kollu, kolsuz, askılı)",
+  "hasGraphic": true or false,
+  "graphicDescriptionEn": "short English description of a print/graphic, or empty",
+  "garmentLength": "mini | knee | midi | maxi | standard"
+}}
+Return ONLY valid JSON."""
 
     if gemini_api_key:
-        _logger.info('Google Gemini API kullanılarak doğrudan kiyafet analizi yapılıyor...')
-        mime_type, base64_data = _prepare_gemini_image(image_url)
-        if mime_type and base64_data:
-            model = "gemini-2.5-flash"
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-            
-            payload = {
-                "contents": [{
-                    "parts": [
-                        {"text": prompt},
-                        {
-                            "inlineData": {
-                                "mimeType": mime_type,
-                                "data": base64_data
-                            }
-                        }
-                    ]
-                }],
-                "generationConfig": {
-                    "responseMimeType": "application/json"
-                }
-            }
-            
-            try:
-                if not requests:
-                    raise RuntimeError("requests paketi kurulu değil.")
-                
-                headers = {'Content-Type': 'application/json', 'x-goog-api-key': gemini_api_key}
-                resp = requests.post(url, json=payload, headers=headers, timeout=45)
-                resp.raise_for_status()
-                res_data = resp.json()
-                
-                candidates = res_data.get('candidates', [])
-                if candidates:
-                    text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '')
-                    if text:
-                        text = text.strip()
-                        # Clean markdown formatting if present
-                        if text.startswith('```json'):
-                            text = text[7:]
-                        if text.endswith('```'):
-                            text = text[:-3]
-                        text = text.strip()
-                        parsed = json.loads(text)
-                        if isinstance(parsed, dict):
-                            return parsed
-            except Exception as e:
-                _logger.exception('Direct Gemini API hatası, fal.ai fallback denenecek: %s', e)
-        else:
-            _logger.warning('Görsel Gemini API için hazırlanamadı, fal.ai fallback denenecek')
+        _logger.info('Gemini ile kıyafet analizi yapılıyor...')
+        parsed = _gemini_json(gemini_api_key, prompt, image_url, schema=_ANALYSIS_SCHEMA, timeout=45)
+        if parsed:
+            return parsed
+        _logger.warning('Gemini analizi başarısız, fal.ai fallback denenecek')
 
-    # Fallback to fal.ai if gemini fails or isn't provided
     if api_key:
         return _analyze_via_fal(api_key, image_url, prompt)
 
     return _default_analysis()
 
 
-def detect_image_tags(api_key, image_url, gemini_api_key=None):
-    """Herhangi bir kıyafet görselindeki (ön, arka veya yan yüz) mağaza alarmı ve fiyat etiketlerini hızlıca tespit eder.
+# Mağaza etiketi tespiti — tek görev, kısa prompt, deterministik (daha doğru kutular)
+_TAG_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "securityTags": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "box_2d": {"type": "ARRAY", "items": {"type": "INTEGER"}},
+                    "label": {"type": "STRING", "enum": ["alarm_tag", "price_tag", "hangtag", "tag_pin"]},
+                    "confidence": {"type": "NUMBER"},
+                },
+                "required": ["box_2d", "label"],
+            },
+        },
+    },
+    "required": ["securityTags"],
+}
 
-    Args:
-        api_key: fal.ai API anahtarı
-        image_url: Görsel URL'si veya base64 verisi
-        gemini_api_key: Google Gemini API anahtarı
+_TAG_PROMPT = """Detect every retail store item attached to this garment that must be removed before a product photo:
+- alarm_tag: plastic security / EAS hard tag (round, oval or rectangular, often grey or white), ink tag, magnetic sensor clip
+- price_tag: paper or cardboard price / barcode tag
+- hangtag: brand hangtag hanging on a string, plastic fastener or safety pin
+- tag_pin: the pin, plastic loop or string that attaches a tag
+Include the whole object and its attachment. Do NOT report the garment's own buttons, rivets, zipper pulls, buckles, brooches, sewn-in labels or prints.
+Give each item a confidence from 0.0 to 1.0 and report anything at least 50% likely.
+box_2d is [ymin, xmin, ymax, xmax] normalized to 0-1000.
+Return JSON: {"securityTags": [{"box_2d": [ymin, xmin, ymax, xmax], "label": "alarm_tag", "confidence": 0.9}]}
+Return {"securityTags": []} if there is none."""
+
+
+def detect_image_tags(api_key, image_url, gemini_api_key=None):
+    """Kıyafet görselindeki mağaza alarmı / fiyat etiketlerini tespit eder.
 
     Returns:
-        list: [{'box_2d': [ymin, xmin, ymax, xmax], 'label': 'tag'}] veya []
+        list: [{'box_2d': [ymin, xmin, ymax, xmax], 'label': str, 'confidence': float}] veya []
     """
-    if not image_url:
+    if not image_url or not gemini_api_key:
         return []
-
-    tag_prompt = """Locate all retail store security alarm devices (EAS tags, magnetic sensor pins) and paper/cardboard store price tags, barcode hangtags pinned or clipped to the garment.
-Do NOT report garment buttons, rivets, zipper pulls, or belt buckles.
-For each item give "confidence" (0.0-1.0); only report items you are at least 70% sure are store tags.
-Return valid JSON only:
-{
-  "securityTags": [
-    {
-      "box_2d": [ymin, xmin, ymax, xmax],
-      "label": "alarm_or_tag",
-      "confidence": 0.95
-    }
-  ]
-}
-Coordinates must be normalized integers [0..1000]. If no security tags or price hangtags are visible, return {"securityTags": []}. Return ONLY valid JSON, no markdown."""
-
-    if gemini_api_key:
-        try:
-            mime_type, base64_data = _prepare_gemini_image(image_url)
-            if mime_type and base64_data:
-                model = "gemini-2.5-flash"
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-                payload = {
-                    "contents": [{
-                        "parts": [
-                            {"text": tag_prompt},
-                            {"inlineData": {"mimeType": mime_type, "data": base64_data}}
-                        ]
-                    }],
-                    "generationConfig": {"responseMimeType": "application/json"}
-                }
-                if requests:
-                    resp = requests.post(url, json=payload, headers={'Content-Type': 'application/json', 'x-goog-api-key': gemini_api_key}, timeout=25)
-                    resp.raise_for_status()
-                    res_data = resp.json()
-                    candidates = res_data.get('candidates', [])
-                    if candidates:
-                        text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '').strip()
-                        if text.startswith('```json'):
-                            text = text[7:]
-                        if text.endswith('```'):
-                            text = text[:-3]
-                        parsed = json.loads(text.strip())
-                        if isinstance(parsed, dict) and 'securityTags' in parsed:
-                            tags = parsed.get('securityTags') or []
-                            if tags:
-                                _logger.info('detect_image_tags: %d adet etiket tespit edildi', len(tags))
-                            return tags
-        except Exception as e:
-            _logger.warning('detect_image_tags hatası: %s', e)
-
-    return []
+    parsed = _gemini_json(gemini_api_key, _TAG_PROMPT, image_url, schema=_TAG_SCHEMA,
+                          timeout=25, deterministic=True)
+    tags = (parsed or {}).get('securityTags') or []
+    tags = [t for t in tags if isinstance(t, dict) and isinstance(t.get('box_2d'), list)
+            and len(t['box_2d']) == 4]
+    if tags:
+        _logger.info('detect_image_tags: %d etiket tespit edildi (%s)',
+                     len(tags), ', '.join(str(t.get('label')) for t in tags))
+    return tags
 
 
 def _analyze_via_fal(api_key, image_url, prompt):
@@ -369,172 +360,50 @@ def _analyze_via_fal(api_key, image_url, prompt):
     return _default_analysis()
 
 
+_OUTFIT_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "bottomsType": {"type": "STRING"},
+        "bottomsColor": {"type": "STRING"},
+        "shoesType": {"type": "STRING"},
+        "shoesColor": {"type": "STRING"},
+    },
+}
+
+
 def analyze_outfit_consistency(image_data, api_key=None, gemini_api_key=None, category='tops'):
-    """Front try-on sonucundaki TUM kıyafet detaylarını analiz et.
+    """Ön görünüm sonucundaki alt giyim ve ayakkabıyı çıkar (arka/yan tutarlılığı için).
 
-    Cross-view tutarlılık için: front sonucundaki pantolon, ayakkabı,
-    saç stili gibi detayları çıkarır, back/side promptlarına enjekte edilir.
-
-    Args:
-        image_data: Front try-on sonucu (base64 veya URL)
-        api_key: fal.ai API anahtarı (fallback)
-        gemini_api_key: Gemini API anahtarı
-        category: Değiştirilen kıyafetin kategorisi ('tops', 'bottoms', 'one-piece')
+    Arka/yan çağrılarına ön sonuç zaten Image 3 olarak gidiyor; bu kısa tarif
+    yalnızca renk/model sabitlemeye yardımcı olur.
 
     Returns:
-        dict: Çıkarılan analiz ve 'fullOutfitPrompt'
+        dict: bottomsType, bottomsColor, shoesType, shoesColor (boş olabilir)
     """
-    if category == 'bottoms':
-        except_clause = "EXCEPT for the main BOTTOM garment (pants/jeans/skirt) which will be changed in other views."
-    elif category == 'one-piece' or category == 'one_piece':
-        except_clause = "EXCEPT for the main ONE-PIECE garment (dress/jumpsuit) which will be changed in other views."
-    else:
-        except_clause = "EXCEPT for the main TOP garment (shirt/t-shirt/jacket) which will be changed in other views."
-
-    prompt = f"""You are analyzing a fashion model photograph for OUTFIT CONSISTENCY.
-Your job is to describe EVERYTHING the model is wearing and their appearance,
-{except_clause}
-
-Analyze and return JSON:
-{{
-  "topsType": "string — top garment type (e.g., 'white cotton t-shirt', 'black hoodie'). Leave empty if analyzing a one-piece or if it's the target top.",
-  "topsColor": "string — top garment exact color",
-  "bottomsType": "string — pants/jeans/skirt/shorts type (e.g., 'slim-fit white trousers', 'dark blue skinny jeans'). Leave empty if it's the target bottom.",
-  "bottomsColor": "string — bottom garment exact color",
-  "shoesType": "string — shoe type (e.g., 'white low-top sneakers', 'black ankle boots', 'beige heels')",
-  "shoesColor": "string — shoe color",
-  "hairStyle": "string — hair description (e.g., 'long wavy blonde hair', 'short brown bob')",
-  "hairColor": "string — hair color",
-  "skinTone": "string — skin tone (e.g., 'fair/light', 'medium', 'olive', 'dark')",
-  "accessories": "string — any visible accessories (watch, necklace, earrings, belt) or 'none'",
-  "modelBuild": "string — body build (e.g., 'slim', 'athletic', 'curvy', 'standard')",
-  "backgroundDescription": "string — background (e.g., 'clean white studio', 'light grey')"
-}}
-
-Return ONLY valid JSON, no markdown. Be VERY specific about colors and styles."""
-
-    try:
-        if gemini_api_key:
-            mime_type, base64_data = _prepare_gemini_image(image_data)
-            if mime_type and base64_data:
-                model = "gemini-2.5-flash"
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-
-                payload = {
-                    "contents": [{
-                        "parts": [
-                            {"text": prompt},
-                            {
-                                "inlineData": {
-                                    "mimeType": mime_type,
-                                    "data": base64_data
-                                }
-                            }
-                        ]
-                    }],
-                    "generationConfig": {
-                        "responseMimeType": "application/json"
-                    }
-                }
-
-                if requests:
-                    headers = {'Content-Type': 'application/json', 'x-goog-api-key': gemini_api_key}
-                    resp = requests.post(url, json=payload, headers=headers, timeout=30)
-                    resp.raise_for_status()
-                    res_data = resp.json()
-                    candidates = res_data.get('candidates', [])
-                    if candidates:
-                        text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '')
-                        if text:
-                            text = text.strip()
-                            if text.startswith('```json'):
-                                text = text[7:]
-                            if text.endswith('```'):
-                                text = text[:-3]
-                            outfit_data = json.loads(text.strip())
-                            # fullOutfitPrompt oluştur
-                            outfit_data['fullOutfitPrompt'] = _build_consistency_prompt(outfit_data)
-                            _logger.info(
-                                'Outfit tutarlılık analizi: %s %s, %s %s, saç=%s',
-                                outfit_data.get('bottomsColor', '?'),
-                                outfit_data.get('bottomsType', '?'),
-                                outfit_data.get('shoesColor', '?'),
-                                outfit_data.get('shoesType', '?'),
-                                outfit_data.get('hairStyle', '?'),
-                            )
-                            return outfit_data
-
-        # Fallback: fal.ai
-        if api_key:
-            result = _analyze_via_fal(api_key, image_data, prompt)
-            if result and result != _default_analysis():
-                result['fullOutfitPrompt'] = _build_consistency_prompt(result)
-                return result
-
-    except Exception as e:
-        _logger.warning('Outfit tutarlılık analizi başarısız: %s', e)
-
-    return {
-        'fullOutfitPrompt': '',
-        'bottomsType': '', 'bottomsColor': '',
-        'shoesType': '', 'shoesColor': '',
-        'hairStyle': '', 'hairColor': '',
-        'skinTone': '', 'accessories': '',
-    }
-
-
-def _build_consistency_prompt(outfit_data):
-    """Outfit verilerinden tutarlılık prompt cümlesi oluştur."""
-    parts = []
-
-    tops = outfit_data.get('topsType', '')
-    tops_color = outfit_data.get('topsColor', '')
-    if tops and tops_color:
-        parts.append(f"{tops_color} {tops}")
-    elif tops:
-        parts.append(tops)
-
-    bottoms = outfit_data.get('bottomsType', '')
-    bottoms_color = outfit_data.get('bottomsColor', '')
-    if bottoms and bottoms_color:
-        parts.append(f"{bottoms_color} {bottoms}")
-    elif bottoms:
-        parts.append(bottoms)
-
-    shoes = outfit_data.get('shoesType', '')
-    shoes_color = outfit_data.get('shoesColor', '')
-    if shoes and shoes_color:
-        parts.append(f"{shoes_color} {shoes}")
-    elif shoes:
-        parts.append(shoes)
-
-    hair = outfit_data.get('hairStyle', '')
-    if hair:
-        parts.append(f"hair: {hair}")
-
-    skin = outfit_data.get('skinTone', '')
-    if skin:
-        parts.append(f"skin tone: {skin}")
-
-    accessories = outfit_data.get('accessories', '')
-    if accessories and accessories.lower() != 'none':
-        parts.append(f"accessories: {accessories}")
-
-    if not parts:
-        return ''
-
-    return (
-        "ABSOLUTE PRIORITY — CROSS-VIEW OUTFIT CONSISTENCY LOCK: "
-        "You MUST replicate the EXACT SAME complete outfit from the front view reference image. "
-        "The model is wearing: "
-        + ", ".join(parts) + ". "
-        "Do NOT change, replace, or hallucinate ANY clothing item. "
-        "The bottoms MUST be IDENTICAL — same color, same fabric, same fit, same style. "
-        "The shoes MUST be IDENTICAL. The hair MUST be IDENTICAL. "
-        "If the front view shows white pants, the side/back view MUST also show white pants — NOT jeans, NOT different color. "
-        "Every view must look like the SAME photoshoot session with the SAME outfit. "
-        "ANY outfit change between views is a CRITICAL FAILURE. "
+    empty = {'bottomsType': '', 'bottomsColor': '', 'shoesType': '', 'shoesColor': ''}
+    skip_bottoms = category in ('bottoms', 'one-piece', 'one_piece')
+    prompt = (
+        "Describe what this fashion model wears, in short plain English.\n"
+        + ("Leave bottomsType and bottomsColor empty.\n" if skip_bottoms else
+           "bottomsType: the trousers/jeans/skirt, e.g. 'slim-fit tailored trousers'. bottomsColor: its color.\n")
+        + "shoesType: e.g. 'white low-top sneakers', 'nude pumps'. shoesColor: their color.\n"
+        'Return JSON: {"bottomsType": "", "bottomsColor": "", "shoesType": "", "shoesColor": ""}'
     )
+    parsed = None
+    if gemini_api_key:
+        parsed = _gemini_json(gemini_api_key, prompt, image_data, schema=_OUTFIT_SCHEMA, timeout=30)
+    elif api_key:
+        result = _analyze_via_fal(api_key, image_data, prompt)
+        parsed = result if result != _default_analysis() else None
+    if not parsed:
+        return empty
+    out = {k: str(parsed.get(k) or '').strip() for k in empty}
+    if skip_bottoms:
+        out['bottomsType'] = out['bottomsColor'] = ''
+    _logger.info('Outfit tutarlılık: alt=%s %s, ayakkabı=%s %s',
+                 out['bottomsColor'], out['bottomsType'], out['shoesColor'], out['shoesType'])
+    return out
+
 
 
 # Eski (İngilizce alan içermeyen) önbellekli analizler için minimal TR→EN sözlüğü.
@@ -640,9 +509,9 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         dict: {'positive': str, 'negative': str}
     """
     from .category_constants import (
-        SEEDREAM_TEMPLATES, SEEDREAM_DETAIL_TEMPLATE, SEEDREAM_NEGATIVES,
+        SEEDREAM_TEMPLATES, SEEDREAM_NEGATIVES,
         LEG_RULES, SHOE_RULES, HAND_POSES, DEFAULT_BACKGROUND, FRONT_REF_SENTENCE,
-        FASHN_VIEW_TEMPLATES, FASHN_NEGATIVE,
+        FASHN_VIEW_TEMPLATES, FASHN_NEGATIVE, CLEAN_PRODUCT,
     )
 
     if not isinstance(analysis, dict):
@@ -682,6 +551,7 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
             base_prompt += " Model wears full-length dark trousers."
         elif sub_type in ('bottoms', 'jumpsuit'):
             base_prompt += " Full length visible down to the shoes."
+        base_prompt += " " + CLEAN_PRODUCT
         for lock in prompt_locks:
             lock_str = str(lock).strip()
             if not lock_str.upper().startswith('NEGATIVE'):
@@ -747,11 +617,9 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     scene_prompt = (scene_prompt or '').strip()
     background = scene_prompt or DEFAULT_BACKGROUND
 
-    if photo_type == 'detail':
-        template = SEEDREAM_DETAIL_TEMPLATE
-    else:
-        template = SEEDREAM_TEMPLATES.get((sub_type, photo_type)) or \
-            SEEDREAM_TEMPLATES.get((sub_type, 'front'), SEEDREAM_TEMPLATES[('tops', 'front')])
+    # Detay görünümü AI'a gönderilmez (üretilen görselden kırpılır); tanımsız açılar ön şablonu kullanır
+    template = SEEDREAM_TEMPLATES.get((sub_type, photo_type)) or \
+        SEEDREAM_TEMPLATES.get((sub_type, 'front'), SEEDREAM_TEMPLATES[('tops', 'front')])
 
     base_prompt = template.format(
         garment=garment,
@@ -836,43 +704,28 @@ def visual_quality_check(gemini_api_key, generated_image, garment_hint='', timeo
     Returns:
         dict: {'issues': [Türkçe metin, ...], 'codes': [kod, ...]} veya None (kontrol yapılamadı)
     """
-    if not gemini_api_key or not generated_image or requests is None:
+    if not gemini_api_key or not generated_image:
         return None
-    mime_type, base64_data = _prepare_gemini_image(generated_image)
-    if not base64_data:
-        return None
-
     codes_doc = '\n'.join(f'- "{code}"' for code in VISUAL_QC_ISSUES)
     prompt = f"""You are a strict QA reviewer for AI-generated fashion e-commerce photos.
 The product being modeled: {garment_hint or 'a garment'}.
 Check the photo ONLY for these defects and report a code only when it is clearly present:
 {codes_doc}
 Rules:
-- "pants_under_dress": only for dresses/skirts — trousers, jeans, leggings or tights visible under the hem. Jumpsuits are NOT dresses.
+- "pants_under_dress": only for dresses/skirts: trousers, jeans, leggings or tights visible under the hem. Jumpsuits are NOT dresses.
 - "bad_hands": extra, missing, fused or malformed fingers, or deformed hands.
-- "store_tag_visible": a security alarm tag, price tag or hangtag attached to the garment.
+- "store_tag_visible": a security alarm tag, price tag, hangtag or tag pin attached to the garment.
 Return JSON only: {{"defects": ["code", ...]}}. Return {{"defects": []}} if the photo is clean."""
-
-    try:
-        resp = requests.post(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
-            json={
-                "contents": [{"parts": [
-                    {"text": prompt},
-                    {"inlineData": {"mimeType": mime_type, "data": base64_data}},
-                ]}],
-                "generationConfig": {"responseMimeType": "application/json", "temperature": 0},
-            },
-            headers={'Content-Type': 'application/json', 'x-goog-api-key': gemini_api_key},
-            timeout=timeout,
-        )
-        resp.raise_for_status()
-        text = resp.json()['candidates'][0]['content']['parts'][0]['text']
-        codes = [c for c in (json.loads(text).get('defects') or []) if c in VISUAL_QC_ISSUES]
-    except Exception as e:
-        status = getattr(getattr(e, 'response', None), 'status_code', None)
-        _logger.warning('Görsel kalite denetimi başarısız (%s, status=%s)', e.__class__.__name__, status)
+    schema = {
+        "type": "OBJECT",
+        "properties": {"defects": {"type": "ARRAY", "items": {"type": "STRING", "enum": list(VISUAL_QC_ISSUES)}}},
+        "required": ["defects"],
+    }
+    parsed = _gemini_json(gemini_api_key, prompt, generated_image, schema=schema,
+                          timeout=timeout, deterministic=True)
+    if parsed is None:
         return None
+    codes = [c for c in (parsed.get('defects') or []) if c in VISUAL_QC_ISSUES]
     return {'codes': codes, 'issues': [VISUAL_QC_ISSUES[c] for c in codes]}
 
 
@@ -880,27 +733,15 @@ def _default_analysis():
     """Analiz yapilamadiysa varsayilan dondurulen degerler."""
     return {
         'garmentType': 'Kiyafet',
+        'garmentTypeEn': 'garment',
         'clothingCategory': 'tops',
         'primaryColor': '',
-        'colorHex': '#000000',
-        'secondaryColors': [],
         'fabricType': '',
-        'pattern': 'Duz',
-        'style': 'Casual',
-        'fitDetails': 'Regular Fit',
         'collarType': '',
         'sleeveType': '',
-        'closureType': '',
-        'buttonCount': None,
         'hasGraphic': False,
-        'graphicDescription': '',
+        'graphicDescriptionEn': '',
         'garmentLength': 'standard',
-        'hemline': '',
-        'seoTitle': '',
-        'seoDescription': '',
-        'recommendedBottoms': 'dark blue skinny jeans',
-        'recommendedShoes': 'white sneakers',
-        'securityTags': [],
     }
 
 
