@@ -148,23 +148,21 @@ def inpaint_security_tags(img_bgr, tag_boxes):
         if px2 <= px1 or py2 <= py1:
             continue
 
-        # Alarm pininin metal/plastik kenarlarini tam kapsamak icin hafif padding ekle
+        # Etiketin/pinin metal/plastik ve kağıt kenarlarını tam kapsamak için %20 padding ekle
         bw = px2 - px1
         bh = py2 - py1
-        pad_x = max(4, int(bw * 0.18))
-        pad_y = max(4, int(bh * 0.18))
+        pad_x = max(6, int(bw * 0.20))
+        pad_y = max(6, int(bh * 0.20))
 
         x1 = max(0, px1 - pad_x)
         y1 = max(0, py1 - pad_y)
         x2 = min(w, px2 + pad_x)
         y2 = min(h, py2 + pad_y)
 
-        # Alarm pinleri cogu zaman yuvarlak veya ovaldir, maskeye elips ciz
-        center_x = (x1 + x2) // 2
-        center_y = (y1 + y2) // 2
-        radius_x = max(2, (x2 - x1) // 2)
-        radius_y = max(2, (y2 - y1) // 2)
-        cv2.ellipse(mask, (center_x, center_y), (radius_x, radius_y), 0, 0, 360, 255, -1)
+        # Mağaza etiketleri ve alarmlar dikdörtgen veya oval olabilir.
+        # Köşelerin açıkta kalıp beyaz rozet/etiket olarak halüsinasyon yapmasını önlemek için
+        # maskeyi tam kapsayıcı dikdörtgen olarak çiziyoruz.
+        cv2.rectangle(mask, (x1, y1), (x2, y2), 255, -1)
         tags_found += 1
 
     if tags_found > 0:

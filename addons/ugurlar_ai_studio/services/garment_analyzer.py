@@ -134,12 +134,10 @@ Use this official product metadata as definitive context:
     prompt = f"""You are a senior Fashion Merchandiser analyzing a product image.
 Ignore any hangers, clips, hands, or mannequins holding the garment. Focus ONLY on the garment's actual design.
 {context_section}
-SECURITY TAG DETECTION (be VERY conservative — false positives damage the image):
-1. ONLY report actual retail store security alarm devices: large round/oval plastic EAS hard tags (typically 4-6cm diameter, white/grey/beige), or rectangular magnetic alarm sensors clipped to fabric edges.
-2. Do NOT report any of these as security tags: buttons (including metal/snap buttons), rivets, grommets, eyelets, zipper pulls, decorative clasps, brooches, belt buckles, logo hardware, or any design element that is SYMMETRICALLY placed or appears in multiples across the garment.
-3. A genuine security tag is typically: a single isolated device, NOT part of a pattern, round/oval shaped, 3-6cm in size, attached by a metal pin through the fabric, usually near the waistband, collar, or hemline edge.
-4. If you are NOT at least 90% confident that an item is a retail security tag, return an EMPTY array []. When in doubt, do NOT flag it.
-5. In the "securityTags" field, return bounding boxes ONLY for items you are highly confident are actual store security devices. Format: [ymin, xmin, ymax, xmax] normalized 0-1000. If none found, return [].
+STORE SECURITY & PRICE TAG DETECTION:
+1. Detect any retail store security alarm devices (round/oval/rectangular plastic EAS hard tags, magnetic sensor clips, alarm pins) AND any paper/cardboard store price tags, barcode hangtags, or brand labels attached with pins/strings to the garment (waistband, collar, hem, or pocket).
+2. Do NOT report real garment design elements: regular buttons, denim rivets, grommets, zipper pulls, belt buckles, or brooches.
+3. In the "securityTags" field, return the 2D bounding boxes of all detected security alarms, sensor tags, and store price hangtags in normalized coordinates [ymin, xmin, ymax, xmax] on a scale of 0 to 1000. If none found, return [].
 
 CRITICAL NECKLINE INSTRUCTION: If the garment is hanging on a hanger, the front collar often drops down, revealing the INSIDE of the BACK panel (inner back lining, back collar label, or back keyhole). You MUST completely IGNORE anything visible through the neck hole. Do NOT describe the inner back lining as part of the front collar. If you see a keyhole or label through the neck opening, do NOT say the garment has a keyhole collar. Assume a clean, standard front neckline.
 
@@ -242,6 +240,71 @@ Return ONLY valid JSON, no markdown."""
         return _analyze_via_fal(api_key, image_url, prompt)
 
     return _default_analysis()
+
+
+def detect_image_tags(api_key, image_url, gemini_api_key=None):
+    """Herhangi bir kıyafet görselindeki (ön, arka veya yan yüz) mağaza alarmı ve fiyat etiketlerini hızlıca tespit eder.
+
+    Args:
+        api_key: fal.ai API anahtarı
+        image_url: Görsel URL'si veya base64 verisi
+        gemini_api_key: Google Gemini API anahtarı
+
+    Returns:
+        list: [{'box_2d': [ymin, xmin, ymax, xmax], 'label': 'tag'}] veya []
+    """
+    if not image_url:
+        return []
+
+    tag_prompt = """Locate all retail store security alarm devices (EAS tags, magnetic sensor pins) and paper/cardboard store price tags, barcode hangtags pinned or clipped to the garment.
+Do NOT report garment buttons, rivets, zipper pulls, or belt buckles.
+Return valid JSON only:
+{
+  "securityTags": [
+    {
+      "box_2d": [ymin, xmin, ymax, xmax],
+      "label": "alarm_or_tag"
+    }
+  ]
+}
+Coordinates must be normalized integers [0..1000]. If no security tags or price hangtags are visible, return {"securityTags": []}. Return ONLY valid JSON, no markdown."""
+
+    if gemini_api_key:
+        try:
+            mime_type, base64_data = _prepare_gemini_image(image_url)
+            if mime_type and base64_data:
+                model = "gemini-2.5-flash"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_api_key}"
+                payload = {
+                    "contents": [{
+                        "parts": [
+                            {"text": tag_prompt},
+                            {"inlineData": {"mimeType": mime_type, "data": base64_data}}
+                        ]
+                    }],
+                    "generationConfig": {"responseMimeType": "application/json"}
+                }
+                if requests:
+                    resp = requests.post(url, json=payload, headers={'Content-Type': 'application/json'}, timeout=25)
+                    resp.raise_for_status()
+                    res_data = resp.json()
+                    candidates = res_data.get('candidates', [])
+                    if candidates:
+                        text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '').strip()
+                        if text.startswith('```json'):
+                            text = text[7:]
+                        if text.endswith('```'):
+                            text = text[:-3]
+                        parsed = json.loads(text.strip())
+                        if isinstance(parsed, dict) and 'securityTags' in parsed:
+                            tags = parsed.get('securityTags') or []
+                            if tags:
+                                _logger.info('detect_image_tags: %d adet etiket tespit edildi', len(tags))
+                            return tags
+        except Exception as e:
+            _logger.warning('detect_image_tags hatası: %s', e)
+
+    return []
 
 
 def _analyze_via_fal(api_key, image_url, prompt):
@@ -550,8 +613,11 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
 
         # Fashn icin outfit directive ve prompt locks
         if sub_type in ('dress', 'skirt', 'shorts'):
-            base_prompt += " Remove all pants, trousers, and jeans. Natural bare legs below garment hemline. No bottom clothing underneath."
+            base_prompt += " Remove all pants, trousers, and jeans. Natural bare legs below garment hemline. No bottom clothing underneath. Model wears elegant heeled pumps or sandals on bare feet."
         elif sub_type == 'tops':
+            gt_l = garment_type.lower()
+            if any(w in gt_l for w in ['yelek', 'vest', 'waistcoat', 'hırka', 'cardigan', 'ceket', 'jacket', 'blazer', 'mont', 'kaban', 'trençkot', 'trench']):
+                base_prompt += f" The model wears a fitted solid neutral inner top underneath the open {garment_type}. No bare chest or bare stomach."
             base_prompt += " Model wears full-length dark trousers."
         elif sub_type == 'bottoms':
             base_prompt += " Full trouser length visible to shoes."
@@ -602,6 +668,21 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     elif analysis.get('hasGraphic'):
         graphic_note = "Preserve the graphic print exactly as in Figure 1. "
 
+    # Yelek, hırka, ceket gibi açık önlü üst giyimler için iç giyim (inner top) kuralı
+    inner_top_note = ''
+    if sub_type == 'tops':
+        gt_lower = garment_type.lower()
+        if any(w in gt_lower for w in ['yelek', 'vest', 'waistcoat', 'hırka', 'cardigan', 'ceket', 'jacket', 'blazer', 'mont', 'kaban', 'trençkot', 'trench']):
+            inner_top_note = (
+                f"The model wears a simple solid neutral fitted inner top/t-shirt underneath the open {garment_type}. "
+                f"The {garment_type} is worn neatly layered over the top with clean catalog coverage, no bare chest or stomach. "
+            )
+
+    # Elbise ve etek için ayakkabı kuralı (kaba botları ve spor ayakkabıları engeller)
+    shoe_rule = ''
+    if sub_type in ('dress', 'skirt'):
+        shoe_rule = "Model wears elegant high-heeled pumps or sandals on bare feet — NO heavy boots, NO sneakers, NO casual shoes. "
+
     # Extra prompt
     extra = ''
     if extra_prompt:
@@ -621,6 +702,8 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         color=color,
         fabric=fabric,
         leg_rule=leg_rule,
+        shoe_rule=shoe_rule,
+        inner_top_note=inner_top_note,
         hand_pose=hand_pose,
         collar_note=collar_note,
         graphic_note=graphic_note,

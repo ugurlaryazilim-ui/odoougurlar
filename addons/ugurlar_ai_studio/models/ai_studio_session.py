@@ -1098,6 +1098,24 @@ class AiStudioSession(models.Model):
         Returns:
             tuple: (garment_url, processed_b64) — CDN URL ve işlenmiş base64
         """
+        # Eğer security_tags verilmediyse (örneğin arka veya yan yüz görseli),
+        # doğrudan bu görsel üzerinde etiket/alarm tespiti yap
+        if security_tags is None and source_image:
+            try:
+                gemini_api_key = self.env['ir.config_parameter'].sudo().get_param(
+                    'ugurlar_ai_studio.gemini_api_key', ''
+                )
+                fal_api_key = self.env['ir.config_parameter'].sudo().get_param(
+                    'ugurlar_ai_studio.fal_api_key', ''
+                )
+                if gemini_api_key or fal_api_key:
+                    from ..services.garment_analyzer import detect_image_tags
+                    security_tags = detect_image_tags(fal_api_key, source_image, gemini_api_key=gemini_api_key)
+                    if security_tags:
+                        _logger.info('_prepare_garment_for_tryon: Görselde %d adet etiket/alarm tespit edildi ve temizlenecek', len(security_tags))
+            except Exception as tag_err:
+                _logger.warning('_prepare_garment_for_tryon etiket tespiti hatası: %s', tag_err)
+
         from ..services.garment_preprocessor import (
             preprocess_garment_image,
             convert_birefnet_output_to_rgb,
@@ -1507,7 +1525,18 @@ class AiStudioSession(models.Model):
                     convert_birefnet_output_to_rgb,
                 )
 
-                security_tags = cached_analysis_data.get('securityTags') if isinstance(cached_analysis_data, dict) else None
+                if photo_type == 'front':
+                    security_tags = cached_analysis_data.get('securityTags') if isinstance(cached_analysis_data, dict) else None
+                else:
+                    security_tags = None
+                    try:
+                        gemini_api_key = env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.gemini_api_key', '')
+                        fal_api_key = env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fal_api_key', '')
+                        from ..services.garment_analyzer import detect_image_tags
+                        security_tags = detect_image_tags(fal_api_key, source_image, gemini_api_key=gemini_api_key)
+                    except Exception as te:
+                        _logger.warning('Worker etiket tespiti hatası: %s', te)
+
                 preprocessed = preprocess_garment_image(
                     source_image,
                     target_long_edge=1200,  # Yuksek cozunurluk: detay korumasi icin
@@ -2226,7 +2255,9 @@ class AiStudioSession(models.Model):
                     # 3) Detay görseli zaten üretilen manken sonucundan akıllı kırpılarak (crop) elde edilir.
                     detail_urls = []
                     # Arka plan kaldırma ve askı temizleme (DRY helper)
-                    security_tags = cached_analysis.get('securityTags') if isinstance(cached_analysis, dict) else None
+                    # Ön yüz dışındaki açılarda (back, side) ön yüz koordinatları geçersizdir.
+                    # security_tags=None verildiğinde _prepare_garment_for_tryon o görseli kendisi tarar.
+                    security_tags = cached_analysis.get('securityTags') if (photo_type == 'front' and isinstance(cached_analysis, dict)) else None
                     garment_url, processed_garment_b64 = self._prepare_garment_for_tryon(
                         source_image, provider, session, auto_bg=auto_bg, security_tags=security_tags
                     )

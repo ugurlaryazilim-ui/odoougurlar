@@ -114,6 +114,7 @@ SEEDREAM_TEMPLATES = {
         "CRITICAL: Strip and replace all lower body clothing from Figure 2. "
         "The model wears ONLY this one-piece {garment_type} with bare skin legs — NO pants, NO trousers, NO jeans, NO leggings underneath. "
         "{leg_rule} "
+        "{shoe_rule}"
         "Keep face, hair, body proportions from Figure 2. "
         "Professional e-commerce photo, white studio, even lighting. "
         "{hand_pose} "
@@ -145,13 +146,13 @@ SEEDREAM_TEMPLATES = {
     ('tops', 'front'): (
         "Dress the model in Figure 2 with the {garment_type} from Figure 1. "
         "This is a {color} {fabric} {garment_type}. "
+        "{inner_top_note}"
         "Replace upper clothing of Figure 2 with Figure 1. "
         "Model wears dark tailored trousers covering entire legs down to shoes. "
         "Keep face, hair, shoes from Figure 2. "
         "Professional e-commerce photo, white studio, even lighting. "
         "{hand_pose} "
         "{collar_note}{graphic_note}"
-        ""
         "{extra_prompt}"
     ),
     # TOPS — BACK
@@ -291,6 +292,7 @@ SEEDREAM_NEGATIVES = {
         "pants, trousers, jeans, leggings, tights, sweatpants, pants underneath, trousers underneath, "
         "leggings underneath, jeans underneath, tights under dress, stockings, covered legs, denim, "
         "denim pants, black trousers, navy trousers, double-layered bottoms, "
+        "boots under dress, heavy boots, combat boots, sneakers under dress, "
         "security tag, price tag, "
         "extra fingers, fused fingers, missing fingers, deformed hands, extra hand, mutated hands, "
         "mannequin, CGI, plastic skin, blurry, low resolution"
@@ -299,6 +301,7 @@ SEEDREAM_NEGATIVES = {
         "pants, trousers, jeans, leggings, tights, sweatpants, pants underneath, trousers underneath, "
         "leggings underneath, tights under skirt, stockings, covered legs, denim, denim pants, "
         "black trousers, navy trousers, double-layered bottoms, "
+        "boots under skirt, heavy boots, combat boots, sneakers under skirt, "
         "security tag, price tag, "
         "extra fingers, fused fingers, missing fingers, deformed hands, extra hand, mutated hands, "
         "mannequin, CGI, plastic skin, blurry, low resolution"
@@ -311,6 +314,8 @@ SEEDREAM_NEGATIVES = {
         "mannequin, CGI, plastic skin, blurry, low resolution"
     ),
     'tops': (
+        "bare chest, exposed stomach, bare belly, exposed cleavage, deep cleavage, "
+        "shirtless under jacket, naked under vest, shirtless, unbuttoned bare skin, "
         "bare legs, exposed thighs, shorts visible, underwear visible, "
         "missing pants, "
         "security tag, price tag, "
@@ -360,6 +365,8 @@ FASHN_VIEW_TEMPLATES = {
 }
 
 FASHN_NEGATIVE = (
+    "bare chest, exposed stomach, bare belly, exposed cleavage, shirtless under jacket, naked under vest, shirtless, "
+    "boots under dress, heavy boots, combat boots, sneakers under dress, "
     "security tag, alarm tag, anti-theft tag, price tag, "
     "extra fingers, fused fingers, extra arms, "
     "mannequin, CGI, plastic skin, blurry"
