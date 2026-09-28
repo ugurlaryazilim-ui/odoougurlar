@@ -274,6 +274,25 @@ class FalProvider(AIProviderBase):
             'request_id': request_id,
             'seed': seed_val,
         }
+    def single_image_edit(self, image_base64, prompt, timeout=120):
+        """Tek görseli Seedream ile düzenle (etiket silme, manken bacak düzeltme vb.).
+
+        Returns:
+            (bytes veya None, float cost): düzenlenmiş görselin ham baytları ve maliyet
+        """
+        self._check_client()
+        import requests as req_lib
+        app = self.ENDPOINTS['seedream']
+        image = image_base64.decode('ascii') if isinstance(image_base64, bytes) else image_base64
+        url = self.upload_image(image)
+        result = fal_client.subscribe(app, arguments={'prompt': prompt, 'image_urls': [url]},
+                                      client_timeout=timeout)
+        images = (result or {}).get('images') or []
+        out_url = images[0].get('url') if images and isinstance(images[0], dict) else ''
+        if not out_url:
+            return None, 0.0
+        return req_lib.get(out_url, timeout=60).content, self.get_estimated_cost(app)
+
     def remove_background(self, image_base64):
         # Arka plan kaldirma - birefnet.
         self._check_client()

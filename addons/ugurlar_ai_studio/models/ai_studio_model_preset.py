@@ -61,6 +61,16 @@ class AiStudioModelPreset(models.Model):
         max_width=1920, max_height=1920,
         help='Mankenin yandan fotoğrafı',
     )
+    # Elbise/etek/şort çekimlerinde kullanılan "çıplak bacak + topuklu" manken sürümleri.
+    # Seedream bir düzenleme modelidir: Image 1'deki pantolonu çoğu zaman korur ve
+    # elbisenin altına giydirir. Bu yüzden pantolonlu manken hiç gönderilmez; ilk
+    # ihtiyaçta bir kez türetilip burada saklanır (manken görseli değişince sıfırlanır).
+    model_image_front_legs = fields.Image(string='Önden Manken (Çıplak Bacak)', max_width=1920,
+                                          max_height=1920, attachment=True, copy=False)
+    model_image_back_legs = fields.Image(string='Arkadan Manken (Çıplak Bacak)', max_width=1920,
+                                         max_height=1920, attachment=True, copy=False)
+    model_image_side_legs = fields.Image(string='Yandan Manken (Çıplak Bacak)', max_width=1920,
+                                         max_height=1920, attachment=True, copy=False)
     background_type = fields.Selection([
         ('white', 'Beyaz Stüdyo'),
         ('studio', 'Profesyonel Stüdyo'),
@@ -200,6 +210,58 @@ class AiStudioModelPreset(models.Model):
                 'sticky': False,
             },
         }
+
+    BARE_LEGS_EDIT_PROMPT = (
+        "Image 1 shows a fashion model. Keep the same person, face, hair, body, pose, top, "
+        "lighting and background exactly. Change only the legs and feet: remove the trousers "
+        "and shoes and show natural bare legs with simple nude high-heeled pumps."
+    )
+
+    def write(self, vals):
+        # Manken görseli değişirse ondan türetilmiş çıplak bacak sürümü geçersizdir
+        for view in ('front', 'back', 'side'):
+            if 'model_image_%s' % view in vals and 'model_image_%s_legs' % view not in vals:
+                vals['model_image_%s_legs' % view] = False
+        return super().write(vals)
+
+    def _get_bare_leg_mannequin(self, view, gemini_api_key, fal_api_key):
+        """Elbise/etek/şort için bacakları açık manken görseli (base64).
+
+        Önbellek yoksa: Gemini ile bacaklar kapalı mı bakılır; kapalıysa Seedream ile
+        bir kez "çıplak bacak + topuklu" sürümü üretilip saklanır. Kontrol/üretim
+        yapılamazsa orijinal görsel döner (üretim yine sonuç denetimiyle korunur).
+        """
+        self.ensure_one()
+        base_field = 'model_image_%s' % view
+        legs_field = base_field + '_legs'
+        if self[legs_field]:
+            return self[legs_field]
+        base = self[base_field] or self.model_image_front
+        if not base:
+            return base
+
+        from ..services.garment_analyzer import mannequin_legs_covered
+        covered = mannequin_legs_covered(gemini_api_key, base) if gemini_api_key else None
+        if covered is False:
+            self.sudo().write({legs_field: base})
+            return base
+        if covered is None and self.garment_type == 'one_piece':
+            return base  # kontrol yapılamadı; elbise preset'i, olduğu gibi kullan
+        if not fal_api_key:
+            return base
+
+        from ..services.fal_provider import FalProvider
+        try:
+            data, _cost = FalProvider(fal_api_key).single_image_edit(base, self.BARE_LEGS_EDIT_PROMPT)
+        except Exception as e:
+            _logger.warning('Çıplak bacak manken üretilemedi (preset=%s, %s): %s', self.id, view, e)
+            return base
+        if not data:
+            return base
+        legs_b64 = base64.b64encode(data)
+        self.sudo().write({legs_field: legs_b64})
+        _logger.info('Çıplak bacak manken türetildi ve saklandı (preset=%s, %s)', self.id, view)
+        return legs_b64
 
     def action_regenerate_mannequins(self):
         """Seçili presetlerin mankenlerini güncel promptla yeniden üret (toplu, sıralı).

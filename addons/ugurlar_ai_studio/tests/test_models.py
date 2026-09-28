@@ -9,7 +9,7 @@ from odoo.tests import TransactionCase, new_test_user, tagged
 
 from unittest.mock import patch
 
-from ..models.ai_studio_session import _get_extra_prompt_en, _try_acquire_lease
+from ..models.ai_studio_session import _get_extra_prompt_en, _needs_bare_legs, _try_acquire_lease
 
 try:
     from PIL import Image
@@ -83,6 +83,30 @@ class TestAiStudioModels(TransactionCase):
             session.extra_prompt = 'Yaka açık olsun'
             _get_extra_prompt_en(session)
             self.assertEqual(tr.call_count, 2, 'metin değişince yeniden çevrilmeli')
+
+    # ── Elbise: pantolonlu manken gönderilmez ────────────────────────
+    def test_dress_needs_bare_legs_even_with_uppercase_name(self):
+        self.template.name = 'ELBİSE NOCTURNE'
+        session = self._session(self.red)
+        self.assertTrue(_needs_bare_legs(session, {'clothingCategory': 'dress', 'garmentType': 'Elbise'}))
+        self.template.name = 'Tulum'
+        self.assertFalse(_needs_bare_legs(session, {'clothingCategory': 'dress', 'garmentType': 'Tulum'}))
+        self.template.name = 'Bluz'
+        self.assertFalse(_needs_bare_legs(session, {'clothingCategory': 'tops', 'garmentType': 'Bluz'}))
+
+    def test_bare_leg_mannequin_cached_and_reset(self):
+        preset = self.env['ai.studio.model.preset'].create({
+            'name': 'Test Manken', 'garment_type': 'tops', 'model_image_front': _image_b64(),
+        })
+        # Bacaklar zaten açıksa orijinal görsel önbelleğe alınır, düzenleme yapılmaz
+        with patch('odoo.addons.ugurlar_ai_studio.services.garment_analyzer.mannequin_legs_covered',
+                   return_value=False):
+            img = preset._get_bare_leg_mannequin('front', 'gemini-key', 'fal-key')
+        self.assertEqual(img, preset.model_image_front)
+        self.assertTrue(preset.model_image_front_legs)
+        # Manken görseli değişince türetilmiş sürüm sıfırlanır
+        preset.model_image_front = _image_b64((10, 10, 10))
+        self.assertFalse(preset.model_image_front_legs)
 
     # ── Aylık bütçe ──────────────────────────────────────────────────
     def test_monthly_budget_blocks_new_processing(self):

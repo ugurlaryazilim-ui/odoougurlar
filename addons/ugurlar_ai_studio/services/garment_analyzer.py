@@ -463,7 +463,9 @@ def _to_english(analysis, key):
 
 def _detect_sub_type(category, garment_text):
     """Prompt alt tipini belirle: jumpsuit > dress > skirt > shorts > tops > bottoms."""
-    from .category_constants import TOPS_AND_OUTERWEAR_KW, JUMPSUIT_KW
+    from .category_constants import TOPS_AND_OUTERWEAR_KW, JUMPSUIT_KW, normalize_tr
+    # 'ELBİSE'.lower() birleşik noktalı i üretir ve 'elbise' ile eşleşmez
+    garment_text = normalize_tr(garment_text)
     if _safe_keyword_match(garment_text, JUMPSUIT_KW):
         return 'jumpsuit'
     if category in ('dress', 'one_piece', 'one-piece', 'full-body') or \
@@ -688,6 +690,26 @@ VISUAL_QC_ISSUES = {
     'text_or_watermark': 'Görselde yazı veya filigran var',
     'garment_mismatch': 'Kıyafet ürünle uyuşmuyor',
 }
+
+
+def mannequin_legs_covered(gemini_api_key, image):
+    """Manken görselinde bacaklar pantolon/tayt vb. ile kapalı mı?
+
+    Returns:
+        True / False, veya None (kontrol yapılamadı)
+    """
+    parsed = _gemini_json(
+        gemini_api_key,
+        "Look at the person's legs. Are they covered by trousers, jeans, leggings, tights or a long "
+        "skirt? Answer legsCovered true or false. Return JSON: {\"legsCovered\": true}",
+        image,
+        schema={"type": "OBJECT", "properties": {"legsCovered": {"type": "BOOLEAN"}},
+                "required": ["legsCovered"]},
+        timeout=20, deterministic=True,
+    )
+    if not parsed or 'legsCovered' not in parsed:
+        return None
+    return bool(parsed['legsCovered'])
 
 
 def visual_quality_check(gemini_api_key, generated_image, garment_hint='', timeout=25):

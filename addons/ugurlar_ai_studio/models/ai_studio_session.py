@@ -184,44 +184,65 @@ def _get_seedream_image_size(env):
     return FalProvider.SEEDREAM_IMAGE_SIZES.get(key, FalProvider.SEEDREAM_IMAGE_SIZES['hd'])
 
 
-TAG_FIX_APP = 'bytedance/seedream/v5/pro/edit'
-TAG_FIX_PROMPT = (
-    "Image 1 is a fashion e-commerce photo. Remove every store security tag, alarm pin, "
-    "price tag and hangtag from the garment and restore the fabric underneath with the same "
-    "color, texture and pattern. Keep everything else exactly the same: the model, pose, "
-    "garment shape and details, background and lighting."
-)
+# Görsel denetimin bulduğu ve tek görsellik düzenlemeyle giderilebilen hatalar
+AUTO_FIX_INSTRUCTIONS = {
+    'store_tag_visible': (
+        "Remove every store security tag, alarm pin, price tag and hangtag from the garment "
+        "and restore the fabric underneath with the same color, texture and pattern."
+    ),
+    'pants_under_dress': (
+        "Remove the trousers, jeans, leggings or tights under the dress or skirt and show "
+        "natural bare legs below the hem with simple nude high-heeled pumps."
+    ),
+}
 
 
-def _auto_remove_tags(env, generated_b64):
-    """Görünür mağaza etiketini üretilmiş görselden tek görsellik Seedream edit ile sil.
+def _auto_fix_defects(env, generated_b64, codes):
+    """Denetimin bulduğu düzeltilebilir hataları tek Seedream düzenlemesiyle gider.
 
     Returns:
-        (bytes base64, float cost) veya (None, 0.0)
+        (bytes base64, float cost, list fixed_codes) veya (None, 0.0, [])
     """
+    fixable = [c for c in codes if c in AUTO_FIX_INSTRUCTIONS]
     fal_key = env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fal_api_key')
-    if not fal_key:
-        return None, 0.0
-    import fal_client
-    import requests as req_lib
+    if not fixable or not fal_key:
+        return None, 0.0, []
     from ..services.fal_provider import FalProvider
+    prompt = ("Image 1 is a fashion e-commerce photo. "
+              + ' '.join(AUTO_FIX_INSTRUCTIONS[c] for c in fixable)
+              + " Keep everything else exactly the same: the model, face, pose, garment shape "
+                "and details, background and lighting.")
     try:
-        provider = FalProvider(fal_key)
-        image = generated_b64.decode('ascii') if isinstance(generated_b64, bytes) else generated_b64
-        url = provider.upload_image(image)
-        result = fal_client.subscribe(TAG_FIX_APP, arguments={
-            'prompt': TAG_FIX_PROMPT,
-            'image_urls': [url],
-        }, client_timeout=120)
-        images = (result or {}).get('images') or []
-        out_url = images[0].get('url') if images and isinstance(images[0], dict) else ''
-        if not out_url:
-            return None, 0.0
-        data = _convert_to_jpeg(req_lib.get(out_url, timeout=60).content)
-        return base64.b64encode(data), FalProvider.ESTIMATED_COSTS.get(TAG_FIX_APP, 0.135)
+        data, cost = FalProvider(fal_key).single_image_edit(generated_b64, prompt)
     except Exception as e:
-        _logger.warning('Otomatik etiket temizleme başarısız: %s', e)
-        return None, 0.0
+        _logger.warning('Otomatik düzeltme başarısız (%s): %s', fixable, e)
+        return None, 0.0, []
+    if not data:
+        return None, 0.0, []
+    return base64.b64encode(_convert_to_jpeg(data)), cost, fixable
+
+
+def _needs_bare_legs(session, analysis=None):
+    """Elbise / etek / şort: manken bacakları açık olmalı (tulum hariç)."""
+    from ..services.garment_analyzer import _detect_sub_type
+    analysis = analysis if isinstance(analysis, dict) else {}
+    category = analysis.get('clothingCategory', '')
+    if session._detect_garment_type() == 'one_piece' and category not in ('dress', 'one_piece'):
+        category = 'dress'
+    text = ' '.join(filter(None, [analysis.get('garmentType'), analysis.get('garmentTypeEn'),
+                                  session.product_id.product_tmpl_id.name, category]))
+    return _detect_sub_type(category, text) in ('dress', 'skirt', 'shorts')
+
+
+def _get_mannequin_image(session, preset, photo_type, needs_bare_legs):
+    """Görünüme uygun manken görseli; elbise/etekte pantolonsuz sürüm."""
+    view = photo_type if photo_type in ('front', 'back', 'side') else 'front'
+    if needs_bare_legs:
+        icp = session.env['ir.config_parameter'].sudo()
+        return preset.sudo()._get_bare_leg_mannequin(
+            view, icp.get_param('ugurlar_ai_studio.gemini_api_key', ''),
+            icp.get_param('ugurlar_ai_studio.fal_api_key', ''))
+    return getattr(preset, 'model_image_%s' % view) or preset.model_image_front
 
 
 def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', analysis=None,
@@ -245,10 +266,10 @@ def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', anal
         visual_qc = visual_quality_check(gemini_api_key, generated_b64, garment_hint=hint)
 
         auto_fix = icp.get_param('ugurlar_ai_studio.auto_tag_fix', 'True') == 'True'
-        if visual_qc and 'store_tag_visible' in visual_qc.get('codes', []) and auto_fix:
-            fixed_b64, fix_cost = _auto_remove_tags(env, generated_b64)
+        if visual_qc and auto_fix:
+            fixed_b64, fix_cost, fixed_codes = _auto_fix_defects(env, generated_b64, visual_qc.get('codes', []))
             if fixed_b64:
-                _logger.info('Görünür mağaza etiketi otomatik silindi (gen=%s)', gen.id if gen else '?')
+                _logger.info('Otomatik düzeltildi %s (gen=%s)', fixed_codes, gen.id if gen else '?')
                 generated_b64 = fixed_b64
                 vals['generated_image'] = fixed_b64
                 vals['cost'] = (base_cost or 0.0) + fix_cost
@@ -257,7 +278,7 @@ def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', anal
     qc = compute_quality_score(source_image, generated_b64, visual_qc=visual_qc)
     vals.update({'quality_score': qc['score'], 'quality_details': qc['details']})
     if 'generated_image' in vals:
-        vals['quality_details'] = 'Etiket otomatik silindi | ' + vals['quality_details']
+        vals['quality_details'] = 'Otomatik düzeltildi | ' + vals['quality_details']
     return vals
 
 
@@ -1826,6 +1847,14 @@ class AiStudioSession(models.Model):
             except Exception as ae:
                 _logger.warning('Kıyafet analizi başarısız, varsayılan kullanılacak: %s', ae)
 
+            try:
+                needs_bare_legs = _needs_bare_legs(session, cached_analysis)
+            except Exception as nb_err:
+                _logger.warning('Bacak kuralı belirlenemedi: %s', nb_err)
+                needs_bare_legs = False
+            if needs_bare_legs:
+                _logger.info('Elbise/etek/şort: bacakları açık manken kullanılacak (session=%s)', session_id)
+
             # ═══ TÜM GENERATION'LARI İŞLE ═══
             # Cross-view tutarlılık verisi — front sonrası doldurulur
             outfit_consistency = None
@@ -1994,15 +2023,8 @@ class AiStudioSession(models.Model):
                         continue
 
                     # ═══ APILER İÇİN URL VE FORMAT AYARLARI ═══
-                    model_image_field = 'model_image_front'
-                    if photo_type == 'back':
-                        model_image_field = 'model_image_back'
-                    elif photo_type == 'side':
-                        model_image_field = 'model_image_side'
-
-                    model_image_data = getattr(preset, model_image_field)
-                    if not model_image_data:
-                        model_image_data = preset.model_image_front
+                    # Elbise/etek/şort: pantolonlu manken ASLA gönderilmez (kök neden)
+                    model_image_data = _get_mannequin_image(session, preset, photo_type, needs_bare_legs)
 
                     if not model_image_data:
                         raise UserError(_('Preset manken resmi eksik.'))
@@ -2486,12 +2508,7 @@ class AiStudioSession(models.Model):
                     source_image, provider, session, auto_bg=auto_bg, security_tags=None
                 )
 
-                model_image_field = 'model_image_front'
-                if photo_type == 'back':
-                    model_image_field = 'model_image_back'
-                elif photo_type == 'side':
-                    model_image_field = 'model_image_side'
-                model_image = getattr(preset, model_image_field, False) or preset.model_image_front
+                model_image = _get_mannequin_image(session, preset, photo_type, _needs_bare_legs(session))
                 if not model_image:
                     raise Exception('Preset manken resmi eksik.')
 

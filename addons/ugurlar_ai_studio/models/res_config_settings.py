@@ -96,11 +96,11 @@ class ResConfigSettings(models.TransientModel):
              'kalite detayında listelenir (görsel başına ~$0.001).',
     )
     ai_studio_auto_tag_fix = fields.Boolean(
-        string='Görünür Etiketi Otomatik Sil',
+        string='Görünür Hataları Otomatik Düzelt',
         default=True,
         config_parameter='ugurlar_ai_studio.auto_tag_fix',
-        help='AI görsel denetim sonuçta mağaza/alarm etiketi görürse, görsel tek seferlik '
-             'Seedream düzenlemesiyle temizlenir (sadece etiket bulunan görsellerde ~$0.07-0.135).',
+        help='AI görsel denetim sonuçta mağaza/alarm etiketi veya elbise altında pantolon görürse, '
+             'görsel tek seferlik Seedream düzenlemesiyle düzeltilir (sadece hatalı görsellerde ~$0.07-0.135).',
     )
     ai_studio_auto_bg_remove = fields.Boolean(
         string='Otomatik Arka Plan Kaldırma',

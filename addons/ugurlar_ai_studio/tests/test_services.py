@@ -64,6 +64,13 @@ class TestGarmentClassifier(BaseCase):
         self.assertEqual(cc.classify_garment_text('AYAKKABI')[0], 'shoes')
         self.assertEqual(cc.classify_garment_text('Elbiseler')[0], 'one_piece')
 
+    def test_prompt_sub_type_handles_turkish_uppercase(self):
+        # 'ELBİSE'.lower() birleşik noktalı i üretir; elbise algılanmazsa manken pantolonlu kalır
+        from ..services.garment_analyzer import _detect_sub_type
+        self.assertEqual(_detect_sub_type('', 'ELBİSE NOCTURNE'), 'dress')
+        self.assertEqual(_detect_sub_type('dress', 'TULUM'), 'jumpsuit')
+        self.assertEqual(_detect_sub_type('', 'MİNİ ETEK'), 'skirt')
+
     def test_no_match(self):
         self.assertEqual(cc.classify_garment_text('Hediye Kartı'), (None, None))
 
