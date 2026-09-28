@@ -70,6 +70,17 @@ class TestAiStudioModels(TransactionCase):
         with self.assertRaises(UserError):
             session.action_start_processing()
 
+    # ── Aylık bütçe ──────────────────────────────────────────────────
+    def test_monthly_budget_blocks_new_processing(self):
+        session = self._session(self.red)
+        self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'done', 'cost': 5.0})
+        icp = self.env['ir.config_parameter'].sudo()
+        icp.set_param('ugurlar_ai_studio.monthly_budget', '0')
+        session._check_monthly_budget()  # limitsiz
+        icp.set_param('ugurlar_ai_studio.monthly_budget', '1.0')
+        with self.assertRaises(UserError):
+            session._check_monthly_budget()
+
     # ── Alternatif aday seçimi ───────────────────────────────────────
     def test_select_candidate_swaps_images(self):
         session = self._session(self.red, state='review')

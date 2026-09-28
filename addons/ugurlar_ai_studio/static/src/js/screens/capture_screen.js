@@ -30,17 +30,19 @@ export class CaptureScreen extends Component {
         this.unmounted = false;
 
         this.state = useState({
-            activeTab: "front",    // front, back, detail
+            activeTab: "front",    // front, back, side, detail
             cameraActive: false,
             cameraError: null,
             detailPlacement: "front",  // Detay hangi yüze ait: front veya back
             photos: {
                 front: null,
                 back: null,
+                side: null,   // opsiyonel: yoksa yan görünüm ön fotoğraftan üretilir
                 details: [],
             },
             hasFront: false,
             hasBack: false,
+            hasSide: false,
             detailCount: 0,
             facingMode: "environment", // Arka kamera
             capturing: false,
@@ -212,6 +214,9 @@ export class CaptureScreen extends Component {
         } else if (tab === "back") {
             this.state.photos.back = photo;
             this.state.hasBack = true;
+        } else if (tab === "side") {
+            this.state.photos.side = photo;
+            this.state.hasSide = true;
         } else if (tab === "detail") {
             const placement = this.state.detailPlacement || "front";
             const existingIdx = this.state.photos.details.findIndex(d => d.placement === placement);
@@ -246,6 +251,9 @@ export class CaptureScreen extends Component {
         } else if (tab === "back") {
             this.state.photos.back = null;
             this.state.hasBack = false;
+        } else if (tab === "side") {
+            this.state.photos.side = null;
+            this.state.hasSide = false;
         } else if (tab === "detail") {
             const placement = this.state.detailPlacement || "front";
             const idx = this.state.photos.details.findIndex(d => d.placement === placement);
@@ -281,6 +289,7 @@ export class CaptureScreen extends Component {
         const tab = this.state.activeTab;
         if (tab === "front") return this.state.photos.front;
         if (tab === "back") return this.state.photos.back;
+        if (tab === "side") return this.state.photos.side;
         if (tab === "detail") {
             const placement = this.state.detailPlacement || "front";
             return this.state.photos.details.find(d => d.placement === placement) || null;
@@ -307,6 +316,9 @@ export class CaptureScreen extends Component {
             { type: "front", data: this.state.photos.front.data },
             { type: "back", data: this.state.photos.back.data },
         ];
+        if (this.state.photos.side) {
+            photos.push({ type: "side", data: this.state.photos.side.data });
+        }
         for (const detail of this.state.photos.details) {
             photos.push({
                 type: "detail",

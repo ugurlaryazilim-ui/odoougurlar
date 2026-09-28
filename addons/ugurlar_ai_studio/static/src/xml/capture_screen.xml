@@ -88,6 +88,10 @@
                             t-on-click="() => this.setTab('back')">
                         <span class="status-indicator" t-att-class="{ active: state.hasBack }"></span> Arka (<t t-out="state.hasBack ? '1/1' : '0/1'"/>)
                     </button>
+                    <button t-attf-class="ais-tab-glass {{ state.activeTab === 'side' ? 'active' : '' }}"
+                            t-on-click="() => this.setTab('side')" title="Opsiyonel — çekilmezse ön fotoğraftan üretilir">
+                        <span class="status-indicator" t-att-class="{ active: state.hasSide }"></span> Yan (<t t-out="state.hasSide ? '1/1' : 'ops.'"/>)
+                    </button>
                     <button t-attf-class="ais-tab-glass {{ state.activeTab === 'detail' ? 'active' : '' }}"
                             t-on-click="() => this.setTab('detail')">
                         <span class="status-indicator" t-att-class="{ active: state.detailCount > 0 }"></span> Detay (<t t-out="state.detailCount"/>/2)
@@ -102,6 +106,7 @@
                             <span class="text-white-50 small">
                                 <t t-if="state.activeTab === 'front'">Ön Yüz Çekildi (1/1)</t>
                                 <t t-elif="state.activeTab === 'back'">Arka Yüz Çekildi (1/1)</t>
+                                <t t-elif="state.activeTab === 'side'">Yan Görünüm Çekildi (1/1)</t>
                                 <t t-elif="state.detailPlacement === 'front'">Ön Detay Çekildi (1/1)</t>
                                 <t t-else="">Arka Detay Çekildi (1/1)</t>
                             </span>

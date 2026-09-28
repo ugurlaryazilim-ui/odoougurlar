@@ -1331,6 +1331,7 @@ class AiStudioSession(models.Model):
             raise UserError(_('Lütfen bir manken preseti seçin.'))
         if not self.photo_ids:
             raise UserError(_('Fotoğraf yok. Önce fotoğraf çekin.'))
+        self._check_monthly_budget()
 
         # ═══ OTOMATİK PRESET SEÇİMİ ═══
         # Ürün kategorisine göre doğru manken preset'ini seç
@@ -2624,6 +2625,25 @@ class AiStudioSession(models.Model):
             except Exception as se:
                 _logger.warning("Retry sonrasi session state guncellenirken hata: %s", se)
 
+    def _get_month_ai_cost(self):
+        """Bu ay oluşturulan üretimlerin kaydedilen toplam maliyeti (USD)."""
+        month_start = fields.Datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        groups = self.env['ai.studio.generation'].sudo()._read_group(
+            [('create_date', '>=', month_start)], aggregates=['cost:sum'])
+        return (groups[0][0] if groups else 0.0) or 0.0
+
+    def _check_monthly_budget(self):
+        budget = float(self.env['ir.config_parameter'].sudo().get_param(
+            'ugurlar_ai_studio.monthly_budget', '0') or 0)
+        if budget <= 0:
+            return
+        spent = self._get_month_ai_cost()
+        if spent >= budget:
+            raise UserError(_(
+                'Aylık AI bütçesi doldu: $%(spent).2f / $%(budget).2f. '
+                'Yönetici Ayarlar > AI Studio > Aylık AI Bütçesi değerini artırabilir.',
+                spent=spent, budget=budget))
+
     def _check_reviewer(self):
         """Onaycı/yönetici yetkisi yoksa hata ver (RPC ile doğrudan çağrılara karşı)."""
         if not (self.env.su or self.env.is_admin()
@@ -2672,8 +2692,10 @@ class AiStudioSession(models.Model):
         import logging
         _logger = logging.getLogger(__name__)
 
-        # Eğer takım modu ise doğrudan takım kayıt metoduna yönlendir
-        if getattr(self, 'generation_mode', False) == 'set_combo' or self.set_line_ids:
+        # Takım (kombin) kaydı yalnızca gerçekten kombin üretimi varsa. Set satırı
+        # olup kombin üretimi olmayan oturumda set moduna girmek onaylı arka/yan/
+        # detay görsellerini sessizce atıyordu (kombin üretimini yapan akış yok).
+        if approved_generations.filtered(lambda g: g.generation_mode == 'set_combo'):
             return self._save_to_product_set_mode(approved_generations)
 
         # ═══ TEKLİ MOD ═══

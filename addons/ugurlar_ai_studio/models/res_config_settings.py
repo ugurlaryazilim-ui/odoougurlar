@@ -74,6 +74,12 @@ class ResConfigSettings(models.TransientModel):
         help='Seedream v5 Pro çıktı boyutu (2:3). Her iki boyut da Trendyol 1200×1800 '
              'gereksinimini karşılar; yüksek detay zoom kalitesi için daha iyidir.',
     )
+    ai_studio_monthly_budget = fields.Float(
+        string='Aylık AI Bütçesi (USD)',
+        default=0.0,
+        config_parameter='ugurlar_ai_studio.monthly_budget',
+        help='Bu ay kaydedilen toplam AI maliyeti bu tutara ulaşınca yeni işlem başlatılamaz. 0 = limitsiz.',
+    )
     ai_studio_candidate_count = fields.Integer(
         string='Ön Görünüm Aday Sayısı',
         default=1,
