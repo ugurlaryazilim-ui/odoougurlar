@@ -65,6 +65,15 @@ class ResConfigSettings(models.TransientModel):
         config_parameter='ugurlar_ai_studio.tryon_resolution',
         help='tryon-max çözünürlük ayarı. 4K en iyi kalite ama daha pahalı.',
     )
+    ai_studio_seedream_image_size = fields.Selection([
+        ('hd', '1664×2496 — Yüksek detay ($0.135/görsel)'),
+        ('standard', '1248×1872 — Standart ($0.0675/görsel)'),
+    ], string='Seedream Çıktı Boyutu',
+        default='hd',
+        config_parameter='ugurlar_ai_studio.seedream_image_size',
+        help='Seedream v5 Pro çıktı boyutu (2:3). Her iki boyut da Trendyol 1200×1800 '
+             'gereksinimini karşılar; yüksek detay zoom kalitesi için daha iyidir.',
+    )
     ai_studio_auto_bg_remove = fields.Boolean(
         string='Otomatik Arka Plan Kaldırma',
         default=True,

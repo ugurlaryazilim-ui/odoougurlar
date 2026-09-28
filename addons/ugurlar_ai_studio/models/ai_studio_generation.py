@@ -179,8 +179,18 @@ class AiStudioGeneration(models.Model):
         help='Renk doğruluğu, çözünürlük vb. detaylı kalite bilgileri',
     )
 
+    def _check_ai_studio_group(self, level):
+        """Model seviyesinde yetki kontrolü (RPC ile doğrudan çağrılara karşı)."""
+        group = {
+            'reviewer': 'ugurlar_ai_studio.group_ai_studio_reviewer',
+            'manager': 'ugurlar_ai_studio.group_ai_studio_manager',
+        }[level]
+        if not (self.env.su or self.env.is_admin() or self.env.user.has_group(group)):
+            raise UserError(_('Bu işlem için yetkiniz yok.'))
+
     def action_approve(self):
         """Üretimi onayla."""
+        self._check_ai_studio_group('reviewer')
         for gen in self:
             if gen.state != 'done':
                 raise UserError(_('Sadece tamamlanan üretimler onaylanabilir.'))
@@ -203,6 +213,7 @@ class AiStudioGeneration(models.Model):
 
     def action_unapprove(self):
         """Üretim onayını geri al."""
+        self._check_ai_studio_group('reviewer')
         for gen in self:
             gen.is_approved = False
             gen.is_primary = False
@@ -215,6 +226,7 @@ class AiStudioGeneration(models.Model):
 
     def action_toggle_exclude(self):
         """Hariç tutma durumunu değiştir (toggle)."""
+        self._check_ai_studio_group('reviewer')
         for gen in self:
             gen.is_excluded = not gen.is_excluded
             if gen.is_excluded:
@@ -252,10 +264,10 @@ class AiStudioGeneration(models.Model):
                     "Return ONLY the English translation, nothing else.\n\n"
                     f"Turkish instruction: {prompt_text}"
                 )
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
                 resp = _req.post(url, json={
                     'contents': [{'parts': [{'text': prompt}]}],
-                }, headers={'Content-Type': 'application/json'}, timeout=10)
+                }, headers={'Content-Type': 'application/json', 'x-goog-api-key': gemini_key}, timeout=10)
                 
                 if resp.status_code == 200:
                     data = resp.json()
@@ -304,6 +316,7 @@ class AiStudioGeneration(models.Model):
 
     def action_reject(self):
         """Red dialog'u aç — revize için."""
+        self._check_ai_studio_group('reviewer')
         self.ensure_one()
         if self.state != 'done':
             raise UserError(_('Sadece tamamlanan üretimler reddedilebilir.'))
@@ -329,6 +342,7 @@ class AiStudioGeneration(models.Model):
 
     def action_set_primary(self):
         """Bu görseli ana resim olarak işaretle."""
+        self._check_ai_studio_group('reviewer')
         self.ensure_one()
         # Aynı oturumdaki diğer primary'leri kaldır
         siblings = self.search([
@@ -379,6 +393,7 @@ class AiStudioGeneration(models.Model):
         Revizyon talimatı varsa ve önceki görsel mevcutsa Seedream ile
         hedefli düzenleme yapılır. Aksi halde sıfırdan üretim yapılır.
         """
+        self._check_ai_studio_group('reviewer')
         self.ensure_one()
         if not self.reject_reason_id:
             raise UserError(_('Lütfen bir red sebebi seçin.'))
@@ -395,10 +410,10 @@ class AiStudioGeneration(models.Model):
             revision_text += self.revision_prompt_en
         elif self.revision_prompt:
             revision_text += self.revision_prompt
-        if self.reject_reason_id.suggested_prompt:
+        if self.reject_reason_id.suggested_prompt_en:
             if revision_text:
                 revision_text += ' '
-            revision_text += self.reject_reason_id.suggested_prompt
+            revision_text += self.reject_reason_id.suggested_prompt_en
 
         # Önceki görsel ve revizyon talimatı varsa → Seedream ile hedefli düzenleme
         use_seedream_edit = bool(revision_text and self.generated_image)
@@ -442,9 +457,7 @@ class AiStudioGeneration(models.Model):
                         arguments={
                             'prompt': seedream_prompt,
                             'image_urls': [parent_image_url],
-                            'aspect_ratio': '2:3',
                             'output_format': 'png',
-                            'resolution': '2k',
                         },
                         client_timeout=120,
                     )
@@ -513,6 +526,7 @@ class AiStudioGeneration(models.Model):
 
     def action_retry(self):
         """Başarısız üretimi tekrar dene."""
+        self._check_ai_studio_group('reviewer')
         self.ensure_one()
         if self.state != 'failed':
             raise UserError(_('Sadece başarısız üretimler tekrar denenebilir.'))
@@ -536,6 +550,7 @@ class AiStudioGeneration(models.Model):
 
     def action_cancel_revision_record(self):
         """Listeden veya formdan revizyonu iptal edip önceki haline döndür."""
+        self._check_ai_studio_group('reviewer')
         self.ensure_one()
         parent = self.parent_generation_id
         if not parent:
@@ -561,6 +576,7 @@ class AiStudioGeneration(models.Model):
 
     def action_recover_stuck_revisions_server(self, *args, **kwargs):
         """Takılmış revizeleri yeniden kuyruğa alarak kurtar."""
+        self._check_ai_studio_group('reviewer')
         from datetime import timedelta
         # Eğer kullanıcı belirli satırları seçip butona bastıysa doğrudan onları kurtar
         selected = self.filtered(lambda g: g.state in ('pending', 'processing'))
@@ -603,6 +619,7 @@ class AiStudioGeneration(models.Model):
 
     def action_batch_retry(self, *args, **kwargs):
         """Seçilen veya başarısız olan revizyonları toplu olarak sırayla tekrar dene."""
+        self._check_ai_studio_group('reviewer')
         import threading
         failed_records = self.filtered(lambda g: g.state == 'failed')
         if not failed_records:
@@ -688,6 +705,7 @@ class AiStudioGeneration(models.Model):
 
     def action_batch_cancel(self, *args, **kwargs):
         """Seçilen revizyonları iptal edip önceki hallerine döndür."""
+        self._check_ai_studio_group('reviewer')
         revisions = self.filtered(lambda g: g.parent_generation_id)
         if not revisions:
             raise UserError(_('İptal edilecek geçerli bir revizyon kaydı seçilmedi.'))
@@ -777,6 +795,7 @@ class AiStudioGeneration(models.Model):
         3. Veritabanındaki generation kayıtlarıyla timestamp + photo_type eşle
         4. Output image URL'den görseli indir ve ir_attachment'a kaydet
         """
+        self._check_ai_studio_group('manager')
         import requests as http_requests
         import base64
         from datetime import datetime, timedelta
@@ -1055,6 +1074,7 @@ class AiStudioGeneration(models.Model):
     @api.model
     def action_test_session_recovery(self, session_name='AIS/2026/01071'):
         """Spesifik bir oturum için fal.ai eşleştirmesini test et ve ekrana detay bas."""
+        self._check_ai_studio_group('manager')
         import requests as http_requests
         from datetime import datetime, timedelta
 

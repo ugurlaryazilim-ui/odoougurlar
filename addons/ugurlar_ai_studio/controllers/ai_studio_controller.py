@@ -6,11 +6,7 @@ from odoo import _, fields, http
 from odoo.http import request
 import psycopg2
 import requests as _req
-import requests as req_lib
 from datetime import date, timedelta
-from ..services.garment_analyzer import analyze_garment as do_analyze, build_generation_prompt
-from ..services.fal_provider import FalProvider
-from ..services.fal_error_handler import parse_fal_error
 try:
     from deep_translator import GoogleTranslator
 except ImportError:
@@ -93,6 +89,8 @@ class AiStudioController(http.Controller):
                 'quality': quality,
             }
         except Exception as e:
+            # Hata sözlüğü döndürüldüğünde Odoo commit eder — yarım yazımı geri al
+            request.env.cr.rollback()
             _logger.exception('upload_photo hatasi: %s', e)
             return {'error': str(e)}
 
@@ -150,6 +148,8 @@ class AiStudioController(http.Controller):
                 'session_name': session.name,
             }
         except Exception as e:
+            # Hata sözlüğü döndürüldüğünde Odoo commit eder — yarım yazımı geri al
+            request.env.cr.rollback()
             _logger.exception('create_session hatasi: %s', e)
             return {'error': str(e)}
 
@@ -436,6 +436,8 @@ class AiStudioController(http.Controller):
 
             return {'success': True}
         except Exception as e:
+            # Hata sözlüğü döndürüldüğünde Odoo commit eder — yarım yazımı geri al
+            request.env.cr.rollback()
             _logger.exception('approve_generation hatasi: %s', e)
             return {'error': str(e)}
 
@@ -452,6 +454,8 @@ class AiStudioController(http.Controller):
             gen.action_unapprove()
             return {'success': True}
         except Exception as e:
+            # Hata sözlüğü döndürüldüğünde Odoo commit eder — yarım yazımı geri al
+            request.env.cr.rollback()
             _logger.exception('unapprove_generation hatasi: %s', e)
             return {'error': str(e)}
 
@@ -468,6 +472,8 @@ class AiStudioController(http.Controller):
             gen.action_toggle_exclude()
             return {'success': True, 'is_excluded': gen.is_excluded}
         except Exception as e:
+            # Hata sözlüğü döndürüldüğünde Odoo commit eder — yarım yazımı geri al
+            request.env.cr.rollback()
             _logger.exception('toggle_exclude hatasi: %s', e)
             return {'error': str(e)}
 
@@ -481,15 +487,22 @@ class AiStudioController(http.Controller):
             if not gen.exists():
                 return {'error': 'Uretim bulunamadi.'}
 
-            vals = {'is_approved': False}
-            if reason_id:
-                vals['reject_reason_id'] = int(reason_id)
-            if revision_prompt:
-                vals['revision_prompt'] = revision_prompt
-            if revision_prompt_en:
-                vals['revision_prompt_en'] = revision_prompt_en
-            gen.write(vals)
+            # Çift tıklama / eşzamanlı red: aynı generation için tek revizyon
+            request.env.cr.execute(
+                "SELECT id FROM ai_studio_generation WHERE id = %s FOR UPDATE", (gen.id,))
+            existing_child = request.env['ai.studio.generation'].search(
+                [('parent_generation_id', '=', gen.id)], limit=1)
+            if existing_child:
+                return {
+                    'success': True,
+                    'new_generation_id': existing_child.id,
+                    'revision_number': existing_child.revision_number,
+                }
+            if gen.state != 'done':
+                return {'error': 'Sadece tamamlanan üretimler reddedilebilir.'}
 
+            # Limit kontrolü reject_reason yazılmadan ÖNCE: aksi halde görsel
+            # review ekranından kaybolur ama yerine revizyon oluşmaz
             max_rev = int(request.env['ir.config_parameter'].sudo().get_param(
                 'ugurlar_ai_studio.max_revisions', '5'
             ))
@@ -500,11 +513,19 @@ class AiStudioController(http.Controller):
                     'needs_supervisor': True,
                 }
 
+            vals = {'is_approved': False}
+            if reason_id:
+                vals['reject_reason_id'] = int(reason_id)
+            if revision_prompt:
+                vals['revision_prompt'] = revision_prompt
+            if revision_prompt_en:
+                vals['revision_prompt_en'] = revision_prompt_en
+            gen.write(vals)
+
             new_gen = request.env['ai.studio.generation'].create({
                 'session_id': gen.session_id.id,
                 'source_photo_id': gen.source_photo_id.id,
                 'photo_type': gen.photo_type,
-                'original_image': gen.original_image,
                 'state': 'pending',
                 'revision_number': gen.revision_number + 1,
                 'parent_generation_id': gen.id,
@@ -524,6 +545,8 @@ class AiStudioController(http.Controller):
                 'revision_number': new_gen.revision_number,
             }
         except Exception as e:
+            # Hata sözlüğü döndürüldüğünde Odoo commit eder — yarım yazımı geri al
+            request.env.cr.rollback()
             _logger.exception('reject_generation hatasi: %s', e)
             return {'error': str(e)}
 
@@ -564,6 +587,8 @@ class AiStudioController(http.Controller):
                 
             return {'success': True}
         except Exception as e:
+            # Hata sözlüğü döndürüldüğünde Odoo commit eder — yarım yazımı geri al
+            request.env.cr.rollback()
             _logger.exception('cancel_revision hatasi: %s', e)
             return {'error': str(e)}
 
@@ -589,10 +614,10 @@ class AiStudioController(http.Controller):
                     "Return ONLY the English translation, nothing else.\n\n"
                     f"Turkish instruction: {text}"
                 )
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
                 resp = _req.post(url, json={
                     'contents': [{'parts': [{'text': prompt}]}],
-                }, headers={'Content-Type': 'application/json'}, timeout=10)
+                }, headers={'Content-Type': 'application/json', 'x-goog-api-key': gemini_key}, timeout=10)
                 
                 if resp.status_code == 200:
                     data = resp.json()
@@ -601,7 +626,7 @@ class AiStudioController(http.Controller):
                         en_text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '').strip()
                         if en_text:
                             return {'translated': en_text}
-                _logger.warning('Gemini ceviri basarisiz (status=%s), deep-translator deneniyor', resp.status_code if 'resp' in dir() else 'N/A')
+                _logger.warning('Gemini ceviri basarisiz (status=%s), deep-translator deneniyor', resp.status_code)
         except Exception as e:
             _logger.warning('Gemini ceviri hatasi: %s — deep-translator deneniyor', e)
         
@@ -636,6 +661,8 @@ class AiStudioController(http.Controller):
                 'generation_id': gen.id,
             }
         except Exception as e:
+            # Hata sözlüğü döndürüldüğünde Odoo commit eder — yarım yazımı geri al
+            request.env.cr.rollback()
             _logger.exception('retry_generation hatasi: %s', e)
             return {'error': str(e)}
 
@@ -654,7 +681,7 @@ class AiStudioController(http.Controller):
             
             if session.state == 'done':
                 return {'success': False, 'error': 'Bu oturum zaten tamamlanmış.'}
-            if session.state not in ('review', 'generating'):
+            if session.state != 'review':
                 return {'success': False, 'error': 'Bu oturum tamamlanabilir durumda değil (durum: %s).' % session.state}
 
             # 1. is_primary değerlerini güncelle
@@ -709,6 +736,8 @@ class AiStudioController(http.Controller):
             # (SerializationFailure, Deadlock, LockTimeout vb.)
             raise
         except Exception as e:
+            # Yarım kalan kayıt (silinmiş eski görseller vb.) commit edilmemeli
+            request.env.cr.rollback()
             _logger.exception('complete_session hatasi (session=%s): %s', session_id, e)
             return {'success': False, 'error': 'Kaydetme hatası: %s' % str(e)[:200]}
 
@@ -774,6 +803,8 @@ class AiStudioController(http.Controller):
             })
             return {'success': True, 'locked_by_self': True}
         except Exception as e:
+            # Hata sözlüğü döndürüldüğünde Odoo commit eder — yarım yazımı geri al
+            request.env.cr.rollback()
             _logger.exception('acquire_lock hatasi: %s', e)
             return {'success': False, 'error': str(e)}
 
@@ -798,6 +829,8 @@ class AiStudioController(http.Controller):
                 })
             return {'success': True}
         except Exception as e:
+            # Hata sözlüğü döndürüldüğünde Odoo commit eder — yarım yazımı geri al
+            request.env.cr.rollback()
             _logger.exception('release_lock hatasi: %s', e)
             return {'success': False}
 
@@ -815,6 +848,7 @@ class AiStudioController(http.Controller):
                 return {'success': True}
             return {'success': False, 'error': 'Kilit size ait değil.'}
         except Exception as e:
+            request.env.cr.rollback()
             return {'success': False}
 
     @http.route('/ai_studio/review_data', type='jsonrpc', auth='user', methods=['POST'])
@@ -931,6 +965,8 @@ class AiStudioController(http.Controller):
                 'user_role': user_role,
             }
         except Exception as e:
+            # Hata sözlüğü döndürüldüğünde Odoo commit eder — yarım yazımı geri al
+            request.env.cr.rollback()
             _logger.exception('review_data hatasi: %s', e)
             return {'error': str(e)}
 
@@ -1084,158 +1120,3 @@ class AiStudioController(http.Controller):
                 'month_cost': 0,
                 'today_sessions': 0,
             }
-
-    @http.route('/ai_studio/analyze_garment', type='jsonrpc', auth='user', methods=['POST'])
-    def analyze_garment(self, image_data):
-        """Kiyafet gorseli AI ile analiz et — tur, renk, kumas, detaylar."""
-        try:
-            api_key = request.env['ir.config_parameter'].sudo().get_param(
-                'ugurlar_ai_studio.fal_api_key', ''
-            )
-            gemini_api_key = request.env['ir.config_parameter'].sudo().get_param(
-                'ugurlar_ai_studio.gemini_api_key', ''
-            )
-            if not api_key and not gemini_api_key:
-                return {'error': 'fal.ai veya Gemini API anahtarı tanımlanmamış. Ayarlar > AI Studio'}
-
-            # Analiz yap
-            from ..services.garment_analyzer import analyze_garment as do_analyze
-            
-            if gemini_api_key:
-                # Direct Gemini supports base64/data URI/raw string directly
-                analysis = do_analyze(api_key, image_data, gemini_api_key=gemini_api_key)
-            else:
-                # Base64 gorseli fal.ai'ya yukle
-                from ..services.fal_provider import FalProvider
-                provider = FalProvider(api_key)
-                image_url = provider.upload_image(image_data)
-                analysis = do_analyze(api_key, image_url)
-
-            return {'success': True, 'analysis': analysis}
-        except Exception as e:
-            _logger.exception('analyze_garment hatasi: %s', e)
-            return {'error': str(e)}
-
-    @http.route('/ai_studio/build_prompt', type='jsonrpc', auth='user', methods=['POST'])
-    def build_prompt(self, analysis, preset_id=None, lock_ids=None, extra_prompt=''):
-        """Analiz sonuclarina gore AI gorsel uretim promptu olustur."""
-        try:
-            # Preset bilgisi
-            preset_data = {}
-            if preset_id:
-                preset = request.env['ai.studio.model.preset'].browse(int(preset_id))
-                if preset.exists():
-                    preset_data = {
-                        'gender': preset.gender,
-                        'body_type': preset.body_type,
-                        'target_audience': preset.target_audience or '',
-                    }
-
-            # Prompt lock'lari
-            prompt_locks = []
-            if lock_ids:
-                templates = request.env['ai.studio.prompt.template'].browse(lock_ids)
-                for t in templates:
-                    prompt_locks.append(t.prompt_text)
-            else:
-                # Varsayilan olarak tum global lock'lari kullan
-                all_locks = request.env['ai.studio.prompt.template'].search([
-                    ('scope', '=', 'global'),
-                    ('active', '=', True),
-                ])
-                for t in all_locks:
-                    prompt_locks.append(t.prompt_text)
-
-            from ..services.garment_analyzer import build_generation_prompt
-            result = build_generation_prompt(
-                analysis, preset_data, prompt_locks, extra_prompt
-            )
-
-            return {'success': True, 'prompt': result}
-        except Exception as e:
-            _logger.exception('build_prompt hatasi: %s', e)
-            return {'error': str(e)}
-
-    @http.route('/ai_studio/generate_image', type='jsonrpc', auth='user', methods=['POST'])
-    def generate_image(self, session_id, photo_id, preset_id, prompt=None):
-        """AI gorsel uretim — fal.ai FASHN virtual try-on."""
-        try:
-            api_key = request.env['ir.config_parameter'].sudo().get_param(
-                'ugurlar_ai_studio.fal_api_key', ''
-            )
-            if not api_key:
-                return {'error': 'fal.ai API anahtari tanimlanmamis.'}
-
-            session = request.env['ai.studio.session'].browse(int(session_id))
-            if not session.exists():
-                return {'error': 'Oturum bulunamadi.'}
-
-            photo = request.env['ai.studio.photo'].browse(int(photo_id))
-            if not photo.exists():
-                return {'error': 'Fotograf bulunamadi.'}
-
-            preset = request.env['ai.studio.model.preset'].browse(int(preset_id))
-            if not preset.exists():
-                return {'error': 'Manken preseti bulunamadi.'}
-
-            from ..services.fal_provider import FalProvider
-            provider = FalProvider(api_key)
-
-            # Gorsel yukle
-            garment_url = provider.upload_image(photo.image_original)
-
-            # Manken gorseli
-            model_image = preset.model_image_front
-            if photo.photo_type == 'back' and preset.model_image_back:
-                model_image = preset.model_image_back
-
-            if not model_image:
-                return {'error': 'Manken gorseli bulunamadi.'}
-
-            model_image_raw = model_image
-            if isinstance(model_image_raw, bytes):
-                model_image_raw = model_image_raw.decode('ascii')
-            model_url = provider.upload_image(model_image_raw)
-
-            # Kategori belirle
-            category = session.category or 'tops'
-
-            # Virtual try-on
-            result = provider.virtual_tryon(
-                model_image_url=model_url,
-                garment_image_url=garment_url,
-                category=category,
-            )
-
-            if result.get('image_url'):
-                # Sonucu indir ve kaydet
-                import requests as req_lib
-                img_response = req_lib.get(result['image_url'], timeout=120)
-                generated_b64 = base64.b64encode(img_response.content).decode()
-
-                # Generation kaydı olustur
-                gen = request.env['ai.studio.generation'].create({
-                    'session_id': session.id,
-                    'source_photo_id': photo.id,
-                    'photo_type': photo.photo_type,
-                    'original_image': photo.image_original,
-                    'generated_image': generated_b64,
-                    'state': 'done',
-                    'cost': result.get('cost', 0.075),
-                    'provider': 'fal',
-                    'fal_request_id': result.get('request_id', ''),
-                })
-
-                return {
-                    'success': True,
-                    'generation_id': gen.id,
-                    'cost': result.get('cost', 0.075),
-                }
-
-            return {'error': 'AI görsel üretilemedi.'}
-        except Exception as e:
-            from ..services.fal_error_handler import parse_fal_error
-            parsed = parse_fal_error(e)
-            _logger.exception('generate_image hatasi: %s', e)
-            return {'error': parsed['message']}
-

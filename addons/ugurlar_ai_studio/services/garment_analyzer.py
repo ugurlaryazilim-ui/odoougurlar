@@ -145,26 +145,33 @@ CRITICAL CATEGORY INSTRUCTION:
 - If the garment is an etek (skirt), mini skirt, A-line skirt, pleated skirt, pencil skirt, şort (shorts), or pants/trousers: clothingCategory MUST be 'bottoms' (NEVER tops, NEVER outerwear)!
 - If the garment is an elbise (dress), abiye, or jumpsuit: clothingCategory MUST be 'dress'!
 - For coats, mantos, kabans, paltos, trench coats, parkas, jackets, blazers, mont, cardigans, sweaters, blouses, shirts, and t-shirts: clothingCategory MUST be 'outerwear' or 'tops'! DO NOT classify a coat, jacket, manto, or cardigan as a 'dress' even if it reaches mid-thigh or has a belt!
-- For skirts and dresses: garmentLength MUST accurately specify 'mini', 'midi', or 'maxi'.
+- For skirts and dresses: garmentLength MUST accurately specify 'mini', 'knee', 'midi', or 'maxi'.
+
+The *En fields MUST be plain English (they are inserted directly into an English image-generation prompt); the other descriptive fields stay in Turkish.
 
 Analyze the garment and return a JSON with these fields:
 {
   "garmentType": "string — type (e.g., T-Shirt, Gömlek, Pantolon, Elbise, Kazak, Ceket, Etek, Mini Etek)",
+  "garmentTypeEn": "string — the same garment type in English, lowercase (e.g., 'shirt', 'knit dress', 'wide-leg trousers', 'mini skirt', 'jumpsuit')",
   "clothingCategory": "string — tops/bottoms/dress/outerwear/knitwear",
   "primaryColor": "string — dominant color (e.g., Siyah, Beyaz, Lacivert, Kirmizi)",
+  "primaryColorEn": "string — dominant color in English, lowercase (e.g., 'black', 'navy', 'burgundy')",
   "colorHex": "string — approximate hex code (e.g., #1a1a2e)",
   "secondaryColors": ["array of other colors present"],
   "fabricType": "string — fabric (e.g., Pamuk, Polyester, Keten, Denim, Triko, Saten)",
+  "fabricTypeEn": "string — fabric in English, lowercase (e.g., 'cotton', 'knit', 'satin', 'denim')",
   "pattern": "string — pattern (e.g., Duz, Cizgili, Kareli, Cicekli, Baskili)",
   "style": "string — style (e.g., Casual, Formal, Sporcu, Elegance)",
   "fitDetails": "string — fit description (e.g., Regular Fit, Slim Fit, Oversize)",
   "collarType": "string — collar/neckline if visible",
+  "collarTypeEn": "string — collar/neckline in English without the word 'neckline' (e.g., 'V', 'crew', 'shirt collar', 'turtleneck')",
   "sleeveType": "string — sleeve type if visible",
   "closureType": "string — closure type (Dugme, Fermuar, Yok)",
   "buttonCount": "number or null",
   "hasGraphic": "boolean — has print/graphic",
   "graphicDescription": "string — describe any print/graphic",
-  "garmentLength": "string — mini/midi/maxi/standard",
+  "graphicDescriptionEn": "string — short English description of the print/graphic, or empty",
+  "garmentLength": "string — mini/knee/midi/maxi/standard",
   "hemline": "string — hem description",
   "seoTitle": "string — SEO optimized Turkish title",
   "seoDescription": "string — SEO optimized Turkish description (50-100 words)",
@@ -188,7 +195,7 @@ Return ONLY valid JSON, no markdown."""
         mime_type, base64_data = _prepare_gemini_image(image_url)
         if mime_type and base64_data:
             model = "gemini-2.5-flash"
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
             
             payload = {
                 "contents": [{
@@ -211,7 +218,7 @@ Return ONLY valid JSON, no markdown."""
                 if not requests:
                     raise RuntimeError("requests paketi kurulu değil.")
                 
-                headers = {'Content-Type': 'application/json'}
+                headers = {'Content-Type': 'application/json', 'x-goog-api-key': gemini_api_key}
                 resp = requests.post(url, json=payload, headers=headers, timeout=45)
                 resp.raise_for_status()
                 res_data = resp.json()
@@ -274,7 +281,7 @@ Coordinates must be normalized integers [0..1000]. If no security tags or price 
             mime_type, base64_data = _prepare_gemini_image(image_url)
             if mime_type and base64_data:
                 model = "gemini-2.5-flash"
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_api_key}"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
                 payload = {
                     "contents": [{
                         "parts": [
@@ -285,7 +292,7 @@ Coordinates must be normalized integers [0..1000]. If no security tags or price 
                     "generationConfig": {"responseMimeType": "application/json"}
                 }
                 if requests:
-                    resp = requests.post(url, json=payload, headers={'Content-Type': 'application/json'}, timeout=25)
+                    resp = requests.post(url, json=payload, headers={'Content-Type': 'application/json', 'x-goog-api-key': gemini_api_key}, timeout=25)
                     resp.raise_for_status()
                     res_data = resp.json()
                     candidates = res_data.get('candidates', [])
@@ -407,7 +414,7 @@ Return ONLY valid JSON, no markdown. Be VERY specific about colors and styles.""
             mime_type, base64_data = _prepare_gemini_image(image_data)
             if mime_type and base64_data:
                 model = "gemini-2.5-flash"
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_api_key}"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
                 payload = {
                     "contents": [{
@@ -427,7 +434,7 @@ Return ONLY valid JSON, no markdown. Be VERY specific about colors and styles.""
                 }
 
                 if requests:
-                    headers = {'Content-Type': 'application/json'}
+                    headers = {'Content-Type': 'application/json', 'x-goog-api-key': gemini_api_key}
                     resp = requests.post(url, json=payload, headers=headers, timeout=30)
                     resp.raise_for_status()
                     res_data = resp.json()
@@ -526,31 +533,112 @@ def _build_consistency_prompt(outfit_data):
     )
 
 
+# Eski (İngilizce alan içermeyen) önbellekli analizler için minimal TR→EN sözlüğü.
+# Yeni analizler garmentTypeEn / primaryColorEn / fabricTypeEn alanlarını döndürür.
+_TR_EN_WORDS = {
+    # renkler
+    'siyah': 'black', 'beyaz': 'white', 'lacivert': 'navy', 'mavi': 'blue',
+    'kirmizi': 'red', 'kırmızı': 'red', 'yesil': 'green', 'yeşil': 'green',
+    'sari': 'yellow', 'sarı': 'yellow', 'gri': 'grey', 'bej': 'beige',
+    'kahverengi': 'brown', 'kahve': 'brown', 'pembe': 'pink', 'mor': 'purple',
+    'turuncu': 'orange', 'ekru': 'ecru', 'krem': 'cream', 'haki': 'khaki',
+    'bordo': 'burgundy', 'vizon': 'mink', 'antrasit': 'anthracite', 'fume': 'smoke grey',
+    'indigo': 'indigo', 'petrol': 'petrol blue', 'hardal': 'mustard', 'lila': 'lilac',
+    'mint': 'mint', 'taba': 'tan', 'camel': 'camel', 'altin': 'gold', 'altın': 'gold',
+    'gumus': 'silver', 'gümüş': 'silver', 'acik': 'light', 'açık': 'light', 'koyu': 'dark',
+    # kumaşlar
+    'pamuk': 'cotton', 'keten': 'linen', 'triko': 'knit', 'örme': 'knit', 'orme': 'knit',
+    'saten': 'satin', 'ipek': 'silk', 'yun': 'wool', 'yün': 'wool', 'kase': 'cashmere-blend',
+    'kaşe': 'cashmere-blend', 'kadife': 'velvet', 'deri': 'leather', 'suet': 'suede',
+    'süet': 'suede', 'sifon': 'chiffon', 'şifon': 'chiffon', 'viskon': 'viscose',
+    'krep': 'crepe', 'tul': 'tulle', 'tül': 'tulle', 'dantel': 'lace', 'kot': 'denim',
+    'polar': 'fleece', 'tvit': 'tweed', 'gabardin': 'gabardine', 'poplin': 'poplin',
+    # türler
+    'elbise': 'dress', 'etek': 'skirt', 'pantolon': 'trousers', 'sort': 'shorts',
+    'şort': 'shorts', 'gomlek': 'shirt', 'gömlek': 'shirt', 'bluz': 'blouse',
+    'kazak': 'sweater', 'hirka': 'cardigan', 'hırka': 'cardigan', 'ceket': 'jacket',
+    'mont': 'jacket', 'kaban': 'coat', 'palto': 'coat', 'manto': 'long coat',
+    'trenckot': 'trench coat', 'trençkot': 'trench coat', 'yelek': 'vest',
+    'tisort': 't-shirt', 'tişört': 't-shirt', 'tunik': 'tunic', 'tulum': 'jumpsuit',
+    'abiye': 'evening dress', 'tayt': 'leggings', 'atlet': 'tank top',
+    'jean': 'denim', 'kemerli': 'belted', 'mini': 'mini', 'midi': 'midi', 'maxi': 'maxi',
+    'uzun': 'long', 'kisa': 'short',
+    'kısa': 'short', 'kolsuz': 'sleeveless', 'askili': 'strappy', 'askılı': 'strappy',
+    'desenli': 'patterned', 'cicekli': 'floral', 'çiçekli': 'floral',
+    'cizgili': 'striped', 'çizgili': 'striped', 'kareli': 'checked', 'duz': '', 'düz': '',
+    # yaka
+    'yaka': '', 'yakalı': 'collared', 'yakali': 'collared', 'bisiklet': 'crew', 'balıkçı': 'turtleneck',
+    'balikci': 'turtleneck', 'kayık': 'boat', 'kayik': 'boat', 'hakim': 'mandarin', 'kare': 'square',
+    'kruvaze': 'wrap', 'kapüşonlu': 'hooded', 'kapusonlu': 'hooded',
+}
+
+
+def _to_english(analysis, key):
+    """Analiz alanının İngilizce değerini döndür (keyEn → sözlük → orijinal)."""
+    en_val = (analysis.get(f'{key}En') or '').strip()
+    if en_val:
+        return en_val
+    raw = str(analysis.get(key) or '').strip()
+    if not raw:
+        return ''
+    words = []
+    for w in raw.split():
+        mapped = _TR_EN_WORDS.get(w.lower())
+        words.append(w if mapped is None else mapped)
+    return ' '.join(w for w in words if w)
+
+
+def _detect_sub_type(category, garment_text):
+    """Prompt alt tipini belirle: jumpsuit > dress > skirt > shorts > tops > bottoms."""
+    from .category_constants import TOPS_AND_OUTERWEAR_KW, JUMPSUIT_KW
+    if _safe_keyword_match(garment_text, JUMPSUIT_KW):
+        return 'jumpsuit'
+    if category in ('dress', 'one_piece', 'one-piece', 'full-body') or \
+            _safe_keyword_match(garment_text, ['elbise', 'dress', 'abiye', 'gown']):
+        return 'dress'
+    if _safe_keyword_match(garment_text, ['etek', 'skirt']):
+        return 'skirt'
+    if _safe_keyword_match(garment_text, ['şort', 'sort', 'shorts', 'bermuda']):
+        return 'shorts'
+    if category in ('tops', 'outerwear', 'knitwear') or \
+            _safe_keyword_match(garment_text, TOPS_AND_OUTERWEAR_KW):
+        return 'tops'
+    if category == 'bottoms':
+        return 'bottoms'
+    return 'tops'  # Safe fallback
+
+
+_OPEN_FRONT_WORDS = ['yelek', 'vest', 'waistcoat', 'hırka', 'hirka', 'cardigan', 'ceket',
+                     'jacket', 'blazer', 'mont', 'kaban', 'coat', 'trençkot', 'trench']
+
+
 def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
-                            photo_type='front', outfit_consistency=None, provider_type='fashn'):
+                            photo_type='front', outfit_consistency=None, provider_type='fashn',
+                            scene_prompt='', has_front_ref=True):
     """Analiz sonuclarina gore AI gorsel uretim promptu olustur.
 
-    Seedream v5 Pro icin kisa, kategori-bazli prompt sablonlari kullanir.
-    Hedef: 40-65 kelime, < 500 karakter (Seedream optimal araliği).
-    FASHN icin minimal prompt — kendi try-on modelini kullanir.
+    Seedream v5 Pro: pozitif dilde, yalnızca İngilizce, 60-90 kelimelik
+    kategori şablonları (bkz. category_constants.SEEDREAM_TEMPLATES).
+    FASHN için minimal prompt — kendi try-on modelini kullanır.
 
     Args:
         analysis: Kiyafet analiz sonuclari (dict)
         preset: Manken preset bilgileri (dict)
-        prompt_locks: Aktif prompt lock listesi (list of str) — sadece kalite lock
-        extra_prompt: Ek kullanici promptu
-        photo_type: str — 'front', 'back', 'side', 'detail'
-        outfit_consistency: dict — outfit tutarlilik verileri (back/side view icin)
-        provider_type: str — 'fashn', 'fal', vb.
+        prompt_locks: Aktif prompt lock listesi (list of str)
+        extra_prompt: Ek kullanici / revizyon promptu (İngilizce olmalı)
+        photo_type: 'front', 'back', 'side', 'detail'
+        outfit_consistency: dict — ön görünüm outfit verisi (back/side için)
+        provider_type: 'fashn', 'fal', vb.
+        scene_prompt: Sahne tarifi; verilirse beyaz stüdyo arka planının yerini alır
+        has_front_ref: back/side çağrısında ön görünüm sonucu (Image 3) gönderiliyor mu
 
     Returns:
         dict: {'positive': str, 'negative': str}
     """
     from .category_constants import (
         SEEDREAM_TEMPLATES, SEEDREAM_DETAIL_TEMPLATE, SEEDREAM_NEGATIVES,
-        LEG_RULES, HAND_POSES, QUALITY_SUFFIX,
+        LEG_RULES, SHOE_RULES, HAND_POSES, DEFAULT_BACKGROUND, FRONT_REF_SENTENCE,
         FASHN_VIEW_TEMPLATES, FASHN_NEGATIVE,
-        TOPS_AND_OUTERWEAR_KW,
     )
 
     if not isinstance(analysis, dict):
@@ -561,186 +649,149 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         outfit_consistency = {}
 
     category = analysis.get('clothingCategory', 'tops')
-    garment_type = analysis.get('garmentType', 'garment')
-    garment_type_lower = f"{garment_type} {category}".lower()
+    garment_type_raw = analysis.get('garmentType', 'garment')
+    sub_type = _detect_sub_type(category, f"{garment_type_raw} {category}".lower())
 
-    # ═══ ALT TİP ALGILA (dress / skirt / shorts / tops / bottoms) ═══
-    # ÖNCELİK: dress > skirt > shorts > tops/outerwear > bottoms
-    # "Gömlek Elbise" gibi bileşik isimler dress olarak algılanmalı
-    if category in ['dress', 'one_piece', 'one-piece', 'full-body'] or \
-         _safe_keyword_match(garment_type_lower, ['elbise', 'dress', 'tulum', 'jumpsuit', 'abiye']):
-        sub_type = 'dress'
-    elif _safe_keyword_match(garment_type_lower, ['etek', 'skirt']):
-        sub_type = 'skirt'
-    elif _safe_keyword_match(garment_type_lower, ['şort', 'sort', 'shorts', 'bermuda']):
-        sub_type = 'shorts'
-    elif category in ['tops', 'outerwear', 'knitwear'] or \
-         _safe_keyword_match(garment_type_lower, TOPS_AND_OUTERWEAR_KW):
-        sub_type = 'tops'
-    elif category == 'bottoms':
-        sub_type = 'bottoms'
-    else:
-        sub_type = 'tops'  # Safe fallback
-
-    # ═══ GARMENT TYPE NORMALİZASYONU (Diffusion Model Halüsinasyon Önleyici) ═══
-    # Eğer sub_type elbise ise, Gemini analizinde "tunik", "kazak", "gömlek" gibi kelimeler
-    # kalmışsa difüzyon modeli bunu üst giyim sanıp altına pantolon giydirir.
-    if sub_type == 'dress':
-        gt_lower = garment_type.lower()
-        non_dress_words = ['tunik', 'tunic', 'kazak', 'sweater', 'hırka', 'cardigan',
-                           'bluz', 'blouse', 'gömlek', 'shirt', 'tişört', 't-shirt', 'tshirt',
-                           'sweatshirt', 'hoodie', 'süveter', 'üst giyim', 'top']
-        if any(w in gt_lower for w in non_dress_words) and not any(d in gt_lower for d in ['elbise', 'dress', 'gown']):
-            if 'triko' in gt_lower or 'knit' in gt_lower:
-                garment_type = 'knit dress'
-            elif 'gömlek' in gt_lower or 'shirt' in gt_lower:
-                garment_type = 'shirt dress'
-            else:
-                garment_type = 'dress'
-    elif sub_type == 'skirt':
-        gt_lower = garment_type.lower()
-        if 'etek' not in gt_lower and 'skirt' not in gt_lower:
-            garment_type = 'skirt'
-    elif sub_type == 'shorts':
-        gt_lower = garment_type.lower()
-        if 'şort' not in gt_lower and 'sort' not in gt_lower and 'shorts' not in gt_lower:
-            garment_type = 'shorts'
+    # İngilizce ürün adı; alt tiple çelişen kelimeleri normalize et
+    # (ör. "Triko Tunik" elbise ise "knit dress" — aksi halde model üst giyim sanıp
+    # altına pantolon giydirir)
+    garment = _to_english(analysis, 'garmentType') or 'garment'
+    g_low = garment.lower()
+    if sub_type == 'dress' and not any(d in g_low for d in ('dress', 'gown')):
+        garment = 'knit dress' if 'knit' in g_low else ('shirt dress' if 'shirt' in g_low else 'dress')
+    elif sub_type == 'jumpsuit' and 'jumpsuit' not in g_low and 'overall' not in g_low:
+        garment = 'jumpsuit'
+    elif sub_type == 'skirt' and 'skirt' not in g_low:
+        garment = 'skirt'
+    elif sub_type == 'shorts' and 'shorts' not in g_low:
+        garment = 'shorts'
 
     # ═══ FASHN PROVIDER (minimal prompt, kendi try-on modeli) ═══
     if provider_type == 'fashn':
         base_prompt = FASHN_VIEW_TEMPLATES.get(photo_type, FASHN_VIEW_TEMPLATES['front'])
         negative = FASHN_NEGATIVE
-
-        # Fashn icin outfit directive ve prompt locks
         if sub_type in ('dress', 'skirt', 'shorts'):
-            base_prompt += " Remove all pants, trousers, and jeans. Natural bare legs below garment hemline. No bottom clothing underneath. Model wears elegant heeled pumps or sandals on bare feet."
+            base_prompt += " Natural bare legs below the garment hemline. Model wears elegant heeled pumps or sandals."
         elif sub_type == 'tops':
-            gt_l = garment_type.lower()
-            if any(w in gt_l for w in ['yelek', 'vest', 'waistcoat', 'hırka', 'cardigan', 'ceket', 'jacket', 'blazer', 'mont', 'kaban', 'trençkot', 'trench']):
-                base_prompt += f" The model wears a fitted solid neutral inner top underneath the open {garment_type}. No bare chest or bare stomach."
+            if any(w in g_low or w in garment_type_raw.lower() for w in _OPEN_FRONT_WORDS):
+                base_prompt += f" The model wears a fitted solid neutral inner top underneath the open {garment}."
             base_prompt += " Model wears full-length dark trousers."
-        elif sub_type == 'bottoms':
-            base_prompt += " Full trouser length visible to shoes."
-
+        elif sub_type in ('bottoms', 'jumpsuit'):
+            base_prompt += " Full length visible down to the shoes."
         for lock in prompt_locks:
             lock_str = str(lock).strip()
             if not lock_str.upper().startswith('NEGATIVE'):
                 base_prompt += f" {lock_str}"
-
         if extra_prompt:
             base_prompt += f" {extra_prompt}"
-
-        _logger.info(
-            'Prompt olusturuldu (photo_type=%s, provider=%s, sub_type=%s): %d karakter',
-            photo_type, provider_type, sub_type, len(base_prompt),
-        )
+        _logger.info('Prompt olusturuldu (photo_type=%s, provider=%s, sub_type=%s): %d karakter',
+                     photo_type, provider_type, sub_type, len(base_prompt))
         return {'positive': base_prompt, 'negative': negative}
 
-    # ═══ SEEDREAM / FAL PROVIDER (kategori-bazlı kısa template) ═══
-    color = analysis.get('primaryColor', '')
-    fabric = analysis.get('fabricType', '')
-    garment_length = analysis.get('garmentLength', 'default') or 'default'
+    # ═══ SEEDREAM / FAL PROVIDER ═══
+    color = _to_english(analysis, 'primaryColor')
+    fabric = _to_english(analysis, 'fabricType')
+    # "knit knit dress" / "denim denim trousers" tekrarlarını ele
+    desc_words = []
+    for w in f"{color} {fabric} {garment}".lower().split():
+        if w not in desc_words or w in ('light', 'dark'):
+            desc_words.append(w)
+    desc = ' '.join(desc_words)
+    garment = garment.lower()
 
-    # Bacak kuralı — uzunluğa göre
+    garment_length = (analysis.get('garmentLength') or 'default').lower()
     leg_rules_for_type = LEG_RULES.get(sub_type, {})
     leg_rule = leg_rules_for_type.get(garment_length, leg_rules_for_type.get('default', ''))
+    shoe_rule = ''
+    if sub_type in ('dress', 'skirt'):
+        shoe_rule = SHOE_RULES['maxi'] if garment_length == 'maxi' else SHOE_RULES['default']
 
-    # El pozu
     hand_pose = HAND_POSES.get(photo_type, '')
 
-    # Yaka/kol notu (kısa)
+    # Yaka / kol notu (sadece ön görünüm)
     collar_note = ''
-    collar = analysis.get('collarType', '')
-    sleeve = analysis.get('sleeveType', '')
-    if collar and sub_type in ('tops', 'dress') and photo_type == 'front':
-        collar_note = f"{collar} neckline. "
-    if sleeve and sub_type in ('tops', 'dress') and photo_type == 'front':
-        sleeve_lower = sleeve.lower()
-        if any(k in sleeve_lower for k in ['strapless', 'askisiz', 'askısız', 'sleeveless', 'kolsuz']):
+    if sub_type in ('tops', 'dress', 'jumpsuit') and photo_type == 'front':
+        collar = _to_english(analysis, 'collarType')
+        if collar:
+            collar_note = f"{collar} neckline. "
+        sleeve_lower = str(analysis.get('sleeveType') or '').lower()
+        if any(k in sleeve_lower for k in ['strapless', 'askisiz', 'askısız']):
             collar_note += "Bare shoulders, strapless design. "
         elif any(k in sleeve_lower for k in ['ince askı', 'spaghetti', 'thin strap']):
             collar_note += "Thin spaghetti straps. "
+        elif any(k in sleeve_lower for k in ['sleeveless', 'kolsuz']):
+            collar_note += "Sleeveless. "
 
-    # Grafik/baskı notu
+    # Grafik / baskı notu
     graphic_note = ''
-    if analysis.get('hasGraphic') and analysis.get('graphicDescription'):
-        graphic_note = f"Preserve the graphic print: '{analysis['graphicDescription']}'. "
-    elif analysis.get('hasGraphic'):
-        graphic_note = "Preserve the graphic print exactly as in Figure 1. "
+    if analysis.get('hasGraphic'):
+        graphic_desc = (analysis.get('graphicDescriptionEn') or '').strip()
+        graphic_note = (f"Preserve the print exactly: {graphic_desc}. " if graphic_desc
+                        else "Preserve the print exactly as in Image 2. ")
 
-    # Yelek, hırka, ceket gibi açık önlü üst giyimler için iç giyim (inner top) kuralı
+    # Açık önlü üst giyim (yelek, hırka, ceket...) için iç katman
     inner_top_note = ''
-    if sub_type == 'tops':
-        gt_lower = garment_type.lower()
-        if any(w in gt_lower for w in ['yelek', 'vest', 'waistcoat', 'hırka', 'cardigan', 'ceket', 'jacket', 'blazer', 'mont', 'kaban', 'trençkot', 'trench']):
-            inner_top_note = (
-                f"The model wears a simple solid neutral fitted inner top/t-shirt underneath the open {garment_type}. "
-                f"The {garment_type} is worn neatly layered over the top with clean catalog coverage, no bare chest or stomach. "
-            )
+    if sub_type == 'tops' and any(w in g_low or w in garment_type_raw.lower() for w in _OPEN_FRONT_WORDS):
+        inner_top_note = (
+            f"A plain fitted neutral inner top is worn underneath the {garment}, "
+            f"giving clean catalog coverage. "
+        )
 
-    # Elbise ve etek için ayakkabı kuralı (kaba botları ve spor ayakkabıları engeller)
-    shoe_rule = ''
-    if sub_type in ('dress', 'skirt'):
-        shoe_rule = "Model wears elegant high-heeled pumps or sandals on bare feet — NO heavy boots, NO sneakers, NO casual shoes. "
+    front_ref = FRONT_REF_SENTENCE if (has_front_ref and photo_type in ('back', 'side')) else ''
 
-    # Extra prompt
-    extra = ''
-    if extra_prompt:
-        extra = extra_prompt.strip()
+    # Arka plan: sahne varsa stüdyo tarifinin yerini alır
+    scene_prompt = (scene_prompt or '').strip()
+    background = scene_prompt or DEFAULT_BACKGROUND
 
-    # ═══ TEMPLATE SEÇ VE FORMAT ET ═══
     if photo_type == 'detail':
         template = SEEDREAM_DETAIL_TEMPLATE
     else:
-        template = SEEDREAM_TEMPLATES.get((sub_type, photo_type))
-        if not template:
-            # Fallback: front template
-            template = SEEDREAM_TEMPLATES.get((sub_type, 'front'), SEEDREAM_TEMPLATES[('tops', 'front')])
+        template = SEEDREAM_TEMPLATES.get((sub_type, photo_type)) or \
+            SEEDREAM_TEMPLATES.get((sub_type, 'front'), SEEDREAM_TEMPLATES[('tops', 'front')])
 
     base_prompt = template.format(
-        garment_type=garment_type,
-        color=color,
-        fabric=fabric,
+        garment=garment,
+        desc=desc,
         leg_rule=leg_rule,
         shoe_rule=shoe_rule,
         inner_top_note=inner_top_note,
         hand_pose=hand_pose,
         collar_note=collar_note,
         graphic_note=graphic_note,
-        extra_prompt=extra,
+        front_ref=front_ref,
+        background=background,
+        extra_prompt=(extra_prompt or '').strip(),
     )
 
-    # Kalite suffix ve tek prompt lock (fotorealizm)
+    # Prompt kilitleri (fotorealizm). Sahne seçiliyse stüdyo tarifi içerenler
+    # sahneyle çelişeceği için atlanır.
     for lock in prompt_locks:
         lock_str = str(lock).strip()
-        if not lock_str.upper().startswith('NEGATIVE'):
-            base_prompt += f" {lock_str}"
+        if not lock_str or lock_str.upper().startswith('NEGATIVE'):
+            continue
+        if scene_prompt and any(k in lock_str.lower() for k in ('studio', 'cyclorama')):
+            continue
+        base_prompt += f" {lock_str}"
 
-    # Çift boşlukları temizle
+    # Cross-view tutarlılık: sadece ÜST giyimde alt kombin bilgisi ekle
+    # (alt giyimde bu bilgi değiştirilen ürünün kendisini tarif eder)
+    if outfit_consistency and photo_type in ('back', 'side'):
+        parts = []
+        if sub_type == 'tops':
+            bottoms = f"{outfit_consistency.get('bottomsColor', '')} {outfit_consistency.get('bottomsType', '')}".strip()
+            if bottoms:
+                parts.append(bottoms)
+        if sub_type not in ('dress', 'skirt'):
+            shoes = f"{outfit_consistency.get('shoesColor', '')} {outfit_consistency.get('shoesType', '')}".strip()
+            if shoes:
+                parts.append(shoes)
+        if parts:
+            base_prompt += f" Same styling as the front view: {', '.join(parts)}."
+
     base_prompt = " ".join(base_prompt.split())
 
-    # ═══ CROSS-VIEW OUTFIT TUTARLILIĞI ═══
-    # Back/side view'da front view'daki outfit bilgisini kısa ekle
-    if outfit_consistency and photo_type != 'front':
-        consistency_data = outfit_consistency
-        consistency_parts = []
-        # Dress/etek ise pantolon bilgisi EKLEME — çünkü elbise bacak görünümünü değiştirir
-        if sub_type not in ('dress', 'skirt', 'shorts'):
-            bottoms_info = consistency_data.get('bottomsType', '')
-            bottoms_color = consistency_data.get('bottomsColor', '')
-            if bottoms_info:
-                consistency_parts.append(f"{bottoms_color} {bottoms_info}".strip())
-        shoes_info = consistency_data.get('shoesType', '')
-        shoes_color = consistency_data.get('shoesColor', '')
-        if shoes_info:
-            consistency_parts.append(f"{shoes_color} {shoes_info}".strip())
-        if consistency_parts:
-            base_prompt += f" Same outfit as front view: {', '.join(consistency_parts)}."
-
-    # ═══ NEGATİF PROMPT ═══
+    # Negatif prompt (Seedream kullanmaz; destekleyen modeller için)
     negative = SEEDREAM_NEGATIVES.get(sub_type, SEEDREAM_NEGATIVES['tops'])
-
-    # Scene negatif eklemeleri
     for lock in prompt_locks:
         lock_str = str(lock).strip()
         if lock_str.upper().startswith('NEGATIVE'):
@@ -752,13 +803,7 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         'Prompt olusturuldu (photo_type=%s, provider=%s, sub_type=%s): %d karakter, %d kelime',
         photo_type, provider_type, sub_type, len(base_prompt), len(base_prompt.split()),
     )
-
-    return {
-        'positive': base_prompt,
-        'negative': negative,
-    }
-
-
+    return {'positive': base_prompt, 'negative': negative}
 
 
 def _default_analysis():

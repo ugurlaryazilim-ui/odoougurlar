@@ -50,9 +50,15 @@ class FalProvider(AIProviderBase):
         'fal-ai/flux/schnell': 0.003,
         'fal-ai/flux-pro/v1.1': 0.05,
         'fal-ai/nano-banana-2/edit': 0.04,
-        'bytedance/seedream/v5/pro/edit': 0.05,
+        'bytedance/seedream/v5/pro/edit': 0.135,
         'fal-ai/any-llm': 0.001,
         'fal-ai/flux-kontext/dev': 0.025,
+    }
+
+    # Seedream çıktı boyutları (2:3). Toplam piksel 1536² altı → $0.0675, üstü → $0.135
+    SEEDREAM_IMAGE_SIZES = {
+        'hd': {'width': 1664, 'height': 2496},
+        'standard': {'width': 1248, 'height': 1872},
     }
 
     # Thread-safety: os.environ mutasyonu tek noktadan kontrol edilir
@@ -74,6 +80,18 @@ class FalProvider(AIProviderBase):
     def get_estimated_cost(self, endpoint):
         # Endpoint icin tahmini maliyeti dondur (USD).
         return self.ESTIMATED_COSTS.get(endpoint, 0.01)
+
+    def _compute_cost(self, endpoint, n_outputs, n_refs, arguments):
+        """Gerçek fal fiyatına göre maliyet (USD)."""
+        n_outputs = max(1, n_outputs)
+        if 'seedream' in endpoint:
+            size = arguments.get('image_size') or {}
+            pixels = (size.get('width', 2048) * size.get('height', 2048)) if isinstance(size, dict) else 2048 * 2048
+            per_image = 0.0675 if pixels <= 1536 * 1536 else 0.135
+            return round(per_image * n_outputs + 0.0045 * max(0, n_refs - 1), 4)
+        if 'nano-banana' in endpoint:
+            return self.get_estimated_cost(endpoint) * n_outputs
+        return self.get_estimated_cost(endpoint)
 
     def virtual_tryon(self, model_image_url, garment_image_url,
                       category='tops', mode='balanced', **kwargs):
@@ -105,46 +123,58 @@ class FalProvider(AIProviderBase):
         negative_prompt = kwargs.get('negative_prompt', '')
         photo_type = kwargs.get('photo_type', 'front')
 
-        if 'nano-banana' in endpoint or 'seedream' in endpoint:
-            # ═══ SEEDREAM / NANO-BANANA PATH ═══
-            # Image URL'leri hazirla: [Figure 1=garment, Figure 2=model, Figure 3=front_view?, ...]
-            image_urls_list = [garment_image_url, model_image_url]
-
+        n_refs = 0
+        if 'seedream' in endpoint:
+            # ═══ SEEDREAM v5 PRO EDIT ═══
+            # Şema: prompt, image_urls(<=10), image_size, num_images, output_format,
+            # sync_mode, enable_safety_checker. seed / negative_prompt / aspect_ratio /
+            # resolution DESTEKLENMEZ (gönderilirse sessizce yok sayılır).
+            # Görsel rolleri prompt şablonlarıyla eşleşir:
+            #   Image 1 = manken, Image 2 = ürün, Image 3 = ön görünüm (back/side)
+            image_urls_list = [model_image_url, garment_image_url]
             front_output_url = kwargs.get('front_output_url')
             if front_output_url and photo_type in ('back', 'side'):
                 image_urls_list.append(front_output_url)
 
+            enhanced_prompt = prompt
             detail_urls = kwargs.get('detail_urls') or []
             for du in detail_urls:
                 image_urls_list.append(du)
-
-            # Detail figure referanslari prompt'a ekle
-            enhanced_prompt = prompt
-            if detail_urls:
-                detail_start_idx = 4 if front_output_url and photo_type in ('back', 'side') else 3
-                for i in range(len(detail_urls)):
-                    idx = detail_start_idx + i
-                    enhanced_prompt += f" Figure {idx} is a detail texture reference for the garment."
-                enhanced_prompt += " Output is full-body photo with Figure 1 garment texture."
+                enhanced_prompt += (
+                    f" Image {len(image_urls_list)} is a close-up texture reference of the same garment."
+                )
+            image_urls_list = image_urls_list[:10]
+            n_refs = len(image_urls_list)
 
             arguments = {
                 'prompt': enhanced_prompt,
                 'image_urls': image_urls_list,
-                'aspect_ratio': '2:3',
-                'output_format': 'jpeg',
-                'resolution': kwargs.get('resolution', '2k'),
+                'image_size': kwargs.get('image_size') or self.SEEDREAM_IMAGE_SIZES['hd'],
+                'num_images': max(1, min(6, int(kwargs.get('num_samples') or 1))),
+                'output_format': 'png' if kwargs.get('output_format') == 'png' else 'jpeg',
+                'enable_safety_checker': bool(kwargs.get('enable_safety_checker', True)),
             }
 
-            if 'nano-banana' in endpoint:
-                arguments['num_images'] = kwargs.get('num_samples', 1)
-                arguments['safety_tolerance'] = '4'
-                arguments['limit_generations'] = True
-                arguments['enable_watermark'] = False
-
-            # Negatif prompt — garment_analyzer'dan gelir, ek manipulasyon yok
+        elif 'nano-banana' in endpoint:
+            # ═══ NANO-BANANA PATH ═══ (aspect_ratio / resolution / negative destekler)
+            # Sıra Seedream ile aynı: şablonlar Image 1 = manken, Image 2 = ürün varsayar
+            image_urls_list = [model_image_url, garment_image_url]
+            front_output_url = kwargs.get('front_output_url')
+            if front_output_url and photo_type in ('back', 'side'):
+                image_urls_list.append(front_output_url)
+            arguments = {
+                'prompt': prompt,
+                'image_urls': image_urls_list,
+                'aspect_ratio': '2:3',
+                'output_format': 'jpeg',
+                'resolution': str(kwargs.get('resolution', '2k')).lower(),
+                'num_images': kwargs.get('num_samples', 1),
+                'safety_tolerance': '4',
+                'limit_generations': True,
+                'enable_watermark': False,
+            }
             if negative_prompt:
                 arguments['negative_prompt'] = negative_prompt
-
             if kwargs.get('seed'):
                 arguments['seed'] = int(kwargs['seed'])
 
@@ -193,11 +223,12 @@ class FalProvider(AIProviderBase):
                 break
             except Exception as e:
                 error_str = str(e).lower()
+                # Dar eşleşme: "limit" içeren her hata (ör. içerik/boyut limiti)
+                # ücretli işi yeniden göndermemeli
                 is_rate_limit = (
-                    'rate' in error_str or
-                    'limit' in error_str or
                     '429' in error_str or
-                    'concurrent' in error_str
+                    'rate limit' in error_str or
+                    'too many requests' in error_str
                 )
                 if is_rate_limit and attempt < max_retries - 1:
                     sleep_time = backoff_factor * (2 ** attempt)
@@ -240,7 +271,7 @@ class FalProvider(AIProviderBase):
         return {
             'image_urls': image_urls,
             'image_url': image_url,
-            'cost': self.get_estimated_cost(endpoint) * len(image_urls) if 'nano-banana' in endpoint else self.get_estimated_cost(endpoint),
+            'cost': self._compute_cost(endpoint, len(image_urls), n_refs, arguments),
             'request_id': request_id,
             'seed': seed_val,
         }

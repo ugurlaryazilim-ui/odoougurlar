@@ -29,6 +29,9 @@ OUTERWEAR_ONLY_KW = [
 
 ONE_PIECE_KW = ['elbise', 'dress', 'tulum', 'jumpsuit', 'overall', 'abiye', 'tek parça']
 
+# Tek parça ama bacakları kapatan (elbise bacak kurallarını ALMAMALI)
+JUMPSUIT_KW = ['tulum', 'jumpsuit', 'overall', 'romper', 'salopet']
+
 SKIRT_KW = ['etek', 'skirt']
 
 SHORTS_KW = ['şort', 'sort', 'shorts', 'bermuda']
@@ -55,280 +58,236 @@ ACCESSORIES_KW = [
     'cüzdan', 'cuzdan', 'eldiven',
 ]
 
+def normalize_tr(text):
+    """Türkçe-güvenli küçük harf: 'ELBİSE'.lower() birleşik noktalı i üretir,
+    'AYAKKABI' ise 'ayakkabi' olur — eşleşme için ı/i farkını da kaldırır."""
+    return (text or '').replace('İ', 'i').lower().replace('i̇', 'i').replace('ı', 'i')
+
+
+def _kw_regex(keywords, whole_word):
+    """Anahtar kelime listesinden regex üret.
+
+    whole_word=False: kelime başı eşleşmesi — Türkçe ekleri yakalar
+        (elbise → elbiseler, pantolon → pantolonu).
+    whole_word=True: tam kelime (+ yaygın çoğul/iyelik eki) — 'kemer' ≠ 'kemerli',
+        'bot' ≠ 'bottom', 'sal' ≠ 'salaş', 'bag' ≠ 'baggy'.
+    """
+    import re
+    parts = sorted({re.escape(normalize_tr(k)) for k in keywords}, key=len, reverse=True)
+    body = '|'.join(parts)
+    if whole_word:
+        return re.compile(r'(?<!\w)(?:%s)(?:ler|lar|leri|lari|si|i)?(?!\w)' % body)
+    return re.compile(r'(?<!\w)(?:%s)' % body)
+
+
+# (kategori, anahtar kelimeler, tam_kelime) — SIRA ÖNEMLİ: giysi kelimeleri önce.
+# Ürün adında giysi kelimesi varsa ("Kemerli Elbise", "Bot Paça Jean",
+# "Şal Yaka Ceket") aksesuar/ayakkabı kelimeleri yok sayılır.
+_GARMENT_RULES = [
+    ('one_piece', ONE_PIECE_KW, False),
+    ('tops', OUTERWEAR_ONLY_KW, False),
+    ('tops', [k for k in TOPS_AND_OUTERWEAR_KW if k not in ('atlet', 'body', 'vest')], False),
+    ('tops', ['atlet', 'body', 'bodysuit', 'vest'], True),
+    ('bottoms', BOTTOMS_SAFE_KW + ['pantalon', 'palazzo', 'şalvar', 'salvar'], False),
+    ('bottoms', SKIRT_KW + SHORTS_KW, False),
+    ('bags', BAGS_KW, True),
+    ('shoes', SHOES_KW, True),
+    ('accessories', ACCESSORIES_KW, True),
+]
+_GARMENT_RULES_COMPILED = None
+
+
+def classify_garment_text(text):
+    """Serbest metinden (ürün adı + kategori + attribute) giysi tipi çıkar.
+
+    Returns:
+        (category, matched_keyword) veya (None, None). category:
+        'one_piece' | 'tops' | 'bottoms' | 'bags' | 'shoes' | 'accessories'
+    """
+    global _GARMENT_RULES_COMPILED
+    if _GARMENT_RULES_COMPILED is None:
+        _GARMENT_RULES_COMPILED = [(cat, _kw_regex(kws, whole)) for cat, kws, whole in _GARMENT_RULES]
+    norm = normalize_tr(text)
+    for cat, rx in _GARMENT_RULES_COMPILED:
+        m = rx.search(norm)
+        if m:
+            return cat, m.group(0)
+    return None, None
+
+
 # Türkçe false positive temizleme listesi (tişört içinde şort vb.)
 FALSE_POSITIVE_CLEAN_KW = ['tişört', 'tisort', 'tısört', 'tısort', 'tshirt', 't-shirt', 't shirt']
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SEEDREAM PROMPT ŞABLONLARI
-# Her şablon: 40-65 kelime hedef, < 500 karakter
-# Seedream v5 Pro optimal: 2-4 cümle, < 50 kelime, doğal dil
+#
+# Seedream v5 Pro Edit negative_prompt / seed DESTEKLEMEZ — tek kaldıraç
+# pozitif prompt'tur. Kurallar:
+#   * Sadece İngilizce, 60-90 kelime, istenen sonucu TARİF ET.
+#   * İstenmeyen nesneyi tekrar tekrar anma ("NO pants" ×9 modeli pantolona
+#     çeker); gerekiyorsa tek bir "replace ... including trousers" cümlesi.
+#   * Görsel rolleri sabittir (fal_provider sırasıyla eşleşir):
+#       Image 1 = manken referansı (kimlik, poz, vücut)
+#       Image 2 = ürün fotoğrafı
+#       Image 3 = ön görünüm sonucu (sadece back/side ve varsa)
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Bacak kuralları — kıyafet uzunluğuna göre
+# Bacak tarifleri — kıyafet uzunluğuna göre (pozitif dil)
 LEG_RULES = {
     'dress': {
-        'mini':    'Bare skin female legs completely visible from mid-thigh down to bare ankles and shoes. Absolutely no pants, no trousers, no jeans, no leggings, no tights.',
-        'midi':    'Bare skin female legs completely visible from mid-calf down to bare ankles and shoes. Absolutely no pants, no trousers, no jeans, no leggings, no tights.',
-        'knee':    'Bare skin female legs completely visible from knee down to bare ankles and shoes. Absolutely no pants, no trousers, no jeans, no leggings, no tights.',
-        'maxi':    'Dress hemline near ankles, bare feet and shoes visible. Absolutely no pants or trousers underneath.',
-        'default': 'Bare skin female legs completely visible below dress hemline down to shoes. Absolutely no pants, no trousers, no jeans, no leggings, no tights.',
+        'mini':    'The mini hem ends at mid-thigh, with bare legs visible below it.',
+        'knee':    'The hem ends at the knee, with bare lower legs visible below it.',
+        'midi':    'The midi hem ends at mid-calf, with bare lower legs visible below it.',
+        'maxi':    'The maxi hem falls to the ankles.',
+        'default': 'Bare legs are visible below the hem.',
     },
     'skirt': {
-        'mini':    'Bare skin female legs completely visible from mid-thigh down to bare ankles and shoes. Absolutely no pants, no trousers, no jeans, no leggings, no tights.',
-        'midi':    'Bare skin female legs completely visible from mid-calf down to bare ankles and shoes. Absolutely no pants, no trousers, no jeans, no leggings, no tights.',
-        'knee':    'Bare skin female legs completely visible from knee down to bare ankles and shoes. Absolutely no pants, no trousers, no jeans, no leggings, no tights.',
-        'maxi':    'Skirt hemline near ankles, bare feet and shoes visible. Absolutely no pants or trousers underneath.',
-        'default': 'Bare skin female legs completely visible below skirt hemline down to shoes. Absolutely no pants, no trousers, no jeans, no leggings, no tights.',
+        'mini':    'The mini skirt ends at mid-thigh, with bare legs visible below it.',
+        'knee':    'The skirt ends at the knee, with bare lower legs visible below it.',
+        'midi':    'The midi skirt ends at mid-calf, with bare lower legs visible below it.',
+        'maxi':    'The maxi skirt falls to the ankles.',
+        'default': 'Bare legs are visible below the skirt hem.',
     },
     'shorts': {
-        'default': 'Bare skin female legs completely visible below shorts down to shoes. Absolutely no long pants, no trousers, no leggings.',
+        'default': 'Bare legs are visible below the shorts.',
     },
+}
+
+# Ayakkabı tarifleri — elbise/etek için zarif; maxi'de ayak çoğunlukla gizli
+SHOE_RULES = {
+    'default': 'She wears simple nude high-heeled pumps.',
+    'maxi': 'Only the toes of simple nude heeled sandals show below the hem.',
 }
 
 # El pozları — view'e göre
 # NOT: "one hand on hip" gibi detaylı poz talimatları Seedream'de
 # fazla/kaynaşmış parmak sorununa yol açar. Basit tutulmalı.
 HAND_POSES = {
-    'front': 'Arms relaxed naturally at sides, hands visible with five fingers each.',
+    'front': 'Arms relaxed at the sides with natural hands.',
     'back':  '',
-    'side':  'Arms relaxed naturally at sides.',
+    'side':  'Arms relaxed at the sides.',
     'detail': '',
 }
 
+# Varsayılan arka plan (sahne seçilmediyse)
+DEFAULT_BACKGROUND = 'Clean white studio background with soft, even lighting.'
 
-# ── SEEDREAM PROMPT TEMPLATES ──
+# Üst giyim çekimlerinde sabit alt kombin (tüm açılarda aynı kalmalı)
+DEFAULT_BOTTOMS = 'dark tailored full-length trousers'
+# Alt giyim / etek / şort çekimlerinde sabit üst kombin
+DEFAULT_TOP = 'a plain fitted neutral top'
+
+_FRONT_INTRO = (
+    "Image 1 shows the model. Image 2 shows the {garment} product. "
+    "Photograph the same model from Image 1, with the same face, hair and body, "
+    "wearing the {desc} from Image 2 and reproducing its exact color, fabric, pattern and construction details. "
+)
+_BACK_INTRO = (
+    "Image 1 shows the model from behind. Image 2 shows the back of the {garment} product. "
+    "Back view of the same model, facing away from the camera, "
+    "wearing the {desc} from Image 2 with its exact back design. {front_ref}"
+)
+_SIDE_INTRO = (
+    "Image 1 shows the model. Image 2 shows the {garment} product. "
+    "Three-quarter side view, about 45 degrees, of the same model "
+    "wearing the {desc} from Image 2, showing its side profile and drape. {front_ref}"
+)
+_OUTRO = "E-commerce catalog photo, full body. {background} {extra_prompt}"
+
 # Key: (sub_type, photo_type)
-# sub_type: 'dress', 'tops', 'bottoms', 'skirt', 'shorts'
-# photo_type: 'front', 'back', 'side', 'detail'
-# Placeholders: {color}, {fabric}, {garment_type}, {leg_rule}, {hand_pose},
-#               {graphic_note}, {collar_note}, {extra_prompt}
-
+# sub_type: 'dress', 'jumpsuit', 'tops', 'bottoms', 'skirt', 'shorts'
+# Placeholders: {garment}, {desc}, {leg_rule}, {shoe_rule}, {inner_top_note},
+#   {hand_pose}, {collar_note}, {graphic_note}, {front_ref}, {background}, {extra_prompt}
 SEEDREAM_TEMPLATES = {
-    # ══════════════════════════════════════════
-    # DRESS — FRONT
-    # ══════════════════════════════════════════
-    ('dress', 'front'): (
-        "Dress the model in Figure 2 with the {garment_type} from Figure 1. "
-        "This is a {color} {fabric} {garment_type}. "
-        "CRITICAL: Strip and replace all lower body clothing from Figure 2. "
-        "The model wears ONLY this one-piece {garment_type} with bare skin legs — NO pants, NO trousers, NO jeans, NO leggings underneath. "
-        "{leg_rule} "
-        "{shoe_rule}"
-        "Keep face, hair, body proportions from Figure 2. "
-        "Professional e-commerce photo, white studio, even lighting. "
-        "{hand_pose} "
-        "{collar_note}{graphic_note}"
-        "{extra_prompt}"
-    ),
-    # DRESS — BACK
-    ('dress', 'back'): (
-        "Back view of the model from Figure 3 wearing the {garment_type} from Figure 1. "
-        "Model facing away from camera, showing back of this {color} {fabric} {garment_type}. "
-        "Bare skin legs visible below hemline — NO pants, NO trousers, NO leggings underneath. "
-        "Same model, hair, shoes as Figure 3. {leg_rule} "
-        "White studio background, even lighting. "
-        "{extra_prompt}"
-    ),
-    # DRESS — SIDE
-    ('dress', 'side'): (
-        "45-degree side view of the model from Figure 3 wearing the {garment_type} from Figure 1. "
-        "Show side profile of this {color} {fabric} {garment_type}. "
-        "Bare skin legs visible below hemline — NO pants, NO trousers, NO leggings underneath. "
-        "Same model, hair, shoes as Figure 3. {leg_rule} "
-        "White studio background, even lighting. "
-        "{extra_prompt}"
-    ),
+    # ── DRESS ──
+    ('dress', 'front'): _FRONT_INTRO + (
+        "Replace the model's entire original outfit, including any trousers, with this one-piece dress. "
+        "{collar_note}{graphic_note}{leg_rule} {shoe_rule} {hand_pose} "
+    ) + _OUTRO,
+    ('dress', 'back'): _BACK_INTRO + "{leg_rule} {shoe_rule} " + _OUTRO,
+    ('dress', 'side'): _SIDE_INTRO + "{leg_rule} {shoe_rule} " + _OUTRO,
 
-    # ══════════════════════════════════════════
-    # TOPS / OUTERWEAR — FRONT
-    # ══════════════════════════════════════════
-    ('tops', 'front'): (
-        "Dress the model in Figure 2 with the {garment_type} from Figure 1. "
-        "This is a {color} {fabric} {garment_type}. "
-        "{inner_top_note}"
-        "Replace upper clothing of Figure 2 with Figure 1. "
-        "Model wears dark tailored trousers covering entire legs down to shoes. "
-        "Keep face, hair, shoes from Figure 2. "
-        "Professional e-commerce photo, white studio, even lighting. "
-        "{hand_pose} "
-        "{collar_note}{graphic_note}"
-        "{extra_prompt}"
-    ),
-    # TOPS — BACK
-    ('tops', 'back'): (
-        "Back view of the model from Figure 3 wearing the {garment_type} from Figure 1. "
-        "Model facing away from camera, showing back of this {color} {fabric} {garment_type}. "
-        "Same dark trousers and shoes as Figure 3. "
-        "Show single back panel only, ignore any hanger fold-over at shoulders. "
-        "White studio background, even lighting. "
-        ""
-        "{extra_prompt}"
-    ),
-    # TOPS — SIDE
-    ('tops', 'side'): (
-        "45-degree side view of the model from Figure 3 wearing the {garment_type} from Figure 1. "
-        "Same inner top, dark trousers and shoes as Figure 3. "
-        "Show collar, sleeves, pockets from side angle. "
-        "White studio background, even lighting. "
-        "{extra_prompt}"
-    ),
+    # ── JUMPSUIT (tulum) — bacaklar kapalı, elbise bacak kuralı ALMAZ ──
+    ('jumpsuit', 'front'): _FRONT_INTRO + (
+        "Replace the model's entire original outfit with this one-piece jumpsuit; "
+        "its legs cover the model's legs down to the ankles. "
+        "{collar_note}{graphic_note}The same shoes as in Image 1. {hand_pose} "
+    ) + _OUTRO,
+    ('jumpsuit', 'back'): _BACK_INTRO + "The jumpsuit legs reach the ankles. " + _OUTRO,
+    ('jumpsuit', 'side'): _SIDE_INTRO + "The jumpsuit legs reach the ankles. " + _OUTRO,
 
-    # ══════════════════════════════════════════
-    # BOTTOMS (PANTOLON/JEAN) — FRONT
-    # ══════════════════════════════════════════
-    ('bottoms', 'front'): (
-        "Dress the model in Figure 2 with the {garment_type} from Figure 1. "
-        "This is {color} {fabric} {garment_type}. "
-        "Replace bottom clothing of Figure 2 with Figure 1. "
-        "Full trouser length visible from waist to ankle hem at shoes. "
-        "Neutral fitted top on upper body. Keep face, hair from Figure 2. "
-        "Professional e-commerce photo, white studio, even lighting. "
-        "{hand_pose} "
-        ""
-        "{extra_prompt}"
-    ),
-    # BOTTOMS — BACK
-    ('bottoms', 'back'): (
-        "Back view of the model from Figure 3 wearing the {garment_type} from Figure 1. "
-        "Model facing away, showing back of this {color} {fabric} {garment_type}. "
-        "Same top and shoes as Figure 3. Back waistband clean with no extra hardware. "
-        "White studio background, even lighting. "
-        ""
-        "{extra_prompt}"
-    ),
-    # BOTTOMS — SIDE
-    ('bottoms', 'side'): (
-        "45-degree side view of the model from Figure 3 wearing the {garment_type} from Figure 1. "
-        "Same top and shoes as Figure 3. "
-        "Show waistband, pockets, fabric drape from side angle. "
-        "White studio background, even lighting. "
-        "{extra_prompt}"
-    ),
+    # ── TOPS / OUTERWEAR ──
+    ('tops', 'front'): _FRONT_INTRO + (
+        "{inner_top_note}{collar_note}{graphic_note}"
+        "Styled with " + DEFAULT_BOTTOMS + " and the same shoes as in Image 1. {hand_pose} "
+    ) + _OUTRO,
+    ('tops', 'back'): _BACK_INTRO + (
+        "Styled with " + DEFAULT_BOTTOMS + ". Show a single clean back panel. "
+    ) + _OUTRO,
+    ('tops', 'side'): _SIDE_INTRO + (
+        "Styled with " + DEFAULT_BOTTOMS + ". "
+    ) + _OUTRO,
 
-    # ══════════════════════════════════════════
-    # SKIRT — FRONT
-    # ══════════════════════════════════════════
-    ('skirt', 'front'): (
-        "Dress the model in Figure 2 with the skirt from Figure 1. "
-        "This is a {color} {fabric} skirt. "
-        "CRITICAL: Replace all pants and bottom clothing of Figure 2 with this skirt only. "
-        "The model wears ONLY this skirt on the bottom with bare skin legs — NO pants, NO trousers, NO jeans underneath. "
-        "{leg_rule} "
-        "Neutral fitted top on upper body. Keep face, hair, shoes from Figure 2. "
-        "Professional e-commerce photo, white studio, even lighting. "
-        "{hand_pose} "
-        "{extra_prompt}"
-    ),
-    # SKIRT — BACK
-    ('skirt', 'back'): (
-        "Back view of the model from Figure 3 wearing the skirt from Figure 1. "
-        "Model facing away, showing back of this {color} {fabric} skirt. "
-        "Bare skin legs visible below hemline — NO pants, NO trousers underneath. "
-        "Same top and shoes as Figure 3. {leg_rule} "
-        "White studio background, even lighting. "
-        "{extra_prompt}"
-    ),
-    # SKIRT — SIDE
-    ('skirt', 'side'): (
-        "45-degree side view of the model from Figure 3 wearing the skirt from Figure 1. "
-        "Bare skin legs visible below hemline — NO pants, NO trousers underneath. "
-        "Same top and shoes as Figure 3. {leg_rule} "
-        "White studio background, even lighting. "
-        "{extra_prompt}"
-    ),
+    # ── BOTTOMS (pantolon / jean) ──
+    ('bottoms', 'front'): _FRONT_INTRO + (
+        "The full trouser length is visible from waistband to hem. "
+        "Styled with " + DEFAULT_TOP + " tucked in and the same shoes as in Image 1. {hand_pose} "
+    ) + _OUTRO,
+    ('bottoms', 'back'): _BACK_INTRO + (
+        "The back waistband and pockets match Image 2 exactly. Styled with " + DEFAULT_TOP + ". "
+    ) + _OUTRO,
+    ('bottoms', 'side'): _SIDE_INTRO + (
+        "Styled with " + DEFAULT_TOP + ". "
+    ) + _OUTRO,
 
-    # ══════════════════════════════════════════
-    # SHORTS — FRONT
-    # ══════════════════════════════════════════
-    ('shorts', 'front'): (
-        "Dress the model in Figure 2 with the shorts from Figure 1. "
-        "This is {color} {fabric} shorts. "
-        "CRITICAL: Replace all long pants and bottom clothing of Figure 2 with these shorts only. "
-        "The model wears ONLY these shorts on the bottom with bare skin legs — NO long pants, NO trousers underneath. "
-        "Bare skin legs completely visible below shorts hemline down to shoes. "
-        "Neutral fitted top on upper body. Keep face, hair, shoes from Figure 2. "
-        "Professional e-commerce photo, white studio, even lighting. "
-        "{hand_pose} "
-        "{extra_prompt}"
-    ),
-    # SHORTS — BACK
-    ('shorts', 'back'): (
-        "Back view of the model from Figure 3 wearing the shorts from Figure 1. "
-        "Model facing away, showing back of these {color} {fabric} shorts. "
-        "Bare skin legs completely visible below shorts down to shoes — NO long pants, NO trousers. "
-        "Same top and shoes as Figure 3. "
-        "White studio background, even lighting. "
-        "{extra_prompt}"
-    ),
-    # SHORTS — SIDE
-    ('shorts', 'side'): (
-        "45-degree side view of the model from Figure 3 wearing the shorts from Figure 1. "
-        "Bare skin legs completely visible below shorts down to shoes — NO long pants, NO trousers. "
-        "Same top and shoes as Figure 3. "
-        "White studio background, even lighting. "
-        "{extra_prompt}"
-    ),
+    # ── SKIRT ──
+    ('skirt', 'front'): _FRONT_INTRO + (
+        "Replace the model's original bottoms, including any trousers, with this skirt. "
+        "{leg_rule} Styled with " + DEFAULT_TOP + ". {shoe_rule} {hand_pose} "
+    ) + _OUTRO,
+    ('skirt', 'back'): _BACK_INTRO + "{leg_rule} {shoe_rule} " + _OUTRO,
+    ('skirt', 'side'): _SIDE_INTRO + "{leg_rule} {shoe_rule} " + _OUTRO,
+
+    # ── SHORTS ──
+    ('shorts', 'front'): _FRONT_INTRO + (
+        "Replace the model's original bottoms, including any trousers, with these shorts. "
+        "{leg_rule} Styled with " + DEFAULT_TOP + " and the same shoes as in Image 1. {hand_pose} "
+    ) + _OUTRO,
+    ('shorts', 'back'): _BACK_INTRO + "{leg_rule} " + _OUTRO,
+    ('shorts', 'side'): _SIDE_INTRO + "{leg_rule} " + _OUTRO,
 }
 
 # Detail view — tüm kategoriler için ortak
 SEEDREAM_DETAIL_TEMPLATE = (
-    "Close-up detail shot of the {garment_type} from Figure 1 being worn by the model. "
-    "Sharp focus on fabric texture, stitching, and construction details. "
-    "Model wearing complete outfit. White studio background. "
-    ""
-    "{extra_prompt}"
+    "Close-up detail photo of the {desc} from Image 2 worn by the model from Image 1. "
+    "Sharp focus on fabric texture, stitching and construction details. {background} {extra_prompt}"
+)
+
+# Back/side görünümlerde ön görünüm referansı (Image 3) varsa eklenen cümle
+FRONT_REF_SENTENCE = (
+    "Image 3 is the finished front view: keep the same model, hair, outfit styling and shoes as Image 3. "
 )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SEEDREAM NEGATİF PROMPTLARI
-# Kategori-bazlı, max 20 terim (Seedream optimal: 15-25 spesifik terim)
-# Kural: "no" kelimesi KULLANMA, sadece artifact listele
+# NEGATİF PROMPTLAR
+# DİKKAT: Seedream v5 Pro Edit negative_prompt kabul etmez; bu metinler
+# yalnızca destekleyen modeller (nano-banana vb.) için kullanılır.
 # ═══════════════════════════════════════════════════════════════════════════
 
+_COMMON_NEG = (
+    "security tag, price tag, "
+    "extra fingers, fused fingers, missing fingers, deformed hands, extra hand, mutated hands, "
+    "mannequin, CGI, plastic skin, blurry, low resolution"
+)
 SEEDREAM_NEGATIVES = {
-    'dress': (
-        "pants, trousers, jeans, leggings, tights, sweatpants, pants underneath, trousers underneath, "
-        "leggings underneath, jeans underneath, tights under dress, stockings, covered legs, denim, "
-        "denim pants, black trousers, navy trousers, double-layered bottoms, "
-        "boots under dress, heavy boots, combat boots, sneakers under dress, "
-        "security tag, price tag, "
-        "extra fingers, fused fingers, missing fingers, deformed hands, extra hand, mutated hands, "
-        "mannequin, CGI, plastic skin, blurry, low resolution"
-    ),
-    'skirt': (
-        "pants, trousers, jeans, leggings, tights, sweatpants, pants underneath, trousers underneath, "
-        "leggings underneath, tights under skirt, stockings, covered legs, denim, denim pants, "
-        "black trousers, navy trousers, double-layered bottoms, "
-        "boots under skirt, heavy boots, combat boots, sneakers under skirt, "
-        "security tag, price tag, "
-        "extra fingers, fused fingers, missing fingers, deformed hands, extra hand, mutated hands, "
-        "mannequin, CGI, plastic skin, blurry, low resolution"
-    ),
-    'shorts': (
-        "long pants, trousers, jeans, leggings, tights, pants underneath, trousers underneath, "
-        "leggings underneath, denim pants, sweatpants, "
-        "security tag, price tag, "
-        "extra fingers, fused fingers, missing fingers, deformed hands, extra hand, mutated hands, "
-        "mannequin, CGI, plastic skin, blurry, low resolution"
-    ),
-    'tops': (
-        "bare chest, exposed stomach, bare belly, exposed cleavage, deep cleavage, "
-        "shirtless under jacket, naked under vest, shirtless, unbuttoned bare skin, "
-        "bare legs, exposed thighs, shorts visible, underwear visible, "
-        "missing pants, "
-        "security tag, price tag, "
-        "extra fingers, fused fingers, missing fingers, deformed hands, extra hand, mutated hands, "
-        "mannequin, CGI, plastic skin, blurry, low resolution"
-    ),
-    'bottoms': (
-        "wrong waistband, altered pockets, changed fabric texture, "
-        "cropped hemline, "
-        "security tag, price tag, "
-        "extra fingers, fused fingers, missing fingers, deformed hands, extra hand, mutated hands, "
-        "mannequin, CGI, plastic skin, blurry, low resolution"
-    ),
+    'dress': "pants, trousers, jeans, leggings, tights, covered legs, heavy boots, sneakers, " + _COMMON_NEG,
+    'skirt': "pants, trousers, jeans, leggings, tights, covered legs, heavy boots, sneakers, " + _COMMON_NEG,
+    'shorts': "long pants, trousers, jeans, leggings, " + _COMMON_NEG,
+    'jumpsuit': "bare legs, shorts, " + _COMMON_NEG,
+    'tops': "bare chest, exposed stomach, shirtless, bare legs, shorts visible, underwear visible, " + _COMMON_NEG,
+    'bottoms': "wrong waistband, altered pockets, changed fabric texture, cropped hemline, " + _COMMON_NEG,
 }
 
 # Fotorealizm kalite cümlesi — prompt sonuna eklenir (tek kısa cümle)

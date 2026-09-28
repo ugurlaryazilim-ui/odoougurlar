@@ -69,6 +69,44 @@ def _convert_to_jpeg(img_data_bytes, quality=92):
         _logger.warning("JPEG dönüşümü başarısız, orijinal kullanılıyor: %s", e)
         return img_data_bytes
 
+def _is_db_conflict(exc):
+    """Hata (veya sarmaladığı hata) bir DB eşzamanlılık/kilit çakışması mı?"""
+    from psycopg2 import errors as pg_errors
+    conflict_types = (pg_errors.SerializationFailure, pg_errors.LockNotAvailable,
+                      pg_errors.DeadlockDetected)
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        if isinstance(exc, conflict_types):
+            return True
+        seen.add(id(exc))
+        exc = getattr(exc, 'orig', None) or exc.__cause__ or exc.__context__
+    return False
+
+
+def _get_seedream_image_size(env):
+    """Ayarlardaki Seedream çıktı boyutunu fal image_size dict'i olarak döndür."""
+    from ..services.fal_provider import FalProvider
+    key = env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.seedream_image_size', 'hd')
+    return FalProvider.SEEDREAM_IMAGE_SIZES.get(key, FalProvider.SEEDREAM_IMAGE_SIZES['hd'])
+
+
+def _build_revision_instruction(gen):
+    """Red sonrası revizyon talimatını İngilizce tek cümle olarak kur."""
+    parts = []
+    if gen.revision_prompt_en:
+        parts.append(gen.revision_prompt_en.strip().rstrip('.'))
+    elif gen.revision_prompt:
+        parts.append(gen.revision_prompt.strip().rstrip('.'))
+    reason = gen.reject_reason_id
+    if reason:
+        suggested = (reason.suggested_prompt_en or '').strip().rstrip('.')
+        if suggested:
+            parts.append(suggested)
+    if not parts:
+        return ''
+    return "Reviewer correction, highest priority: %s." % '. '.join(parts)
+
+
 def _safe_write_and_commit(cr, record, vals, max_retries=5):
     """Concurrent update (SerializationFailure) hatalarını önlemek için güvenli DB yazma."""
     import time, random
@@ -79,12 +117,7 @@ def _safe_write_and_commit(cr, record, vals, max_retries=5):
             return True
         except Exception as e:
             cr.rollback()
-            from psycopg2 import errors as pg_errors
-            # Odoo exception wrapper'lari asmak icin orig'e de bakiyoruz
-            orig_e = getattr(e, 'orig', getattr(e, '__cause__', e))
-            is_serialization = isinstance(orig_e, pg_errors.SerializationFailure)
-            
-            if is_serialization and attempt < max_retries - 1:
+            if _is_db_conflict(e) and attempt < max_retries - 1:
                 time.sleep(random.uniform(0.2, 1.5))
                 continue
             raise e
@@ -605,104 +638,32 @@ class AiStudioSession(models.Model):
             _logger.info('_detect_garment_type: Ürün yok, fallback=%s', fallback)
             return fallback
         
-        # Ürün adı + kategori adı + attribute değerlerini topla
-        check_texts = []
-        
-        # Ürün adı (stored field - thread-safe)
+        from ..services.category_constants import classify_garment_text
+
         tmpl = product.product_tmpl_id
-        if tmpl and tmpl.name:
-            check_texts.append(str(tmpl.name).lower())
-        
-        # Default code (stored field - thread-safe)
-        if product.default_code:
-            check_texts.append(product.default_code.lower())
-        
-        # Template kategori adı (categ_id - stored relation)
-        if tmpl and tmpl.categ_id and tmpl.categ_id.name:
-            check_texts.append(str(tmpl.categ_id.name).lower())
-            # Üst kategorileri de kontrol et
-            parent = tmpl.categ_id.parent_id
-            while parent:
-                if parent.name:
-                    check_texts.append(str(parent.name).lower())
-                parent = parent.parent_id
-        
-        # Template attribute'ları (Reyon, Ürün Grubu)
-        if tmpl:
-            try:
-                for line in tmpl.attribute_line_ids:
-                    attr_name = line.attribute_id.name or ''
-                    if attr_name in ('Reyon', 'Ürün Grubu'):
-                        for val in line.value_ids:
-                            if val.name:
-                                check_texts.append(str(val.name).lower())
-            except Exception as e:
-                _logger.warning('_detect_garment_type: Attribute okuma hatası: %s', e)
-        
-        combined = ' '.join(check_texts)
-        _logger.info('_detect_garment_type: Kontrol metni: "%s"', combined[:200])
-        
-        # Anahtar kelime eşleştirme
-        BAGS_KW = ['çanta', 'canta', 'bag', 'bags', 'clutch', 'el çantası', 'sırt çantası', 'valiz', 'portföy']
-        SHOES_KW = ['ayakkabı', 'ayakkabi', 'shoe', 'shoes', 'bot', 'çizme', 'cizme', 'terlik', 
-                     'sandalet', 'sneaker', 'spor ayakkabı', 'topuklu', 'loafer', 'babet', 'slip-on',
-                     'slipper', 'mule', 'stiletto']
-        ACCESSORIES_KW = ['aksesuar', 'accessory', 'accessories', 'kemer', 'belt', 'şal', 'sal', 
-                          'fular', 'atkı', 'atki', 'bere', 'şapka', 'sapka', 'gözlük', 'gozluk',
-                          'saat', 'watch', 'bileklik', 'kolye', 'küpe', 'kupe', 'yüzük', 'yuzuk',
-                          'cüzdan', 'cuzdan', 'eldiven']
-        BOTTOMS_KW_SAFE = ['pantolon', 'jean', 'jeans', 'tayt', 'eşofman altı',
-                           'alt giyim', 'bermuda', 'capri', 'jogger']
-        # 'şort', 'sort', 'etek' — tişört/tisort false positive'ine düşebilir
-        BOTTOMS_KW_RISKY = ['şort', 'sort', 'etek']
-        OUTERWEAR_KW = ['manto', 'kaban', 'palto', 'mont', 'ceket', 'jacket', 'coat',
-                        'trenchcoat', 'trençkot', 'trench', 'pardösü', 'pardesu',
-                        'parka', 'anorak', 'yağmurluk', 'yagmurluk', 'blazer', 'rüzgarlık']
-        TOPS_KW = ['bluz', 'blouse', 'gömlek', 'gomlek', 'shirt', 'tişört', 'tisort', 't-shirt', 'tshirt',
-                   'kazak', 'sweater', 'hırka', 'hirka', 'cardigan', 'süveter', 'suveter',
-                   'yelek', 'vest', 'sweatshirt', 'hoodie', 'tunik', 'tunic', 'atlet', 'tank top',
-                   'crop top', 'bustiyer', 'büstiyer', 'üst giyim', 'body']
-        ONE_PIECE_KW = ['elbise', 'dress', 'tulum', 'jumpsuit', 'overall', 'abiye', 'tek parça']
-        
-        for kw in BAGS_KW:
-            if kw in combined:
-                _logger.info('_detect_garment_type: "%s" bulundu → bags', kw)
-                return 'bags'
-        for kw in SHOES_KW:
-            if kw in combined:
-                _logger.info('_detect_garment_type: "%s" bulundu → shoes', kw)
-                return 'shoes'
-        for kw in ACCESSORIES_KW:
-            if kw in combined:
-                _logger.info('_detect_garment_type: "%s" bulundu → accessories', kw)
-                return 'accessories'
-        # ONE_PIECE (elbise/dress) ÖNCELİKLİ — çünkü ürün adında "elbise" varsa bu kesindir
-        for kw in ONE_PIECE_KW:
-            if kw in combined:
-                _logger.info('_detect_garment_type: "%s" bulundu → one_piece', kw)
-                return 'one_piece'
-        # Dış giyim ve üst giyim (manto/ceket/bluz)
-        for kw in OUTERWEAR_KW:
-            if kw in combined:
-                _logger.info('_detect_garment_type: "%s" bulundu → tops (outerwear)', kw)
-                return 'tops'
-        for kw in TOPS_KW:
-            if kw in combined:
-                _logger.info('_detect_garment_type: "%s" bulundu → tops', kw)
-                return 'tops'
-        for kw in BOTTOMS_KW_SAFE:
-            if kw in combined:
-                _logger.info('_detect_garment_type: "%s" bulundu → bottoms', kw)
-                return 'bottoms'
-        # Riskli kelimeler: tişört/tisort false positive'lerini temizle
-        combined_clean = combined
-        for fp in ['tişört', 'tisort', 'tısört', 'tısort', 'tshirt', 't-shirt', 't shirt']:
-            combined_clean = combined_clean.replace(fp, '')
-        for kw in BOTTOMS_KW_RISKY:
-            if kw in combined_clean:
-                _logger.info('_detect_garment_type: "%s" bulundu (temizlenmiş) → bottoms', kw)
-                return 'bottoms'
-        
+        # Önce SADECE ürün adı: kategori yolu ("Giyim > Üst Giyim" gibi) bir çantayı
+        # ya da kemeri yanlışlıkla giysi yapmasın.
+        name_text = ' '.join(filter(None, [tmpl.name or '', product.default_code or '']))
+
+        context_texts = []
+        categ = tmpl.categ_id
+        while categ:
+            if categ.name:
+                context_texts.append(categ.name)
+            categ = categ.parent_id
+        try:
+            for line in tmpl.attribute_line_ids:
+                if (line.attribute_id.name or '') in ('Reyon', 'Ürün Grubu'):
+                    context_texts.extend(v.name for v in line.value_ids if v.name)
+        except Exception as e:
+            _logger.warning('_detect_garment_type: Attribute okuma hatası: %s', e)
+
+        for source, text in (('ad', name_text), ('kategori/attribute', ' '.join(context_texts))):
+            cat, kw = classify_garment_text(text)
+            if cat:
+                _logger.info('_detect_garment_type: %s içinde "%s" → %s', source, kw, cat)
+                return cat
+
         # 3. Fallback: preset veya tops
         fallback = self.model_preset_id.garment_type if self.model_preset_id else 'tops'
         _logger.info('_detect_garment_type: Eşleşme yok, fallback=%s', fallback)
@@ -1000,6 +961,7 @@ class AiStudioSession(models.Model):
         Genellikle ürüne kaydetme sırasında concurrent update hatası alan
         oturumları kurtarır.
         """
+        self._check_reviewer()
         for session in self:
             if session.generation_ids:
                 session.sudo().write({
@@ -2095,6 +2057,17 @@ class AiStudioSession(models.Model):
             front_failed = False
             for gen in ordered_gens:
                 photo_type = gen.photo_type or 'front'
+                # Her iterasyonda sıfırla: çakışma kurtarması önceki görünümün
+                # sonucunu (ör. ön yüz görselini) bu generation'a yazmamalı.
+                gen_b64 = tryon_result = None
+                elapsed = 0.0
+                # Oturum iptal/sıfırlandıysa yeni ücretli çağrı yapma
+                cr.execute("SELECT state FROM ai_studio_session WHERE id = %s", (session_id,))
+                row = cr.fetchone()
+                if not row or row[0] not in ('preprocessing', 'processing'):
+                    _logger.info('Oturum artık aktif değil (session_id=%s, state=%s), AI döngüsü durduruluyor',
+                                 session_id, row and row[0])
+                    break
                 if front_failed:
                     gen.write({
                         'state': 'failed',
@@ -2311,33 +2284,21 @@ class AiStudioSession(models.Model):
 
                         from ..services.garment_analyzer import build_generation_prompt
                         
-                        combined_extra_prompt = session.extra_prompt or ''
-                        if session.scene_id and session.scene_id.prompt_additions:
-                            combined_extra_prompt += f" {session.scene_id.prompt_additions}"
+                        # Sahne ayrı parametre: beyaz stüdyo tarifinin YERİNE geçer
+                        scene_prompt = (session.scene_id.prompt_additions or '') if session.scene_id else ''
+                        combined_extra_prompt = ' '.join(filter(None, [
+                            _build_revision_instruction(gen),
+                            session.extra_prompt or '',
+                        ]))
 
-                        # ═══ REVİZYON TALİMATI (RED SONRASI) ═══
-                        revision_parts = []
-                        if gen.revision_prompt_en:
-                            revision_parts.append(gen.revision_prompt_en)
-                        elif gen.revision_prompt:
-                            revision_parts.append(gen.revision_prompt)
-                        if gen.reject_reason_id and gen.reject_reason_id.suggested_prompt:
-                            revision_parts.append(gen.reject_reason_id.suggested_prompt)
-                        if revision_parts:
-                            revision_instruction = ' '.join(revision_parts)
-                            combined_extra_prompt = (
-                                f"CRITICAL REVISION — FOCUSED EDIT ONLY: {revision_instruction}. "
-                                f"You MUST apply ONLY this specific change. Do NOT alter anything else — "
-                                f"keep the same model, same pose, same shoes, same background, same lighting. "
-                                f"Change ONLY what is described above. "
-                            ) + combined_extra_prompt
-                            
                         built_prompt = build_generation_prompt(
                             analysis_data, preset_data, prompt_locks,
                             combined_extra_prompt.strip(),
                             photo_type=photo_type,
                             outfit_consistency=outfit_consistency,
                             provider_type=provider_type,
+                            scene_prompt=scene_prompt,
+                            has_front_ref=bool(front_output_url),
                         )
                         prompt_text = built_prompt.get('positive', '')
                         negative_prompt_text = built_prompt.get('negative', '')
@@ -2365,6 +2326,7 @@ class AiStudioSession(models.Model):
                         front_output_url=front_output_url,
                         detail_urls=detail_urls,
                         resolution=tryon_resolution,
+                        image_size=_get_seedream_image_size(env),
                         photo_type=photo_type,
                         seed=front_seed,
                         garment_type=(analysis_data or {}).get('garmentType', '') if isinstance(analysis_data, dict) else '',
@@ -2531,21 +2493,20 @@ class AiStudioSession(models.Model):
 
                 except Exception as e:
                     cr.rollback()
-                    err_str = str(e).lower()
-                    if 'concurrent update' in err_str or 'serialization' in err_str or 'could not serialize' in err_str or 'lock' in err_str:
+                    if _is_db_conflict(e):
                         _logger.warning('AI Üretim sırasında veritabanı kilit çakışması (gen=%s), 1.5s beklenip tekrar denenecek: %s', gen.id, e)
                         time.sleep(1.5)
                         try:
                             with self.pool.cursor() as retry_cr:
                                 retry_env = api.Environment(retry_cr, uid, {})
                                 r_gen = retry_env['ai.studio.generation'].browse(gen.id)
-                                if 'gen_b64' in locals() and gen_b64:
+                                if gen_b64:
                                     r_gen.write({
                                         'generated_image': gen_b64,
                                         'state': 'done',
-                                        'fal_endpoint': tryon_endpoint if 'tryon_endpoint' in locals() else ('%s/%s' % (provider_type, tryon_model)),
-                                        'generation_time_seconds': elapsed if 'elapsed' in locals() else 0.0,
-                                        'cost': tryon_result.get('cost', 0.05) if 'tryon_result' in locals() else 0.05,
+                                        'fal_endpoint': '%s/%s' % (provider_type, tryon_model),
+                                        'generation_time_seconds': elapsed,
+                                        'cost': (tryon_result or {}).get('cost', 0.05),
                                     })
                                     retry_cr.commit()
                                     _logger.info('Veritabanı çakışması sonrası AI sonucu başarıyla kaydedildi (gen=%s)', gen.id)
@@ -2576,15 +2537,20 @@ class AiStudioSession(models.Model):
                 with self.pool.cursor() as final_cr:
                     final_env = api.Environment(final_cr, uid, {'lang': 'tr_TR'})
                     final_session = final_env['ai.studio.session'].sudo().browse(session_id)
-                    
+                    if final_session.state not in ('preprocessing', 'processing'):
+                        # İptal edildi / sıfırlandı — kullanıcının kararını ezme
+                        _logger.info('Oturum son durumu yazılmadı, mevcut state=%s (session_id=%s)',
+                                     final_session.state, session_id)
+                        break
+
                     has_done = any(g.state == 'done' for g in final_session.generation_ids)
                     has_failed = any(g.state == 'failed' for g in final_session.generation_ids)
                     final_state = 'review' if has_done else ('failed' if has_failed else 'processing')
-                    
-                    final_session.write({
-                        'state': final_state,
-                        'date_review_start': fields.Datetime.now()
-                    })
+
+                    final_vals = {'state': final_state}
+                    if final_state == 'review':
+                        final_vals['date_review_start'] = fields.Datetime.now()
+                    final_session.write(final_vals)
                     final_cr.commit()
                     _logger.info('Oturum başarıyla %s durumuna geçirildi (session_id=%s)', final_state, session_id)
 
@@ -2731,7 +2697,6 @@ class AiStudioSession(models.Model):
                             arguments={
                                 'prompt': seedream_prompt,
                                 'image_urls': [parent_url],
-                                'resolution': '2k',
                             },
                             client_timeout=120,
                         )
@@ -2921,10 +2886,12 @@ class AiStudioSession(models.Model):
 
                     built_prompt = build_generation_prompt(
                         analysis, preset_data, prompt_locks,
-                        session.extra_prompt or '',
+                        ' '.join(filter(None, [_build_revision_instruction(gen), session.extra_prompt or ''])),
                         photo_type=photo_type,
                         outfit_consistency=outfit_consistency,
                         provider_type=provider_type,
+                        scene_prompt=(session.scene_id.prompt_additions or '') if session.scene_id else '',
+                        has_front_ref=bool(front_output_url),
                     )
                     prompt_text = built_prompt.get('positive', '') if isinstance(built_prompt, dict) else ''
                     negative_prompt_text = built_prompt.get('negative', '') if isinstance(built_prompt, dict) else ''
@@ -2951,6 +2918,7 @@ class AiStudioSession(models.Model):
                     front_output_url=front_output_url,
                     detail_urls=detail_urls,
                     resolution=tryon_resolution,
+                    image_size=_get_seedream_image_size(env),
                     photo_type=photo_type,
                     seed=front_seed,
                     garment_type=(analysis or {}).get('garmentType', '') if isinstance(analysis, dict) else '',
@@ -3107,11 +3075,16 @@ class AiStudioSession(models.Model):
             except Exception as se:
                 _logger.warning("Retry sonrasi session state guncellenirken hata: %s", se)
 
+    def _check_reviewer(self):
+        """Onaycı/yönetici yetkisi yoksa hata ver (RPC ile doğrudan çağrılara karşı)."""
+        if not (self.env.su or self.env.is_admin()
+                or self.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer')):
+            raise UserError(_('Bu işlem için onaycı veya yönetici yetkisi gereklidir.'))
+
     def action_mark_done(self):
         """Onaylanmış görselleri ürüne kaydet ve oturumu tamamla (Senkron)."""
         self.ensure_one()
-        if not (self.env.is_admin() or self.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer')):
-            raise UserError(_('Bu işlem için onaycı veya yönetici yetkisi gereklidir.'))
+        self._check_reviewer()
         approved = self.generation_ids.filtered(
             lambda g: g.is_approved and g.state == 'done' and not g.is_excluded
         )
@@ -3144,30 +3117,6 @@ class AiStudioSession(models.Model):
                 'sticky': False,
             }
         }
-
-    def action_mark_done_async(self):
-        """Geriye uyumluluk: Artık doğrudan senkron kaydetme yapar."""
-        self.ensure_one()
-        approved = self.generation_ids.filtered(
-            lambda g: g.is_approved and g.state == 'done' and not g.is_excluded
-        )
-        if not approved:
-            raise UserError(_('En az bir görsel onaylanmalı.'))
-            
-        has_primary = approved.filtered(lambda g: g.is_primary)
-        if not has_primary:
-            front = approved.filtered(lambda g: g.photo_type == 'front')[:1]
-            primary = front or approved[0]
-            primary.is_primary = True
-
-        self._save_to_product(approved)
-
-        self.reviewer_id = self.env.user
-        self.state = 'done'
-        self.date_done = fields.Datetime.now()
-        self.message_post(
-            body=_('%d onaylı görsel ürüne başarıyla kaydedildi.') % len(approved),
-        )
 
     @api.model
     def _cron_process_saving_sessions(self):
@@ -3240,16 +3189,19 @@ class AiStudioSession(models.Model):
 
         self.env.cr.execute("SELECT id FROM product_template WHERE id = %s FOR NO KEY UPDATE", (tmpl.id,))
 
-        # 1. Eski AI görsellerini temizle
+        # 1. Eski AI görsellerini temizle — SADECE bu renk grubunun varyantları
+        # (template geneli arama diğer renklerin AI galerisini siliyordu)
         existing_ai_images = self.env['product.image'].search([
-            ('product_tmpl_id', '=', tmpl.id),
+            ('product_variant_id', 'in', products.ids),
             ('name', 'like', '%% - AI (%%'),
         ])
         if existing_ai_images:
             existing_ai_images.unlink()
 
-        # 2. Ana resmi template ve varyantlara batch olarak ata
-        tmpl.write({'image_1920': primary.generated_image})
+        # 2. Ana resmi varyantlara ata; template resmini yalnızca boşsa veya
+        # kaydedilen varyantlar template'in tamamını kapsıyorsa değiştir
+        if not tmpl.image_1920 or not (tmpl.product_variant_ids - products):
+            tmpl.write({'image_1920': primary.generated_image})
         variant_records = products.filtered(lambda p: hasattr(p, 'image_variant_1920'))
         if variant_records:
             variant_records.write({'image_variant_1920': primary.generated_image})
@@ -3322,16 +3274,17 @@ class AiStudioSession(models.Model):
                 _logger.warning('Takım parçası %s için tekli ön görsel bulunamadı, atlanıyor.', set_line.product_name)
                 continue
             
-            # Eski AI görsellerini temizle
+            # Eski AI görsellerini temizle — sadece bu renk grubunun varyantları
             existing_ai = self.env['product.image'].search([
-                ('product_tmpl_id', '=', tmpl.id),
+                ('product_variant_id', 'in', products.ids),
                 ('name', 'like', '%% - AI (%%'),
             ])
             if existing_ai:
                 existing_ai.unlink()
             
-            # _1: Tekli ön → Ana görsel
-            tmpl.write({'image_1920': single_front.generated_image})
+            # _1: Tekli ön → Ana görsel (template'i yalnızca boşsa / tamamı kapsanıyorsa)
+            if not tmpl.image_1920 or not (tmpl.product_variant_ids - products):
+                tmpl.write({'image_1920': single_front.generated_image})
             
             variant_records = products.filtered(lambda p: hasattr(p, 'image_variant_1920'))
             if variant_records:
@@ -3379,6 +3332,7 @@ class AiStudioSession(models.Model):
 
     def action_cancel(self):
         """Oturumu iptal et."""
+        self._check_reviewer()
         for session in self:
             session.state = 'cancelled'
             stuck_gens = session.generation_ids.filtered(
@@ -3392,8 +3346,11 @@ class AiStudioSession(models.Model):
             session.message_post(body=_('Oturum iptal edildi.'))
 
     def action_reset_draft(self):
-        """Taslak durumuna geri dön."""
+        """Taslak durumuna geri dön (yalnızca iptal/başarısız oturumlar)."""
+        self._check_reviewer()
         for session in self:
+            if session.state not in ('cancelled', 'failed'):
+                raise UserError(_('Yalnızca iptal edilmiş veya başarısız oturumlar taslağa döndürülebilir.'))
             session.state = 'draft'
 
     @api.model
@@ -3672,10 +3629,11 @@ class AiStudioSession(models.Model):
         if not reviewer_group:
             return
 
-        # Odoo 19 uyumlu: res.groups artık 'users' alanına sahip değil
-        # res.users üzerinden groups_id ile arama yapıyoruz
-        reviewer_users = self.env['res.users'].sudo().search([
-            ('groups_id', 'in', reviewer_group.id),
+        # Odoo 19'da res.users.groups_id → group_ids olarak yeniden adlandırıldı
+        users_model = self.env['res.users'].sudo()
+        groups_field = 'group_ids' if 'group_ids' in users_model._fields else 'groups_id'
+        reviewer_users = users_model.search([
+            (groups_field, 'in', reviewer_group.id),
             ('active', '=', True),
         ])
         reviewer_ids = reviewer_users.ids
@@ -3752,8 +3710,8 @@ Lütfen bu ürün için SEO'ya uygun, ikna edici ve çarpıcı 1 paragraflık bi
 """
 
         # Gemini API call
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-        headers = {'Content-Type': 'application/json'}
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        headers = {'Content-Type': 'application/json', 'x-goog-api-key': api_key}
         
         # Primary fotoğrafı bul
         primary_gen = self.generation_ids.filtered('is_primary')[:1]
@@ -3803,5 +3761,6 @@ Lütfen bu ürün için SEO'ya uygun, ikna edici ve çarpıcı 1 paragraflık bi
             self.env.cr.commit()
             
         except Exception as e:
-            _logger.error("Gemini API hatası: %s", str(e))
-            self.message_post(body=f"⚠️ Gemini SEO Üretimi Başarısız: {str(e)[:200]}")
+            status = getattr(getattr(e, 'response', None), 'status_code', None)
+            _logger.error("Gemini SEO hatası: %s (status=%s)", e.__class__.__name__, status)
+            self.message_post(body=f"⚠️ Gemini SEO Üretimi Başarısız ({e.__class__.__name__}, status={status})")

@@ -80,6 +80,15 @@
                                 </div>
                             </div>
                         </setting>
+                        <setting string="Seedream Çıktı Boyutu"
+                                 help="Seedream v5 Pro çıktı çözünürlüğü ve görsel başına maliyet">
+                            <div class="content-group">
+                                <div class="row mt16">
+                                    <label for="ai_studio_seedream_image_size" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="ai_studio_seedream_image_size" class="col-6"/>
+                                </div>
+                            </div>
+                        </setting>
                         <setting string="Otomatik Arka Plan Kaldirma"
                                  help="Fotograflari AI ya gondermeden once arka plani otomatik kaldir">
                             <field name="ai_studio_auto_bg_remove"/>

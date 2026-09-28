@@ -21,6 +21,10 @@ class AiStudioRejectReason(models.Model):
         string='Önerilen Revizyon Promptu',
         help='Bu sebep seçildiğinde otomatik önerilen prompt',
     )
+    suggested_prompt_en = fields.Text(
+        string='Önerilen Prompt (İngilizce)',
+        help='AI modeline gönderilen İngilizce karşılık. Boşsa önerilen prompt modele eklenmez.',
+    )
     sequence = fields.Integer(string='Sıra', default=10)
     active = fields.Boolean(string='Aktif', default=True)
     count = fields.Integer(

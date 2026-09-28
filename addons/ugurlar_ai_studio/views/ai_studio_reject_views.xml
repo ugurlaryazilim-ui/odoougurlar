@@ -9,6 +9,7 @@
                 <field name="name"/>
                 <field name="code"/>
                 <field name="suggested_prompt"/>
+                <field name="suggested_prompt_en" optional="show"/>
                 <field name="active"/>
             </list>
         </field>
