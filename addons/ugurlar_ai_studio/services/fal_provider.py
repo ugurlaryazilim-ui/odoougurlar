@@ -187,10 +187,7 @@ class FalProvider(AIProviderBase):
                 'one-piece': 'one-piece',
                 'full-body': 'one-piece',
                 'dress': 'one-piece',
-                'shoes': 'tops',
-                'bags': 'tops',
-                'accessories': 'tops',
-            }.get(category, 'tops')
+            }.get(category, 'auto')  # ayakkabı/çanta/aksesuar: modele bırak
 
             arguments = {
                 'model_image': model_image_url,
@@ -200,10 +197,7 @@ class FalProvider(AIProviderBase):
                 'garment_photo_type': kwargs.get('garment_photo_type', 'flat-lay'),
                 'enable_watermark': False,
             }
-            if prompt:
-                arguments['prompt'] = prompt
-            if negative_prompt:
-                arguments['negative_prompt'] = negative_prompt
+            # FASHN v1.6 şeması prompt / negative_prompt içermez
 
             if kwargs.get('seed'):
                 arguments['seed'] = int(kwargs['seed'])
@@ -415,104 +409,3 @@ class FalProvider(AIProviderBase):
         # 3. Son çare: base64 data URI dönder
         _logger.warning('fal CDN yükleme tamamen başarısız, data URI fallback')
         return f'data:{content_type};base64,{image_base64}'
-
-    def kontext_edit(self, image_base64, prompt, **kwargs):
-        """FLUX Kontext ile hedefli gorsel duzenleme.
-
-        Mask gerektirmez — metin komutuyla hedefli duzenleme yapar.
-        Ornek: 'Remove belt loops from the waistband, make it smooth and clean'
-        """
-        self._check_client()
-        image_url = self.upload_image(image_base64)
-
-        import time
-        max_retries = 2
-        for attempt in range(max_retries):
-            try:
-                result = fal_client.subscribe(
-                    self.ENDPOINTS['flux_kontext'],
-                    arguments={
-                        'prompt': prompt,
-                        'image_url': image_url,
-                        'num_images': 1,
-                    },
-                    client_timeout=120,
-                )
-                break
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    time.sleep(3)
-                else:
-                    raise
-
-        output_url = ''
-        if isinstance(result, dict):
-            if 'images' in result and isinstance(result['images'], list) and result['images']:
-                first = result['images'][0]
-                if isinstance(first, dict):
-                    output_url = first.get('url', '')
-                elif isinstance(first, str):
-                    output_url = first
-            elif 'image' in result and result['image']:
-                first = result['image']
-                if isinstance(first, dict):
-                    output_url = first.get('url', '')
-                elif isinstance(first, str):
-                    output_url = first
-
-        if output_url:
-            import requests as req_lib
-            img_data = req_lib.get(output_url, timeout=60).content
-            return base64.b64encode(img_data).decode()
-        return None
-
-    def inpaint_edit(self, prompt, image_urls, **kwargs):
-        """Seedream v5 Pro Edit — Region-precise inpainting/editing."""
-        self._check_client()
-        arguments = {
-            'prompt': prompt,
-            'image_urls': image_urls,
-            'aspect_ratio': kwargs.get('aspect_ratio', '2:3'),
-            'output_format': 'png',
-            'resolution': kwargs.get('resolution', '2k'),
-        }
-        if 'seed' in kwargs and kwargs['seed']:
-            arguments['seed'] = int(kwargs['seed'])
-
-        import time
-        max_retries = 3
-        result = None
-        for attempt in range(max_retries):
-            try:
-                result = fal_client.subscribe(
-                    self.ENDPOINTS['seedream'],
-                    arguments=arguments,
-                    client_timeout=300,
-                )
-                break
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    time.sleep(3)
-                else:
-                    raise
-
-        output_url = ''
-        if isinstance(result, dict):
-            if 'images' in result and isinstance(result['images'], list) and result['images']:
-                first = result['images'][0]
-                if isinstance(first, dict):
-                    output_url = first.get('url', '')
-                elif isinstance(first, str):
-                    output_url = first
-            elif 'image' in result and result['image']:
-                first = result['image']
-                if isinstance(first, dict):
-                    output_url = first.get('url', '')
-                elif isinstance(first, str):
-                    output_url = first
-
-        if output_url:
-            import requests as req_lib
-            img_data = req_lib.get(output_url, timeout=60).content
-            return base64.b64encode(img_data).decode()
-        return None

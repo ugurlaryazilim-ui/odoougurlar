@@ -65,7 +65,7 @@ class FashnProvider(AIProviderBase):
 
     # Model basina tahmini maliyet (USD / kredi)
     ESTIMATED_COSTS = {
-        'tryon-v1.6': 0.05,
+        'tryon-v1.6': 0.075,
         'tryon-max': 0.15,
         'background-remove': 0.01,
         'model-create': 0.05,
@@ -114,7 +114,8 @@ class FashnProvider(AIProviderBase):
 
         # v1.6 vs max icin farkli input yapisi
         if model_name == 'tryon-max':
-            resolution = kwargs.get('resolution', '2K')
+            # API enum'u küçük harf: 1k / 2k / 4k
+            resolution = str(kwargs.get('resolution') or '2k').lower()
             inputs = {
                 'model_image': model_image_url,
                 'product_image': garment_image_url,  # tryon-max: product_image!
@@ -133,10 +134,15 @@ class FashnProvider(AIProviderBase):
             # tryon-v1.6
             # FASHN v1.6 accepts: 'tops', 'bottoms', 'one-pieces'
             # garment_analyzer returns 'full-body' for dresses/jumpsuits
+            # Desteklenmeyen kategoriler (ayakkabı/çanta/aksesuar) 'tops' değil 'auto'
             fashn_category = {
                 'full-body': 'one-pieces',
                 'one_piece': 'one-pieces',
+                'one-piece': 'one-pieces',
+                'dress': 'one-pieces',
             }.get(category, category)
+            if fashn_category not in ('tops', 'bottoms', 'one-pieces', 'auto'):
+                fashn_category = 'auto'
             inputs = {
                 'model_image': model_image_url,
                 'garment_image': garment_image_url,
@@ -147,15 +153,11 @@ class FashnProvider(AIProviderBase):
                 'output_format': output_format,
             }
 
-        # Prompt ve Seed parametreleri ekleme
+        # Prompt yalnızca tryon-max'ta desteklenir; v1.6 prompt/negative almaz
         prompt = kwargs.get('prompt', '')
-        if prompt:
+        if prompt and model_name == 'tryon-max':
             inputs['prompt'] = prompt
-            
-        negative_prompt = kwargs.get('negative_prompt', '')
-        if negative_prompt:
-            inputs['negative_prompt'] = negative_prompt
-            
+
         if 'seed' in kwargs and kwargs['seed']:
             inputs['seed'] = int(kwargs['seed'])
 
@@ -192,7 +194,8 @@ class FashnProvider(AIProviderBase):
                 image_urls = [result.output]
 
         credits_used = getattr(result, 'credits_used', None) or 0
-        cost = credits_used * 0.05 if credits_used else self.get_estimated_cost(model_name) * num_samples
+        # Liste fiyatı: kredi başına $0.075 (hacimde düşer)
+        cost = credits_used * 0.075 if credits_used else self.get_estimated_cost(model_name) * num_samples
         seed_val = getattr(result, 'seed', None)
         if not seed_val and hasattr(result, 'output') and isinstance(result.output, dict):
             seed_val = result.output.get('seed')

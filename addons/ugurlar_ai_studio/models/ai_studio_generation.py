@@ -772,21 +772,6 @@ class AiStudioGeneration(models.Model):
             })
 
     @api.model
-    def action_recover_originals(self):
-        """Orijinal görseller artık source_photo_id üzerinden compute field ile
-        otomatik olarak hesaplanmaktadır. Bu fonksiyon geriye dönük uyumluluk
-        için korunmaktadır ancak artık işlem yapmaz.
-
-        original_image = compute('_compute_original_image') → source_photo_id.image_original
-        """
-        _logger.info(
-            'action_recover_originals çağrıldı. '
-            'original_image artık compute field olarak source_photo_id üzerinden '
-            'otomatik hesaplandığı için kurtarma işlemi gerekli değildir.'
-        )
-        return 0
-
-    @api.model
     def action_recover_from_fal_history(self):
         """fal.ai Platform API üzerinden geçmiş request'leri çekerek
         kayıp AI görsellerini kurtarır.

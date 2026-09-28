@@ -647,36 +647,4 @@ class AiStudioModelPreset(models.Model):
                 _logger.error('Durum güncelleme de başarısız oldu')
 
     # ─── Kıyafet Giydirme (seedream/v5/pro/edit) ────────────────────
-    @staticmethod
-    def fal_tryon(garment_image_url, mannequin_image_url, prompt, api_key):
-        """SaaS tarzı kıyafet giydirme — seedream/v5/pro/edit (SDK)."""
-        import os
-        os.environ['FAL_KEY'] = api_key
-
-        try:
-            import fal_client
-        except ImportError:
-            raise Exception('fal-client paketi kurulu değil.')
-
-        full_prompt = (
-            f"OUTPUT EXACTLY ONE IMAGE. {prompt} "
-            "Put the garment from the first image onto the model in the second image. "
-            "Preserve the garment's exact color, fabric texture, stitching, and pattern details. "
-            "Keep the model's face, skin tone, hair, and pose exactly the same. "
-            "Professional e-commerce fashion photography, white studio background."
-        )
-
-        _logger.info('seedream/v5/pro/edit kıyafet giydirme çağrısı (SDK)')
-        result = fal_client.subscribe(
-            'bytedance/seedream/v5/pro/edit',
-            arguments={
-                'prompt': full_prompt,
-                'image_urls': [garment_image_url, mannequin_image_url],
-                'num_images': 1,
-                'output_format': 'png',
-            },
-            client_timeout=180,
-        )
-        return result
-
 
