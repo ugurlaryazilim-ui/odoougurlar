@@ -34,7 +34,7 @@
                 <t t-if="state.compareMode === 'side'">
                     <div class="ais-comparison-side">
                         <div class="ais-compare-panel">
-                            <div class="ais-compare-label">ORJİNAL</div>
+                            <div class="ais-compare-label">ORİJİNAL</div>
                             <img t-att-src="'/web/image/ai.studio.generation/' + currentGen.id + '/original_image'"
                                  class="ais-compare-img"/>
                         </div>

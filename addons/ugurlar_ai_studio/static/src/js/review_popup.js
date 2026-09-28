@@ -19,6 +19,9 @@ async function _jsonRpc(url, params = {}) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", method: "call", params }),
     });
+    if (!response.ok) {
+        throw new Error(`Sunucu hatası (HTTP ${response.status})`);
+    }
     const data = await response.json();
     if (data.error) {
         throw new Error(data.error.data?.message || data.error.message || "RPC Error");
@@ -93,7 +96,7 @@ function showToast(message, type = 'error') {
             border-radius: 50%;
             font-size: 14px;
         ">${t.icon}</span>
-        <span style="flex:1; padding-top:3px;">${message}</span>
+        <span class="ais-toast-msg" style="flex:1; padding-top:3px;"></span>
         <button style="
             flex-shrink: 0;
             background: none; border: none;
@@ -102,6 +105,7 @@ function showToast(message, type = 'error') {
             padding: 0 2px; line-height: 1;
         " onclick="this.parentElement.style.opacity='0';this.parentElement.style.transform='translateX(30px)';setTimeout(()=>this.parentElement.remove(),250);" aria-label="Kapat">✕</button>
     `;
+    toast.querySelector('.ais-toast-msg').textContent = String(message ?? '');
     container.appendChild(toast);
 
     requestAnimationFrame(() => {
@@ -116,17 +120,33 @@ function showToast(message, type = 'error') {
     }, 4000);
 }
 
+function newLockToken() {
+    return 'lock_' + (crypto.randomUUID
+        ? crypto.randomUUID().replace(/-/g, '').substring(0, 16)
+        : Math.random().toString(36).substring(2) + Date.now().toString(36));
+}
+
+// Açık popup (tek örnek): ikinci açılış öncekini kapatır
+let activePopupClose = null;
+
 async function openReviewPopup(initialSessionId) {
+    if (activePopupClose) activePopupClose();
     // Unique lock token for this specific popup window (let: sonraki session geçişinde güncellenebilir)
     let sessionId = initialSessionId;
-    let lockToken = 'lock_' + (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '').substring(0, 16) : Math.random().toString(36).substring(2) + Date.now().toString(36));
+    let lockToken = newLockToken();
 
     // ═══ KİLİT KONTROLÜ ═══
-    const lockResult = await _jsonRpc('/ai_studio/acquire_lock', { session_id: sessionId, lock_token: lockToken });
+    let lockResult;
+    try {
+        lockResult = await _jsonRpc('/ai_studio/acquire_lock', { session_id: sessionId, lock_token: lockToken });
+    } catch (e) {
+        showToast('Kilit alınamadı: ' + e.message);
+        return;
+    }
     if (!lockResult.success) {
         if (lockResult.locked) {
             showToast(
-                `⚠️ Bu oturum şu an ${escapeHtml(lockResult.locked_by_name)} tarafından inceleniyor (${lockResult.lock_duration}). ` +
+                `⚠️ Bu oturum şu an ${lockResult.locked_by_name} tarafından inceleniyor (${lockResult.lock_duration}). ` +
                 `Lütfen tamamlamasını bekleyin veya 5dk sonra otomatik açılacak.`,
                 'error'
             );
@@ -139,7 +159,14 @@ async function openReviewPopup(initialSessionId) {
     }
 
     // Veriyi çek
-    const data = await _jsonRpc('/ai_studio/review_data', { session_id: sessionId, lock_token: lockToken });
+    let data;
+    try {
+        data = await _jsonRpc('/ai_studio/review_data', { session_id: sessionId, lock_token: lockToken });
+    } catch (e) {
+        _jsonRpc('/ai_studio/release_lock', { session_id: sessionId, lock_token: lockToken }).catch(() => {});
+        showToast('Veri yüklenemedi: ' + e.message);
+        return;
+    }
     if (data.error) {
         await _jsonRpc('/ai_studio/release_lock', { session_id: sessionId, lock_token: lockToken });
         showToast(data.error);
@@ -153,20 +180,27 @@ async function openReviewPopup(initialSessionId) {
 
     let currentIndex = 0;
     let items = data.items;
-    const rejectReasons = data.reject_reasons || [];
+    let rejectReasons = data.reject_reasons || [];
     let showRejectModal = false;
     let selectedReasonId = null;
     let revisionPrompt = '';
     let revisionPromptEn = '';
-    const userRole = data.user_role || 'operator';
-    const canApprove = (userRole === 'reviewer' || userRole === 'manager');
+    // revisionPromptEn hangi Türkçe metnin çevirisi? (eski/yarışan çeviri gönderilmesin)
+    let revisionPromptEnSource = '';
+    let userRole = data.user_role || 'operator';
+    let canApprove = (userRole === 'reviewer' || userRole === 'manager');
     let revisionPollTimer = null;
     let heartbeatTimer = null;
+    let lockLostWarned = false;
 
     // ═══ HEARTBEAT — her 2dk'da kilidi canlı tut ═══
     heartbeatTimer = setInterval(async () => {
         try {
-            await _jsonRpc('/ai_studio/heartbeat_lock', { session_id: sessionId, lock_token: lockToken });
+            const hb = await _jsonRpc('/ai_studio/heartbeat_lock', { session_id: sessionId, lock_token: lockToken });
+            if (hb && hb.success === false && !lockLostWarned) {
+                lockLostWarned = true;
+                showToast('⚠️ İnceleme kilidi kaybedildi: başka bir kullanıcı bu oturumu açmış olabilir.', 'warning');
+            }
         } catch(e) {
             console.error('Heartbeat error:', e);
         }
@@ -179,21 +213,12 @@ async function openReviewPopup(initialSessionId) {
 
     // MutationObserver: Overlay dışarıdan DOM'dan kaldırılırsa (Odoo navigation, vb.)
     // setInterval timer'larını otomatik temizle
-    const _overlayObserver = new MutationObserver((mutations) => {
-        for (const m of mutations) {
-            for (const removed of m.removedNodes) {
-                if (removed === overlay || (removed.contains && removed.contains(overlay))) {
-                    _overlayObserver.disconnect();
-                    if (revisionPollTimer) { clearInterval(revisionPollTimer); revisionPollTimer = null; }
-                    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-                    window.removeEventListener('beforeunload', window._aisBeforeUnload);
-                    _jsonRpc('/ai_studio/release_lock', { session_id: sessionId, lock_token: lockToken }).catch(() => {});
-                    return;
-                }
-            }
+    const _overlayObserver = new MutationObserver(() => {
+        if (!overlay.isConnected) {
+            cleanup();
         }
     });
-    _overlayObserver.observe(document.body, { childList: true, subtree: true });
+    _overlayObserver.observe(document.body, { childList: true });
 
     function getPhotoTypeIcon(type) {
         switch(type) {
@@ -506,25 +531,28 @@ async function openReviewPopup(initialSessionId) {
                 if (translateTimer) clearTimeout(translateTimer);
                 if (!revisionPrompt.trim()) {
                     revisionPromptEn = '';
+                    revisionPromptEnSource = '';
                     const enEl = document.getElementById('ais-rp-revision-prompt-en');
                     if (enEl) enEl.value = '';
                     return;
                 }
                 translateTimer = setTimeout(async () => {
+                    const sourceText = revisionPrompt;
                     try {
                         const enEl = document.getElementById('ais-rp-revision-prompt-en');
                         if (enEl) enEl.value = '⏳ Çevriliyor...';
                         const result = await _jsonRpc('/ai_studio/translate_revision', {
-                            text: revisionPrompt,
+                            text: sourceText,
                         });
-                        if (result && result.translated) {
+                        // Bu arada metin değiştiyse eski çeviriyi kullanma
+                        if (result && result.translated && sourceText === revisionPrompt) {
                             revisionPromptEn = result.translated;
+                            revisionPromptEnSource = sourceText;
                             const enEl2 = document.getElementById('ais-rp-revision-prompt-en');
                             if (enEl2) enEl2.value = revisionPromptEn;
                         }
                     } catch (err) {
                         console.error('Translation error:', err);
-                        revisionPromptEn = revisionPrompt;
                     }
                 }, 800);
             });
@@ -597,7 +625,24 @@ async function openReviewPopup(initialSessionId) {
                 const y = ((e.clientY - rect.top) / rect.height) * 100;
                 wrap.style.backgroundPosition = `${x}% ${y}%`;
             });
+
+            // Tablette hover yok: dokununca tam boy görüntüleyici (iki parmakla yakınlaştırma)
+            wrap.addEventListener('click', () => openFullscreenImage(zoomSrc));
         });
+    }
+
+    function openFullscreenImage(src) {
+        const viewer = document.createElement('div');
+        viewer.className = 'ais-rp-fullscreen';
+        viewer.innerHTML = '<button class="ais-rp-fullscreen-close" aria-label="Kapat">✕</button>';
+        const img = document.createElement('img');
+        img.src = src;
+        img.alt = '';
+        viewer.appendChild(img);
+        viewer.addEventListener('click', (e) => {
+            if (e.target !== img) viewer.remove();
+        });
+        overlay.appendChild(viewer);
     }
 
     async function approve() {
@@ -606,10 +651,15 @@ async function openReviewPopup(initialSessionId) {
         if (btn) { btn.disabled = true; btn.textContent = '⏳...'; }
 
         try {
-            await _jsonRpc('/ai_studio/approve_generation', {
+            const res = await _jsonRpc('/ai_studio/approve_generation', {
                 generation_id: item.id,
                 is_primary: item.is_primary,
             });
+            if (!res || res.error) {
+                showToast('Onay hatası: ' + ((res && res.error) || 'Sunucu yanıt vermedi'));
+                render();
+                return;
+            }
             item.is_approved = true;
 
             // Sonraki onaylanmamış, revize beklenmeyen ve hariç tutulmamış görsele geç
@@ -664,9 +714,14 @@ async function openReviewPopup(initialSessionId) {
         if (btn) { btn.disabled = true; btn.textContent = '⏳...'; }
 
         try {
-            await _jsonRpc('/ai_studio/unapprove_generation', {
+            const res = await _jsonRpc('/ai_studio/unapprove_generation', {
                 generation_id: item.id,
             });
+            if (!res || res.error) {
+                showToast('Onay geri alma hatası: ' + ((res && res.error) || 'Sunucu yanıt vermedi'));
+                render();
+                return;
+            }
             item.is_approved = false;
             item.is_primary = false;
             render();
@@ -690,15 +745,19 @@ async function openReviewPopup(initialSessionId) {
         if (btn) { btn.disabled = true; btn.textContent = '⏳...'; }
 
         try {
+            // Çeviri güncel metne ait değilse boş gönder: sunucu arka planda çevirir
+            const promptEn = (revisionPrompt && revisionPromptEnSource === revisionPrompt) ? revisionPromptEn : '';
             const result = await _jsonRpc('/ai_studio/reject_generation', {
                 generation_id: item.id,
                 reason_id: selectedReasonId,
                 revision_prompt: revisionPrompt,
-                revision_prompt_en: revisionPromptEn || revisionPrompt,
+                revision_prompt_en: promptEn,
             });
 
             showRejectModal = false;
             revisionPrompt = '';
+            revisionPromptEn = '';
+            revisionPromptEnSource = '';
 
             if (result.error) {
                 showToast(result.error);
@@ -777,15 +836,12 @@ async function openReviewPopup(initialSessionId) {
                 let updated = false;
 
                 for (const pendingItem of pendingItems) {
-                    // Aynı photo_type veya aynı ID'nin güncel durumunu bul
-                    // action_retry: aynı ID'yi tekrar kullanır (copy yapmaz)
-                    // action_confirm_reject: yeni ID oluşturur
+                    // Retry aynı ID'yi kullanır; red yeni bir child generation oluşturur
+                    // (new_generation_id). photo_type ile eşleştirmek iki 'detail'
+                    // sekmesini karıştırıyordu.
+                    const targetId = pendingItem.new_generation_id || pendingItem.id;
                     const freshVersion = freshData.items.find(fi =>
-                        (fi.id === pendingItem.id && (fi.state === 'done' || fi.state === 'failed')) ||
-                        (fi.photo_type === pendingItem.photo_type &&
-                         fi.id !== pendingItem.id &&
-                         !fi.is_approved &&
-                         (fi.state === 'done' || fi.state === 'failed'))
+                        fi.id === targetId && (fi.state === 'done' || fi.state === 'failed')
                     );
 
                     if (freshVersion) {
@@ -800,28 +856,10 @@ async function openReviewPopup(initialSessionId) {
                     }
                 }
 
-                if (updated) {
-                    // Hedefli DOM güncelleme: Eğer aktif tab'da değişiklik varsa
-                    // tam render gerekir, değilse sadece tab badge'lerini güncelle
-                    if (!showRejectModal) {
-                        // Tab badge'lerini güncelle (tam render yerine)
-                        const tabs = overlay.querySelectorAll('.ais-rp-tab');
-                        let needFullRender = false;
-                        tabs.forEach((tab, idx) => {
-                            if (idx < items.length) {
-                                const it = items[idx];
-                                // Pending → Done geçişi varsa ve aktif tab ise tam render gerekli
-                                if (idx === currentIndex && !it.pending_revision) {
-                                    needFullRender = true;
-                                }
-                                // Tab class'larını güncelle
-                                tab.className = `ais-rp-tab ${idx === currentIndex ? 'active' : ''} ${it.is_approved ? 'approved' : ''} ${it.pending_revision ? 'pending' : ''} ${it.is_excluded ? 'excluded' : ''}`;
-                            }
-                        });
-                        if (needFullRender) {
-                            render();
-                        }
-                    }
+                // İlerleme çubuğu ve "Tamamla" butonu da güncellensin; red formu
+                // açıksa kullanıcının yazdığı metni silmemek için beklet
+                if (updated && !showRejectModal) {
+                    render();
                 }
 
                 // Hala pending var mı kontrol et
@@ -874,8 +912,8 @@ async function openReviewPopup(initialSessionId) {
             // Sonraki review session var mı?
             if (data.next_session_id) {
                 // Yeni session için kilit al
-                const newLockToken = 'lock_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
-                const nextLock = await _jsonRpc('/ai_studio/acquire_lock', { session_id: data.next_session_id, lock_token: newLockToken }).catch(() => null);
+                const nextLockToken = newLockToken();
+                const nextLock = await _jsonRpc('/ai_studio/acquire_lock', { session_id: data.next_session_id, lock_token: nextLockToken }).catch(() => null);
                 if (!nextLock || !nextLock.success) {
                     showToast(`✅ ${previousSessionName} başarıyla kaydedildi! Sonraki oturum kilitli veya erişilemiyor.`, 'success');
                     close();
@@ -885,23 +923,27 @@ async function openReviewPopup(initialSessionId) {
 
                 // Sonraki session'ı yükle
                 currentIndex = 0;
-                const nextData = await _jsonRpc('/ai_studio/review_data', { session_id: data.next_session_id, lock_token: newLockToken });
+                const nextData = await _jsonRpc('/ai_studio/review_data', { session_id: data.next_session_id, lock_token: nextLockToken });
                 if (nextData.error || !nextData.items || nextData.items.length === 0) {
                     showToast(`✅ ${previousSessionName} başarıyla kaydedildi! İncelenecek başka oturum yok.`, 'success');
-                    await _jsonRpc('/ai_studio/release_lock', { session_id: data.next_session_id, lock_token: newLockToken }).catch(() => {});
+                    await _jsonRpc('/ai_studio/release_lock', { session_id: data.next_session_id, lock_token: nextLockToken }).catch(() => {});
                     close();
                     window.location.reload();
                     return;
                 }
                 // Closure değişkenlerini güncelle (heartbeat & close doğru session'ı hedeflesin)
                 sessionId = data.next_session_id;
-                lockToken = newLockToken;
+                lockToken = nextLockToken;
+                lockLostWarned = false;
                 // Verileri güncelle
                 data.session_id = nextData.session_id;
                 data.session_name = nextData.session_name;
                 data.product_name = nextData.product_name;
                 data.next_session_id = nextData.next_session_id;
                 data.reject_reasons = nextData.reject_reasons || rejectReasons;
+                rejectReasons = data.reject_reasons;
+                userRole = nextData.user_role || userRole;
+                canApprove = (userRole === 'reviewer' || userRole === 'manager');
                 items = nextData.items;
                 currentIndex = 0;
                 showToast(`✅ ${previousSessionName} kaydedildi. Sıradaki oturuma geçildi (${nextData.session_name}).`, 'success');
@@ -917,32 +959,17 @@ async function openReviewPopup(initialSessionId) {
         }
     }
 
-    function close() {
-        if (revisionPollTimer) {
-            clearInterval(revisionPollTimer);
-            revisionPollTimer = null;
-        }
-        if (heartbeatTimer) {
-            clearInterval(heartbeatTimer);
-            heartbeatTimer = null;
-        }
-        // ═══ MutationObserver temizle ═══
-        _overlayObserver.disconnect();
-        // ═══ KİLİDİ BIRAK ═══
-        _jsonRpc('/ai_studio/release_lock', { session_id: sessionId, lock_token: lockToken }).catch(() => {});
-        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-        // beforeunload temizle
-        window.removeEventListener('beforeunload', window._aisBeforeUnload);
-        if (typeof onKeyDown !== 'undefined') {
-            document.removeEventListener('keydown', onKeyDown);
-        }
-    }
-
-    // İlk render
-    render();
-
     // ESC ve Yön tuşları ile kapat/gez
     const onKeyDown = (e) => {
+        // Red formunda yazarken ok tuşları imleci hareket ettirmeli, sekme değiştirmemeli
+        const tag = (e.target && e.target.tagName) || '';
+        const typing = tag === 'TEXTAREA' || tag === 'INPUT' || (e.target && e.target.isContentEditable);
+        const viewer = overlay.querySelector('.ais-rp-fullscreen');
+        if (e.key === 'Escape' && viewer) {
+            viewer.remove();
+            return;
+        }
+        if (typing && e.key !== 'Escape') return;
         if (e.key === 'Escape') {
             if (showRejectModal) {
                 showRejectModal = false;
@@ -956,14 +983,12 @@ async function openReviewPopup(initialSessionId) {
                 render();
             }
         } else if (e.key === 'ArrowRight') {
-            const activeItems = items.filter(i => !i.is_excluded);
             if (currentIndex < items.length - 1) {
                 currentIndex++;
                 render();
             }
         }
     };
-    document.addEventListener('keydown', onKeyDown);
 
     // Sayfa kapatılırken kilidi bırak
     const onBeforeUnload = () => {
@@ -974,8 +999,32 @@ async function openReviewPopup(initialSessionId) {
         });
         navigator.sendBeacon('/ai_studio/release_lock', new Blob([payload], { type: 'application/json' }));
     };
-    window._aisBeforeUnload = onBeforeUnload;
-    window.addEventListener('beforeunload', window._aisBeforeUnload);
+
+    let cleanedUp = false;
+    /** Zamanlayıcılar, dinleyiciler ve kilit — her kapanış yolunda (close / dışarıdan kaldırma) bir kez. */
+    function cleanup() {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        if (revisionPollTimer) { clearInterval(revisionPollTimer); revisionPollTimer = null; }
+        if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+        _overlayObserver.disconnect();
+        document.removeEventListener('keydown', onKeyDown);
+        window.removeEventListener('beforeunload', onBeforeUnload);
+        _jsonRpc('/ai_studio/release_lock', { session_id: sessionId, lock_token: lockToken }).catch(() => {});
+        if (activePopupClose === close) activePopupClose = null;
+    }
+
+    function close() {
+        cleanup();
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    }
+
+    activePopupClose = close;
+    document.addEventListener('keydown', onKeyDown);
+    window.addEventListener('beforeunload', onBeforeUnload);
+
+    // İlk render
+    render();
 }
 
 // Client action olarak kaydet

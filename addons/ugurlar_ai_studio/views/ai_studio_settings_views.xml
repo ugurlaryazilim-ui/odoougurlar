@@ -12,9 +12,9 @@
                      data-key="ugurlar_ai_studio"
                      groups="base.group_system">
 
-                    <block title="AI Saglayici Secimi" name="provider_settings">
-                        <setting string="AI Saglayici"
-                                 help="Kullanilacak AI saglayiciyi secin">
+                    <block title="AI Sağlayıcı Seçimi" name="provider_settings">
+                        <setting string="AI Sağlayıcı"
+                                 help="Kullanılacak AI sağlayıcıyı seçin">
                             <div class="content-group">
                                 <div class="row mt16">
                                     <label for="ai_studio_default_provider" class="col-3 col-lg-3 o_light_label"/>
@@ -22,8 +22,8 @@
                                 </div>
                             </div>
                         </setting>
-                        <setting string="fal.ai API Anahtari"
-                                 help="fal.ai kullanilacaksa API key girin"
+                        <setting string="fal.ai API Anahtarı"
+                                 help="fal.ai kullanılacaksa API anahtarını girin"
                                  invisible="ai_studio_default_provider != 'fal'">
                             <div class="content-group">
                                 <div class="row mt16">
@@ -32,8 +32,8 @@
                                 </div>
                             </div>
                         </setting>
-                        <setting string="FASHN API Anahtari"
-                                 help="FASHN direkt API kullanilacaksa key girin (fa-XXXX)"
+                        <setting string="FASHN API Anahtarı"
+                                 help="FASHN doğrudan API kullanılacaksa anahtarı girin (fa-XXXX)"
                                  invisible="ai_studio_default_provider != 'fashn'">
                             <div class="content-group">
                                 <div class="row mt16">
@@ -53,9 +53,9 @@
                         </setting>
                     </block>
 
-                    <block title="Try-On Model Ayarlari" name="tryon_settings">
+                    <block title="Try-On Model Ayarları" name="tryon_settings">
                         <setting string="Try-On Modeli"
-                                 help="FASHN try-on modeli secimi">
+                                 help="FASHN try-on modeli seçimi">
                             <div class="content-group">
                                 <div class="row mt16">
                                     <label for="ai_studio_tryon_model" class="col-3 col-lg-3 o_light_label"/>
@@ -63,7 +63,7 @@
                                 </div>
                             </div>
                         </setting>
-                        <setting string="Varsayilan Kalite Modu">
+                        <setting string="Varsayılan Kalite Modu">
                             <div class="content-group">
                                 <div class="row mt16">
                                     <label for="ai_studio_quality_mode" class="col-3 col-lg-3 o_light_label"/>
@@ -71,8 +71,8 @@
                                 </div>
                             </div>
                         </setting>
-                        <setting string="Uretim Sayisi (num_samples)"
-                                 help="Her istek icin kac gorsel uretilsin (1-4)">
+                        <setting string="Üretim Sayısı (num_samples)"
+                                 help="Her istek için kaç görsel üretilsin (1-4)">
                             <div class="content-group">
                                 <div class="row mt16">
                                     <label for="ai_studio_num_samples" class="col-3 col-lg-3 o_light_label"/>
@@ -93,15 +93,15 @@
                                  help="Üretimleri Gemini ile pantolon/el/etiket hatalarına karşı denetle">
                             <field name="ai_studio_visual_qc"/>
                         </setting>
-                        <setting string="Otomatik Arka Plan Kaldirma"
-                                 help="Fotograflari AI ya gondermeden once arka plani otomatik kaldir">
+                        <setting string="Otomatik Arka Plan Kaldırma"
+                                 help="Fotoğrafları AI'ya göndermeden önce arka planı otomatik kaldır">
                             <field name="ai_studio_auto_bg_remove"/>
                         </setting>
                     </block>
 
                     <block title="Operasyonel Ayarlar" name="operational_settings">
-                        <setting string="Maksimum Revizyon Sayisi"
-                                 help="Supervizoer onayi gerektirmeden yapilabilecek revize sayisi">
+                        <setting string="Maksimum Revizyon Sayısı"
+                                 help="Süpervizör onayı gerektirmeden yapılabilecek revize sayısı">
                             <div class="content-group">
                                 <div class="row mt16">
                                     <label for="ai_studio_max_revisions" class="col-3 col-lg-3 o_light_label"/>
@@ -109,8 +109,8 @@
                                 </div>
                             </div>
                         </setting>
-                        <setting string="Eszamanli Istek Limiti"
-                                 help="Ayni anda kac AI istegi gonderilebilir">
+                        <setting string="Eşzamanlı İstek Limiti"
+                                 help="Aynı anda kaç oturum AI'da işlenebilir">
                             <div class="content-group">
                                 <div class="row mt16">
                                     <label for="ai_studio_concurrent_limit" class="col-3 col-lg-3 o_light_label"/>
@@ -120,9 +120,9 @@
                         </setting>
                     </block>
 
-                    <block title="Bakim" name="maintenance_settings">
-                        <setting string="Cop Temizleme Suresi (gun)"
-                                 help="Reddedilen gorsellerin kac gun sonra temizlenecegi">
+                    <block title="Bakım" name="maintenance_settings">
+                        <setting string="Çöp Temizleme Süresi (gün)"
+                                 help="Reddedilen görsellerin kaç gün sonra temizleneceği">
                             <div class="content-group">
                                 <div class="row mt16">
                                     <label for="ai_studio_garbage_days" class="col-3 col-lg-3 o_light_label"/>

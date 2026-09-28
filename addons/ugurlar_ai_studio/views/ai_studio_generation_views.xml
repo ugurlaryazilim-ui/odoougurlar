@@ -4,7 +4,7 @@
         <field name="name">ai.studio.generation.list</field>
         <field name="model">ai.studio.generation</field>
         <field name="arch" type="xml">
-            <list string="AI Üretimler"
+            <list class="ais_list" string="AI Üretimler"
                   decoration-success="is_approved"
                   decoration-danger="state == 'failed'">
                 <field name="session_id"/>
@@ -100,7 +100,7 @@
         <field name="name">ai.studio.revision.list</field>
         <field name="model">ai.studio.generation</field>
         <field name="arch" type="xml">
-            <list string="Revizeler"
+            <list class="ais_list" string="Revizeler"
                   decoration-warning="state in ('pending', 'processing')"
                   decoration-danger="state == 'failed'"
                   decoration-success="state == 'done' and is_approved"

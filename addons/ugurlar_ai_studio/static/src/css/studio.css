@@ -923,23 +923,24 @@
 }
 
 /* ============================================================ */
-/* Backend List View — Ürün Adı, SKU ve Barkod Sütun Genişlikleri */
+/* AI Stüdyo listeleri — Ürün Adı, SKU ve Barkod Sütun Genişlikleri
+   (sadece class="ais_list" listeler; önceden tüm Odoo listelerini etkiliyordu) */
 /* ============================================================ */
-.o_list_renderer .o_data_cell[name="product_name"],
-.o_list_renderer .o_data_cell[name="product_id"],
-.o_list_renderer th[data-name="product_name"],
-.o_list_renderer th[data-name="product_id"] {
+.ais_list .o_data_cell[name="product_name"],
+.ais_list .o_data_cell[name="product_id"],
+.ais_list th[data-name="product_name"],
+.ais_list th[data-name="product_id"] {
     min-width: 320px !important;
     white-space: normal !important;
     word-break: break-word !important;
 }
 
-.o_list_renderer .o_data_cell[name="barcode"],
-.o_list_renderer .o_data_cell[name="product_barcode"],
-.o_list_renderer .o_data_cell[name="default_code"],
-.o_list_renderer th[data-name="barcode"],
-.o_list_renderer th[data-name="product_barcode"],
-.o_list_renderer th[data-name="default_code"] {
+.ais_list .o_data_cell[name="barcode"],
+.ais_list .o_data_cell[name="product_barcode"],
+.ais_list .o_data_cell[name="default_code"],
+.ais_list th[data-name="barcode"],
+.ais_list th[data-name="product_barcode"],
+.ais_list th[data-name="default_code"] {
     min-width: 140px !important;
     white-space: nowrap !important;
 }

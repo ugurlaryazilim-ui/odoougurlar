@@ -8,7 +8,7 @@
         <field name="name">ai.studio.imageless.line.list</field>
         <field name="model">ai.studio.imageless.line</field>
         <field name="arch" type="xml">
-            <list decoration-warning="has_session" decoration-muted="qty_available == 0">
+            <list class="ais_list" decoration-warning="has_session" decoration-muted="qty_available == 0">
                 <header>
                     <button name="action_refresh" type="object"
                             string="🔄 Listeyi Yenile" class="btn-secondary"/>

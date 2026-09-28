@@ -19,6 +19,7 @@ export class SettingsScreen extends Component {
             qualityMode: "balanced",
             extraPrompt: "",
             selectedTemplateId: null,
+            submitting: false,
         });
     }
 
@@ -48,7 +49,8 @@ export class SettingsScreen extends Component {
         }
     }
 
-    startProcessing() {
+    async startProcessing() {
+        if (this.state.submitting) return;
         if (!this.state.selectedPresetId) {
             this.env.services.notification.add("Lütfen AI işlemi başlatmadan önce bir manken seçiniz!", { type: "danger", sticky: false });
             const presetGrid = document.querySelector(".ais-preset-grid");
@@ -63,12 +65,17 @@ export class SettingsScreen extends Component {
             }
             return;
         }
-        this.props.onStartProcessing({
-            presetId: this.state.selectedPresetId,
-            category: this.state.category,
-            qualityMode: this.state.qualityMode,
-            extraPrompt: this.state.extraPrompt,
-            promptTemplateId: this.state.selectedTemplateId,
-        });
+        this.state.submitting = true;
+        try {
+            await this.props.onStartProcessing({
+                presetId: this.state.selectedPresetId,
+                category: this.state.category,
+                qualityMode: this.state.qualityMode,
+                extraPrompt: this.state.extraPrompt,
+                promptTemplateId: this.state.selectedTemplateId,
+            });
+        } finally {
+            this.state.submitting = false;
+        }
     }
 }

@@ -95,8 +95,9 @@
             <!-- Başlat -->
             <div class="ais-bottom-bar">
                 <button class="ais-btn-primary ais-btn-large"
-                        t-on-click="startProcessing">
-                    🚀 AI İşlemeyi Başlat
+                        t-on-click="startProcessing" t-att-disabled="state.submitting">
+                    <t t-if="state.submitting">⏳ Başlatılıyor…</t>
+                    <t t-else="">🚀 AI İşlemeyi Başlat</t>
                 </button>
             </div>
         </div>

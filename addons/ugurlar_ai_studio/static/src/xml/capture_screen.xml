@@ -8,6 +8,8 @@
                 <t t-if="state.cameraError">
                     <div class="ais-camera-error">
                         <p>⚠️ <t t-out="state.cameraError"/></p>
+                        <button class="btn btn-light me-2" t-on-click="startCamera">🔄 Tekrar Dene</button>
+                        <button class="btn btn-light" t-on-click="openFilePicker">📁 Dosyadan Yükle</button>
                     </div>
                 </t>
                 <t t-else="">
@@ -48,6 +50,9 @@
                     </div>
                     <canvas t-ref="captureCanvas" class="d-none"/>
                 </t>
+                <!-- DSLR / galeri yükleme (kamera hatasında da kullanılabilir) -->
+                <input type="file" accept="image/*" class="d-none" t-ref="fileInput"
+                       t-on-change="onFileSelected"/>
             </div>
 
             <!-- Üst Arayüz Katmanı (Header + Ürün Bilgisi) -->
@@ -139,16 +144,19 @@
 
                 <!-- Ana Kontroller (Kamera Değiştirme + Çekim) -->
                 <div class="ais-capture-controls">
-                    <div class="control-side">
-                        <!-- Spacer to balance -->
-                    </div>
-                    
-                    <button class="ais-btn-shutter" t-on-click="capturePhoto"
-                            t-att-disabled="!state.cameraActive">
+                    <button class="ais-btn-rotate" t-on-click="openFilePicker"
+                            title="Dosyadan / DSLR'dan Yükle" aria-label="Dosyadan yükle"
+                            t-att-disabled="state.capturing or state.submitting">
+                        📁
+                    </button>
+
+                    <button class="ais-btn-shutter" t-on-click="capturePhoto" aria-label="Fotoğraf çek"
+                            t-att-disabled="!state.cameraActive or state.capturing or state.submitting">
                         <div class="shutter-inner"></div>
                     </button>
                     
-                    <button class="ais-btn-rotate" t-on-click="toggleCamera" title="Kamera Değiştir">
+                    <button class="ais-btn-rotate" t-on-click="toggleCamera" title="Kamera Değiştir"
+                            aria-label="Kamera değiştir" t-att-disabled="state.submitting">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-rotate">
                             <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
                         </svg>
@@ -157,8 +165,9 @@
 
                 <!-- Devam Et Barı -->
                 <div class="ais-proceed-bar">
-                    <button class="ais-btn-proceed" t-on-click="proceed">
-                        Devam Et (AI Giydirme Ayarları) →
+                    <button class="ais-btn-proceed" t-on-click="proceed" t-att-disabled="state.submitting">
+                        <t t-if="state.submitting">⏳ Fotoğraflar yükleniyor…</t>
+                        <t t-else="">Devam Et (AI Giydirme Ayarları) →</t>
                     </button>
                 </div>
             </div>

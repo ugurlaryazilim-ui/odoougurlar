@@ -4,6 +4,14 @@ import { Component, useState, useRef, onMounted, onWillUnmount } from "@odoo/owl
 import { _t } from "@web/core/l10n/translation";
 import { useService } from "@web/core/utils/hooks";
 
+// Çıktı oranı: pazaryeri standardı 2:3 dikey (Trendyol 1200x1800)
+const OUTPUT_ASPECT = 2 / 3;
+// Uzun kenar üst sınırı: yükleme boyutunu makul tutar, AI için fazlasıyla yeterli
+const MAX_LONG_EDGE = 3000;
+// Bu çözünürlüğün altındaki çekimde kullanıcı uyarılır
+const MIN_SHORT_EDGE = 1000;
+const JPEG_QUALITY = 0.92;
+
 export class CaptureScreen extends Component {
     static template = "ugurlar_ai_studio.CaptureScreen";
     static props = {
@@ -16,6 +24,10 @@ export class CaptureScreen extends Component {
         this.notification = useService("notification");
         this.videoRef = useRef("cameraVideo");
         this.canvasRef = useRef("captureCanvas");
+        this.fileInputRef = useRef("fileInput");
+        // Reaktif olmayan akış referansı: unmount sonrası gelen stream'i durdurabilmek için
+        this.stream = null;
+        this.unmounted = false;
 
         this.state = useState({
             activeTab: "front",    // front, back, detail
@@ -30,52 +42,59 @@ export class CaptureScreen extends Component {
             hasFront: false,
             hasBack: false,
             detailCount: 0,
-            stream: null,
             facingMode: "environment", // Arka kamera
+            capturing: false,
+            submitting: false,
         });
 
         onMounted(() => this.startCamera());
-        onWillUnmount(() => this.stopCamera());
+        onWillUnmount(() => {
+            this.unmounted = true;
+            this.stopCamera();
+        });
     }
 
     async startCamera() {
-        try {
-            const constraints = {
-                video: {
-                    facingMode: { ideal: this.state.facingMode },
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
-                },
-            };
-            let stream;
+        this.state.cameraError = null;
+        const attempts = [
+            // En yüksek çözünürlük: tarayıcı desteklediği en yakın değeri seçer
+            { video: { facingMode: { ideal: this.state.facingMode }, width: { ideal: 3840 }, height: { ideal: 2160 } }, audio: false },
+            // iOS / eski cihaz fallback — basit kısıtlar
+            { video: { facingMode: this.state.facingMode }, audio: false },
+        ];
+        let stream = null;
+        let lastError = null;
+        for (const constraints of attempts) {
             try {
                 stream = await navigator.mediaDevices.getUserMedia(constraints);
-            } catch(e1) {
-                // iOS fallback — simpler constraints
-                stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'environment' },
-                    audio: false
-                });
+                break;
+            } catch (e) {
+                lastError = e;
             }
-            this.state.stream = stream;
-            this.state.cameraActive = true;
-            this.state.cameraError = null;
-
-            if (this.videoRef.el) {
-                this.videoRef.el.srcObject = stream;
-            }
-        } catch (e) {
-            this.state.cameraError = _t("Kamera erişimi reddedildi. Lütfen izin verin.");
-            console.error("Kamera hatası:", e);
+        }
+        if (!stream) {
+            this.state.cameraError = _t("Kamera erişimi reddedildi veya kamera bulunamadı. İzin verip tekrar deneyin ya da dosyadan yükleyin.");
+            console.error("Kamera hatası:", lastError);
+            return;
+        }
+        // Kullanıcı kamera açılırken ekrandan ayrıldıysa ışık açık kalmasın
+        if (this.unmounted) {
+            stream.getTracks().forEach(track => track.stop());
+            return;
+        }
+        this.stream = stream;
+        this.state.cameraActive = true;
+        if (this.videoRef.el) {
+            this.videoRef.el.srcObject = stream;
         }
     }
 
     stopCamera() {
-        if (this.state.stream) {
-            this.state.stream.getTracks().forEach(track => track.stop());
-            this.state.stream = null;
-            this.state.cameraActive = false;
+        if (this.stream) {
+            this.stream.getTracks().forEach(track => track.stop());
+            this.stream = null;
         }
+        this.state.cameraActive = false;
     }
 
     async toggleCamera() {
@@ -84,64 +103,119 @@ export class CaptureScreen extends Component {
         await this.startCamera();
     }
 
-    capturePhoto() {
-        if (!this.videoRef.el || !this.canvasRef.el) return;
-
-        const video = this.videoRef.el;
-        const canvas = this.canvasRef.el;
-
-        const videoWidth = video.videoWidth;
-        const videoHeight = video.videoHeight;
-        const elementWidth = video.clientWidth || window.innerWidth;
-        const elementHeight = video.clientHeight || window.innerHeight;
-
-        const elementAspectRatio = elementWidth / elementHeight;
-        const streamAspectRatio = videoWidth / videoHeight;
-
-        let sourceX = 0;
-        let sourceY = 0;
-        let sourceWidth = videoWidth;
-        let sourceHeight = videoHeight;
-
-        if (streamAspectRatio > elementAspectRatio) {
-            // Stream is wider than element (e.g. 4:3 video inside 9:16 screen)
-            sourceWidth = videoHeight * elementAspectRatio;
-            sourceX = (videoWidth - sourceWidth) / 2;
-        } else if (streamAspectRatio < elementAspectRatio) {
-            // Stream is taller than element
-            sourceHeight = videoWidth / elementAspectRatio;
-            sourceY = (videoHeight - sourceHeight) / 2;
+    /**
+     * Kaynağı (video karesi / bitmap / img) ortadan 2:3 kırpar, uzun kenarı
+     * MAX_LONG_EDGE ile sınırlar ve JPEG dataURL döndürür.
+     */
+    _cropToOutput(source, srcWidth, srcHeight) {
+        let cropW = srcWidth;
+        let cropH = srcHeight;
+        if (srcWidth / srcHeight > OUTPUT_ASPECT) {
+            cropW = Math.round(srcHeight * OUTPUT_ASPECT);
+        } else {
+            cropH = Math.round(srcWidth / OUTPUT_ASPECT);
         }
+        const sx = Math.round((srcWidth - cropW) / 2);
+        const sy = Math.round((srcHeight - cropH) / 2);
+        const scale = Math.min(1, MAX_LONG_EDGE / Math.max(cropW, cropH));
+        const outW = Math.round(cropW * scale);
+        const outH = Math.round(cropH * scale);
 
-        canvas.width = sourceWidth;
-        canvas.height = sourceHeight;
-
+        const canvas = this.canvasRef.el || document.createElement("canvas");
+        canvas.width = outW;
+        canvas.height = outH;
         const ctx = canvas.getContext("2d");
-        ctx.drawImage(
-            video,
-            sourceX, sourceY, sourceWidth, sourceHeight,
-            0, 0, sourceWidth, sourceHeight
-        );
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(source, sx, sy, cropW, cropH, 0, 0, outW, outH);
+        return { dataUrl: canvas.toDataURL("image/jpeg", JPEG_QUALITY), width: outW, height: outH };
+    }
 
-        // Base64 olarak al
-        const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+    /** Mümkünse tam sensör çözünürlüğünde fotoğraf, değilse video karesi. */
+    async _grabFrame() {
+        const track = this.stream && this.stream.getVideoTracks()[0];
+        if (track && typeof window.ImageCapture === "function") {
+            try {
+                const blob = await new window.ImageCapture(track).takePhoto();
+                const bitmap = await createImageBitmap(blob);
+                try {
+                    return this._cropToOutput(bitmap, bitmap.width, bitmap.height);
+                } finally {
+                    bitmap.close && bitmap.close();
+                }
+            } catch (e) {
+                console.warn("ImageCapture.takePhoto başarısız, video karesi kullanılıyor:", e);
+            }
+        }
+        const video = this.videoRef.el;
+        return this._cropToOutput(video, video.videoWidth, video.videoHeight);
+    }
+
+    async capturePhoto() {
+        if (!this.videoRef.el || this.state.capturing) return;
+        this.state.capturing = true;
+        try {
+            const shot = await this._grabFrame();
+            this._storePhoto(shot);
+        } catch (e) {
+            console.error("Çekim hatası:", e);
+            this.notification.add(_t("Fotoğraf çekilemedi, tekrar deneyin."), { type: "danger" });
+        } finally {
+            this.state.capturing = false;
+        }
+    }
+
+    openFilePicker() {
+        this.fileInputRef.el && this.fileInputRef.el.click();
+    }
+
+    /** DSLR / galeri fotoğrafı: aynı 2:3 kırpma ve boyut kuralları uygulanır. */
+    async onFileSelected(ev) {
+        const file = ev.target.files && ev.target.files[0];
+        ev.target.value = "";  // aynı dosya tekrar seçilebilsin
+        if (!file) return;
+        if (!file.type.startsWith("image/")) {
+            this.notification.add(_t("Lütfen bir görsel dosyası seçin."), { type: "danger" });
+            return;
+        }
+        this.state.capturing = true;
+        try {
+            const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+            try {
+                this._storePhoto(this._cropToOutput(bitmap, bitmap.width, bitmap.height));
+            } finally {
+                bitmap.close && bitmap.close();
+            }
+        } catch (e) {
+            console.error("Dosya okuma hatası:", e);
+            this.notification.add(_t("Görsel okunamadı."), { type: "danger" });
+        } finally {
+            this.state.capturing = false;
+        }
+    }
+
+    _storePhoto({ dataUrl, width, height }) {
         const base64Data = dataUrl.split(",")[1];
+        if (Math.min(width, height) < MIN_SHORT_EDGE) {
+            this.notification.add(
+                _t("Düşük çözünürlük (%(w)sx%(h)s). AI kalitesi düşebilir; mümkünse arka kamerayla veya dosyadan yükleyin.",
+                   { w: width, h: height }),
+                { type: "warning" }
+            );
+        }
+        // Önizleme için aynı dataURL; ayrı kopya tutulmaz
+        const photo = { data: base64Data, preview: dataUrl };
 
         const tab = this.state.activeTab;
         if (tab === "front") {
-            this.state.photos.front = { data: base64Data, preview: dataUrl };
+            this.state.photos.front = photo;
             this.state.hasFront = true;
         } else if (tab === "back") {
-            this.state.photos.back = { data: base64Data, preview: dataUrl };
+            this.state.photos.back = photo;
             this.state.hasBack = true;
         } else if (tab === "detail") {
             const placement = this.state.detailPlacement || "front";
             const existingIdx = this.state.photos.details.findIndex(d => d.placement === placement);
-            const detailObj = {
-                data: base64Data,
-                preview: dataUrl,
-                placement: placement,
-            };
+            const detailObj = { ...photo, placement };
             if (existingIdx !== -1) {
                 // Mevcut detayı güncelle (Maksimum 1 adet sınırı)
                 this.state.photos.details[existingIdx] = detailObj;
@@ -152,7 +226,6 @@ export class CaptureScreen extends Component {
                     { type: "info", sticky: false }
                 );
             } else {
-                // Yeni detay ekle (bu konum için ilk ve tek)
                 this.state.photos.details.push(detailObj);
                 this.notification.add(
                     placement === "front"
@@ -196,10 +269,6 @@ export class CaptureScreen extends Component {
         this.state.detailPlacement = placement;
     }
 
-    get canProceed() {
-        return true; // Düğme her zaman açık, uyarıları proceed içinde vereceğiz
-    }
-
     get hasDetailFront() {
         return this.state.photos.details.some(d => d.placement === "front");
     }
@@ -219,36 +288,46 @@ export class CaptureScreen extends Component {
         return null;
     }
 
-    proceed() {
+    async proceed() {
+        if (this.state.submitting) return;
         if (!this.state.hasFront && !this.state.hasBack) {
-            this.env.services.notification.add("Lütfen Ürünün Önünü ve Arkasını Çekiniz!", { type: "danger", sticky: false });
+            this.notification.add(_t("Lütfen ürünün önünü ve arkasını çekiniz!"), { type: "danger", sticky: false });
             return;
         }
         if (!this.state.hasFront) {
-            this.env.services.notification.add("Lütfen Ürünün Önünü Çekiniz!", { type: "danger", sticky: false });
+            this.notification.add(_t("Lütfen ürünün önünü çekiniz!"), { type: "danger", sticky: false });
             return;
         }
         if (!this.state.hasBack) {
-            this.env.services.notification.add("Lütfen Ürünün Arkasını Çekiniz!", { type: "danger", sticky: false });
+            this.notification.add(_t("Lütfen ürünün arkasını çekiniz!"), { type: "danger", sticky: false });
             return;
         }
 
-        const photos = [];
-        if (this.state.photos.front) {
-            photos.push({ type: "front", data: this.state.photos.front.data });
-        }
-        if (this.state.photos.back) {
-            photos.push({ type: "back", data: this.state.photos.back.data });
-        }
+        const photos = [
+            { type: "front", data: this.state.photos.front.data },
+            { type: "back", data: this.state.photos.back.data },
+        ];
         for (const detail of this.state.photos.details) {
             photos.push({
                 type: "detail",
                 data: detail.data,
-                detail_placement: detail.placement || 'front',
+                detail_placement: detail.placement || "front",
             });
         }
 
+        this.state.submitting = true;
         this.stopCamera();
-        this.props.onPhotosReady(photos);
+        let ok = false;
+        try {
+            ok = await this.props.onPhotosReady(photos);
+        } finally {
+            if (!this.unmounted) {
+                this.state.submitting = false;
+                // Oturum oluşturma / yükleme başarısızsa çekimler korunur, kamera geri açılır
+                if (!ok) {
+                    await this.startCamera();
+                }
+            }
+        }
     }
 }

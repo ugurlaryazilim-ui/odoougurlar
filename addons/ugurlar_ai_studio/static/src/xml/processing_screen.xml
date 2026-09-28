@@ -34,7 +34,10 @@
 
             <!-- Info Box -->
             <div class="ais-info-box">
-                <p>💡 İşlem devam ederken başka ürüne geçebilirsiniz. Tamamlandığında bildirim alacaksınız.</p>
+                <p>💡 İşlem devam ederken başka ürüne geçebilirsiniz. Tamamlanan oturumlar inceleme listesinde görünür.</p>
+                <t t-if="state.timedOut">
+                    <p>⏱️ İşlem uzun sürüyor; bu ekran beklemeyi bıraktı. Üretim arka planda devam ediyor, sonucu inceleme listesinden takip edebilirsiniz.</p>
+                </t>
             </div>
 
             <!-- Butonlar -->

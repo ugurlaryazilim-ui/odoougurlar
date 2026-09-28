@@ -9,6 +9,7 @@
     left: 0;
     width: 100vw;
     height: 100vh;
+    height: 100dvh;
     background: rgba(0, 0, 0, 0.45);
     backdrop-filter: blur(3px);
     z-index: 10000;
@@ -717,6 +718,7 @@
     .ais-rp {
         width: 100vw;
         height: 100vh;
+        height: 100dvh;
         max-width: none;
         max-height: none;
         border-radius: 0;
@@ -761,4 +763,44 @@
     .ais-rp-zoomable {
         cursor: default;
     }
+}
+
+/* Tablet: dokununca tam boy görüntüleyici (iki parmakla yakınlaştırma) */
+.ais-rp-fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    background: rgba(0, 0, 0, 0.92);
+    overflow: auto;
+    touch-action: pinch-zoom pan-x pan-y;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+}
+
+.ais-rp-fullscreen img {
+    max-width: none;
+    width: 100%;
+    height: auto;
+}
+
+@media (min-width: 992px) {
+    .ais-rp-fullscreen img {
+        width: auto;
+        max-height: none;
+    }
+}
+
+.ais-rp-fullscreen-close {
+    position: fixed;
+    top: 12px;
+    right: 16px;
+    z-index: 11;
+    width: 44px;
+    height: 44px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.9);
+    font-size: 20px;
+    cursor: pointer;
 }

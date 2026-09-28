@@ -262,18 +262,20 @@ class AiStudioController(http.Controller):
             return {'variants': []}
 
     @http.route('/ai_studio/find_product', type='jsonrpc', auth='user', methods=['POST'])
-    def find_product(self, query):
-        """Barkod, SKU veya isim ile urun ara."""
+    def find_product(self, query='', product_id=None):
+        """Barkod, SKU veya isim ile (ya da doğrudan product_id ile) urun ara."""
         try:
             Product = request.env['product.product']
-            query = query.strip()
+            query = (query or '').strip()
 
+            product = Product.browse(int(product_id)).exists() if product_id else Product
             # 1. Barkod ile ara
-            product = Product.search([('barcode', '=', query)], limit=1)
-            if not product:
+            if not product and query:
+                product = Product.search([('barcode', '=', query)], limit=1)
+            if not product and query:
                 # 2. Dahili referans ile ara
                 product = Product.search([('default_code', '=', query)], limit=1)
-            if not product:
+            if not product and query:
                 # 3. Isim ile ara
                 product = Product.search([('name', 'ilike', query)], limit=5)
 
@@ -898,6 +900,7 @@ class AiStudioController(http.Controller):
                     orig_url = '/web/image/ai.studio.generation/%d/original_image' % gen.id
 
                 gen_url = '/web/image/ai.studio.generation/%d/generated_image' % gen.id
+                uniq = int(gen.write_date.timestamp()) if gen.write_date else 0
 
                 items.append({
                     'id': gen.id,
@@ -907,10 +910,12 @@ class AiStudioController(http.Controller):
                     'is_approved': gen.is_approved,
                     'is_primary': gen.is_primary,
                     'revision_number': gen.revision_number,
-                    'original_url': orig_url,
-                    'original_url_full': orig_url,
-                    'generated_url': gen_url,
-                    'generated_url_full': gen_url,
+                    # Önizleme küçültülmüş (tablet belleği/bant genişliği), zoom tam boy;
+                    # unique: aynı id'de yeniden üretilen görsel önbellekten gelmesin
+                    'original_url': '%s?width=1200&unique=%d' % (orig_url, uniq) if orig_url else '',
+                    'original_url_full': '%s?unique=%d' % (orig_url, uniq) if orig_url else '',
+                    'generated_url': '%s?width=1200&unique=%d' % (gen_url, uniq),
+                    'generated_url_full': '%s?unique=%d' % (gen_url, uniq),
                     'error_message': gen.error_message or '',
                     'quality_score': gen.quality_score,
                     # Görsel denetimin bulduğu hatalar ("⚠ a; b" biçiminde saklanır)

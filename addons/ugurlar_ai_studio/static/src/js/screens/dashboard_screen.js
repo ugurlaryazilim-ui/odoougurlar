@@ -2,7 +2,8 @@
 
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
-import { Component, onWillStart, useState, useRef, useEffect } from "@odoo/owl";
+import { Component, onWillStart, onWillUnmount, useState, useRef, useEffect } from "@odoo/owl";
+import { loadJS } from "@web/core/assets";
 
 export class AiStudioDashboard extends Component {
     setup() {
@@ -29,17 +30,19 @@ export class AiStudioDashboard extends Component {
         useEffect(() => {
             this.renderChart();
         }, () => [this.state.reject_reasons]);
+
+        // Chart.js örneği canvas'a bağlı kalıp bellek sızdırmasın
+        onWillUnmount(() => {
+            if (this.chartInstance) {
+                this.chartInstance.destroy();
+                this.chartInstance = null;
+            }
+        });
     }
 
     async loadChartJS() {
         if (window.Chart) return;
-        return new Promise((resolve, reject) => {
-            const script = document.createElement("script");
-            script.src = "/web/static/lib/Chart/Chart.js";
-            script.onload = resolve;
-            script.onerror = reject;
-            document.head.appendChild(script);
-        });
+        await loadJS("/web/static/lib/Chart/Chart.js");
     }
 
     async loadData() {

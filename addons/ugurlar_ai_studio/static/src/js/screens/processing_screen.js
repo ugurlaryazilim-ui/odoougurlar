@@ -3,6 +3,10 @@
 import { Component, useState, onMounted, onWillUnmount } from "@odoo/owl";
 import { _t } from "@web/core/l10n/translation";
 
+const POLL_MS = 5000;
+// Bu süreden sonra ekran beklemeyi bırakır (iş arka planda sürer, cron devralır)
+const MAX_POLL_MS = 20 * 60 * 1000;
+
 export class ProcessingScreen extends Component {
     static template = "ugurlar_ai_studio.ProcessingScreen";
     static props = {
@@ -17,8 +21,12 @@ export class ProcessingScreen extends Component {
         this.state = useState({
             generations: [],
             allDone: false,
-            pollInterval: null,
+            timedOut: false,
         });
+        // Zamanlayıcı reaktif state'te tutulmaz
+        this.pollInterval = null;
+        this.polling = false;
+        this.pollStartedAt = 0;
 
         onMounted(() => this.startPolling());
         onWillUnmount(() => this.stopPolling());
@@ -30,6 +38,9 @@ export class ProcessingScreen extends Component {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ jsonrpc: "2.0", method: "call", params }),
         });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
         const data = await response.json();
         if (data.error) {
             throw new Error(data.error.data?.message || data.error.message || "RPC Error");
@@ -38,18 +49,27 @@ export class ProcessingScreen extends Component {
     }
 
     startPolling() {
+        this.pollStartedAt = Date.now();
         this.checkStatus();
-        this.state.pollInterval = setInterval(() => this.checkStatus(), 5000);
+        this.pollInterval = setInterval(() => this.checkStatus(), POLL_MS);
     }
 
     stopPolling() {
-        if (this.state.pollInterval) {
-            clearInterval(this.state.pollInterval);
-            this.state.pollInterval = null;
+        if (this.pollInterval) {
+            clearInterval(this.pollInterval);
+            this.pollInterval = null;
         }
     }
 
     async checkStatus() {
+        // Önceki istek bitmediyse üst üste binme; sekme gizliyken sunucuyu yorma
+        if (this.polling || document.hidden) return;
+        if (Date.now() - this.pollStartedAt > MAX_POLL_MS) {
+            this.state.timedOut = true;
+            this.stopPolling();
+            return;
+        }
+        this.polling = true;
         try {
             const res = await this._jsonRpc("/ai_studio/generation_status/" + this.props.sessionId, {});
             this.state.generations = res.generations || [];
@@ -63,6 +83,8 @@ export class ProcessingScreen extends Component {
             }
         } catch (e) {
             console.error("Status check error:", e);
+        } finally {
+            this.polling = false;
         }
     }
 
@@ -78,18 +100,19 @@ export class ProcessingScreen extends Component {
 
     getStateLabel(state) {
         const labels = {
-            pending: _t("Sirada"),
-            processing: _t("Isleniyor..."),
-            done: _t("Tamamlandi"),
-            failed: _t("Basarisiz"),
+            pending: _t("Sırada"),
+            processing: _t("İşleniyor..."),
+            done: _t("Tamamlandı"),
+            failed: _t("Başarısız"),
         };
         return labels[state] || state;
     }
 
     getTypeLabel(type) {
         const labels = {
-            front: _t("On Yuz"),
-            back: _t("Arka Yuz"),
+            front: _t("Ön Yüz"),
+            back: _t("Arka Yüz"),
+            side: _t("Yan"),
             detail: _t("Detay"),
         };
         return labels[type] || type;

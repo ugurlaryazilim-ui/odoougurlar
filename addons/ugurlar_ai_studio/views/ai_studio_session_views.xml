@@ -5,7 +5,7 @@
         <field name="name">ai.studio.session.list</field>
         <field name="model">ai.studio.session</field>
         <field name="arch" type="xml">
-            <list>
+            <list class="ais_list">
                 <field name="name" width="140px"/>
                 <field name="product_id" width="380px"/>
                 <field name="product_barcode" optional="show" width="150px"/>
@@ -44,13 +44,13 @@
             <form>
                 <header>
                     <!-- Herkes: Fotoğraf çekme akışı -->
-                    <button name="action_photos_ready" string="Fotograflar Hazir"
+                    <button name="action_photos_ready" string="Fotoğraflar Hazır"
                             type="object" class="btn-primary"
                             invisible="state != 'draft'"/>
-                    <button name="action_start_processing" string="AI islemeyi Baslat"
+                    <button name="action_start_processing" string="AI İşlemeyi Başlat"
                             type="object" class="btn-primary"
                             invisible="state != 'photos_ready' or generation_count > 0"
-                            confirm="AI isleme baslatilsin mi?"/>
+                            confirm="AI işleme başlatılsın mı?"/>
                     <!-- Takılı kalmış oturumları kurtarma: photos_ready veya processing ama üretimler var -->
                     <button name="action_force_review" string="İncelemeye Al"
                             type="object" class="btn-warning"
@@ -62,7 +62,7 @@
                             confirm="DİKKAT: Mevcut AI üretimleri silinecek ve işlem baştan başlayacaktır. Emin misiniz?"
                             groups="ugurlar_ai_studio.group_ai_studio_reviewer"/>
                     <!-- Onayıcı/Yönetici: İnceleme ve tamamlama -->
-                    <button name="action_review_generations" string="Gorselleri Incele"
+                    <button name="action_review_generations" string="Görselleri İncele"
                             type="object" class="btn-primary"
                             invisible="state in ('draft', 'photos_ready', 'done', 'cancelled') or generation_count == 0"
                             groups="ugurlar_ai_studio.group_ai_studio_reviewer"/>
@@ -76,11 +76,11 @@
                             invisible="state != 'review'"
                             groups="ugurlar_ai_studio.group_ai_studio_reviewer"/>
                     <!-- Yönetici ve Onayıcı: İptal ve sıfırlama -->
-                    <button name="action_cancel" string="Iptal"
+                    <button name="action_cancel" string="İptal"
                             type="object"
                             invisible="state in ('done', 'cancelled')"
                             groups="ugurlar_ai_studio.group_ai_studio_reviewer"/>
-                    <button name="action_reset_draft" string="Taslaga Don"
+                    <button name="action_reset_draft" string="Taslağa Dön"
                             type="object"
                             invisible="state != 'cancelled'"
                             groups="ugurlar_ai_studio.group_ai_studio_reviewer"/>

@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, onWillStart } from "@odoo/owl";
+import { Component, useState, onWillStart, onMounted } from "@odoo/owl";
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { _t } from "@web/core/l10n/translation";
@@ -56,6 +56,26 @@ export class AiStudioAction extends Component {
         onWillStart(async () => {
             await this.loadInitialData();
         });
+        // "Resmi Olmayanlar" listesinden "Resim Çek" ile gelindiyse ürünü otomatik aç
+        onMounted(() => {
+            const autoProductId = this.props.action?.params?.auto_product_id;
+            if (autoProductId) {
+                this.openProductById(autoProductId);
+            }
+        });
+    }
+
+    async openProductById(productId) {
+        try {
+            const res = await this._jsonRpc("/ai_studio/find_product", { product_id: productId });
+            if (res.found !== false && res.products && res.products.length) {
+                this.onProductFound(res.products[0]);
+            } else {
+                this.notification.add(_t("Ürün bulunamadı."), { type: "warning" });
+            }
+        } catch (e) {
+            this.notification.add(e.message || _t("Ürün açılamadı."), { type: "danger" });
+        }
     }
 
     async _jsonRpc(url, params = {}) {
@@ -70,6 +90,13 @@ export class AiStudioAction extends Component {
                 params: params,
             }),
         });
+        if (!response.ok) {
+            // 413 (çok büyük istek), oturum süresi dolması vb. HTML döner:
+            // JSON parse hatası yerine anlamlı mesaj ver
+            throw new Error(response.status === 413
+                ? _t("Yüklenen veri çok büyük (HTTP 413).")
+                : _t("Sunucu hatası (HTTP %s).", response.status));
+        }
         const data = await response.json();
         if (data.error) {
             throw new Error(data.error.data?.message || data.error.message || "RPC Error");
@@ -136,56 +163,72 @@ export class AiStudioAction extends Component {
         this.navigateTo("capture");
     }
 
+    /**
+     * Oturumu oluştur ve fotoğrafları yükle.
+     * @returns {Promise<boolean>} başarılıysa true; false ise çekim ekranı fotoğrafları korur
+     */
     async onPhotosReady(photos) {
+        if (this._creatingSession) return false;
+        this._creatingSession = true;
         this.state.photos = photos;
         try {
             const res = await this._jsonRpc("/ai_studio/create_session", {
                 product_id: this.state.productId,
             });
-            if (res.error) {
-                this.notification.add(res.error, { type: "danger", sticky: false });
-                console.error("Session create error:", res.error);
-                return;
+            if (res.error || !res.success) {
+                this.notification.add(res.error || _t("Oturum oluşturulamadı."), { type: "danger", sticky: false });
+                return false;
             }
-            if (res.success) {
-                this.state.sessionId = res.session_id;
-                this.state.sessionName = res.session_name;
+            this.state.sessionId = res.session_id;
+            this.state.sessionName = res.session_name;
 
-                for (const photo of photos) {
-                    try {
-                        const uploadParams = {
-                            session_id: res.session_id,
-                            photo_type: photo.type,
-                            image_data: photo.data,
-                        };
-                        // Detay fotoğraflarında konum bilgisi gönder
-                        if (photo.type === 'detail' && photo.detail_placement) {
-                            uploadParams.detail_placement = photo.detail_placement;
-                        }
-                        await this._jsonRpc("/ai_studio/upload_photo", uploadParams);
-                    } catch (uploadErr) {
-                        console.error("Photo upload error:", uploadErr);
-                    }
+            // Paralel yükleme; controller hataları {error} olarak DÖNDÜRÜR (throw etmez)
+            const results = await Promise.allSettled(photos.map(photo => {
+                const uploadParams = {
+                    session_id: res.session_id,
+                    photo_type: photo.type,
+                    image_data: photo.data,
+                };
+                if (photo.type === "detail" && photo.detail_placement) {
+                    uploadParams.detail_placement = photo.detail_placement;
                 }
-
-                // Presetleri ürün cinsiyetine ve vücut tipine göre filtreli yükle
-                const gender = this.state.productGender || '';
-                const bodyType = this.state.productBodyType || 'standard';
-                const presetsRes = await this._jsonRpc("/ai_studio/get_presets", {
-                    gender: gender || undefined,
-                    body_type: bodyType,
-                });
-                this.state.presets = presetsRes.presets || [];
-
-                this.navigateTo("settings");
+                return this._jsonRpc("/ai_studio/upload_photo", uploadParams);
+            }));
+            const failures = results
+                .map((r, i) => ({ r, photo: photos[i] }))
+                .filter(({ r }) => r.status === "rejected" || (r.value && r.value.error));
+            if (failures.length) {
+                const reason = failures.map(({ r, photo }) =>
+                    `${photo.type}: ${r.status === "rejected" ? r.reason.message : r.value.error}`).join(", ");
+                this.notification.add(_t("Fotoğraf yüklenemedi (%s). Lütfen tekrar deneyin.", reason),
+                                      { type: "danger", sticky: true });
+                return false;
             }
+
+            // Presetleri ürün cinsiyetine ve vücut tipine göre filtreli yükle
+            const gender = this.state.productGender || '';
+            const bodyType = this.state.productBodyType || 'standard';
+            const presetsRes = await this._jsonRpc("/ai_studio/get_presets", {
+                gender: gender || undefined,
+                body_type: bodyType,
+            });
+            this.state.presets = presetsRes.presets || [];
+
+            this.navigateTo("settings");
+            return true;
         } catch (e) {
-            this.notification.add(e.message || _t("Oturum olusturulamadi."), { type: "danger", sticky: false });
+            this.notification.add(e.message || _t("Oturum oluşturulamadı."), { type: "danger", sticky: false });
             console.error("Session creation exception:", e);
+            return false;
+        } finally {
+            this._creatingSession = false;
         }
     }
 
     async onStartProcessing(settings) {
+        // Çift tıklama iki ücretli işlem başlatmasın
+        if (this._startingProcessing) return;
+        this._startingProcessing = true;
         try {
             await this.orm.write("ai.studio.session", [this.state.sessionId], {
                 model_preset_id: settings.presetId,
@@ -206,7 +249,9 @@ export class AiStudioAction extends Component {
 
             this.navigateTo("processing");
         } catch (e) {
-            this.notification.add(e.message || _t("Islem baslatilamadi."), { type: "danger", sticky: false });
+            this.notification.add(e.message || _t("İşlem başlatılamadı."), { type: "danger", sticky: false });
+        } finally {
+            this._startingProcessing = false;
         }
     }
 
@@ -301,7 +346,7 @@ export class AiStudioAction extends Component {
             is_primary: isPrimary,
         });
         if (res.success) {
-            this.notification.add(_t("Gorsel onaylandi."), { type: "success", sticky: false });
+            this.notification.add(_t("Görsel onaylandı."), { type: "success", sticky: false });
             await this.refreshGenerations();
         }
     }
@@ -313,7 +358,7 @@ export class AiStudioAction extends Component {
             revision_prompt: prompt,
         });
         if (res.success) {
-            this.notification.add(_t("Revizyon gonderildi."), { type: "warning", sticky: false });
+            this.notification.add(_t("Revizyon gönderildi."), { type: "warning", sticky: false });
             this.navigateTo("processing");
         } else if (res.needs_supervisor) {
             this.notification.add(res.error, { type: "danger", sticky: false });
@@ -325,11 +370,11 @@ export class AiStudioAction extends Component {
             session_id: this.state.sessionId,
         });
         if (res.success) {
-            this.notification.add(_t("Gorseller urune kaydedildi!"), { type: "success", sticky: false });
+            this.notification.add(_t("Görseller ürüne kaydedildi!"), { type: "success", sticky: false });
             this.resetSession();
             this.navigateTo("scan");
         } else {
-            this.notification.add(res.error || _t("Hata olustu."), { type: "danger", sticky: false });
+            this.notification.add(res.error || _t("Hata oluştu."), { type: "danger", sticky: false });
         }
     }
 
@@ -434,11 +479,16 @@ document.addEventListener("click", (ev) => {
     });
 
     // Kapatma tetikleyicileri
+    const onKeyDown = (e) => {
+        if (e.key === "Escape") closeLightbox();
+    };
     const closeLightbox = () => {
+        document.removeEventListener("keydown", onKeyDown);
         lightbox.style.opacity = "0";
         imgEl.style.transform = "scale(0.95)";
         setTimeout(() => lightbox.remove(), 250);
     };
 
     lightbox.addEventListener("click", closeLightbox);
+    document.addEventListener("keydown", onKeyDown);
 });
