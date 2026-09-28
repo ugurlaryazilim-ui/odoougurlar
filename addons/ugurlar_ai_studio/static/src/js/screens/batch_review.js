@@ -2,6 +2,7 @@
 
 import { Component, useState, onWillStart } from "@odoo/owl";
 import { useService } from "@web/core/utils/hooks";
+import { openReviewPopup } from "../rpc_utils";
 
 export class BatchReview extends Component {
     static template = "ugurlar_ai_studio.BatchReview";
@@ -25,13 +26,7 @@ export class BatchReview extends Component {
     }
 
     async openSession(sessionId) {
-        // Backend form view'a git
-        await this.env.services.action.doAction({
-            type: "ir.actions.act_window",
-            res_model: "ai.studio.session",
-            res_id: sessionId,
-            views: [[false, "form"]],
-            target: "current",
-        });
+        // Form yerine doğrudan inceleme popup'ı (onay, red, aday seçimi tek yerde)
+        await openReviewPopup(this.env.services.action, sessionId);
     }
 }

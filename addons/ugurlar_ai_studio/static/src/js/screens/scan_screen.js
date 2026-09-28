@@ -1,5 +1,6 @@
 /** @odoo-module **/
 import { openCameraScanner } from "@ugurlar_barcode/js/camera_scanner";
+import { aisRpc } from "../rpc_utils";
 
 import { Component, useState } from "@odoo/owl";
 import { useService } from "@web/core/utils/hooks";
@@ -27,16 +28,7 @@ export class ScanScreen extends Component {
     }
 
     async _jsonRpc(url, params = {}) {
-        const response = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ jsonrpc: "2.0", method: "call", params }),
-        });
-        const data = await response.json();
-        if (data.error) {
-            throw new Error(data.error.data?.message || data.error.message || "RPC Error");
-        }
-        return data.result;
+        return aisRpc(url, params);
     }
 
     async onInputChange(ev) {

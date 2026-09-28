@@ -201,6 +201,57 @@ class AiStudioModelPreset(models.Model):
             },
         }
 
+    def action_regenerate_mannequins(self):
+        """Seçili presetlerin mankenlerini güncel promptla yeniden üret (toplu, sıralı).
+
+        Eski manken görselleri önce kütüphaneye yedeklenir. Prompt'u olmayan (elle
+        yüklenmiş) presetler atlanır.
+        """
+        if not (self.env.is_admin() or self.env.user.has_group('ugurlar_ai_studio.group_ai_studio_manager')):
+            raise UserError(_('Bu işlem için AI Stüdyo yönetici yetkisi gereklidir.'))
+        presets = self.filtered(lambda p: p.mannequin_prompt and p.mannequin_generation_state != 'generating')
+        if not presets:
+            raise UserError(_('Yeniden üretilecek preset yok (manken promptu olan ve şu an üretimde olmayan preset seçin).'))
+
+        icp = self.env['ir.config_parameter'].sudo()
+        provider_type = icp.get_param('ugurlar_ai_studio.default_provider', 'fashn')
+        api_key = icp.get_param('ugurlar_ai_studio.fashn_api_key' if provider_type == 'fashn'
+                                else 'ugurlar_ai_studio.fal_api_key')
+        if not api_key:
+            raise UserError(_('AI API anahtarı ayarlanmamış.'))
+
+        for preset in presets.filtered('model_image_front'):
+            previous_link = preset.library_mannequin_id
+            preset.action_save_to_library()  # yedek
+            preset.library_mannequin_id = previous_link  # yedek, preset'in kaynağı olmasın
+        presets.write({'mannequin_generation_state': 'generating'})
+
+        jobs = [(p.id, p.mannequin_prompt, p.gender, p.body_type, p.background_type) for p in presets]
+        uid = self.env.uid
+
+        def _run_all():
+            for preset_id, prompt, gender, body_type, bg_type in jobs:
+                self._generate_mannequin_thread(preset_id, prompt, api_key, gender, body_type,
+                                                bg_type, provider_type, uid)
+
+        def _start():
+            thread = threading.Thread(target=_run_all)
+            thread.daemon = True
+            thread.start()
+        self.env.cr.postcommit.add(_start)
+
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Mankenler Yeniden Üretiliyor'),
+                'message': _('%d preset sırayla işlenecek (her biri 1-3 dk). Eski görseller kütüphaneye yedeklendi.')
+                           % len(presets),
+                'type': 'info',
+                'sticky': False,
+            },
+        }
+
     def action_generate_mannequin(self):
         """AI ile manken fotoğrafı oluştur (ön ve arka)."""
         self.ensure_one()

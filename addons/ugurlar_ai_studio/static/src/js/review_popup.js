@@ -2,6 +2,7 @@
 
 import { registry } from "@web/core/registry";
 import { _t } from "@web/core/l10n/translation";
+import { aisRpc } from "./rpc_utils";
 
 /**
  * AI Studio - Profesyonel İnceleme Popup'ı
@@ -13,21 +14,8 @@ import { _t } from "@web/core/l10n/translation";
  * - Tamamla Kaydet sadece pending revizyon yokken gösterilir
  */
 
-async function _jsonRpc(url, params = {}) {
-    const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", method: "call", params }),
-    });
-    if (!response.ok) {
-        throw new Error(`Sunucu hatası (HTTP ${response.status})`);
-    }
-    const data = await response.json();
-    if (data.error) {
-        throw new Error(data.error.data?.message || data.error.message || "RPC Error");
-    }
-    return data.result;
-}
+// Odoo rpc üzerinden (bkz. rpc_utils.js)
+const _jsonRpc = aisRpc;
 
 function escapeHtml(str) {
     if (!str) return '';

@@ -610,27 +610,26 @@ class AiStudioSession(models.Model):
     )
 
     # --- İstatistikler ---
+    # Saklanmaz (okunurken hesaplanır): stored olduklarında her generation yazımı oturum
+    # satırını da güncelliyor, kira/kilit güncellemeleriyle "concurrent update" çakışması
+    # üretiyordu. Hiçbiri aramada/sıralamada kullanılmıyor.
     total_cost = fields.Monetary(
         string='Toplam Maliyet',
         compute='_compute_stats',
-        store=True,
         currency_field='currency_id',
     )
     revision_count = fields.Integer(
         string='Toplam Revizyon',
         compute='_compute_stats',
-        store=True,
     )
     approval_rate = fields.Float(
         string='Onay Oranı (%)',
         compute='_compute_stats',
-        store=True,
         digits=(5, 1),
     )
     review_status_display = fields.Char(
         string='İnceleme Durumu',
         compute='_compute_review_status',
-        store=True,
     )
     photo_count = fields.Integer(
         string='Fotoğraf Sayısı',
@@ -3152,6 +3151,12 @@ class AiStudioSession(models.Model):
         res = super(AiStudioSession, self).write(vals)
         if 'state' in vals:
             for record in self:
+                if record.state in ('review', 'failed'):
+                    # Bildirim asla state geçişini engellememeli
+                    try:
+                        record._notify_state_change()
+                    except Exception as e:
+                        _logger.warning("Durum bildirimi gönderilemedi (session=%s): %s", record.id, e)
                 if record.state == 'review':
                     # Review durumuna geçtiğinde Aktivite oluşturmayı dene
                     # AMA asla state geçişini engellememelidir
@@ -3183,6 +3188,34 @@ class AiStudioSession(models.Model):
                             _logger.warning("SEO thread başlatma başarısız (session=%s): %s", record.id, e)
         return res
 
+    def _get_reviewer_users(self):
+        """Aktif onaycı/yönetici kullanıcılar."""
+        reviewer_group = self.env.ref('ugurlar_ai_studio.group_ai_studio_reviewer', raise_if_not_found=False)
+        users_model = self.env['res.users'].sudo()
+        if not reviewer_group:
+            return users_model
+        # Odoo 19'da res.users.groups_id → group_ids olarak yeniden adlandırıldı
+        groups_field = 'group_ids' if 'group_ids' in users_model._fields else 'groups_id'
+        return users_model.search([(groups_field, 'in', reviewer_group.id), ('active', '=', True)])
+
+    def _notify_state_change(self):
+        """Anlık bildirim: incelemeye hazır olunca onaycılara toast; oturumu başlatanın
+        işlem ekranına durum olayı (5 sn'lik polling'i beklemeden yenilensin)."""
+        self.ensure_one()
+        bus = self.env['bus.bus'].sudo()
+        if self.create_uid.partner_id:
+            bus._sendone(self.create_uid.partner_id, 'ai_studio.session_update',
+                         {'session_id': self.id, 'state': self.state})
+        if self.state == 'review':
+            product = self.product_id.display_name or ''
+            for user in self._get_reviewer_users():
+                bus._sendone(user.partner_id, 'simple_notification', {
+                    'title': _('📸 İncelemeye hazır'),
+                    'message': '%s — %s' % (self.name, product),
+                    'type': 'info',
+                    'sticky': False,
+                })
+
     def _create_review_activities(self):
         """Review durumuna geçişte onayıcılara aktivite oluşturur."""
         self.ensure_one()
@@ -3190,18 +3223,7 @@ class AiStudioSession(models.Model):
         if not activity_type:
             return
 
-        reviewer_group = self.env.ref('ugurlar_ai_studio.group_ai_studio_reviewer', raise_if_not_found=False)
-        if not reviewer_group:
-            return
-
-        # Odoo 19'da res.users.groups_id → group_ids olarak yeniden adlandırıldı
-        users_model = self.env['res.users'].sudo()
-        groups_field = 'group_ids' if 'group_ids' in users_model._fields else 'groups_id'
-        reviewer_users = users_model.search([
-            (groups_field, 'in', reviewer_group.id),
-            ('active', '=', True),
-        ])
-        reviewer_ids = reviewer_users.ids
+        reviewer_ids = self._get_reviewer_users().ids
 
         if not reviewer_ids:
             return

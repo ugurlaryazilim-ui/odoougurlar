@@ -6,12 +6,12 @@ import { useService } from "@web/core/utils/hooks";
 import { _t } from "@web/core/l10n/translation";
 import { markup } from "@odoo/owl";
 import { ConfirmationDialog, AlertDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
+import { aisRpc, openReviewPopup } from "./rpc_utils";
 
 import { ScanScreen } from "./screens/scan_screen";
 import { CaptureScreen } from "./screens/capture_screen";
 import { SettingsScreen } from "./screens/settings_screen";
 import { ProcessingScreen } from "./screens/processing_screen";
-import { ReviewScreen } from "./screens/review_screen";
 import { BatchReview } from "./screens/batch_review";
 import { HistoryScreen } from "./screens/history_screen";
 
@@ -26,7 +26,6 @@ export class AiStudioAction extends Component {
         CaptureScreen,
         SettingsScreen,
         ProcessingScreen,
-        ReviewScreen,
         BatchReview,
         HistoryScreen,
     };
@@ -79,29 +78,7 @@ export class AiStudioAction extends Component {
     }
 
     async _jsonRpc(url, params = {}) {
-        const response = await fetch(url, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                jsonrpc: "2.0",
-                method: "call",
-                params: params,
-            }),
-        });
-        if (!response.ok) {
-            // 413 (çok büyük istek), oturum süresi dolması vb. HTML döner:
-            // JSON parse hatası yerine anlamlı mesaj ver
-            throw new Error(response.status === 413
-                ? _t("Yüklenen veri çok büyük (HTTP 413).")
-                : _t("Sunucu hatası (HTTP %s).", response.status));
-        }
-        const data = await response.json();
-        if (data.error) {
-            throw new Error(data.error.data?.message || data.error.message || "RPC Error");
-        }
-        return data.result;
+        return aisRpc(url, params);
     }
 
     async loadInitialData() {
@@ -335,52 +312,11 @@ export class AiStudioAction extends Component {
             this.navigateTo("scan");
             return;
         }
-        const res = await this._jsonRpc("/ai_studio/generation_status/" + this.state.sessionId, {});
-        this.state.generations = res.generations || [];
-        this.navigateTo("review");
-    }
-
-    async onApproveGeneration(genId, isPrimary) {
-        const res = await this._jsonRpc("/ai_studio/approve_generation", {
-            generation_id: genId,
-            is_primary: isPrimary,
-        });
-        if (res.success) {
-            this.notification.add(_t("Görsel onaylandı."), { type: "success", sticky: false });
-            await this.refreshGenerations();
-        }
-    }
-
-    async onRejectGeneration(genId, reasonId, prompt) {
-        const res = await this._jsonRpc("/ai_studio/reject_generation", {
-            generation_id: genId,
-            reason_id: reasonId,
-            revision_prompt: prompt,
-        });
-        if (res.success) {
-            this.notification.add(_t("Revizyon gönderildi."), { type: "warning", sticky: false });
-            this.navigateTo("processing");
-        } else if (res.needs_supervisor) {
-            this.notification.add(res.error, { type: "danger", sticky: false });
-        }
-    }
-
-    async onCompleteSession() {
-        const res = await this._jsonRpc("/ai_studio/complete_session", {
-            session_id: this.state.sessionId,
-        });
-        if (res.success) {
-            this.notification.add(_t("Görseller ürüne kaydedildi!"), { type: "success", sticky: false });
-            this.resetSession();
-            this.navigateTo("scan");
-        } else {
-            this.notification.add(res.error || _t("Hata oluştu."), { type: "danger", sticky: false });
-        }
-    }
-
-    async refreshGenerations() {
-        const res = await this._jsonRpc("/ai_studio/generation_status/" + this.state.sessionId, {});
-        this.state.generations = res.generations || [];
+        // Tek inceleme arayüzü: backend'deki review popup (kilit, revizyon, aday seçimi)
+        const sessionId = this.state.sessionId;
+        this.resetSession();
+        this.navigateTo("scan");
+        await openReviewPopup(this.actionService, sessionId);
     }
 
     resetSession() {

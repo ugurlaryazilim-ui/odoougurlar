@@ -36,33 +36,6 @@
                     onProcessingComplete.bind="onProcessingComplete"
                     onBackToScan.bind="onBackToScan"/>
             </t>
-            <!-- Review ekranı sadece onayıcı ve yönetici için -->
-            <t t-elif="state.currentScreen === 'review' and state.userRole !== 'operator'">
-                <ReviewScreen
-                    sessionId="state.sessionId"
-                    generations="state.generations"
-                    rejectReasons="state.rejectReasons"
-                    onApproveGeneration.bind="onApproveGeneration"
-                    onRejectGeneration.bind="onRejectGeneration"
-                    onCompleteSession.bind="onCompleteSession"
-                    onBackToScan.bind="onBackToScan"/>
-            </t>
-            <!-- Operatör review ekranına erişmeye çalışırsa scan'e yönlendir -->
-            <t t-elif="state.currentScreen === 'review' and state.userRole === 'operator'">
-                <div class="ais-screen ais-processing">
-                    <div class="ais-header">
-                        <h2 class="ais-title">✅ İşlem Tamamlandı</h2>
-                    </div>
-                    <div class="ais-info-box">
-                        <p>📷 Fotoğraflar başarıyla AI'ya gönderildi. Onayıcı inceleyecek.</p>
-                    </div>
-                    <div class="ais-bottom-bar">
-                        <button class="ais-btn-primary ais-btn-large" t-on-click="onBackToScan">
-                            🔍 Başka Ürün Tara
-                        </button>
-                    </div>
-                </div>
-            </t>
             <t t-elif="state.currentScreen === 'batch'">
                 <BatchReview onBackToScan.bind="onBackToScan"/>
             </t>

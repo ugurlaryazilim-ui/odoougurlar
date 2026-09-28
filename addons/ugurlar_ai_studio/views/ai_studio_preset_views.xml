@@ -78,4 +78,14 @@
             </form>
         </field>
     </record>
+
+    <!-- Liste "İşlem" menüsü: güncel promptla toplu manken yeniden üretimi -->
+    <record id="action_server_regenerate_mannequins" model="ir.actions.server">
+        <field name="name">Mankenleri Yeniden Üret (güncel prompt)</field>
+        <field name="model_id" ref="model_ai_studio_model_preset"/>
+        <field name="binding_model_id" ref="model_ai_studio_model_preset"/>
+        <field name="binding_view_types">list,form</field>
+        <field name="state">code</field>
+        <field name="code">action = records.action_regenerate_mannequins()</field>
+    </record>
 </odoo>
