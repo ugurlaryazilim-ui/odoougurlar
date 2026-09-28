@@ -519,6 +519,30 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     else:
         sub_type = 'tops'  # Safe fallback
 
+    # ═══ GARMENT TYPE NORMALİZASYONU (Diffusion Model Halüsinasyon Önleyici) ═══
+    # Eğer sub_type elbise ise, Gemini analizinde "tunik", "kazak", "gömlek" gibi kelimeler
+    # kalmışsa difüzyon modeli bunu üst giyim sanıp altına pantolon giydirir.
+    if sub_type == 'dress':
+        gt_lower = garment_type.lower()
+        non_dress_words = ['tunik', 'tunic', 'kazak', 'sweater', 'hırka', 'cardigan',
+                           'bluz', 'blouse', 'gömlek', 'shirt', 'tişört', 't-shirt', 'tshirt',
+                           'sweatshirt', 'hoodie', 'süveter', 'üst giyim', 'top']
+        if any(w in gt_lower for w in non_dress_words) and not any(d in gt_lower for d in ['elbise', 'dress', 'gown']):
+            if 'triko' in gt_lower or 'knit' in gt_lower:
+                garment_type = 'knit dress'
+            elif 'gömlek' in gt_lower or 'shirt' in gt_lower:
+                garment_type = 'shirt dress'
+            else:
+                garment_type = 'dress'
+    elif sub_type == 'skirt':
+        gt_lower = garment_type.lower()
+        if 'etek' not in gt_lower and 'skirt' not in gt_lower:
+            garment_type = 'skirt'
+    elif sub_type == 'shorts':
+        gt_lower = garment_type.lower()
+        if 'şort' not in gt_lower and 'sort' not in gt_lower and 'shorts' not in gt_lower:
+            garment_type = 'shorts'
+
     # ═══ FASHN PROVIDER (minimal prompt, kendi try-on modeli) ═══
     if provider_type == 'fashn':
         base_prompt = FASHN_VIEW_TEMPLATES.get(photo_type, FASHN_VIEW_TEMPLATES['front'])
@@ -526,7 +550,7 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
 
         # Fashn icin outfit directive ve prompt locks
         if sub_type in ('dress', 'skirt', 'shorts'):
-            base_prompt += " Natural bare legs below garment hemline."
+            base_prompt += " Remove all pants, trousers, and jeans. Natural bare legs below garment hemline. No bottom clothing underneath."
         elif sub_type == 'tops':
             base_prompt += " Model wears full-length dark trousers."
         elif sub_type == 'bottoms':

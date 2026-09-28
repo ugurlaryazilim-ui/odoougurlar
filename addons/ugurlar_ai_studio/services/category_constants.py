@@ -68,21 +68,21 @@ FALSE_POSITIVE_CLEAN_KW = ['tişört', 'tisort', 'tısört', 'tısort', 'tshirt'
 # Bacak kuralları — kıyafet uzunluğuna göre
 LEG_RULES = {
     'dress': {
-        'mini':    'Natural bare legs visible from mid-thigh down to shoes.',
-        'midi':    'Natural bare legs visible from mid-calf down to shoes.',
-        'knee':    'Natural bare legs visible from knee down to shoes.',
-        'maxi':    'Dress hemline near ankles, only feet and shoes visible.',
-        'default': 'Natural bare legs below dress hemline.',
+        'mini':    'Bare skin female legs completely visible from mid-thigh down to bare ankles and shoes. Absolutely no pants, no trousers, no jeans, no leggings, no tights.',
+        'midi':    'Bare skin female legs completely visible from mid-calf down to bare ankles and shoes. Absolutely no pants, no trousers, no jeans, no leggings, no tights.',
+        'knee':    'Bare skin female legs completely visible from knee down to bare ankles and shoes. Absolutely no pants, no trousers, no jeans, no leggings, no tights.',
+        'maxi':    'Dress hemline near ankles, bare feet and shoes visible. Absolutely no pants or trousers underneath.',
+        'default': 'Bare skin female legs completely visible below dress hemline down to shoes. Absolutely no pants, no trousers, no jeans, no leggings, no tights.',
     },
     'skirt': {
-        'mini':    'Natural bare legs visible from mid-thigh down to shoes.',
-        'midi':    'Natural bare legs visible from mid-calf down to shoes.',
-        'knee':    'Natural bare legs visible from knee down to shoes.',
-        'maxi':    'Skirt hemline near ankles, only feet and shoes visible.',
-        'default': 'Natural bare legs below skirt hemline.',
+        'mini':    'Bare skin female legs completely visible from mid-thigh down to bare ankles and shoes. Absolutely no pants, no trousers, no jeans, no leggings, no tights.',
+        'midi':    'Bare skin female legs completely visible from mid-calf down to bare ankles and shoes. Absolutely no pants, no trousers, no jeans, no leggings, no tights.',
+        'knee':    'Bare skin female legs completely visible from knee down to bare ankles and shoes. Absolutely no pants, no trousers, no jeans, no leggings, no tights.',
+        'maxi':    'Skirt hemline near ankles, bare feet and shoes visible. Absolutely no pants or trousers underneath.',
+        'default': 'Bare skin female legs completely visible below skirt hemline down to shoes. Absolutely no pants, no trousers, no jeans, no leggings, no tights.',
     },
     'shorts': {
-        'default': 'Natural bare legs below shorts hemline.',
+        'default': 'Bare skin female legs completely visible below shorts down to shoes. Absolutely no long pants, no trousers, no leggings.',
     },
 }
 
@@ -111,28 +111,29 @@ SEEDREAM_TEMPLATES = {
     ('dress', 'front'): (
         "Dress the model in Figure 2 with the {garment_type} from Figure 1. "
         "This is a {color} {fabric} {garment_type}. "
-        "Replace both top and bottom of Figure 2 with this {garment_type}. "
+        "CRITICAL: Strip and replace all lower body clothing from Figure 2. "
+        "The model wears ONLY this one-piece {garment_type} with bare skin legs — NO pants, NO trousers, NO jeans, NO leggings underneath. "
         "{leg_rule} "
         "Keep face, hair, body proportions from Figure 2. "
         "Professional e-commerce photo, white studio, even lighting. "
         "{hand_pose} "
         "{collar_note}{graphic_note}"
-        ""
         "{extra_prompt}"
     ),
     # DRESS — BACK
     ('dress', 'back'): (
         "Back view of the model from Figure 3 wearing the {garment_type} from Figure 1. "
         "Model facing away from camera, showing back of this {color} {fabric} {garment_type}. "
+        "Bare skin legs visible below hemline — NO pants, NO trousers, NO leggings underneath. "
         "Same model, hair, shoes as Figure 3. {leg_rule} "
         "White studio background, even lighting. "
-        ""
         "{extra_prompt}"
     ),
     # DRESS — SIDE
     ('dress', 'side'): (
         "45-degree side view of the model from Figure 3 wearing the {garment_type} from Figure 1. "
         "Show side profile of this {color} {fabric} {garment_type}. "
+        "Bare skin legs visible below hemline — NO pants, NO trousers, NO leggings underneath. "
         "Same model, hair, shoes as Figure 3. {leg_rule} "
         "White studio background, even lighting. "
         "{extra_prompt}"
@@ -210,26 +211,27 @@ SEEDREAM_TEMPLATES = {
     ('skirt', 'front'): (
         "Dress the model in Figure 2 with the skirt from Figure 1. "
         "This is a {color} {fabric} skirt. "
-        "Replace bottom clothing of Figure 2 with this skirt only. "
+        "CRITICAL: Replace all pants and bottom clothing of Figure 2 with this skirt only. "
+        "The model wears ONLY this skirt on the bottom with bare skin legs — NO pants, NO trousers, NO jeans underneath. "
         "{leg_rule} "
         "Neutral fitted top on upper body. Keep face, hair, shoes from Figure 2. "
         "Professional e-commerce photo, white studio, even lighting. "
         "{hand_pose} "
-        ""
         "{extra_prompt}"
     ),
     # SKIRT — BACK
     ('skirt', 'back'): (
         "Back view of the model from Figure 3 wearing the skirt from Figure 1. "
         "Model facing away, showing back of this {color} {fabric} skirt. "
+        "Bare skin legs visible below hemline — NO pants, NO trousers underneath. "
         "Same top and shoes as Figure 3. {leg_rule} "
         "White studio background, even lighting. "
-        ""
         "{extra_prompt}"
     ),
     # SKIRT — SIDE
     ('skirt', 'side'): (
         "45-degree side view of the model from Figure 3 wearing the skirt from Figure 1. "
+        "Bare skin legs visible below hemline — NO pants, NO trousers underneath. "
         "Same top and shoes as Figure 3. {leg_rule} "
         "White studio background, even lighting. "
         "{extra_prompt}"
@@ -241,27 +243,28 @@ SEEDREAM_TEMPLATES = {
     ('shorts', 'front'): (
         "Dress the model in Figure 2 with the shorts from Figure 1. "
         "This is {color} {fabric} shorts. "
-        "Replace bottom clothing of Figure 2 with these shorts only. "
-        "Natural bare legs below shorts hemline. "
+        "CRITICAL: Replace all long pants and bottom clothing of Figure 2 with these shorts only. "
+        "The model wears ONLY these shorts on the bottom with bare skin legs — NO long pants, NO trousers underneath. "
+        "Bare skin legs completely visible below shorts hemline down to shoes. "
         "Neutral fitted top on upper body. Keep face, hair, shoes from Figure 2. "
         "Professional e-commerce photo, white studio, even lighting. "
         "{hand_pose} "
-        ""
         "{extra_prompt}"
     ),
     # SHORTS — BACK
     ('shorts', 'back'): (
         "Back view of the model from Figure 3 wearing the shorts from Figure 1. "
         "Model facing away, showing back of these {color} {fabric} shorts. "
-        "Same top and shoes as Figure 3. Natural bare legs below shorts. "
+        "Bare skin legs completely visible below shorts down to shoes — NO long pants, NO trousers. "
+        "Same top and shoes as Figure 3. "
         "White studio background, even lighting. "
-        ""
         "{extra_prompt}"
     ),
     # SHORTS — SIDE
     ('shorts', 'side'): (
         "45-degree side view of the model from Figure 3 wearing the shorts from Figure 1. "
-        "Same top and shoes as Figure 3. Natural bare legs below shorts. "
+        "Bare skin legs completely visible below shorts down to shoes — NO long pants, NO trousers. "
+        "Same top and shoes as Figure 3. "
         "White studio background, even lighting. "
         "{extra_prompt}"
     ),
@@ -285,21 +288,24 @@ SEEDREAM_DETAIL_TEMPLATE = (
 
 SEEDREAM_NEGATIVES = {
     'dress': (
-        "pants underneath, trousers underneath, leggings underneath, jeans underneath, "
-        "tights under dress, double-layered bottoms, "
+        "pants, trousers, jeans, leggings, tights, sweatpants, pants underneath, trousers underneath, "
+        "leggings underneath, jeans underneath, tights under dress, stockings, covered legs, denim, "
+        "denim pants, black trousers, navy trousers, double-layered bottoms, "
         "security tag, price tag, "
         "extra fingers, fused fingers, missing fingers, deformed hands, extra hand, mutated hands, "
         "mannequin, CGI, plastic skin, blurry, low resolution"
     ),
     'skirt': (
-        "pants underneath, trousers underneath, leggings underneath, "
-        "tights under skirt, double-layered bottoms, "
+        "pants, trousers, jeans, leggings, tights, sweatpants, pants underneath, trousers underneath, "
+        "leggings underneath, tights under skirt, stockings, covered legs, denim, denim pants, "
+        "black trousers, navy trousers, double-layered bottoms, "
         "security tag, price tag, "
         "extra fingers, fused fingers, missing fingers, deformed hands, extra hand, mutated hands, "
         "mannequin, CGI, plastic skin, blurry, low resolution"
     ),
     'shorts': (
-        "long pants underneath, trousers underneath, leggings underneath, "
+        "long pants, trousers, jeans, leggings, tights, pants underneath, trousers underneath, "
+        "leggings underneath, denim pants, sweatpants, "
         "security tag, price tag, "
         "extra fingers, fused fingers, missing fingers, deformed hands, extra hand, mutated hands, "
         "mannequin, CGI, plastic skin, blurry, low resolution"
