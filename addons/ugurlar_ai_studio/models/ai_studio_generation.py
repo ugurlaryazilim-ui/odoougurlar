@@ -85,6 +85,10 @@ class AiStudioGeneration(models.Model):
         help='Bu yön ürün kartına kaydedilirken hariç tutulacak',
     )
     is_exported_to_local = fields.Boolean(string='Klasöre Aktarıldı', default=False, index=True)
+    candidate_ids = fields.One2many(
+        'ai.studio.generation.candidate', 'generation_id', string='Alternatif Adaylar',
+        help='Aynı istekte üretilen diğer görseller; reviewer birini ana görsel yapabilir.',
+    )
     is_primary = fields.Boolean(
         string='Ana Resim',
         default=False,

@@ -89,6 +89,15 @@
                                 </div>
                             </div>
                         </setting>
+                        <setting string="Ön Görünüm Aday Sayısı"
+                                 help="Ön görünüm için üretilecek alternatif sayısı (1-4); reviewer en iyisini seçer">
+                            <div class="content-group">
+                                <div class="row mt16">
+                                    <label for="ai_studio_candidate_count" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="ai_studio_candidate_count" class="col-2"/>
+                                </div>
+                            </div>
+                        </setting>
                         <setting string="AI Görsel Denetim"
                                  help="Üretimleri Gemini ile pantolon/el/etiket hatalarına karşı denetle">
                             <field name="ai_studio_visual_qc"/>

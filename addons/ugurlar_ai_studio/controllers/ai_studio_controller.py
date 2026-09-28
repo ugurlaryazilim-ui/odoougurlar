@@ -552,6 +552,22 @@ class AiStudioController(http.Controller):
             _logger.exception('reject_generation hatasi: %s', e)
             return {'error': str(e)}
 
+    @http.route('/ai_studio/select_candidate', type='jsonrpc', auth='user', methods=['POST'])
+    def select_candidate(self, candidate_id):
+        """Alternatif adayı ana görsel yap. Sadece onaycı ve yönetici."""
+        try:
+            if not request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'):
+                return {'error': 'Bu işlemi yapmaya yetkiniz yok.'}
+            candidate = request.env['ai.studio.generation.candidate'].browse(int(candidate_id)).exists()
+            if not candidate:
+                return {'error': 'Aday bulunamadı.'}
+            candidate.action_select()
+            return {'success': True, 'generation_id': candidate.generation_id.id}
+        except Exception as e:
+            request.env.cr.rollback()
+            _logger.exception('select_candidate hatasi: %s', e)
+            return {'error': str(e)}
+
     @http.route('/ai_studio/cancel_revision', type='jsonrpc', auth='user', methods=['POST'])
     def cancel_revision(self, generation_id):
         """Devam eden veya takılı kalan bir revizyonu iptal et ve önceki haline döndür."""
@@ -718,6 +734,8 @@ class AiStudioController(http.Controller):
 
             # 4. Doğrudan ürüne kaydet (senkron)
             session._save_to_product(approved)
+            # Seçilmeyen alternatif adaylar artık gereksiz — depolamayı boşalt
+            session.generation_ids.candidate_ids.unlink()
 
             # 5. Oturumu tamamlandı olarak işaretle
             session.write({
@@ -924,6 +942,13 @@ class AiStudioController(http.Controller):
                         if i.strip()
                     ] if '⚠' in (gen.quality_details or '') else [],
                     'pending_revision': gen.state in ('pending', 'processing'),
+                    'candidates': [{
+                        'id': c.id,
+                        'url': '/web/image/ai.studio.generation.candidate/%d/image?width=400&unique=%d' % (
+                            c.id, int(c.write_date.timestamp()) if c.write_date else 0),
+                        'url_full': '/web/image/ai.studio.generation.candidate/%d/image?unique=%d' % (
+                            c.id, int(c.write_date.timestamp()) if c.write_date else 0),
+                    } for c in gen.candidate_ids] if gen.state == 'done' else [],
                     'is_excluded': gen.is_excluded,
                 })
 

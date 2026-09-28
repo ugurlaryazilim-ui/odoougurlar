@@ -74,6 +74,13 @@ class ResConfigSettings(models.TransientModel):
         help='Seedream v5 Pro çıktı boyutu (2:3). Her iki boyut da Trendyol 1200×1800 '
              'gereksinimini karşılar; yüksek detay zoom kalitesi için daha iyidir.',
     )
+    ai_studio_candidate_count = fields.Integer(
+        string='Ön Görünüm Aday Sayısı',
+        default=1,
+        config_parameter='ugurlar_ai_studio.candidate_count',
+        help='Seedream ön görünüm için kaç alternatif üretsin (1-4). Reviewer en iyisini seçer; '
+             'revizyon ihtiyacını azaltır. Her ek aday görsel başına ücretlendirilir.',
+    )
     ai_studio_visual_qc = fields.Boolean(
         string='AI Görsel Denetim',
         default=True,

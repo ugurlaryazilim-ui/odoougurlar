@@ -203,6 +203,32 @@ def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', anal
     return {'quality_score': qc['score'], 'quality_details': qc['details']}
 
 
+def _get_candidate_count(env, photo_type, provider_type):
+    """Ön görünüm için ayarlanan aday sayısı (Seedream/fal dışında ve diğer açılarda 1)."""
+    if photo_type != 'front' or provider_type != 'fal':
+        return 1
+    try:
+        count = int(env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.candidate_count', '1') or 1)
+    except ValueError:
+        count = 1
+    return max(1, min(4, count))
+
+
+def _store_candidates(gen, image_urls):
+    """İlk görsel dışındaki çıktıları aday olarak kaydet (indirme hatası üretimi bozmaz)."""
+    import requests as req_lib
+    vals = []
+    for seq, url in enumerate(image_urls, start=1):
+        try:
+            data = req_lib.get(url, timeout=60).content
+            vals.append({'generation_id': gen.id, 'sequence': seq,
+                         'image': base64.b64encode(_convert_to_jpeg(data))})
+        except Exception as e:
+            _logger.warning('Aday görsel indirilemedi (gen=%s): %s', gen.id, e)
+    if vals:
+        gen.env['ai.studio.generation.candidate'].create(vals)
+
+
 def _build_revision_instruction(gen):
     """Red sonrası revizyon talimatını İngilizce tek cümle olarak kur."""
     parts = []
@@ -2020,7 +2046,7 @@ class AiStudioSession(models.Model):
                         category=category_to_send,
                         mode=session.quality_mode or 'quality',
                         model_name=tryon_model,
-                        num_samples=1,
+                        num_samples=_get_candidate_count(env, photo_type, provider_type),
                         garment_photo_type='auto',
                         output_format='jpeg',
                         prompt=prompt_text,
@@ -2053,6 +2079,9 @@ class AiStudioSession(models.Model):
                             'cost': tryon_result.get('cost', 0.05),
                             'seed': saved_seed,
                         })
+                        extra_urls = (tryon_result.get('image_urls') or [])[1:]
+                        if extra_urls:
+                            _store_candidates(gen, extra_urls)
 
                         # ═══ FRONT SONRASI: REFERANS CACHE + OUTFIT ANALİZİ ═══
                         if photo_type == 'front':
@@ -2885,6 +2914,8 @@ class AiStudioSession(models.Model):
             gen.write({'state': 'failed', 'error_message': _('Kurtarılan fal sonucunda görsel yok.'),
                        'error_type': 'empty_result', 'is_retryable': True})
             return 'failed'
+        if len(urls) > 1:
+            _store_candidates(gen, urls[1:])
         gen.write({
             'generated_image': gen_b64,
             'state': 'done',

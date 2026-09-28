@@ -70,6 +70,19 @@ class TestAiStudioModels(TransactionCase):
         with self.assertRaises(UserError):
             session.action_start_processing()
 
+    # ── Alternatif aday seçimi ───────────────────────────────────────
+    def test_select_candidate_swaps_images(self):
+        session = self._session(self.red, state='review')
+        first, second = _image_b64((200, 30, 40)), _image_b64((20, 40, 200))
+        gen = self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'done',
+                               'generated_image': first})
+        cand = self.env['ai.studio.generation.candidate'].create({'generation_id': gen.id, 'image': second})
+        cand.action_select()
+        self.assertEqual(gen.generated_image, second)
+        self.assertEqual(cand.image, first, 'önceki ana görsel aday olarak kalmalı (geri alınabilir)')
+        with self.assertRaises(UserError):
+            cand.with_user(self.operator).action_select()
+
     # ── Ürüne kaydetme: diğer rengin AI galerisi korunmalı ───────────
     def test_save_to_product_keeps_other_color_images(self):
         Image_ = self.env['product.image']

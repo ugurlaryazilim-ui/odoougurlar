@@ -147,6 +147,12 @@ class TestSeedreamArguments(BaseCase):
                                        image_size=FalProvider.SEEDREAM_IMAGE_SIZES['standard'])
         self.assertAlmostEqual(result['cost'], 0.0675 + 0.0045, places=4)
 
+    def test_candidates_use_num_images_and_are_billed(self):
+        captured, result = self._call(photo_type='front', num_samples=3)
+        self.assertEqual(captured['arguments']['num_images'], 3)
+        # fake_subscribe tek görsel döndürür; maliyet dönen görsel sayısına göre
+        self.assertAlmostEqual(result['cost'], 0.135 + 0.0045, places=4)
+
     def test_on_enqueue_receives_request_id_and_endpoint(self):
         seen = []
         captured, _result = self._call(photo_type='front', on_enqueue=lambda rid, app: seen.append((rid, app)))

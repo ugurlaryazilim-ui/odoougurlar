@@ -359,6 +359,17 @@ async function openReviewPopup(initialSessionId) {
                                 <div class="ais-rp-img-wrap ais-rp-zoomable" data-zoom-src="${item.generated_url_full}">
                                     <img src="${item.generated_url}" class="ais-rp-img" alt="AI Sonucu"/>
                                 </div>
+                                ${canApprove && (item.candidates || []).length ? `
+                                    <div class="ais-rp-candidates">
+                                        <span class="ais-rp-candidates-label">Alternatifler</span>
+                                        ${item.candidates.map(c => `
+                                            <button class="ais-rp-candidate" data-candidate-id="${c.id}"
+                                                    title="Bunu ana görsel yap" aria-label="Alternatifi ana görsel yap">
+                                                <img src="${c.url}" alt=""/>
+                                            </button>
+                                        `).join('')}
+                                    </div>
+                                ` : ''}
                             </div>
                         </div>
                     `}
@@ -593,6 +604,11 @@ async function openReviewPopup(initialSessionId) {
             });
         });
 
+        // Alternatif aday seçimi: ana görselle yer değiştirir (geri alınabilir)
+        overlay.querySelectorAll('.ais-rp-candidate').forEach(btn => {
+            btn.addEventListener('click', () => selectCandidate(parseInt(btn.dataset.candidateId)));
+        });
+
         // Reason radio clicks
         overlay.querySelectorAll('.ais-rp-reason').forEach(el => {
             el.addEventListener('click', () => {
@@ -672,6 +688,28 @@ async function openReviewPopup(initialSessionId) {
             showToast('Onay hatası: ' + e.message);
             render();
         }
+    }
+
+    async function selectCandidate(candidateId) {
+        overlay.querySelectorAll('.ais-rp-candidate').forEach(b => { b.disabled = true; });
+        try {
+            const res = await _jsonRpc('/ai_studio/select_candidate', { candidate_id: candidateId });
+            if (!res || res.error) {
+                showToast('Aday seçilemedi: ' + ((res && res.error) || 'Sunucu yanıt vermedi'));
+            } else {
+                const freshData = await _jsonRpc('/ai_studio/review_data', { session_id: data.session_id });
+                const fresh = (freshData.items || []).find(fi => fi.id === res.generation_id);
+                const idx = items.findIndex(it => it.id === res.generation_id);
+                if (fresh && idx >= 0) {
+                    // Yerel onay / ana görsel işaretini koru
+                    items[idx] = { ...fresh, is_primary: items[idx].is_primary };
+                }
+                showToast('Alternatif ana görsel yapıldı.', 'success');
+            }
+        } catch (e) {
+            showToast('Aday seçilemedi: ' + e.message);
+        }
+        render();
     }
 
     async function toggleExclude() {
