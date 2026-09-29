@@ -13,6 +13,10 @@ from .ai_provider_base import AIProviderBase
 
 _logger = logging.getLogger(__name__)
 
+# fal_client her kuyruk durum sorgusunu (saniyede birkaç kez) httpx INFO satırı olarak
+# yazıyor ve log'u boğuyordu; uyarı/hatalar görünmeye devam eder
+logging.getLogger('httpx').setLevel(logging.WARNING)
+
 try:
     import fal_client
 except ImportError:
