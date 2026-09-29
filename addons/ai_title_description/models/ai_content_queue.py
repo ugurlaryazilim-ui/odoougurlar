@@ -68,8 +68,11 @@ class AIContentQueue(models.Model):
                 ('product_tmpl_id.product_variant_ids.barcode', operator, value)]
 
     @api.model
-    def _cron_process_queue(self, batch_size=10):
-        """Kuyruktan batch_size kadar ürün alıp AI içerik üretir."""
+    def _cron_process_queue(self, batch_size=10, only_ids=None):
+        """Kuyruktan batch_size kadar ürün alıp AI içerik üretir.
+
+        only_ids verilirse yalnızca o kuyruk kayıtları işlenir ("Şimdi İşle").
+        """
         from datetime import timedelta
         # 0. 20 dakikadan fazla 'processing' kalan takılı kayıtları sıfırla
         stuck_threshold = fields.Datetime.now() - timedelta(minutes=20)
@@ -89,8 +92,11 @@ class AIContentQueue(models.Model):
         if stuck_records:
             self.env.cr.commit()
 
+        domain = [('state', '=', 'pending')]
+        if only_ids:
+            domain.append(('id', 'in', list(only_ids)))
         records = self.search(
-            [('state', '=', 'pending')],
+            domain,
             limit=batch_size,
             order='priority asc, create_date asc'
         )
@@ -201,7 +207,10 @@ class AIContentQueue(models.Model):
                 }
 
                 if record.mode in ('title', 'both'):
-                    ecommerce_title = result.get('ecommerce_title', '').strip()
+                    # Ürün adı olacak başlık da klişe/yasaklı kelime ve uzunluk temizliğinden geçer
+                    ecommerce_title = (result.get('ecommerce_title') or '').strip()
+                    if ecommerce_title:
+                        ecommerce_title = tv.validate_and_fix(ecommerce_title, platform='genel')['fixed_title']
                     product_vals.update({
                         'ai_trendyol_title': fixed_title,
                         'ai_ecommerce_title': ecommerce_title,
@@ -227,7 +236,9 @@ class AIContentQueue(models.Model):
                         'ai_html_description': html_desc,
                         'ai_meta_description': result.get('meta_description', ''),
                         'description': html_desc or short_summary,
-                        'description_sale': html_desc,
+                        # Satış açıklaması düz metin alanıdır (teklif/fatura satırı, etiket):
+                        # HTML etiketleri görünmesin
+                        'description_sale': product._ai_sale_text(html_desc, short_summary),
                     })
 
                 # SEO anahtar kelimelerini E-Ticaret etiketlerine otomatik bağla
@@ -326,10 +337,12 @@ class AIContentQueue(models.Model):
             })
 
     def action_process_now(self):
-        """Kuyruk kaydını hemen senkron olarak işler."""
-        for record in self:
-            record.state = 'pending'
-        self._cron_process_queue(batch_size=len(self))
+        """Seçili kuyruk kayıtlarını hemen senkron olarak işler (yalnız bunları)."""
+        todo = self.filtered(lambda r: r.state != 'done')
+        if not todo:
+            return True  # boşken limit=0 "sınırsız" olur ve tüm kuyruk işlenirdi
+        todo.write({'state': 'pending'})
+        self._cron_process_queue(batch_size=len(todo), only_ids=todo.ids)
         return True
 
     def action_cancel(self):

@@ -60,6 +60,9 @@ class AIContentWizard(models.TransientModel):
     used_model = fields.Char('Kullanılan Model', readonly=True)
     prompt_used = fields.Text('Kullanılan Prompt', readonly=True)
     raw_response = fields.Text('Ham AI Yanıtı', readonly=True)
+    used_vision = fields.Boolean('Görsel Analiz Kullanıldı', readonly=True)
+    # Üretim anında açılan geçmiş kaydı: uygulanmasa da ödenen maliyet kayda geçer
+    log_id = fields.Many2one('ai.content.log', string='Üretim Kaydı', readonly=True)
 
     state = fields.Selection([
         ('draft', 'Hazır'),
@@ -208,6 +211,31 @@ class AIContentWizard(models.TransientModel):
         # Düzeltilmiş başlığı kullan
         if validation.get('fixed_title'):
             self.preview_trendyol_title = validation['fixed_title']
+        # Ürün adı olacak e-ticaret başlığı da klişe/yasaklı kelime ve uzunluk temizliğinden geçer
+        if self.preview_ecommerce_title:
+            self.preview_ecommerce_title = tv.validate_and_fix(
+                self.preview_ecommerce_title, platform='genel')['fixed_title']
+
+        self.used_vision = bool(image_base64)
+        # Maliyet ödendi: uygulanmasa da kayda geçsin (Uygula'da bu kayıt güncellenir)
+        self.log_id = self.env['ai.content.log'].sudo().create({
+            'product_tmpl_id': product.id,
+            'provider': provider_type,
+            'model_name': model_name,
+            'mode': self.mode,
+            'generated_title': self.preview_trendyol_title,
+            'generated_description': self.preview_html_description,
+            'applied': False,
+            'title_score': self.title_score,
+            'used_vision': self.used_vision,
+            'seo_keywords_used': self.preview_seo_keywords,
+            'prompt_tokens': prompt_toks,
+            'completion_tokens': comp_toks,
+            'token_count': total_toks,
+            'cost_estimate': cost,
+            'prompt_used': self.prompt_used,
+            'raw_response': self.raw_response,
+        })
 
         self.state = 'generated'
 
@@ -259,7 +287,9 @@ class AIContentWizard(models.TransientModel):
             # Odoo ana iç notlar (description) ve satış açıklaması (description_sale) alanlarını ZENGİN AÇIKLAMA ile güncelle
             if self.preview_html_description:
                 vals['description'] = self.preview_html_description
-                vals['description_sale'] = self.preview_html_description
+                # Satış açıklaması düz metin alanıdır (teklif/fatura satırı, etiket)
+                vals['description_sale'] = product._ai_sale_text(
+                    self.preview_html_description, self.preview_short_description)
             elif self.preview_short_description:
                 vals['description'] = self.preview_short_description
 
@@ -291,31 +321,39 @@ class AIContentWizard(models.TransientModel):
 
         product.write(vals)
 
-        # Üretim logunu kaydet
-        self.env['ai.content.log'].sudo().create({
-            'product_tmpl_id': product.id,
-            'provider': self.used_provider or self.provider,
-            'model_name': self.used_model or self.gemini_model,
-            'mode': self.mode,
+        # Üretimde açılan geçmiş kaydını "uygulandı" yap (elle düzeltilmiş son hâliyle)
+        log_vals = {
+            'applied': True,
             'generated_title': self.preview_trendyol_title,
             'generated_description': self.preview_html_description,
-            'title_score': self.title_score,
-            'applied': True,
-            'used_vision': bool(product.image_1920),
-            'seo_keywords_used': self.preview_seo_keywords,
-            'prompt_tokens': self.prompt_tokens,
-            'completion_tokens': self.completion_tokens,
-            'token_count': self.token_count,
-            'cost_estimate': self.cost_estimate,
-            'prompt_used': self.prompt_used,
-            'raw_response': self.raw_response,
-        })
+        }
+        if self.log_id:
+            self.log_id.sudo().write(log_vals)
+        else:
+            self.env['ai.content.log'].sudo().create(dict(log_vals, **{
+                'product_tmpl_id': product.id,
+                'provider': self.used_provider or self.provider,
+                'model_name': self.used_model or self.gemini_model,
+                'mode': self.mode,
+                'title_score': self.title_score,
+                'used_vision': self.used_vision,
+                'seo_keywords_used': self.preview_seo_keywords,
+                'prompt_tokens': self.prompt_tokens,
+                'completion_tokens': self.completion_tokens,
+                'token_count': self.token_count,
+                'cost_estimate': self.cost_estimate,
+                'prompt_used': self.prompt_used,
+                'raw_response': self.raw_response,
+            }))
 
         self.state = 'applied'
         return {'type': 'ir.actions.act_window_close'}
 
     def action_apply(self):
-        return self._apply_data(title=True, description=True)
+        # Seçilen moda uy: "Sadece Başlık"ta görünmeyen açıklama, "Sadece Açıklama"da
+        # görünmeyen başlık (ve ürün adı) ürüne yazılmasın
+        return self._apply_data(title=self.mode in ('title', 'both'),
+                                description=self.mode in ('description', 'both'))
 
     def action_apply_title_only(self):
         return self._apply_data(title=True, description=False)

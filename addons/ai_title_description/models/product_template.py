@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
+from odoo.tools import html2plaintext
 
 class ProductTemplate(models.Model):
     _inherit = 'product.template'
@@ -32,6 +33,23 @@ class ProductTemplate(models.Model):
                 'default_mode': 'both',
             }
         }
+
+    @api.model
+    def _ai_sale_text(self, html, fallback=''):
+        """description_sale düz metin alanı: HTML açıklamanın metin hâli (yoksa kısa özet)."""
+        if html:
+            text = html2plaintext(html).strip()
+            if text:
+                return text
+        return fallback or ''
+
+    def action_view_ai_logs(self):
+        """Bu ürünün AI üretim geçmişi (yalnız bu ürün)."""
+        self.ensure_one()
+        action = self.env['ir.actions.act_window']._for_xml_id('ai_title_description.action_ai_content_log')
+        action['domain'] = [('product_tmpl_id', '=', self.id)]
+        action['context'] = {'default_product_tmpl_id': self.id}
+        return action
 
     def _add_to_ai_queue(self, mode):
         """Toplu kuyruğa ekleme — Binary görselleri RAM'e çekmeden, batch insert ile güvenli ekler."""

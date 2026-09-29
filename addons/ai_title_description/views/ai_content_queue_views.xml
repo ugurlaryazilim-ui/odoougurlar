@@ -119,6 +119,7 @@ records.action_reset_to_pending()
             <field name="code">
 records.unlink()
             </field>
+            <field name="group_ids" eval="[(4, ref('ai_title_description.group_ai_content_manager'))]"/>
         </record>
 
         <!-- Aksiyonlar Menüsü: Toplu Durdur -->

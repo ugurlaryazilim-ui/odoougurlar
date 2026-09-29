@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from odoo import models, fields
+from odoo import api, models, fields
 
 class ResConfigSettings(models.TransientModel):
     _inherit = 'res.config.settings'
@@ -22,22 +22,36 @@ class ResConfigSettings(models.TransientModel):
         ('gpt-4o', 'GPT-4o (En Yüksek Kalite)')
     ], default='gpt-4o-mini', string="OpenAI Modeli", config_parameter='ai_title_description.openai_model')
 
-    ai_td_default_platform = fields.Selection([
-        ('trendyol', 'Trendyol'), 
-        ('hepsiburada', 'Hepsiburada'), 
-        ('genel', 'Genel E-Ticaret')
-    ], default='trendyol', string="Varsayılan Platform", config_parameter='ai_title_description.default_platform')
-    ai_td_use_vision = fields.Boolean("Görsel Analiz Aktif", default=True, config_parameter='ai_title_description.use_vision')
+    # Varsayılanı AÇIK kutular config_parameter ile tanımlanmaz: Odoo kutu kaldırılınca
+    # parametreyi siler, kod da varsayılan 'True' okuyup özelliği kapatılamaz yapıyordu.
+    # Açıkça 'True'/'False' olarak get_values/set_values ile saklanır.
+    ai_td_use_vision = fields.Boolean("Görsel Analiz Aktif")
     ai_td_image_size = fields.Selection([
         ('image_512', '512px (Hızlı)'), 
         ('image_1024', '1024px (Önerilen)'), 
         ('image_1920', '1920px (Detaylı)')
     ], default='image_1024', string="Görsel Boyutu", config_parameter='ai_title_description.image_size')
-    ai_td_default_tone = fields.Selection([
-        ('professional', 'Profesyonel'), 
-        ('casual', 'Samimi'), 
-        ('seo_marketing', 'SEO Odaklı')
-    ], default='seo_marketing', string="Varsayılan Ton", config_parameter='ai_title_description.default_tone')
-    ai_td_use_google_suggest = fields.Boolean("Google Suggest Aktif", default=True, config_parameter='ai_title_description.use_google_suggest')
-    ai_td_use_trendyol_suggest = fields.Boolean("Trendyol Suggest Aktif", default=True, config_parameter='ai_title_description.use_trendyol_suggest')
-    ai_td_use_search_grounding = fields.Boolean("Gemini Search Grounding", default=True, config_parameter='ai_title_description.use_search_grounding')
+    ai_td_use_google_suggest = fields.Boolean("Google Suggest Aktif")
+    ai_td_use_trendyol_suggest = fields.Boolean("Trendyol Suggest Aktif")
+    ai_td_use_search_grounding = fields.Boolean("Gemini Search Grounding")
+
+    _AI_TD_DEFAULT_ON_TOGGLES = {
+        'ai_td_use_vision': 'ai_title_description.use_vision',
+        'ai_td_use_google_suggest': 'ai_title_description.use_google_suggest',
+        'ai_td_use_trendyol_suggest': 'ai_title_description.use_trendyol_suggest',
+        'ai_td_use_search_grounding': 'ai_title_description.use_search_grounding',
+    }
+
+    @api.model
+    def get_values(self):
+        res = super().get_values()
+        icp = self.env['ir.config_parameter'].sudo()
+        for field_name, key in self._AI_TD_DEFAULT_ON_TOGGLES.items():
+            res[field_name] = icp.get_param(key, 'True') == 'True'
+        return res
+
+    def set_values(self):
+        super().set_values()
+        icp = self.env['ir.config_parameter'].sudo()
+        for field_name, key in self._AI_TD_DEFAULT_ON_TOGGLES.items():
+            icp.set_param(key, 'True' if self[field_name] else 'False')

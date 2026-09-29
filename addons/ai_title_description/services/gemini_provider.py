@@ -58,7 +58,10 @@ class GeminiContentProvider:
         Returns:
             dict: Structured JSON çıktı (trendyol_title, ecommerce_title, etc.)
         """
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={self.api_key}"
+        # Anahtar URL'de değil başlıkta: bağlantı hatası mesajlarına (log, kuyruk hata alanı,
+        # kullanıcıya gösterilen uyarı) URL ile birlikte sızmasın
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent"
+        headers = {'x-goog-api-key': self.api_key}
 
         # Build contents based on whether image is provided
         parts = []
@@ -111,7 +114,7 @@ class GeminiContentProvider:
         last_error = None
         for attempt in range(self.MAX_RETRIES + 1):
             try:
-                response = requests.post(url, json=payload, timeout=90)
+                response = requests.post(url, json=payload, headers=headers, timeout=90)
 
                 # Handle 429 Rate Limit with retry
                 if response.status_code == 429:
@@ -139,10 +142,12 @@ class GeminiContentProvider:
                     _logger.error("Gemini API boş yanıt: %s", json.dumps(result)[:500])
                     raise ValueError("Gemini API boş yanıt döndürdü.")
 
-                # Check if response was truncated
+                # Kesik yanıt: "tamir edilen" yarım açıklama ürüne yazılmasın; hata say,
+                # kuyruk yeniden dener / sihirbaz kullanıcıya bildirir
                 finish_reason = candidates[0].get('finishReason', '')
                 if finish_reason == 'MAX_TOKENS':
                     _logger.warning("Gemini yanıtı MAX_TOKENS nedeniyle kesildi!")
+                    raise ValueError("Gemini yanıtı token sınırında kesildi, içerik eksik. Lütfen tekrar deneyin.")
 
                 text = candidates[0]['content']['parts'][0]['text']
                 parsed = self._parse_json_response(text)
@@ -151,7 +156,9 @@ class GeminiContentProvider:
                 usage = result.get('usageMetadata', {})
                 parsed['_token_count'] = usage.get('totalTokenCount', 0)
                 parsed['_prompt_tokens'] = usage.get('promptTokenCount', 0)
-                parsed['_completion_tokens'] = usage.get('candidatesTokenCount', 0)
+                # Gemini 2.5 "düşünme" token'ları çıktı fiyatından ücretlendirilir
+                parsed['_completion_tokens'] = (usage.get('candidatesTokenCount', 0)
+                                                + usage.get('thoughtsTokenCount', 0))
 
                 _logger.info("Gemini API başarılı: %d token kullanıldı (deneme %d)",
                            parsed.get('_token_count', 0), attempt + 1)

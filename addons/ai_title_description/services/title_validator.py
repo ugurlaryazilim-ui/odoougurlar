@@ -30,6 +30,7 @@ class TitleValidator:
         for char in fixed_title:
             if char in self.BANNED_CHARS:
                 has_banned_chars = True
+                cleaned_chars.append(' ')  # "Pamuk/Elastan" → "Pamuk Elastan", birleşmesin
             else:
                 cleaned_chars.append(char)
         if has_banned_chars:

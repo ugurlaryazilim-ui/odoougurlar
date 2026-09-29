@@ -134,12 +134,22 @@ Yanıtın SADECE ve SADECE bir JSON objesi olmalı:
             prompt_parts.append("- ⛔ 'Şık ve konforlu' gibi basmakalıp laflar ekleme, sadece gördüğün fiziksel detayları (ör. dik yaka, fermuarlı, örme doku) yaz.")
             prompt_parts.append("- Görselde görünmeyen özellikleri UYDURMA.")
 
-        # Açıklama kalitesi vurgusu
-        prompt_parts.append("\n📝 AÇIKLAMA KALİTESİ:")
-        prompt_parts.append("- Açıklama en az 150 kelime, ideal 200-250 kelime olmalı.")
-        prompt_parts.append("- ⛔ 'Şık', 'konforlu', 'vazgeçilmez' gibi basmakalıp dolgu kelimeleri KULLANMA.")
-        prompt_parts.append("- Sadece ürünün somut niteliklerini (kumaş yapısı, dikiş, yaka, kol, kesim) anlat.")
-            
+        if mode == 'title':
+            # Kullanılmayacak açıklamayı üretip ücretini ödemeyelim
+            prompt_parts.append("\n🎯 BU İSTEKTE SADECE BAŞLIK ÜRET:")
+            prompt_parts.append("- trendyol_title, ecommerce_title, meta_title ve seo_keywords alanlarını doldur.")
+            prompt_parts.append('- short_summary, html_description ve meta_description alanlarını boş metin (""), key_features alanını boş liste ([]) bırak.')
+        else:
+            if mode == 'description':
+                prompt_parts.append("\n🎯 BU İSTEKTE SADECE AÇIKLAMA ÜRET:")
+                prompt_parts.append("- short_summary, key_features, html_description, meta_description ve seo_keywords alanlarını doldur.")
+                prompt_parts.append('- trendyol_title, ecommerce_title ve meta_title alanlarını boş metin ("") bırak.')
+            # Açıklama kalitesi vurgusu
+            prompt_parts.append("\n📝 AÇIKLAMA KALİTESİ:")
+            prompt_parts.append("- Açıklama en az 150 kelime, ideal 200-250 kelime olmalı.")
+            prompt_parts.append("- ⛔ 'Şık', 'konforlu', 'vazgeçilmez' gibi basmakalıp dolgu kelimeleri KULLANMA.")
+            prompt_parts.append("- Sadece ürünün somut niteliklerini (kumaş yapısı, dikiş, yaka, kol, kesim) anlat.")
+
         return "\n".join(prompt_parts)
 
     def _detect_category_template(self, category_name):

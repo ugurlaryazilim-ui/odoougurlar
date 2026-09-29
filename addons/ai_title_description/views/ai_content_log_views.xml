@@ -114,7 +114,7 @@
             <field name="search_view_id" ref="view_ai_content_log_search"/>
         </record>
 
-        <menuitem id="menu_ai_content_root" name="AI İçerik"/>
+        <menuitem id="menu_ai_content_root" name="AI İçerik" groups="ai_title_description.group_ai_content_user"/>
         <menuitem id="menu_ai_content_log" name="İçerik Geçmişi" parent="menu_ai_content_root" action="action_ai_content_log"/>
     </data>
 </odoo>

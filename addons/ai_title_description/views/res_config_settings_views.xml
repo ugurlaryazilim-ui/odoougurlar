@@ -16,7 +16,7 @@
 
                         <block title="Google Gemini API &amp; Model" name="gemini_api">
                             <setting id="gemini_api_key_setting" string="Gemini API Anahtarı" help="Google AI Studio (aistudio.google.com) üzerinden alınan API anahtarı">
-                                <field name="ai_td_gemini_api_key"/>
+                                <field name="ai_td_gemini_api_key" password="True"/>
                             </setting>
                             <setting string="Gemini Modeli" help="Kullanılacak Gemini yapay zeka modeli">
                                 <field name="ai_td_gemini_model"/>
@@ -25,21 +25,13 @@
 
                         <block title="OpenAI (ChatGPT) API &amp; Model" name="openai_api">
                             <setting id="openai_api_key_setting" string="OpenAI API Anahtarı" help="OpenAI Platform (platform.openai.com) üzerinden alınan API anahtarı">
-                                <field name="ai_td_openai_api_key"/>
+                                <field name="ai_td_openai_api_key" password="True"/>
                             </setting>
                             <setting string="OpenAI Modeli" help="Kullanılacak GPT modeli (GPT-4o veya GPT-4o-mini)">
                                 <field name="ai_td_openai_model"/>
                             </setting>
                         </block>
 
-                        <block title="Varsayılan Ayarlar" name="ai_defaults">
-                            <setting string="Hedef Platform">
-                                <field name="ai_td_default_platform"/>
-                            </setting>
-                            <setting string="İçerik Tonu">
-                                <field name="ai_td_default_tone"/>
-                            </setting>
-                        </block>
                         <block title="Görsel Analiz" name="ai_vision">
                             <setting string="Görsel Analizi Kullan" help="Ürün görselinden yaka tipi, kumaş, desen gibi detayları çıkarır">
                                 <field name="ai_td_use_vision"/>
@@ -55,7 +47,7 @@
                             <setting string="Trendyol Autocomplete (Ücretsiz)" help="Trendyol arama önerilerinden anahtar kelime keşfi">
                                 <field name="ai_td_use_trendyol_suggest"/>
                             </setting>
-                            <setting string="Gemini Search Grounding" help="Gemini'nin Google Search ile gerçek zamanlı SEO verisi çekmesi (Sadece Gemini)">
+                            <setting string="Gemini Search Grounding" help="Gemini'nin Google Search ile gerçek zamanlı SEO verisi çekmesi (Sadece Gemini). Not: Gemini aramayı görselle birlikte kullanamadığı için yalnızca Görsel Analiz kapalıyken devreye girer.">
                                 <field name="ai_td_use_search_grounding"/>
                             </setting>
                         </block>
