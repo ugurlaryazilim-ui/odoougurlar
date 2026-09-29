@@ -261,3 +261,9 @@ class TestAiStudioModels(TransactionCase):
                                 groups='ugurlar_ai_studio.group_ai_studio_manager')
         self.assertIn(manager, self.Session._get_reviewer_users())
         self.assertNotIn(self.operator, self.Session._get_reviewer_users())
+
+    # ── fal içerik denetimi: manken düzenleme promptu "kıyafet çıkarma" içermemeli ──
+    def test_bare_leg_prompt_avoids_moderation_terms(self):
+        prompt = type(self.env['ai.studio.model.preset']).BARE_LEGS_EDIT_PROMPT.lower()
+        for word in ('remove', 'bare', 'trousers', 'naked', 'undress'):
+            self.assertNotIn(word, prompt)

@@ -211,10 +211,14 @@ class AiStudioModelPreset(models.Model):
             },
         }
 
+    # Kıyafet DEĞİŞTİRME dili: "remove the trousers / bare legs" fal içerik denetimine
+    # (content_policy_violation) takılıyor. Mini etek bacakları açık bırakır; elbise
+    # giydirilirken kıyafetin tamamı zaten değiştirilir.
     BARE_LEGS_EDIT_PROMPT = (
         "Image 1 shows a fashion model. Keep the same person, face, hair, body, pose, top, "
-        "lighting and background exactly. Change only the legs and feet: remove the trousers "
-        "and shoes and show natural bare legs with simple nude high-heeled pumps."
+        "lighting and background exactly. Change only the lower-body outfit: the model now "
+        "wears a plain black fitted mini skirt ending at mid-thigh and simple nude "
+        "high-heeled pumps, with the lower legs visible below the skirt."
     )
 
     def write(self, vals):
