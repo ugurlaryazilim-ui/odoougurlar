@@ -3319,25 +3319,62 @@ class AiStudioSession(models.Model):
                 _logger.warning("Aktivite oluşturulamadı (user=%s): %s", reviewer_id, e)
 
     def _generate_seo_content_gemini_threaded(self, session_id):
-        """Yeni bir Odoo Environment'i açarak Gemini API çağrısını yapar."""
-        from odoo import api, SUPERUSER_ID
-        import logging
-        _logger = logging.getLogger(__name__)
-        
+        """SEO açıklaması ve etiketlerini arka planda üretir.
+
+        Gemini çağrısı (5-60 sn) açık bir DB işlemi içinde beklenmez: oturum bu arada
+        güncellenince yazma "could not serialize access" ile düşüp sonuç kayboluyordu.
+        İstek kısa bir işlemde hazırlanır, çağrı işlem dışında yapılır, sonuç taze bir
+        işlemde (çakışmada yeniden denenerek) yazılır.
+        """
+        from odoo import SUPERUSER_ID
+
         try:
             with self.pool.cursor() as cr:
                 env = api.Environment(cr, SUPERUSER_ID, {})
-                session = env['ai.studio.session'].browse(session_id)
-                session._generate_seo_content_gemini()
-        except Exception as e:
-            _logger.exception("Gemini Thread error: %s", e)
+                request_args = env['ai.studio.session'].browse(session_id)._prepare_seo_request()
+            if not request_args:
+                return
+            url, headers, payload = request_args
 
-    def _generate_seo_content_gemini(self):
-        """Gemini API kullanarak SEO açıklaması ve etiket üretir."""
-        import requests
-        import json
-        import logging
-        _logger = logging.getLogger(__name__)
+            vals = None
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=60)
+                response.raise_for_status()
+                result_text = response.json()['candidates'][0]['content']['parts'][0]['text']
+                result_json = json.loads(result_text)
+                vals = {
+                    'seo_description': result_json.get('seo_description', ''),
+                    'seo_tags': result_json.get('seo_tags', ''),
+                }
+                message = "✨ Gemini SEO İçeriği başarıyla üretildi."
+            except Exception as e:
+                status = getattr(getattr(e, 'response', None), 'status_code', None)
+                _logger.error("Gemini SEO hatası: %s (status=%s)", e.__class__.__name__, status)
+                message = f"⚠️ Gemini SEO Üretimi Başarısız ({e.__class__.__name__}, status={status})"
+
+            for attempt in range(3):
+                try:
+                    with self.pool.cursor() as cr:
+                        env = api.Environment(cr, SUPERUSER_ID, {})
+                        session = env['ai.studio.session'].browse(session_id)
+                        if not session.exists():
+                            return
+                        if vals:
+                            session.write(vals)
+                        session.message_post(body=message)
+                        cr.commit()
+                    return
+                except Exception as write_err:
+                    if not _is_db_conflict(write_err) or attempt == 2:
+                        raise
+                    _logger.info("SEO yazımı çakıştı (session=%s), tekrar deneniyor (%d/3)",
+                                 session_id, attempt + 1)
+                    time.sleep(1.0 + attempt)
+        except Exception as e:
+            _logger.exception("Gemini SEO thread hatası (session=%s): %s", session_id, e)
+
+    def _prepare_seo_request(self):
+        """Gemini SEO isteğini hazırlar: (url, headers, payload) ya da None (atlanır)."""
 
         api_key = self.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.gemini_api_key')
         if not api_key:
@@ -3404,22 +3441,4 @@ Lütfen bu ürün için SEO'ya uygun, ikna edici ve çarpıcı 1 paragraflık bi
             }
         }
 
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=60)
-            response.raise_for_status()
-            data = response.json()
-            
-            result_text = data['candidates'][0]['content']['parts'][0]['text']
-            result_json = json.loads(result_text)
-            
-            self.write({
-                'seo_description': result_json.get('seo_description', ''),
-                'seo_tags': result_json.get('seo_tags', ''),
-            })
-            self.message_post(body="✨ Gemini SEO İçeriği başarıyla üretildi.")
-            self.env.cr.commit()
-            
-        except Exception as e:
-            status = getattr(getattr(e, 'response', None), 'status_code', None)
-            _logger.error("Gemini SEO hatası: %s (status=%s)", e.__class__.__name__, status)
-            self.message_post(body=f"⚠️ Gemini SEO Üretimi Başarısız ({e.__class__.__name__}, status={status})")
+        return url, headers, payload

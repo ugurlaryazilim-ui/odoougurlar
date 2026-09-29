@@ -664,8 +664,10 @@ class AiStudioController(http.Controller):
         except Exception as e:
             _logger.warning('deep-translator hatasi: %s', e)
         
-        _logger.error('Ceviri tamamen basarisiz, Turkce metin donuyor: %s', text[:100])
-        return {'translated': text}
+        # Türkçe metni "çeviri" diye döndürme: İngilizce alana yazılır ve modele Türkçe gider.
+        # Boş dönünce revizyon thread'i çeviriyi (HTTP isteği dışında) yeniden dener.
+        _logger.error('Ceviri tamamen basarisiz, arka planda tekrar denenecek: %s', text[:100])
+        return {'translated': ''}
 
     @http.route('/ai_studio/retry_generation', type='jsonrpc', auth='user', methods=['POST'])
     def retry_generation(self, generation_id):
