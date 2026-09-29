@@ -11,6 +11,9 @@ const MAX_LONG_EDGE = 3000;
 // Bu çözünürlüğün altındaki çekimde kullanıcı uyarılır
 const MIN_SHORT_EDGE = 1000;
 const JPEG_QUALITY = 0.92;
+// AI ön işleme görseli bu uzun kenara indirir: video karesi bunu karşılıyorsa sensör
+// fotoğrafına gerek yok ve kaydedilen alan önizlemedeki çerçeveyle birebir aynı olur
+const AI_LONG_EDGE = 1600;
 
 export class CaptureScreen extends Component {
     static template = "ugurlar_ai_studio.CaptureScreen";
@@ -102,9 +105,25 @@ export class CaptureScreen extends Component {
         }
     }
 
-    _updateCropFrame() {
+    /** Video karesinin 2:3 kırpımı yeterliyse kayıt oradan alınır (çerçeve = kayıt). */
+    _useVideoFrame() {
         const video = this.videoRef.el;
         if (!video || !video.videoWidth) {
+            return false;
+        }
+        if (typeof window.ImageCapture !== "function") {
+            return true;
+        }
+        const vw = video.videoWidth, vh = video.videoHeight;
+        const cropLong = vw / vh > OUTPUT_ASPECT ? vh : vw / OUTPUT_ASPECT;
+        return cropLong >= AI_LONG_EDGE;
+    }
+
+    _updateCropFrame() {
+        const video = this.videoRef.el;
+        // Sensör fotoğrafı (ImageCapture) farklı en-boy/alanla çekilir; o durumda
+        // yanıltıcı olmasın diye çerçeve gösterilmez
+        if (!video || !video.videoWidth || !this._useVideoFrame()) {
             this.state.cropFrameStyle = "";
             return;
         }
@@ -165,10 +184,10 @@ export class CaptureScreen extends Component {
         return { dataUrl: canvas.toDataURL("image/jpeg", JPEG_QUALITY), width: outW, height: outH };
     }
 
-    /** Mümkünse tam sensör çözünürlüğünde fotoğraf, değilse video karesi. */
+    /** Video karesi yeterliyse o (çerçeveyle aynı alan), değilse tam sensör fotoğrafı. */
     async _grabFrame() {
         const track = this.stream && this.stream.getVideoTracks()[0];
-        if (track && typeof window.ImageCapture === "function") {
+        if (track && !this._useVideoFrame() && typeof window.ImageCapture === "function") {
             try {
                 const blob = await new window.ImageCapture(track).takePhoto();
                 const bitmap = await createImageBitmap(blob);

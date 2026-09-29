@@ -708,6 +708,8 @@ class AiStudioController(http.Controller):
                 return {'success': False, 'error': 'Bu oturum zaten tamamlanmış.'}
             if session.state != 'review':
                 return {'success': False, 'error': 'Bu oturum tamamlanabilir durumda değil (durum: %s).' % session.state}
+            if session.generation_ids.filtered(lambda g: g.state in ('pending', 'processing')):
+                return {'success': False, 'error': 'İşlenmekte olan üretimler var; tamamlanmalarını bekleyin.'}
 
             # 1. is_primary değerlerini güncelle
             if approved_items:

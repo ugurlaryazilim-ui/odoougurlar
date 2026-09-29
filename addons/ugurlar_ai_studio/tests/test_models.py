@@ -209,3 +209,55 @@ class TestAiStudioModels(TransactionCase):
         self.Session._cron_check_stuck_generations()
         self.assertEqual(gen.state, 'pending', 'gönderilmeden ölen iş tekrar kuyruğa alınmalı')
         self.assertEqual(gen.retry_count, 1)
+
+    # ── Sırada bekleyen thread bitmiş işi yeniden çalıştırmaz (mükerrer ücret) ──
+    def test_thread_skips_work_finished_while_waiting(self):
+        session = self._session(self.red, state='review')
+        gen = self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'done'})
+        Session = type(self.Session)
+        with patch.object(Session, '_create_provider') as create_provider:
+            self.Session._retry_generation_thread_body(session.id, gen.id, 'key', self.env.uid)
+            self.Session._process_ai_thread_body(session.id, 'key', self.env.uid)
+        create_provider.assert_not_called()
+        self.assertEqual(gen.state, 'done')
+        self.assertEqual(session.state, 'review')
+
+    def test_cron_waits_for_front_in_fal_queue(self):
+        session = self._session(self.red, state='processing')
+        self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'processing',
+                         'fal_request_id': 'req-1', 'submitted_at': fields.Datetime.now()})
+        self.Gen.create({'session_id': session.id, 'photo_type': 'back', 'state': 'pending'})
+        found = self.Session.search([
+            ('id', '=', session.id),
+            ('generation_ids', 'not any', [
+                ('photo_type', '=', 'front'), ('state', '=', 'processing'), ('fal_request_id', '!=', False),
+            ]),
+        ])
+        self.assertFalse(found, 'ön yüz fal kuyruğundayken oturum yeniden başlatılmamalı')
+
+    # ── Arka ofis iptal / tamamlama korumaları ──────────────────────
+    def test_processing_revision_cannot_be_cancelled(self):
+        session = self._session(self.red, state='review')
+        parent = self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'done'})
+        rev = self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'processing',
+                               'parent_generation_id': parent.id})
+        with self.assertRaises(UserError):
+            rev.action_cancel_revision_record()
+        with self.assertRaises(UserError):
+            rev.action_batch_cancel()
+        self.assertTrue(rev.exists())
+
+    def test_mark_done_blocked_while_revision_pending(self):
+        session = self._session(self.red, state='review')
+        self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'done', 'is_approved': True})
+        self.Gen.create({'session_id': session.id, 'photo_type': 'back', 'state': 'pending'})
+        with self.assertRaises(UserError):
+            session.action_mark_done()
+        self.assertEqual(session.state, 'review')
+
+    # ── Odoo 19: onaycı grubunu yönetici üzerinden devralanlar da bildirim alır ──
+    def test_reviewer_users_include_implied_managers(self):
+        manager = new_test_user(self.env, login='ais_manager',
+                                groups='ugurlar_ai_studio.group_ai_studio_manager')
+        self.assertIn(manager, self.Session._get_reviewer_users())
+        self.assertNotIn(self.operator, self.Session._get_reviewer_users())

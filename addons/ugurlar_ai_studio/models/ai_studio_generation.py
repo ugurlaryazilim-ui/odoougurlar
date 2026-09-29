@@ -463,6 +463,9 @@ class AiStudioGeneration(models.Model):
         """Listeden veya formdan revizyonu iptal edip önceki haline döndür."""
         self._check_ai_studio_group('reviewer')
         self.ensure_one()
+        if self.state not in ('pending', 'failed'):
+            # İşlenen kayıt silinirse fal ücreti ödenir ama sonuç kaybolur
+            raise UserError(_('Yalnızca bekleyen veya başarısız revizyonlar iptal edilebilir.'))
         parent = self.parent_generation_id
         if not parent:
             raise UserError(_('Bu kaydın bağlı olduğu bir önceki versiyon bulunamadı.'))
@@ -622,9 +625,10 @@ class AiStudioGeneration(models.Model):
     def action_batch_cancel(self, *args, **kwargs):
         """Seçilen revizyonları iptal edip önceki hallerine döndür."""
         self._check_ai_studio_group('reviewer')
-        revisions = self.filtered(lambda g: g.parent_generation_id)
+        # İşlenen/tamamlanan revizyonlar silinmez (ücreti ödenmiş sonuç kaybolur)
+        revisions = self.filtered(lambda g: g.parent_generation_id and g.state in ('pending', 'failed'))
         if not revisions:
-            raise UserError(_('İptal edilecek geçerli bir revizyon kaydı seçilmedi.'))
+            raise UserError(_('İptal edilecek bekleyen veya başarısız bir revizyon seçilmedi.'))
         count = 0
         for gen in revisions:
             parent = gen.parent_generation_id

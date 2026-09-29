@@ -1328,7 +1328,7 @@ class AiStudioSession(models.Model):
         """Kaynak görseli AI try-on için hazırla: preprocess → bg_remove → hanger_remove → upload.
 
         Returns:
-            tuple: (garment_url, processed_b64) — CDN URL ve işlenmiş base64
+            tuple: (garment_url, processed_b64, erase_cost) — CDN URL, işlenmiş base64, etiket silme maliyeti
         """
         from ..services.garment_preprocessor import (
             preprocess_garment_image,
@@ -1837,6 +1837,13 @@ class AiStudioSession(models.Model):
         _logger.info("AI Thread starting for session %s with uid %s", session_id, uid)
         with self.pool.cursor() as cr:
             env = api.Environment(cr, uid, {'lang': 'tr_TR'})
+            session = env['ai.studio.session'].browse(session_id)
+            # Semaphore beklenirken iş başka bir thread/cron tarafından bitirilmiş ya da
+            # oturum iptal edilmiş olabilir: yeniden çalıştırmak mükerrer ücret demek
+            if not session.exists() or session.state not in ('preprocessing', 'processing'):
+                _logger.info('AI Thread: oturum %s artık işlenecek durumda değil (%s), atlandı.',
+                             session_id, session.exists() and session.state)
+                return
             provider_type = env['ir.config_parameter'].sudo().get_param(
                 'ugurlar_ai_studio.default_provider', 'fashn'
             )
@@ -1881,6 +1888,13 @@ class AiStudioSession(models.Model):
             generations = session.generation_ids.filtered(
                 lambda g: g.state == 'pending'
             )
+            # Ön yüz fal kuyruğunda sürüyorsa diğer görünümler onun sonucunu (referans +
+            # analiz) bekler; cron ön yüzü kurtarınca oturum yeniden başlatılır
+            if session.generation_ids.filtered(
+                    lambda g: g.photo_type == 'front' and g.state == 'processing' and g.fal_request_id):
+                _logger.info('AI Thread: ön yüz fal kuyruğunda (session=%s), diğer görünümler bekletiliyor.',
+                             session_id)
+                generations = generations.filtered(lambda g: g.photo_type == 'front')
 
             auto_bg = env['ir.config_parameter'].sudo().get_param(
                 'ugurlar_ai_studio.auto_bg_remove', 'True'
@@ -2097,6 +2111,7 @@ class AiStudioSession(models.Model):
 
                     # VIEW-SPESİFİK PROMPT OLUŞTURMA
                     prompt_text = ""
+                    negative_prompt_text = ""
                     try:
                         prompt_locks = global_prompt_locks
 
@@ -2402,6 +2417,12 @@ class AiStudioSession(models.Model):
 
             session = env['ai.studio.session'].browse(session_id)
             gen = env['ai.studio.generation'].browse(gen_id)
+            # Semaphore beklenirken üretim başka yerde tamamlanmış/iptal edilmiş olabilir:
+            # yeniden çalıştırmak mükerrer ücret ve onaylı görselin üzerine yazma demek
+            if not gen.exists() or gen.state != 'pending':
+                _logger.info('AI Retry Thread: gen %s artık bekleyen durumda değil (%s), atlandı.',
+                             gen_id, gen.exists() and gen.state)
+                return
             photo_type = gen.photo_type or 'front'
 
             try:
@@ -2749,6 +2770,11 @@ class AiStudioSession(models.Model):
         """Onaylanmış görselleri ürüne kaydet ve oturumu tamamla (Senkron)."""
         self.ensure_one()
         self._check_reviewer()
+        if self.state != 'review':
+            raise UserError(_('Bu oturum tamamlanabilir durumda değil.'))
+        if self.generation_ids.filtered(lambda g: g.state in ('pending', 'processing')):
+            # Süren revizyon, oturum kapandıktan sonra biterse ürüne hiç kaydedilmez
+            raise UserError(_('İşlenmekte olan üretimler var; tamamlanmalarını bekleyin.'))
         approved = self.generation_ids.filtered(
             lambda g: g.is_approved and g.state == 'done' and not g.is_excluded
         )
@@ -2763,6 +2789,8 @@ class AiStudioSession(models.Model):
 
         # Doğrudan ürüne kaydet
         self._save_to_product(approved)
+        # Seçilmeyen alternatif adaylar artık gereksiz — depolamayı boşalt
+        self.generation_ids.candidate_ids.unlink()
 
         self.reviewer_id = self.env.user
         self.state = 'done'
@@ -3123,6 +3151,12 @@ class AiStudioSession(models.Model):
                 ('state', 'in', active_states),
                 ('generation_ids.state', '=', 'pending'),
                 ('write_date', '<', now - timedelta(minutes=1)),
+                # Ön yüz fal kuyruğundaysa önce 0. adım sonucu alsın (referans + analiz)
+                ('generation_ids', 'not any', [
+                    ('photo_type', '=', 'front'),
+                    ('state', '=', 'processing'),
+                    ('fal_request_id', '!=', False),
+                ]),
             ] + self._lease_free_domain(), order='write_date asc', limit=slots)
             if waiting_sessions:
                 _logger.info('Cron Kuyruk: %d sahipsiz oturum başlatılıyor (%s)',
@@ -3225,8 +3259,9 @@ class AiStudioSession(models.Model):
         users_model = self.env['res.users'].sudo()
         if not reviewer_group:
             return users_model
-        # Odoo 19'da res.users.groups_id → group_ids olarak yeniden adlandırıldı
-        groups_field = 'group_ids' if 'group_ids' in users_model._fields else 'groups_id'
+        # Odoo 19: group_ids yalnız doğrudan atanan gruplar; all_group_ids devralınanlar
+        # dahil (yönetici grubu onaycıyı implied olarak içerir)
+        groups_field = 'all_group_ids' if 'all_group_ids' in users_model._fields else 'groups_id'
         return users_model.search([(groups_field, 'in', reviewer_group.id), ('active', '=', True)])
 
     def _notify_state_change(self):

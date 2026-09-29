@@ -144,7 +144,7 @@
                         class="btn-warning btn-sm"/>
                 <button name="action_cancel_revision_record" string="İptal Et" type="object"
                         icon="fa-times"
-                        invisible="state not in ('pending', 'processing', 'failed')"
+                        invisible="state not in ('pending', 'failed')"
                         confirm="Bu revizyonu iptal edip önceki görsele dönmek istediğinize emin misiniz?"
                         class="btn-secondary btn-sm"/>
                 <button name="action_open_session_review" string="İncele" type="object"
