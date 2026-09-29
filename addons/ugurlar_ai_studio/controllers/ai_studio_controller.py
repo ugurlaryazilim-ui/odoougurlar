@@ -121,7 +121,7 @@ class AiStudioController(http.Controller):
             # Güvenlik Kontrolü: Herhangi bir kullanıcı tarafından başlatılmış aktif oturum var mı? (sudo)
             existing_active_session = request.env['ai.studio.session'].sudo().search([
                 ('product_id', 'in', color_variants.ids),
-                ('state', 'in', ['photos_ready', 'processing', 'review', 'failed', 'saving'])
+                ('state', 'in', ['photos_ready', 'preprocessing', 'processing', 'review', 'failed', 'saving'])
             ], limit=1)
 
             if existing_active_session:
@@ -348,7 +348,8 @@ class AiStudioController(http.Controller):
                 # Aktif oturum var mi kontrol et (Aynı renkteki TÜM bedenler taranır - Record Rule aşımı için sudo)
                 active_session = request.env['ai.studio.session'].sudo().search([
                     ('product_id', 'in', color_variants.ids),
-                    ('state', 'in', ['draft', 'photos_ready', 'processing', 'review', 'failed', 'saving'])
+                    # Taslak aktif sayılmaz: Ayarlar'dan "Geri" denince ürün kilitli kalıyordu
+                    ('state', 'in', ['photos_ready', 'preprocessing', 'processing', 'review', 'failed', 'saving'])
                 ], limit=1)
 
                 # Resim var mı kontrol et — aynı renkteki varyantların KENDİ resmine bak
@@ -579,8 +580,11 @@ class AiStudioController(http.Controller):
             if not gen.exists():
                 return {'error': 'Üretim bulunamadı.'}
             
-            if gen.state not in ('pending', 'processing', 'failed'):
-                return {'error': 'Sadece bekleyen, işlenen veya başarısız revizyonlar iptal edilebilir.'}
+            if not gen.parent_generation_id:
+                return {'error': 'Yalnızca revizyonlar iptal edilebilir (ilk sürüm için "Tekrar Dene" kullanın).'}
+            if gen.state not in ('pending', 'failed'):
+                # İşlenen revizyon silinirse ödenmiş fal sonucu kaybolur
+                return {'error': 'Revizyon şu anda işleniyor; tamamlanınca iptal edebilirsiniz.'}
 
             parent = gen.parent_generation_id
             parent_id = parent.id if parent else False

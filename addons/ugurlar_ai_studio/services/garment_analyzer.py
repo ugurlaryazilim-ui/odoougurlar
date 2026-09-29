@@ -95,10 +95,18 @@ def _prepare_gemini_image(image_url):
             _logger.error('Failed to download image for Gemini: %s', e)
             return None, None
 
-    # Case 3: Raw base64 string
+    # Case 3: Raw base64 string — biçimi içerikten tespit et (ön işleme WebP üretir)
     try:
-        base64.b64decode(image_url)
-        return 'image/jpeg', image_url
+        raw = base64.b64decode(image_url)
+        mime_type = 'image/jpeg'
+        try:
+            import io
+            from PIL import Image
+            fmt = (Image.open(io.BytesIO(raw)).format or '').upper()
+            mime_type = {'PNG': 'image/png', 'WEBP': 'image/webp', 'JPEG': 'image/jpeg'}.get(fmt, 'image/jpeg')
+        except Exception:
+            pass
+        return mime_type, image_url
     except Exception:
         pass
 
@@ -326,14 +334,18 @@ def _analyze_via_fal(api_key, image_url, prompt):
     # Odoo Binary alanları bytes döner, str'ye çevir (JSON serialization için)
     if isinstance(image_url, bytes):
         image_url = image_url.decode('utf-8')
+    if not image_url.startswith(('http://', 'https://', 'data:')):
+        mime_type, b64 = _prepare_gemini_image(image_url)
+        image_url = 'data:%s;base64,%s' % (mime_type or 'image/jpeg', b64)
 
     try:
+        # any-llm yalnızca metin alır (görseli görmeden uydururdu); vision uç noktası şart
         result = fal_client.subscribe(
-            'fal-ai/any-llm',
+            'fal-ai/any-llm/vision',
             arguments={
                 'prompt': prompt,
                 'model': 'google/gemini-2.5-flash',
-                'image_url': image_url,
+                'image_urls': [image_url],
                 'max_tokens': 4096,
             },
             client_timeout=60,

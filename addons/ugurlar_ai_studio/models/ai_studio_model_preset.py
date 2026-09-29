@@ -225,7 +225,7 @@ class AiStudioModelPreset(models.Model):
         return super().write(vals)
 
     def _get_bare_leg_mannequin(self, view, gemini_api_key, fal_api_key):
-        """Elbise/etek/şort için bacakları açık manken görseli (base64).
+        """Elbise/etek/şort için bacakları açık manken görseli: (base64, maliyet).
 
         Önbellek yoksa: Gemini ile bacaklar kapalı mı bakılır; kapalıysa Seedream ile
         bir kez "çıplak bacak + topuklu" sürümü üretilip saklanır. Kontrol/üretim
@@ -235,33 +235,36 @@ class AiStudioModelPreset(models.Model):
         base_field = 'model_image_%s' % view
         legs_field = base_field + '_legs'
         if self[legs_field]:
-            return self[legs_field]
-        base = self[base_field] or self.model_image_front
+            return self[legs_field], 0.0
+        if view != 'front' and not self[base_field]:
+            # Bu açının kendi mankeni yok: ön mankenin sürümünü paylaş (ikinci kez ödeme yok)
+            return self._get_bare_leg_mannequin('front', gemini_api_key, fal_api_key)
+        base = self[base_field]
         if not base:
-            return base
+            return base, 0.0
 
         from ..services.garment_analyzer import mannequin_legs_covered
         covered = mannequin_legs_covered(gemini_api_key, base) if gemini_api_key else None
         if covered is False:
             self.sudo().write({legs_field: base})
-            return base
+            return base, 0.0
         if covered is None and self.garment_type == 'one_piece':
-            return base  # kontrol yapılamadı; elbise preset'i, olduğu gibi kullan
+            return base, 0.0  # kontrol yapılamadı; elbise preset'i, olduğu gibi kullan
         if not fal_api_key:
-            return base
+            return base, 0.0
 
         from ..services.fal_provider import FalProvider
         try:
-            data, _cost = FalProvider(fal_api_key).single_image_edit(base, self.BARE_LEGS_EDIT_PROMPT)
+            data, cost = FalProvider(fal_api_key).single_image_edit(base, self.BARE_LEGS_EDIT_PROMPT)
         except Exception as e:
             _logger.warning('Çıplak bacak manken üretilemedi (preset=%s, %s): %s', self.id, view, e)
-            return base
+            return base, 0.0
         if not data:
-            return base
+            return base, 0.0
         legs_b64 = base64.b64encode(data)
         self.sudo().write({legs_field: legs_b64})
         _logger.info('Çıplak bacak manken türetildi ve saklandı (preset=%s, %s)', self.id, view)
-        return legs_b64
+        return legs_b64, cost
 
     def action_regenerate_mannequins(self):
         """Seçili presetlerin mankenlerini güncel promptla yeniden üret (toplu, sıralı).

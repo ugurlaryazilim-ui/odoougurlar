@@ -101,8 +101,13 @@ class TestAiStudioModels(TransactionCase):
         # Bacaklar zaten açıksa orijinal görsel önbelleğe alınır, düzenleme yapılmaz
         with patch('odoo.addons.ugurlar_ai_studio.services.garment_analyzer.mannequin_legs_covered',
                    return_value=False):
-            img = preset._get_bare_leg_mannequin('front', 'gemini-key', 'fal-key')
+            img, cost = preset._get_bare_leg_mannequin('front', 'gemini-key', 'fal-key')
         self.assertEqual(img, preset.model_image_front)
+        self.assertEqual(cost, 0.0)
+        # Arka mankeni olmayan preset ön sürümü paylaşır (ikinci kez ücret yok)
+        back_img, back_cost = preset._get_bare_leg_mannequin('back', 'gemini-key', 'fal-key')
+        self.assertEqual(back_img, preset.model_image_front_legs)
+        self.assertEqual(back_cost, 0.0)
         self.assertTrue(preset.model_image_front_legs)
         # Manken görseli değişince türetilmiş sürüm sıfırlanır
         preset.model_image_front = _image_b64((10, 10, 10))
@@ -119,6 +124,23 @@ class TestAiStudioModels(TransactionCase):
         self.assertEqual(icp.get_param('ugurlar_ai_studio.auto_bg_remove'), 'False')
         fresh = self.env['res.config.settings'].create({})
         self.assertFalse(fresh.ai_studio_auto_tag_fix, 'kapatılan kutu formda yeniden açık görünmemeli')
+
+    # ── Taslak oturum ürünü kilitlemez; bütçe revizyonlarda da geçerli ─
+    def test_draft_session_does_not_block_product(self):
+        session = self._session(self.red)  # "Geri" ile bırakılmış taslak
+        self.assertEqual(session.state, 'draft')
+        active = self.Session.search([
+            ('product_id', '=', self.red.id),
+            ('state', 'in', ['photos_ready', 'preprocessing', 'processing', 'review', 'failed', 'saving']),
+        ])
+        self.assertFalse(active)
+
+    def test_budget_blocks_revisions_too(self):
+        session = self._session(self.red, state='review')
+        gen = self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'pending', 'cost': 5.0})
+        self.env['ir.config_parameter'].sudo().set_param('ugurlar_ai_studio.monthly_budget', '1.0')
+        with self.assertRaises(UserError):
+            session._process_single_generation(gen)
 
     # ── Aylık bütçe ──────────────────────────────────────────────────
     def test_monthly_budget_blocks_new_processing(self):

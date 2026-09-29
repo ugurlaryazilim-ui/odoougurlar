@@ -5,6 +5,7 @@ import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { _t } from "@web/core/l10n/translation";
 import { markup } from "@odoo/owl";
+import { escape } from "@web/core/utils/strings";
 import { ConfirmationDialog, AlertDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
 import { aisRpc, openReviewPopup } from "./rpc_utils";
 
@@ -244,7 +245,7 @@ export class AiStudioAction extends Component {
                 // Varyant listesi HTML'i oluştur
                 const variantLines = variants.map(v => {
                     const colorLabel = v.color || v.attributes;
-                    return `<div style="padding:4px 0;">🎨 <strong>${colorLabel}</strong> <span style="color:#888;">(Stok: ${Math.floor(v.qty_available)})</span></div>`;
+                    return `<div style="padding:4px 0;">🎨 <strong>${escape(colorLabel)}</strong> <span style="color:#888;">(Stok: ${Math.floor(v.qty_available)})</span></div>`;
                 }).join('');
 
                 const bodyHtml = markup(
@@ -271,7 +272,6 @@ export class AiStudioAction extends Component {
                             barcode: nextVariant.barcode,
                             default_code: nextVariant.default_code,
                         };
-                        this.state.productGender = '';  // Aynı template, aynı cinsiyet
                         this.notification.add(
                             _t("🎨 " + (nextVariant.color || nextVariant.attributes) + " varyantı çekime hazır!"),
                             { type: "info", sticky: false }

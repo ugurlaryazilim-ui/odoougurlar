@@ -218,6 +218,12 @@ class TestSeedreamArguments(BaseCase):
 @tagged('post_install', '-at_install', 'ugurlar_ai_studio')
 class TestTagDetection(BaseCase):
 
+    def test_gemini_gets_real_mime_type(self):
+        webp = io.BytesIO()
+        Image.new('RGB', (10, 10)).save(webp, 'WEBP')
+        mime, _data = analyzer_module._prepare_gemini_image(base64.b64encode(webp.getvalue()).decode())
+        self.assertEqual(mime, 'image/webp')
+
     def test_invalid_boxes_are_dropped(self):
         fake = {'securityTags': [
             {'box_2d': [100, 100, 150, 150], 'label': 'alarm_tag', 'confidence': 0.9},

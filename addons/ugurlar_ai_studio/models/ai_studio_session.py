@@ -190,18 +190,15 @@ def _get_seedream_image_size(env):
 
 
 # Görsel denetimin bulduğu ve tek görsellik düzenlemeyle giderilebilen hatalar
+# Düzeltilebilir hatalar. Etiket türü hatalar KONUMLA maskeli silinir (istem yok);
+# pantolon için Seedream'e yalnızca olumlu tarif gider: görsel modeller olumsuzlanan
+# nesneyi ("remove the trousers") çizmeye meyillidir.
 AUTO_FIX_INSTRUCTIONS = {
-    'added_label': (
-        "Remove the extra label or patch that was added to the garment and restore the "
-        "fabric underneath with the same color and texture."
-    ),
-    'store_tag_visible': (
-        "Remove every store security tag, alarm pin, price tag and hangtag from the garment "
-        "and restore the fabric underneath with the same color, texture and pattern."
-    ),
+    'added_label': None,
+    'store_tag_visible': None,
     'pants_under_dress': (
-        "Remove the trousers, jeans, leggings or tights under the dress or skirt and show "
-        "natural bare legs below the hem with simple nude high-heeled pumps."
+        "Below the hem of the dress or skirt the model has natural bare legs and wears "
+        "simple nude high-heeled pumps."
     ),
 }
 
@@ -217,7 +214,7 @@ def _auto_fix_defects(env, generated_b64, codes, boxes=None):
     Returns:
         (bytes base64, float cost, list fixed_codes) veya (None, 0.0, [])
     """
-    fixable = [c for c in codes if c in AUTO_FIX_INSTRUCTIONS]
+    fixable = [c for c in codes if c in AUTO_FIX_INSTRUCTIONS]  # None = maskeli silme
     icp = env['ir.config_parameter'].sudo()
     fal_key = icp.get_param('ugurlar_ai_studio.fal_api_key')
     if not fixable or not fal_key:
@@ -240,16 +237,18 @@ def _auto_fix_defects(env, generated_b64, codes, boxes=None):
                 fixed.append('pants_under_dress')
         tag_codes = [c for c in ('store_tag_visible', 'added_label') if c in fixable]
         if tag_codes:
-            # Denetimin verdiği kutular (sonuç görselinde); yoksa ayrı tespit
-            tag_boxes = [dict(b, confidence=1.0, label='alarm_tag') for b in (boxes or [])
+            # Denetimin kutuları ORİJİNAL görsele aittir; pantolon düzeltmesi görseli
+            # yeniden ürettiyse konumlar kaymıştır — yeni görselde yeniden tespit et
+            usable_boxes = [] if 'pants_under_dress' in fixed else (boxes or [])
+            tag_boxes = [dict(b, confidence=1.0, label='alarm_tag') for b in usable_boxes
                          if b.get('code') in tag_codes]
             if not tag_boxes:
                 from ..services.garment_analyzer import detect_image_tags
                 tag_boxes = detect_image_tags(
                     None, current, gemini_api_key=icp.get_param('ugurlar_ai_studio.gemini_api_key', ''))
+            # Konum yoksa düzeltme yapılmaz (istemli düzenleme etiketi yeniden çizebilir);
+            # denetim uyarısı reviewer'da görünür
             data, cost = provider.erase_regions(current, tag_boxes, pad_ratio=0.35) if tag_boxes else (None, 0.0)
-            if not data:
-                data, cost = _seedream([AUTO_FIX_INSTRUCTIONS[c] for c in tag_codes])
             if data:
                 current, total_cost = base64.b64encode(_convert_to_jpeg(data)), total_cost + cost
                 fixed.extend(tag_codes)
@@ -273,14 +272,18 @@ def _needs_bare_legs(session, analysis=None):
 
 
 def _get_mannequin_image(session, preset, photo_type, needs_bare_legs):
-    """Görünüme uygun manken görseli; elbise/etekte pantolonsuz sürüm."""
+    """Görünüme uygun manken görseli; elbise/etekte pantolonsuz sürüm.
+
+    Returns:
+        (base64, float cost) — cost: bu çağrıda türetme yapıldıysa ücreti
+    """
     view = photo_type if photo_type in ('front', 'back', 'side') else 'front'
     if needs_bare_legs:
         icp = session.env['ir.config_parameter'].sudo()
         return preset.sudo()._get_bare_leg_mannequin(
             view, icp.get_param('ugurlar_ai_studio.gemini_api_key', ''),
             icp.get_param('ugurlar_ai_studio.fal_api_key', ''))
-    return getattr(preset, 'model_image_%s' % view) or preset.model_image_front
+    return (getattr(preset, 'model_image_%s' % view) or preset.model_image_front), 0.0
 
 
 def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', analysis=None,
@@ -1247,6 +1250,7 @@ class AiStudioSession(models.Model):
                 return self.action_review_generations()
             raise UserError(_('Tekrar denenecek başarısız veya bekleyen üretim yok.'))
 
+        self._check_monthly_budget()
         # API anahtarı kontrolü (erken hata yakalama)
         provider_type = self.env['ir.config_parameter'].sudo().get_param(
             'ugurlar_ai_studio.default_provider', 'fashn'
@@ -1350,52 +1354,55 @@ class AiStudioSession(models.Model):
                 garment_b64 = processed_b64
 
         # Mağaza alarmı / fiyat etiketi: ürüne kırpılmış görselde bul, maskeli AI ile sil
-        garment_b64 = self._remove_store_tags(session, garment_b64, security_tags)
+        garment_b64, erase_cost = self._remove_store_tags(session, garment_b64, security_tags)
 
         garment_url = provider.upload_image(garment_b64)
-        # İkinci değer: try-on'a giden temizlenmiş ürün görseli (sonuç denetiminde referans)
-        return garment_url, garment_b64
+        # garment_b64: try-on'a giden temizlenmiş ürün görseli (sonuç denetiminde referans)
+        return garment_url, garment_b64, erase_cost
 
     def _remove_store_tags(self, session, image_b64, tags=None):
-        """Görseldeki mağaza etiketlerini sil (FLUX Fill; olmazsa OpenCV Telea).
+        """Görseldeki mağaza etiketlerini sil (Bria/FLUX; olmazsa OpenCV Telea).
 
         Returns:
-            base64 görsel (etiket yoksa / silinemezse girdinin kendisi)
+            (base64 görsel, float cost) — etiket yoksa / silinemezse girdinin kendisi
         """
         if not image_b64:
-            return image_b64
+            return image_b64, 0.0
         if tags is None:
             tags = self._detect_security_tags(session, image_b64)
         if not tags:
             _logger.info('Ürün görselinde mağaza etiketi bulunamadı (session=%s)', session.id)
-            return image_b64
+            return image_b64, 0.0
         fal_key = session.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fal_api_key')
         if fal_key:
             from ..services.fal_provider import FalProvider
             provider = FalProvider(fal_key)
-            current = image_b64
+            current, total_cost = image_b64, 0.0
             try:
                 # Sil → yeniden tara; kalıntı varsa daha geniş maskeyle ikinci geçiş
                 for attempt, pad in enumerate((0.25, 0.6), start=1):
-                    data, _cost = provider.erase_regions(current, tags, pad_ratio=pad)
+                    data, cost = provider.erase_regions(current, tags, pad_ratio=pad)
                     if not data:
                         break
+                    total_cost += cost
                     current = base64.b64encode(_convert_to_jpeg(data, quality=95))
+                    if attempt == 2:
+                        break  # son geçiş: yeniden tarama sonucu kullanılmaz (ücretli çağrı)
                     tags = self._detect_security_tags(session, current)
                     if not tags:
                         _logger.info('Mağaza etiketi silindi ve doğrulandı (geçiş %d)', attempt)
-                        return current
+                        return current, total_cost
                     _logger.warning('Silme sonrası %d etiket hâlâ görünüyor (geçiş %d)', len(tags), attempt)
                 if current is not image_b64:
-                    return current
+                    return current, total_cost
             except Exception as e:
                 _logger.warning('AI etiket silme başarısız, OpenCV kullanılacak: %s', e)
         from ..services.garment_preprocessor import inpaint_tags_base64
         try:
-            return inpaint_tags_base64(image_b64, tags)
+            return inpaint_tags_base64(image_b64, tags), 0.0
         except Exception as e:
             _logger.warning('OpenCV etiket silme başarısız: %s', e)
-            return image_b64
+            return image_b64, 0.0
 
     def _process_detail_generation(self, gen, session, provider, source_image, auto_bg, provider_type, preset):
         """Detay fotoğrafı generation'ını işle (crop veya BG remove).
@@ -1662,6 +1669,7 @@ class AiStudioSession(models.Model):
         )
         if not valid_sessions:
             raise UserError(_('Seçili oturumlar arasında işlenebilir durumda olan (Ön yüz fotoğrafı ve Manken Preseti olan) oturum bulunamadı.'))
+        self._check_monthly_budget()
 
         # API key kontrolü
         provider_type = self.env['ir.config_parameter'].sudo().get_param(
@@ -2113,7 +2121,7 @@ class AiStudioSession(models.Model):
 
                     # ═══ APILER İÇİN URL VE FORMAT AYARLARI ═══
                     # Elbise/etek/şort: pantolonlu manken ASLA gönderilmez (kök neden)
-                    model_image_data = _get_mannequin_image(session, preset, photo_type, needs_bare_legs)
+                    model_image_data, mannequin_cost = _get_mannequin_image(session, preset, photo_type, needs_bare_legs)
 
                     if not model_image_data:
                         raise UserError(_('Preset manken resmi eksik.'))
@@ -2146,9 +2154,11 @@ class AiStudioSession(models.Model):
                     # Arka plan kaldırma ve askı temizleme (DRY helper)
                     # Ön yüz dışındaki açılarda (back, side) ön yüz koordinatları geçersizdir.
                     # security_tags=None verildiğinde _prepare_garment_for_tryon o görseli kendisi tarar.
-                    garment_url, processed_garment_b64 = self._prepare_garment_for_tryon(
+                    garment_url, processed_garment_b64, erase_cost = self._prepare_garment_for_tryon(
                         source_image, provider, session, auto_bg=auto_bg, security_tags=None
                     )
+                    # Hazırlık maliyeti (etiket silme + ilk kez türetilen manken) bu üretime yazılır
+                    prep_cost = (erase_cost or 0.0) + (mannequin_cost or 0.0)
 
                     # Seedream v5 Pro — region-precise editing, kiafet sadakati icin
                     tryon_model = 'seedream/v5/pro/edit' if provider_type == 'fal' else 'tryon-v1.6'
@@ -2226,6 +2236,9 @@ class AiStudioSession(models.Model):
                     except Exception as pe:
                         _logger.warning('Prompt oluşturma başarısız: %s', pe)
 
+                    # Çeviri / manken önbelleği yazımları try-on boyunca satır kilidi tutmasın
+                    cr.commit()
+
                     # TRY-ON API ÇAĞRISI
                     tryon_result = provider.virtual_tryon(
                         model_image_url=model_url,
@@ -2263,7 +2276,7 @@ class AiStudioSession(models.Model):
                             'state': 'done',
                             'fal_endpoint': '%s/%s' % (provider_type, tryon_model),
                             'generation_time_seconds': elapsed,
-                            'cost': tryon_result.get('cost', 0.05),
+                            'cost': tryon_result.get('cost', 0.05) + prep_cost,
                             'seed': saved_seed,
                         })
                         extra_urls = (tryon_result.get('image_urls') or [])[1:]
@@ -2297,7 +2310,7 @@ class AiStudioSession(models.Model):
                             qc_vals = _run_quality_check(
                                 env, source_image, gen_b64, gemini_api_key,
                                 analysis=cached_analysis, category=category_to_send, gen=gen,
-                                base_cost=tryon_result.get('cost', 0.0),
+                                base_cost=tryon_result.get('cost', 0.0) + prep_cost,
                                 reference_image=processed_garment_b64,
                             )
                             gen.write(qc_vals)
@@ -2376,7 +2389,10 @@ class AiStudioSession(models.Model):
 
                     has_done = any(g.state == 'done' for g in final_session.generation_ids)
                     has_failed = any(g.state == 'failed' for g in final_session.generation_ids)
-                    final_state = 'review' if has_done else ('failed' if has_failed else 'processing')
+                    still_running = any(g.state in ('pending', 'processing') for g in final_session.generation_ids)
+                    # Sürmekte olan (ör. cron'un fal'den alacağı) üretim varsa oturum işlemede
+                    # kalır; hepsi bitince cron review/failed'a taşır
+                    final_state = 'processing' if still_running else ('review' if has_done else 'failed')
 
                     final_vals = {'state': final_state}
                     if final_state == 'review':
@@ -2404,8 +2420,10 @@ class AiStudioSession(models.Model):
                 _logger.warning('Oturum son durum güncellemesi kilit çakışması (session_id=%s, deneme %d/5): %s', session_id, attempt + 1, final_write_err)
                 time.sleep(1.0 + attempt * 0.5)
 
-    def _process_single_generation(self, generation):
-        """Tek bir generation'ı yeniden işle (retry için)."""
+    def _process_single_generation(self, generation, check_budget=True):
+        """Tek bir generation'ı yeniden işle (retry / revizyon için)."""
+        if check_budget:
+            self._check_monthly_budget()
         provider_type = self.env['ir.config_parameter'].sudo().get_param(
             'ugurlar_ai_studio.default_provider', 'fashn'
         )
@@ -2595,7 +2613,7 @@ class AiStudioSession(models.Model):
                 ) == 'True'
 
                 # Etiketler _prepare_garment_for_tryon içinde ayrı taramayla bulunur
-                garment_url, processed_b64 = self._prepare_garment_for_tryon(
+                garment_url, processed_b64, erase_cost = self._prepare_garment_for_tryon(
                     source_image, provider, session, auto_bg=auto_bg, security_tags=None
                 )
 
@@ -2623,7 +2641,8 @@ class AiStudioSession(models.Model):
                         )
 
                 needs_bare_legs = _needs_bare_legs(session, analysis)
-                model_image = _get_mannequin_image(session, preset, photo_type, needs_bare_legs)
+                model_image, mannequin_cost = _get_mannequin_image(session, preset, photo_type, needs_bare_legs)
+                prep_cost = (erase_cost or 0.0) + (mannequin_cost or 0.0)
                 if not model_image:
                     raise Exception('Preset manken resmi eksik.')
 
@@ -2755,7 +2774,7 @@ class AiStudioSession(models.Model):
                         'error_message': False,
                         'seed': gen_seed,
                         # Yeniden üretimin maliyeti de kaydedilmeli (önceden yazılmıyordu)
-                        'cost': (tryon_result or {}).get('cost', 0.0),
+                        'cost': (tryon_result or {}).get('cost', 0.0) + prep_cost,
                         'fal_endpoint': '%s/%s' % (provider_type, tryon_model),
                     }
 
@@ -2806,13 +2825,18 @@ class AiStudioSession(models.Model):
             [('create_date', '>=', month_start)], aggregates=['cost:sum'])
         return (groups[0][0] if groups else 0.0) or 0.0
 
-    def _check_monthly_budget(self):
+    def _budget_status(self):
+        """(aşıldı mı, harcanan, bütçe) — bütçe 0 ise limitsiz."""
         budget = float(self.env['ir.config_parameter'].sudo().get_param(
             'ugurlar_ai_studio.monthly_budget', '0') or 0)
         if budget <= 0:
-            return
+            return False, 0.0, 0.0
         spent = self._get_month_ai_cost()
-        if spent >= budget:
+        return spent >= budget, spent, budget
+
+    def _check_monthly_budget(self):
+        exceeded, spent, budget = self._budget_status()
+        if exceeded:
             raise UserError(_(
                 'Aylık AI bütçesi doldu: $%(spent).2f / $%(budget).2f. '
                 'Yönetici Ayarlar > AI Studio > Aylık AI Bütçesi değerini artırabilir.',
@@ -3193,6 +3217,8 @@ class AiStudioSession(models.Model):
         if not api_key:
             if self.search_count([('state', 'in', active_states)]):
                 _logger.warning('Cron Kuyruk: Bekleyen işlemler var ama API anahtarı bulunamadı!')
+        elif slots and self._budget_status()[0]:
+            _logger.warning('Cron Kuyruk: aylık AI bütçesi dolu, yeni iş başlatılmıyor')
         elif slots:
             # Yeni başlatılan oturumun thread'i kira almadan önce semaphore bekliyor
             # olabilir; 1 dk'dan yeni oturumlara dokunma (kira yine de mükerrer işi engeller)
@@ -3217,9 +3243,11 @@ class AiStudioSession(models.Model):
                 ] + self._lease_free_domain('session_id.'), order='write_date asc, id asc', limit=slots)
                 for rev_gen in pending_revisions:
                     _logger.info('Cron Kuyruk: bekleyen revizyon başlatılıyor (gen=%s)', rev_gen.id)
-                    rev_gen.session_id._process_single_generation(rev_gen)
+                    rev_gen.session_id._process_single_generation(rev_gen, check_budget=False)
 
         # ═══ 4: otomatik yeniden deneme — sadece kalıcı olmayan hatalar, üstel bekleme ═══
+        if self._budget_status()[0]:
+            return
         failed_sessions = self.search([
             ('state', '=', 'failed'),
             ('retry_count', '<', 3),
