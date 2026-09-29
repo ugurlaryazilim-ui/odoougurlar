@@ -561,3 +561,13 @@
         opacity: 1;
     }
 }
+
+/* Kaydedilecek 2:3 alan: dışı karartılır, operatör neyin kırpılacağını görür */
+.ais-crop-frame {
+    position: absolute;
+    z-index: 2;
+    border: 2px solid rgba(255, 255, 255, 0.85);
+    border-radius: 4px;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+}

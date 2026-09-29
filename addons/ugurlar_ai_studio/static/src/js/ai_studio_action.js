@@ -105,6 +105,20 @@ export class AiStudioAction extends Component {
     navigateTo(screen, data = {}) {
         Object.assign(this.state, data);
         this.state.currentScreen = screen;
+        if (screen === "scan") {
+            this.refreshStats();  // "Bugün / Bu Ay" vardiya boyunca donmasın
+        }
+    }
+
+    async refreshStats() {
+        try {
+            const stats = await this._jsonRpc("/ai_studio/dashboard_stats", {});
+            if (stats) {
+                this.state.dashboardStats = stats;
+            }
+        } catch {
+            // istatistik yenilenemezse mevcut değerler kalır
+        }
     }
 
     onProductFound(productInfo) {

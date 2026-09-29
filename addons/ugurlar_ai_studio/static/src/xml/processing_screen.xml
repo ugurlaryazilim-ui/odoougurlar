@@ -37,6 +37,7 @@
                 <p>💡 İşlem devam ederken başka ürüne geçebilirsiniz. Tamamlanan oturumlar inceleme listesinde görünür.</p>
                 <t t-if="state.timedOut">
                     <p>⏱️ İşlem uzun sürüyor; bu ekran beklemeyi bıraktı. Üretim arka planda devam ediyor, sonucu inceleme listesinden takip edebilirsiniz.</p>
+                    <button class="btn btn-secondary" t-on-click="resumePolling">🔄 Tekrar Kontrol Et</button>
                 </t>
             </div>
 

@@ -14,6 +14,8 @@
                 </t>
                 <t t-else="">
                     <video t-ref="cameraVideo" autoplay="true" playsinline="true" class="ais-camera-video"/>
+                    <!-- Kaydedilecek 2:3 alan; dışı karartılır -->
+                    <div t-if="state.cropFrameStyle" class="ais-crop-frame" t-att-style="state.cropFrameStyle"/>
                     
                     <!-- Kılavuz Çizgiler ve Ürün Hizalama Rehberi -->
                     <div class="ais-camera-overlay-layer">

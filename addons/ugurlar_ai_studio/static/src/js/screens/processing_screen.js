@@ -93,6 +93,12 @@ export class ProcessingScreen extends Component {
         }
     }
 
+    resumePolling() {
+        this.state.timedOut = false;
+        this.stopPolling();
+        this.startPolling();
+    }
+
     getProgressPercent(gen) {
         switch (gen.state) {
             case "pending": return 0;

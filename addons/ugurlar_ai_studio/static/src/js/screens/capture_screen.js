@@ -47,11 +47,19 @@ export class CaptureScreen extends Component {
             facingMode: "environment", // Arka kamera
             capturing: false,
             submitting: false,
+            cropFrameStyle: "",
         });
 
-        onMounted(() => this.startCamera());
+        // Önizleme object-fit:cover ile kırpılır; kaydedilen alan kameranın ortasındaki
+        // 2:3 bölgedir. Çerçeve, o bölgenin ekrandaki yerini gösterir.
+        this.updateCropFrame = () => this._updateCropFrame();
+        onMounted(() => {
+            window.addEventListener("resize", this.updateCropFrame);
+            this.startCamera();
+        });
         onWillUnmount(() => {
             this.unmounted = true;
+            window.removeEventListener("resize", this.updateCropFrame);
             this.stopCamera();
         });
     }
@@ -90,7 +98,30 @@ export class CaptureScreen extends Component {
         this.state.cameraActive = true;
         if (this.videoRef.el) {
             this.videoRef.el.srcObject = stream;
+            this.videoRef.el.onloadedmetadata = this.updateCropFrame;
         }
+    }
+
+    _updateCropFrame() {
+        const video = this.videoRef.el;
+        if (!video || !video.videoWidth) {
+            this.state.cropFrameStyle = "";
+            return;
+        }
+        const W = video.clientWidth, H = video.clientHeight;
+        const vw = video.videoWidth, vh = video.videoHeight;
+        const scale = Math.max(W / vw, H / vh);  // object-fit: cover
+        const ox = (W - vw * scale) / 2, oy = (H - vh * scale) / 2;
+        let cw = vw, ch = vh;
+        if (vw / vh > OUTPUT_ASPECT) {
+            cw = vh * OUTPUT_ASPECT;
+        } else {
+            ch = vw / OUTPUT_ASPECT;
+        }
+        const left = ox + ((vw - cw) / 2) * scale;
+        const top = oy + ((vh - ch) / 2) * scale;
+        this.state.cropFrameStyle =
+            `left:${left}px;top:${top}px;width:${cw * scale}px;height:${ch * scale}px;`;
     }
 
     stopCamera() {

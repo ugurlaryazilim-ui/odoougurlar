@@ -118,6 +118,18 @@ function newLockToken() {
 let activePopupClose = null;
 // Açılış sürerken ikinci açılış (çift dokunma) yok sayılır
 let popupOpening = false;
+// İstemci aksiyonunun env'i (görünümü yenilemek için)
+let popupEnv = null;
+
+/** Tüm sayfayı (ve tabletteki tüm varlıkları) yeniden yüklemeden mevcut görünümü yenile. */
+function reloadCurrentView() {
+    const actions = registry.category("actions");
+    if (popupEnv && actions.contains("soft_reload")) {
+        popupEnv.services.action.doAction({ type: "ir.actions.client", tag: "soft_reload" });
+    } else {
+        window.location.reload();
+    }
+}
 
 async function openReviewPopup(initialSessionId) {
     if (popupOpening) return;
@@ -957,7 +969,7 @@ async function _openReviewPopup(initialSessionId) {
                 if (!nextLock || !nextLock.success) {
                     showToast(`✅ ${previousSessionName} başarıyla kaydedildi! Sonraki oturum kilitli veya erişilemiyor.`, 'success');
                     close();
-                    window.location.reload();
+                    reloadCurrentView();
                     return;
                 }
 
@@ -968,7 +980,7 @@ async function _openReviewPopup(initialSessionId) {
                     showToast(`✅ ${previousSessionName} başarıyla kaydedildi! İncelenecek başka oturum yok.`, 'success');
                     await _jsonRpc('/ai_studio/release_lock', { session_id: data.next_session_id, lock_token: nextLockToken }).catch(() => {});
                     close();
-                    window.location.reload();
+                    reloadCurrentView();
                     return;
                 }
                 // Closure değişkenlerini güncelle (heartbeat & close doğru session'ı hedeflesin)
@@ -991,7 +1003,7 @@ async function _openReviewPopup(initialSessionId) {
             } else {
                 showToast(`✅ ${previousSessionName} başarıyla kaydedildi!`, 'success');
                 close();
-                window.location.reload();
+                reloadCurrentView();
             }
         } catch(e) {
             showToast('❌ Kaydetme hatası: ' + e.message, 'error');
@@ -1075,5 +1087,6 @@ registry.category("actions").add("ugurlar_ai_studio.review_popup", async (env, a
         env.services.notification.add(_t("Oturum bulunamadı."), { type: "danger", sticky: false });
         return;
     }
+    popupEnv = env;
     await openReviewPopup(sessionId);
 });

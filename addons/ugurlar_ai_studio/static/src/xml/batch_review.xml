@@ -6,6 +6,7 @@
             <div class="ais-header">
                 <button class="btn btn-link" t-on-click="props.onBackToScan">← Geri</button>
                 <h2 class="ais-title">📋 Toplu Onay</h2>
+                <button class="btn btn-link" t-on-click="loadSessions" title="Listeyi yenile">🔄 Yenile</button>
             </div>
             <div class="ais-batch-grid">
                 <t t-foreach="state.sessions" t-as="session" t-key="session.id">
