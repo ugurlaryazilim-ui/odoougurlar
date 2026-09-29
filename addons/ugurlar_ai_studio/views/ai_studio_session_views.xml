@@ -152,15 +152,6 @@
                                 </group>
                             </group>
                         </page>
-                        <!-- SEO: Onay sonrası otomatik dolan Gemini verileri -->
-                        <page string="SEO &amp; Metinler" name="seo">
-                            <group>
-                                <field name="seo_tags"/>
-                            </group>
-                            <group>
-                                <field name="seo_description" nolabel="1" placeholder="AI tarafından SEO uyumlu açıklama üretilecek..."/>
-                            </group>
-                        </page>
                     </notebook>
                 </sheet>
                 <chatter/>

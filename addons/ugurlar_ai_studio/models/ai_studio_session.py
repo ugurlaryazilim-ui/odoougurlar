@@ -717,16 +717,6 @@ class AiStudioSession(models.Model):
         default=lambda self: self.env.company,
     )
     
-    # --- SEO Alanları ---
-    seo_description = fields.Html(
-        string='AI SEO Ürün Açıklaması',
-        help='Gemini tarafından üretilen ürün açıklaması'
-    )
-    seo_tags = fields.Char(
-        string='SEO Etiketleri',
-        help='Gemini tarafından üretilen SEO etiketleri (virgülle ayrılmış)'
-    )
-
     @api.model_create_multi
     def create(self, vals_list):
         """Otomatik sıra numarası ata."""
@@ -3241,16 +3231,6 @@ class AiStudioSession(models.Model):
                     except Exception as e:
                         _logger.warning("Aktivite kapatma başarısız (session=%s): %s", record.id, e)
 
-                    # Done ise Gemini SEO üretimi tetikle (commit sonrası arka planda)
-                    if record.state == 'done':
-                        try:
-                            record_id = record.id
-                            def _start_seo_thread():
-                                thread = threading.Thread(target=record._generate_seo_content_gemini_threaded, args=(record_id,))
-                                thread.start()
-                            record.env.cr.postcommit.add(_start_seo_thread)
-                        except Exception as e:
-                            _logger.warning("SEO thread başlatma başarısız (session=%s): %s", record.id, e)
         return res
 
     def _get_reviewer_users(self):
@@ -3317,128 +3297,3 @@ class AiStudioSession(models.Model):
                 })
             except Exception as e:
                 _logger.warning("Aktivite oluşturulamadı (user=%s): %s", reviewer_id, e)
-
-    def _generate_seo_content_gemini_threaded(self, session_id):
-        """SEO açıklaması ve etiketlerini arka planda üretir.
-
-        Gemini çağrısı (5-60 sn) açık bir DB işlemi içinde beklenmez: oturum bu arada
-        güncellenince yazma "could not serialize access" ile düşüp sonuç kayboluyordu.
-        İstek kısa bir işlemde hazırlanır, çağrı işlem dışında yapılır, sonuç taze bir
-        işlemde (çakışmada yeniden denenerek) yazılır.
-        """
-        from odoo import SUPERUSER_ID
-
-        try:
-            with self.pool.cursor() as cr:
-                env = api.Environment(cr, SUPERUSER_ID, {})
-                request_args = env['ai.studio.session'].browse(session_id)._prepare_seo_request()
-            if not request_args:
-                return
-            url, headers, payload = request_args
-
-            vals = None
-            try:
-                response = requests.post(url, headers=headers, json=payload, timeout=60)
-                response.raise_for_status()
-                result_text = response.json()['candidates'][0]['content']['parts'][0]['text']
-                result_json = json.loads(result_text)
-                vals = {
-                    'seo_description': result_json.get('seo_description', ''),
-                    'seo_tags': result_json.get('seo_tags', ''),
-                }
-                message = "✨ Gemini SEO İçeriği başarıyla üretildi."
-            except Exception as e:
-                status = getattr(getattr(e, 'response', None), 'status_code', None)
-                _logger.error("Gemini SEO hatası: %s (status=%s)", e.__class__.__name__, status)
-                message = f"⚠️ Gemini SEO Üretimi Başarısız ({e.__class__.__name__}, status={status})"
-
-            for attempt in range(3):
-                try:
-                    with self.pool.cursor() as cr:
-                        env = api.Environment(cr, SUPERUSER_ID, {})
-                        session = env['ai.studio.session'].browse(session_id)
-                        if not session.exists():
-                            return
-                        if vals:
-                            session.write(vals)
-                        session.message_post(body=message)
-                        cr.commit()
-                    return
-                except Exception as write_err:
-                    if not _is_db_conflict(write_err) or attempt == 2:
-                        raise
-                    _logger.info("SEO yazımı çakıştı (session=%s), tekrar deneniyor (%d/3)",
-                                 session_id, attempt + 1)
-                    time.sleep(1.0 + attempt)
-        except Exception as e:
-            _logger.exception("Gemini SEO thread hatası (session=%s): %s", session_id, e)
-
-    def _prepare_seo_request(self):
-        """Gemini SEO isteğini hazırlar: (url, headers, payload) ya da None (atlanır)."""
-
-        api_key = self.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.gemini_api_key')
-        if not api_key:
-            _logger.info("Gemini API anahtarı ayarlanmamış, SEO üretimi atlanıyor.")
-            return
-
-        product = self.product_id
-        if not product:
-            return
-
-        # Ürün özelliklerini toparla
-        attributes_text = ""
-        if product.product_template_attribute_value_ids:
-            attrs = [f"{v.attribute_id.name}: {v.name}" for v in product.product_template_attribute_value_ids]
-            attributes_text = ", ".join(attrs)
-
-        prompt = f"""
-Bu fotoğrafı e-ticaret sitemiz için incele. Ürün bilgileri aşağıdadır:
-Ürün Adı: {product.name}
-Kategori: {product.categ_id.name}
-Özellikler: {attributes_text}
-
-Lütfen bu ürün için SEO'ya uygun, ikna edici ve çarpıcı 1 paragraflık bir ürün açıklaması (HTML <p> etiketi içinde) ve SEO için 5 adet etiket (virgülle ayrılmış) üret.
-Çıktıyı sadece JSON formatında ver. Format şu şekilde olmalı:
-{{
-  "seo_description": "<p>Açıklama metni...</p>",
-  "seo_tags": "etiket1, etiket2, etiket3, etiket4, etiket5"
-}}
-"""
-
-        # Gemini API call
-        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-        headers = {'Content-Type': 'application/json', 'x-goog-api-key': api_key}
-        
-        # Primary fotoğrafı bul
-        primary_gen = self.generation_ids.filtered('is_primary')[:1]
-        if not primary_gen:
-            primary_gen = self.generation_ids.filtered('is_approved')[:1]
-            
-        if not primary_gen or not primary_gen.generated_image:
-            _logger.info("Onaylı görsel bulunamadı, SEO üretimi atlanıyor.")
-            return
-
-        # Base64 decode string for JSON
-        import base64
-        image_data = primary_gen.generated_image
-        if isinstance(image_data, bytes):
-            image_data = image_data.decode('utf-8')
-
-        payload = {
-            "contents": [{
-                "parts": [
-                    {"text": prompt},
-                    {
-                        "inline_data": {
-                            "mime_type": "image/jpeg",
-                            "data": image_data
-                        }
-                    }
-                ]
-            }],
-            "generationConfig": {
-                "response_mime_type": "application/json",
-            }
-        }
-
-        return url, headers, payload
