@@ -25,17 +25,9 @@ services:
         condition: service_healthy
     ports:
       - "8069:8069"
-    # Canlı bildirim (bus/websocket) çok işçili modda ayrı gevent portundan (8072) açılır
-    expose:
-      - "8072"
-    labels:
-      # Coolify'ın Traefik'i /websocket isteklerini 8072'ye, diğer her şeyi 8069'a yönlendirir
-      - "traefik.http.routers.odoo-ws.rule=Host(`odoo.ugurlar.com`) && PathPrefix(`/websocket`)"
-      - "traefik.http.routers.odoo-ws.entrypoints=https"
-      - "traefik.http.routers.odoo-ws.tls=true"
-      - "traefik.http.routers.odoo-ws.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.odoo-ws.service=odoo-ws"
-      - "traefik.http.services.odoo-ws.loadbalancer.server.port=8072"
+      # Canlı bildirim (bus/websocket) çok işçili modda ayrı gevent portundan açılır.
+      # Cloudflare Tunnel /websocket yolunu localhost:8072'ye yönlendirir; yalnız sunucu içinden erişilir.
+      - "127.0.0.1:8072:8072"
     volumes:
       - odoo-data:/var/lib/odoo
     environment:
