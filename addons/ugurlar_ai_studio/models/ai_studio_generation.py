@@ -405,102 +405,10 @@ class AiStudioGeneration(models.Model):
         self.state = 'done'
         self.session_id.message_post(body=_("%s görseli reddedildi, yeni versiyon üretilecek.") % self.photo_type)
         
-        # Revizyon talimatı var mı? — İngilizce çeviri varsa onu kullan
-        revision_text = ''
-        # Önce İngilizce çeviriyi kontrol et (UI'da @api.onchange ile çevrildi)
-        if self.revision_prompt_en:
-            revision_text += self.revision_prompt_en
-        elif self.revision_prompt:
-            revision_text += self.revision_prompt
-        if self.reject_reason_id.suggested_prompt_en:
-            if revision_text:
-                revision_text += ' '
-            revision_text += self.reject_reason_id.suggested_prompt_en
-
-        # Önceki görsel ve revizyon talimatı varsa → Seedream ile hedefli düzenleme
-        use_seedream_edit = bool(revision_text and self.generated_image)
+        # Revizyon (talimat varsa önce hedefli Seedream düzenlemesi, olmazsa yeniden
+        # üretim) arka plan thread'inde yapılır: HTTP isteğinde uzun fal çağrısı yok.
         revision_success = False
-        
-        if use_seedream_edit:
-            try:
-                import logging
-                _logger = logging.getLogger(__name__)
-                _logger.info(
-                    'Seedream revizyonu baslatiliyor (gen=%s, tip=%s): %s',
-                    self.id, self.photo_type, revision_text[:100],
-                )
-                
-                session = self.session_id
-                fal_api_key = session.fal_api_key or self.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fal_api_key', '')
-                
-                if fal_api_key:
-                    from ..services.fal_provider import FalProvider
-                    provider = FalProvider(fal_api_key)
-                    
-                    # Önceki görseli fal CDN'e yükle
-                    parent_image_b64 = self.generated_image
-                    if isinstance(parent_image_b64, bytes):
-                        parent_image_b64 = parent_image_b64.decode('ascii')
-                    
-                    parent_image_url = provider.upload_image(parent_image_b64)
-                    
-                    # Seedream ile hedefli düzenleme — Figure 1 referansı
-                    seedream_prompt = (
-                        f"This is a fashion e-commerce photo (Figure 1). "
-                        f"Apply ONLY this specific edit to Figure 1: {revision_text}. "
-                        f"Keep everything else in Figure 1 exactly the same — "
-                        f"same model, same pose, same hairstyle, same shoes, same background, same lighting. "
-                        f"Change ONLY what is described above. Output one image. "
-                    )
-                    
-                    import fal_client as _fal_client
-                    result = _fal_client.subscribe(
-                        'bytedance/seedream/v5/pro/edit',
-                        arguments={
-                            'prompt': seedream_prompt,
-                            'image_urls': [parent_image_url],
-                            'output_format': 'png',
-                        },
-                        client_timeout=120,
-                    )
-                    
-                    # Sonucu al
-                    output_url = ''
-                    if 'images' in result and result['images']:
-                        output_url = result['images'][0].get('url', '')
-                    elif 'image' in result and result['image']:
-                        output_url = result['image'].get('url', '')
-                    
-                    if output_url:
-                        import requests as req_lib
-                        import base64
-                        img_data = req_lib.get(output_url, timeout=60).content
-                        from odoo.addons.ugurlar_ai_studio.models.ai_studio_session import _convert_to_jpeg
-                        img_data = _convert_to_jpeg(img_data)
-                        fixed_b64 = base64.b64encode(img_data).decode()
-                        
-                        # Yeni versiyon oluştur — Seedream sonucu ile
-                        new_gen = self.copy({
-                            'state': 'done',
-                            'is_approved': False,
-                            'generated_image': fixed_b64,
-                            'revision_number': self.revision_number + 1,
-                            'parent_generation_id': self.id,
-                            'error_message': False,
-                            'fal_request_id': False,
-                            'cost': 0.05,
-                            'quality_score': 0.0,
-                            'fal_endpoint': 'fal/seedream-revision',
-                        })
-                        revision_success = True
-                        _logger.info('Seedream revizyonu basarili (gen=%s → new=%s)', self.id, new_gen.id)
-                    else:
-                        _logger.warning('Seedream revizyonu sonuc dondurmedi, sifirdan uretim yapilacak (gen=%s)', self.id)
-            except Exception as e:
-                import logging
-                _logger = logging.getLogger(__name__)
-                _logger.warning('Seedream revizyonu hatasi, sifirdan uretim yapilacak (gen=%s): %s', self.id, e)
-        
+
         if not revision_success:
             # Fallback: sıfırdan üretim (eski davranış)
             new_gen = self.copy({
@@ -513,6 +421,9 @@ class AiStudioGeneration(models.Model):
                 'fal_request_id': False,
                 'cost': 0.0,
                 'quality_score': 0.0,
+                # Red nedeni YALNIZCA eski sürümde kalır: review ekranı red nedenli
+                # kayıtları "eski sürüm" sayıp gizler
+                'reject_reason_id': False,
             })
             self.session_id._process_single_generation(new_gen)
         
@@ -532,10 +443,8 @@ class AiStudioGeneration(models.Model):
         self.ensure_one()
         if self.state != 'failed':
             raise UserError(_('Sadece başarısız üretimler tekrar denenebilir.'))
-        self.write({
-            'state': 'pending',
-            'error_message': False,
-        })
+        from .ai_studio_session import CLEAR_FAL_REQUEST
+        self.write(dict(CLEAR_FAL_REQUEST, state='pending', error_message=False))
         self.session_id._process_single_generation(self)
 
     def action_open_session_review(self):
@@ -638,10 +547,8 @@ class AiStudioGeneration(models.Model):
         if not failed_records:
             raise UserError(_('Tekrar denenecek başarısız revizyon bulunamadı.'))
 
-        failed_records.write({
-            'state': 'pending',
-            'error_message': False,
-        })
+        from .ai_studio_session import CLEAR_FAL_REQUEST
+        failed_records.write(dict(CLEAR_FAL_REQUEST, state='pending', error_message=False))
 
         provider_type = self.env['ir.config_parameter'].sudo().get_param(
             'ugurlar_ai_studio.default_provider', 'fashn'
@@ -655,12 +562,15 @@ class AiStudioGeneration(models.Model):
         gen_ids = failed_records.ids
         uid = self.env.uid or 1
 
-        thread = threading.Thread(
-            target=self._batch_retry_worker_thread,
-            args=(gen_ids, api_key, uid),
-        )
-        thread.daemon = True
-        thread.start()
+        # Commit'ten ÖNCE başlarsa thread kayıtları hâlâ 'failed' görür ve atlar
+        def _start():
+            thread = threading.Thread(
+                target=self._batch_retry_worker_thread,
+                args=(gen_ids, api_key, uid),
+            )
+            thread.daemon = True
+            thread.start()
+        self.env.cr.postcommit.add(_start)
 
         return {
             'type': 'ir.actions.client',

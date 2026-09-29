@@ -1,4 +1,4 @@
-from odoo import models, fields
+from odoo import api, fields, models
 
 
 class ResConfigSettings(models.TransientModel):
@@ -90,7 +90,6 @@ class ResConfigSettings(models.TransientModel):
     ai_studio_visual_qc = fields.Boolean(
         string='AI Görsel Denetim',
         default=True,
-        config_parameter='ugurlar_ai_studio.visual_qc',
         help='Her üretimi Gemini ile elbise altında pantolon, bozuk el, görünür etiket gibi '
              'hatalara karşı denetler; bulunan hatalar kalite skorunu düşürür ve '
              'kalite detayında listelenir (görsel başına ~$0.001).',
@@ -98,14 +97,12 @@ class ResConfigSettings(models.TransientModel):
     ai_studio_auto_tag_fix = fields.Boolean(
         string='Görünür Hataları Otomatik Düzelt',
         default=True,
-        config_parameter='ugurlar_ai_studio.auto_tag_fix',
         help='AI görsel denetim sonuçta mağaza/alarm etiketi veya elbise altında pantolon görürse, '
              'görsel tek seferlik Seedream düzenlemesiyle düzeltilir (sadece hatalı görsellerde ~$0.07-0.135).',
     )
     ai_studio_auto_bg_remove = fields.Boolean(
         string='Otomatik Arka Plan Kaldırma',
         default=True,
-        config_parameter='ugurlar_ai_studio.auto_bg_remove',
         help='Fotoğrafları AI\'ya göndermeden önce arka planı otomatik kaldır',
     )
 
@@ -128,3 +125,26 @@ class ResConfigSettings(models.TransientModel):
         config_parameter='ugurlar_ai_studio.concurrent_limit',
         help='Aynı anda kaç AI isteği gönderilebilir',
     )
+
+    # Varsayılanı AÇIK olan anahtarlar config_parameter ile tutulamaz: Odoo kutu
+    # kapatılınca parametreyi SİLER, kod da eksik parametreyi 'True' okur — kutu
+    # kapatılamıyordu. Bu yüzden açıkça 'True' / 'False' yazılıp okunur.
+    _AIS_DEFAULT_ON_TOGGLES = {
+        'ai_studio_visual_qc': 'ugurlar_ai_studio.visual_qc',
+        'ai_studio_auto_tag_fix': 'ugurlar_ai_studio.auto_tag_fix',
+        'ai_studio_auto_bg_remove': 'ugurlar_ai_studio.auto_bg_remove',
+    }
+
+    @api.model
+    def get_values(self):
+        res = super().get_values()
+        icp = self.env['ir.config_parameter'].sudo()
+        for field_name, key in self._AIS_DEFAULT_ON_TOGGLES.items():
+            res[field_name] = icp.get_param(key, 'True') == 'True'
+        return res
+
+    def set_values(self):
+        super().set_values()
+        icp = self.env['ir.config_parameter'].sudo()
+        for field_name, key in self._AIS_DEFAULT_ON_TOGGLES.items():
+            icp.set_param(key, 'True' if self[field_name] else 'False')

@@ -94,6 +94,11 @@ def _make_enqueue_recorder(pool, gen_id):
     return _on_enqueue
 
 
+# Yeni bir deneme başlarken önceki fal isteğinin izi silinir; aksi halde cron bu
+# üretim için ÖNCEKİ isteğin sonucunu "kurtarır".
+CLEAR_FAL_REQUEST = {'fal_request_id': False, 'fal_app': False, 'submitted_at': False}
+
+
 def _is_client_timeout(exc):
     """fal SDK istemci zaman aşımı mı? (iş fal tarafında sürmeye ve ücretlenmeye devam eder)"""
     name = exc.__class__.__name__.lower()
@@ -1220,9 +1225,17 @@ class AiStudioSession(models.Model):
           (Sunucu yeniden başlatmalarına dayanıklı kuyruk yönetimi)
         """
         self.ensure_one()
+        self._check_reviewer()
+        if self.state not in ('processing', 'failed', 'preprocessing', 'review'):
+            raise UserError(_('Bu oturum şu an devam ettirilebilir durumda değil.'))
+        if self.ai_lease_until and self.ai_lease_until > fields.Datetime.now():
+            raise UserError(_('Oturum şu anda arka planda işleniyor; bitmesini bekleyin.'))
 
+        # fal'e gönderilmiş ve sonucu beklenen işler yeniden gönderilmez (ikinci ücret);
+        # onları cron request_id ile tamamlar
         retryable = self.generation_ids.filtered(
-            lambda g: g.state in ('failed', 'pending', 'processing')
+            lambda g: g.state in ('failed', 'pending')
+            or (g.state == 'processing' and not g.fal_request_id)
         )
         if not retryable:
             # Tüm generation'lar zaten tamamlanmışsa oturumu hemen 'review' durumuna al
@@ -1250,11 +1263,7 @@ class AiStudioSession(models.Model):
             raise UserError(_('API anahtarı bulunamadı. Lütfen Yapılandırma ayarlarını kontrol edin.'))
 
         # Failed olanları pending'e çevir, error mesajını temizle
-        for gen in retryable:
-            gen.write({
-                'state': 'pending',
-                'error_message': False,
-            })
+        retryable.write(dict(CLEAR_FAL_REQUEST, state='pending', error_message=False))
 
         # Oturumu processing durumuna al
         self.write({
@@ -1991,7 +2000,7 @@ class AiStudioSession(models.Model):
                     continue
 
                 try:
-                    gen.write({'state': 'processing'})
+                    gen.write(dict(CLEAR_FAL_REQUEST, state='processing'))
                     cr.commit()
 
                     start_time = time.time()
@@ -2026,6 +2035,7 @@ class AiStudioSession(models.Model):
                                      session.product_id.display_name, garment_cat,
                                      preset.garment_type if preset else 'yok')
                         
+                        target_gen = None  # ürün fotoğrafından kırpılan kategorilerde kullanılmaz
                         # Ayakkabı/Çanta/Aksesuar → doğrudan ürün fotoğrafından kırp
                         # (Manken try-on sonucunda bu ürünler görünmez)
                         if garment_cat in ('shoes', 'bags', 'accessories'):
@@ -2279,6 +2289,10 @@ class AiStudioSession(models.Model):
 
 
                         # KALİTE KONTROL (+ Gemini görsel denetim + etiket silme)
+                        # Denetim + otomatik düzeltme dakikalar sürebilir: kira dolmasın
+                        if lease_owner:
+                            _renew_session_lease(cr, session_id, lease_owner)
+                            cr.commit()
                         try:
                             qc_vals = _run_quality_check(
                                 env, source_image, gen_b64, gemini_api_key,
@@ -2427,7 +2441,7 @@ class AiStudioSession(models.Model):
             try:
                 _logger.info("AI Retry Thread kira aldı (session_id=%s, gen_id=%s)", session_id, gen_id)
                 try:
-                    self._retry_generation_thread_body(session_id, gen_id, api_key, uid)
+                    self._retry_generation_thread_body(session_id, gen_id, api_key, uid, lease_owner=owner)
                 except Exception as thread_err:
                     _logger.exception("AI Retry Thread: Beklenmeyen kritik hata olustu: %s", thread_err)
                     try:
@@ -2442,7 +2456,7 @@ class AiStudioSession(models.Model):
             finally:
                 _release_session_lease(self.pool, session_id, owner)
 
-    def _retry_generation_thread_body(self, session_id, gen_id, api_key, uid):
+    def _retry_generation_thread_body(self, session_id, gen_id, api_key, uid, lease_owner=None):
         """Tek generation retry thread'i (body)."""
         _logger.info("AI Retry Thread starting for session %s, gen %s with uid %s", session_id, gen_id, uid)
         with self.pool.cursor() as cr:
@@ -2478,7 +2492,10 @@ class AiStudioSession(models.Model):
             try:
                 provider = self._create_provider(api_key, provider_type)
 
-                _safe_write_and_commit(cr, gen, {'state': 'processing'})
+                _safe_write_and_commit(cr, gen, dict(CLEAR_FAL_REQUEST, state='processing'))
+                if lease_owner:
+                    _renew_session_lease(cr, session_id, lease_owner)
+                    cr.commit()
 
                 # Türkçe revizyon talimatının İngilizcesi yoksa burada (HTTP isteği
                 # dışında) çevir — model İngilizce prompt bekliyor
@@ -2514,18 +2531,12 @@ class AiStudioSession(models.Model):
                             f"Change ONLY what is described above. Output one image. "
                         )
 
-                        import fal_client as _fal_client
-                        from ..services.fal_provider import FalProvider
                         edit_app = 'bytedance/seedream/v5/pro/edit'
-                        recorder = _make_enqueue_recorder(self.pool, gen.id)
-                        edit_result = _fal_client.subscribe(
+                        edit_result = edit_provider.run_queued(
                             edit_app,
-                            arguments={
-                                'prompt': seedream_prompt,
-                                'image_urls': [parent_url],
-                            },
-                            client_timeout=120,
-                            on_enqueue=lambda rid: recorder(rid, edit_app),
+                            {'prompt': seedream_prompt, 'image_urls': [parent_url]},
+                            on_enqueue=_make_enqueue_recorder(self.pool, gen.id),
+                            timeout=180,
                         )
                         cr.commit()  # on_enqueue sonrası snapshot'ı yenile
 
@@ -2588,27 +2599,35 @@ class AiStudioSession(models.Model):
                     source_image, provider, session, auto_bg=auto_bg, security_tags=None
                 )
 
-                model_image = _get_mannequin_image(session, preset, photo_type, _needs_bare_legs(session))
+                detected_cat = session._detect_garment_type()
+
+                # Analiz, manken seçiminden ÖNCE: kategori (elbise mi?) kararı hem mankeni
+                # (pantolonsuz sürüm) hem promptu hem de denetim ipucunu belirler
+                analysis = None
+                try:
+                    from ..services.garment_analyzer import analyze_garment
+                    analysis = analyze_garment(fal_api_key, garment_url, gemini_api_key=gemini_api_key,
+                                               product_context=session._get_product_context_text())
+                except Exception as ae:
+                    _logger.warning('Retry kıyafet analizi başarısız: %s', ae)
+                if isinstance(analysis, dict):
+                    gemini_cat = analysis.get('clothingCategory', '')
+                    if gemini_cat in ('dress', 'one_piece', 'one-piece', 'full-body'):
+                        detected_cat = 'one_piece'
+                        analysis['clothingCategory'] = 'dress'
+                    elif detected_cat in ('tops', 'bottoms', 'one_piece'):
+                        analysis['clothingCategory'] = (
+                            'tops' if detected_cat == 'tops' else (
+                                'bottoms' if detected_cat == 'bottoms' else 'dress'
+                            )
+                        )
+
+                needs_bare_legs = _needs_bare_legs(session, analysis)
+                model_image = _get_mannequin_image(session, preset, photo_type, needs_bare_legs)
                 if not model_image:
                     raise Exception('Preset manken resmi eksik.')
 
                 model_url = provider.upload_image(model_image)
-
-                detected_cat = session._detect_garment_type()
-
-                # Retry: ilk prompt oluşturma öncesi Gemini analiz
-                # NOT: cached_analysis_data bir Odoo field değil, güvenli erişim gerekli
-                _retry_cached = getattr(session, '_cached_analysis_data_runtime', None)
-                if _retry_cached and detected_cat == 'tops':
-                    try:
-                        import json
-                        _retry_analysis = json.loads(_retry_cached) if isinstance(_retry_cached, str) else _retry_cached
-                        _retry_gemini_cat = (_retry_analysis or {}).get('clothingCategory', '')
-                        if _retry_gemini_cat in ('dress', 'one_piece', 'one-piece', 'full-body'):
-                            _logger.info('Retry category override: keyword=%s Gemini=%s → one_piece', detected_cat, _retry_gemini_cat)
-                            detected_cat = 'one_piece'
-                    except Exception:
-                        pass
 
                 if detected_cat in ('tops', 'bottoms', 'one_piece', 'bags', 'shoes'):
                     category_to_send = (
@@ -2654,41 +2673,26 @@ class AiStudioSession(models.Model):
                         except Exception:
                             pass
 
-                        try:
-                            from ..services.garment_analyzer import analyze_outfit_consistency
-                            outfit_consistency = analyze_outfit_consistency(
-                                front_result_b64,
-                                api_key=fal_api_key,
-                                gemini_api_key=gemini_api_key,
-                                category=category_to_send,
-                            )
-                        except Exception as oe:
-                            _logger.warning('Retry outfit tutarlılık analizi başarısız: %s', oe)
+                        # Elbise/etek/şortta sonucu kullanılmıyor (ücretli çağrıyı atla)
+                        if not needs_bare_legs:
+                            try:
+                                from ..services.garment_analyzer import analyze_outfit_consistency
+                                outfit_consistency = analyze_outfit_consistency(
+                                    front_result_b64,
+                                    api_key=fal_api_key,
+                                    gemini_api_key=gemini_api_key,
+                                    category=category_to_send,
+                                )
+                            except Exception as oe:
+                                _logger.warning('Retry outfit tutarlılık analizi başarısız: %s', oe)
 
                 # ═══ VIEW-SPESİFİK PROMPT ═══
                 prompt_text = ""
                 negative_prompt_text = ""
-                analysis = None
                 try:
                     prompt_locks = global_prompt_locks
 
-                    from ..services.garment_analyzer import analyze_garment, build_generation_prompt
-                    product_context = session._get_product_context_text()
-                    analysis = analyze_garment(fal_api_key, garment_url, gemini_api_key=gemini_api_key, product_context=product_context)
-                    if isinstance(analysis, dict):
-                        gemini_cat = analysis.get('clothingCategory', '')
-                        # Gemini dress diyorsa → Gemini'ye güven, detected_cat'i override et
-                        if gemini_cat in ('dress', 'one_piece', 'one-piece', 'full-body'):
-                            detected_cat = 'one_piece'
-                            analysis['clothingCategory'] = 'dress'
-                            _logger.info('Retry: Gemini dress algıladı → one_piece override')
-                        elif detected_cat in ('tops', 'bottoms', 'one_piece'):
-                            # Keyword eşleşmesi varsa ve Gemini çelişmiyorsa keyword'e güven
-                            analysis['clothingCategory'] = (
-                                'tops' if detected_cat == 'tops' else (
-                                    'bottoms' if detected_cat == 'bottoms' else 'dress'
-                                )
-                            )
+                    from ..services.garment_analyzer import build_generation_prompt
 
                     preset_data = {
                         'gender': preset.gender or 'female',
@@ -2716,6 +2720,9 @@ class AiStudioSession(models.Model):
                 elif provider_type == 'fashn':
                     tryon_model = getattr(preset, f'fashn_model_{photo_type}', False) or preset.fashn_model_front or 'tryon-v1.6'
 
+                if lease_owner:
+                    _renew_session_lease(cr, session_id, lease_owner)
+                cr.commit()
                 tryon_result = provider.virtual_tryon(
                     model_image_url=model_url,
                     garment_image_url=garment_url,
@@ -3167,7 +3174,8 @@ class AiStudioSession(models.Model):
                 gen.write({'state': 'failed', 'error_type': 'orphaned', 'is_retryable': False,
                            'error_message': _('İşlem 3 kez yarıda kesildi (sunucu yeniden başlıyor olabilir).')})
             else:
-                gen.write({'state': 'pending', 'error_message': False, 'retry_count': gen.retry_count + 1})
+                gen.write(dict(CLEAR_FAL_REQUEST, state='pending', error_message=False,
+                               retry_count=gen.retry_count + 1))
                 _logger.warning('Cron: sahipsiz üretim tekrar kuyruğa alındı (gen=%s, deneme %d/3)',
                                 gen.id, gen.retry_count)
 
@@ -3225,7 +3233,7 @@ class AiStudioSession(models.Model):
             retryable = failed_gens.filtered('is_retryable')
             if not retryable:
                 continue
-            retryable.write({'state': 'pending', 'error_message': False, 'error_type': False})
+            retryable.write(dict(CLEAR_FAL_REQUEST, state='pending', error_message=False, error_type=False))
             session.write({'state': 'processing', 'retry_count': session.retry_count + 1})
             try:
                 session.message_post(body=_('🔄 Otomatik yeniden deneme #%d/3 — %d üretim kuyruğa alındı.') % (

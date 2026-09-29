@@ -156,8 +156,10 @@ class TestSeedreamArguments(BaseCase):
             return {'images': [{'url': 'https://example.com/out.jpg'}]}
 
         provider = FalProvider('test-key')
-        with patch.object(fal_provider_module, 'fal_client') as fc:
-            fc.subscribe.side_effect = fake_subscribe
+        with patch.object(FalProvider, 'run_queued',
+                          lambda self, endpoint, arguments, on_enqueue=None, **kw:
+                          fake_subscribe(endpoint, arguments=arguments,
+                                         on_enqueue=(lambda rid: on_enqueue(rid, endpoint)) if on_enqueue else None)):
             result = provider.virtual_tryon('MODEL', 'GARMENT', model_name='seedream/v5/pro/edit',
                                             prompt='p', negative_prompt='neg', seed=123, **kwargs)
         return captured, result
@@ -185,6 +187,26 @@ class TestSeedreamArguments(BaseCase):
         self.assertEqual(captured['arguments']['num_images'], 3)
         # fake_subscribe tek görsel döndürür; maliyet dönen görsel sayısına göre
         self.assertAlmostEqual(result['cost'], 0.135 + 0.0045, places=4)
+
+    def test_queue_timeout_does_not_cancel_the_paid_job(self):
+        # fal_client.subscribe(client_timeout) süre dolunca işi iptal eder; biz etmemeliyiz
+        from ..services.fal_provider import FalQueueTimeout
+
+        class Handle:
+            request_id = 'req-9'
+
+            def status(self):
+                return object()  # hiç tamamlanmıyor
+
+        seen = []
+        with patch.object(fal_provider_module, 'fal_client') as fc:
+            fc.submit.return_value = Handle()
+            fc.Completed = type('Completed', (), {})
+            with self.assertRaises(FalQueueTimeout):
+                FalProvider('k').run_queued('app', {}, on_enqueue=lambda r, a: seen.append(r),
+                                            timeout=0, poll_interval=0)
+        self.assertEqual(seen, ['req-9'])
+        fc.cancel.assert_not_called()
 
     def test_on_enqueue_receives_request_id_and_endpoint(self):
         seen = []

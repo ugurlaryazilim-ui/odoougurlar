@@ -23,6 +23,18 @@ except ImportError:
     )
 
 
+class FalQueueTimeout(Exception):
+    """İş fal kuyruğunda sürerken bekleme süresi doldu (iş İPTAL EDİLMEDİ).
+
+    Sınıf adında 'Timeout' geçer: session._is_client_timeout bunu tanır ve sonucu
+    cron'un request_id ile almasına bırakır.
+    """
+
+    def __init__(self, request_id, timeout):
+        super().__init__('fal isteği %ss içinde bitmedi (request_id=%s)' % (timeout, request_id))
+        self.request_id = request_id
+
+
 class FalProvider(AIProviderBase):
     # fal.ai FASHN v1.6 implementasyonu.
     #
@@ -76,6 +88,26 @@ class FalProvider(AIProviderBase):
                 'fal-client paketi kurulu degil. '
                 'Kurulum: pip install fal-client'
             )
+
+    def run_queued(self, endpoint, arguments, on_enqueue=None, timeout=180, poll_interval=2.0):
+        """fal kuyruğuna gönder ve sonucu bekle — süre dolarsa işi İPTAL ETMEDEN hata ver.
+
+        fal_client.subscribe(client_timeout=...) süre dolunca isteği iptal eder; bu,
+        ücreti ödenmiş/kuyruktaki işin sonucunu kaybettirir. Burada iş kuyrukta kalır,
+        request_id on_enqueue ile kaydedilmiştir ve cron sonucu sonradan alır.
+        """
+        self._check_client()
+        handle = fal_client.submit(endpoint, arguments=arguments)
+        if on_enqueue:
+            on_enqueue(handle.request_id, endpoint)
+        deadline = time.time() + timeout
+        while True:
+            status = handle.status()
+            if isinstance(status, fal_client.Completed):
+                return handle.get()
+            if time.time() >= deadline:
+                raise FalQueueTimeout(handle.request_id, timeout)
+            time.sleep(poll_interval)
 
     def get_estimated_cost(self, endpoint):
         # Endpoint icin tahmini maliyeti dondur (USD).
@@ -207,18 +239,12 @@ class FalProvider(AIProviderBase):
         max_retries = 2
         backoff_factor = 4
         result = None
-        # fal kuyruğa aldığı anda request_id'yi çağırana bildir: worker ölse bile
-        # sonuç cron tarafından fal'den geri alınabilir (yeniden ücret ödenmez)
+        # fal kuyruğa aldığı anda request_id'yi çağırana bildir: worker ölse ya da
+        # bekleme süresi dolsa bile sonuç cron tarafından fal'den alınır (yeniden ücret yok)
         on_enqueue = kwargs.get('on_enqueue')
-        enqueue_cb = (lambda request_id: on_enqueue(request_id, endpoint)) if on_enqueue else None
         for attempt in range(max_retries):
             try:
-                result = fal_client.subscribe(
-                    endpoint,
-                    arguments=arguments,
-                    client_timeout=180,
-                    on_enqueue=enqueue_cb,
-                )
+                result = self.run_queued(endpoint, arguments, on_enqueue=on_enqueue, timeout=180)
                 break
             except Exception as e:
                 error_str = str(e).lower()

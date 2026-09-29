@@ -108,6 +108,18 @@ class TestAiStudioModels(TransactionCase):
         preset.model_image_front = _image_b64((10, 10, 10))
         self.assertFalse(preset.model_image_front_legs)
 
+    # ── Ayarlar: varsayılanı açık kutular kapatılabilmeli ────────────
+    def test_default_on_toggles_can_be_turned_off(self):
+        settings = self.env['res.config.settings'].create({
+            'ai_studio_visual_qc': False, 'ai_studio_auto_tag_fix': False, 'ai_studio_auto_bg_remove': False,
+        })
+        settings.execute()
+        icp = self.env['ir.config_parameter'].sudo()
+        self.assertEqual(icp.get_param('ugurlar_ai_studio.visual_qc'), 'False')
+        self.assertEqual(icp.get_param('ugurlar_ai_studio.auto_bg_remove'), 'False')
+        fresh = self.env['res.config.settings'].create({})
+        self.assertFalse(fresh.ai_studio_auto_tag_fix, 'kapatılan kutu formda yeniden açık görünmemeli')
+
     # ── Aylık bütçe ──────────────────────────────────────────────────
     def test_monthly_budget_blocks_new_processing(self):
         session = self._session(self.red)
