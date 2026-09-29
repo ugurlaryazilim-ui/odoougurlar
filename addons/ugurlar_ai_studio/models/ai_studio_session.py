@@ -186,6 +186,10 @@ def _get_seedream_image_size(env):
 
 # Görsel denetimin bulduğu ve tek görsellik düzenlemeyle giderilebilen hatalar
 AUTO_FIX_INSTRUCTIONS = {
+    'added_label': (
+        "Remove the extra label or patch that was added to the garment and restore the "
+        "fabric underneath with the same color and texture."
+    ),
     'store_tag_visible': (
         "Remove every store security tag, alarm pin, price tag and hangtag from the garment "
         "and restore the fabric underneath with the same color, texture and pattern."
@@ -197,7 +201,7 @@ AUTO_FIX_INSTRUCTIONS = {
 }
 
 
-def _auto_fix_defects(env, generated_b64, codes):
+def _auto_fix_defects(env, generated_b64, codes, boxes=None):
     """Denetimin bulduğu düzeltilebilir hataları gider.
 
     - Elbise altı pantolon: Seedream düzenlemesi (bütünsel değişiklik)
@@ -229,15 +233,21 @@ def _auto_fix_defects(env, generated_b64, codes):
             if data:
                 current, total_cost = base64.b64encode(_convert_to_jpeg(data)), total_cost + cost
                 fixed.append('pants_under_dress')
-        if 'store_tag_visible' in fixable:
-            from ..services.garment_analyzer import detect_image_tags
-            tags = detect_image_tags(None, current, gemini_api_key=icp.get_param('ugurlar_ai_studio.gemini_api_key', ''))
-            data, cost = provider.erase_regions(current, tags) if tags else (None, 0.0)
+        tag_codes = [c for c in ('store_tag_visible', 'added_label') if c in fixable]
+        if tag_codes:
+            # Denetimin verdiği kutular (sonuç görselinde); yoksa ayrı tespit
+            tag_boxes = [dict(b, confidence=1.0, label='alarm_tag') for b in (boxes or [])
+                         if b.get('code') in tag_codes]
+            if not tag_boxes:
+                from ..services.garment_analyzer import detect_image_tags
+                tag_boxes = detect_image_tags(
+                    None, current, gemini_api_key=icp.get_param('ugurlar_ai_studio.gemini_api_key', ''))
+            data, cost = provider.erase_regions(current, tag_boxes, pad_ratio=0.35) if tag_boxes else (None, 0.0)
             if not data:
-                data, cost = _seedream([AUTO_FIX_INSTRUCTIONS['store_tag_visible']])
+                data, cost = _seedream([AUTO_FIX_INSTRUCTIONS[c] for c in tag_codes])
             if data:
                 current, total_cost = base64.b64encode(_convert_to_jpeg(data)), total_cost + cost
-                fixed.append('store_tag_visible')
+                fixed.extend(tag_codes)
     except Exception as e:
         _logger.warning('Otomatik düzeltme başarısız (%s): %s', fixable, e)
     if not fixed:
@@ -269,7 +279,7 @@ def _get_mannequin_image(session, preset, photo_type, needs_bare_legs):
 
 
 def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', analysis=None,
-                       category='', gen=None, base_cost=0.0):
+                       category='', gen=None, base_cost=0.0, reference_image=None):
     """Kalite skoru + (ayar açıksa) Gemini görsel denetimi + görünür etiketi otomatik silme.
 
     Returns:
@@ -286,18 +296,21 @@ def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', anal
         analysis = analysis if isinstance(analysis, dict) else {}
         hint = ' '.join(filter(None, [analysis.get('primaryColor'), analysis.get('garmentType')]))
         hint = f"{hint} ({category})".strip()
-        visual_qc = visual_quality_check(gemini_api_key, generated_b64, garment_hint=hint)
+        visual_qc = visual_quality_check(gemini_api_key, generated_b64, garment_hint=hint,
+                                         reference_image=reference_image)
 
         auto_fix = icp.get_param('ugurlar_ai_studio.auto_tag_fix', 'True') == 'True'
         if visual_qc and auto_fix:
-            fixed_b64, fix_cost, fixed_codes = _auto_fix_defects(env, generated_b64, visual_qc.get('codes', []))
+            fixed_b64, fix_cost, fixed_codes = _auto_fix_defects(
+                env, generated_b64, visual_qc.get('codes', []), visual_qc.get('boxes'))
             if fixed_b64:
                 _logger.info('Otomatik düzeltildi %s (gen=%s)', fixed_codes, gen.id if gen else '?')
                 generated_b64 = fixed_b64
                 vals['generated_image'] = fixed_b64
                 vals['cost'] = (base_cost or 0.0) + fix_cost
                 # Silme sonrası yeniden denetle: etiket hâlâ duruyorsa reviewer görsün
-                visual_qc = visual_quality_check(gemini_api_key, generated_b64, garment_hint=hint) or visual_qc
+                visual_qc = visual_quality_check(gemini_api_key, generated_b64, garment_hint=hint,
+                                                 reference_image=reference_image) or visual_qc
     qc = compute_quality_score(source_image, generated_b64, visual_qc=visual_qc)
     vals.update({'quality_score': qc['score'], 'quality_details': qc['details']})
     if 'generated_image' in vals:
@@ -1331,7 +1344,8 @@ class AiStudioSession(models.Model):
         garment_b64 = self._remove_store_tags(session, garment_b64, security_tags)
 
         garment_url = provider.upload_image(garment_b64)
-        return garment_url, processed_b64
+        # İkinci değer: try-on'a giden temizlenmiş ürün görseli (sonuç denetiminde referans)
+        return garment_url, garment_b64
 
     def _remove_store_tags(self, session, image_b64, tags=None):
         """Görseldeki mağaza etiketlerini sil (FLUX Fill; olmazsa OpenCV Telea).
@@ -1349,10 +1363,22 @@ class AiStudioSession(models.Model):
         fal_key = session.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fal_api_key')
         if fal_key:
             from ..services.fal_provider import FalProvider
+            provider = FalProvider(fal_key)
+            current = image_b64
             try:
-                data, _cost = FalProvider(fal_key).erase_regions(image_b64, tags)
-                if data:
-                    return base64.b64encode(_convert_to_jpeg(data, quality=95))
+                # Sil → yeniden tara; kalıntı varsa daha geniş maskeyle ikinci geçiş
+                for attempt, pad in enumerate((0.25, 0.6), start=1):
+                    data, _cost = provider.erase_regions(current, tags, pad_ratio=pad)
+                    if not data:
+                        break
+                    current = base64.b64encode(_convert_to_jpeg(data, quality=95))
+                    tags = self._detect_security_tags(session, current)
+                    if not tags:
+                        _logger.info('Mağaza etiketi silindi ve doğrulandı (geçiş %d)', attempt)
+                        return current
+                    _logger.warning('Silme sonrası %d etiket hâlâ görünüyor (geçiş %d)', len(tags), attempt)
+                if current is not image_b64:
+                    return current
             except Exception as e:
                 _logger.warning('AI etiket silme başarısız, OpenCV kullanılacak: %s', e)
         from ..services.garment_preprocessor import inpaint_tags_base64
@@ -2258,6 +2284,7 @@ class AiStudioSession(models.Model):
                                 env, source_image, gen_b64, gemini_api_key,
                                 analysis=cached_analysis, category=category_to_send, gen=gen,
                                 base_cost=tryon_result.get('cost', 0.0),
+                                reference_image=processed_garment_b64,
                             )
                             gen.write(qc_vals)
                             if qc_vals.get('generated_image'):
@@ -2731,6 +2758,7 @@ class AiStudioSession(models.Model):
                             env, source_image, gen_b64, gemini_api_key,
                             analysis=analysis, category=category_to_send, gen=gen,
                             base_cost=gen_vals['cost'],
+                            reference_image=processed_b64,
                         ))
                     except Exception as qe:
                         _logger.warning('Retry kalite kontrol hatası (gen=%s): %s', gen.id, qe)

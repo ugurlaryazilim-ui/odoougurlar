@@ -180,11 +180,12 @@ DEFAULT_TOP = 'a plain fitted neutral top'
 # Üst giyimde kumaş pantolonla uyumlu ayakkabı (manken spor ayakkabı giyiyor olabilir)
 DEFAULT_TOPS_SHOES = 'simple dark leather shoes'
 
-# Mağaza etiketleri: negative_prompt desteklenmediği için bunu pozitif cümleyle söylemek
-# zorundayız; aksi halde "yapısal detayları birebir kopyala" talimatı etiketi de kopyalatır
+# Temiz ürün: mağaza etiketleri Image 2'den zaten silinmiş olarak gelir. Cümle nesne
+# adı İÇERMEZ — "no tags/labels" gibi olumsuzlamalar modele o nesneleri hatırlatıp
+# bel bandına etiket/yama çizdiriyordu. Yalnızca Image 2'deki detaylar istenir.
 CLEAN_PRODUCT = (
-    "Show the garment as a clean, finished retail product with no security tags, "
-    "alarm pins, price tags or hangtags attached."
+    "Show the garment as a clean, finished retail product with exactly the details "
+    "visible in Image 2 and nothing added."
 )
 
 _FRONT_INTRO = (

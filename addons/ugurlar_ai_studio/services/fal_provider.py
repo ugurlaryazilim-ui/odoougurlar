@@ -274,17 +274,23 @@ class FalProvider(AIProviderBase):
             'request_id': request_id,
             'seed': seed_val,
         }
-    ERASE_APP = 'fal-ai/flux-pro/v1/fill'
-    ERASE_PROMPT = (
-        "The same garment fabric continuing seamlessly, matching the surrounding color, "
-        "texture, weave and pattern exactly. No tag, label, pin, plastic or paper object."
+    # Birincil: Bria Eraser — prompt almaz, bölgeyi çevresiyle doldurur. Metin
+    # istemi olmadığı için silinen yere "etiket/logo" gibi yeni bir nesne çizemez.
+    # Maske: beyaz (255) = silinecek alan (Bria dokümantasyonu).
+    ERASE_APP = 'fal-ai/bria/eraser'
+    # Yedek: FLUX.1 Pro Fill. İstem SADECE olumlu olmalı: "tag/label" gibi nesne
+    # adları olumsuzlansa bile model onları çizme eğilimindedir.
+    FILL_APP = 'fal-ai/flux-pro/v1/fill'
+    FILL_PROMPT = (
+        "Plain fabric continuing seamlessly, identical to the surrounding garment "
+        "in color, texture, weave and pattern."
     )
 
-    def erase_regions(self, image_base64, tag_boxes, prompt=None, timeout=120):
-        """Etiket kutularını maskeleyip FLUX.1 Pro Fill ile kumaşla doldur.
+    def erase_regions(self, image_base64, tag_boxes, prompt=None, timeout=120, pad_ratio=0.25):
+        """Kutuları maskeleyip bölgeyi çevresindeki kumaşla doldur (Bria, olmazsa FLUX Fill).
 
-        upload_image görseli küçültüp WebP'ye çevirdiği için kullanılmaz: Fill görsel
-        ve maskenin birebir aynı boyutta olmasını ister; ikisi de burada yüklenir.
+        upload_image görseli küçültüp WebP'ye çevirdiği için kullanılmaz: silme
+        modelleri görsel ve maskenin aynı boyutta olmasını ister; ikisi de burada yüklenir.
 
         Returns:
             (bytes veya None, float cost)
@@ -304,7 +310,7 @@ class FalProvider(AIProviderBase):
         draw = ImageDraw.Draw(mask)
         drawn = 0
         for item in tag_boxes or []:
-            rect = tag_box_to_pixels(item, w, h)
+            rect = tag_box_to_pixels(item, w, h, pad_ratio=pad_ratio)
             if rect:
                 draw.rectangle(rect, fill=255)  # beyaz = doldurulacak alan
                 drawn += 1
@@ -316,19 +322,38 @@ class FalProvider(AIProviderBase):
         mask.save(mask_buf, format='PNG')
         image_url = fal_client.upload(img_buf.getvalue(), 'image/jpeg', file_name='garment.jpg')
         mask_url = fal_client.upload(mask_buf.getvalue(), 'image/png', file_name='mask.png')
-        result = fal_client.subscribe(self.ERASE_APP, arguments={
-            'prompt': prompt or self.ERASE_PROMPT,
-            'image_url': image_url,
-            'mask_url': mask_url,
-            'output_format': 'png',
-            'safety_tolerance': '5',
-        }, client_timeout=timeout)
-        images = (result or {}).get('images') or []
-        out_url = images[0].get('url') if images and isinstance(images[0], dict) else ''
+
+        def _first_url(result):
+            result = result or {}
+            image = result.get('image')
+            if isinstance(image, dict) and image.get('url'):
+                return image['url']
+            images = result.get('images') or []
+            return images[0].get('url') if images and isinstance(images[0], dict) else ''
+
+        out_url, cost, used = '', 0.0, self.ERASE_APP
+        try:
+            out_url = _first_url(fal_client.subscribe(self.ERASE_APP, arguments={
+                'image_url': image_url,
+                'mask_url': mask_url,
+                'mask_type': 'manual',
+            }, client_timeout=timeout))
+            cost = 0.04
+        except Exception as e:
+            _logger.warning('Bria Eraser başarısız, FLUX Fill deneniyor: %s', e)
+        if not out_url:
+            used = self.FILL_APP
+            out_url = _first_url(fal_client.subscribe(self.FILL_APP, arguments={
+                'prompt': prompt or self.FILL_PROMPT,
+                'image_url': image_url,
+                'mask_url': mask_url,
+                'output_format': 'png',
+                'safety_tolerance': '5',
+            }, client_timeout=timeout))
+            cost = round(0.05 * max(1.0, w * h / 1e6), 4)
         if not out_url:
             return None, 0.0
-        cost = round(0.05 * max(1.0, w * h / 1e6), 4)
-        _logger.info('FLUX Fill ile %d etiket bölgesi silindi (%dx%d, $%.3f)', drawn, w, h, cost)
+        _logger.info('%s ile %d bölge silindi (%dx%d, $%.3f)', used, drawn, w, h, cost)
         return req_lib.get(out_url, timeout=60).content, cost
 
     def single_image_edit(self, image_base64, prompt, timeout=120):

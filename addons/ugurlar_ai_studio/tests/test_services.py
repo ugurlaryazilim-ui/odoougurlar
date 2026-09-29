@@ -117,7 +117,10 @@ class TestPromptBuilder(BaseCase):
         for (sub_type, photo_type) in cc.SEEDREAM_TEMPLATES:
             category = {'dress': 'dress', 'jumpsuit': 'dress', 'bottoms': 'bottoms'}.get(sub_type, 'tops')
             p = self._build({'garmentType': 'Ürün', 'clothingCategory': category}, photo_type)
-            self.assertIn('no security tags', p, (sub_type, photo_type))
+            self.assertIn('nothing added', p, (sub_type, photo_type))
+            # Nesne adı olumsuzlansa bile model onu çizer: etiket kelimeleri geçmemeli
+            for word in ('tag', 'label', 'patch'):
+                self.assertNotIn(word, p.lower(), (sub_type, photo_type, word))
 
     def test_back_view_takes_design_from_back_photo(self):
         p = self._build({'garmentType': 'Bluz', 'clothingCategory': 'tops'}, 'back')
@@ -271,6 +274,40 @@ class TestTagErasing(BaseCase):
         self.assertEqual(mask.getpixel((120, 150)), 255, 'etiket bölgesi beyaz (doldurulacak)')
         self.assertEqual(mask.getpixel((700, 1100)), 0)
         self.assertEqual(args['mask_url'], 'https://cdn/2')
+
+    def test_erase_falls_back_to_flux_with_object_free_prompt(self):
+        calls = []
+
+        def fake_subscribe(app, arguments=None, **kw):
+            calls.append((app, arguments))
+            if app == FalProvider.ERASE_APP:
+                raise Exception('bria down')
+            return {'images': [{'url': 'https://out'}]}
+
+        class FakeResp:
+            content = b'IMG'
+
+        with patch.object(fal_provider_module, 'fal_client') as fc,                 patch('requests.get', return_value=FakeResp()):
+            fc.upload.return_value = 'https://cdn/x'
+            fc.subscribe.side_effect = fake_subscribe
+            data, _cost = FalProvider('k').erase_regions(
+                _jpeg_b64(Image.new('RGB', (400, 600))),
+                [{'box_2d': [100, 100, 150, 200], 'label': 'alarm_tag', 'confidence': 0.9}])
+        self.assertEqual(data, b'IMG')
+        self.assertEqual([c[0] for c in calls], [FalProvider.ERASE_APP, FalProvider.FILL_APP])
+        self.assertNotIn('prompt', calls[0][1], 'Bria istemsiz çalışmalı')
+        fill_prompt = calls[1][1]['prompt'].lower()
+        for word in ('tag', 'label', 'pin', 'plastic'):
+            self.assertNotIn(word, fill_prompt)
+
+    def test_visual_qc_sends_reference_and_returns_boxes(self):
+        fake = {'defects': ['added_label'], 'boxes': [{'code': 'added_label', 'box_2d': [400, 450, 430, 500]}]}
+        with patch.object(analyzer_module, '_gemini_json', return_value=fake) as gj:
+            res = analyzer_module.visual_quality_check('k', 'RESULT', garment_hint='pantolon',
+                                                       reference_image='REF')
+        self.assertEqual(gj.call_args.kwargs['extra_images'], ['REF'])
+        self.assertEqual(res['codes'], ['added_label'])
+        self.assertEqual(len(res['boxes']), 1)
 
     def test_erase_regions_skips_design_labels(self):
         with patch.object(fal_provider_module, 'fal_client') as fc:

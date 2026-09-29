@@ -108,7 +108,8 @@ def _prepare_gemini_image(image_url):
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
 
-def _gemini_json(gemini_api_key, prompt, image, schema=None, timeout=30, deterministic=False):
+def _gemini_json(gemini_api_key, prompt, image, schema=None, timeout=30, deterministic=False,
+                 extra_images=None):
     """Görsel + prompt ile Gemini'den JSON al.
 
     Args:
@@ -126,6 +127,11 @@ def _gemini_json(gemini_api_key, prompt, image, schema=None, timeout=30, determi
     if not base64_data:
         _logger.warning('Görsel Gemini için hazırlanamadı')
         return None
+    parts = [{"text": prompt}, {"inlineData": {"mimeType": mime_type, "data": base64_data}}]
+    for extra in extra_images or []:
+        e_mime, e_data = _prepare_gemini_image(extra)
+        if e_data:
+            parts.append({"inlineData": {"mimeType": e_mime, "data": e_data}})
 
     def _call(with_schema):
         config = {"responseMimeType": "application/json"}
@@ -137,10 +143,7 @@ def _gemini_json(gemini_api_key, prompt, image, schema=None, timeout=30, determi
         return requests.post(
             _GEMINI_URL,
             json={
-                "contents": [{"parts": [
-                    {"text": prompt},
-                    {"inlineData": {"mimeType": mime_type, "data": base64_data}},
-                ]}],
+                "contents": [{"parts": parts}],
                 "generationConfig": config,
             },
             headers={'Content-Type': 'application/json', 'x-goog-api-key': gemini_api_key},
@@ -688,6 +691,7 @@ VISUAL_QC_ISSUES = {
     'pants_under_dress': 'Elbise/etek altında pantolon veya tayt var',
     'bad_hands': 'El veya parmak bozuk',
     'store_tag_visible': 'Mağaza/alarm etiketi görünüyor',
+    'added_label': 'Üründe olmayan etiket/yama eklenmiş',
     'extra_limbs_or_person': 'Fazla uzuv veya ikinci kişi var',
     'text_or_watermark': 'Görselde yazı veya filigran var',
     'garment_mismatch': 'Kıyafet ürünle uyuşmuyor',
@@ -714,43 +718,55 @@ def mannequin_legs_covered(gemini_api_key, image):
     return bool(parsed['legsCovered'])
 
 
-def visual_quality_check(gemini_api_key, generated_image, garment_hint='', timeout=25):
+def visual_quality_check(gemini_api_key, generated_image, garment_hint='', timeout=30,
+                         reference_image=None):
     """AI çıktısını Gemini ile gerçek üretim hatalarına karşı denetle.
 
-    Renk/keskinlik metrikleri "elbise altında pantolon" veya "altı parmak" gibi
-    hataları yakalayamaz; bu kontrol reviewer'ın gözünü sorunlu görsellere çevirir.
-
-    Args:
-        gemini_api_key: Google Gemini API anahtarı (yoksa kontrol atlanır)
-        generated_image: AI çıktısı (base64 / bytes)
-        garment_hint: ürün tarifi, ör. "Siyah Midi Elbise (one_piece)"
+    reference_image (temizlenmiş ürün görseli) verilirse karşılaştırmalı denetim yapılır:
+    üründe olmayan etiket/yama/rozet "added_label" olarak bulunur. Etiket türü hataların
+    konumu (box_2d, 0-1000) da döner; düzeltme bu kutularla maskeli silme yapar.
 
     Returns:
-        dict: {'issues': [Türkçe metin, ...], 'codes': [kod, ...]} veya None (kontrol yapılamadı)
+        dict: {'issues': [Türkçe], 'codes': [kod], 'boxes': [{'box_2d', 'code'}]} veya None
     """
     if not gemini_api_key or not generated_image:
         return None
     codes_doc = '\n'.join(f'- "{code}"' for code in VISUAL_QC_ISSUES)
+    reference_note = (
+        "Image 1 is the AI-generated photo. Image 2 is the real product (reference).\n"
+        if reference_image else "Image 1 is the AI-generated photo.\n"
+    )
     prompt = f"""You are a strict QA reviewer for AI-generated fashion e-commerce photos.
-The product being modeled: {garment_hint or 'a garment'}.
-Check the photo ONLY for these defects and report a code only when it is clearly present:
+{reference_note}The product being modeled: {garment_hint or 'a garment'}.
+Check Image 1 ONLY for these defects and report a code only when it is clearly present:
 {codes_doc}
 Rules:
 - "pants_under_dress": only for dresses/skirts: trousers, jeans, leggings or tights visible under the hem. Jumpsuits are NOT dresses.
 - "bad_hands": extra, missing, fused or malformed fingers, or deformed hands.
 - "store_tag_visible": a security alarm tag, price tag, hangtag or tag pin attached to the garment.
-Return JSON only: {{"defects": ["code", ...]}}. Return {{"defects": []}} if the photo is clean."""
+- "added_label": {"a label, patch, badge, logo, tag or small object on the garment in Image 1 that does not exist on the product in Image 2 (check the waistband, back, hem and seams carefully)." if reference_image else "never report this code."}
+For every "store_tag_visible" and "added_label" finding, add its bounding box on Image 1 as box_2d [ymin, xmin, ymax, xmax] normalized to 0-1000.
+Return JSON: {{"defects": ["code", ...], "boxes": [{{"code": "added_label", "box_2d": [ymin, xmin, ymax, xmax]}}]}}.
+Return {{"defects": [], "boxes": []}} if the photo is clean."""
     schema = {
         "type": "OBJECT",
-        "properties": {"defects": {"type": "ARRAY", "items": {"type": "STRING", "enum": list(VISUAL_QC_ISSUES)}}},
+        "properties": {
+            "defects": {"type": "ARRAY", "items": {"type": "STRING", "enum": list(VISUAL_QC_ISSUES)}},
+            "boxes": {"type": "ARRAY", "items": {"type": "OBJECT", "properties": {
+                "code": {"type": "STRING"},
+                "box_2d": {"type": "ARRAY", "items": {"type": "INTEGER"}},
+            }}},
+        },
         "required": ["defects"],
     }
-    parsed = _gemini_json(gemini_api_key, prompt, generated_image, schema=schema,
-                          timeout=timeout, deterministic=True)
+    parsed = _gemini_json(gemini_api_key, prompt, generated_image, schema=schema, timeout=timeout,
+                          deterministic=True, extra_images=[reference_image] if reference_image else None)
     if parsed is None:
         return None
     codes = [c for c in (parsed.get('defects') or []) if c in VISUAL_QC_ISSUES]
-    return {'codes': codes, 'issues': [VISUAL_QC_ISSUES[c] for c in codes]}
+    boxes = [b for b in (parsed.get('boxes') or [])
+             if isinstance(b, dict) and isinstance(b.get('box_2d'), list) and len(b['box_2d']) == 4]
+    return {'codes': codes, 'issues': [VISUAL_QC_ISSUES[c] for c in codes], 'boxes': boxes}
 
 
 def _default_analysis():
