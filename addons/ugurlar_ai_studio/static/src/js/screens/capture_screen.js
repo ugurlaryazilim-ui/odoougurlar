@@ -57,6 +57,8 @@ export class CaptureScreen extends Component {
     }
 
     async startCamera() {
+        // Hızlı "kamera değiştir" dokunuşlarında yalnız EN SON başlatma geçerli
+        const token = (this._camSeq = (this._camSeq || 0) + 1);
         this.state.cameraError = null;
         const attempts = [
             // En yüksek çözünürlük: tarayıcı desteklediği en yakın değeri seçer
@@ -79,8 +81,8 @@ export class CaptureScreen extends Component {
             console.error("Kamera hatası:", lastError);
             return;
         }
-        // Kullanıcı kamera açılırken ekrandan ayrıldıysa ışık açık kalmasın
-        if (this.unmounted) {
+        // Ekrandan ayrıldıysa ya da bu arada yeni bir başlatma yapıldıysa ışık açık kalmasın
+        if (this.unmounted || token !== this._camSeq) {
             stream.getTracks().forEach(track => track.stop());
             return;
         }

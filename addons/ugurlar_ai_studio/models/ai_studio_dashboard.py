@@ -202,8 +202,8 @@ class AiStudioLeaderboard(models.Model):
         elif period == 'this_year':
             all_gens_domain.append(('create_date', '>=', first_day_this_year))
             
-        all_gens = Generation.search(all_gens_domain)
-        total_cost = sum(all_gens.mapped('cost'))
+        cost_groups = Generation._read_group(all_gens_domain, aggregates=['cost:sum'])
+        total_cost = (cost_groups[0][0] if cost_groups else 0.0) or 0.0
         
         is_manager = self.env.user.has_group('ugurlar_ai_studio.group_ai_studio_manager')
 
@@ -220,9 +220,10 @@ class AiStudioLeaderboard(models.Model):
             'cost_data': {
                 'show': is_manager,
                 'total_cost': round(total_cost, 2),
-                'currency': self.env.user.company_id.currency_id.symbol or '$'
+                'currency': '$',  # AI maliyetleri USD tutulur
             },
             'my_stats': {
+                'id': self.env.uid,  # liderlik tablosunda kendi satırını vurgulamak için
                 'rank': my_rank,
                 'score': my_stats.get('score', 0),
                 'approved': my_stats.get('approved', 0),

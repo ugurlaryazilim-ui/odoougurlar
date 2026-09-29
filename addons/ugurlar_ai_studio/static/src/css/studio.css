@@ -137,84 +137,6 @@
     transform: scale(0.95);
 }
 
-/* --- Camera Overlay (ugurlar_barcode uyumlu) --- */
-.ub-camera-overlay {
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0, 0, 0, 0.95);
-    z-index: 99999;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-}
-
-.ub-camera-header {
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 12px 16px;
-    background: rgba(0,0,0,0.6);
-    color: white;
-    font-size: 15px;
-    z-index: 2;
-}
-
-.ub-camera-close-btn {
-    background: rgba(255,255,255,0.2);
-    color: white;
-    border: none;
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    font-size: 18px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.ub-camera-overlay video {
-    width: 100%;
-    max-width: 640px;
-    max-height: 70vh;
-    object-fit: cover;
-    border-radius: 8px;
-}
-
-.ub-camera-target {
-    position: absolute;
-    width: 260px;
-    height: 160px;
-    border: 3px solid var(--ais-primary, #6C63FF);
-    border-radius: 12px;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    box-shadow: 0 0 0 9999px rgba(0,0,0,0.4);
-    animation: ais-scan-pulse 2s ease-in-out infinite;
-}
-
-@keyframes ais-scan-pulse {
-    0%, 100% { border-color: rgba(108, 99, 255, 0.6); }
-    50% { border-color: rgba(108, 99, 255, 1); }
-}
-
-.ub-camera-status {
-    position: absolute;
-    bottom: 40px;
-    left: 0; right: 0;
-    text-align: center;
-    color: white;
-    font-size: 15px;
-    padding: 8px;
-    background: rgba(0,0,0,0.5);
-    border-radius: 8px;
-    margin: 0 20px;
-}
-
 /* --- Product Card --- */
 .ais-results {
     margin-bottom: 20px;
@@ -899,8 +821,8 @@
 
 /* --- Odoo specific overrides for mobile — SADECE AI Studio icinde --- */
 @media screen and (max-width: 768px) {
-    /* Odoo navbar compact — bu global kalabilir */
-    .o_main_navbar {
+    /* Odoo navbar compact — yalnız AI Stüdyo ekranı açıkken */
+    .o_web_client:has(.ais-app) .o_main_navbar {
         height: auto !important;
         min-height: 46px;
     }

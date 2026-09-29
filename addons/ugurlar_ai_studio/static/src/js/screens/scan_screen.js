@@ -3,7 +3,7 @@ import { openCameraScanner } from "@ugurlar_barcode/js/camera_scanner";
 import { aisRpc } from "../rpc_utils";
 
 import { Component, useState } from "@odoo/owl";
-import { useService } from "@web/core/utils/hooks";
+import { useAutofocus, useService } from "@web/core/utils/hooks";
 import { _t } from "@web/core/l10n/translation";
 
 export class ScanScreen extends Component {
@@ -18,6 +18,8 @@ export class ScanScreen extends Component {
 
     setup() {
         this.notification = useService("notification");
+        // Ekrana her dönüşte odak: klavye kamalı barkod okuyucu boşluğa yazmasın
+        useAutofocus({ refName: "searchInput" });
 
         this.state = useState({
             query: "",
@@ -43,7 +45,8 @@ export class ScanScreen extends Component {
 
     async searchProduct() {
         const query = this.state.query.trim();
-        if (!query) return;
+        // Bazı okuyucular CR+LF gönderir: ikinci Enter aramayı tekrarlamasın
+        if (!query || this.state.searching) return;
 
         this.state.searching = true;
         this.state.showResults = false;
@@ -56,10 +59,12 @@ export class ScanScreen extends Component {
                 this.state.results = res.products;
                 this.state.showResults = true;
             } else {
-                this.notification.add(_t("Urun bulunamadi."), { type: "warning", sticky: false });
+                this.notification.add(res.error || _t("Ürün bulunamadı."), {
+                    type: res.error ? "danger" : "warning", sticky: false,
+                });
             }
         } catch (e) {
-            this.notification.add(_t("Arama hatasi."), { type: "danger", sticky: false });
+            this.notification.add(e.message || _t("Arama hatası."), { type: "danger", sticky: false });
         } finally {
             this.state.searching = false;
         }

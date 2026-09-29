@@ -474,7 +474,12 @@ def _to_english(analysis, key):
     words = []
     for w in raw.split():
         mapped = _TR_EN_WORDS.get(w.lower())
-        words.append(w if mapped is None else mapped)
+        if mapped is None:
+            # Sözlükte olmayan Türkçe kelime İngilizce prompta sızmasın ("Yakası" vb.)
+            if set(w.lower()) & set('çğıöşü'):
+                continue
+            mapped = w
+        words.append(mapped)
     return ' '.join(w for w in words if w)
 
 
@@ -606,7 +611,9 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     if sub_type in ('tops', 'dress', 'jumpsuit') and photo_type == 'front':
         collar = _to_english(analysis, 'collarType')
         if collar:
-            collar_note = f"{collar} neckline. "
+            # "shirt collar neckline" gibi çift ifade olmasın
+            collar_note = f"{collar}. " if 'collar' in collar.lower() or 'neck' in collar.lower() \
+                else f"{collar} neckline. "
         sleeve_lower = str(analysis.get('sleeveType') or '').lower()
         if any(k in sleeve_lower for k in ['strapless', 'askisiz', 'askısız']):
             collar_note += "Bare shoulders, strapless design. "
@@ -619,7 +626,7 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     graphic_note = ''
     if analysis.get('hasGraphic'):
         graphic_desc = (analysis.get('graphicDescriptionEn') or '').strip()
-        graphic_note = (f"Preserve the print exactly: {graphic_desc}. " if graphic_desc
+        graphic_note = (f"Preserve the print exactly: {graphic_desc.rstrip('. ')}. " if graphic_desc
                         else "Preserve the print exactly as in Image 2. ")
 
     # Açık önlü üst giyim (yelek, hırka, ceket...) için iç katman

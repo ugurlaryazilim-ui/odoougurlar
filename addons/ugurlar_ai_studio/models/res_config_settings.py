@@ -31,40 +31,6 @@ class ResConfigSettings(models.TransientModel):
         help='Google Gemini API anahtarı. Boş bırakılırsa fal.ai (Proxy/any-llm) kullanılır.',
     )
 
-    # --- Model Secimi ---
-    ai_studio_tryon_model = fields.Selection([
-        ('tryon-v1.6', 'Try-On v1.6 (Hızlı, 1 kredi)'),
-        ('tryon-max', 'Try-On Max (Premium, 2-5 kredi)'),
-    ], string='Try-On Modeli',
-        default='tryon-max',
-        config_parameter='ugurlar_ai_studio.tryon_model',
-        help='FASHN try-on modeli. Max daha kaliteli ama daha pahalı.',
-    )
-
-    # --- Uretim Ayarlari ---
-    ai_studio_quality_mode = fields.Selection([
-        ('performance', 'Hızlı'),
-        ('balanced', 'Dengeli'),
-        ('quality', 'Kaliteli'),
-    ], string='Varsayılan Kalite Modu',
-        default='quality',
-        config_parameter='ugurlar_ai_studio.quality_mode',
-    )
-    ai_studio_num_samples = fields.Integer(
-        string='Üretim Sayısı (num_samples)',
-        default=1,
-        config_parameter='ugurlar_ai_studio.num_samples',
-        help='Her istek için kaç görsel üretilsin (1-4). Fazlası maliyet artırır.',
-    )
-    ai_studio_tryon_resolution = fields.Selection([
-        ('1K', '1K (Hızlı, düşük maliyet)'),
-        ('2K', '2K (Dengeli)'),
-        ('4K', '4K (Maksimum kalite)'),
-    ], string='Try-On Çözünürlük',
-        default='2K',
-        config_parameter='ugurlar_ai_studio.tryon_resolution',
-        help='tryon-max çözünürlük ayarı. 4K en iyi kalite ama daha pahalı.',
-    )
     ai_studio_seedream_image_size = fields.Selection([
         ('hd', '1664×2496 — Yüksek detay ($0.135/görsel)'),
         ('standard', '1248×1872 — Standart ($0.0675/görsel)'),

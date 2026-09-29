@@ -302,7 +302,8 @@ def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', anal
     if enabled and gemini_api_key:
         from ..services.garment_analyzer import visual_quality_check
         analysis = analysis if isinstance(analysis, dict) else {}
-        hint = ' '.join(filter(None, [analysis.get('primaryColor'), analysis.get('garmentType')]))
+        hint = ' '.join(filter(None, [analysis.get('primaryColorEn') or analysis.get('primaryColor'),
+                                      analysis.get('garmentTypeEn') or analysis.get('garmentType')]))
         hint = f"{hint} ({category})".strip()
         visual_qc = visual_quality_check(gemini_api_key, generated_b64, garment_hint=hint,
                                          reference_image=reference_image)
@@ -319,7 +320,8 @@ def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', anal
                 # Silme sonrası yeniden denetle: etiket hâlâ duruyorsa reviewer görsün
                 visual_qc = visual_quality_check(gemini_api_key, generated_b64, garment_hint=hint,
                                                  reference_image=reference_image) or visual_qc
-    qc = compute_quality_score(source_image, generated_b64, visual_qc=visual_qc)
+    # Renk karşılaştırması temizlenmiş ürün görseliyle (ham mağaza fotoğrafında duvar/zemin var)
+    qc = compute_quality_score(reference_image or source_image, generated_b64, visual_qc=visual_qc)
     vals.update({'quality_score': qc['score'], 'quality_details': qc['details']})
     if 'generated_image' in vals:
         vals['quality_details'] = 'Otomatik düzeltildi | ' + vals['quality_details']
@@ -1405,76 +1407,50 @@ class AiStudioSession(models.Model):
             return image_b64, 0.0
 
     def _process_detail_generation(self, gen, session, provider, source_image, auto_bg, provider_type, preset):
-        """Detay fotoğrafı generation'ını işle (crop veya BG remove).
+        """Detay görseli: try-on sonucundan kırp; ayakkabı/çanta/aksesuarda ürün fotoğrafından.
 
         Returns:
-            base64: Detay görseli base64 verisi
+            base64: Detay görseli
         """
         from ..services.garment_preprocessor import (
             preprocess_garment_image,
             convert_birefnet_output_to_rgb,
         )
         garment_cat = session._detect_garment_type()
-        _logger.info('DETAY TİP TESPİT: ürün=%s → algılanan=%s (preset=%s)',
-                     session.product_id.display_name, garment_cat,
-                     preset.garment_type if preset else 'yok')
-
         crop_from_product = garment_cat in ('shoes', 'bags', 'accessories')
-        preprocessed = preprocess_garment_image(
-            source_image, target_long_edge=1600,
-            security_tags=self._detect_security_tags(session, source_image) if crop_from_product else None)
-        processed_b64 = preprocessed['image_base64']
 
-        # Ayakkabı/Çanta/Aksesuar → doğrudan ürün fotoğrafından kırp
-        if crop_from_product:
-            if auto_bg and processed_b64:
-                try:
-                    bg_removed_b64 = provider.remove_background(processed_b64)
-                    try:
-                        bg_removed_data = base64.b64decode(bg_removed_b64)
-                        rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
-                        clean_b64 = base64.b64encode(rgb_data)
-                    except Exception:
-                        clean_b64 = bg_removed_b64
-                except Exception:
-                    clean_b64 = processed_b64
-            else:
-                clean_b64 = processed_b64
-            return session._crop_image_detail(clean_b64, category=garment_cat)
-
-        # Üst/Alt/Tek Parça → manken try-on sonucundan kırp
-        target_type = 'front'
-        if gen.source_photo_id and gen.source_photo_id.photo_type == 'detail':
-            if gen.source_photo_id.detail_placement == 'back':
+        if not crop_from_product:
+            # Üst/Alt/Tek Parça → manken try-on sonucundan kırp (ön işleme gerekmez)
+            target_type = 'front'
+            if gen.source_photo_id and gen.source_photo_id.photo_type == 'detail' \
+                    and gen.source_photo_id.detail_placement == 'back':
                 target_type = 'back'
-
-        target_gen = session.generation_ids.filtered(
-            lambda g: g.photo_type == target_type and g.state == 'done' and g.generated_image
-        )
-        if not target_gen and target_type == 'back':
             target_gen = session.generation_ids.filtered(
-                lambda g: g.photo_type == 'front' and g.state == 'done' and g.generated_image
-            )
+                lambda g: g.photo_type == target_type and g.state == 'done' and g.generated_image)
+            if not target_gen and target_type == 'back':
+                target_gen = session.generation_ids.filtered(
+                    lambda g: g.photo_type == 'front' and g.state == 'done' and g.generated_image)
+            if target_gen:
+                return session._crop_image_detail(target_gen[0].generated_image, category=garment_cat)
+            _logger.warning('Detay: try-on sonucu yok, ürün fotoğrafı kullanılacak (gen=%s)', gen.id)
 
-        if target_gen:
-            return session._crop_image_detail(
-                target_gen[0].generated_image,
-                category=garment_cat
-            )
-
-        # Fallback: BG remove
+        processed_b64 = preprocess_garment_image(
+            source_image, target_long_edge=1600,
+            security_tags=self._detect_security_tags(session, source_image) if crop_from_product else None,
+        )['image_base64']
+        clean_b64 = processed_b64
         if auto_bg and processed_b64:
             try:
                 bg_removed_b64 = provider.remove_background(processed_b64)
                 try:
-                    bg_removed_data = base64.b64decode(bg_removed_b64)
-                    rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
-                    return base64.b64encode(rgb_data)
+                    clean_b64 = base64.b64encode(convert_birefnet_output_to_rgb(base64.b64decode(bg_removed_b64)))
                 except Exception:
-                    return bg_removed_b64
-            except Exception:
-                pass
-        return processed_b64
+                    clean_b64 = bg_removed_b64
+            except Exception as e:
+                _logger.warning('Detay arka plan kaldırma başarısız: %s', e)
+        if crop_from_product:
+            return session._crop_image_detail(clean_b64, category=garment_cat)
+        return clean_b64
 
     def _download_tryon_result(self, tryon_result):
         """Try-on API sonucunu indir ve JPEG'e dönüştür.
@@ -1560,12 +1536,7 @@ class AiStudioSession(models.Model):
                     'Ayarlar → AI Stüdyo menüsünden girin.'
                 ))
 
-        # Ön yüz fotoğrafını doğrula. Takım satırı fotoğrafları ana ürünün
-        # fotoğraflarını ezmesin; iki detay fotoğrafında ön yerleşimli olan öncelikli.
-        photos_by_type = {}
-        for p in self.photo_ids.filtered(lambda p: not p.set_line_id).sorted(
-                lambda p: (p.photo_type != 'detail' or p.detail_placement != 'front', p.id)):
-            photos_by_type.setdefault(p.photo_type, p)
+        photos_by_type = self._photos_by_type()
         front_photo = photos_by_type.get('front')
         if not front_photo:
             raise UserError(_('AI işlemeyi başlatabilmek için en azından Ön Yüz fotoğrafı yüklenmiş olmalıdır.'))
@@ -1658,6 +1629,15 @@ class AiStudioSession(models.Model):
             },
         }
 
+    def _photos_by_type(self):
+        """Görünüm başına kaynak fotoğraf. Takım satırı fotoğrafları ana ürünü ezmez;
+        iki detay fotoğrafında ön yerleşimli olan öncelikli."""
+        photos_by_type = {}
+        for p in self.photo_ids.filtered(lambda p: not p.set_line_id).sorted(
+                lambda p: (p.photo_type != 'detail' or p.detail_placement != 'front', p.id)):
+            photos_by_type.setdefault(p.photo_type, p)
+        return photos_by_type
+
     def action_batch_reprocess(self):
         """Seçili oturumları toplu olarak sırayla yeniden AI işlemeye gönderir."""
         now = fields.Datetime.now()
@@ -1665,7 +1645,8 @@ class AiStudioSession(models.Model):
             lambda s: s.model_preset_id and any(p.photo_type == 'front' for p in s.photo_ids)
             # İşlenmekte olan (kirası canlı) ve tamamlanmış oturumlara dokunma
             and not (s.ai_lease_until and s.ai_lease_until > now)
-            and s.state not in ('done', 'saving')
+            # İncelemedekiler de atlanır: yeniden işleme onayları/ücretli üretimleri siler
+            and s.state not in ('done', 'saving', 'review')
         )
         if not valid_sessions:
             raise UserError(_('Seçili oturumlar arasında işlenebilir durumda olan (Ön yüz fotoğrafı ve Manken Preseti olan) oturum bulunamadı.'))
@@ -1695,7 +1676,7 @@ class AiStudioSession(models.Model):
             })
             session.generation_ids.unlink()
 
-            photos_by_type = {p.photo_type: p for p in session.photo_ids}
+            photos_by_type = session._photos_by_type()
             front_photo = photos_by_type.get('front')
             back_photo = photos_by_type.get('back')
             side_photo = photos_by_type.get('side')
@@ -1836,14 +1817,14 @@ class AiStudioSession(models.Model):
                             with self.pool.cursor() as cr:
                                 env = api.Environment(cr, uid, {'lang': 'tr_TR'})
                                 sess = env['ai.studio.session'].browse(session_id)
-                                # Kalan pending/processing kayıtlarını failed yap
-                                for g in sess.generation_ids.filtered(lambda x: x.state in ('pending', 'processing')):
-                                    g.write({
-                                        'state': 'failed',
-                                        'error_message': _('Toplu işleme sırasında beklenmeyen hata: %s') % str(e)[:200],
-                                    })
-                                has_done = any(x.state == 'done' for x in sess.generation_ids)
-                                sess.write({'state': 'review' if has_done else 'failed'})
+                                # Kalanları failed yap — fal'e gönderilmiş olanlar hariç (cron alır)
+                                for g in sess.generation_ids.filtered(
+                                        lambda x: x.state == 'pending' or (x.state == 'processing' and not x.fal_request_id)):
+                                    g.write(_failure_vals(
+                                        e, _('Toplu işleme sırasında beklenmeyen hata: %s') % str(e)[:200]))
+                                if not sess.generation_ids.filtered(lambda x: x.state == 'processing'):
+                                    has_done = any(x.state == 'done' for x in sess.generation_ids)
+                                    sess.write({'state': 'review' if has_done else 'failed'})
                                 cr.commit()
                         except Exception:
                             pass
@@ -1905,13 +1886,6 @@ class AiStudioSession(models.Model):
                 'ugurlar_ai_studio.auto_bg_remove', 'True'
             ) == 'True'
 
-            # ═══ AYARLARI YUKLE ═══
-            tryon_model = env['ir.config_parameter'].sudo().get_param(
-                'ugurlar_ai_studio.tryon_model', 'tryon-max'
-            )
-            tryon_resolution = env['ir.config_parameter'].sudo().get_param(
-                'ugurlar_ai_studio.tryon_resolution', '2K'
-            )
 
             # ═══ KIYAFET ANALIZINI CACHE'LE (tek API cagrisi) ═══
             cached_analysis = None
@@ -2024,98 +1998,24 @@ class AiStudioSession(models.Model):
                         cr.commit()
                         continue
 
-                    from ..services.garment_preprocessor import (
-                        preprocess_garment_image,
-                        convert_birefnet_output_to_rgb,
-                    )
-
-                    # ═══ DETAY FOTOĞRAFI ═══
-                    # (diğer görünümler _prepare_garment_for_tryon içinde ön işlenir)
+                    # ═══ DETAY FOTOĞRAFI ═══ (AI'a gönderilmez: try-on sonucundan ya da
+                    # ayakkabı/çanta/aksesuarda ürün fotoğrafından kırpılır)
                     if photo_type == 'detail':
-                        garment_cat = session._detect_garment_type()
-                        crop_from_product = garment_cat in ('shoes', 'bags', 'accessories')
-                        processed_b64 = preprocess_garment_image(
-                            source_image,
-                            target_long_edge=1600,
-                            security_tags=self._detect_security_tags(session, source_image) if crop_from_product else None,
-                        )['image_base64']
-                        _logger.info('DETAY TİP TESPİT: ürün=%s → algılanan=%s (preset=%s)',
-                                     session.product_id.display_name, garment_cat,
-                                     preset.garment_type if preset else 'yok')
-                        
-                        target_gen = None  # ürün fotoğrafından kırpılan kategorilerde kullanılmaz
-                        # Ayakkabı/Çanta/Aksesuar → doğrudan ürün fotoğrafından kırp
-                        # (Manken try-on sonucunda bu ürünler görünmez)
-                        if garment_cat in ('shoes', 'bags', 'accessories'):
-                            _logger.info('Detay: %s kategorisi — ürün fotoğrafından kırpılacak (gen=%s)', garment_cat, gen.id)
-                            # BG remove + detay kırpma
-                            if auto_bg and processed_b64:
-                                try:
-                                    bg_removed_b64 = provider.remove_background(processed_b64)
-                                    bg_removed_data = base64.b64decode(bg_removed_b64)
-                                    rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
-                                    clean_b64 = base64.b64encode(rgb_data)
-                                except Exception as e:
-                                    _logger.warning('BG remove başarısız, orijinal kullanılacak: %s', e)
-                                    clean_b64 = processed_b64
-                            else:
-                                clean_b64 = processed_b64
-                            detail_b64 = session._crop_image_detail(clean_b64, category=garment_cat)
-                        else:
-                            # Üst/Alt/Tek Parça → manken try-on sonucundan kırp
-                            target_type = 'front'
-                            if gen.source_photo_id and gen.source_photo_id.photo_type == 'detail':
-                                if gen.source_photo_id.detail_placement == 'back':
-                                    target_type = 'back'
-
-                            target_gen = session.generation_ids.filtered(
-                                lambda g: g.photo_type == target_type and g.state == 'done' and g.generated_image
-                            )
-                            if not target_gen and target_type == 'back':
-                                target_gen = session.generation_ids.filtered(
-                                    lambda g: g.photo_type == 'front' and g.state == 'done' and g.generated_image
-                                )
-
-                            if target_gen:
-                                detail_b64 = session._crop_image_detail(
-                                    target_gen[0].generated_image,
-                                    category=garment_cat
-                                )
-                                _logger.info('Detay kırpıldı (gen=%s) %s try-on sonucundan', gen.id, target_type)
-                            else:
-                                _logger.warning('Detay kırpma fallback: try-on sonucu bulunamadı (gen=%s)', gen.id)
-                                if auto_bg and processed_b64:
-                                    try:
-                                        bg_removed_b64 = provider.remove_background(processed_b64)
-                                        bg_removed_data = base64.b64decode(bg_removed_b64)
-                                        rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
-                                        detail_b64 = base64.b64encode(rgb_data)
-                                    except Exception as e:
-                                        _logger.warning('Detay BG remove başarısız: %s', e)
-                                        detail_b64 = processed_b64
-                                else:
-                                    detail_b64 = processed_b64
-
-                        elapsed = time.time() - start_time
+                        detail_b64 = self._process_detail_generation(
+                            gen, session, provider, source_image, auto_bg, provider_type, preset)
                         gen.write({
                             'generated_image': detail_b64,
                             'state': 'done',
-                            'fal_endpoint': 'detail-crop' if target_gen else ('%s/bg-remove-detail' % provider_type),
-                            'generation_time_seconds': elapsed,
-                            'cost': 0.0 if target_gen else 0.01,
+                            'fal_endpoint': 'detail-crop',
+                            'generation_time_seconds': time.time() - start_time,
+                            'cost': 0.0,
                         })
-
-                        # KALİTE KONTROL
                         try:
                             from ..services.quality_checker import compute_quality_score
                             qc = compute_quality_score(source_image, detail_b64)
-                            gen.write({
-                                'quality_score': qc['score'],
-                                'quality_details': qc['details'],
-                            })
+                            gen.write({'quality_score': qc['score'], 'quality_details': qc['details']})
                         except Exception as qe:
                             _logger.debug('Kalite kontrol hatası: %s', qe)
-
                         cr.commit()
                         continue
 
@@ -2288,7 +2188,8 @@ class AiStudioSession(models.Model):
                             front_seed = saved_seed
                             front_result_b64 = gen_b64
 
-                            if outfit_consistency is None:
+                            # Elbise/etek/şortta sonucu kullanılmıyor: ücretli çağrıyı atla
+                            if outfit_consistency is None and not needs_bare_legs:
                                 try:
                                     from ..services.garment_analyzer import analyze_outfit_consistency
                                     outfit_consistency = analyze_outfit_consistency(
@@ -2496,12 +2397,8 @@ class AiStudioSession(models.Model):
             gemini_api_key = env['ir.config_parameter'].sudo().get_param(
                 'ugurlar_ai_studio.gemini_api_key', ''
             )
-            tryon_model = env['ir.config_parameter'].sudo().get_param(
-                'ugurlar_ai_studio.tryon_model', 'tryon-max'
-            )
-            tryon_resolution = env['ir.config_parameter'].sudo().get_param(
-                'ugurlar_ai_studio.tryon_resolution', '2K'
-            )
+            tryon_model = 'seedream/v5/pro/edit'
+            tryon_resolution = '2K'
 
             session = env['ai.studio.session'].browse(session_id)
             gen = env['ai.studio.generation'].browse(gen_id)
@@ -3358,6 +3255,12 @@ class AiStudioSession(models.Model):
             return
 
         reviewer_ids = self._get_reviewer_users().ids
+        # processing↔review döngülerinde her seferinde yeni aktivite açılmasın
+        existing = self.env['mail.activity'].sudo().search([
+            ('res_model', '=', 'ai.studio.session'), ('res_id', '=', self.id),
+            ('user_id', 'in', reviewer_ids),
+        ]).mapped('user_id').ids
+        reviewer_ids = [uid for uid in reviewer_ids if uid not in existing]
 
         if not reviewer_ids:
             return

@@ -116,9 +116,23 @@ function newLockToken() {
 
 // Açık popup (tek örnek): ikinci açılış öncekini kapatır
 let activePopupClose = null;
+// Açılış sürerken ikinci açılış (çift dokunma) yok sayılır
+let popupOpening = false;
 
 async function openReviewPopup(initialSessionId) {
-    if (activePopupClose) activePopupClose();
+    if (popupOpening) return;
+    popupOpening = true;
+    try {
+        // Öncekinin kilidi bırakılmadan yenisi alınırsa (aynı oturum) bırakma sonra
+        // gelip yeni kilidi silebilir: bırakmayı bekle
+        if (activePopupClose) await activePopupClose();
+        await _openReviewPopup(initialSessionId);
+    } finally {
+        popupOpening = false;
+    }
+}
+
+async function _openReviewPopup(initialSessionId) {
     // Unique lock token for this specific popup window (let: sonraki session geçişinde güncellenebilir)
     let sessionId = initialSessionId;
     let lockToken = newLockToken();
@@ -1029,20 +1043,21 @@ async function openReviewPopup(initialSessionId) {
     let cleanedUp = false;
     /** Zamanlayıcılar, dinleyiciler ve kilit — her kapanış yolunda (close / dışarıdan kaldırma) bir kez. */
     function cleanup() {
-        if (cleanedUp) return;
+        if (cleanedUp) return Promise.resolve();
         cleanedUp = true;
         if (revisionPollTimer) { clearInterval(revisionPollTimer); revisionPollTimer = null; }
         if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
         _overlayObserver.disconnect();
         document.removeEventListener('keydown', onKeyDown);
         window.removeEventListener('beforeunload', onBeforeUnload);
-        _jsonRpc('/ai_studio/release_lock', { session_id: sessionId, lock_token: lockToken }).catch(() => {});
         if (activePopupClose === close) activePopupClose = null;
+        return _jsonRpc('/ai_studio/release_lock', { session_id: sessionId, lock_token: lockToken }).catch(() => {});
     }
 
     function close() {
-        cleanup();
+        const released = cleanup();
         if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        return released;
     }
 
     activePopupClose = close;
@@ -1057,7 +1072,7 @@ async function openReviewPopup(initialSessionId) {
 registry.category("actions").add("ugurlar_ai_studio.review_popup", async (env, action) => {
     const sessionId = action.params?.session_id;
     if (!sessionId) {
-        env.services.notification.add("Session ID bulunamadı.", { type: "danger", sticky: false });
+        env.services.notification.add(_t("Oturum bulunamadı."), { type: "danger", sticky: false });
         return;
     }
     await openReviewPopup(sessionId);

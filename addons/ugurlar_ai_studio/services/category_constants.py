@@ -41,7 +41,6 @@ BOTTOMS_SAFE_KW = [
     'alt giyim', 'bermuda', 'capri', 'jogger',
 ]
 
-BOTTOMS_RISKY_KW = ['şort', 'sort', 'etek']
 
 BAGS_KW = ['çanta', 'canta', 'bag', 'bags', 'clutch', 'el çantası', 'sırt çantası', 'valiz', 'portföy']
 
@@ -115,8 +114,6 @@ def classify_garment_text(text):
     return None, None
 
 
-# Türkçe false positive temizleme listesi (tişört içinde şort vb.)
-FALSE_POSITIVE_CLEAN_KW = ['tişört', 'tisort', 'tısört', 'tısort', 'tshirt', 't-shirt', 't shirt']
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -333,41 +330,3 @@ FASHN_NEGATIVE = (
     "extra fingers, fused fingers, extra arms, "
     "mannequin, CGI, plastic skin, blurry"
 )
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# FASHN CATEGORY MAPPING
-# ═══════════════════════════════════════════════════════════════════════════
-
-FASHN_CATEGORY_MAP = {
-    'tops': 'tops',
-    'bottoms': 'bottoms',
-    'dress': 'full-body',
-    'outerwear': 'tops',
-    'knitwear': 'tops',
-    'one_piece': 'full-body',
-    'full-body': 'full-body',
-}
-
-GARMENT_TYPE_TO_FASHN = {
-    # Üst giyim / Dış giyim
-    'manto': 'tops', 'kaban': 'tops', 'palto': 'tops', 'mont': 'tops',
-    'ceket': 'tops', 'jacket': 'tops', 'coat': 'tops', 'trenchcoat': 'tops',
-    'trenckot': 'tops', 'pardesu': 'tops', 'parka': 'tops', 'blazer': 'tops',
-    't-shirt': 'tops', 'tisort': 'tops', 'gomlek': 'tops',
-    'bluz': 'tops', 'kazak': 'tops', 'hirka': 'tops', 'yelek': 'tops',
-    'sweatshirt': 'tops', 'hoodie': 'tops', 'polo': 'tops',
-    'atlet': 'tops', 'tank top': 'tops', 'crop top': 'tops',
-    'shirt': 'tops', 'blouse': 'tops', 'sweater': 'tops', 'cardigan': 'tops',
-    'vest': 'tops', 'top': 'tops', 'tunik': 'tops',
-    # Alt giyim
-    'pantolon': 'bottoms', 'sort': 'bottoms', 'etek': 'bottoms',
-    'jean': 'bottoms', 'denim': 'bottoms', 'tayt': 'bottoms',
-    'esofman alti': 'bottoms',
-    'pants': 'bottoms', 'trousers': 'bottoms', 'shorts': 'bottoms',
-    'skirt': 'bottoms', 'jeans': 'bottoms', 'leggings': 'bottoms',
-    # Tam vücut
-    'elbise': 'full-body', 'tulum': 'full-body', 'overall': 'full-body',
-    'dress': 'full-body', 'jumpsuit': 'full-body', 'romper': 'full-body',
-    'gown': 'full-body', 'abiye': 'full-body',
-}

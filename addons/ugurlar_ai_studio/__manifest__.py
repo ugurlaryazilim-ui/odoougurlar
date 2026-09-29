@@ -48,7 +48,6 @@
         'web.assets_backend': [
             'ugurlar_ai_studio/static/src/css/studio.css',
             'ugurlar_ai_studio/static/src/css/camera.css',
-            'ugurlar_ai_studio/static/src/css/comparison.css',
             'ugurlar_ai_studio/static/src/css/approval.css',
             'ugurlar_ai_studio/static/src/css/dashboard.css',
             'ugurlar_ai_studio/static/src/js/rpc_utils.js',

@@ -5,7 +5,7 @@
         <field name="name">ai.studio.prompt.template.list</field>
         <field name="model">ai.studio.prompt.template</field>
         <field name="arch" type="xml">
-            <list string="Prompt Sablonlari">
+            <list string="Prompt Şablonları">
                 <field name="name"/>
                 <field name="scope"/>
                 <field name="category_id" optional="show"/>
@@ -20,7 +20,7 @@
         <field name="name">ai.studio.prompt.template.form</field>
         <field name="model">ai.studio.prompt.template</field>
         <field name="arch" type="xml">
-            <form string="Prompt Sablonu">
+            <form string="Prompt Şablonu">
                 <sheet>
                     <group>
                         <group>

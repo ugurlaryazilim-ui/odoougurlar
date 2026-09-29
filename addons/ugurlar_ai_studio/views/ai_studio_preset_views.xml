@@ -40,16 +40,16 @@
                 </header>
                 <sheet>
                     <div class="oe_title">
-                        <h1><field name="name" placeholder="Preset adi..."/></h1>
+                        <h1><field name="name" placeholder="Preset adı..."/></h1>
                     </div>
                     <group>
-                        <group string="Manken Gorselleri">
+                        <group string="Manken Görselleri">
                             <field name="model_image_front" widget="image" class="oe_avatar ais-zoomable-img"/>
                             <field name="model_image_back" widget="image" class="oe_avatar ais-zoomable-img"/>
                             <field name="model_image_side" widget="image" class="oe_avatar ais-zoomable-img"/>
                             <field name="preview_image" widget="image" class="oe_avatar ais-zoomable-img"/>
                         </group>
-                        <group string="Ozellikler">
+                        <group string="Özellikler">
                             <field name="gender"/>
                             <field name="body_type"/>
                             <field name="garment_type"/>
@@ -60,7 +60,7 @@
                             <field name="active"/>
                         </group>
                     </group>
-                    <group string="AI Manken Olusturma">
+                    <group string="AI Manken Oluşturma">
                         <field name="mannequin_prompt"
                                placeholder="Orn: Young woman, 25 years old, slim build, long brown hair, natural makeup, elegant standing pose, white studio background, fashion model, professional photography"
                                widget="text"/>

@@ -66,10 +66,11 @@
                 <div class="ais-search-input-wrap">
                     <input type="text"
                            class="ais-search-input"
+                           t-ref="searchInput"
                            t-att-value="state.query"
                            t-on-input="onInputChange"
                            t-on-keydown="onKeyDown"
-                           placeholder="Barkod, SKU veya urun adi..."
+                           placeholder="Barkod, SKU veya ürün adı..."
                            autofocus="autofocus"
                            inputmode="search"/>
                     <button class="ais-camera-btn" t-on-click="startCameraScan"

@@ -24,7 +24,7 @@ class AiStudioController(http.Controller):
         try:
             session = request.env['ai.studio.session'].browse(int(session_id))
             if not session.exists():
-                return {'error': 'Oturum bulunamadi.'}
+                return {'error': 'Oturum bulunamadı.'}
 
             # Kalite kontrol
             warnings = []
@@ -100,7 +100,7 @@ class AiStudioController(http.Controller):
         try:
             product = request.env['product.product'].browse(int(product_id))
             if not product.exists():
-                return {'error': 'Urun bulunamadi.'}
+                return {'error': 'Ürün bulunamadı.'}
 
             # Aynı renkteki varyantları bul
             current_color_id = None
@@ -399,7 +399,7 @@ class AiStudioController(http.Controller):
         try:
             session = request.env['ai.studio.session'].browse(session_id)
             if not session.exists():
-                return {'error': 'Oturum bulunamadi.'}
+                return {'error': 'Oturum bulunamadı.'}
 
             generations = []
             for gen in session.generation_ids:
@@ -621,6 +621,9 @@ class AiStudioController(http.Controller):
         Öncelik: Gemini Flash (güvenilir, ~$0.001)
         Fallback: deep-translator (ücretsiz ama Docker'da rate limit riski)
         """
+        # Gemini anahtarı kullanır: yalnızca onaycı/yönetici
+        if not request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'):
+            return {'error': 'Bu işlemi yapmaya yetkiniz yok.'}
         if not text or not text.strip():
             return {'translated': ''}
         
@@ -1042,7 +1045,8 @@ class AiStudioController(http.Controller):
                     usage_cnt = 0
                     appr_rate = 0.0
 
-                preview_url = f"/web/image/ai.studio.model.preset/{p.id}/preview_image" if p.preview_image else (f"/web/image/ai.studio.model.preset/{p.id}/model_image_front" if p.model_image_front else False)
+                # Kart küçük: tam boy yerine 400px (tablette bellek/bant genişliği)
+                preview_url = f"/web/image/ai.studio.model.preset/{p.id}/preview_image?width=400" if p.preview_image else (f"/web/image/ai.studio.model.preset/{p.id}/model_image_front?width=400" if p.model_image_front else False)
 
                 result.append({
                     'id': p.id,
@@ -1128,12 +1132,11 @@ class AiStudioController(http.Controller):
             month_sessions = Session.search_count([
                 ('create_date', '>=', month_start.isoformat()),
             ])
-            month_gens = Generation.search([
-                ('create_date', '>=', month_start.isoformat()),
-                ('state', '=', 'done'),
-            ])
-            approved = month_gens.filtered('is_approved')
-            total_cost = sum(month_gens.mapped('cost'))
+            gen_domain = [('create_date', '>=', month_start.isoformat()), ('state', '=', 'done')]
+            month_gen_count = Generation.search_count(gen_domain)
+            approved_count = Generation.search_count(gen_domain + [('is_approved', '=', True)])
+            cost_groups = Generation._read_group(gen_domain, aggregates=['cost:sum'])
+            total_cost = (cost_groups[0][0] if cost_groups else 0.0) or 0.0
 
             today_sessions = Session.search_count([
                 ('create_date', '>=', today.isoformat()),
@@ -1141,10 +1144,8 @@ class AiStudioController(http.Controller):
 
             return {
                 'month_sessions': month_sessions,
-                'month_generations': len(month_gens),
-                'month_approval_rate': (
-                    (len(approved) / len(month_gens)) * 100 if month_gens else 0
-                ),
+                'month_generations': month_gen_count,
+                'month_approval_rate': (approved_count / month_gen_count) * 100 if month_gen_count else 0,
                 'month_cost': total_cost,
                 'today_sessions': today_sessions,
                 'user_role': 'manager' if request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_manager')

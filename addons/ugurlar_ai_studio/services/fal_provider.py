@@ -45,14 +45,11 @@ class FalProvider(AIProviderBase):
 
     ENDPOINTS = {
         'tryon_fashn': 'fal-ai/fashn/tryon/v1.6',
-        'tryon_kolors': 'fal-ai/kling/v1-5/kolors-virtual-try-on',
         'bg_remove': 'fal-ai/birefnet',
         'flux_schnell': 'fal-ai/flux/schnell',
-        'flux_pro': 'fal-ai/flux-pro/v1.1',
         'nano_banana': 'fal-ai/nano-banana-2/edit',
         'seedream': 'bytedance/seedream/v5/pro/edit',
         'any_llm': 'fal-ai/any-llm',
-        'flux_kontext': 'fal-ai/flux-kontext/dev',
     }
 
     # Endpoint basina tahmini maliyet (USD)
@@ -328,7 +325,8 @@ class FalProvider(AIProviderBase):
         from .garment_preprocessor import tag_box_to_pixels
 
         raw = image_base64.decode('ascii') if isinstance(image_base64, bytes) else image_base64
-        img = Image.open(io.BytesIO(base64.b64decode(raw))).convert('RGB')
+        original = Image.open(io.BytesIO(base64.b64decode(raw))).convert('RGB')
+        img = original.copy()
         if max(img.size) > 2048:
             img.thumbnail((2048, 2048), Image.LANCZOS)
         w, h = img.size
@@ -380,7 +378,16 @@ class FalProvider(AIProviderBase):
         if not out_url:
             return None, 0.0
         _logger.info('%s ile %d bölge silindi (%dx%d, $%.3f)', used, drawn, w, h, cost)
-        return req_lib.get(out_url, timeout=60).content, cost
+        erased = Image.open(io.BytesIO(req_lib.get(out_url, timeout=60).content)).convert('RGB')
+        # Yalnız maskelenen bölgeler orijinale yapıştırılır: görselin geri kalanı ve
+        # çözünürlüğü (ör. 1664x2496) aynen korunur, yeniden sıkıştırma kaybı olmaz
+        if erased.size != original.size:
+            erased = erased.resize(original.size, Image.LANCZOS)
+        full_mask = mask.resize(original.size, Image.NEAREST) if mask.size != original.size else mask
+        original.paste(erased, (0, 0), full_mask)
+        out = io.BytesIO()
+        original.save(out, format='JPEG', quality=95)
+        return out.getvalue(), cost
 
     def single_image_edit(self, image_base64, prompt, timeout=120):
         """Tek görseli Seedream ile düzenle (etiket silme, manken bacak düzeltme vb.).
@@ -400,29 +407,6 @@ class FalProvider(AIProviderBase):
         if not out_url:
             return None, 0.0
         return req_lib.get(out_url, timeout=60).content, self.get_estimated_cost(app)
-
-    def remove_background(self, image_base64):
-        # Arka plan kaldirma - birefnet.
-        self._check_client()
-
-        image_url = self.upload_image(image_base64)
-        result = fal_client.subscribe(
-            self.ENDPOINTS['bg_remove'],
-            arguments={'image_url': image_url},
-            client_timeout=60,
-        )
-        output_url = ''
-        if isinstance(result, dict):
-            img_val = result.get('image')
-            if isinstance(img_val, dict):
-                output_url = img_val.get('url', '')
-            elif isinstance(img_val, str):
-                output_url = img_val
-        if output_url:
-            import requests
-            img_data = requests.get(output_url, timeout=60).content
-            return base64.b64encode(img_data).decode()
-        return image_base64
 
     def generate_mannequin(self, prompt, **kwargs):
         # AI ile manken fotografi olustur - FLUX schnell.
@@ -456,6 +440,29 @@ class FalProvider(AIProviderBase):
             img_data = requests.get(image_url, timeout=60).content
             return base64.b64encode(img_data).decode()
         return None
+
+    def remove_background(self, image_base64):
+        # Arka plan kaldirma - birefnet.
+        self._check_client()
+
+        image_url = self.upload_image(image_base64)
+        result = fal_client.subscribe(
+            self.ENDPOINTS['bg_remove'],
+            arguments={'image_url': image_url},
+            client_timeout=60,
+        )
+        output_url = ''
+        if isinstance(result, dict):
+            img_val = result.get('image')
+            if isinstance(img_val, dict):
+                output_url = img_val.get('url', '')
+            elif isinstance(img_val, str):
+                output_url = img_val
+        if output_url:
+            import requests
+            img_data = requests.get(output_url, timeout=60).content
+            return base64.b64encode(img_data).decode()
+        return image_base64
 
     def upload_image(self, image_base64, content_type='image/jpeg'):
         # Gorseli fal CDN'e yukle - otomatik retry ve fallback ile.

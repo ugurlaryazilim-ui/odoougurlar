@@ -135,6 +135,14 @@ class TestPromptBuilder(BaseCase):
             p = self._build(analysis, view)
             self.assertFalse(set(p) & set('çğıöşüÇĞİÖŞÜ'), (view, p))
 
+    def test_unknown_turkish_words_do_not_leak(self):
+        p = self._build({'garmentType': 'Gömlek', 'clothingCategory': 'tops',
+                         'collarType': 'Gömlek Yakası', 'hasGraphic': True,
+                         'graphicDescriptionEn': 'small logo on chest.'})
+        self.assertNotIn('Yakası', p)
+        self.assertNotIn('collar neckline', p)
+        self.assertNotIn('..', p)
+
     def test_all_templates_format(self):
         for (sub_type, photo_type) in cc.SEEDREAM_TEMPLATES:
             category = {'dress': 'dress', 'jumpsuit': 'dress', 'bottoms': 'bottoms'}.get(sub_type, 'tops')
@@ -286,7 +294,10 @@ class TestTagErasing(BaseCase):
             return 'https://cdn/%d' % len(uploads)
 
         class FakeResp:
-            content = b'PNGDATA'
+            # Silme modeli çıktısı: tamamen beyaz (hangi bölgenin yapıştırıldığı görülsün)
+            buf = io.BytesIO()
+            Image.new('RGB', (800, 1200), (255, 255, 255)).save(buf, 'PNG')
+            content = buf.getvalue()
 
         img = Image.new('RGB', (800, 1200), (60, 30, 20))
         with patch.object(fal_provider_module, 'fal_client') as fc,                 patch('requests.get', return_value=FakeResp()):
@@ -295,8 +306,11 @@ class TestTagErasing(BaseCase):
             data, cost = FalProvider('k').erase_regions(
                 _jpeg_b64(img), [{'box_2d': [100, 100, 150, 200], 'label': 'alarm_tag', 'confidence': 0.9}])
             args = fc.subscribe.call_args.kwargs['arguments']
-        self.assertEqual(data, b'PNGDATA')
         self.assertGreater(cost, 0)
+        result = Image.open(io.BytesIO(data)).convert('RGB')
+        self.assertEqual(result.size, (800, 1200), 'çözünürlük korunmalı')
+        self.assertGreater(result.getpixel((120, 150))[1], 200, 'maske bölgesi silme çıktısından gelir')
+        self.assertLess(result.getpixel((700, 1100))[1], 60, 'maske dışı orijinal kalır')
         image, mask = uploads
         self.assertEqual(image.size, mask.size, 'FLUX Fill görsel ve maskenin aynı boyutta olmasını ister')
         self.assertEqual(mask.getpixel((120, 150)), 255, 'etiket bölgesi beyaz (doldurulacak)')
@@ -313,7 +327,9 @@ class TestTagErasing(BaseCase):
             return {'images': [{'url': 'https://out'}]}
 
         class FakeResp:
-            content = b'IMG'
+            buf = io.BytesIO()
+            Image.new('RGB', (400, 600)).save(buf, 'PNG')
+            content = buf.getvalue()
 
         with patch.object(fal_provider_module, 'fal_client') as fc,                 patch('requests.get', return_value=FakeResp()):
             fc.upload.return_value = 'https://cdn/x'
@@ -321,7 +337,7 @@ class TestTagErasing(BaseCase):
             data, _cost = FalProvider('k').erase_regions(
                 _jpeg_b64(Image.new('RGB', (400, 600))),
                 [{'box_2d': [100, 100, 150, 200], 'label': 'alarm_tag', 'confidence': 0.9}])
-        self.assertEqual(data, b'IMG')
+        self.assertTrue(data)
         self.assertEqual([c[0] for c in calls], [FalProvider.ERASE_APP, FalProvider.FILL_APP])
         self.assertNotIn('prompt', calls[0][1], 'Bria istemsiz çalışmalı')
         fill_prompt = calls[1][1]['prompt'].lower()

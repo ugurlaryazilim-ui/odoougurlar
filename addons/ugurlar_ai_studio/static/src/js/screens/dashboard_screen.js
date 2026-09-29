@@ -55,6 +55,15 @@ export class AiStudioDashboard extends Component {
         this.state.my_stats = data.my_stats;
     }
 
+    get periodLabel() {
+        return {
+            this_month: "Bu Ay",
+            last_month: "Geçen Ay",
+            this_year: "Bu Yıl",
+            all: "Tüm Zamanlar",
+        }[this.state.period] || "";
+    }
+
     async setPeriod(period) {
         if (this.state.period !== period) {
             this.state.period = period;

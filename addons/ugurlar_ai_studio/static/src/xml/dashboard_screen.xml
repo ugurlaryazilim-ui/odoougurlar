@@ -24,11 +24,11 @@
                                 <t t-else="">Tüm Zamanlar</t>
                             </button>
                             <ul class="dropdown-menu dropdown-menu-end">
-                                <li><a class="dropdown-item" href="#" t-on-click="() => this.setPeriod('this_month')">Bu Ay</a></li>
-                                <li><a class="dropdown-item" href="#" t-on-click="() => this.setPeriod('last_month')">Geçen Ay</a></li>
-                                <li><a class="dropdown-item" href="#" t-on-click="() => this.setPeriod('this_year')">Bu Yıl</a></li>
+                                <li><a class="dropdown-item" href="#" t-on-click.prevent="() => this.setPeriod('this_month')">Bu Ay</a></li>
+                                <li><a class="dropdown-item" href="#" t-on-click.prevent="() => this.setPeriod('last_month')">Geçen Ay</a></li>
+                                <li><a class="dropdown-item" href="#" t-on-click.prevent="() => this.setPeriod('this_year')">Bu Yıl</a></li>
                                 <li><hr class="dropdown-divider"/></li>
-                                <li><a class="dropdown-item" href="#" t-on-click="() => this.setPeriod('all')">Tüm Zamanlar</a></li>
+                                <li><a class="dropdown-item" href="#" t-on-click.prevent="() => this.setPeriod('all')">Tüm Zamanlar</a></li>
                             </ul>
                         </div>
                     </div>
@@ -58,7 +58,7 @@
             <div class="ai-dashboard-grid">
                 <!-- Sol Taraf: Leaderboard -->
                 <div class="ai-dashboard-card leaderboard-card">
-                    <h2>🌟 Bu Ayın En İyileri (İlk 10)</h2>
+                    <h2>🌟 <t t-esc="periodLabel"/> En İyiler (İlk 10)</h2>
                     <table class="leaderboard-table">
                         <thead>
                             <tr>
@@ -71,7 +71,7 @@
                         </thead>
                         <tbody>
                             <t t-if="state.leaderboard.length === 0">
-                                <tr><td colspan="5" class="text-center text-muted">Bu ay henüz çekim yapılmadı.</td></tr>
+                                <tr><td colspan="5" class="text-center text-muted">Bu dönemde henüz çekim yapılmadı.</td></tr>
                             </t>
                             <t t-foreach="state.leaderboard" t-as="user" t-key="user.id">
                                 <tr t-att-class="user.id === state.my_stats.id ? 'my-row' : ''">
@@ -107,7 +107,7 @@
                     </div>
 
                     <div class="ai-dashboard-card overview-card">
-                        <h2>📊 Bu Ay Genel Durum</h2>
+                        <h2>📊 <t t-esc="periodLabel"/> Genel Durum</h2>
                         <div class="overview-stats">
                             <div class="circle-stat">
                                 <span class="circle-value"><t t-esc="state.overview.approval_rate"/>%</span>
