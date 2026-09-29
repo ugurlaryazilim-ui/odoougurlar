@@ -478,6 +478,11 @@ class FalProvider(AIProviderBase):
         # Fal CDN yükleme ve GPU indirme/işleme süresini dramatik şekilde hızlandırır.
         try:
             from PIL import Image as _PILImage
+            try:
+                # Odoo Pillow'u temel formatlarla sınırlar; WebP eklentisini açıkça yükle
+                from PIL import WebPImagePlugin  # noqa: F401
+            except ImportError:
+                pass
             import io as _io
             _img = _PILImage.open(_io.BytesIO(raw_bytes))
             _fmt = (_img.format or '').upper()

@@ -21,6 +21,12 @@ _logger = logging.getLogger(__name__)
 
 try:
     from PIL import Image, ImageFilter, ImageEnhance
+    # Odoo, Pillow'u yalnız temel formatlarla başlatır (Image._initialized = 2);
+    # WebP kaydı için eklenti açıkça yüklenmeli (Odoo'nun IcoImagePlugin'i yüklemesi gibi)
+    try:
+        from PIL import WebPImagePlugin  # noqa: F401
+    except ImportError:
+        pass
 except ImportError:
     Image = None
     _logger.warning('Pillow kurulu degil. pip install Pillow')
