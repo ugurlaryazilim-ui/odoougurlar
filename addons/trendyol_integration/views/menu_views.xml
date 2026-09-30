@@ -10,14 +10,17 @@
     </record>
 
     <!-- Ana Menü -->
+    <!-- Satış ve depo kullanıcıları; alt menüler role göre -->
     <menuitem id="menu_trendyol_root"
               name="Trendyol"
+              groups="sales_team.group_sale_salesman,stock.group_stock_user"
               web_icon="trendyol_integration,static/description/trendyol.png"
               sequence="45"/>
 
     <!-- Mağazalar -->
     <menuitem id="menu_trendyol_stores"
               name="Mağazalar"
+              groups="sales_team.group_sale_salesman"
               parent="menu_trendyol_root"
               action="action_trendyol_stores"
               sequence="5"/>
@@ -25,6 +28,7 @@
     <!-- Siparişler Alt Menü -->
     <menuitem id="menu_trendyol_orders"
               name="Siparişler"
+              groups="sales_team.group_sale_salesman"
               parent="menu_trendyol_root"
               sequence="10"/>
 
@@ -61,6 +65,7 @@
     <!-- Senkronizasyon Alt Menü -->
     <menuitem id="menu_trendyol_sync"
               name="Senkronizasyon"
+              groups="sales_team.group_sale_salesman"
               parent="menu_trendyol_root"
               sequence="20"/>
 
@@ -85,6 +90,7 @@
     <!-- Ayarlar -->
     <menuitem id="menu_trendyol_config"
               name="Ayarlar"
+              groups="base.group_system"
               parent="menu_trendyol_root"
               action="action_trendyol_settings"
               sequence="90"/>

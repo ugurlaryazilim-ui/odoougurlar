@@ -268,12 +268,16 @@ class TrendyolOrderSync(models.Model):
 
             for package in content:
                 try:
-                    res = self._process_package(package, store)
+                    # Savepoint: tek paketteki DB hatası kalan iadeleri zehirlemesin
+                    with self.env.cr.savepoint():
+                        res = self._process_package(package, store)
+                        self.env.flush_all()
                     if res == 'created':
                         created += 1
                     elif res == 'updated':
                         updated += 1
                 except Exception as e:
+                    self.env.invalidate_all(flush=False)
                     _logger.exception("İade işleme hatası [%s]: %s", store.name, e)
 
             total_pages = data.get('totalPages', 1)

@@ -19,6 +19,8 @@ TRENDYOL_STATUS = [
     ('picking', 'Toplanıyor (Picking)'),
     ('invoiced', 'Faturalandı (Invoiced)'),
     ('shipped', 'Kargoda (Shipped)'),
+    ('atcollectionpoint', 'Teslimat Noktasında (AtCollectionPoint)'),
+    ('unpacked', 'Paket Ayrıştırıldı (UnPacked)'),
     ('cancelled', 'İptal (Cancelled)'),
     ('delivered', 'Teslim Edildi (Delivered)'),
     ('undelivered', 'Teslim Edilemedi (UnDelivered)'),
@@ -142,17 +144,23 @@ class TrendyolOrder(models.Model):
 
         if existing:
             vals = {}
-            if existing.trendyol_status != status_raw:
-                vals['trendyol_status'] = status_raw
+            # Tanımsız durum (ör. yeni bir Trendyol statüsü) yazılırsa Selection hatası
+            # siparişi kalıcı olarak güncellenemez yapar: bilinmeyeni yok say
+            status = self._valid_status(status_raw)
+            if status and existing.trendyol_status != status:
+                vals['trendyol_status'] = status
                 # Ham veriyi sadece durum değiştiğinde güncelle
                 vals['raw_data'] = json.dumps(package_data, ensure_ascii=False)
             if not existing.store_id:
                 vals['store_id'] = store.id
 
-            # Komisyon bilgisi güncelle (order-level + line-level)
+            # Komisyon bilgisi — yalnız değişen değerler (her senkronda tüm siparişleri yazmasın)
             if store.process_commission:
                 commission_vals = self._extract_commission(package_data)
-                vals.update(commission_vals)
+                vals.update({
+                    k: v for k, v in commission_vals.items()
+                    if abs((existing[k] or 0.0) - (v or 0.0)) > 0.005
+                })
                 # Line-level komisyon oranı güncelle (O(n) — dict lookup)
                 line_map = {}
                 for odoo_line in existing.line_ids:
@@ -173,9 +181,10 @@ class TrendyolOrder(models.Model):
 
             if vals:
                 existing.write(vals)
-                if status_raw in ('cancelled', 'unsupplied') and existing.sale_order_id:
-                    self._cancel_odoo_order(existing, store)
-            return 'updated'
+            # İptal her senkronda denenir (idempotent): önceki deneme başarısız olduysa tekrarlanır
+            if existing.trendyol_status in ('cancelled', 'unsupplied') and existing.sale_order_id:
+                self._cancel_odoo_order(existing, store)
+            return 'updated' if vals else 'unchanged'
 
         # Yeni kayıt oluştur
         vals = self._prepare_order_vals(package_data, store)
@@ -188,6 +197,7 @@ class TrendyolOrder(models.Model):
                 'sale_order_id': sale_order.id,
                 'partner_id': sale_order.partner_id.id,
                 'state': 'synced',
+                'error_message': trendyol_order._confirm_failure_message(sale_order, store),
             })
         except Exception as e:
             trendyol_order.write({
@@ -197,6 +207,23 @@ class TrendyolOrder(models.Model):
             _logger.exception("Sale order oluşturma hatası [%s]: %s", store.name, e)
 
         return 'created'
+
+    @api.model
+    def _confirm_failure_message(self, sale_order, store):
+        """Otomatik onay açıkken sipariş taslakta kaldıysa görünür uyarı (yoksa False)."""
+        if store.auto_confirm and sale_order.state == 'draft':
+            return ('Satış siparişi otomatik onaylanamadı; taslakta bekliyor. '
+                    'Siparişi açıp elle onaylayın (ayrıntı sunucu logunda).')
+        return False
+
+    @api.model
+    def _valid_status(self, status_raw):
+        """Trendyol durumunu (küçük harf) seçim listesindeyse döndür, değilse None."""
+        if status_raw in dict(TRENDYOL_STATUS):
+            return status_raw
+        if status_raw:
+            _logger.info("Tanımsız Trendyol durumu yok sayıldı: %s", status_raw)
+        return None
 
     @api.private
     def _extract_commission(self, data):

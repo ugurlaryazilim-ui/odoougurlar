@@ -44,7 +44,8 @@ class TrendyolAPI:
                 json=data,
                 timeout=30,
             )
-            _logger.info("Trendyol API %s %s → %s", method, url, resp.status_code)
+            # Başarılı istekler DEBUG: her senkronda onlarca satır log'u boğuyordu; hatalar aşağıda loglanır
+            _logger.debug("Trendyol API %s %s → %s", method, url, resp.status_code)
             if resp.status_code == 200:
                 try:
                     return {'success': True, 'data': resp.json()}

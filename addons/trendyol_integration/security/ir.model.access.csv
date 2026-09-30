@@ -1,8 +1,10 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_trendyol_store,trendyol.store,model_trendyol_store,base.group_user,1,0,0,0
 access_trendyol_store_manager,trendyol.store.manager,model_trendyol_store,sales_team.group_sale_manager,1,1,1,1
-access_trendyol_order,trendyol.order,model_trendyol_order,base.group_user,1,1,1,0
-access_trendyol_order_line,trendyol.order.line,model_trendyol_order_line,base.group_user,1,1,1,0
+access_trendyol_order,trendyol.order,model_trendyol_order,base.group_user,1,0,0,0
+access_trendyol_order_line,trendyol.order.line,model_trendyol_order_line,base.group_user,1,0,0,0
+access_trendyol_order_salesman,trendyol.order.salesman,model_trendyol_order,sales_team.group_sale_salesman,1,1,1,0
+access_trendyol_order_line_salesman,trendyol.order.line.salesman,model_trendyol_order_line,sales_team.group_sale_salesman,1,1,1,0
 access_trendyol_order_manager,trendyol.order.manager,model_trendyol_order,sales_team.group_sale_manager,1,1,1,1
 access_trendyol_order_line_manager,trendyol.order.line.manager,model_trendyol_order_line,sales_team.group_sale_manager,1,1,1,1
 access_trendyol_sync_log,trendyol.sync.log,model_trendyol_sync_log,base.group_user,1,0,0,0

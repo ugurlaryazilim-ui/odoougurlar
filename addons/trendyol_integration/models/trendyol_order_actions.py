@@ -37,7 +37,7 @@ class TrendyolOrderActions(models.Model):
                     'sale_order_id': sale_order.id,
                     'partner_id': sale_order.partner_id.id,
                     'state': 'synced',
-                    'error_message': '',
+                    'error_message': order._confirm_failure_message(sale_order, store) or '',
                     'store_id': store.id,
                 })
                 success += 1

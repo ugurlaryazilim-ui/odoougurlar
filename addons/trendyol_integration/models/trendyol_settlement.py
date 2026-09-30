@@ -216,8 +216,9 @@ class TrendyolSettlement(models.Model):
         # 4) Bağsız settlement'ları siparişlere bağla
         self._relink_unlinked_settlements(store)
 
-        # 5) Sipariş bazlı finansal özet güncelle
-        self._update_order_financial_summary(store)
+        # 5) Sipariş bazlı finansal özet — yalnız son senkrondan beri değişen siparişler
+        since = (store.last_financial_sync or start_date) - timedelta(hours=1)
+        self._update_order_financial_summary(store, since=since)
 
         # last_financial_sync — ayrı cursor ile güncelle (serialization çakışmasını önler)
         try:
@@ -307,9 +308,19 @@ class TrendyolSettlement(models.Model):
             ('source', '=', 'otherfinancials'),
         ])
 
+        # Kalemleri alınmış eski faturalar her senkronda yeniden çekilmesin; son 7 gün
+        # yine de kontrol edilir (fatura kalemleri geç tamamlanabilir)
+        processed_serials = set(self.search([
+            ('store_id', '=', store.id),
+            ('source', '=', 'cargo_invoice'),
+        ]).mapped('receipt_id'))
+        recent = fields.Datetime.now() - timedelta(days=7)
+
         for invoice in cargo_invoices:
             serial_number = invoice.trendyol_id
             if not serial_number:
+                continue
+            if serial_number in processed_serials and (invoice.transaction_date or recent) < recent:
                 continue
 
             try:
@@ -380,7 +391,8 @@ class TrendyolSettlement(models.Model):
                 'receipt_id': serial_number,
             }
             try:
-                self.create(vals)
+                with self.env.cr.savepoint():
+                    self.create(vals)
                 created += 1
             except Exception as e:
                 _logger.warning("Cargo invoice kayıt hatası: %s — %s",
@@ -465,7 +477,9 @@ class TrendyolSettlement(models.Model):
         }
 
         try:
-            self.create(vals)
+            # Savepoint: çakışma (unique) tüm finans senkronunun işlemini bozmasın
+            with self.env.cr.savepoint():
+                self.create(vals)
             return True
         except Exception as e:
             if 'unique' in str(e).lower() or 'duplicate' in str(e).lower():
@@ -476,15 +490,23 @@ class TrendyolSettlement(models.Model):
             return False
 
     @api.private
-    def _update_order_financial_summary(self, store):
+    def _update_order_financial_summary(self, store, since=None):
         """Sipariş bazlı finansal özetleri güncelle (optimize).
 
-        Tek sorguda tüm settlement'ları çekip Python'da gruplama yapar.
+        since verilirse yalnız o andan beri finans kaydı eklenen/bağlanan ya da durumu
+        değişen siparişler yeniden hesaplanır (tüm geçmiş her seferinde taranmaz).
         """
-        all_settlements = self.search([
-            ('store_id', '=', store.id),
-            ('order_id', '!=', False),
-        ])
+        domain = [('store_id', '=', store.id), ('order_id', '!=', False)]
+        if since:
+            orders = self.env['trendyol.order'].search([
+                ('store_id', '=', store.id),
+                '|', ('write_date', '>=', since),
+                ('settlement_ids.write_date', '>=', since),
+            ])
+            if not orders:
+                return
+            domain.append(('order_id', 'in', orders.ids))
+        all_settlements = self.search(domain)
 
         if not all_settlements:
             return
@@ -519,8 +541,7 @@ class TrendyolSettlement(models.Model):
                     if s.transaction_type in ('sale', 'coupon', 'discount_cancel',
                                               'coupon_cancel', 'provision_positive'):
                         seller_revenue += s.seller_revenue
-                    elif s.transaction_type in ('discount', 'return', 'coupon',
-                                                'provision_negative'):
+                    elif s.transaction_type in ('discount', 'return', 'provision_negative'):
                         seller_revenue -= abs(s.seller_revenue)
 
             # Fatura yoksa tahmini hesapla
@@ -536,14 +557,18 @@ class TrendyolSettlement(models.Model):
             net_revenue = (seller_revenue - platform_fee - shipping_cost
                            - return_cargo_cost - penalty_amount)
 
-            order.sudo().write({
+            summary = {
                 'platform_fee': platform_fee,
                 'shipping_cost': shipping_cost,
                 'return_cargo_cost': return_cargo_cost,
                 'penalty_amount': penalty_amount,
                 'seller_revenue': seller_revenue,
                 'final_net_amount': net_revenue,
-            })
+            }
+            # Yalnız değişen değerler yazılır
+            changed = {k: v for k, v in summary.items() if abs((order[k] or 0.0) - v) > 0.005}
+            if changed:
+                order.sudo().write(changed)
 
 
     # ═══════════════════════════════════════════════════════

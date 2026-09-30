@@ -8,7 +8,9 @@
         <field name="arch" type="xml">
             <list string="Trendyol Siparişleri"
                   decoration-danger="state == 'error'"
+                  decoration-warning="state == 'synced' and error_message"
                   decoration-muted="trendyol_status == 'cancelled'">
+                <field name="error_message" column_invisible="1"/>
                 <field name="order_date"/>
                 <field name="name"/>
                 <field name="trendyol_order_number"/>
@@ -18,7 +20,8 @@
                        decoration-success="trendyol_status in ('delivered', 'shipped')"
                        decoration-warning="trendyol_status in ('created', 'picking')"
                        decoration-info="trendyol_status == 'invoiced'"
-                       decoration-danger="trendyol_status in ('cancelled', 'unsupplied', 'returned')"/>
+                       decoration-danger="trendyol_status in ('cancelled', 'unsupplied', 'returned')"
+                       decoration-primary="trendyol_status in ('atcollectionpoint', 'unpacked')"/>
                 <field name="cargo_provider" optional="show"/>
                 <field name="store_name" optional="show"/>
                 <field name="seller_id" optional="show"/>
@@ -47,6 +50,10 @@
                     <field name="state" widget="statusbar" statusbar_visible="draft,synced"/>
                 </header>
                 <sheet>
+                    <!-- Senkronize ama uyarılı (ör. otomatik onay başarısız) -->
+                    <div class="alert alert-warning" role="alert" invisible="state == 'error' or not error_message">
+                        <field name="error_message" readonly="1" nolabel="1"/>
+                    </div>
                     <div class="oe_title">
                         <h1><field name="name" readonly="1"/></h1>
                     </div>
