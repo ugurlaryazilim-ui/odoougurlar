@@ -124,6 +124,14 @@ class TrendyolStore(models.Model):
         default=15,
         help='Son kaç güne ait finansal işlemler çekilsin (max 15 - API limiti)',
     )
+    platform_fee_fixed = fields.Float(
+        string='Platform Hizmet Bedeli (gönderi başı, KDV dahil)',
+        default=13.19,
+        digits=(10, 2),
+        help='Trendyol platform hizmet bedelini gönderi başına sabit tutar olarak faturalar '
+             '(örn. 10,99 + KDV = 13,19 TL). Faturalar sipariş numarası taşımadığından sipariş '
+             'özetinde bu tutar kullanılır. 0 ise aşağıdaki oran kullanılır.',
+    )
     platform_fee_rate = fields.Float(
         string='Platform Hizmet Bedeli Oranı (%)',
         default=1.47,

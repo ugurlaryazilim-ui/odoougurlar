@@ -154,10 +154,10 @@
                                     <field name="transaction_date"/>
                                     <field name="transaction_type" widget="badge"/>
                                     <field name="description"/>
-                                    <field name="credit"/>
-                                    <field name="debt"/>
-                                    <field name="commission_amount"/>
-                                    <field name="seller_revenue"/>
+                                    <field name="credit" sum="Alacak"/>
+                                    <field name="debt" sum="Borç"/>
+                                    <field name="signed_commission" sum="Komisyon"/>
+                                    <field name="signed_seller_revenue" sum="Hakediş"/>
                                     <field name="payment_order_id"/>
                                 </list>
                             </field>

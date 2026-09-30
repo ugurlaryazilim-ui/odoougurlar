@@ -108,7 +108,8 @@
                                     <field name="last_financial_sync"/>
                                 </group>
                                 <group string="Tahmini Hesaplama (Fatura kesilmemişse)">
-                                    <field name="platform_fee_rate"/>
+                                    <field name="platform_fee_fixed"/>
+                                    <field name="platform_fee_rate" invisible="platform_fee_fixed"/>
                                     <field name="cargo_unit_price"/>
                                 </group>
                             </group>

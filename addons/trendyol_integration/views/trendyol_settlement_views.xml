@@ -21,8 +21,10 @@
                 <field name="debt" sum="Toplam Borç"/>
                 <field name="net_amount" sum="Net"/>
                 <field name="commission_rate" optional="hide"/>
-                <field name="commission_amount" optional="hide" sum="Komisyon"/>
-                <field name="seller_revenue" optional="show" sum="Hakediş"/>
+                <field name="signed_commission" optional="show" sum="Komisyon"/>
+                <field name="signed_seller_revenue" optional="show" sum="Hakediş"/>
+                <field name="commission_amount" optional="hide"/>
+                <field name="seller_revenue" optional="hide"/>
                 <field name="payment_order_id" optional="hide"/>
                 <field name="receipt_id" optional="hide"/>
                 <field name="source" optional="hide"/>
