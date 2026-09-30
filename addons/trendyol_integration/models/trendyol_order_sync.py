@@ -198,12 +198,27 @@ class TrendyolOrderSync(models.Model):
 
     @api.private
     def _sync_cancelled_orders(self, api, store, start_date=None):
-        """İptal edilen siparişleri senkronize et (sayfalama ile)."""
+        """İptal ve "tedarik edilemedi" paketlerini senkronize et.
+
+        UnSupplied: satıcı panelden "tedarik edemiyorum" dediğinde Trendyol siparişi
+        iptal eder; Odoo'da da iptalle aynı şekilde işlenir (sipariş iptal + Nebim'den silme).
+        """
+        created = 0
+        updated = 0
+        for api_status, odoo_status in (('Cancelled', 'cancelled'), ('UnSupplied', 'unsupplied')):
+            res = self._sync_terminal_status(api, store, start_date, api_status, odoo_status)
+            created += res['created']
+            updated += res['updated']
+        return {'created': created, 'updated': updated}
+
+    @api.private
+    def _sync_terminal_status(self, api, store, start_date, api_status, odoo_status):
+        """Bir iptal türü durumundaki paketleri çek; Odoo siparişini iptal et."""
         created = 0
         updated = 0
         page = 0
         while True:
-            result = api.get_orders(status='Cancelled', page=page, size=50, start_date=start_date)
+            result = api.get_orders(status=api_status, page=page, size=50, start_date=start_date)
             if not result['success']:
                 break
 
@@ -224,8 +239,8 @@ class TrendyolOrderSync(models.Model):
                         ], limit=1)
 
                 if existing:
-                    if existing.trendyol_status != 'cancelled':
-                        existing.write({'trendyol_status': 'cancelled'})
+                    if existing.trendyol_status != odoo_status:
+                        existing.write({'trendyol_status': odoo_status})
                         self._cancel_odoo_order(existing, store)
                         updated += 1
                 else:
@@ -238,7 +253,7 @@ class TrendyolOrderSync(models.Model):
                                 created += 1
                                 new_rec = self.search([('shipment_package_id', '=', package_id)], limit=1)
                                 if new_rec:
-                                    new_rec.write({'trendyol_status': 'cancelled'})
+                                    new_rec.write({'trendyol_status': odoo_status})
                                     self._cancel_odoo_order(new_rec, store)
                     except Exception as e:
                         _logger.warning("İptal olan sipariş Odoo'ya aktarılırken hata (%s): %s", package_id, e)
