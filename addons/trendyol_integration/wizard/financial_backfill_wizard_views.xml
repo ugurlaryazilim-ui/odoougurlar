@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="trendyol_financial_backfill_wizard_form" model="ir.ui.view">
+        <field name="name">trendyol.financial.backfill.wizard.form</field>
+        <field name="model">trendyol.financial.backfill.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Finans Geçmişini Tamamla">
+                <group>
+                    <field name="store_id" readonly="1"/>
+                    <field name="period" widget="radio"/>
+                    <field name="date_from" invisible="period != 'custom'" required="period == 'custom'"/>
+                    <field name="date_to" invisible="period != 'custom'" required="period == 'custom'"/>
+                </group>
+                <div class="alert alert-info" role="status" invisible="not info">
+                    <field name="info" readonly="1" nolabel="1"/>
+                </div>
+                <div class="text-muted">
+                    Trendyol finans servisleri tek seferde en fazla 15 günlük veri verir; seçilen dönem 15'er
+                    günlük parçalara bölünür. Mevcut kayıtlar tekrar eklenmez, yalnızca eksikler eklenir ve
+                    değişen bilgiler (ödeme no/tarihi) güncellenir. Sonunda kargo / platform faturası
+                    detayları çekilir ve tüm siparişlerin finans özeti yeniden hesaplanır.
+                </div>
+                <footer>
+                    <button name="action_start" type="object" string="Başlat" class="btn-primary"/>
+                    <button string="Vazgeç" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+</odoo>
