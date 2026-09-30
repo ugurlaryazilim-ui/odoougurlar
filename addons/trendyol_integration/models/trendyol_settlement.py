@@ -289,6 +289,14 @@ class TrendyolSettlement(models.Model):
             errors.append(f"OtherFinancials: {e}")
             _logger.exception("OtherFinancials sync hatası [%s]", store.name)
 
+        # 2a) Platform hizmet bedeli (transactionSubType=PlatformServiceFee) — paket bazında
+        #     gelirse siparişe bağlanır ve tahmin yerine gerçek bedel kullanılır
+        try:
+            created += self._fetch_platform_service_fees(api, start_date, end_date, store)
+        except Exception as e:
+            errors.append(f"PlatformServiceFee: {e}")
+            _logger.exception("Platform hizmet bedeli sync hatası [%s]", store.name)
+
         # 2b) Ödeme emirleri: ödenen kayıtlara ödeme no / tarihi işlenir
         try:
             self._sync_payment_orders(api, store)
@@ -419,6 +427,40 @@ class TrendyolSettlement(models.Model):
                 for item in page_result.get('data', {}).get('content', []):
                     if self._process_settlement_item(item, store, 'settlements'):
                         created += 1
+        return created
+
+    @api.private
+    def _fetch_platform_service_fees(self, api, start_date, end_date, store):
+        """DeductionInvoices + transactionSubType=PlatformServiceFee.
+
+        Kayıt paket/sipariş numarası taşıyorsa siparişe bağlanır. Aynı fatura ID'si birden çok
+        pakete ait satırda tekrar ederse her paket ayrı saklanır (ID + paket no).
+        """
+        created = linked = total = 0
+        page = 0
+        while True:
+            result = api.get_other_financials(
+                start_date, end_date, transaction_type='DeductionInvoices',
+                transaction_sub_type='PlatformServiceFee', page=page, size=1000)
+            if not result.get('success'):
+                _logger.warning("Platform hizmet bedeli API hatası [%s]: %s", store.name, result.get('error'))
+                break
+            data = result.get('data') or {}
+            for item in data.get('content') or []:
+                total += 1
+                package_id = item.get('shipmentPackageId')
+                if package_id or item.get('orderNumber'):
+                    linked += 1
+                    if package_id and item.get('id'):
+                        item = dict(item, id=f"{item['id']}_{package_id}")
+                if self._process_settlement_item(item, store, 'otherfinancials'):
+                    created += 1
+            page += 1
+            if page >= (data.get('totalPages') or 1):
+                break
+        if total:
+            _logger.info("Trendyol platform hizmet bedeli [%s]: %s kayıt, %s tanesi sipariş/paket bilgili",
+                         store.name, total, linked)
         return created
 
     @api.private
