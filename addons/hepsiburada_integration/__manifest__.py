@@ -1,12 +1,13 @@
 {
     'name': 'Hepsiburada.com Entegrasyonu',
-    'version': '19.0.1.0.0',
+    'version': '19.0.1.1.0',
     'category': 'Sales',
     'summary': 'Hepsiburada API Entegrasyonu (Sipariş Yönetimi)',
     'description': """
         Hepsiburada pazaryeri entegrasyonu.
-        - Ödemesi tamamlanmış sipariş aktarımı
-        - Stok ve Fiyat eşleştirmeleri
+        - Gönderime hazır paketlerden sipariş aktarımı
+        - Kalem bazlı iptal / kısmi iptal
+        - Finansal kayıtlar (muhasebe servisi) ve iade talepleri
         - Nebim V3 ve Barkod (Depo) sistemleriyle entegre
     """,
     'author': 'Ugurlar',
@@ -18,6 +19,7 @@
         'views/hepsiburada_store_views.xml',
         'views/hepsiburada_config_views.xml',
         'views/hepsiburada_order_views.xml',
+        'views/hepsiburada_finance_views.xml',
         'views/hepsiburada_sync_log_views.xml',
         'views/menu_views.xml',
     ],

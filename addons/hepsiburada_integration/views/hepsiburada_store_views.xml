@@ -23,6 +23,14 @@
                                 class="oe_stat_button" icon="fa-history">
                             <field name="log_count" widget="statinfo" string="Loglar"/>
                         </button>
+                        <button name="action_view_transactions" type="object"
+                                class="oe_stat_button" icon="fa-money" invisible="not sync_financials">
+                            <field name="transaction_count" widget="statinfo" string="Finans"/>
+                        </button>
+                        <button name="action_view_claims" type="object"
+                                class="oe_stat_button" icon="fa-undo" invisible="not process_returns">
+                            <field name="claim_count" widget="statinfo" string="İade"/>
+                        </button>
                     </div>
                     <widget name="web_ribbon" title="Arşiv" bg_color="text-bg-danger"
                             invisible="active"/>
@@ -75,25 +83,14 @@
                                 <group string="İade Ayarları">
                                     <field name="process_returns"/>
                                     <field name="return_day_range" invisible="not process_returns"/>
+                                    <button name="action_sync_claims" type="object"
+                                            string="İade Taleplerini Şimdi Çek" class="btn-secondary"
+                                            invisible="not process_returns" colspan="2"/>
                                 </group>
                                 <group string="Müşteri Ayarları">
                                     <field name="customer_prefix"/>
                                     <field name="micro_export_prefix"/>
                                     <field name="skip_customer_email"/>
-                                </group>
-                            </group>
-                        </page>
-
-                        <!-- ── Kargo Ayarları ── -->
-                        <page string="Kargo Ayarları" name="cargo_settings">
-                            <group>
-                                <group string="Kargo Kodu">
-                                    <field name="auto_send_cargo"/>
-                                    <field name="cargo_include_order_number"/>
-                                </group>
-                                <group string="Koli Bilgisi">
-                                    <field name="default_package_count"/>
-                                    <field name="default_desi"/>
                                 </group>
                             </group>
                         </page>
@@ -104,9 +101,12 @@
                                 <group string="Finansal Senkronizasyon">
                                     <field name="sync_financials"/>
                                     <field name="financial_day_range" invisible="not sync_financials"/>
-                                    <field name="last_financial_sync"/>
+                                    <field name="last_financial_sync" invisible="not sync_financials"/>
+                                    <button name="action_sync_financials" type="object"
+                                            string="Finansal Kayıtları Şimdi Çek" class="btn-secondary"
+                                            invisible="not sync_financials" colspan="2"/>
                                 </group>
-                                <group string="Tahmini Hesaplama (Fatura kesilmemişse)">
+                                <group string="Tahmini Hesaplama (Finansal kayıt oluşmadan önce)">
                                     <field name="platform_fee_rate"/>
                                     <field name="cargo_unit_price"/>
                                 </group>

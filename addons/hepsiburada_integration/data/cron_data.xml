@@ -10,5 +10,25 @@
             <field name="interval_type">minutes</field>
             <field name="active" eval="True"/>
         </record>
+
+        <record id="ir_cron_hepsiburada_financial_sync" model="ir.cron">
+            <field name="name">Hepsiburada: Finansal Kayıt Senkronizasyonu</field>
+            <field name="model_id" ref="model_hepsiburada_store"/>
+            <field name="state">code</field>
+            <field name="code">model.cron_sync_financials()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">hours</field>
+            <field name="active" eval="True"/>
+        </record>
+
+        <record id="ir_cron_hepsiburada_claim_sync" model="ir.cron">
+            <field name="name">Hepsiburada: İade Talebi Senkronizasyonu</field>
+            <field name="model_id" ref="model_hepsiburada_store"/>
+            <field name="state">code</field>
+            <field name="code">model.cron_sync_claims()</field>
+            <field name="interval_number">30</field>
+            <field name="interval_type">minutes</field>
+            <field name="active" eval="True"/>
+        </record>
     </data>
 </odoo>

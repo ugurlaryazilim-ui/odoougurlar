@@ -14,6 +14,8 @@
                 <field name="order_date"/>
                 <field name="name"/>
                 <field name="trendyol_order_number"/>
+                <!-- Kısmi iptalde aynı sipariş numaralı paketleri ayırt etmek için -->
+                <field name="shipment_package_id" optional="show"/>
                 <field name="customer_name"/>
                 <field name="total_amount" sum="Toplam"/>
                 <field name="trendyol_status" widget="badge"
@@ -178,6 +180,8 @@
             <search>
                 <field name="name"/>
                 <field name="trendyol_order_number"/>
+                <!-- Kısmi iptalde aynı sipariş numaralı paketleri ayırt etmek için -->
+                <field name="shipment_package_id" optional="show"/>
                 <field name="customer_name"/>
                 <field name="cargo_tracking_number"/>
                 <field name="store_id"/>
