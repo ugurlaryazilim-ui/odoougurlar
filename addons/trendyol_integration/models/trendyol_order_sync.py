@@ -74,6 +74,18 @@ class TrendyolOrderSync(models.Model):
             start_date = datetime.now() - timedelta(days=store.order_day_range)
 
         try:
+            # İptaller ÖNCE: kısmi iptalde eski paket kapanıp Nebim'den silinmeden yeni paket
+            # işlenirse, yeni sipariş Nebim'de "mükerrer" sayılıp gönderilmez
+            try:
+                with self.env.cr.savepoint():
+                    cancel_result = self._sync_cancelled_orders(api, store, start_date)
+                    self.env.flush_all()
+                    updated_count += cancel_result.get('updated', 0)
+            except Exception as e:
+                self.env.invalidate_all(flush=False)
+                error_details.append(f"İptal sync: {str(e)}")
+                _logger.error("İptal sync hatası [%s]: %s", store_name, str(e))
+
             for status in ['Created', 'Picking', 'Invoiced', 'Shipped', 'Delivered']:
                 page = 0
                 while True:
@@ -122,17 +134,6 @@ class TrendyolOrderSync(models.Model):
                     page += 1
                     if page >= total_pages:
                         break
-
-            # İptalleri kontrol et
-            try:
-                with self.env.cr.savepoint():
-                    cancel_result = self._sync_cancelled_orders(api, store, start_date)
-                    self.env.flush_all()
-                    updated_count += cancel_result.get('updated', 0)
-            except Exception as e:
-                self.env.invalidate_all(flush=False)
-                error_details.append(f"İptal sync: {str(e)}")
-                _logger.error("İptal sync hatası [%s]: %s", store_name, str(e))
 
             # ── İade işleme ──
             if store.process_returns:
@@ -229,14 +230,8 @@ class TrendyolOrderSync(models.Model):
 
             for package in content:
                 package_id = str(package.get('id') or package.get('shipmentPackageId', ''))
-                existing = self.search([('shipment_package_id', '=', package_id)], limit=1)
-                if not existing:
-                    order_num = str(package.get('orderNumber') or '')
-                    if order_num:
-                        existing = self.search([
-                            ('trendyol_order_number', '=', order_num),
-                            ('store_id', '=', store.id),
-                        ], limit=1)
+                existing = self._find_existing_package(
+                    package_id, str(package.get('orderNumber') or ''), store)
 
                 if existing:
                     if existing.trendyol_status != odoo_status:

@@ -133,14 +133,11 @@ class TrendyolOrder(models.Model):
         status_raw = (package_data.get('status') or package_data.get('shipmentPackageStatus', '')).lower()
 
         # Mevcut kayıt var mı?
-        existing = False
-        if package_id:
-            existing = self.search([('shipment_package_id', '=', package_id)], limit=1)
-        if not existing and order_number:
-            existing = self.search([
-                ('trendyol_order_number', '=', order_number),
-                ('store_id', '=', store.id),
-            ], limit=1)
+        existing = self._find_existing_package(package_id, order_number, store)
+        if not existing:
+            # Bölme (split): parçalar eskisi gibi kaynak paketin güncellemesi sayılır —
+            # her parça ayrı sipariş olursa ikincisi Nebim'de "mükerrer" sayılıp gönderilmez
+            existing = self._split_origin(package_data, store)
 
         if existing:
             vals = {}
@@ -186,6 +183,11 @@ class TrendyolOrder(models.Model):
                 self._cancel_odoo_order(existing, store)
             return 'updated' if vals else 'unchanged'
 
+        # Kısmi iptal / bölme: bu paket eski bir paketin yerine geldiyse önce eskisini kapat
+        # (Odoo siparişi iptal + Nebim'den silme). Sıra önemli: eski sipariş Nebim'de dururken
+        # yenisi "mükerrer" sayılıp Nebim'e gönderilmezdi.
+        self._close_origin_packages(package_data, store)
+
         # Yeni kayıt oluştur
         vals = self._prepare_order_vals(package_data, store)
         trendyol_order = self.create(vals)
@@ -207,6 +209,63 @@ class TrendyolOrder(models.Model):
             _logger.exception("Sale order oluşturma hatası [%s]: %s", store.name, e)
 
         return 'created'
+
+    @api.model
+    def _find_existing_package(self, package_id, order_number, store):
+        """Paketi paket ID ile bul.
+
+        Sipariş numarasıyla eşleştirme yalnız paket ID'si olmayan eski kayıtlar için:
+        Trendyol kısmi iptal/bölmede aynı sipariş numarasıyla YENİ paket açar; sipariş
+        numarasıyla eşlemek yeni paketi eskisinin güncellemesi sanıp kalan ürünü kaybediyordu.
+        """
+        existing = self.browse()
+        if package_id:
+            existing = self.search([('shipment_package_id', '=', package_id)], limit=1)
+        if not existing and order_number:
+            existing = self.search([
+                ('trendyol_order_number', '=', order_number),
+                ('store_id', '=', store.id),
+                ('shipment_package_id', 'in', [False, '']),
+            ], limit=1)
+        return existing
+
+    @api.private
+    def _close_origin_packages(self, package_data, store):
+        """Kısmi iptalden doğan paketin kaynak paketini kapat.
+
+        Trendyol: kalem iptalinde orijinal paket Cancelled olur, kalan kalemler aynı
+        sipariş numarasıyla yeni pakete taşınır (createdBy='cancel', originPackageIds =
+        ilk paketin ID'si).
+        """
+        created_by = (package_data.get('createdBy') or '').lower()
+        origin_ids = package_data.get('originPackageIds') or []
+        if created_by != 'cancel' or not origin_ids:
+            return
+        for origin_id in origin_ids:
+            origin = self.search([
+                ('shipment_package_id', '=', str(origin_id)),
+                ('store_id', '=', store.id),
+            ], limit=1)
+            if not origin or origin.trendyol_status in ('cancelled', 'unpacked'):
+                continue
+            _logger.info("Trendyol %s: paket %s yerine %s geldi, eski paket kapatılıyor",
+                         created_by, origin_id, package_data.get('id'))
+            origin.write({'trendyol_status': 'cancelled'})
+            self._cancel_odoo_order(origin, store)
+
+    @api.private
+    def _split_origin(self, package_data, store):
+        """Bölmeden doğan paketin kaynak kaydı (yoksa boş)."""
+        if (package_data.get('createdBy') or '').lower() != 'split':
+            return self.browse()
+        for origin_id in package_data.get('originPackageIds') or []:
+            origin = self.search([
+                ('shipment_package_id', '=', str(origin_id)),
+                ('store_id', '=', store.id),
+            ], limit=1)
+            if origin:
+                return origin
+        return self.browse()
 
     @api.model
     def _confirm_failure_message(self, sale_order, store):
@@ -399,6 +458,8 @@ class TrendyolOrder(models.Model):
 
         existing_so = self.env['sale.order'].sudo().search([
             ('trendyol_store_id', '=', store.id),
+            # Aynı sipariş numaralı BAŞKA paketin (kısmi iptal/bölme) siparişi mükerrer değildir
+            ('trendyol_order_id', 'in', [False, self.id]),
             '|', '|',
             ('client_order_ref', 'in', ref_names),
             ('origin', 'in', ref_names),
