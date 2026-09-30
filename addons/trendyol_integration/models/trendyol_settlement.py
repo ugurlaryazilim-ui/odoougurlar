@@ -26,8 +26,43 @@ SETTLEMENT_TYPES = [
     ('penalty', 'Ceza'),
     ('payment', 'Ödeme / Hakediş'),
     ('commission', 'Komisyon'),
+    ('commission_adjustment', 'Komisyon Düzeltme'),
+    ('manual_refund', 'Kısmi İade'),
+    ('manual_refund_cancel', 'Kısmi İade İptal'),
+    ('delivery_fee', 'Teslimat Ücreti'),
+    ('delivery_fee_cancel', 'Teslimat Ücreti İptal'),
+    ('ty_discount', 'Kurumsal Fatura - TY İndirim/Kupon'),
+    ('ty_discount_cancel', 'Kurumsal Fatura - TY İndirim/Kupon İptal'),
+    ('revenue_adjustment', 'Hakediş Düzeltme'),
+    ('stoppage', 'E-Ticaret Stopajı'),
     ('other', 'Diğer'),
 ]
+
+# Settlements servisinden çekilen tüm kayıt tipleri (doküman: transactionTypes virgülle)
+SETTLEMENT_API_TYPES = [
+    'Sale', 'Return', 'Discount', 'DiscountCancel', 'Coupon', 'CouponCancel',
+    'ProvisionPositive', 'ProvisionNegative', 'ManualRefund', 'ManualRefundCancel',
+    'TyDiscount', 'TyDiscountCancel', 'TyCoupon', 'TyCouponCancel',
+    'SellerRevenuePositive', 'SellerRevenueNegative', 'CommissionPositive', 'CommissionNegative',
+    'SellerRevenuePositiveCancel', 'SellerRevenueNegativeCancel',
+    'CommissionPositiveCancel', 'CommissionNegativeCancel',
+    'DeliveryFee', 'DeliveryFeeCancel', 'PayByLink',
+]
+OTHER_FINANCIAL_API_TYPES = ['DeductionInvoices', 'PaymentOrder', 'Stoppage']
+
+# Hakedişe etkisi: +1 artırır, -1 azaltır (tutar mutlak değerle alınır)
+_REVENUE_SIGN = {
+    'manual_refund': -1, 'manual_refund_cancel': 1,
+    'delivery_fee': 1, 'delivery_fee_cancel': -1,
+    'ty_discount': -1, 'ty_discount_cancel': 1,
+}
+
+_TR_TRANSLATE = str.maketrans({'ç': 'c', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u', '\u0307': None})
+
+
+def normalize_tr(text):
+    """Türkçe metni karşılaştırma için sadeleştir (İ/ı/ş/ç/ğ/ö/ü → ascii, küçük harf)."""
+    return (text or '').strip().casefold().translate(_TR_TRANSLATE)
 
 
 class TrendyolSettlement(models.Model):
@@ -84,17 +119,38 @@ class TrendyolSettlement(models.Model):
 
     # ─── İşlem türü eşleştirme tablosu ─────────────────────
     _TX_TYPE_MAP = {
-        'satis': 'sale', 'sat\u0131\u015f': 'sale', 'sale': 'sale',
+        'satis': 'sale', 'sale': 'sale', 'paybylink': 'sale',
         'iade': 'return', 'return': 'return',
         'indirim': 'discount', 'discount': 'discount',
         'discountcancel': 'discount_cancel',
         'kupon': 'coupon', 'coupon': 'coupon',
         'couponcancel': 'coupon_cancel',
         'odeme': 'payment', 'paymentorder': 'payment',
+        'provisionpositive': 'provision_positive', 'provisionnegative': 'provision_negative',
+        'manualrefund': 'manual_refund', 'manuelrefund': 'manual_refund',
+        'manualrefundcancel': 'manual_refund_cancel', 'manuelrefundcancel': 'manual_refund_cancel',
+        'deliveryfee': 'delivery_fee', 'deliveryfeecancel': 'delivery_fee_cancel',
+        'tydiscount': 'ty_discount', 'tycoupon': 'ty_discount',
+        'tydiscountcancel': 'ty_discount_cancel', 'tycouponcancel': 'ty_discount_cancel',
+        'stoppage': 'stoppage',
     }
 
     _TX_KEYWORD_MAP = [
         # (keyword_list, result_type) — sıra önemli, ilk eşleşen kazanır
+        (['stopaj'], 'stoppage'),
+        (['kismi iade', 'iptal'], 'manual_refund_cancel'),
+        (['kismi iade'], 'manual_refund'),
+        (['teslimat ucreti', 'iptal'], 'delivery_fee_cancel'),
+        (['teslimat ucreti'], 'delivery_fee'),
+        (['ty promosyon', 'iptal'], 'ty_discount_cancel'),
+        (['ty kupon', 'iptal'], 'ty_discount_cancel'),
+        (['ty promosyon'], 'ty_discount'),
+        (['ty kupon'], 'ty_discount'),
+        (['hakedis', 'duzeltme'], 'revenue_adjustment'),
+        (['sellerrevenue'], 'revenue_adjustment'),
+        (['komisyon', 'duzeltme'], 'commission_adjustment'),
+        (['commissionpositive'], 'commission_adjustment'),
+        (['commissionnegative'], 'commission_adjustment'),
         (['indirim', 'iptal'], 'discount_cancel'),
         (['kupon', 'iptal'], 'coupon_cancel'),
         (['kargo fatura'], 'shipping_cargo'),
@@ -110,6 +166,8 @@ class TrendyolSettlement(models.Model):
         (['kusurlu urun'], 'penalty'),
         (['yanlis urun'], 'penalty'),
         (['eksik urun'], 'penalty'),
+        (['gecikme'], 'penalty'),
+        (['tedarik edememe'], 'penalty'),
         (['provizyon', '+'], 'provision_positive'),
         (['provizyon', '-'], 'provision_negative'),
         (['kesinti'], 'platform_fee'),
@@ -119,23 +177,16 @@ class TrendyolSettlement(models.Model):
     @api.private
     def _classify_transaction_type(self, raw_type, description=''):
         """Ham Trendyol işlem türünü sınıflandırmaya çevir."""
-        raw = (raw_type or '').strip()
-        desc = (description or '').strip()
-
-        def normalize(s):
-            return s.casefold().replace('\u0130', 'i').replace('\u0131', 'i').replace('i\u0307', 'i')
-
-        raw_n = normalize(raw)
-        desc_n = normalize(desc)
+        raw_n = normalize_tr(raw_type)
+        desc_n = normalize_tr(description)
         combined = f"{raw_n} {desc_n}"
 
-        # 1. Tam eşleşme
+        # 1. Tam eşleşme (boşluksuz İngilizce tip adları da: "ManualRefundCancel")
+        compact = raw_n.replace(' ', '')
         if raw_n in self._TX_TYPE_MAP:
-            # Özel durum: "iade" kelimesi kargo ile birlikte gelirse return_cargo
-            if raw_n in ('iade', 'return') and 'kargo' in raw_n:
-                pass  # Keyword map'e düşsün
-            else:
-                return self._TX_TYPE_MAP[raw_n]
+            return self._TX_TYPE_MAP[raw_n]
+        if compact in self._TX_TYPE_MAP:
+            return self._TX_TYPE_MAP[compact]
 
         # 2. Keyword eşleştirme
         for keywords, result_type in self._TX_KEYWORD_MAP:
@@ -189,22 +240,27 @@ class TrendyolSettlement(models.Model):
 
         # 1) Settlements
         try:
-            types_to_fetch = ['Sale', 'Return', 'Discount', 'DiscountCancel',
-                              'Coupon', 'CouponCancel']
             created += self._fetch_paginated_settlements(
-                api, start_date, end_date, types_to_fetch, store)
+                api, start_date, end_date, SETTLEMENT_API_TYPES, store)
         except Exception as e:
             errors.append(f"Settlements: {e}")
             _logger.exception("Settlements sync hatası [%s]", store.name)
 
-        # 2) OtherFinancials
+        # 2) OtherFinancials (Stoppage: e-ticaret stopajı)
         try:
-            for tx_type in ['DeductionInvoices', 'PaymentOrder']:
+            for tx_type in OTHER_FINANCIAL_API_TYPES:
                 created += self._fetch_paginated_otherfinancials(
                     api, start_date, end_date, tx_type, store)
         except Exception as e:
             errors.append(f"OtherFinancials: {e}")
             _logger.exception("OtherFinancials sync hatası [%s]", store.name)
+
+        # 2b) Ödeme emirleri: ödenen kayıtlara ödeme no / tarihi işlenir
+        try:
+            self._sync_payment_orders(api, store)
+        except Exception as e:
+            errors.append(f"PaymentOrder: {e}")
+            _logger.exception("Ödeme emri sync hatası [%s]", store.name)
 
         # 3) Kargo Faturası Detay (cargo-invoice)
         try:
@@ -237,6 +293,73 @@ class TrendyolSettlement(models.Model):
             'errors': len(errors),
             'error_details': '\n'.join(errors),
         }
+
+    @api.private
+    def _sync_payment_orders(self, api, store):
+        """Ödenmiş hakediş ödeme emirleri → ilgili kayıtlara ödeme no/tarihi yazılır.
+
+        Doküman: ödeme emri oluştuktan sonra kayıtların güncellenmesi zaman alabilir, ertesi
+        gün sorgulanmalı. İşlenen ödeme emirleri mağazada tutulur (tekrar sorgulanmaz).
+        """
+        processed = [i for i in (store.processed_payment_orders or '').split(',') if i]
+        now = datetime.utcnow()
+        oldest = now - timedelta(days=60)
+        newly = []
+        for page in range(5):
+            result = api.get_payment_orders(page=page)
+            if not result.get('success'):
+                _logger.warning("Ödeme emri listesi alınamadı [%s]: %s", store.name, result.get('error'))
+                break
+            data = result.get('data') or {}
+            content = data.get('content') or []
+            stop = False
+            for po in content:
+                po_id = str(po.get('id') or '')
+                payout_ts = po.get('payoutDate') or 0
+                payout = datetime.fromtimestamp(payout_ts / 1000, tz=timezone.utc).replace(tzinfo=None) \
+                    if payout_ts else None
+                if payout and payout < oldest:
+                    stop = True
+                    break
+                if not po_id or po_id in processed or (payout and payout > now - timedelta(days=1)):
+                    continue
+                self._apply_payment_order(api, store, po_id)
+                newly.append(po_id)
+            if stop or not content or page + 1 >= (data.get('totalPages') or 1):
+                break
+        if newly:
+            keep = (processed + newly)[-300:]
+            # Ayrı cursor: mağaza satırı ana işlemde kilitlenirse aşağıdaki last_financial_sync
+            # güncellemesi (o da ayrı cursor) bu kilidi bekleyip asılı kalırdı
+            try:
+                with self.pool.cursor() as new_cr:
+                    new_cr.execute(
+                        "UPDATE trendyol_store SET processed_payment_orders = %s WHERE id = %s",
+                        (','.join(keep), store.id))
+            except Exception as e:
+                _logger.warning("İşlenen ödeme emirleri kaydedilemedi (%s): %s", store.name, e)
+            _logger.info("Trendyol ödeme emirleri [%s]: %s ödeme işlendi", store.name, len(newly))
+
+    @api.private
+    def _apply_payment_order(self, api, store, payment_order_id):
+        """Bir ödeme emrinin tüm kayıtlarını çek; mevcutları günceller, eksikleri ekler."""
+        for fetch, types, source in (
+                (api.get_settlements, SETTLEMENT_API_TYPES, 'settlements'),
+                (api.get_other_financials, OTHER_FINANCIAL_API_TYPES, 'otherfinancials')):
+            page = 0
+            while True:
+                result = fetch(transaction_types=types, page=page, size=1000,
+                               payment_order_id=payment_order_id)
+                if not result.get('success'):
+                    _logger.warning("Ödeme emri %s kayıtları alınamadı (%s): %s",
+                                    payment_order_id, source, result.get('error'))
+                    break
+                data = result.get('data') or {}
+                for item in data.get('content') or []:
+                    self._process_settlement_item(item, store, source)
+                page += 1
+                if page >= (data.get('totalPages') or 1):
+                    break
 
     @api.private
     def _fetch_paginated_settlements(self, api, start_date, end_date, types, store):
@@ -437,8 +560,6 @@ class TrendyolSettlement(models.Model):
             ('source', '=', source),
             ('store_id', '=', store.id),
         ], limit=1)
-        if existing:
-            return False
 
         tx_ts = data.get('transactionDate', 0)
         tx_date = datetime.fromtimestamp(tx_ts / 1000, tz=timezone.utc).replace(tzinfo=None) if tx_ts else None
@@ -476,6 +597,12 @@ class TrendyolSettlement(models.Model):
             'payment_period': data.get('paymentPeriod', 0) or 0,
         }
 
+        if existing:
+            # Ödeme no / tarihi kayıt oluştuktan sonra (ödeme günü) dolar; sınıflandırma
+            # düzeltmeleri de eski kayıtlara yansısın — yalnız değişen alanlar yazılır
+            self._update_existing(existing, vals)
+            return False
+
         try:
             # Savepoint: çakışma (unique) tüm finans senkronunun işlemini bozmasın
             with self.env.cr.savepoint():
@@ -488,6 +615,29 @@ class TrendyolSettlement(models.Model):
             _logger.warning("Finansal kayıt oluşturma hatası [%s]: %s — %s",
                             store.name, tid, e)
             return False
+
+    _UPDATABLE_FIELDS = ('transaction_type', 'debt', 'credit', 'commission_rate', 'commission_amount',
+                         'seller_revenue', 'payment_order_id', 'payment_date', 'payment_period')
+
+    @api.private
+    def _update_existing(self, record, vals):
+        changed = {}
+        for key in self._UPDATABLE_FIELDS:
+            new = vals.get(key)
+            old = record[key]
+            if isinstance(old, float) or isinstance(new, float):
+                if abs((old or 0.0) - (new or 0.0)) > 0.005:
+                    changed[key] = new or 0.0
+            elif (old or False) != (new or False):
+                if key == 'payment_order_id' and not new:
+                    continue  # boş gelen değer dolu ödeme bilgisini silmesin
+                if key == 'payment_date' and not new:
+                    continue
+                changed[key] = new
+        if not record.order_id and vals.get('order_id'):
+            changed['order_id'] = vals['order_id']
+        if changed:
+            record.write(changed)
 
     @api.private
     def _update_order_financial_summary(self, store, since=None):
@@ -521,9 +671,11 @@ class TrendyolSettlement(models.Model):
             shipping_cost = 0.0
             return_cargo_cost = 0.0
             penalty_amount = 0.0
+            stoppage_amount = 0.0
             seller_revenue = 0.0
             has_platform_invoice = False
             has_cargo_invoice = False
+            sale_records = []
 
             for s in settlements:
                 if s.transaction_type == 'platform_fee':
@@ -536,6 +688,10 @@ class TrendyolSettlement(models.Model):
                     return_cargo_cost += s.debt
                 elif s.transaction_type == 'penalty':
                     penalty_amount += s.debt
+                elif s.transaction_type == 'stoppage':
+                    stoppage_amount += (s.debt or 0) - (s.credit or 0)
+                if s.transaction_type == 'sale':
+                    sale_records.append(s)
 
                 if s.seller_revenue:
                     if s.transaction_type in ('sale', 'coupon', 'discount_cancel',
@@ -543,6 +699,14 @@ class TrendyolSettlement(models.Model):
                         seller_revenue += s.seller_revenue
                     elif s.transaction_type in ('discount', 'return', 'provision_negative'):
                         seller_revenue -= abs(s.seller_revenue)
+                    elif s.transaction_type in _REVENUE_SIGN:
+                        seller_revenue += _REVENUE_SIGN[s.transaction_type] * abs(s.seller_revenue)
+                    elif s.transaction_type == 'revenue_adjustment':
+                        raw = normalize_tr(s.transaction_type_raw)
+                        sign = 1 if ('pozitif' in raw or 'positive' in raw) else -1
+                        if 'iptal' in raw or 'cancel' in raw:
+                            sign = -sign
+                        seller_revenue += sign * abs(s.seller_revenue)
 
             # Fatura yoksa tahmini hesapla
             if not has_platform_invoice and store.platform_fee_rate and seller_revenue > 0:
@@ -555,18 +719,26 @@ class TrendyolSettlement(models.Model):
                 shipping_cost = round(deci * store.cargo_unit_price, 2)
 
             net_revenue = (seller_revenue - platform_fee - shipping_cost
-                           - return_cargo_cost - penalty_amount)
+                           - return_cargo_cost - penalty_amount - stoppage_amount)
 
             summary = {
                 'platform_fee': platform_fee,
                 'shipping_cost': shipping_cost,
                 'return_cargo_cost': return_cargo_cost,
                 'penalty_amount': penalty_amount,
+                'stoppage_amount': stoppage_amount,
                 'seller_revenue': seller_revenue,
                 'final_net_amount': net_revenue,
             }
             # Yalnız değişen değerler yazılır
             changed = {k: v for k, v in summary.items() if abs((order[k] or 0.0) - v) > 0.005}
+            is_paid = bool(sale_records) and all(r.payment_order_id for r in sale_records)
+            paid_dates = [r.payment_date for r in sale_records if r.payment_date]
+            paid_date = max(paid_dates) if paid_dates else False
+            if order.is_paid != is_paid:
+                changed['is_paid'] = is_paid
+            if order.paid_date != paid_date:
+                changed['paid_date'] = paid_date
             if changed:
                 order.sudo().write(changed)
 

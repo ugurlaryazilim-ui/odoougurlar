@@ -90,6 +90,10 @@
                 <filter string="Satış" name="filter_sale" domain="[('transaction_type', '=', 'sale')]"/>
                 <filter string="İade" name="filter_return" domain="[('transaction_type', '=', 'return')]"/>
                 <filter string="Platform" name="filter_platform" domain="[('transaction_type', '=', 'platform_fee')]"/>
+                <filter string="Stopaj" name="filter_stoppage" domain="[('transaction_type', '=', 'stoppage')]"/>
+                <separator/>
+                <filter string="Ödendi" name="filter_paid" domain="[('payment_order_id', '!=', False)]"/>
+                <filter string="Ödenmedi" name="filter_not_paid" domain="[('payment_order_id', '=', False)]"/>
             </search>
         </field>
     </record>
