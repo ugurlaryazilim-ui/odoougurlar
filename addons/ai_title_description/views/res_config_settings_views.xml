@@ -51,6 +51,12 @@
                                 <field name="ai_td_use_search_grounding"/>
                             </setting>
                         </block>
+                        <block title="Maliyet" name="ai_budget">
+                            <setting string="Aylık Bütçe Uyarısı" help="Bu ayki tahmini maliyet bu tutarı ($) geçince AI İçerik yöneticilerine ayda bir kez bildirim gider. Üretim durmaz. 0 = kapalı.">
+                                <field name="ai_td_monthly_budget"/>
+                                <div class="text-muted mt-1">Bu ayki harcama: $<field name="ai_td_month_spend" class="oe_inline" readonly="1"/></div>
+                            </setting>
+                        </block>
                         <block title="Ürün Etiketleri" name="ai_tags">
                             <setting string="SEO Kelimelerinden Etiket Oluştur" help="Üretilen SEO anahtar kelimeleri ürün etiketi olarak eklenir; eksik etiketler oluşturulur. Kapalıyken etiketlere dokunulmaz.">
                                 <field name="ai_td_create_tags"/>

@@ -6,7 +6,7 @@
     'summary': 'Gemini AI + Google SEO ile Trendyol/HB uyumlu ürün başlığı ve açıklama üretimi',
     'author': 'Uğurlar Yazılım',
     'website': 'https://ugurlar.com',
-    'depends': ['product', 'base_setup', 'web'],
+    'depends': ['product', 'base_setup', 'web', 'mail'],
     'external_dependencies': {'python': ['requests']},
     'data': [
         'security/ai_title_security.xml',

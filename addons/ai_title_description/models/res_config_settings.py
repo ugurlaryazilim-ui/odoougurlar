@@ -35,6 +35,15 @@ class ResConfigSettings(models.TransientModel):
     ai_td_use_trendyol_suggest = fields.Boolean("Trendyol Suggest Aktif")
     ai_td_use_search_grounding = fields.Boolean("Gemini Search Grounding")
     ai_td_create_tags = fields.Boolean("SEO Kelimelerinden Ürün Etiketi Oluştur")
+    ai_td_monthly_budget = fields.Float("Aylık Bütçe Uyarısı ($)", config_parameter='ai_title_description.monthly_budget',
+                                        help="Bu ayki tahmini maliyet bu tutarı geçince yöneticilere bir kez bildirim gider. "
+                                             "Üretim durmaz. 0 = kapalı.")
+    ai_td_month_spend = fields.Float("Bu Ayki Harcama ($)", compute='_compute_ai_td_month_spend')
+
+    def _compute_ai_td_month_spend(self):
+        spend = self.env['ai.content.log']._month_spend()
+        for rec in self:
+            rec.ai_td_month_spend = spend
 
     _AI_TD_DEFAULT_ON_TOGGLES = {
         'ai_td_use_vision': 'ai_title_description.use_vision',
