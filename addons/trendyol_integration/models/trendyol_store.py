@@ -145,6 +145,13 @@ class TrendyolStore(models.Model):
         help='Platform kargoda 1 desi kargo birim fiyatı (TL). Trendyol panelinden kontrol edin.',
     )
     last_financial_sync = fields.Datetime(string='Son Finansal Senkron', readonly=True)
+    # ─── Finans geçmişini tamamlama (arka plan işi) ───
+    backfill_from = fields.Date(string='Tamamlama Başlangıcı', readonly=True, copy=False)
+    backfill_to = fields.Date(string='Tamamlama Bitişi', readonly=True, copy=False)
+    backfill_next = fields.Date(string='Sıradaki Parça', readonly=True, copy=False,
+                                help='Doluysa geçmiş tamamlama arka planda sürüyor')
+    backfill_created = fields.Integer(string='Tamamlamada Eklenen', readonly=True, copy=False)
+    backfill_last_result = fields.Char(string='Son Tamamlama', readonly=True, copy=False)
     processed_payment_orders = fields.Text(
         string='İşlenen Ödeme Emirleri', readonly=True, copy=False,
         help='Kayıtlarına ödeme bilgisi işlenmiş Trendyol ödeme emri ID\'leri')
@@ -304,6 +311,20 @@ class TrendyolStore(models.Model):
                 'sticky': False,
             },
         }
+
+    def action_open_financial_backfill(self):
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'Finans Geçmişini Tamamla',
+            'res_model': 'trendyol.financial.backfill.wizard',
+            'view_mode': 'form',
+            'target': 'new',
+            'context': {'default_store_id': self.id},
+        }
+
+    def action_cancel_financial_backfill(self):
+        self.write({'backfill_next': False})
 
     def action_view_settlements(self):
         """Mağazanın finansal işlemlerini görüntüle."""

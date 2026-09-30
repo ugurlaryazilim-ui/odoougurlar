@@ -83,6 +83,7 @@ class TrendyolSettlement(models.Model):
         ('settlements', 'Settlements'),
         ('otherfinancials', 'Other Financials'),
         ('cargo_invoice', 'Kargo Faturası'),
+        ('platform_invoice', 'Platform Faturası Detayı'),
     ], string='Kaynak', readonly=True)
 
     # ─── Finansal ────────────────────────────────────────
@@ -269,6 +270,46 @@ class TrendyolSettlement(models.Model):
         end_date = datetime.now()
         start_date = end_date - timedelta(days=day_range)
 
+        created, errors = self._sync_window(api, store, start_date, end_date)
+
+        # 2b) Ödeme emirleri: ödenen kayıtlara ödeme no / tarihi işlenir
+        try:
+            self._sync_payment_orders(api, store)
+        except Exception as e:
+            errors.append(f"PaymentOrder: {e}")
+            _logger.exception("Ödeme emri sync hatası [%s]", store.name)
+
+        # 3) Kargo / platform faturası kalem detayları
+        created += self._process_invoice_details(api, store)
+
+        # 4) Bağsız settlement'ları siparişlere bağla
+        self._relink_unlinked_settlements(store)
+
+        # 5) Sipariş bazlı finansal özet — yalnız son senkrondan beri değişen siparişler
+        since = (store.last_financial_sync or start_date) - timedelta(hours=1)
+        self._update_order_financial_summary(store, since=since)
+
+        # last_financial_sync — ayrı cursor ile güncelle (serialization çakışmasını önler)
+        try:
+            with self.pool.cursor() as new_cr:
+                new_cr.execute(
+                    "UPDATE trendyol_store SET last_financial_sync = %s, write_date = %s WHERE id = %s",
+                    (fields.Datetime.now(), fields.Datetime.now(), store.id)
+                )
+        except Exception as e:
+            _logger.warning("last_financial_sync güncelleme atlandı (%s): %s", store.name, e)
+        _logger.info("Finansal senkronizasyon [%s]: %s yeni kayıt, %s hata",
+                      store.name, created, len(errors))
+
+        return {
+            'created': created,
+            'errors': len(errors),
+            'error_details': '\n'.join(errors),
+        }
+
+    @api.private
+    def _sync_window(self, api, store, start_date, end_date):
+        """Bir tarih aralığındaki (en fazla 15 gün) settlements + otherfinancials kayıtları."""
         created = 0
         errors = []
 
@@ -297,44 +338,76 @@ class TrendyolSettlement(models.Model):
             errors.append(f"PlatformServiceFee: {e}")
             _logger.exception("Platform hizmet bedeli sync hatası [%s]", store.name)
 
-        # 2b) Ödeme emirleri: ödenen kayıtlara ödeme no / tarihi işlenir
+        return created, errors
+
+    @api.private
+    def _process_invoice_details(self, api, store, recent_only=True):
+        """Kargo faturası kalemleri (sipariş bazlı) + platform faturası kalem denemesi."""
+        created = 0
         try:
-            self._sync_payment_orders(api, store)
+            created += self._process_cargo_invoices(api, store, recent_only=recent_only)
         except Exception as e:
-            errors.append(f"PaymentOrder: {e}")
-            _logger.exception("Ödeme emri sync hatası [%s]", store.name)
-
-        # 3) Kargo Faturası Detay (cargo-invoice)
+            _logger.exception("CargoInvoice sync hatası [%s]: %s", store.name, e)
         try:
-            created += self._process_cargo_invoices(api, store)
+            created += self._process_platform_invoices(api, store, recent_only=recent_only)
         except Exception as e:
-            errors.append(f"CargoInvoice: {e}")
-            _logger.exception("CargoInvoice sync hatası [%s]", store.name)
+            _logger.exception("Platform faturası detay hatası [%s]: %s", store.name, e)
+        return created
 
-        # 4) Bağsız settlement'ları siparişlere bağla
-        self._relink_unlinked_settlements(store)
+    # ─── GEÇMİŞİ TAMAMLAMA (15'er günlük parçalar, arka planda) ───
 
-        # 5) Sipariş bazlı finansal özet — yalnız son senkrondan beri değişen siparişler
-        since = (store.last_financial_sync or start_date) - timedelta(hours=1)
-        self._update_order_financial_summary(store, since=since)
+    _BACKFILL_CHUNK_DAYS = 15
+    _BACKFILL_CHUNKS_PER_RUN = 3
+    _BACKFILL_CHUNK_PAUSE = 5  # sn — finans servisleri dakikada 100 istek
 
-        # last_financial_sync — ayrı cursor ile güncelle (serialization çakışmasını önler)
-        try:
-            with self.pool.cursor() as new_cr:
-                new_cr.execute(
-                    "UPDATE trendyol_store SET last_financial_sync = %s, write_date = %s WHERE id = %s",
-                    (fields.Datetime.now(), fields.Datetime.now(), store.id)
-                )
-        except Exception as e:
-            _logger.warning("last_financial_sync güncelleme atlandı (%s): %s", store.name, e)
-        _logger.info("Finansal senkronizasyon [%s]: %s yeni kayıt, %s hata",
-                      store.name, created, len(errors))
+    @api.model
+    def cron_financial_backfill(self):
+        """Geçmiş tamamlama işi bekleyen mağazaları parça parça işler; iş kaldıysa kendini tetikler."""
+        import time
+        stores = self.env['trendyol.store'].search([('backfill_next', '!=', False)])
+        remaining = False
+        for store in stores:
+            try:
+                api = store.get_api()
+            except Exception as e:
+                _logger.warning("Finans geçmişi tamamlanamadı [%s]: %s", store.name, e)
+                continue
+            for i in range(self._BACKFILL_CHUNKS_PER_RUN):
+                if not store.backfill_next or store.backfill_next > store.backfill_to:
+                    break
+                if i:
+                    time.sleep(self._BACKFILL_CHUNK_PAUSE)
+                chunk_start = store.backfill_next
+                chunk_end = min(chunk_start + timedelta(days=self._BACKFILL_CHUNK_DAYS - 1),
+                                store.backfill_to)
+                start_dt = datetime.combine(chunk_start, datetime.min.time())
+                end_dt = datetime.combine(chunk_end, datetime.max.time()).replace(microsecond=0)
+                created, errors = self._sync_window(api, store, start_dt, end_dt)
+                store.write({
+                    'backfill_next': chunk_end + timedelta(days=1),
+                    'backfill_created': store.backfill_created + created,
+                })
+                _logger.info("Finans geçmişi [%s]: %s → %s, %s yeni kayıt%s", store.name,
+                             chunk_start, chunk_end, created, f", hata: {'; '.join(errors)}" if errors else '')
+                self.env.cr.commit()  # her parça kalıcı: yarıda kalırsa kaldığı yerden devam eder
 
-        return {
-            'created': created,
-            'errors': len(errors),
-            'error_details': '\n'.join(errors),
-        }
+            if store.backfill_next and store.backfill_next > store.backfill_to:
+                # Son adım: fatura kalemleri, eşleştirme ve tüm siparişlerin özeti
+                self._process_invoice_details(api, store, recent_only=False)
+                self._relink_unlinked_settlements(store)
+                self._update_order_financial_summary(store)
+                _logger.info("Finans geçmişi tamamlandı [%s]: %s → %s, toplam %s yeni kayıt",
+                             store.name, store.backfill_from, store.backfill_to, store.backfill_created)
+                store.write({'backfill_next': False, 'backfill_last_result':
+                             f"{store.backfill_from} → {store.backfill_to}: {store.backfill_created} yeni kayıt "
+                             f"({fields.Datetime.now():%d.%m.%Y %H:%M} UTC)"})
+                self.env.cr.commit()
+            elif store.backfill_next:
+                remaining = True
+        if remaining:
+            cron = self.env.ref('trendyol_integration.cron_trendyol_financial_backfill', raise_if_not_found=False)
+            if cron:
+                cron._trigger(fields.Datetime.now() + timedelta(seconds=60))
 
     @api.private
     def _sync_payment_orders(self, api, store):
@@ -491,7 +564,7 @@ class TrendyolSettlement(models.Model):
         return created
 
     @api.private
-    def _process_cargo_invoices(self, api, store):
+    def _process_cargo_invoices(self, api, store, recent_only=True):
         """Kargo faturası seri numaralarını bul ve sipariş bazlı detay çek.
 
         Akış:
@@ -519,7 +592,8 @@ class TrendyolSettlement(models.Model):
             serial_number = invoice.trendyol_id
             if not serial_number:
                 continue
-            if serial_number in processed_serials and (invoice.transaction_date or recent) < recent:
+            if serial_number in processed_serials and (
+                    not recent_only or (invoice.transaction_date or recent) < recent):
                 continue
 
             try:
@@ -546,6 +620,79 @@ class TrendyolSettlement(models.Model):
                 _logger.warning("Cargo invoice [%s] işleme hatası: %s",
                                 serial_number, e)
 
+        return created
+
+    @api.private
+    def _process_platform_invoices(self, api, store, recent_only=True):
+        """Platform hizmet bedeli faturalarının kalem (sipariş) kırılımını dene.
+
+        Dokümanda platform faturası için kalem servisi yok; fatura seri numarasıyla çalışan
+        cargo-invoice/{no}/items servisi denenir. Sipariş numaralı kalem dönerse bedel
+        siparişlere dağıtılır, dönmezse faturalar toplu kalır (özet gönderi başı tahmin kullanır).
+        """
+        domain = [('store_id', '=', store.id), ('transaction_type', '=', 'platform_fee'),
+                  ('source', '=', 'otherfinancials'), ('order_id', '=', False)]
+        if recent_only:
+            domain.append(('transaction_date', '>=', fields.Datetime.now() - timedelta(days=7)))
+        invoices = self.search(domain)
+        done = set(self.search([('store_id', '=', store.id), ('source', '=', 'platform_invoice')])
+                   .mapped('receipt_id'))
+        created = tried = with_items = 0
+        for invoice in invoices:
+            serial = (invoice.trendyol_id or '').split('_')[0]
+            if not serial or serial in done:
+                continue
+            if tried >= 3 and not with_items:
+                _logger.info("Platform faturası kalem detayı [%s]: ilk %s fatura boş döndü, kırılım yok — "
+                             "faturalar toplu kalacak", store.name, tried)
+                break
+            tried += 1
+            page = 0
+            while True:
+                result = api.get_cargo_invoice_items(serial, page=page)
+                if not result.get('success'):
+                    if tried == 1:
+                        _logger.info("Platform faturası kalem detayı alınamadı [%s] (%s): %s — faturalar "
+                                     "toplu kalacak", store.name, serial, result.get('error'))
+                        return 0  # servis bu fatura tipini desteklemiyor: diğerlerini deneme
+                    break
+                data = result.get('data') or {}
+                items = [i for i in (data.get('content') or []) if i.get('orderNumber')]
+                if items:
+                    with_items += 1
+                for item in items:
+                    order_number = str(item.get('orderNumber'))
+                    unique_id = f"pf_{serial}_{item.get('parcelUniqueId') or order_number}"
+                    if self.search_count([('trendyol_id', '=', unique_id), ('store_id', '=', store.id),
+                                          ('source', '=', 'platform_invoice')]):
+                        continue
+                    try:
+                        with self.env.cr.savepoint():
+                            self.create({
+                                'trendyol_id': unique_id,
+                                'store_id': store.id,
+                                'order_id': self._find_order(store, order_number=order_number),
+                                'transaction_date': invoice.transaction_date,
+                                'transaction_type': 'platform_fee',
+                                'transaction_type_raw': invoice.transaction_type_raw,
+                                'description': f"Platform Hizmet Bedeli ({order_number})",
+                                'source': 'platform_invoice',
+                                'debt': item.get('amount') or 0.0,
+                                'credit': 0.0,
+                                'order_number': order_number,
+                                'receipt_id': serial,
+                                'payment_order_id': invoice.payment_order_id,
+                                'payment_date': invoice.payment_date,
+                            })
+                        created += 1
+                    except Exception as e:
+                        _logger.warning("Platform fatura kalemi yazılamadı (%s): %s", unique_id, e)
+                page += 1
+                if page >= (data.get('totalPages') or 1):
+                    break
+        if tried:
+            _logger.info("Platform faturası kalem denemesi [%s]: %s fatura, %s tanesinde sipariş kalemi, "
+                         "%s kayıt", store.name, tried, with_items, created)
         return created
 
     @api.private

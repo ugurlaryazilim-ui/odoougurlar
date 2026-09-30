@@ -106,6 +106,19 @@
                                     <field name="financial_day_range"
                                            invisible="not sync_financials"/>
                                     <field name="last_financial_sync"/>
+                                    <button name="action_open_financial_backfill" type="object"
+                                            string="Geçmişi Tamamla" class="btn-secondary" icon="fa-history" groups="sales_team.group_sale_manager"
+                                            invisible="not sync_financials or backfill_next" colspan="2"/>
+                                    <div class="alert alert-info" role="status" colspan="2" invisible="not backfill_next">
+                                        Finans geçmişi arka planda çekiliyor:
+                                        <field name="backfill_from" readonly="1" class="oe_inline"/> →
+                                        <field name="backfill_to" readonly="1" class="oe_inline"/>,
+                                        sıradaki parça <field name="backfill_next" readonly="1" class="oe_inline"/>,
+                                        şimdiye kadar <field name="backfill_created" readonly="1" class="oe_inline"/> yeni kayıt.
+                                        <button name="action_cancel_financial_backfill" type="object"
+                                                string="Durdur" class="btn-link"/>
+                                    </div>
+                                    <field name="backfill_last_result" invisible="not backfill_last_result or backfill_next"/>
                                 </group>
                                 <group string="Tahmini Hesaplama (Fatura kesilmemişse)">
                                     <field name="platform_fee_fixed"/>
