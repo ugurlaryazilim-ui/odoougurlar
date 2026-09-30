@@ -4,3 +4,4 @@ access_ai_content_log_user,ai.content.log.user,model_ai_content_log,group_ai_con
 access_ai_content_log_manager,ai.content.log.manager,model_ai_content_log,group_ai_content_manager,1,1,1,1
 access_ai_content_queue_user,ai.content.queue.user,model_ai_content_queue,group_ai_content_user,1,1,1,0
 access_ai_content_queue_manager,ai.content.queue.manager,model_ai_content_queue,group_ai_content_manager,1,1,1,1
+access_ai_keyword_cache_manager,ai.keyword.cache.manager,model_ai_keyword_cache,group_ai_content_manager,1,1,1,1

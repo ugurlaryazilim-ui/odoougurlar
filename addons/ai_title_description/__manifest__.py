@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'AI Ürün Başlık & Açıklama Üretici',
-    'version': '19.0.1.0.1',
+    'version': '19.0.1.0.2',
     'category': 'Inventory/Products',
     'summary': 'Gemini AI + Google SEO ile Trendyol/HB uyumlu ürün başlığı ve açıklama üretimi',
     'author': 'Uğurlar Yazılım',

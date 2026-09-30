@@ -34,12 +34,14 @@ class ResConfigSettings(models.TransientModel):
     ai_td_use_google_suggest = fields.Boolean("Google Suggest Aktif")
     ai_td_use_trendyol_suggest = fields.Boolean("Trendyol Suggest Aktif")
     ai_td_use_search_grounding = fields.Boolean("Gemini Search Grounding")
+    ai_td_create_tags = fields.Boolean("SEO Kelimelerinden Ürün Etiketi Oluştur")
 
     _AI_TD_DEFAULT_ON_TOGGLES = {
         'ai_td_use_vision': 'ai_title_description.use_vision',
         'ai_td_use_google_suggest': 'ai_title_description.use_google_suggest',
         'ai_td_use_trendyol_suggest': 'ai_title_description.use_trendyol_suggest',
         'ai_td_use_search_grounding': 'ai_title_description.use_search_grounding',
+        'ai_td_create_tags': 'ai_title_description.create_tags',
     }
 
     @api.model

@@ -16,6 +16,10 @@ class ProductTemplate(models.Model):
     ai_content_generated = fields.Boolean("AI İçerik Üretildi", default=False)
     ai_last_generated = fields.Datetime("Son AI Üretimi", readonly=True)
     ai_generation_count = fields.Integer("AI Üretim Sayısı", default=0)
+    # AI ürün adını değiştirir; tekrar üretimde model kendi önceki başlığını değil
+    # orijinal (Nebim) adı görsün diye ilk değişiklikten önceki ad saklanır
+    ai_original_name = fields.Char("Orijinal Ürün Adı", copy=False,
+                                   help="AI ürün adını ilk kez değiştirmeden önceki ad. Üretimde bu ad kullanılır.")
 
     def action_open_ai_title_wizard(self):
         self.ensure_one()
@@ -42,6 +46,19 @@ class ProductTemplate(models.Model):
             if text:
                 return text
         return fallback or ''
+
+    def _ai_name_vals(self, new_name):
+        """Ürün adını AI başlığıyla değiştirirken orijinal adı (bir kez) sakla."""
+        self.ensure_one()
+        vals = {'name': new_name}
+        if not self.ai_original_name and self.name and self.name != new_name:
+            vals['ai_original_name'] = self.name
+        return vals
+
+    @api.model
+    def _ai_create_tags_enabled(self):
+        return self.env['ir.config_parameter'].sudo().get_param(
+            'ai_title_description.create_tags', 'True') == 'True'
 
     def action_view_ai_logs(self):
         """Bu ürünün AI üretim geçmişi (yalnız bu ürün)."""
@@ -149,7 +166,7 @@ class ProductTemplate(models.Model):
             attributes[attr_name] = values
                 
         return {
-            'raw_name': self.name,
+            'raw_name': self.ai_original_name or self.name,
             'brand': brand,
             'category': self.categ_id.complete_name if self.categ_id else '',
             'attributes': attributes,

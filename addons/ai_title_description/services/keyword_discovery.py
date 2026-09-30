@@ -57,7 +57,7 @@ class KeywordDiscovery:
         return list(results)
 
     def _fetch_google_suggest(self, query):
-        url = "http://suggestqueries.google.com/complete/search"
+        url = "https://suggestqueries.google.com/complete/search"
         params = {
             "client": "firefox",
             "hl": "tr",

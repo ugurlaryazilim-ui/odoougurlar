@@ -50,6 +50,7 @@
                             <group string="Durum">
                                 <field name="ai_content_generated" readonly="1"/>
                                 <field name="ai_last_generated" readonly="1"/>
+                                <field name="ai_original_name"/>
                             </group>
                         </group>
                     </page>

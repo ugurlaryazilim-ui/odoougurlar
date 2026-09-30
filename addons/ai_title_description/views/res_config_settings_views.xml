@@ -51,6 +51,11 @@
                                 <field name="ai_td_use_search_grounding"/>
                             </setting>
                         </block>
+                        <block title="Ürün Etiketleri" name="ai_tags">
+                            <setting string="SEO Kelimelerinden Etiket Oluştur" help="Üretilen SEO anahtar kelimeleri ürün etiketi olarak eklenir; eksik etiketler oluşturulur. Kapalıyken etiketlere dokunulmaz.">
+                                <field name="ai_td_create_tags"/>
+                            </setting>
+                        </block>
                     </app>
                 </xpath>
             </field>

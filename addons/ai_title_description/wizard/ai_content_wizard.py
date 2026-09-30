@@ -110,7 +110,6 @@ class AIContentWizard(models.TransientModel):
         # Servisleri import et
         from ..services import get_ai_provider
         from ..services.prompt_engine import PromptEngine
-        from ..services.keyword_discovery import KeywordDiscovery
         from ..services.title_validator import TitleValidator
         from ..services.vision_analyzer import VisionAnalyzer
 
@@ -120,10 +119,10 @@ class AIContentWizard(models.TransientModel):
         # 1. SEO Anahtar Kelime Keşfi
         seo_keywords = []
         try:
-            kd = KeywordDiscovery()
             seed = payload.get('category', '').split(' / ')[-1] if payload.get('category') else payload.get('raw_name', '')
             if seed:
-                seo_keywords = kd.discover_keywords(seed, use_google=use_google, use_trendyol=use_trendyol)
+                seo_keywords = self.env['ai.keyword.cache']._get_keywords(
+                    seed, use_google=use_google, use_trendyol=use_trendyol)
                 self.discovered_keywords = ', '.join(seo_keywords) if seo_keywords else ''
         except Exception as e:
             _logger.warning("Anahtar kelime keşfi başarısız: %s", e)
@@ -276,9 +275,9 @@ class AIContentWizard(models.TransientModel):
             vals['ai_seo_keywords'] = self.preview_seo_keywords
             # Odoo ana ürün adını güncelle
             if self.preview_ecommerce_title:
-                vals['name'] = self.preview_ecommerce_title
+                vals.update(product._ai_name_vals(self.preview_ecommerce_title))
             elif self.preview_trendyol_title:
-                vals['name'] = self.preview_trendyol_title
+                vals.update(product._ai_name_vals(self.preview_trendyol_title))
 
         if description:
             vals['ai_short_description'] = self.preview_short_description
@@ -294,7 +293,7 @@ class AIContentWizard(models.TransientModel):
                 vals['description'] = self.preview_short_description
 
         # SEO anahtar kelimelerini E-Ticaret ürün etiketlerine ekle
-        if self.preview_seo_keywords:
+        if self.preview_seo_keywords and product._ai_create_tags_enabled():
             keywords = [k.strip() for k in self.preview_seo_keywords.split(',') if k.strip()]
             if keywords:
                 tag_field = False

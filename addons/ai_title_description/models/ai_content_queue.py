@@ -105,7 +105,6 @@ class AIContentQueue(models.Model):
 
         from ..services import get_ai_provider
         from ..services.prompt_engine import PromptEngine
-        from ..services.keyword_discovery import KeywordDiscovery
         from ..services.title_validator import TitleValidator
         from ..services.vision_analyzer import VisionAnalyzer
 
@@ -133,7 +132,6 @@ class AIContentQueue(models.Model):
 
         provider = get_ai_provider(provider_type, gemini_key, openai_key, model_name=model_name)
         pe = PromptEngine()
-        kd = KeywordDiscovery()
         tv = TitleValidator()
         va = VisionAnalyzer()
 
@@ -165,7 +163,8 @@ class AIContentQueue(models.Model):
                 try:
                     seed = payload.get('category', '').split(' / ')[-1] if payload.get('category') else payload.get('raw_name', '')
                     if seed:
-                        seo_keywords = kd.discover_keywords(seed, use_google=use_google, use_trendyol=use_trendyol)
+                        seo_keywords = self.env['ai.keyword.cache']._get_keywords(
+                            seed, use_google=use_google, use_trendyol=use_trendyol)
                 except Exception as e:
                     _logger.warning("Kuyruk [%s]: Keyword keşfi başarısız: %s", record.id, e)
 
@@ -220,7 +219,7 @@ class AIContentQueue(models.Model):
                     # Ürün adını SADECE geçerli (boş olmayan) bir başlık varsa güncelle
                     new_name = ecommerce_title or fixed_title
                     if new_name:
-                        product_vals['name'] = new_name
+                        product_vals.update(product._ai_name_vals(new_name))
 
                 if record.mode in ('description', 'both'):
                     # Key features'ı HTML'e dahil et
@@ -243,7 +242,7 @@ class AIContentQueue(models.Model):
 
                 # SEO anahtar kelimelerini E-Ticaret etiketlerine otomatik bağla
                 seo_kws_str = product_vals.get('ai_seo_keywords') or ', '.join(result.get('seo_keywords', []))
-                if seo_kws_str:
+                if seo_kws_str and product._ai_create_tags_enabled():
                     keywords = [k.strip() for k in seo_kws_str.split(',') if k.strip()]
                     if keywords:
                         tag_field = False
