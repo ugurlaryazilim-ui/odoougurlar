@@ -60,19 +60,19 @@ class HepsiburadaStore(models.Model):
     process_commission = fields.Boolean(
         string='Komisyon Bilgisi İşlensin',
         default=True,
-        help='Hepsiburada komisyon tutarlarını sipariş kaydına ekler',
+        help='Hepsiburada komisyon tutar ve oranlarını sipariş satırlarına yazar',
     )
 
     # ─── İade Ayarları ───
     process_returns = fields.Boolean(
         string='İade İşle',
         default=False,
-        help='İade edilen siparişleri de çekip işle',
+        help='Hepsiburada iade/değişim taleplerini çekip siparişe bağlar (HB tarafında aksiyon alınmaz)',
     )
     return_day_range = fields.Integer(
         string='İade Gün Aralığı',
         default=3,
-        help='Son kaç güne ait iadeler çekilsin',
+        help='Son kaç günde açılan talepler çekilsin (açık talepler bu süre boyunca güncellenir)',
     )
 
     # ─── Müşteri Ayarları ───
@@ -84,7 +84,7 @@ class HepsiburadaStore(models.Model):
     micro_export_prefix = fields.Char(
         string='Mikro İ. Müşteri Kodu Ön Ek',
         default='MHB',
-        help='Mikro ihracat siparişlerinde müşteri koduna eklenen ön ek',
+        help='Mikro ihracat (yurt dışı) siparişlerinde müşteri koduna eklenen ön ek',
     )
     skip_customer_email = fields.Boolean(
         string='Mail Adresi İşlenmesin',
@@ -92,32 +92,12 @@ class HepsiburadaStore(models.Model):
         help='Müşteri oluşturulurken e-posta adresi kaydedilmez (KVKK)',
     )
 
-    # ─── Kargo Ayarları ───
-    auto_send_cargo = fields.Boolean(
-        string='Otomatik Kargo Kodu Gönder',
-        default=True,
-        help='Picking tamamlandığında kargo bilgisi Hepsiburada\'ya otomatik gönderilir',
-    )
-    cargo_include_order_number = fields.Boolean(
-        string='Kargo Koduna Sipariş No Ekle',
-        default=False,
-        help='Kargo takip koduna sipariş numarasını ekler',
-    )
-    default_package_count = fields.Integer(
-        string='Varsayılan Koli Sayısı',
-        default=1,
-    )
-    default_desi = fields.Float(
-        string='Varsayılan Desi',
-        default=1.0,
-        help='Hacimsel ağırlık',
-    )
-
     # ─── Finansal İşlem Ayarları ───
     sync_financials = fields.Boolean(
         string='Finansal İşlemleri Senkronize Et',
         default=True,
-        help='Finansal verileri çeker',
+        help='Hepsiburada muhasebe servisinden sipariş bazlı finansal kayıtları (satış, komisyon, kargo, '
+             'hizmet bedeli) çeker ve siparişe net hakediş olarak yansıtır',
     )
     financial_day_range = fields.Integer(
         string='Finansal Gün Aralığı',
@@ -128,11 +108,13 @@ class HepsiburadaStore(models.Model):
         string='Platform Hizmet Bedeli Oranı (%)',
         default=1.50,
         digits=(5, 2),
+        help='Finansal kayıt oluşmadan önce tahmini net hesaplamasında kullanılır',
     )
     cargo_unit_price = fields.Float(
         string='Kargo Birim Fiyatı (desi)',
         default=95.00,
         digits=(10, 2),
+        help='Tahmini net hesaplamasında: sipariş desisi × bu fiyat',
     )
     last_financial_sync = fields.Datetime(string='Son Finansal Senkron', readonly=True)
 
@@ -141,16 +123,29 @@ class HepsiburadaStore(models.Model):
 
     order_count = fields.Integer(compute='_compute_order_count', string='Siparişler')
     log_count = fields.Integer(compute='_compute_log_count', string='Log Sayısı')
+    transaction_count = fields.Integer(compute='_compute_fin_counts', string='Finansal Kayıt')
+    claim_count = fields.Integer(compute='_compute_fin_counts', string='İade Talebi')
 
     @api.depends()
     def _compute_order_count(self):
+        # merchant_id yalnızca sistem yöneticisine açık → sayım sudo ile
+        merchants = {s.id: s.sudo().merchant_id for s in self}
         data = self.env['sale.order'].sudo()._read_group(
-            [('hb_store_id', 'in', [s.merchant_id for s in self])],
+            [('hb_store_id', 'in', [m for m in merchants.values() if m])],
             groupby=['hb_store_id'], aggregates=['__count'],
         )
         counts = {merchant_id: count for merchant_id, count in data}
         for store in self:
-            store.order_count = counts.get(store.merchant_id, 0)
+            store.order_count = counts.get(merchants[store.id], 0)
+
+    @api.depends()
+    def _compute_fin_counts(self):
+        for model, fname in (('hepsiburada.transaction', 'transaction_count'), ('hepsiburada.claim', 'claim_count')):
+            data = self.env[model].sudo()._read_group(
+                [('store_id', 'in', self.ids)], groupby=['store_id'], aggregates=['__count'])
+            counts = {store.id: count for store, count in data}
+            for store in self:
+                store[fname] = counts.get(store.id, 0)
 
     @api.depends('log_ids')
     def _compute_log_count(self):
@@ -193,12 +188,20 @@ class HepsiburadaStore(models.Model):
             return "oms-external-sit.hepsiburada.com"
         return "oms-external.hepsiburada.com"
 
-    def _get_clean_credentials(self):
-        """API kimlik bilgilerini temizle ve döndür."""
+    def _get_finance_domain(self):
+        """Muhasebe servisi ayrı host'ta çalışır."""
         self.ensure_one()
-        clean_merchant = re.sub(r'[\s\u200B-\u200D\uFEFF]+', '', self.merchant_id) if self.merchant_id else ''
-        clean_user = re.sub(r'[\s\u200B-\u200D\uFEFF]+', '', self.api_user) if self.api_user else ''
-        clean_pass = re.sub(r'[\s\u200B-\u200D\uFEFF]+', '', self.api_password) if self.api_password else ''
+        if self.environment == 'test':
+            return "mpfinance-external-sit.hepsiburada.com"
+        return "mpfinance-external.hepsiburada.com"
+
+    def _get_clean_credentials(self):
+        """API kimlik bilgilerini temizle ve döndür (alanlar yalnızca sistem yöneticisine açık → sudo)."""
+        self.ensure_one()
+        rec = self.sudo()
+        clean_merchant = re.sub(r'[\s\u200B-\u200D\uFEFF]+', '', rec.merchant_id) if rec.merchant_id else ''
+        clean_user = re.sub(r'[\s\u200B-\u200D\uFEFF]+', '', rec.api_user) if rec.api_user else ''
+        clean_pass = re.sub(r'[\s\u200B-\u200D\uFEFF]+', '', rec.api_password) if rec.api_password else ''
         return clean_merchant, clean_user, clean_pass
 
     def _get_session(self):
@@ -265,17 +268,93 @@ class HepsiburadaStore(models.Model):
     def action_sync_now(self):
         """Bu mağaza için manuel sipariş senkronizasyonu başlatır"""
         self.ensure_one()
-        self.env['hepsiburada.order.sync']._sync_store_orders(self)
+        self.env['hepsiburada.order.sync']._sync_store_orders(self.sudo())
+        return self._notify('Senkronizasyon', 'Sipariş senkronizasyonu tamamlandı. Detay için loglara bakın.', 'success')
 
     def action_view_orders(self):
+        self.ensure_one()
         return {
             'name': 'Hepsiburada Siparişleri',
             'type': 'ir.actions.act_window',
             'res_model': 'sale.order',
             'view_mode': 'list,form',
-            'domain': [('hb_store_id', '=', self.merchant_id)],
+            'domain': [('hb_store_id', '=', self.sudo().merchant_id)],
             'context': {'create': False}
         }
+
+    def action_view_transactions(self):
+        self.ensure_one()
+        return {
+            'name': 'Finansal Kayıtlar',
+            'type': 'ir.actions.act_window',
+            'res_model': 'hepsiburada.transaction',
+            'view_mode': 'list,form',
+            'domain': [('store_id', '=', self.id)],
+        }
+
+    def action_view_claims(self):
+        self.ensure_one()
+        return {
+            'name': 'İade Talepleri',
+            'type': 'ir.actions.act_window',
+            'res_model': 'hepsiburada.claim',
+            'view_mode': 'list,form',
+            'domain': [('store_id', '=', self.id)],
+        }
+
+    def action_sync_financials(self):
+        self.ensure_one()
+        if not self.sync_financials:
+            raise UserError(_('Bu mağazada "Finansal İşlemleri Senkronize Et" kapalı.'))
+        res = self.env['hepsiburada.transaction']._sync_store(self)
+        return self._notify(
+            'Finans Senkronizasyonu',
+            f"✅ {res.get('created', 0)} yeni, {res.get('updated', 0)} güncellenen kayıt"
+            + (' (bazı istekler başarısız, loglara bakın)' if res.get('failed') else ''),
+            'warning' if res.get('failed') else 'success')
+
+    def action_sync_claims(self):
+        self.ensure_one()
+        if not self.process_returns:
+            raise UserError(_('Bu mağazada "İade İşle" kapalı.'))
+        res = self.env['hepsiburada.claim']._sync_store(self)
+        return self._notify(
+            'İade Talepleri',
+            f"✅ {res.get('created', 0)} yeni, {res.get('updated', 0)} güncellenen talep"
+            + (' (istek başarısız, loglara bakın)' if res.get('failed') else ''),
+            'warning' if res.get('failed') else 'success')
+
+    def _notify(self, title, message, ntype='info'):
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': f'Hepsiburada - {title}',
+                'message': message,
+                'type': ntype,
+                'sticky': ntype in ('danger', 'warning'),
+            },
+        }
+
+    # ─── CRON ───
+
+    @api.model
+    def cron_sync_financials(self):
+        for store in self.search([('active', '=', True), ('sync_financials', '=', True)]):
+            try:
+                with self.env.cr.savepoint():
+                    self.env['hepsiburada.transaction']._sync_store(store)
+            except Exception as e:
+                _logger.exception("HB finans senkron hatası [%s]: %s", store.name, e)
+
+    @api.model
+    def cron_sync_claims(self):
+        for store in self.search([('active', '=', True), ('process_returns', '=', True)]):
+            try:
+                with self.env.cr.savepoint():
+                    self.env['hepsiburada.claim']._sync_store(store)
+            except Exception as e:
+                _logger.exception("HB iade talebi senkron hatası [%s]: %s", store.name, e)
 
     def action_view_logs(self):
         return {
@@ -328,7 +407,7 @@ class HepsiburadaStore(models.Model):
         packages = [data] if isinstance(data, dict) else data
 
         try:
-            processed, created, errors, msgs = OrderSync._process_orders(packages, self, skip_date_filter=True)
+            processed, created, errors, msgs = OrderSync._process_orders(packages, self.sudo(), skip_date_filter=True)
         except Exception as e:
             raise UserError(_('❌ Sipariş işleme hatası:\n\n%s') % str(e))
 

@@ -5,7 +5,21 @@
         <field name="model">hepsiburada.order</field>
         <field name="arch" type="xml">
             <form string="Hepsiburada Siparişi" create="false" edit="false">
+                <header>
+                    <button name="action_clear_warning" type="object" string="Uyarıyı Kapat"
+                            invisible="not warning_message"/>
+                </header>
                 <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_view_claims" type="object" class="oe_stat_button"
+                                icon="fa-undo" invisible="not claim_count">
+                            <field name="claim_count" widget="statinfo" string="İade Talebi"/>
+                        </button>
+                    </div>
+                    <!-- Eksik ürün / otomatik onay hatası / kısmi iptal uyarıları -->
+                    <div class="alert alert-warning" role="alert" invisible="not warning_message">
+                        <field name="warning_message" readonly="1" nolabel="1"/>
+                    </div>
                     <div class="oe_title">
                         <h1>
                             <field name="hb_order_number" readonly="1"/>
@@ -13,14 +27,20 @@
                     </div>
                     <group>
                         <group>
-                            <field name="merchant_id"/>
+                            <field name="store_id"/>
+                            <field name="merchant_id" groups="base.group_system"/>
                             <field name="sale_order_id"/>
+                            <field name="sale_state" invisible="not sale_order_id"/>
                             <field name="order_date"/>
+                            <field name="status" invisible="1"/>
                             <field name="status_display" string="Hepsiburada Durumu"/>
+                            <field name="partially_cancelled" invisible="not partially_cancelled"/>
+                            <field name="is_micro_export" invisible="not is_micro_export"/>
                         </group>
                         <group>
                             <field name="customer_name"/>
                             <field name="customer_email"/>
+                            <field name="customer_phone"/>
                             <field name="tax_office"/>
                             <field name="tax_number"/>
                         </group>
@@ -31,27 +51,83 @@
                             <field name="cargo_provider"/>
                             <field name="cargo_tracking_number"/>
                             <field name="package_number"/>
+                            <field name="total_deci"/>
                         </group>
                         <group string="Ödeme">
-                            <field name="total_price" widget="monetary" options="{'currency_field': 'currency'}"/>
-                            <field name="currency" invisible="1"/>
+                            <field name="total_price"/>
+                            <field name="currency"/>
+                            <field name="total_commission"/>
+                            <field name="estimated_net" invisible="has_financials"/>
+                            <field name="fin_net" invisible="not has_financials"/>
+                            <field name="has_financials" invisible="1"/>
                         </group>
                     </group>
 
                     <notebook>
-                        <page string="Satırlar">
+                        <page string="Satırlar" name="lines">
                             <field name="line_ids">
-                                <list>
+                                <list decoration-muted="remaining_qty == 0"
+                                      decoration-warning="cancelled_qty and remaining_qty">
                                     <field name="product_name"/>
-                                    <field name="sku" column_invisible="1"/>
+                                    <field name="sku" optional="hide"/>
                                     <field name="merchant_sku"/>
+                                    <field name="line_item_id" optional="hide"/>
                                     <field name="quantity"/>
+                                    <field name="cancelled_qty" optional="show"/>
+                                    <field name="remaining_qty" optional="show"/>
                                     <field name="merchant_unit_price"/>
+                                    <field name="commission_amount" optional="hide"/>
+                                    <field name="commission_rate" optional="hide"/>
                                     <field name="status_display" string="Durum"/>
                                 </list>
                             </field>
                         </page>
-                        <page string="Ham JSON">
+                        <page string="Finans" name="financials">
+                            <group invisible="has_financials">
+                                <div class="text-muted" colspan="2">
+                                    Finansal kayıtlar Hepsiburada'da sipariş teslim edildikten sonra oluşur.
+                                    O zamana kadar "Tahmini Net" gösterilir.
+                                </div>
+                            </group>
+                            <group invisible="not has_financials">
+                                <group>
+                                    <field name="fin_payment"/>
+                                    <field name="fin_return"/>
+                                    <field name="fin_commission"/>
+                                </group>
+                                <group>
+                                    <field name="fin_cargo"/>
+                                    <field name="fin_service_fee"/>
+                                    <field name="fin_other"/>
+                                    <field name="fin_net" class="fw-bold"/>
+                                </group>
+                            </group>
+                            <field name="transaction_ids" invisible="not has_financials">
+                                <list create="false" edit="false">
+                                    <field name="record_date"/>
+                                    <field name="transaction_type"/>
+                                    <field name="category"/>
+                                    <field name="sku" optional="hide"/>
+                                    <field name="signed_amount" sum="Toplam"/>
+                                    <field name="status"/>
+                                    <field name="payment_date" optional="show"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="İade Talepleri" name="claims" invisible="not claim_count">
+                            <field name="claim_ids">
+                                <list create="false" edit="false">
+                                    <field name="claim_number"/>
+                                    <field name="claim_date"/>
+                                    <field name="claim_type"/>
+                                    <field name="sku"/>
+                                    <field name="quantity"/>
+                                    <field name="status_display"/>
+                                    <field name="refund_amount"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Ham JSON" name="raw" groups="base.group_no_one">
                             <field name="raw_payload"/>
                         </page>
                     </notebook>
@@ -64,20 +140,56 @@
         <field name="name">hepsiburada.order.list</field>
         <field name="model">hepsiburada.order</field>
         <field name="arch" type="xml">
-            <list string="Hepsiburada Siparişleri" create="false" edit="false">
+            <list string="Hepsiburada Siparişleri" create="false" edit="false"
+                  decoration-warning="warning_message"
+                  decoration-muted="status in ('Cancelled', 'CancelledByCustomer', 'CancelledByMerchant', 'CancelledBySap')">
+                <field name="warning_message" column_invisible="1"/>
                 <field name="hb_order_number"/>
+                <field name="package_number" optional="show"/>
                 <field name="order_date"/>
                 <field name="customer_name"/>
-                <field name="total_price" widget="monetary" options="{'currency_field': 'currency'}"/>
+                <field name="store_id" optional="hide"/>
+                <field name="total_price" sum="Toplam"/>
+                <field name="fin_net" optional="hide" sum="Net Toplam"/>
                 <field name="currency" column_invisible="1"/>
                 <field name="status" column_invisible="1"/>
                 <field name="status_display" string="Hepsiburada Durumu" widget="badge"
                        decoration-success="status in ('Delivered', 'Completed')"
                        decoration-info="status in ('InTransit', 'Shipped')"
-                       decoration-warning="status in ('Open', 'Processing', 'Packed', 'AtWarehouse')"
-                       decoration-danger="status in ('Cancelled', 'UnDelivered', 'Returned')"/>
+                       decoration-warning="status in ('Open', 'Processing', 'Packed', 'Packaged', 'AtWarehouse', 'Unpacked')"
+                       decoration-danger="status in ('Cancelled', 'CancelledByCustomer', 'CancelledByMerchant', 'CancelledBySap', 'UnDelivered', 'Returned')"/>
+                <field name="claim_count" optional="hide"/>
                 <field name="sale_order_id"/>
             </list>
+        </field>
+    </record>
+
+    <record id="view_hepsiburada_order_search" model="ir.ui.view">
+        <field name="name">hepsiburada.order.search</field>
+        <field name="model">hepsiburada.order</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="hb_order_number"/>
+                <field name="package_number"/>
+                <field name="customer_name"/>
+                <field name="customer_email"/>
+                <field name="sale_order_id"/>
+                <field name="line_ids" string="Ürün / SKU"
+                       filter_domain="['|', '|', ('line_ids.merchant_sku', 'ilike', self), ('line_ids.sku', 'ilike', self), ('line_ids.product_name', 'ilike', self)]"/>
+                <filter string="Uyarılı" name="filter_warning" domain="[('warning_message', '!=', False)]"/>
+                <filter string="Kısmi İptal" name="filter_partial" domain="[('partially_cancelled', '=', True)]"/>
+                <filter string="İptal" name="filter_cancelled"
+                        domain="[('status', 'in', ['Cancelled', 'CancelledByCustomer', 'CancelledByMerchant', 'CancelledBySap'])]"/>
+                <filter string="İade Talebi Var" name="filter_claims" domain="[('claim_count', '>', 0)]"/>
+                <filter string="Mikro İhracat" name="filter_micro" domain="[('is_micro_export', '=', True)]"/>
+                <separator/>
+                <filter string="Sipariş Tarihi" name="filter_order_date" date="order_date"/>
+                <group>
+                    <filter string="Mağaza" name="group_store" context="{'group_by': 'store_id'}"/>
+                    <filter string="Durum" name="group_status" context="{'group_by': 'status'}"/>
+                    <filter string="Gün" name="group_date" context="{'group_by': 'order_date:day'}"/>
+                </group>
+            </search>
         </field>
     </record>
 
@@ -85,6 +197,7 @@
         <field name="name">Hepsiburada Siparişleri</field>
         <field name="res_model">hepsiburada.order</field>
         <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_hepsiburada_order_search"/>
     </record>
 
     <record id="action_sync_hepsiburada_orders_manual" model="ir.actions.server">

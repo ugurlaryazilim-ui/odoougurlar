@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- ═══ FİNANSAL KAYITLAR ═══ -->
+    <record id="view_hepsiburada_transaction_list" model="ir.ui.view">
+        <field name="name">hepsiburada.transaction.list</field>
+        <field name="model">hepsiburada.transaction</field>
+        <field name="arch" type="xml">
+            <list string="Finansal Kayıtlar" create="false" edit="false"
+                  decoration-success="is_income" decoration-danger="not is_income">
+                <field name="is_income" column_invisible="1"/>
+                <field name="record_date"/>
+                <field name="order_number"/>
+                <field name="order_id" optional="hide"/>
+                <field name="transaction_type"/>
+                <field name="category"/>
+                <field name="product_name" optional="hide"/>
+                <field name="sku" optional="hide"/>
+                <field name="amount" optional="hide"/>
+                <field name="signed_amount" sum="Toplam"/>
+                <field name="status"/>
+                <field name="due_date" optional="show"/>
+                <field name="payment_date" optional="show"/>
+                <field name="invoice_number" optional="hide"/>
+                <field name="store_id" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_hepsiburada_transaction_form" model="ir.ui.view">
+        <field name="name">hepsiburada.transaction.form</field>
+        <field name="model">hepsiburada.transaction</field>
+        <field name="arch" type="xml">
+            <form string="Finansal Kayıt" create="false" edit="false">
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="transaction_type"/>
+                            <field name="category"/>
+                            <field name="status"/>
+                            <field name="order_number"/>
+                            <field name="order_id"/>
+                            <field name="package_number"/>
+                            <field name="store_id"/>
+                        </group>
+                        <group>
+                            <field name="amount"/>
+                            <field name="tax_amount"/>
+                            <field name="net_amount"/>
+                            <field name="signed_amount"/>
+                            <field name="currency_code"/>
+                            <field name="is_income"/>
+                            <field name="is_invoice"/>
+                        </group>
+                    </group>
+                    <group>
+                        <group>
+                            <field name="record_date"/>
+                            <field name="order_date"/>
+                            <field name="due_date"/>
+                            <field name="payment_date"/>
+                        </group>
+                        <group>
+                            <field name="sku"/>
+                            <field name="product_name"/>
+                            <field name="quantity"/>
+                            <field name="invoice_number"/>
+                            <field name="description"/>
+                            <field name="hb_id" groups="base.group_no_one"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_hepsiburada_transaction_search" model="ir.ui.view">
+        <field name="name">hepsiburada.transaction.search</field>
+        <field name="model">hepsiburada.transaction</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="order_number"/>
+                <field name="transaction_type"/>
+                <field name="sku"/>
+                <field name="invoice_number"/>
+                <filter string="Ödenecek" name="filter_will_be_paid" domain="[('status', '=', 'WillBePaid')]"/>
+                <filter string="Ödendi" name="filter_paid" domain="[('status', '=', 'Paid')]"/>
+                <separator/>
+                <filter string="Gelir" name="filter_income" domain="[('is_income', '=', True)]"/>
+                <filter string="Gider" name="filter_expense" domain="[('is_income', '=', False)]"/>
+                <separator/>
+                <filter string="Siparişe Bağlı Değil" name="filter_orphan" domain="[('order_id', '=', False)]"/>
+                <filter string="Kayıt Tarihi" name="filter_record_date" date="record_date"/>
+                <group>
+                    <filter string="Kategori" name="group_category" context="{'group_by': 'category'}"/>
+                    <filter string="Kayıt Tipi" name="group_type" context="{'group_by': 'transaction_type'}"/>
+                    <filter string="Ödeme Durumu" name="group_status" context="{'group_by': 'status'}"/>
+                    <filter string="Vade" name="group_due" context="{'group_by': 'due_date:week'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="view_hepsiburada_transaction_pivot" model="ir.ui.view">
+        <field name="name">hepsiburada.transaction.pivot</field>
+        <field name="model">hepsiburada.transaction</field>
+        <field name="arch" type="xml">
+            <pivot string="Finansal Kayıtlar">
+                <field name="category" type="row"/>
+                <field name="record_date" interval="month" type="col"/>
+                <field name="signed_amount" type="measure"/>
+            </pivot>
+        </field>
+    </record>
+
+    <record id="action_hepsiburada_transactions" model="ir.actions.act_window">
+        <field name="name">Finansal Kayıtlar</field>
+        <field name="res_model">hepsiburada.transaction</field>
+        <field name="view_mode">list,pivot,form</field>
+        <field name="search_view_id" ref="view_hepsiburada_transaction_search"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Henüz finansal kayıt yok</p>
+            <p>Mağaza ayarlarında "Finansal İşlemleri Senkronize Et" açıkken kayıtlar saatlik çekilir.
+               Hepsiburada finansal kayıtları sipariş teslim edildikten sonra oluşturur.</p>
+        </field>
+    </record>
+
+    <!-- ═══ İADE TALEPLERİ ═══ -->
+    <record id="view_hepsiburada_claim_list" model="ir.ui.view">
+        <field name="name">hepsiburada.claim.list</field>
+        <field name="model">hepsiburada.claim</field>
+        <field name="arch" type="xml">
+            <list string="İade Talepleri" create="false" edit="false"
+                  decoration-warning="status in ('AwaitingAction', 'AwaitingPreApproval', 'NewRequest')"
+                  decoration-muted="status in ('Rejected', 'Cancelled')">
+                <field name="status" column_invisible="1"/>
+                <field name="claim_date"/>
+                <field name="claim_number"/>
+                <field name="order_number"/>
+                <field name="sale_order_id" optional="show"/>
+                <field name="customer_name"/>
+                <field name="claim_type"/>
+                <field name="sku" optional="show"/>
+                <field name="quantity"/>
+                <field name="status_display" widget="badge"
+                       decoration-warning="status in ('AwaitingAction', 'AwaitingPreApproval', 'NewRequest')"
+                       decoration-success="status == 'Accepted'"
+                       decoration-danger="status == 'Rejected'"/>
+                <field name="finalized_with" optional="show"/>
+                <field name="refund_amount" optional="show" sum="Toplam"/>
+                <field name="store_id" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_hepsiburada_claim_form" model="ir.ui.view">
+        <field name="name">hepsiburada.claim.form</field>
+        <field name="model">hepsiburada.claim</field>
+        <field name="arch" type="xml">
+            <form string="İade Talebi" create="false" edit="false">
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="claim_number" readonly="1"/></h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="status_display"/>
+                            <field name="claim_type"/>
+                            <field name="claim_date"/>
+                            <field name="finalized_with"/>
+                            <field name="store_id"/>
+                        </group>
+                        <group>
+                            <field name="order_number"/>
+                            <field name="order_id"/>
+                            <field name="sale_order_id"/>
+                            <field name="order_date"/>
+                            <field name="customer_name"/>
+                        </group>
+                    </group>
+                    <group>
+                        <group string="Ürün">
+                            <field name="sku"/>
+                            <field name="quantity"/>
+                            <field name="price_amount"/>
+                            <field name="total_price_amount"/>
+                        </group>
+                        <group string="İade">
+                            <field name="refund_amount"/>
+                            <field name="refund_date"/>
+                        </group>
+                    </group>
+                    <group string="Açıklamalar">
+                        <field name="explanation"/>
+                        <field name="merchant_rejection_statement" invisible="not merchant_rejection_statement"/>
+                    </group>
+                    <div class="text-muted">
+                        Talebi kabul / red işlemleri Hepsiburada satıcı panelinden yapılır; burada yalnızca takip edilir.
+                    </div>
+                    <notebook groups="base.group_no_one">
+                        <page string="Ham JSON" name="raw">
+                            <field name="raw_payload"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_hepsiburada_claim_search" model="ir.ui.view">
+        <field name="name">hepsiburada.claim.search</field>
+        <field name="model">hepsiburada.claim</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="claim_number"/>
+                <field name="order_number"/>
+                <field name="customer_name"/>
+                <field name="sku"/>
+                <filter string="Aksiyon Bekleyen" name="filter_awaiting"
+                        domain="[('status', 'in', ['AwaitingAction', 'AwaitingPreApproval', 'NewRequest'])]"/>
+                <filter string="Kabul Edilen" name="filter_accepted" domain="[('status', '=', 'Accepted')]"/>
+                <filter string="Reddedilen" name="filter_rejected" domain="[('status', '=', 'Rejected')]"/>
+                <separator/>
+                <filter string="Talep Tarihi" name="filter_claim_date" date="claim_date"/>
+                <group>
+                    <filter string="Durum" name="group_status" context="{'group_by': 'status'}"/>
+                    <filter string="Talep Tipi" name="group_type" context="{'group_by': 'claim_type'}"/>
+                    <filter string="Mağaza" name="group_store" context="{'group_by': 'store_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_hepsiburada_claims" model="ir.actions.act_window">
+        <field name="name">İade Talepleri</field>
+        <field name="res_model">hepsiburada.claim</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_hepsiburada_claim_search"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Henüz iade talebi yok</p>
+            <p>Mağaza ayarlarında "İade İşle" açıkken talepler 30 dakikada bir çekilir.</p>
+        </field>
+    </record>
+
+</odoo>

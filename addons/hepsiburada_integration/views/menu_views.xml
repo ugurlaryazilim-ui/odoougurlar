@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
 
-    <!-- Ana Menü -->
-    <menuitem id="menu_hepsiburada_root" 
-              name="Hepsiburada" 
-              sequence="50" 
+    <!-- Ana Menü — satış ve depo kullanıcıları -->
+    <menuitem id="menu_hepsiburada_root"
+              name="Hepsiburada"
+              sequence="50"
+              groups="sales_team.group_sale_salesman,stock.group_stock_user"
               web_icon="hepsiburada_integration,static/description/hepsiburada.png"/>
 
     <!-- Mağazalar -->
@@ -12,12 +13,14 @@
               name="Mağazalar"
               parent="menu_hepsiburada_root"
               action="action_hepsiburada_stores"
+              groups="sales_team.group_sale_salesman"
               sequence="5"/>
 
     <!-- Siparişler Alt Menü -->
     <menuitem id="menu_hepsiburada_orders"
               name="Siparişler"
               parent="menu_hepsiburada_root"
+              groups="sales_team.group_sale_salesman"
               sequence="10"/>
 
     <menuitem id="menu_hepsiburada_orders_all"
@@ -26,7 +29,26 @@
               action="action_hepsiburada_order"
               sequence="10"/>
 
-    <!-- Operasyonlar Alt Menü -->
+    <menuitem id="menu_hepsiburada_claims"
+              name="İade Talepleri"
+              parent="menu_hepsiburada_orders"
+              action="action_hepsiburada_claims"
+              sequence="20"/>
+
+    <!-- Finans -->
+    <menuitem id="menu_hepsiburada_finance"
+              name="Finans"
+              parent="menu_hepsiburada_root"
+              groups="sales_team.group_sale_salesman"
+              sequence="12"/>
+
+    <menuitem id="menu_hepsiburada_transactions"
+              name="Finansal Kayıtlar"
+              parent="menu_hepsiburada_finance"
+              action="action_hepsiburada_transactions"
+              sequence="10"/>
+
+    <!-- Operasyonlar Alt Menü — depo ve satış -->
     <menuitem id="menu_hepsiburada_operations"
               name="Operasyonlar"
               parent="menu_hepsiburada_root"
@@ -48,6 +70,7 @@
     <menuitem id="menu_hepsiburada_sync"
               name="Senkronizasyon"
               parent="menu_hepsiburada_root"
+              groups="sales_team.group_sale_salesman"
               sequence="20"/>
 
     <menuitem id="menu_hepsiburada_sync_logs"
@@ -60,6 +83,7 @@
               name="Zamanlanmış Görevler"
               parent="menu_hepsiburada_sync"
               action="action_hepsiburada_cron_jobs"
+              groups="base.group_system"
               sequence="20"/>
 
     <!-- Ayarlar -->
@@ -67,6 +91,7 @@
               name="Ayarlar"
               parent="menu_hepsiburada_root"
               action="action_hepsiburada_settings"
+              groups="base.group_system"
               sequence="90"/>
 
 </odoo>
