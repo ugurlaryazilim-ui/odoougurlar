@@ -2,13 +2,25 @@
 """Trendyol sipariş senkronizasyon logic'i — API'den çekme, işleme, güncelleme."""
 import json
 import logging
+import time
 
 from datetime import datetime, timedelta
 
 from odoo import api, fields, models
-from .trendyol_api import TrendyolAPI
+from .trendyol_api import TrendyolAPI, ty_datetime
 
 _logger = logging.getLogger(__name__)
+
+# Trendyol'un sipariş servislerinde izin verdiği en uzun tarih aralığı
+_MAX_WINDOW_DAYS = 14
+# Akış (stream) sayfaları arası önerilen bekleme
+_STREAM_PAGE_DELAY = 5
+_STREAM_MAX_PAGES = 100
+# Son senkrondan geriye güvenlik payı (gecikmeli güncellenen paketler kaçmasın)
+_STREAM_OVERLAP = timedelta(minutes=30)
+# Ödeme onayı bekleyen paketler: doküman "Created olana kadar işlem yapmayın" diyor
+_SKIP_STATUSES = {'awaiting', 'verified'}
+_CANCEL_STATUSES = {'cancelled', 'unsupplied'}
 
 
 class TrendyolOrderSync(models.Model):
@@ -45,7 +57,12 @@ class TrendyolOrderSync(models.Model):
 
     @api.model
     def sync_orders_for_store(self, store):
-        """Tek bir mağazadan siparişleri senkronize et."""
+        """Tek bir mağazadan siparişleri senkronize et.
+
+        Trendyol'un periyodik senkron için önerdiği akış (stream) servisi kullanılır: son
+        senkrondan beri değişen TÜM statülerdeki paketler tek akışta gelir. Akış servisi
+        yanıt vermezse statü bazlı v2 sorgularına düşülür.
+        """
         store_name = store.name or ''
         store_id = store.id
 
@@ -61,115 +78,46 @@ class TrendyolOrderSync(models.Model):
             'start_date': fields.Datetime.now(),
             'store_id': store_id,
         })
-        # Log kaydı transaction sonunda otomatik commit edilir
 
-        created_count = 0
-        updated_count = 0
-        error_count = 0
+        run_started = fields.Datetime.now()
+        counters = {'created': 0, 'updated': 0, 'errors': 0}
         error_details = []
 
-        # ── Sipariş gün aralığı filtresi ──
-        start_date = None
-        if store.order_day_range and store.order_day_range > 0:
-            start_date = datetime.now() - timedelta(days=store.order_day_range)
+        # Yeni sipariş olarak içeri alınacak en eski sipariş tarihi
+        day_range = min(store.order_day_range or _MAX_WINDOW_DAYS, _MAX_WINDOW_DAYS)
+        order_cutoff = datetime.utcnow() - timedelta(days=day_range)
 
+        stream_ok = False
         try:
-            # İptaller ÖNCE: kısmi iptalde eski paket kapanıp Nebim'den silinmeden yeni paket
-            # işlenirse, yeni sipariş Nebim'de "mükerrer" sayılıp gönderilmez
-            try:
-                with self.env.cr.savepoint():
-                    cancel_result = self._sync_cancelled_orders(api, store, start_date)
-                    self.env.flush_all()
-                    updated_count += cancel_result.get('updated', 0)
-            except Exception as e:
-                self.env.invalidate_all(flush=False)
-                error_details.append(f"İptal sync: {str(e)}")
-                _logger.error("İptal sync hatası [%s]: %s", store_name, str(e))
+            stream_ok = self._sync_via_stream(api, store, order_cutoff, counters, error_details)
+            if stream_ok is None:
+                _logger.warning("Trendyol akış servisi kullanılamadı [%s], statü bazlı sorguya geçiliyor",
+                                store_name)
+                stream_ok = self._sync_via_status_queries(api, store, order_cutoff, counters, error_details)
 
-            for status in ['Created', 'Picking', 'Invoiced', 'Shipped', 'Delivered']:
-                page = 0
-                while True:
-                    result = api.get_orders(status=status, page=page, size=50, start_date=start_date)
-                    if not result['success']:
-                        err_msg = f"API hatası ({status}): {result.get('error')}"
-                        _logger.error("Trendyol sipariş çekme hatası [%s] (%s): %s", store_name, status, result.get('error'))
-                        error_details.append(err_msg)
-                        break
-
-                    data = result.get('data', {})
-                    content = data.get('content', [])
-                    if not content:
-                        break
-
-                    for package in content:
-                        # ── Client-side orderDate filtresi ──
-                        if start_date:
-                            order_date_ts = package.get('orderDate', 0)
-                            if order_date_ts:
-                                order_dt = datetime.fromtimestamp(
-                                    order_date_ts / 1000).replace(microsecond=0)
-                                if order_dt < start_date:
-                                    _logger.debug(
-                                        "Eski sipariş atlandı (orderDate=%s < startDate=%s): %s",
-                                        order_dt, start_date, package.get('orderNumber'))
-                                    continue
-
-                        try:
-                            with self.env.cr.savepoint():
-                                res = self._process_package(package, store)
-                                self.env.flush_all()
-                                if res == 'created':
-                                    created_count += 1
-                                elif res == 'updated':
-                                    updated_count += 1
-                        except Exception as e:
-                            self.env.invalidate_all(flush=False)
-                            error_count += 1
-                            pkg_id = package.get('orderNumber', '?')
-                            err_msg = f"Sipariş {pkg_id}: {str(e)}"
-                            error_details.append(err_msg)
-                            _logger.error("Sipariş işleme hatası [%s]: %s", store_name, str(e))
-
-                    total_pages = data.get('totalPages', 1)
-                    page += 1
-                    if page >= total_pages:
-                        break
-
-            # ── İade işleme ──
-            if store.process_returns:
+            # last_sync yalnız eksiksiz tamamlanan senkronda ilerler (bir sonraki akış buradan başlar);
+            # ayrı cursor ile güncelle (serialization çakışmasını önler)
+            if stream_ok:
                 try:
-                    return_start = None
-                    if store.return_day_range and store.return_day_range > 0:
-                        return_start = datetime.now() - timedelta(days=store.return_day_range)
-                    with self.env.cr.savepoint():
-                        return_result = self._sync_returned_orders(api, store, return_start)
-                        created_count += return_result.get('created', 0)
-                        updated_count += return_result.get('updated', 0)
-                except Exception as e:
-                    self.env.invalidate_all(flush=False)
-                    error_details.append(f"İade sync: {str(e)}")
-                    _logger.error("İade sync hatası [%s]: %s", store_name, str(e))
-
-            # last_sync — ayrı cursor ile güncelle (serialization çakışmasını önler)
-            try:
-                with self.pool.cursor() as new_cr:
-                    new_cr.execute(
-                        "UPDATE trendyol_store SET last_sync = %s, write_date = %s WHERE id = %s",
-                        (fields.Datetime.now(), fields.Datetime.now(), store.id)
-                    )
-            except Exception as store_e:
-                _logger.warning("Mağaza last_sync güncelleme atlandı (%s): %s", store_name, str(store_e))
+                    with self.pool.cursor() as new_cr:
+                        new_cr.execute(
+                            "UPDATE trendyol_store SET last_sync = %s, write_date = %s WHERE id = %s",
+                            (run_started, fields.Datetime.now(), store.id)
+                        )
+                except Exception as store_e:
+                    _logger.warning("Mağaza last_sync güncelleme atlandı (%s): %s", store_name, str(store_e))
 
             try:
                 with self.env.cr.savepoint():
                     log.write({
-                        'state': 'error' if error_count else 'done',
+                        'state': 'error' if (counters['errors'] or not stream_ok) else 'done',
                         'end_date': fields.Datetime.now(),
-                        'records_processed': created_count + updated_count + error_count,
-                        'records_created': created_count,
-                        'records_updated': updated_count,
-                        'records_failed': error_count,
-                        'log_details': f"[{store_name}] Yeni: {created_count}, Güncellenen: {updated_count}, Hata: {error_count}",
+                        'records_processed': sum(counters.values()),
+                        'records_created': counters['created'],
+                        'records_updated': counters['updated'],
+                        'records_failed': counters['errors'],
+                        'log_details': f"[{store_name}] Yeni: {counters['created']}, "
+                                       f"Güncellenen: {counters['updated']}, Hata: {counters['errors']}",
                         'error_details': '\n'.join(error_details) if error_details else '',
                     })
             except Exception as log_e:
@@ -188,114 +136,141 @@ class TrendyolOrderSync(models.Model):
 
         _logger.info(
             "Trendyol senkronizasyon [%s] tamamlandı: %s yeni, %s güncellenen, %s hata",
-            store_name, created_count, updated_count, error_count,
+            store_name, counters['created'], counters['updated'], counters['errors'],
         )
 
-        return {
-            'created': created_count,
-            'updated': updated_count,
-            'errors': error_count,
-        }
+        return dict(counters)
+
+    # ─── AKIŞ (STREAM) ───────────────────────────────────
 
     @api.private
-    def _sync_cancelled_orders(self, api, store, start_date=None):
-        """İptal ve "tedarik edilemedi" paketlerini senkronize et.
+    def _sync_via_stream(self, api, store, order_cutoff, counters, error_details):
+        """Son güncellenme tarihine göre akış. Tamamı işlendiyse True, akış hiç
+        başlatılamadıysa None (statü bazlı sorguya düşülür), yarıda kaldıysa False."""
+        now = datetime.utcnow()
+        start = (store.last_sync - _STREAM_OVERLAP) if store.last_sync else order_cutoff
+        start = max(start, now - timedelta(days=_MAX_WINDOW_DAYS) + timedelta(minutes=1))
 
-        UnSupplied: satıcı panelden "tedarik edemiyorum" dediğinde Trendyol siparişi
-        iptal eder; Odoo'da da iptalle aynı şekilde işlenir (sipariş iptal + Nebim'den silme).
-        """
-        created = 0
-        updated = 0
-        for api_status, odoo_status in (('Cancelled', 'cancelled'), ('UnSupplied', 'unsupplied')):
-            res = self._sync_terminal_status(api, store, start_date, api_status, odoo_status)
-            created += res['created']
-            updated += res['updated']
-        return {'created': created, 'updated': updated}
+        packages = []
+        cursor = None
+        for page in range(_STREAM_MAX_PAGES):
+            if page:
+                time.sleep(_STREAM_PAGE_DELAY)
+            result = api.get_orders_stream(start, now, next_cursor=cursor)
+            if not result.get('success'):
+                if page == 0:
+                    return None
+                error_details.append(f"Akış hatası (sayfa {page}): {result.get('error')}")
+                break
+            data = result.get('data') or {}
+            packages.extend(data.get('content') or [])
+            cursor = data.get('nextCursor')
+            if not data.get('hasMore') or not cursor:
+                self._process_package_batch(packages, store, order_cutoff, counters, error_details)
+                return True
+        else:
+            error_details.append(f"Akış {_STREAM_MAX_PAGES} sayfayı aştı; kalan paketler sonraki senkronda")
+
+        # Yarıda kalan akış: alınan paketleri yine işle, last_sync ilerlemesin
+        self._process_package_batch(packages, store, order_cutoff, counters, error_details)
+        return False
 
     @api.private
-    def _sync_terminal_status(self, api, store, start_date, api_status, odoo_status):
-        """Bir iptal türü durumundaki paketleri çek; Odoo siparişini iptal et."""
-        created = 0
-        updated = 0
-        page = 0
-        while True:
-            result = api.get_orders(status=api_status, page=page, size=50, start_date=start_date)
-            if not result['success']:
-                break
+    def _process_package_batch(self, packages, store, order_cutoff, counters, error_details):
+        """Paketleri işle: iptaller önce (kısmi iptalde eski paket kapanıp Nebim'den silinmeden
+        yeni paket işlenirse yeni sipariş Nebim'de "mükerrer" sayılıp gönderilmez)."""
+        # Aynı paket akışta birden çok kez gelebilir: en son hali kalsın
+        by_id = {}
+        for pkg in packages:
+            key = str(pkg.get('id') or pkg.get('shipmentPackageId') or '')
+            if key:
+                by_id[key] = pkg
+        ordered = sorted(by_id.values(), key=lambda p: 0 if self._pkg_status(p) in _CANCEL_STATUSES else 1)
 
-            data = result.get('data', {})
-            content = data.get('content', [])
-            if not content:
-                break
+        for package in ordered:
+            status = self._pkg_status(package)
+            if status in _SKIP_STATUSES:
+                continue
+            try:
+                with self.env.cr.savepoint():
+                    res = self._sync_one_package(package, store, order_cutoff)
+                    self.env.flush_all()
+                if res == 'created':
+                    counters['created'] += 1
+                elif res == 'updated':
+                    counters['updated'] += 1
+            except Exception as e:
+                self.env.invalidate_all(flush=False)
+                counters['errors'] += 1
+                error_details.append(f"Sipariş {package.get('orderNumber', '?')}: {e}")
+                _logger.error("Sipariş işleme hatası [%s]: %s", store.name, e)
 
-            for package in content:
-                package_id = str(package.get('id') or package.get('shipmentPackageId', ''))
-                existing = self._find_existing_package(
-                    package_id, str(package.get('orderNumber') or ''), store)
-
-                if existing:
-                    if existing.trendyol_status != odoo_status:
-                        existing.write({'trendyol_status': odoo_status})
-                        self._cancel_odoo_order(existing, store)
-                        updated += 1
-                else:
-                    # Odoo'ya önceden düşmeden doğrudan Trendyol'da iptal edilmiş siparişi Odoo'ya aktar ve iptal durumuna al
-                    try:
-                        with self.env.cr.savepoint():
-                            res = self._process_package(package, store)
-                            self.env.flush_all()
-                            if res in ('created', 'updated'):
-                                created += 1
-                                new_rec = self.search([('shipment_package_id', '=', package_id)], limit=1)
-                                if new_rec:
-                                    new_rec.write({'trendyol_status': odoo_status})
-                                    self._cancel_odoo_order(new_rec, store)
-                    except Exception as e:
-                        _logger.warning("İptal olan sipariş Odoo'ya aktarılırken hata (%s): %s", package_id, e)
-
-            total_pages = data.get('totalPages', 1)
-            page += 1
-            if page >= total_pages:
-                break
-
-        return {'created': created, 'updated': updated}
+    @api.model
+    def _pkg_status(self, package):
+        return (package.get('status') or package.get('shipmentPackageStatus') or '').lower()
 
     @api.private
-    def _sync_returned_orders(self, api, store, start_date=None):
-        """İade edilen siparişleri senkronize et."""
-        created = 0
-        updated = 0
-        page = 0
-        while True:
-            result = api.get_orders(status='Returned', page=page, size=50, start_date=start_date)
-            if not result['success']:
-                break
+    def _sync_one_package(self, package, store, order_cutoff):
+        """Tek paket: mevcutsa güncelle; yoksa (yeterince yeniyse) içeri al."""
+        status = self._pkg_status(package)
+        package_id = str(package.get('id') or package.get('shipmentPackageId') or '')
+        order_number = str(package.get('orderNumber') or '')
 
-            data = result.get('data', {})
-            content = data.get('content', [])
-            if not content:
-                break
+        known = (self._find_existing_package(package_id, order_number, store)
+                 or self._split_origin(package, store)
+                 or self._split_cancel_origin(package, store))
+        if not known:
+            if status == 'returned' and not store.process_returns:
+                return 'skipped'
+            # Akış son güncellemeye göre gelir: eski bir siparişin durum değişikliği yeni
+            # sipariş gibi içeri alınmasın (iade edilen paketler hariç)
+            order_ts = package.get('orderDate')
+            if status != 'returned' and order_ts and ty_datetime(order_ts) < order_cutoff:
+                return 'skipped'
 
-            for package in content:
-                try:
-                    # Savepoint: tek paketteki DB hatası kalan iadeleri zehirlemesin
-                    with self.env.cr.savepoint():
-                        res = self._process_package(package, store)
-                        self.env.flush_all()
-                    if res == 'created':
-                        created += 1
-                    elif res == 'updated':
-                        updated += 1
-                except Exception as e:
-                    self.env.invalidate_all(flush=False)
-                    _logger.exception("İade işleme hatası [%s]: %s", store.name, e)
+        res = self._process_package(package, store)
 
-            total_pages = data.get('totalPages', 1)
-            page += 1
-            if page >= total_pages:
-                break
+        # Odoo'ya hiç düşmeden iptal olmuş sipariş: içeri alınıp iptal edilir (mevcut davranış)
+        if not known and status in _CANCEL_STATUSES and res == 'created':
+            new_rec = self.search([('shipment_package_id', '=', package_id)], limit=1)
+            if new_rec:
+                if new_rec.trendyol_status != status:
+                    new_rec.write({'trendyol_status': status})
+                self._cancel_odoo_order(new_rec, store)
+        return res
 
-        return {'created': created, 'updated': updated}
+    # ─── STATÜ BAZLI SORGU (yedek yol) ───────────────────
+
+    @api.private
+    def _sync_via_status_queries(self, api, store, order_cutoff, counters, error_details):
+        """Akış servisi kullanılamazsa: v2 sipariş listesi statü statü sorgulanır."""
+        start_date = order_cutoff
+        ok = True
+        packages = []
+        statuses = ['Cancelled', 'UnSupplied', 'Created', 'Picking', 'Invoiced', 'Shipped',
+                    'AtCollectionPoint', 'Delivered', 'UnDelivered']
+        if store.process_returns:
+            statuses.append('Returned')
+        for status in statuses:
+            page = 0
+            while True:
+                result = api.get_orders(status=status, page=page, size=200, start_date=start_date)
+                if not result['success']:
+                    ok = False
+                    error_details.append(f"API hatası ({status}): {result.get('error')}")
+                    _logger.error("Trendyol sipariş çekme hatası [%s] (%s): %s",
+                                  store.name, status, result.get('error'))
+                    break
+                data = result.get('data', {})
+                content = data.get('content', [])
+                if not content:
+                    break
+                packages.extend(content)
+                page += 1
+                if page >= min(data.get('totalPages', 1), 50):  # v2: en fazla 10.000 kayıt
+                    break
+        self._process_package_batch(packages, store, order_cutoff, counters, error_details)
+        return ok
 
     @api.private
     def _cancel_odoo_order(self, trendyol_order, store=None):

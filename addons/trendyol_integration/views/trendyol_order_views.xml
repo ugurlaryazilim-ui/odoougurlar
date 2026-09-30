@@ -30,6 +30,8 @@
                 <field name="total_commission" optional="hide" sum="Toplam Komisyon"/>
                 <field name="commission_rate" optional="hide"/>
                 <field name="net_amount" optional="hide" sum="Net Toplam"/>
+                <field name="final_net_amount" optional="hide" sum="Net Sipariş Toplamı"/>
+                <field name="is_paid" optional="hide" widget="boolean"/>
                 <field name="sale_order_id" optional="show"/>
                 <field name="state" widget="badge"
                        decoration-success="state == 'synced'"
@@ -120,8 +122,11 @@
                         <group>
                             <field name="return_cargo_cost"/>
                             <field name="penalty_amount"/>
+                            <field name="stoppage_amount"/>
                             <field name="seller_revenue"/>
                             <field name="final_net_amount"/>
+                            <field name="is_paid"/>
+                            <field name="paid_date" invisible="not is_paid"/>
                         </group>
                     </group>
 
@@ -191,6 +196,10 @@
                 <filter string="Teslim Edildi" name="filter_delivered" domain="[('trendyol_status', '=', 'delivered')]"/>
                 <filter string="İptal" name="filter_cancelled" domain="[('trendyol_status', 'in', ['cancelled', 'unsupplied'])]"/>
                 <filter string="Hatalı" name="filter_error" domain="[('state', '=', 'error')]"/>
+                <separator/>
+                <filter string="Hakediş Ödendi" name="filter_paid" domain="[('is_paid', '=', True)]"/>
+                <filter string="Teslim Edildi, Ödenmedi" name="filter_unpaid"
+                        domain="[('is_paid', '=', False), ('trendyol_status', '=', 'delivered')]"/>
                 <separator/>
                 <group>
                     <filter string="Mağaza" name="group_store" context="{'group_by': 'store_id'}"/>

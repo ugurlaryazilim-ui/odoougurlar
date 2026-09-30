@@ -1,6 +1,6 @@
 import logging
 from odoo import api, fields, models, _
-from odoo.exceptions import UserError
+from odoo.exceptions import UserError, ValidationError
 from .trendyol_api import TrendyolAPI
 
 _logger = logging.getLogger(__name__)
@@ -39,8 +39,8 @@ class TrendyolStore(models.Model):
     auto_cancel = fields.Boolean(string='İptalleri Otomatik İptal Et', default=True)
     order_day_range = fields.Integer(
         string='Sipariş Gün Aralığı',
-        default=15,
-        help='Son kaç güne ait siparişler çekilsin (performans için önemli)',
+        default=14,
+        help='Son kaç güne ait siparişler içeri alınsın (Trendyol sınırı: en fazla 14 gün)',
     )
     order_ref_type = fields.Selection([
         ('order_number', 'Trendyol Sipariş No'),
@@ -137,6 +137,9 @@ class TrendyolStore(models.Model):
         help='Platform kargoda 1 desi kargo birim fiyatı (TL). Trendyol panelinden kontrol edin.',
     )
     last_financial_sync = fields.Datetime(string='Son Finansal Senkron', readonly=True)
+    processed_payment_orders = fields.Text(
+        string='İşlenen Ödeme Emirleri', readonly=True, copy=False,
+        help='Kayıtlarına ödeme bilgisi işlenmiş Trendyol ödeme emri ID\'leri')
 
     # ─── İlişkiler ───────────────────────────────────────
     order_ids = fields.One2many('trendyol.order', 'store_id', string='Siparişler')
@@ -148,6 +151,12 @@ class TrendyolStore(models.Model):
         'UNIQUE(seller_id)',
         'Bu Seller ID zaten kayıtlı!',
     )
+
+    @api.constrains('order_day_range')
+    def _check_order_day_range(self):
+        for store in self:
+            if store.order_day_range and not 1 <= store.order_day_range <= 14:
+                raise ValidationError(_('Sipariş gün aralığı 1-14 arasında olmalıdır (Trendyol sınırı).'))
 
     @api.depends('order_ids')
     def _compute_order_count(self):

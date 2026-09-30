@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from odoo import api, fields, models, _
 from odoo.exceptions import UserError
-from .trendyol_api import TrendyolAPI
+from .trendyol_api import TrendyolAPI, ty_datetime
 
 _logger = logging.getLogger(__name__)
 
@@ -94,9 +94,18 @@ class TrendyolOrder(models.Model):
     shipping_cost = fields.Float(string='Gönderi Kargo Tutarı', readonly=True, digits=(12, 2))
     return_cargo_cost = fields.Float(string='İade Kargo Tutarı', readonly=True, digits=(12, 2))
     penalty_amount = fields.Float(string='Ceza Tutarı', readonly=True, digits=(12, 2))
+    stoppage_amount = fields.Float(string='E-Ticaret Stopajı', readonly=True, digits=(12, 2))
+    is_paid = fields.Boolean(string='Hakediş Ödendi', readonly=True, index=True,
+                             help="Satış kayıtlarının tamamı bir Trendyol ödeme emriyle ödendiyse işaretlenir")
+    paid_date = fields.Datetime(string='Ödeme Tarihi', readonly=True)
     seller_revenue = fields.Float(string='Satıcı Hakediş', readonly=True, digits=(12, 2))
     final_net_amount = fields.Float(string='Net Sipariş Tutarı', readonly=True, digits=(12, 2),
-                                    help='Hakediş - Platform Hizmet - Kargo - İade Kargo - Ceza')
+                                    help='Hakediş - Platform Hizmet - Kargo - İade Kargo - Ceza - Stopaj')
+
+    # Bölünmüş (split) siparişte bu kayda bağlanan parça paket ID'leri: ",id1,id2,"
+    split_package_ids = fields.Char(string="Bölünmüş Paket ID'leri", readonly=True, index=True)
+    # Yeniden kurulumda işlenmiş (iptal / bozulmuş) parça paketleri — tekrar işlenmesin
+    split_closed_ids = fields.Char(string="Kapanmış Parça Paketleri", readonly=True)
 
     # ─── İlişkiler ───────────────────────────────────────
     sale_order_id = fields.Many2one('sale.order', string='Odoo Siparişi', readonly=True)
@@ -138,12 +147,23 @@ class TrendyolOrder(models.Model):
             # Bölme (split): parçalar eskisi gibi kaynak paketin güncellemesi sayılır —
             # her parça ayrı sipariş olursa ikincisi Nebim'de "mükerrer" sayılıp gönderilmez
             existing = self._split_origin(package_data, store)
+            if existing:
+                existing._add_split_package(package_id)
 
         if existing:
             vals = {}
             # Tanımsız durum (ör. yeni bir Trendyol statüsü) yazılırsa Selection hatası
             # siparişi kalıcı olarak güncellenemez yapar: bilinmeyeni yok say
             status = self._valid_status(status_raw)
+            is_split_part = bool(existing.split_package_ids) and package_id != existing.shipment_package_id
+            if existing.split_package_ids and not is_split_part and status == 'unpacked':
+                status = None  # bölünen asıl paket: durum parçalardan gelir
+            if is_split_part and status in ('cancelled', 'unsupplied'):
+                if f',{package_id},' in (existing.split_closed_ids or ''):
+                    return 'unchanged'  # bu parça yeniden kurulumda zaten işlendi
+                # Bölünmüş siparişin yalnız bir parçası iptal: diğer parçalar sürüyor
+                if self._rebuild_split_order(existing, store, 'Bölünmüş paketin bir parçası iptal edildi'):
+                    return 'updated'
             if status and existing.trendyol_status != status:
                 vals['trendyol_status'] = status
                 # Ham veriyi sadece durum değiştiğinde güncelle
@@ -183,6 +203,14 @@ class TrendyolOrder(models.Model):
                 self._cancel_odoo_order(existing, store)
             return 'updated' if vals else 'unchanged'
 
+        # Bölünmüş siparişin bir parçasında kısmi iptal: kaynak kayıt tüm parçaları temsil eder;
+        # yalnız o parçayı kapatmak diğer parçaların ürünlerini düşürürdü → sipariş yeniden kurulur
+        split_record = self._split_cancel_origin(package_data, store)
+        if split_record:
+            split_record._add_split_package(package_id)
+            if self._rebuild_split_order(split_record, store, 'Bölünmüş pakette kısmi iptal'):
+                return 'updated'
+
         # Kısmi iptal / bölme: bu paket eski bir paketin yerine geldiyse önce eskisini kapat
         # (Odoo siparişi iptal + Nebim'den silme). Sıra önemli: eski sipariş Nebim'de dururken
         # yenisi "mükerrer" sayılıp Nebim'e gönderilmezdi.
@@ -221,6 +249,11 @@ class TrendyolOrder(models.Model):
         existing = self.browse()
         if package_id:
             existing = self.search([('shipment_package_id', '=', package_id)], limit=1)
+            if not existing:
+                existing = self.search([
+                    ('split_package_ids', 'ilike', f',{package_id},'),
+                    ('store_id', '=', store.id),
+                ], limit=1)
         if not existing and order_number:
             existing = self.search([
                 ('trendyol_order_number', '=', order_number),
@@ -242,10 +275,7 @@ class TrendyolOrder(models.Model):
         if created_by != 'cancel' or not origin_ids:
             return
         for origin_id in origin_ids:
-            origin = self.search([
-                ('shipment_package_id', '=', str(origin_id)),
-                ('store_id', '=', store.id),
-            ], limit=1)
+            origin = self._find_by_package_id(origin_id, store)
             if not origin or origin.trendyol_status in ('cancelled', 'unpacked'):
                 continue
             _logger.info("Trendyol %s: paket %s yerine %s geldi, eski paket kapatılıyor",
@@ -254,18 +284,114 @@ class TrendyolOrder(models.Model):
             self._cancel_odoo_order(origin, store)
 
     @api.private
+    def _find_by_package_id(self, package_id, store):
+        """Paket ID'si kaydın kendisi ya da kayda bağlı bölünmüş parça olabilir."""
+        return self.search([
+            ('store_id', '=', store.id),
+            '|', ('shipment_package_id', '=', str(package_id)),
+            ('split_package_ids', 'ilike', f',{package_id},'),
+        ], limit=1)
+
+    @api.private
     def _split_origin(self, package_data, store):
         """Bölmeden doğan paketin kaynak kaydı (yoksa boş)."""
         if (package_data.get('createdBy') or '').lower() != 'split':
             return self.browse()
         for origin_id in package_data.get('originPackageIds') or []:
-            origin = self.search([
-                ('shipment_package_id', '=', str(origin_id)),
-                ('store_id', '=', store.id),
-            ], limit=1)
+            origin = self._find_by_package_id(origin_id, store)
             if origin:
                 return origin
         return self.browse()
+
+    @api.private
+    def _split_cancel_origin(self, package_data, store):
+        """Kısmi iptalden doğan paketin kaynağı bölünmüş bir siparişse o kayıt (yoksa boş)."""
+        if (package_data.get('createdBy') or '').lower() != 'cancel':
+            return self.browse()
+        for origin_id in package_data.get('originPackageIds') or []:
+            origin = self._find_by_package_id(origin_id, store)
+            if origin and origin.split_package_ids:
+                return origin
+        return self.browse()
+
+    def _add_split_package(self, package_id):
+        self.ensure_one()
+        package_id = str(package_id or '')
+        if not package_id or package_id == self.shipment_package_id:
+            return
+        ids = [i for i in (self.split_package_ids or '').split(',') if i]
+        if package_id not in ids:
+            ids.append(package_id)
+            self.write({'split_package_ids': ',' + ','.join(ids) + ','})
+
+    # Bölünmüş siparişte hâlâ geçerli sayılan parça durumları
+    _SPLIT_ACTIVE_STATUSES = {'created', 'picking', 'invoiced', 'shipped', 'atcollectionpoint',
+                              'delivered', 'undelivered'}
+
+    @api.private
+    def _rebuild_split_order(self, record, store, reason):
+        """Bölünmüş siparişi Trendyol'daki geçerli parçalardan yeniden kurar.
+
+        Eski Odoo siparişi iptal edilir (Nebim'den silinir), tüm geçerli parçaların kalemleriyle
+        yenisi açılır. İşlendiyse True; geçerli parça yoksa / veri alınamazsa False (normal akış).
+        """
+        try:
+            result = store.get_api().get_orders(order_number=record.trendyol_order_number, size=200)
+        except Exception as e:
+            result = {'success': False, 'error': str(e)}
+        if not result.get('success'):
+            record.write({'error_message': f"{reason}; Trendyol'dan sipariş paketleri alınamadı, "
+                                           f"siparişi elle kontrol edin: {result.get('error')}"})
+            return False
+        packages = (result.get('data') or {}).get('content') or []
+        active = [p for p in packages
+                  if (p.get('status') or p.get('shipmentPackageStatus') or '').lower()
+                  in self._SPLIT_ACTIVE_STATUSES]
+        if not active:
+            return False
+
+        old_so = record.sale_order_id
+        if old_so and old_so.state != 'cancel':
+            if old_so.picking_ids.filtered(lambda p: p.state == 'done'):
+                record.write({'error_message': f"{reason}; {old_so.name} sevk edildiği için otomatik "
+                                               f"güncellenmedi, elle kontrol edin."})
+                return True
+            old_so._action_cancel()
+
+        merged = dict(active[0])
+        merged['lines'] = [line for p in active for line in (p.get('lines') or [])]
+        for key in ('packageGrossAmount', 'packageTotalDiscount', 'packageTotalPrice'):
+            merged[key] = sum(p.get(key) or 0 for p in active)
+        for p in active:
+            record._add_split_package(str(p.get('id') or p.get('shipmentPackageId') or ''))
+        closed = {str(p.get('id') or p.get('shipmentPackageId') or '') for p in packages
+                  if p not in active} | {i for i in (record.split_closed_ids or '').split(',') if i}
+        closed.discard('')
+        record.write({'split_closed_ids': ',' + ','.join(sorted(closed)) + ','})
+
+        line_vals = self._prepare_order_vals(merged, store)['line_ids']
+        record.line_ids.unlink()
+        record.write({
+            'line_ids': line_vals,
+            'trendyol_status': self._valid_status(
+                (merged.get('status') or merged.get('shipmentPackageStatus') or '').lower())
+                or record.trendyol_status,
+            'raw_data': json.dumps(merged, ensure_ascii=False),
+        })
+        new_so = record._create_sale_order(merged, store)
+        record.write({
+            'sale_order_id': new_so.id,
+            'partner_id': new_so.partner_id.id,
+            'state': 'synced',
+            'error_message': record._confirm_failure_message(new_so, store),
+        })
+        if old_so and new_so != old_so:
+            new_so.message_post(body=f"{reason}: önceki sipariş {old_so.name} iptal edildi, "
+                                     f"geçerli paketlerin ürünleriyle yeniden oluşturuldu.")
+            old_so.message_post(body=f"{reason}: yerine {new_so.name} oluşturuldu.")
+        _logger.info("Trendyol %s: %s → %s yerine %s", record.trendyol_order_number, reason,
+                     old_so.name if old_so else '-', new_so.name)
+        return True
 
     @api.model
     def _confirm_failure_message(self, sale_order, store):
@@ -334,7 +460,8 @@ class TrendyolOrder(models.Model):
                          or data.get('orderCreatedDate')
                          or data.get('createdDate', 0))
         if order_date_ts:
-            order_date = datetime.fromtimestamp(order_date_ts / 1000, tz=timezone.utc).replace(tzinfo=None)
+            # orderDate GMT+3 epoch gelir (gerçek UTC'den 3 saat ileri) → UTC'ye çevir
+            order_date = ty_datetime(order_date_ts)
         else:
             order_date = fields.Datetime.now()
             _logger.warning(
@@ -460,6 +587,7 @@ class TrendyolOrder(models.Model):
             ('trendyol_store_id', '=', store.id),
             # Aynı sipariş numaralı BAŞKA paketin (kısmi iptal/bölme) siparişi mükerrer değildir
             ('trendyol_order_id', 'in', [False, self.id]),
+            ('state', '!=', 'cancel'),
             '|', '|',
             ('client_order_ref', 'in', ref_names),
             ('origin', 'in', ref_names),
@@ -784,7 +912,7 @@ class TrendyolOrder(models.Model):
     # ═══════════════════════════════════════════════════════
     # Aşağıdaki metodlar _inherit ile ayrı dosyalarda tanımlı:
     # → trendyol_order_sync.py: sync_orders_from_trendyol, sync_orders_for_store,
-    #   _sync_cancelled_orders, _sync_returned_orders, _cancel_odoo_order,
+    #   _sync_via_stream, _sync_via_status_queries, _cancel_odoo_order,
     #   cron_sync_trendyol_orders
     # → trendyol_order_actions.py: action_retry_sync, action_refresh_from_trendyol,
     #   action_delete_error_orders, action_mark_synced, action_retry_all_errors,
