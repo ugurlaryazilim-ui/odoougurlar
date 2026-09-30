@@ -92,7 +92,14 @@ class TrendyolSettlement(models.Model):
                               compute='_compute_net', store=True)
     commission_rate = fields.Float(string='Komisyon Oranı (%)', readonly=True)
     commission_amount = fields.Float(string='Komisyon Tutarı', digits=(12, 2), readonly=True)
-    seller_revenue = fields.Float(string='Satıcı Hakediş', digits=(12, 2), readonly=True)
+    seller_revenue = fields.Float(string='Satıcı Hakediş (Ham)', digits=(12, 2), readonly=True,
+                                  help="Trendyol'un gönderdiği işaretsiz tutar")
+    signed_seller_revenue = fields.Float(
+        string='Hakedişe Etkisi', digits=(12, 2), compute='_compute_signed', store=True,
+        help='Alacak kaydı hakedişi artırır, borç kaydı azaltır (satış +, indirim/kupon/iade −)')
+    signed_commission = fields.Float(
+        string='Komisyon Etkisi', digits=(12, 2), compute='_compute_signed', store=True,
+        help='Satışın komisyonu +, indirim/kupon/iadede geri alınan komisyon −')
 
     # ─── Sipariş Bilgileri ───────────────────────────────
     order_number = fields.Char(string='Sipariş No', index=True, readonly=True)
@@ -112,6 +119,33 @@ class TrendyolSettlement(models.Model):
     def _compute_net(self):
         for rec in self:
             rec.net_amount = (rec.credit or 0) - (rec.debt or 0)
+
+    def _effect_sign(self):
+        """Kaydın hakediş yönü. Trendyol alacak/borç bilgisi esas alınır (satış, iade, indirim,
+        kupon ve iptallerinin tamamı buna uyar); ikisi de boşsa kayıt tipine göre."""
+        self.ensure_one()
+        credit, debt = self.credit or 0.0, self.debt or 0.0
+        if credit > 0.005 and debt <= 0.005:
+            return 1
+        if debt > 0.005 and credit <= 0.005:
+            return -1
+        if self.transaction_type in _REVENUE_SIGN:
+            return _REVENUE_SIGN[self.transaction_type]
+        if self.transaction_type == 'revenue_adjustment':
+            raw = normalize_tr(self.transaction_type_raw)
+            sign = 1 if ('pozitif' in raw or 'positive' in raw) else -1
+            return -sign if ('iptal' in raw or 'cancel' in raw) else sign
+        if self.transaction_type in ('discount', 'coupon', 'return', 'provision_negative'):
+            return -1
+        return 1
+
+    @api.depends('debt', 'credit', 'seller_revenue', 'commission_amount',
+                 'transaction_type', 'transaction_type_raw')
+    def _compute_signed(self):
+        for rec in self:
+            sign = rec._effect_sign()
+            rec.signed_seller_revenue = sign * abs(rec.seller_revenue or 0.0)
+            rec.signed_commission = sign * abs(rec.commission_amount or 0.0)
 
     # ═══════════════════════════════════════════════════════
     # SİNIFLANDIRMA
@@ -482,7 +516,7 @@ class TrendyolSettlement(models.Model):
             pkg_type = item.get('shipmentPackageType', '')
             parcel_id = str(item.get('parcelUniqueId', '') or '')
 
-            if 'iade' in pkg_type.lower():
+            if 'iade' in normalize_tr(pkg_type):
                 cargo_type = 'return_cargo'
             else:
                 cargo_type = 'shipping_cargo'
@@ -693,26 +727,17 @@ class TrendyolSettlement(models.Model):
                 if s.transaction_type == 'sale':
                     sale_records.append(s)
 
-                if s.seller_revenue:
-                    if s.transaction_type in ('sale', 'coupon', 'discount_cancel',
-                                              'coupon_cancel', 'provision_positive'):
-                        seller_revenue += s.seller_revenue
-                    elif s.transaction_type in ('discount', 'return', 'provision_negative'):
-                        seller_revenue -= abs(s.seller_revenue)
-                    elif s.transaction_type in _REVENUE_SIGN:
-                        seller_revenue += _REVENUE_SIGN[s.transaction_type] * abs(s.seller_revenue)
-                    elif s.transaction_type == 'revenue_adjustment':
-                        raw = normalize_tr(s.transaction_type_raw)
-                        sign = 1 if ('pozitif' in raw or 'positive' in raw) else -1
-                        if 'iptal' in raw or 'cancel' in raw:
-                            sign = -sign
-                        seller_revenue += sign * abs(s.seller_revenue)
+                if s.source == 'settlements':
+                    seller_revenue += s.signed_seller_revenue
 
             # Fatura yoksa tahmini hesapla
-            if not has_platform_invoice and store.platform_fee_rate and seller_revenue > 0:
-                net_after_discount = (order.total_amount or 0) - (order.total_discount or 0)
-                if net_after_discount > 0:
-                    platform_fee = round(net_after_discount * store.platform_fee_rate / 100, 2)
+            if not has_platform_invoice and seller_revenue > 0.01:
+                if store.platform_fee_fixed:
+                    platform_fee = store.platform_fee_fixed
+                elif store.platform_fee_rate:
+                    net_after_discount = (order.total_amount or 0) - (order.total_discount or 0)
+                    if net_after_discount > 0:
+                        platform_fee = round(net_after_discount * store.platform_fee_rate / 100, 2)
 
             if not has_cargo_invoice and store.cargo_unit_price and order.trendyol_status == 'delivered':
                 deci = order.cargo_deci or 1
