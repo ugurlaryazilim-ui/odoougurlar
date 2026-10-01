@@ -171,15 +171,8 @@ class PazaramaAPIClient:
         }
         return self._request('POST', '/order/invoice-link', data=body)
 
-    def get_payment_agreements(self, start_date, end_date):
-        """Muhasebe ve Finans Servisi (tarihler TR saati)."""
-        body = {
-            "startDate": start_date.strftime('%Y-%m-%dT%H:%M:%S.000') if isinstance(start_date, datetime) else start_date,
-            "endDate": end_date.strftime('%Y-%m-%dT%H:%M:%S.999') if isinstance(end_date, datetime) else end_date,
-            "allowanceStartDate": None,
-            "allowanceEndDate": None,
-            "orderId": None
-        }
+    def get_payment_agreements(self, body):
+        """Muhasebe ve Finans Servisi — gövde çağıran tarafından kurulur (tarih biçimi denemeleri için)."""
         return self._request('POST', '/order/paymentAgreement', data=body)
 
     def get_refunds(self, start_date, end_date, page_number=1, page_size=100, refund_status=None):

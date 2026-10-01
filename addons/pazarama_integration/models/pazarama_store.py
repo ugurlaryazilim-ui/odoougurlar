@@ -263,13 +263,7 @@ class PazaramaStore(models.Model):
         self.ensure_one()
         Order = self.env['pazarama.order']
         api = self.get_api()
-        end_date = Order._now_turkey()
-        start_date = (end_date - timedelta(days=self.financial_day_range or 15)).replace(
-            hour=0, minute=0, second=0, microsecond=0)
-
-        res = api.get_payment_agreements(start_date=start_date, end_date=end_date)
-        if not res.get('success'):
-            raise UserError(_("Finansal veriler çekilemedi: %s", res.get('error')))
+        res = self._fetch_payment_agreements(api)
 
         body = res.get('data') or {}
         payload = body.get('data') if isinstance(body, dict) else None
@@ -331,6 +325,59 @@ class PazaramaStore(models.Model):
                 'type': 'success',
             }
         }
+
+    @api.model
+    def _finance_bodies(self, start_day, end_day, today):
+        """paymentAgreement için denenecek gövdeler (ad, gövde). Doküman yalnız tek örnek veriyor
+        (başlangıç "T03:00:00.000", bitiş geçmiş günün "T23:59:59.999"); Pazarama hatalı biçimde
+        yalnızca "İşleminiz şu anda gerçekleştirilemiyor" dediği için biçimler sırayla denenir."""
+        def d(day, suffix):
+            return day.strftime('%Y-%m-%d') + suffix
+
+        def body(start, end, allowance=False):
+            return {
+                'startDate': None if allowance else start,
+                'endDate': None if allowance else end,
+                'allowanceStartDate': start if allowance else None,
+                'allowanceEndDate': end if allowance else None,
+                'orderId': None,
+            }
+        return [
+            ('doc', body(d(start_day, 'T03:00:00.000'), d(end_day, 'T23:59:59.999'))),
+            ('doc_today', body(d(start_day, 'T03:00:00.000'), d(today, 'T23:59:59.999'))),
+            ('midnight', body(d(start_day, 'T00:00:00.000'), d(end_day, 'T23:59:59.999'))),
+            ('utc_z', body(d(start_day, 'T00:00:00.000Z'), d(end_day, 'T23:59:59.999Z'))),
+            ('date_only', body(d(start_day, ''), d(end_day, ''))),
+            ('allowance', body(d(start_day, 'T03:00:00.000'), d(end_day, 'T23:59:59.999'), allowance=True)),
+        ]
+
+    def _fetch_payment_agreements(self, api):
+        """Biçimleri sırayla dener; çalışan biçim hatırlanır ve sonraki seferde önce o denenir.
+        Hiçbiri çalışmazsa tüm denemelerin Pazarama yanıtıyla hata verilir."""
+        today = self.env['pazarama.order']._now_turkey().date()
+        end_day = today - timedelta(days=1)  # bitiş: dün (dokümandaki örnek gibi geçmiş gün)
+        start_day = end_day - timedelta(days=max((self.financial_day_range or 15) - 1, 0))
+        params = self.env['ir.config_parameter'].sudo()
+        known = params.get_param('pazarama_integration.finance_body_variant')
+        variants = self._finance_bodies(start_day, end_day, today)
+        variants.sort(key=lambda v: v[0] != known)
+        errors = []
+        for name, body in variants:
+            res = api.get_payment_agreements(body)
+            if res.get('success'):
+                if name != known:
+                    params.set_param('pazarama_integration.finance_body_variant', name)
+                    _logger.info("Pazarama finans: çalışan istek biçimi '%s': %s", name, json.dumps(body))
+                return res
+            errors.append(f"{name}: {res.get('error')}")
+            _logger.warning("Pazarama finans denemesi '%s' başarısız: %s | gövde: %s",
+                            name, res.get('error'), json.dumps(body))
+            if res.get('status') in (401, 403):
+                break  # yetki sorunu — diğer biçimleri denemenin anlamı yok
+        raise UserError(_("Finansal veriler çekilemedi (Pazarama tüm istek biçimlerini reddetti):\n\n%s\n\n"
+                          "Bu durumda sorun Pazarama tarafında olabilir; istek gövdeleri sunucu logunda "
+                          "'Pazarama finans denemesi' satırlarında. Pazarama desteğine iletilebilir.",
+                          '\n'.join(errors)))
 
     def action_view_settlements(self):
         self.ensure_one()
