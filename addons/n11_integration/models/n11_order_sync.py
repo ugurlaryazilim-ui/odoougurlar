@@ -10,7 +10,11 @@ from .n11_order import N11_CANCEL_STATUSES, N11_INACTIVE_LINE_STATUSES, N11_STAT
 
 _logger = logging.getLogger(__name__)
 
-_SYNC_OVERLAP = timedelta(minutes=10)      # last_sync'ten geriye örtüşme (gecikmeli güncellemeler için)
+# n11 epoch'ları veride gerçek UTC; dokümanda ise "GMT+3" yazıyor. Hangi yorumla okunursa okunsun
+# pencere boşa düşmesin diye: geriye 3 saat + 10 dk örtüşme, ileriye 3 saat pay (fazlası zararsız: upsert).
+_SYNC_OVERLAP = timedelta(hours=3, minutes=10)
+_FUTURE_MARGIN = timedelta(hours=3)
+_SYNC_LOCK_NS = 7471011  # mağaza başına senkron kilidi (pg advisory lock ad alanı)
 _MAX_LOOKBACK = timedelta(days=30)         # uzun kesintiden sonra en fazla bu kadar geriye gidilir
 _STALE_CHECK_AFTER = timedelta(hours=6)    # açık siparişler en geç bu aralıkla tek tek yoklanır
 _STALE_CHECK_LIMIT = 20                    # her turda yoklanacak en fazla sipariş
@@ -57,6 +61,12 @@ class N11OrderSync(models.Model):
 
         Böylece yeni siparişlerle birlikte eski siparişlerin iptal / kargo / teslim durumları da gelir.
         last_sync yalnızca tüm pencereler eksiksiz alındıysa ilerler."""
+        # Aynı mağazada tek senkron (cron sürerken manuel senkron aynı paketleri paralel işlemesin)
+        self.env.cr.execute("SELECT pg_try_advisory_xact_lock(%s, %s)", (_SYNC_LOCK_NS, store.id))
+        if not self.env.cr.fetchone()[0]:
+            _logger.info("N11 senkronizasyon [%s] atlandı: başka bir senkron çalışıyor", store.name)
+            return {'created': 0, 'updated': 0, 'errors': 0, 'busy': True}
+
         api_client = store.get_api()
         now = fields.Datetime.now()
         cutoff_new = now - timedelta(days=max(store.order_day_range or 1, 1))
@@ -65,10 +75,12 @@ class N11OrderSync(models.Model):
 
         counters = Counter()
         error_text = False
+        query_end = now + _FUTURE_MARGIN
         win_start = start
-        while win_start < now:
-            win_end = min(win_start + timedelta(days=N11_MAX_WINDOW_DAYS - 1), now)
+        while win_start < query_end:
+            win_end = min(win_start + timedelta(days=N11_MAX_WINDOW_DAYS - 1), query_end)
             packages, error_text = self._fetch_modified_packages(api_client, win_start, win_end)
+            counters['received'] += len(packages)
             self._process_packages(store, api_client, packages, cutoff_new, counters)
             if error_text:
                 _logger.error("N11 Sipariş Çekme Hatası [%s]: %s", store.name, error_text)
@@ -90,8 +102,8 @@ class N11OrderSync(models.Model):
             _logger.exception("N11 iptal tarama hatası: %s", e)
 
         store._write_sync_state(last_sync=None if error_text else now, error=error_text)
-        _logger.info("N11 senkronizasyon [%s] tamamlandı: %d yeni, %d güncellenen, %d hata%s",
-                     store.name, counters['created'], counters['updated'], counters['errors'],
+        _logger.info("N11 senkronizasyon [%s] tamamlandı: %d paket alındı, %d yeni, %d güncellenen, %d hata%s",
+                     store.name, counters['received'], counters['created'], counters['updated'], counters['errors'],
                      ' (eksik: API hatası)' if error_text else '')
         return {'created': counters['created'], 'updated': counters['updated'], 'errors': counters['errors']}
 

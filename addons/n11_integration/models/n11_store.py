@@ -190,6 +190,8 @@ class N11Store(models.Model):
         self.ensure_one()
         sync_model = self.env['n11.order'].sudo()
         res = sync_model.sync_orders_for_store(self)
+        if res.get('busy'):
+            raise UserError(_("Bu mağazada senkronizasyon şu anda zaten çalışıyor. Birkaç dakika sonra tekrar deneyin."))
         msg = f"Sipariş Senkronizasyon Tamamlandı.\nYeni: {res.get('created', 0)}\nGüncellenen: {res.get('updated', 0)}\nHata: {res.get('errors', 0)}"
         
         return {
