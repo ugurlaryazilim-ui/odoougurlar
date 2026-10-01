@@ -14,71 +14,9 @@
             <field name="prompt_text">Photorealistic editorial fashion photograph, natural skin texture, true-to-life fabric detail.</field>
         </record>
 
-        <!-- ============================================================ -->
-        <!-- Eski lock'lar → Pasifleştir                                  -->
-        <!-- Prompt mantığı artık category_constants.py şablonlarında      -->
-        <!-- ============================================================ -->
-        <record id="prompt_anatomy_lock" model="ai.studio.prompt.template">
-            <field name="active" eval="False"/>
-        </record>
-        <record id="prompt_garment_lock" model="ai.studio.prompt.template">
-            <field name="active" eval="False"/>
-        </record>
-        <record id="prompt_anti_hallucination" model="ai.studio.prompt.template">
-            <field name="active" eval="False"/>
-        </record>
-        <!-- KRİTİK: Bu lock elbise+pantolon sorununun kök nedeniydi! -->
-        <record id="prompt_full_outfit_lock" model="ai.studio.prompt.template">
-            <field name="active" eval="False"/>
-        </record>
-        <record id="prompt_negative_unified" model="ai.studio.prompt.template">
-            <field name="active" eval="False"/>
-        </record>
-
-        <!-- ============================================================ -->
-        <!-- v1 eski kayıtlar (zaten pasif)                               -->
-        <!-- ============================================================ -->
-        <record id="prompt_studio_env_lock" model="ai.studio.prompt.template">
-            <field name="active" eval="False"/>
-        </record>
-        <record id="prompt_color_lock" model="ai.studio.prompt.template">
-            <field name="active" eval="False"/>
-        </record>
-        <record id="prompt_fabric_lock" model="ai.studio.prompt.template">
-            <field name="active" eval="False"/>
-        </record>
-        <record id="prompt_button_lock" model="ai.studio.prompt.template">
-            <field name="active" eval="False"/>
-        </record>
-        <record id="prompt_idealization_lock" model="ai.studio.prompt.template">
-            <field name="active" eval="False"/>
-        </record>
-        <record id="prompt_identity_lock" model="ai.studio.prompt.template">
-            <field name="active" eval="False"/>
-        </record>
-        <record id="prompt_editorial_style" model="ai.studio.prompt.template">
-            <field name="active" eval="False"/>
-        </record>
-        <record id="prompt_back_view_lock" model="ai.studio.prompt.template">
-            <field name="active" eval="False"/>
-        </record>
-        <record id="prompt_detail_view_lock" model="ai.studio.prompt.template">
-            <field name="active" eval="False"/>
-        </record>
-        <record id="prompt_capture_lock" model="ai.studio.prompt.template">
-            <field name="active" eval="False"/>
-        </record>
-        <record id="prompt_anti_plastic_lock" model="ai.studio.prompt.template">
-            <field name="active" eval="False"/>
-        </record>
-        <record id="prompt_hair_lock" model="ai.studio.prompt.template">
-            <field name="active" eval="False"/>
-        </record>
-        <record id="prompt_shoulder_drape_lock" model="ai.studio.prompt.template">
-            <field name="active" eval="False"/>
-        </record>
-        <record id="prompt_social_identity_lock" model="ai.studio.prompt.template">
-            <field name="active" eval="False"/>
-        </record>
+        <!-- Eski lock'lar (prompt_anatomy_lock, prompt_identity_lock ...) burada artık
+             tanımlanmaz: ilk sürümler noupdate="1" yüklediği için buradan pasifleştirme
+             mevcut veritabanlarında hiç uygulanmadı, sıfırdan kurulumu da (name alanı
+             eksik) bozuyordu. Pasifleştirme migrations/19.0.1.0.28 içinde yapılır. -->
     </data>
 </odoo>

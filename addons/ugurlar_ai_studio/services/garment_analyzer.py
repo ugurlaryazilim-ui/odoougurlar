@@ -188,6 +188,7 @@ _ANALYSIS_SCHEMA = {
         "primaryColorEn": {"type": "STRING"},
         "fabricType": {"type": "STRING"},
         "fabricTypeEn": {"type": "STRING"},
+        "surfaceEn": {"type": "STRING"},
         "collarType": {"type": "STRING"},
         "collarTypeEn": {"type": "STRING"},
         "sleeveType": {"type": "STRING"},
@@ -247,6 +248,7 @@ Return JSON:
   "primaryColorEn": "e.g. 'black', 'navy', 'burgundy'",
   "fabricType": "Turkish fabric, e.g. Pamuk, Triko, Saten",
   "fabricTypeEn": "e.g. 'cotton', 'knit', 'satin', 'denim'",
+  "surfaceEn": "visible color/surface effect of the fabric in 1-3 plain English words, e.g. 'heathered melange', 'washed', 'ribbed', 'brushed', 'glossy', 'slub'; empty if plain and uniform",
   "collarType": "Turkish collar/neckline if visible",
   "collarTypeEn": "without the word 'neckline', e.g. 'V', 'crew', 'shirt collar', 'turtleneck'",
   "sleeveType": "sleeve type if visible (e.g. uzun kollu, kolsuz, askılı)",
@@ -589,9 +591,12 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     # ═══ SEEDREAM / FAL PROVIDER ═══
     color = _to_english(analysis, 'primaryColor')
     fabric = _to_english(analysis, 'fabricType')
+    # Melanj / yıkanmış / fitilli gibi yüzey etkisi: yoksa model rengi düz ve doygun
+    # bir tona çeviriyor (ör. gri-lacivert melanj sweatshirt → düz lacivert)
+    surface = str(analysis.get('surfaceEn') or '').strip()
     # "knit knit dress" / "denim denim trousers" tekrarlarını ele
     desc_words = []
-    for w in f"{color} {fabric} {garment}".lower().split():
+    for w in f"{color} {surface} {fabric} {garment}".lower().split():
         if w not in desc_words or w in ('light', 'dark'):
             desc_words.append(w)
     desc = ' '.join(desc_words)
