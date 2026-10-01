@@ -5,7 +5,23 @@
         <field name="model">pttavm.order</field>
         <field name="arch" type="xml">
             <form string="Pttavm Siparişi" create="false" edit="false">
+                <header>
+                    <button name="action_refresh_from_pttavm" type="object" string="Pttavm'dan Güncelle" class="btn-primary"/>
+                    <button name="action_retry_sync" type="object" string="Tekrar Dene" class="btn-secondary"
+                            invisible="sale_order_id"/>
+                    <button name="action_create_cargo_barcode" type="object" string="Kargo Barkodu Oluştur"
+                            class="btn-secondary"
+                            invisible="not sale_order_id or cargo_barcode_state in ('pending', 'completed')"/>
+                    <button name="action_check_cargo_barcode" type="object" string="Barkod Durumunu Sorgula"
+                            class="btn-secondary" invisible="cargo_barcode_state != 'pending'"/>
+                    <button name="action_send_invoice" type="object" string="Faturayı PttAVM'ye Gönder"
+                            class="btn-secondary" invisible="not sale_order_id or invoice_sent"
+                            confirm="Nebim fatura linki PttAVM'ye gönderilecek. Devam edilsin mi?"/>
+                </header>
                 <sheet>
+                    <div class="alert alert-warning" role="alert" invisible="not error_message">
+                        <field name="error_message" readonly="1"/>
+                    </div>
                     <div class="oe_title">
                         <h1>
                             <field name="order_number"/>
@@ -17,12 +33,25 @@
                             <field name="sale_order_id"/>
                             <field name="order_date"/>
                             <field name="order_status_display" string="PttAvm Durumu"/>
+                            <field name="total_price"/>
                         </group>
                         <group>
                             <field name="customer_name"/>
                             <field name="customer_email"/>
                             <field name="cargo_provider"/>
                             <field name="cargo_tracking_number"/>
+                        </group>
+                        <group string="Kargo Barkodu" invisible="not cargo_barcode_state">
+                            <field name="cargo_barcode_state"/>
+                            <field name="cargo_barcode"/>
+                            <field name="cargo_barcode_message" invisible="not cargo_barcode_message"/>
+                            <field name="cargo_barcode_date"/>
+                        </group>
+                        <group string="Fatura" invisible="not invoice_sent and not invoice_error">
+                            <field name="invoice_sent"/>
+                            <field name="invoice_sent_date" invisible="not invoice_sent"/>
+                            <field name="invoice_url" widget="url" invisible="not invoice_url"/>
+                            <field name="invoice_error" invisible="not invoice_error"/>
                         </group>
                     </group>
                     <notebook>
@@ -33,7 +62,13 @@
                                     <field name="product_code"/>
                                     <field name="quantity"/>
                                     <field name="sale_price"/>
-                                    <field name="status_display" string="Durum"/>
+                                    <field name="vat_rate" optional="hide"/>
+                                    <field name="item_id" optional="hide"/>
+                                    <field name="status" column_invisible="1"/>
+                                    <field name="status_display" string="Durum" widget="badge"
+                                           decoration-danger="status in ('iptal', 'odeme_gecersiz', 'iade', 'gondericisine_teslim_edildi')"
+                                           decoration-success="status in ('gonderilmis', 'tamamlandi')"
+                                           decoration-warning="status in ('kargo_yapilmasi_bekleniyor', 'havale_onayi_bekleniyor', 'onay_surecinde')"/>
                                 </list>
                             </field>
                         </page>
@@ -50,7 +85,8 @@
         <field name="name">pttavm.order.tree</field>
         <field name="model">pttavm.order</field>
         <field name="arch" type="xml">
-            <list string="Pttavm Siparişleri" create="false" edit="false">
+            <list string="Pttavm Siparişleri" create="false" edit="false"
+                  decoration-muted="order_status in ('iptal', 'odeme_gecersiz')">
                 <header>
                     <button name="action_refresh_from_pttavm" type="object" string="Pttavm'dan Güncelle" class="btn-primary"/>
                     <button name="action_retry_sync" type="object" string="Hatalıları Tekrar Dene" class="btn-secondary"/>
@@ -62,13 +98,44 @@
                 <field name="total_price"/>
                 <field name="order_status" column_invisible="1"/>
                 <field name="order_status_display" string="PttAvm Durumu" widget="badge"
-                       decoration-success="order_status in ('tamamlandi', 'teslim_edildi', 'gonderilmis')"
-                       decoration-info="order_status in ('kargoda', 'kargo_yapilmasi_bekleniyor')"
-                       decoration-warning="order_status in ('hazirlaniyor', 'onay_bekliyor')"
-                       decoration-danger="order_status in ('iptal', 'iade')"/>
+                       decoration-success="order_status in ('tamamlandi', 'gonderilmis')"
+                       decoration-warning="order_status in ('kargo_yapilmasi_bekleniyor', 'havale_onayi_bekleniyor', 'onay_surecinde')"
+                       decoration-danger="order_status in ('iptal', 'odeme_gecersiz', 'iade', 'gondericisine_teslim_edildi')"/>
+                <field name="cargo_barcode_state" optional="hide"/>
+                <field name="invoice_sent" optional="hide"/>
+                <field name="error_message" optional="show"/>
                 <field name="store_id"/>
                 <field name="sale_order_id"/>
             </list>
+        </field>
+    </record>
+
+    <record id="pttavm_order_search" model="ir.ui.view">
+        <field name="name">pttavm.order.search</field>
+        <field name="model">pttavm.order</field>
+        <field name="arch" type="xml">
+            <search string="Pttavm Siparişleri">
+                <field name="order_number"/>
+                <field name="customer_name"/>
+                <field name="cargo_tracking_number"/>
+                <field name="sale_order_id"/>
+                <filter name="has_error" string="Hatalı / Uyarılı" domain="[('error_message', '!=', False)]"/>
+                <filter name="no_sale_order" string="Odoo Siparişi Yok" domain="[('sale_order_id', '=', False)]"/>
+                <filter name="partial" string="Kısmi İptal" domain="[('partially_cancelled', '=', True)]"/>
+                <separator/>
+                <filter name="waiting_cargo" string="Kargo Bekliyor" domain="[('order_status', '=', 'kargo_yapilmasi_bekleniyor')]"/>
+                <filter name="cancelled" string="İptal / Ödeme Geçersiz"
+                        domain="[('order_status', 'in', ('iptal', 'odeme_gecersiz'))]"/>
+                <filter name="returned" string="İade" domain="[('order_status', 'in', ('iade', 'gondericisine_teslim_edildi'))]"/>
+                <separator/>
+                <filter name="barcode_error" string="Barkod Hatası" domain="[('cargo_barcode_state', '=', 'error')]"/>
+                <filter name="invoice_not_sent" string="Fatura Gönderilmedi"
+                        domain="[('invoice_sent', '=', False), ('sale_order_id', '!=', False)]"/>
+                <group>
+                    <filter name="group_status" string="Durum" context="{'group_by': 'order_status'}"/>
+                    <filter name="group_store" string="Mağaza" context="{'group_by': 'store_id'}"/>
+                </group>
+            </search>
         </field>
     </record>
 
@@ -98,5 +165,6 @@
         <field name="name">Pttavm Siparişleri</field>
         <field name="res_model">pttavm.order</field>
         <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="pttavm_order_search"/>
     </record>
 </odoo>

@@ -1,6 +1,6 @@
 {
     'name': 'Pttavm Entegrasyonu',
-    'version': '19.0.1.0.0',
+    'version': '19.0.1.1.0',
     'summary': 'Pttavm Sipariş Entegrasyonu',
     'description': 'Pttavm Pazaryeri API üzerinden siparişlerin çekilmesi, Odoo\'da oluşturulması ve Nebim entegrasyonuna hazır hale getirilmesi.',
     'author': 'Uğurlar',

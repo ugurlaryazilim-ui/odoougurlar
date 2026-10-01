@@ -8,16 +8,20 @@
                 <header>
                     <button name="action_test_connection" type="object" string="Bağlantı Test Et" class="btn-primary"/>
                     <button name="action_sync_now" type="object" string="Şimdi Senkronize Et" class="btn-secondary"/>
-                    <button name="action_sync_financials" type="object" string="Finansal Senkron" class="btn-secondary"/>
                 </header>
                 <sheet>
                     <div class="oe_button_box" name="button_box">
-                        <button class="oe_stat_button" icon="fa-shopping-cart">
+                        <button class="oe_stat_button" icon="fa-shopping-cart" name="action_view_orders" type="object">
                             <field name="order_count" widget="statinfo" string="Siparişler"/>
                         </button>
-                        <button class="oe_stat_button" icon="fa-money">
-                            <field name="settlement_count" widget="statinfo" string="Finans"/>
+                        <button class="oe_stat_button" icon="fa-exclamation-triangle" name="action_view_orders" type="object"
+                                context="{'only_errors': True}" invisible="not error_order_count">
+                            <field name="error_order_count" widget="statinfo" string="Hatalı"/>
                         </button>
+                    </div>
+                    <div class="alert alert-danger" role="alert" invisible="not last_sync_error">
+                        <strong>Son senkronizasyon hatası</strong> (<field name="last_sync_error_date" readonly="1" class="oe_inline"/>):
+                        <field name="last_sync_error" readonly="1" nolabel="1"/>
                     </div>
                     <div class="oe_title">
                         <h1>
@@ -56,6 +60,7 @@
                                 <group string="Müşteri / Fatura">
                                     <field name="customer_prefix"/>
                                     <field name="skip_customer_email"/>
+                                    <field name="auto_send_invoice"/>
                                 </group>
                                 <group string="Sipariş İşleme">
                                     <field name="auto_confirm"/>
@@ -63,30 +68,10 @@
                                 </group>
                             </group>
                         </page>
-                        <page string="İade ve Kargo">
+                        <page string="Kargo">
                             <group>
-                                <group string="İade Ayarları">
-                                    <field name="process_returns"/>
-                                    <field name="return_day_range"/>
-                                </group>
                                 <group string="Kargo Otomasyonu">
                                     <field name="auto_send_cargo"/>
-                                    <field name="cargo_include_order_number"/>
-                                    <field name="default_package_count"/>
-                                    <field name="default_desi"/>
-                                </group>
-                            </group>
-                        </page>
-                        <page string="Finans / Mutabakat">
-                            <group>
-                                <group string="Finans Senkronizasyonu">
-                                    <field name="sync_financials"/>
-                                    <field name="financial_day_range"/>
-                                    <field name="last_financial_sync" readonly="1"/>
-                                </group>
-                                <group string="Komisyon ve Kesintiler">
-                                    <field name="platform_fee_rate"/>
-                                    <field name="cargo_unit_price"/>
                                 </group>
                             </group>
                         </page>
@@ -105,6 +90,7 @@
                 <field name="name"/>
                 <field name="auto_sync"/>
                 <field name="last_sync"/>
+                <field name="last_sync_error" optional="hide"/>
                 <field name="active"/>
             </list>
         </field>

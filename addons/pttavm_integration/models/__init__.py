@@ -1,6 +1,7 @@
 from . import pttavm_store
 from . import pttavm_order
 from . import pttavm_order_sync
+from . import pttavm_order_cargo
 from . import sale_order
 from . import pttavm_settlement
 from . import pttavm_refund

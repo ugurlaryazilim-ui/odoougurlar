@@ -1,17 +1,26 @@
 
 import json
 import logging
-import pytz
+from collections import Counter
 from datetime import datetime, timedelta
 
+import pytz
+
 from odoo import api, fields, models
+
+from .pttavm_api import PTTAVM_MAX_WINDOW_DAYS
+from .pttavm_order import PTTAVM_CANCEL_STATUSES, PTTAVM_STATUS_RANK, normalize_status
 
 _logger = logging.getLogger(__name__)
 
 IST = pytz.timezone('Europe/Istanbul')
 
-# PttAVM iptal sayılan statüler
-PTTAVM_CANCEL_STATUSES = ('İptal Edildi', 'iptal', 'İade', 'İade Edildi')
+_SYNC_LOCK_NS = 7471021  # mağaza başına senkron kilidi (pg advisory lock ad alanı)
+
+
+def _digits(value):
+    return ''.join(filter(str.isdigit, str(value or '')))
+
 
 class PttavmOrderSync(models.Model):
     _inherit = 'pttavm.order'
@@ -25,85 +34,68 @@ class PttavmOrderSync(models.Model):
                 self.sync_orders_for_store(store)
             except Exception as e:
                 _logger.exception("Pttavm %s senkronizasyon hatası: %s", store.name, e)
+                store._write_sync_state(error=str(e))
+
+    @api.model
+    def _now_turkey(self):
+        return datetime.now(pytz.UTC).astimezone(IST).replace(tzinfo=None)
+
+    @api.model
+    def _parse_tr_datetime(self, value):
+        """PttAVM tarihleri (islemTarihi) Türkiye saatidir — Odoo UTC saklar."""
+        if not value:
+            return False
+        try:
+            naive_dt = datetime.strptime(str(value)[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            _logger.warning("PttAVM tarih parse hatası: %s", value)
+            return False
+        return IST.localize(naive_dt).astimezone(pytz.UTC).replace(tzinfo=None)
 
     @api.model
     def sync_orders_for_store(self, store):
-        """Seçilen mağazaya göre Pttavm'dan siparişleri çeker."""
+        """Mağazanın son N gündeki siparişlerini çeker; yenileri açar, mevcutların satır / durum /
+        kargo bilgilerini günceller (PttAVM'de değişiklik tarihi filtresi ve sayfalama yok)."""
+        # Aynı mağazada tek senkron (cron sürerken manuel senkron aynı siparişleri paralel açmasın)
+        self.env.cr.execute("SELECT pg_try_advisory_xact_lock(%s, %s)", (_SYNC_LOCK_NS, store.id))
+        if not self.env.cr.fetchone()[0]:
+            _logger.info("PttAVM senkronizasyon [%s] atlandı: başka bir senkron çalışıyor", store.name)
+            return {'created': 0, 'updated': 0, 'errors': 0, 'busy': True}
+
         api_client = store.get_api()
-        
-        created_count = 0
-        updated_count = 0
-        error_count = 0
-        
-        day_range = store.order_day_range or 30
-        # PttAVM API Türkiye saatinde çalışır — sorgu tarihlerini Türkiye saatine çevir
-        now_turkey = datetime.now(pytz.UTC).astimezone(IST).replace(tzinfo=None)
+        now = fields.Datetime.now()
+        # PttAVM en fazla 40 günlük aralık kabul eder (bitişe 5 dk pay eklendiği için 39)
+        day_range = min(max(store.order_day_range or 30, 1), PTTAVM_MAX_WINDOW_DAYS - 1)
+        # PttAVM API Türkiye saatinde çalışır — sorgu tarihleri Türkiye saatiyle gider
+        now_turkey = self._now_turkey()
         start_date = now_turkey - timedelta(days=day_range)
         end_date = now_turkey + timedelta(minutes=5)  # küçük güvenlik marjı
-        
+
         _logger.info("PttAVM [%s] sipariş çekiliyor (TR saati): %s → %s (son %d gün)",
                      store.name, start_date, end_date, day_range)
-        
+
         res = api_client.get_orders(start_date=start_date, end_date=end_date)
-        
         if not res.get('success'):
-            _logger.error("PttAVM Sipariş Çekme Hatası: %s", res.get('error'))
-            return {'created': 0, 'updated': 0, 'errors': 1}
-        
-        raw_data = res.get('data', [])
-        _logger.info("PttAVM [%s] API yanıt tipi: %s", store.name, type(raw_data).__name__)
-        
-        data_list = raw_data
-        if isinstance(raw_data, dict):
-            data_list = raw_data.get('data', raw_data.get('siparisler', raw_data.get('orders', [])))
-            if not isinstance(data_list, list):
-                _logger.info("PttAVM [%s] dict yanıt anahtarları: %s", store.name, list(raw_data.keys()))
-                data_list = []
-        
-        if not data_list or not isinstance(data_list, list):
-            _logger.info("PttAVM [%s] Sipariş bulunamadı. API yanıt: %s",
-                         store.name, str(raw_data)[:500])
-            try:
-                with self.env.cr.savepoint():
-                    store.sudo().write({'last_sync': fields.Datetime.now()})
-            except Exception as _e:
-                _logger.warning("Mağaza last_sync güncelleme atlandı: %s", _e)
-            return {'created': 0, 'updated': 0, 'errors': 0}
-        
-        _logger.info("PttAVM [%s] %d sipariş bulundu", store.name, len(data_list))
-            
+            error = res.get('error') or 'Bilinmeyen hata'
+            _logger.error("PttAVM Sipariş Çekme Hatası [%s]: %s", store.name, error)
+            store._write_sync_state(error=error)
+            return {'created': 0, 'updated': 0, 'errors': 1, 'error': error}
+
+        data_list = self._extract_order_list(res.get('data'))
+        counters = Counter()
+        counters['received'] = len(data_list)
+        cutoff_new = now - timedelta(days=day_range)
         for order_json in data_list:
-            # ── Client-side tarih filtresi ──
-            islem_tarihi = order_json.get('islemTarihi')
-            if islem_tarihi:
-                try:
-                    order_dt = datetime.strptime(islem_tarihi[:19], '%Y-%m-%dT%H:%M:%S')
-                    if order_dt < start_date:
-                        _logger.debug("Eski sipariş atlandı (orderDate=%s < startDate=%s): %s",
-                                      order_dt, start_date,
-                                      order_json.get('orderNumber') or order_json.get('id', '?'))
-                        continue
-                except Exception:
-                    pass
-
             try:
                 with self.env.cr.savepoint():
-                    action = self._process_order_json(order_json, store)
-                    if action == 'created':
-                        created_count += 1
-                    elif action == 'updated':
-                        updated_count += 1
+                    action = self._sync_order_json(store, order_json, cutoff_new)
+                counters[action] += 1
             except Exception as e:
-                error_count += 1
-                _logger.exception("Pttavm Sipariş İşleme Hatası: %s", e)
-        
-        try:
-            with self.env.cr.savepoint():
-                store.sudo().write({'last_sync': fields.Datetime.now()})
-        except Exception as _e:
-            _logger.warning("Mağaza last_sync güncelleme atlandı: %s", _e)
+                counters['errors'] += 1
+                self.env.invalidate_all(flush=False)
+                _logger.exception("Pttavm Sipariş İşleme Hatası (%s): %s", order_json.get('siparisNo'), e)
 
-        # ── Veritabanındaki iptal siparişleri tara ──
+        # ── Veritabanındaki iptal siparişleri tara (tarih aralığı dışındakiler dahil) ──
         try:
             with self.env.cr.savepoint():
                 cancel_count = self._cancel_pending_orders(store)
@@ -112,60 +104,64 @@ class PttavmOrderSync(models.Model):
         except Exception as e:
             _logger.exception("PttAVM iptal tarama hatası: %s", e)
 
-        return {'created': created_count, 'updated': updated_count, 'errors': error_count}
+        # ── Bekleyen kargo barkodu talepleri / fatura gönderimi ──
+        for step in (self._poll_cargo_barcodes, self._send_pending_invoices):
+            try:
+                step(store, api_client)
+            except Exception as e:
+                self.env.invalidate_all(flush=False)
+                _logger.exception("PttAVM %s hatası [%s]: %s", step.__name__, store.name, e)
+
+        store._write_sync_state(last_sync=now)
+        _logger.info("PttAVM senkronizasyon [%s] tamamlandı: %d sipariş alındı, %d yeni, %d güncellenen, %d hata",
+                     store.name, counters['received'], counters['created'], counters['updated'], counters['errors'])
+        return {'created': counters['created'], 'updated': counters['updated'], 'errors': counters['errors']}
+
+    @api.model
+    def _extract_order_list(self, raw_data):
+        data_list = raw_data
+        if isinstance(raw_data, dict):
+            data_list = raw_data.get('data', raw_data.get('siparisler', raw_data.get('orders', [])))
+        if not isinstance(data_list, list):
+            return []
+        return [o for o in data_list if isinstance(o, dict)]
+
+    # ─── JSON → pttavm.order ─────────────────────────────────
 
     @api.private
-    def _process_order_json(self, order_json, store):
-        """Gelen tekil JSON'u işler, PttavmOrder ve SaleOrder yaratır."""
-        order_number = order_json.get('siparisNo')
+    def _sync_order_json(self, store, order_json, cutoff_new=None):
+        """Tek siparişi işler. 'created' / 'updated' / 'unchanged' / 'skipped' döner."""
+        order_number = str(order_json.get('siparisNo') or '').strip()
         if not order_number:
             return 'skipped'
 
-        # Pttavm uses SiparisNo as the primary identifier (there is no separated orderId root, or lineItemId might be used? lineItemId is inside siparisUrunler)
-        existing_pttavm = self.search([('order_number', '=', order_number)], limit=1)
-        
-        # We will iterate through products to check if "siparisDurumu" is consistent, but let's grab the first product's status
-        products = order_json.get('siparisUrunler', [])
-        first_product_status = products[0].get('siparisDurumu') if products else ''
-        
-        if existing_pttavm:
-            update_vals = {'order_status': first_product_status}
-            cargo_tracking = order_json.get('kargoBarkod', '')
-            if cargo_tracking and not existing_pttavm.cargo_tracking_number:
-                update_vals['cargo_tracking_number'] = cargo_tracking
-            existing_pttavm.write(update_vals)
-            # İptal kontrolü
-            if first_product_status in PTTAVM_CANCEL_STATUSES:
-                if existing_pttavm.sale_order_id and existing_pttavm.sale_order_id.state not in ('cancel', 'done'):
-                    self._cancel_odoo_order(existing_pttavm, store)
-            return 'updated'
+        rec = self.search([('store_id', '=', store.id), ('order_number', '=', order_number)], limit=1)
+        action = None
+        if not rec:
+            order_date = self._parse_tr_datetime(order_json.get('islemTarihi'))
+            if cutoff_new and order_date and order_date < cutoff_new:
+                return 'skipped'
+            rec = self.create(self._order_header_vals(store, order_number, order_json, order_date))
+            action = 'created'
 
-        order_date_str = order_json.get('islemTarihi')
-        order_date = False
-        if order_date_str:
-            try:
-                # PttAVM API Türkiye saati döner — Odoo UTC saklar
-                naive_dt = datetime.strptime(order_date_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
-                turkey_dt = IST.localize(naive_dt)
-                order_date = turkey_dt.astimezone(pytz.UTC).replace(tzinfo=None)
-            except Exception:
-                _logger.warning("PttAVM tarih parse hatası: %s", order_date_str)
-                order_date = fields.Datetime.now()
-        else:
-            order_date = fields.Datetime.now()
-            
-        customer_email = order_json.get('eposta', '')
-        phone_number = order_json.get('telefonNo', '')
+        changed = rec._apply_order_json(order_json)
+        if changed or action == 'created' or not rec.sale_order_id:
+            rec._reconcile_sale_order(store)
+        if action:
+            return action
+        return 'updated' if changed else 'unchanged'
 
-        # Fatura Tipi — PttAVM bazen faturaTip="Bireysel" gönderir ama VKN 10 hanedir (kurumsal).
-        # Örnek: PTTEM siparişlerinde faturaTip="Bireysel" + vergiNo="7330638410" (10 hane VKN)
-        # Bu yüzden VKN hane kontrolü ek güvenlik olarak eklendi.
-        fatura_tipi = order_json.get('faturaTip') # Bireysel, Kurumsal
-        vergi_no = ''.join(filter(str.isdigit, order_json.get('vergiNo') or ''))
-        is_commercial = fatura_tipi == 'Kurumsal' or len(vergi_no) == 10
+    @api.model
+    def _commercial_info(self, order_json):
+        """(kurumsal mı, VKN/TCKN). PttAVM bazen faturaTip="Bireysel" gönderir ama VKN 10 hanedir
+        (ör. PTTEM siparişleri: faturaTip="Bireysel" + vergiNo="7330638410") — hane kontrolü bu yüzden."""
+        vergi_no = _digits(order_json.get('vergiNo'))
+        is_commercial = order_json.get('faturaTip') == 'Kurumsal' or len(vergi_no) == 10
+        return is_commercial, vergi_no or _digits(order_json.get('tckn'))
 
-        # FarkliAdres = 1 ise fatura ve teslimat farkli demektir
-        
+    @api.model
+    def _order_header_vals(self, store, order_number, order_json, order_date):
+        is_commercial, _vat = self._commercial_info(order_json)
         shipment_addr = {
             'address': order_json.get('siparisAdresi'),
             'city': order_json.get('siparisIli'),
@@ -173,7 +169,6 @@ class PttavmOrderSync(models.Model):
             'ilKod': order_json.get('ilKod'),
             'ilceKod': order_json.get('ilceKod'),
         }
-        
         billing_addr = {
             'address': order_json.get('faturaAdresi'),
             'city': order_json.get('faturaIli'),
@@ -185,245 +180,402 @@ class PttavmOrderSync(models.Model):
             'farkliAdres': order_json.get('farkliAdres'),
             'isCommercial': is_commercial,
         }
-
-        # Pttavm.Order kaydı oluştur
-        vals = {
+        return {
             'store_id': store.id,
-            'order_id': order_number, # Mapping orderId to orderNumber
-            'order_number': str(order_number),
-            'order_date': order_date,
-            'order_status': first_product_status,
+            'order_id': order_number,
+            'order_number': order_number,
+            'order_date': order_date or fields.Datetime.now(),
             'payment_type': 1,
             'invoice_type': 2 if is_commercial else 1,
-            'customer_id': str(order_json.get('musteriId', '')),
-            'customer_name': f"{order_json.get('musteriAdi', '')} {order_json.get('musteriSoyadi', '')}".strip(),
-            'customer_email': customer_email,
+            'customer_id': str(order_json.get('musteriId') or ''),
+            'customer_name': f"{order_json.get('musteriAdi') or ''} {order_json.get('musteriSoyadi') or ''}".strip(),
+            'customer_email': order_json.get('eposta') or '',
             'shipment_address': json.dumps(shipment_addr, ensure_ascii=False),
             'billing_address': json.dumps(billing_addr, ensure_ascii=False),
-            'shipping_city': shipment_addr.get('city', ''),
-            'shipping_district': shipment_addr.get('district', ''),
-            'tax_office': order_json.get('vergiDaire', ''),
-            'total_price': 0.0,
+            'shipping_city': shipment_addr['city'] or '',
+            'shipping_district': shipment_addr['district'] or '',
+            'tax_office': order_json.get('vergiDaire') or '',
             'currency': 'TRY',
-            'raw_data': json.dumps(order_json, ensure_ascii=False),
-            'line_ids': [],
         }
 
-        cargo_tracking = order_json.get('kargoBarkod', '')
-        cargo_provider = ''
+    @api.model
+    def _line_vals(self, item, order_json):
+        qty = int(item.get('toplamIslemAdedi') or 1)
+        kdv_dahil = float(item.get('kdvDahilToplamTutar') or 0.0)
+        indirim = float(item.get('indirimToplam') or 0.0)
+        # Net fiyat = KDV dahil toplam - indirim toplam
+        price = kdv_dahil - indirim
+        variant_code = (item.get('variantBarkod') or '').strip()
+        if ',' in variant_code:
+            variant_code = ''  # virgülle ayrılmış varyant ID listesi — barkod değil
+        return {
+            'item_id': str(item.get('lineItemId') or ''),
+            'product_id': str(item.get('urunId') or ''),
+            'product_name': item.get('urun') or order_json.get('urunAdi') or '',
+            'product_code': variant_code or item.get('urunBarkod') or order_json.get('urunKodu') or '',
+            'quantity': qty,
+            'sale_price': price / qty if qty else price,
+            'vat_rate': float(item.get('kdvOrani') or 0),
+            'status': normalize_status(item.get('siparisDurumu')),
+            'cargo_tracking': str(order_json.get('kargoBarkod') or ''),
+            'cargo_company': item.get('kargoKimden') or '',
+        }
 
-        total_order_price = 0.0
-
-        for item in products:
-            qty = item.get('toplamIslemAdedi', 1)
-            kdv_dahil = float(item.get('kdvDahilToplamTutar', 0.0))
-            indirim = float(item.get('indirimToplam', 0.0))
-            # Net fiyat = KDV dahil toplam - indirim toplam
-            price = kdv_dahil - indirim
-            
-            line_vals = {
-                'item_id': str(item.get('lineItemId', '')),
-                'product_id': str(item.get('urunId', '')),
-                'product_name': order_json.get('urunAdi') or item.get('urun'),
-                'product_code': item.get('variantBarkod') or item.get('urunBarkod') or order_json.get('urunKodu'),
-                'quantity': qty,
-                'sale_price': price / qty if qty else price,
-                'vat_rate': float(item.get('kdvOrani', 0)),
-                'status': item.get('siparisDurumu', ''),
-                'cargo_tracking': cargo_tracking,
-                'cargo_company': item.get('kargoKimden', ''),
-            }
-            vals['line_ids'].append((0, 0, line_vals))
-            total_order_price += price
-            
-            if not cargo_provider and line_vals['cargo_company']:
-                cargo_provider = line_vals['cargo_company']
-            
-        vals['total_price'] = total_order_price
-        vals['cargo_tracking_number'] = cargo_tracking
-        vals['cargo_provider'] = cargo_provider
-        
-        pttavm_order = self.create(vals)
-        
-        # Kullanıcı talebi: Pttavm sipariş durumu ne olursa olsun Odoo satış siparişine aktar
-        sale_order = self._create_odoo_sale_order(pttavm_order, store, shipment_addr, billing_addr, customer_email, phone_number, order_json)
-        pttavm_order.write({'sale_order_id': sale_order.id})
-        
-        if store.auto_confirm and sale_order.state in ['draft', 'sent']:
-            sale_order.action_confirm()
-                
-        return 'created'
-
-    @api.private
-    def _create_odoo_sale_order(self, p_order, store, ship_addr, bill_addr, customer_email, phone, raw_json):
-        """Odoo Sale Order & Res Partner yaratır."""
-        
-        partner_env = self.env['res.partner']
-        country_tr = self.env.ref('base.tr').id
-        
-        display_text = ship_addr.get('address') or ''
-        
-        customer_ref = ''
-        if store.customer_prefix and p_order.customer_id:
-            customer_ref = f"{store.customer_prefix}{p_order.customer_id}"
-
-        final_email = '' if store.skip_customer_email else customer_email
-
-        # Müşteri eşleştirme — önce ref ile, sonra name ile
-        partner = False
-        if customer_ref:
-            partner = partner_env.search([('ref', '=', customer_ref)], limit=1)
-        if not partner and phone:
-            partner = partner_env.search([('phone', '=', phone)], limit=1)
-        if not partner:
-            partner_domain = [('name', '=ilike', p_order.customer_name)]
-            partner = partner_env.search(partner_domain, limit=1)
-        
-        is_commercial = bill_addr.get('isCommercial')
-        
-        if not partner:
-            partner = partner_env.create({
-                'name': bill_addr.get('company_name') if is_commercial else p_order.customer_name,
-                'email': final_email,
-                'phone': phone,
-                'street': display_text,
-                'city': p_order.shipping_city,
-                'country_id': country_tr,
-                'ref': customer_ref,
-                'company_type': 'company' if is_commercial else 'person'
-            })
-            
-            if is_commercial:
-                write_vals = {
-                    'vat': bill_addr.get('tax_number') or bill_addr.get('tckn'),
-                }
-                if 'is_subject_to_einvoice' in partner_env._fields:
-                    write_vals['is_subject_to_einvoice'] = raw_json.get('isInvoice', False)
-                partner.write(write_vals)
-        
-        invoice_partner = partner
-        farkli_adres = str(bill_addr.get('farkliAdres', '0')).strip()
-        if bill_addr and farkli_adres == '1':
-            bill_display = bill_addr.get('address', '')
-            # Fatura adı: kurumsal ise firma ünvanı (faturaMusteriAdi), bireysel ise kişi adı
-            if is_commercial:
-                invoice_name = bill_addr.get('company_name') or raw_json.get('faturaMusteriAdi', '')
+    def _apply_order_json(self, order_json):
+        """Satırları (lineItemId ile) ve başlık durumunu günceller. Değişiklik olduysa True."""
+        self.ensure_one()
+        existing = {l.item_id: l for l in self.line_ids if l.item_id}
+        commands = []
+        line_vals = []
+        seen = set()
+        for item in order_json.get('siparisUrunler') or []:
+            vals = self._line_vals(item, order_json)
+            if not vals['item_id'] or vals['item_id'] in seen:
+                continue
+            seen.add(vals['item_id'])
+            line_vals.append(vals)
+            line = existing.get(vals['item_id'])
+            if line:
+                diff = {k: v for k, v in vals.items() if line[k] != v}
+                if diff:
+                    commands.append((1, line.id, diff))
             else:
-                invoice_name = f"{raw_json.get('faturaMusteriAdi','')} {raw_json.get('faturaMusteriSoyadi','')}".strip()
-            if not invoice_name:
-                invoice_name = partner.name
+                commands.append((0, 0, vals))
 
-            inv_vals = {
-                'name': invoice_name,
-                'type': 'invoice',
-                'parent_id': partner.id,
-                'street': bill_display,
-                'city': bill_addr.get('city', ''),
-                'country_id': country_tr,
-                'vat': bill_addr.get('tax_number') or bill_addr.get('tckn'),
-                'company_type': 'company' if is_commercial else 'person',
-                'ref': customer_ref,
-            }
-            if 'is_subject_to_einvoice' in partner_env._fields:
-                inv_vals['is_subject_to_einvoice'] = raw_json.get('isInvoice', False)
-            invoice_partner = partner_env.create(inv_vals)
+        header = {}
+        if commands:
+            header['line_ids'] = commands
+        header.update(self._header_status_vals(line_vals))
+        header['cargo_tracking_number'] = str(order_json.get('kargoBarkod') or '') or self.cargo_tracking_number or ''
+        provider = next((v['cargo_company'] for v in line_vals if v['cargo_company']), '')
+        header['cargo_provider'] = provider or self.cargo_provider or ''
+        header['raw_data'] = json.dumps(order_json, ensure_ascii=False, sort_keys=True)
+        header = {k: v for k, v in header.items() if k == 'line_ids' or self[k] != v}
+        if not header:
+            return False
+        self.write(header)
+        return bool(commands) or any(k != 'raw_data' for k in header)
+
+    @api.model
+    def _header_status_vals(self, line_vals):
+        """Sipariş durumu satır durumlarından: tümü iptalse iptal, değilse en geride kalan aktif satır."""
+        if not line_vals:
+            return {}
+        statuses = [v['status'] for v in line_vals]
+        live = [v for v in line_vals if v['status'] not in PTTAVM_CANCEL_STATUSES]
+        if not live:
+            status = 'odeme_gecersiz' if set(statuses) == {'odeme_gecersiz'} else 'iptal'
+            partial = False
+        else:
+            status = min((v['status'] for v in live), key=lambda s: PTTAVM_STATUS_RANK.get(s, 0))
+            partial = len(live) < len(line_vals)
+        return {
+            'order_status': status,
+            'partially_cancelled': partial,
+            'total_price': round(sum(v['sale_price'] * v['quantity'] for v in (live or line_vals)), 2),
+        }
+
+    def _raw_json(self):
+        self.ensure_one()
+        try:
+            data = json.loads(self.raw_data or '{}')
+        except ValueError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    # ─── pttavm.order → sale.order ───────────────────────────
+
+    def _active_lines(self):
+        return self.line_ids.filtered(lambda l: l.status not in PTTAVM_CANCEL_STATUSES)
+
+    def _reconcile_sale_order(self, store):
+        """Odoo siparişini PttAVM satırlarıyla eşitler: yoksa açar, tamamen iptalse iptal eder,
+        satır düştüyse (kısmi iptal) kalanlarla yeniden kurar."""
+        self.ensure_one()
+        lines = self._active_lines()
+        cancelled = self.order_status in PTTAVM_CANCEL_STATUSES or not lines
+        so = self.sale_order_id
+        if not so:
+            if cancelled:
+                return
+            so = self._create_odoo_sale_order(store)
+            if so:
+                self.write({'sale_order_id': so.id, 'error_message': False})
+                if store.auto_confirm and so.state in ('draft', 'sent'):
+                    so.action_confirm()
+            return
+        if so.state == 'cancel':
+            return
+        if cancelled:
+            self._cancel_odoo_order(self, store)
+            return
+        product_map, missing = self._match_products(lines)
+        if missing:
+            return  # karşılaştırılamaz; mevcut sipariş korunur
+        wanted = Counter()
+        for line in lines:
+            wanted[product_map[line.product_code].id] += line.quantity
+        current = Counter()
+        for sol in so.order_line.filtered(lambda l: l.pttavm_item_id and l.product_id):
+            current[sol.product_id.id] += int(sol.product_uom_qty)
+        if wanted == current:
+            if self.error_message:
+                self.error_message = False
+        elif any(qty > wanted.get(product_id, 0) for product_id, qty in current.items()):
+            reason = 'Kısmi iptal' if self.partially_cancelled else 'PttAVM sipariş satırları değişti'
+            self._rebuild_sale_order(store, reason)
+        else:
+            msg = (f"Odoo siparişi {so.name} PttAVM satırlarıyla uyuşmuyor (Odoo'da eksik ürün var); "
+                   f"elle kontrol edin.")
+            if self.error_message != msg:
+                self.error_message = msg
+
+    def _match_products(self, lines):
+        Product = self.env['product.product'].sudo()
+        codes = [c for c in lines.mapped('product_code') if c]
+        product_map = Product.batch_find_by_marketplace_barcodes(codes) if codes else {}
+        missing = []
+        for line in lines:
+            code = line.product_code
+            product = product_map.get(code) if code else None
+            if not product and code:
+                product = Product.find_by_marketplace_barcode(code)
+                if product:
+                    product_map[code] = product
+            if not product:
+                missing.append(code or line.product_name or line.item_id)
+        return product_map, missing
+
+    def _rebuild_sale_order(self, store, reason):
+        """Mevcut Odoo siparişini iptal eder (Nebim'den de silinir), kalan satırlarla yenisini açar."""
+        old = self.sale_order_id
+        if old.state == 'cancel':
+            return
+        if not store.auto_cancel:
+            msg = (f"{reason}: PttAVM siparişi değişti ancak 'İptalleri Otomatik İptal Et' kapalı; "
+                   f"Odoo siparişi {old.name} elle güncellenmeli.")
+            if self.error_message != msg:
+                self.error_message = msg
+                old.message_post(body=msg)
+            return
+        if old.picking_ids.filtered(lambda p: p.state == 'done'):
+            msg = f"{reason}: {old.name} sevk edildiği için otomatik güncellenmedi; elle kontrol edin."
+            if self.error_message != msg:
+                self.error_message = msg
+                old.message_post(body=msg)
+            return
+        new = self._create_odoo_sale_order(store, partners=(old.partner_id, old.partner_invoice_id,
+                                                              old.partner_shipping_id))
+        if not new:
+            return
+        with self.env.cr.savepoint():
+            old._action_cancel()
+        self.write({'sale_order_id': new.id, 'error_message': False})
+        if store.auto_confirm and new.state in ('draft', 'sent'):
+            new.action_confirm()
+        new.message_post(body=f"{reason}: önceki sipariş {old.name} iptal edildi, kalan ürünlerle yeniden oluşturuldu.")
+        old.message_post(body=f"{reason}: yerine {new.name} oluşturuldu.")
+        _logger.info("PttAVM sipariş %s: %s → %s yerine %s", self.order_number, reason, old.name, new.name)
+
+    @api.model
+    def _sale_tax_field(self):
+        fields_ = self.env['sale.order.line']._fields
+        return 'tax_ids' if 'tax_ids' in fields_ else ('tax_id' if 'tax_id' in fields_ else False)
+
+    def _create_odoo_sale_order(self, store, partners=None):
+        """Aktif PttAVM satırlarından Odoo siparişi oluşturur. Eşleşmeyen ürün varsa sipariş açılmaz."""
+        self.ensure_one()
+        lines = self._active_lines()
+        product_map, missing = self._match_products(lines)
+        if missing:
+            msg = 'Ürün bulunamadı: ' + ', '.join(sorted(set(missing)))
+            if self.error_message != msg:
+                self.error_message = msg
+            _logger.warning("PttAVM %s: %s", self.order_number, msg)
+            return False
+
+        if partners:
+            partner, invoice_partner, shipping_partner = partners
+        else:
+            partner, invoice_partner = self._find_or_create_partner(store)
+            shipping_partner = partner
 
         # Depo ayarını config'den al — Ayarlar > PttAVM > Depo Ayarları
-        warehouse_id_str = self.env['ir.config_parameter'].sudo().get_param(
-            'pttavm_integration.warehouse_id')
-        warehouse_id = int(warehouse_id_str) if warehouse_id_str else False
-
+        warehouse_id_str = self.env['ir.config_parameter'].sudo().get_param('pttavm_integration.warehouse_id')
         sale_vals = {
             'partner_id': partner.id,
             'partner_invoice_id': invoice_partner.id,
-            'partner_shipping_id': partner.id,
+            'partner_shipping_id': shipping_partner.id,
             'pttavm_store_id': store.id,
-            'pttavm_order_id': p_order.id,
-            'client_order_ref': p_order.order_number,
-            'date_order': p_order.order_date,
+            'pttavm_order_id': self.id,
+            'client_order_ref': self.order_number,
+            'date_order': self.order_date or fields.Datetime.now(),
             'order_line': [],
         }
-        if warehouse_id:
-            sale_vals['warehouse_id'] = warehouse_id
-        
-        # Batch ürün arama (merkezi metod)
-        Product = self.env['product.product'].sudo()
-        codes = [line.product_code for line in p_order.line_ids if line.product_code]
-        product_map = Product.batch_find_by_marketplace_barcodes(codes) if codes else {}
+        if warehouse_id_str:
+            sale_vals['warehouse_id'] = int(warehouse_id_str)
 
-        # KDV dahil vergi cache
+        tax_field = self._sale_tax_field()
         tax_cache = {}
-
-        for line in p_order.line_ids:
-            product = product_map.get(line.product_code)
-            
-            if not product:
-                _logger.warning("Pttavm Urun Bulunamadi: %s", line.product_code)
-                continue
-
+        for line in lines:
             ol_vals = {
-                'product_id': product.id,
+                'product_id': product_map[line.product_code].id,
                 'product_uom_qty': line.quantity,
-                'price_unit': line.sale_price,
+                'price_unit': line.sale_price,  # KDV DAHİL fiyat
                 'pttavm_item_id': line.item_id,
             }
-
-            # KDV dahil vergi ata
-            vat_rate = line.vat_rate if hasattr(line, 'vat_rate') and line.vat_rate else 0
+            vat_rate = line.vat_rate or 0
             if vat_rate > 0:
                 if vat_rate not in tax_cache:
-                    tax = self.env['account.tax'].sudo().search([
+                    tax_cache[vat_rate] = self.env['account.tax'].sudo().search([
                         ('type_tax_use', '=', 'sale'),
                         ('amount', '=', vat_rate),
                         ('price_include', '=', True),
                         ('company_id', '=', self.env.company.id),
                     ], limit=1)
-                    tax_cache[vat_rate] = tax
                 include_tax = tax_cache[vat_rate]
-                if include_tax:
-                    ol_vals['tax_id'] = [(6, 0, [include_tax.id])]
+                if include_tax and tax_field:
+                    ol_vals[tax_field] = [(6, 0, [include_tax.id])]
                 else:
                     # KDV dahil vergi bulunamadı — KDV'yi düşerek KDV hariç fiyat ata
                     ol_vals['price_unit'] = line.sale_price / (1 + vat_rate / 100)
                     _logger.warning("PttAVM: %%%d KDV dahil vergi bulunamadi, manuel donusum", int(vat_rate))
-
             sale_vals['order_line'].append((0, 0, ol_vals))
-            
+
         return self.env['sale.order'].create(sale_vals)
+
+    def _find_or_create_partner(self, store):
+        """(ana partner, fatura partneri) döndürür.
+
+        Ana partner teslimat adresini taşır; kurumsal siparişte firma unvanı + VKN ile açılır.
+        farkliAdres=1 ise fatura adresi ayrı (type=invoice) alt partnerdir (PTTEM modeli).
+        Telefon PttAVM'de maskeli geldiği için eşleştirmede kullanılmaz."""
+        self.ensure_one()
+        Partner = self.env['res.partner'].sudo()
+        country_tr = self.env.ref('base.tr').id
+        raw = self._raw_json()
+        is_commercial, vat = self._commercial_info(raw)
+        company_name = raw.get('firmaUnvani') or raw.get('tedarikciFirmaAdi') or ''
+        phone = raw.get('telefonNo') or ''
+        email = '' if store.skip_customer_email else (self.customer_email or '')
+        street = raw.get('siparisAdresi') or ''
+        city = self.shipping_city or raw.get('siparisIli') or ''
+
+        customer_ref = ''
+        if store.customer_prefix and self.customer_id:
+            customer_ref = f"{store.customer_prefix}{self.customer_id}"
+
+        partner = Partner
+        new_ref = customer_ref
+        # Fatura alt partnerleri de aynı ref'i taşır — ana partner yalnızca üst kayıtlarda aranır
+        top = [('parent_id', '=', False)]
+        if customer_ref:
+            if is_commercial and vat:
+                # Firma kaydı aynı müşterinin bireysel kaydını ezmesin: firma ayrı ref taşır
+                new_ref = f"{customer_ref}-{vat}"
+                partner = (Partner.search(top + [('ref', '=', new_ref)], limit=1)
+                           or Partner.search(top + [('ref', '=', customer_ref), ('vat', '=', vat)], limit=1))
+            else:
+                partner = Partner.search(top + [('ref', '=', customer_ref), ('is_company', '=', bool(is_commercial))],
+                                         limit=1)
+        else:
+            # Müşteri no yoksa yalnızca aynı isim + aynı il (+ kurumsalda aynı VKN) eşleşmesi kabul edilir
+            name = (company_name if is_commercial else self.customer_name) or ''
+            if name:
+                domain = [('name', '=ilike', name), ('parent_id', '=', False), ('city', '=ilike', city)]
+                if is_commercial and vat:
+                    domain.append(('vat', '=', vat))
+                partner = Partner.search(domain, limit=1)
+
+        einvoice = 'is_subject_to_einvoice' in Partner._fields
+        if not partner:
+            vals = {
+                'name': (company_name if is_commercial else self.customer_name) or self.customer_name or 'PttAVM Müşteri',
+                'email': email,
+                'phone': phone,
+                'street': street,
+                'city': city,
+                'country_id': country_tr,
+                'ref': new_ref,
+                'company_type': 'company' if is_commercial else 'person',
+            }
+            if is_commercial:
+                vals['vat'] = vat
+                if einvoice:
+                    vals['is_subject_to_einvoice'] = raw.get('isInvoice', False)
+            partner = Partner.create(vals)
+        else:
+            # Teslimat adresi ana partnerde: değiştiyse güncelle (yeni sipariş eski adrese gitmesin)
+            update_vals = {}
+            if street and partner.street != street:
+                update_vals['street'] = street
+            if city and partner.city != city:
+                update_vals['city'] = city
+            if email and not partner.email:
+                update_vals['email'] = email
+            if is_commercial and vat and not partner.vat:
+                update_vals['vat'] = vat
+            if update_vals:
+                partner.write(update_vals)
+
+        invoice_partner = partner
+        if str(raw.get('farkliAdres') or '0').strip() == '1':
+            bill_street = raw.get('faturaAdresi') or ''
+            # Fatura adı: kurumsal ise firma ünvanı (faturaMusteriAdi), bireysel ise kişi adı
+            if is_commercial:
+                invoice_name = company_name or raw.get('faturaMusteriAdi') or ''
+            else:
+                invoice_name = f"{raw.get('faturaMusteriAdi') or ''} {raw.get('faturaMusteriSoyadi') or ''}".strip()
+            invoice_name = invoice_name or partner.name
+            invoice_partner = Partner.search([
+                ('parent_id', '=', partner.id), ('type', '=', 'invoice'),
+                ('street', '=', bill_street), ('name', '=', invoice_name),
+            ], limit=1)
+            if not invoice_partner:
+                inv_vals = {
+                    'name': invoice_name,
+                    'type': 'invoice',
+                    'parent_id': partner.id,
+                    'street': bill_street,
+                    'city': raw.get('faturaIli') or '',
+                    'country_id': country_tr,
+                    'vat': vat,
+                    'company_type': 'company' if is_commercial else 'person',
+                    'ref': new_ref,
+                }
+                if einvoice:
+                    inv_vals['is_subject_to_einvoice'] = raw.get('isInvoice', False)
+                invoice_partner = Partner.create(inv_vals)
+        return partner, invoice_partner
 
     # ─── İPTAL YÖNETİMİ ────────────────────────────────────────
 
     @api.private
     def _cancel_odoo_order(self, pttavm_order, store=None):
         """Odoo siparişini iptal et."""
+        store = store or pttavm_order.store_id
         if store and not store.auto_cancel:
             return
-        if not store:
-            if pttavm_order.store_id and not pttavm_order.store_id.auto_cancel:
-                return
-
         so = pttavm_order.sale_order_id
         if so and so.state not in ('cancel', 'done'):
             try:
-                so._action_cancel()
+                with self.env.cr.savepoint():
+                    so._action_cancel()
                 _logger.info("PttAVM — Odoo sipariş iptal edildi: %s (PttAVM: %s)", so.name, pttavm_order.order_number)
             except Exception as e:
                 _logger.warning("PttAVM — Sipariş iptal hatası: %s - %s", so.name, e)
 
     @api.private
     def _cancel_pending_orders(self, store):
-        """Veritabanındaki iptal PttAVM siparişlerini tara."""
+        """Veritabanındaki iptal / ödemesi geçersiz PttAVM siparişlerini tara."""
+        if not store.auto_cancel:
+            return 0
         cancelled_orders = self.search([
             ('store_id', '=', store.id),
             ('order_status', 'in', list(PTTAVM_CANCEL_STATUSES)),
             ('sale_order_id', '!=', False),
             ('sale_order_id.state', 'not in', ['cancel', 'done']),
         ])
-        count = 0
         for pt_order in cancelled_orders:
-            try:
-                self._cancel_odoo_order(pt_order, store)
-                count += 1
-            except Exception as e:
-                _logger.warning("PttAVM — Bekleyen iptal hatası: %s - %s", pt_order.order_number, e)
-        return count
+            self._cancel_odoo_order(pt_order, store)
+        return len(cancelled_orders)

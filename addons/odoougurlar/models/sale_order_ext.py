@@ -222,11 +222,11 @@ class SaleOrder(models.Model):
                 pt = order.pttavm_order_id
                 display = pt.order_status_display if hasattr(pt, 'order_status_display') and pt.order_status_display else (pt.order_status or '')
                 status_raw = (pt.order_status or '').lower()
-                if 'iptal' in status_raw or 'iade' in status_raw:
+                # PttAVM durumları: kargo_yapilmasi_bekleniyor (henüz kargolanmadı), gonderilmis,
+                # tamamlandi, gondericisine_teslim_edildi (göndericiye geri döndü), iade, iptal, odeme_gecersiz
+                if status_raw in ('iptal', 'iade', 'odeme_gecersiz', 'gondericisine_teslim_edildi'):
                     category = 'danger'
-                elif 'teslim' in status_raw:
-                    category = 'success'
-                elif 'kargo' in status_raw:
+                elif status_raw in ('gonderilmis', 'gonderilmiş', 'tamamlandi'):
                     category = 'success'
                 else:
                     category = 'warning'
