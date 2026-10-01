@@ -362,52 +362,100 @@ class TrendyolSettlement(models.Model):
 
     @api.model
     def cron_financial_backfill(self):
-        """Geçmiş tamamlama işi bekleyen mağazaları parça parça işler; iş kaldıysa kendini tetikler."""
-        import time
-        stores = self.env['trendyol.store'].search([('backfill_next', '!=', False)])
-        remaining = False
-        for store in stores:
-            try:
-                api = store.get_api()
-            except Exception as e:
-                _logger.warning("Finans geçmişi tamamlanamadı [%s]: %s", store.name, e)
-                continue
-            for i in range(self._BACKFILL_CHUNKS_PER_RUN):
-                if not store.backfill_next or store.backfill_next > store.backfill_to:
-                    break
-                if i:
-                    time.sleep(self._BACKFILL_CHUNK_PAUSE)
-                chunk_start = store.backfill_next
-                chunk_end = min(chunk_start + timedelta(days=self._BACKFILL_CHUNK_DAYS - 1),
-                                store.backfill_to)
-                start_dt = datetime.combine(chunk_start, datetime.min.time())
-                end_dt = datetime.combine(chunk_end, datetime.max.time()).replace(microsecond=0)
-                created, errors = self._sync_window(api, store, start_dt, end_dt)
-                store.write({
-                    'backfill_next': chunk_end + timedelta(days=1),
-                    'backfill_created': store.backfill_created + created,
-                })
-                _logger.info("Finans geçmişi [%s]: %s → %s, %s yeni kayıt%s", store.name,
-                             chunk_start, chunk_end, created, f", hata: {'; '.join(errors)}" if errors else '')
-                self.env.cr.commit()  # her parça kalıcı: yarıda kalırsa kaldığı yerden devam eder
+        """Geçmiş tamamlama işi bekleyen mağazaları parça parça işler.
 
-            if store.backfill_next and store.backfill_next > store.backfill_to:
-                # Son adım: fatura kalemleri, eşleştirme ve tüm siparişlerin özeti
-                self._process_invoice_details(api, store, recent_only=False)
-                self._relink_unlinked_settlements(store)
-                self._update_order_financial_summary(store)
-                _logger.info("Finans geçmişi tamamlandı [%s]: %s → %s, toplam %s yeni kayıt",
-                             store.name, store.backfill_from, store.backfill_to, store.backfill_created)
-                store.write({'backfill_next': False, 'backfill_last_result':
-                             f"{store.backfill_from} → {store.backfill_to}: {store.backfill_created} yeni kayıt "
-                             f"({fields.Datetime.now():%d.%m.%Y %H:%M} UTC)"})
-                self.env.cr.commit()
-            elif store.backfill_next:
-                remaining = True
-        if remaining:
-            cron = self.env.ref('trendyol_integration.cron_trendyol_financial_backfill', raise_if_not_found=False)
-            if cron:
-                cron._trigger(fields.Datetime.now() + timedelta(seconds=60))
+        İlerleme (sıradaki parça) ayrı cursor ile yazılır: ana işlem mağaza satırına hiç yazmaz,
+        böylece aynı anda mağazayı güncelleyen başka bir işlemle çakışıp geri alınmaz. Bir parça
+        hata verirse loglanır ve bir sonraki turda (2 dk) kaldığı yerden tekrar denenir.
+        """
+        store_ids = self.env['trendyol.store'].search([('backfill_next', '!=', False)]).ids
+        if not store_ids:
+            return
+        # Önce sonraki turu planla: bu tur hata verse bile iş saatlik cron'u beklemesin
+        self._schedule_backfill(120)
+        for store_id in store_ids:
+            try:
+                self._run_backfill_store(store_id)
+            except Exception as e:
+                self.env.cr.rollback()
+                self.env.invalidate_all()
+                _logger.warning("Finans geçmişi parçası başarısız (mağaza %s), 2 dk sonra tekrar "
+                                "denenecek: %s", store_id, e)
+
+    @api.private
+    def _run_backfill_store(self, store_id):
+        import time
+        store = self.env['trendyol.store'].browse(store_id)
+        api = store.get_api()
+        for i in range(self._BACKFILL_CHUNKS_PER_RUN):
+            state = self._backfill_state(store_id)
+            if not state or not state['next'] or state['next'] > state['to']:
+                break
+            if i:
+                time.sleep(self._BACKFILL_CHUNK_PAUSE)
+            chunk_start = state['next']
+            chunk_end = min(chunk_start + timedelta(days=self._BACKFILL_CHUNK_DAYS - 1), state['to'])
+            start_dt = datetime.combine(chunk_start, datetime.min.time())
+            end_dt = datetime.combine(chunk_end, datetime.max.time()).replace(microsecond=0)
+            created, errors = self._sync_window(api, store, start_dt, end_dt)
+            self.env.cr.commit()  # parçanın kayıtları kalıcı
+            self._backfill_write(
+                "UPDATE trendyol_store SET backfill_next = %s, "
+                "backfill_created = COALESCE(backfill_created, 0) + %s WHERE id = %s "
+                "AND backfill_next IS NOT NULL",  # bu arada "Durdur" denildiyse yeniden başlatma
+                (chunk_end + timedelta(days=1), created, store_id))
+            _logger.info("Finans geçmişi [%s]: %s → %s, %s yeni kayıt%s", store.name,
+                         chunk_start, chunk_end, created, f", hata: {'; '.join(errors)}" if errors else '')
+
+        state = self._backfill_state(store_id)
+        if state and state['next'] and state['next'] > state['to']:
+            # Son adım: fatura kalemleri, eşleştirme ve tüm siparişlerin özeti
+            self._process_invoice_details(api, store, recent_only=False)
+            self._relink_unlinked_settlements(store)
+            self._update_order_financial_summary(store)
+            self.env.cr.commit()
+            result = (f"{state['from']} → {state['to']}: {state['created']} yeni kayıt "
+                      f"({fields.Datetime.now():%d.%m.%Y %H:%M} UTC)")
+            self._backfill_write(
+                "UPDATE trendyol_store SET backfill_next = NULL, backfill_last_result = %s WHERE id = %s",
+                (result, store_id))
+            _logger.info("Finans geçmişi tamamlandı [%s]: %s", store.name, result)
+
+    @api.private
+    def _backfill_state(self, store_id):
+        """Mağazanın güncel tamamlama durumu (ayrı cursor: ana işlemin eski görüntüsünden bağımsız)."""
+        with self.pool.cursor() as cr2:
+            cr2.execute("SELECT backfill_from, backfill_to, backfill_next, COALESCE(backfill_created, 0) "
+                        "FROM trendyol_store WHERE id = %s", (store_id,))
+            row = cr2.fetchone()
+        if not row:
+            return None
+        return {'from': row[0], 'to': row[1], 'next': row[2], 'created': row[3]}
+
+    @api.private
+    def _backfill_write(self, query, params):
+        """İlerlemeyi ayrı, hemen kalıcı cursor ile yaz (çakışmada bir kez daha dener)."""
+        for attempt in range(2):
+            try:
+                with self.pool.cursor() as cr2:
+                    cr2.execute(query, params)
+                return
+            except Exception as e:
+                if attempt:
+                    raise
+                _logger.info("Finans geçmişi ilerlemesi yazılamadı, tekrar deneniyor: %s", e)
+
+    @api.private
+    def _schedule_backfill(self, seconds):
+        cron = self.env.ref('trendyol_integration.cron_trendyol_financial_backfill', raise_if_not_found=False)
+        if not cron:
+            return
+        try:
+            with self.pool.cursor() as cr2:
+                self.env(cr=cr2)['ir.cron'].browse(cron.id)._trigger(
+                    fields.Datetime.now() + timedelta(seconds=seconds))
+        except Exception as e:
+            _logger.warning("Finans geçmişi sonraki tur planlanamadı: %s", e)
 
     @api.private
     def _sync_payment_orders(self, api, store):
