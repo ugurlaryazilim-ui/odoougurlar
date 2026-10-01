@@ -1,6 +1,7 @@
 from . import pazarama_store
 from . import pazarama_order
 from . import pazarama_order_sync
+from . import pazarama_order_invoice
 from . import sale_order
 from . import pazarama_settlement
 from . import pazarama_refund

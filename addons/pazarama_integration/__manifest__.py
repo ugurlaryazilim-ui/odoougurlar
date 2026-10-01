@@ -1,6 +1,6 @@
 {
     'name': 'Pazarama Entegrasyonu',
-    'version': '19.0.1.0.0',
+    'version': '19.0.1.1.0',
     'summary': 'Pazarama Sipariş Entegrasyonu',
     'description': 'Pazarama Pazaryeri API üzerinden siparişlerin çekilmesi, Odoo\'da oluşturulması ve Nebim entegrasyonuna hazır hale getirilmesi.',
     'author': 'Uğurlar',

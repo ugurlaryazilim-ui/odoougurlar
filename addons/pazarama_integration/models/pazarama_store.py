@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
@@ -20,8 +20,9 @@ class PazaramaStore(models.Model):
 
     # API Credentials
     client_id = fields.Char(string='Client ID (API Key)', required=True, groups='base.group_system', help="isortagim.pazarama.com panelinden alınır")
-    client_secret = fields.Char(string='Client Secret (API Secret)', required=True, groups='base.group_system')
-    
+    client_secret = fields.Char(string='Client Secret (API Secret)', required=True, groups='base.group_system',
+                                help="Pazarama API anahtarı en fazla 365 gün geçerlidir; süresi dolunca panelden yenisi üretilmelidir.")
+
     # Tokens
     access_token = fields.Char(string='Access Token', readonly=True, groups='base.group_system')
     token_expiry = fields.Datetime(string='Token Bitiş Tarihi', readonly=True, groups='base.group_system')
@@ -29,27 +30,37 @@ class PazaramaStore(models.Model):
     # ─── Senkronizasyon Ayarları ─────────────────────────
     auto_sync = fields.Boolean(string='Otomatik Sipariş Senkronizasyonu', default=True)
     sync_interval = fields.Integer(string='Senkron Aralığı (dk)', default=1, help='Bu değer cron ile senkronize çalışarak hangi sıklıkta Pazarama API\'ye çıkılacağını gösterir.')
-    order_day_range = fields.Integer(string='Senkronizasyon Gün Aralığı', default=1, help="Geçmişe dönük kaç günlük sipariş çekilecek?")
+    order_day_range = fields.Integer(string='Senkronizasyon Gün Aralığı', default=1, help="Geçmişe dönük kaç günlük sipariş çekilecek (en fazla 29)? Daha eski açık siparişler sipariş numarasıyla ayrıca yoklanır.")
     last_sync = fields.Datetime(string='Son Senkronizasyon', readonly=True)
-    
+    last_sync_error = fields.Text(string='Son Senkron Hatası', readonly=True)
+    last_sync_error_date = fields.Datetime(string='Hata Zamanı', readonly=True)
+
     # ─── Sipariş Ayarları ────────────────────────────────
     auto_confirm = fields.Boolean(string='Siparişi Otomatik Onayla', default=True, help="Odoo'ya düşen siparişler otomatik onaylanır ve Nebim sürecini tetikler.")
     auto_cancel = fields.Boolean(string='İptalleri Otomatik İptal Et', default=True)
+    auto_accept_orders = fields.Boolean(
+        string="Siparişi Pazarama'da Otomatik Onayla", default=False,
+        help="Açıksa Odoo'da onaylanan siparişin 'Sipariş Alındı' kalemleri Pazarama'da 'Hazırlanıyor' "
+             "statüsüne alınır (kargo işlemi için zorunlu adım). Kapalıysa onay panelden yapılır.")
+    auto_send_invoice = fields.Boolean(
+        string="Faturayı Pazarama'ya Gönder", default=False,
+        help="Açıksa, Odoo siparişinin Nebim faturası oluştuğunda e-arşiv/e-fatura linki Pazarama'ya "
+             "gönderilir (Nebim usp_Invoice_EArchieveURL ile alınır).")
 
     # ─── Müşteri Ayarları ────────────────────────────────
     customer_prefix = fields.Char(string='Müşteri Kodu Ön Ek', default='PZR-', help='Pazarama müşterilerinin kodlarına eklenen ek')
     skip_customer_email = fields.Boolean(string='Mail Adresi İşlenmesin', default=False, help='Müşteri oluşturulurken e-posta adresi kaydedilmez (KVKK)')
 
-    # ─── İade Ayarları ───────────────────────────────────
+    # ─── İade Ayarları (kullanılmıyor) ───────────────────
     process_returns = fields.Boolean(string='İadeleri İşle', default=False, help='İade edilen siparişleri çekip listele')
     return_day_range = fields.Integer(string='İade Gün Aralığı', default=3)
-    
+
     # ─── Kargo Ayarları ──────────────────────────────────
     auto_send_cargo = fields.Boolean(string='Otomatik Kargo Kodu Gönder', default=True, help='Depo Picking (Toplama) tamamlandığında kargo bilgisini pazarama paneline otomatik yollar')
     cargo_include_order_number = fields.Boolean(string='Kargo Koduna Sipariş No Ekle', default=False)
     default_package_count = fields.Integer(string='Varsayılan Koli Sayısı', default=1)
     default_desi = fields.Float(string='Varsayılan Desi', default=1.0)
-    
+
     # ─── Finansal İşlem Ayarları ─────────────────────────
     sync_financials = fields.Boolean(string='Finansal İşlemleri Senkronize Et', default=True)
     financial_day_range = fields.Integer(string='Finansal Gün Aralığı', default=15)
@@ -61,19 +72,26 @@ class PazaramaStore(models.Model):
     order_ids = fields.One2many('pazarama.order', 'store_id', string='Siparişler')
     settlement_ids = fields.One2many('pazarama.settlement', 'store_id', string='Finansal İşlemler')
 
+    # ─── Tek Sipariş Çek ─────────────────────────────────
+    fetch_order_number = fields.Char(string='Sipariş No', copy=False,
+                                     help='Pazarama sipariş numarası (son 6 ay)')
+
     # ─── Counts ──────────────────────────────────────────────
     order_count = fields.Integer(string='Sipariş Sayısı', compute='_compute_order_count')
+    error_order_count = fields.Integer(string='Hatalı Sipariş', compute='_compute_order_count')
     settlement_count = fields.Integer(string='Finansal Kayıt', compute='_compute_counts')
 
     @api.depends('order_ids')
     def _compute_order_count(self):
-        data = self.env['pazarama.order'].sudo()._read_group(
-            [('store_id', 'in', self.ids)],
-            groupby=['store_id'], aggregates=['__count'],
-        )
-        counts = {store.id: count for store, count in data}
+        Order = self.env['pazarama.order'].sudo()
+        counts = dict(Order._read_group(
+            [('store_id', 'in', self.ids)], groupby=['store_id'], aggregates=['__count']))
+        errors = dict(Order._read_group(
+            [('store_id', 'in', self.ids), ('error_message', '!=', False)],
+            groupby=['store_id'], aggregates=['__count']))
         for store in self:
-            store.order_count = counts.get(store.id, 0)
+            store.order_count = counts.get(store, 0)
+            store.error_order_count = errors.get(store, 0)
 
     @api.depends('settlement_ids')
     def _compute_counts(self):
@@ -84,6 +102,36 @@ class PazaramaStore(models.Model):
         counts = {store.id: count for store, count in data}
         for store in self:
             store.settlement_count = counts.get(store.id, 0)
+
+    def _separate_write(self, query, params):
+        """Mağaza satırına ayrı cursor ile yazar: cron işlemi satırı kilitlemez, formdan aynı anda
+        kaydedilen mağazayla çakışıp (serialization) geri alınmaz."""
+        self.ensure_one()
+        try:
+            with self.pool.cursor() as cr2:
+                cr2.execute("SET LOCAL lock_timeout = '5s'")
+                cr2.execute(query, params)
+            return True
+        except Exception as e:
+            _logger.warning("Pazarama mağaza durumu yazılamadı (%s): %s", self.name, e)
+            return False
+
+    def _save_token(self, token, expiry):
+        self._separate_write("UPDATE pazarama_store SET access_token = %s, token_expiry = %s WHERE id = %s",
+                             (token or None, expiry or None, self.id))
+
+    def _write_sync_state(self, last_sync=None, error=False):
+        self.ensure_one()
+        if last_sync:
+            self._separate_write("UPDATE pazarama_store SET last_sync = %s WHERE id = %s", (last_sync, self.id))
+        if error:
+            self._separate_write(
+                "UPDATE pazarama_store SET last_sync_error = %s, last_sync_error_date = %s WHERE id = %s",
+                (str(error)[:2000], fields.Datetime.now(), self.id))
+        elif last_sync:
+            self._separate_write("UPDATE pazarama_store SET last_sync_error = NULL, last_sync_error_date = NULL "
+                                 "WHERE id = %s AND last_sync_error IS NOT NULL", (self.id,))
+        self.invalidate_recordset(['last_sync', 'last_sync_error', 'last_sync_error_date'])
 
     def write(self, vals):
         res = super().write(vals)
@@ -116,33 +164,34 @@ class PazaramaStore(models.Model):
         return PazaramaAPIClient(self)
 
     def action_test_connection(self):
-        """Bağlantıyı ve yetkilendirmeyi sına."""
+        """Bağlantıyı ve yetkilendirmeyi sına (yeni token alınır)."""
         self.ensure_one()
-        try:
-            api = self.get_api()
-            token = api.get_access_token()
-            if token:
-                return {
-                    'type': 'ir.actions.client',
-                    'tag': 'display_notification',
-                    'params': {
-                        'title': _('Başarılı'),
-                        'message': _('Bağlantı Başarılı. Token Alındı.'),
-                        'sticky': False,
-                        'type': 'success',
-                    }
-                }
-            else:
-                raise UserError(_("Token alınamadı, bilgilerinizi kontrol edin."))
-        except Exception as e:
-            raise UserError(_("Bağlantı Hatası: %s" % str(e)))
+        api = self.get_api()
+        token = api.get_access_token(force=True)  # önbellekteki token yerine gerçekten yeni token iste
+        if not token:
+            raise UserError(_("Bağlantı Hatası: %s", getattr(api, 'token_error', None) or
+                              'Token alınamadı, bilgilerinizi kontrol edin.'))
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Başarılı'),
+                'message': _('Bağlantı Başarılı. Token Alındı.'),
+                'sticky': False,
+                'type': 'success',
+            }
+        }
 
     def action_sync_now(self):
         self.ensure_one()
         sync_model = self.env['pazarama.order'].sudo()
         res = sync_model.sync_orders_for_store(self)
+        if res.get('busy'):
+            raise UserError(_("Bu mağazada senkronizasyon şu anda zaten çalışıyor. Birkaç dakika sonra tekrar deneyin."))
+        if res.get('error'):
+            raise UserError(_("Pazarama sipariş çekme hatası:\n\n%s", res['error']))
         msg = f"Sipariş Senkronizasyon Tamamlandı.\nYeni: {res.get('created', 0)}\nGüncellenen: {res.get('updated', 0)}\nHata: {res.get('errors', 0)}"
-        
+
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
@@ -154,32 +203,84 @@ class PazaramaStore(models.Model):
             }
         }
 
-    def action_sync_financials(self):
+    def action_view_orders(self):
         self.ensure_one()
-        
+        domain = [('store_id', '=', self.id)]
+        if self.env.context.get('only_errors'):
+            domain.append(('error_message', '!=', False))
+        return {
+            'type': 'ir.actions.act_window',
+            'name': _('Pazarama Siparişleri'),
+            'res_model': 'pazarama.order',
+            'view_mode': 'list,form',
+            'domain': domain,
+        }
+
+    def action_fetch_single_order(self):
+        """Sipariş numarası ile tek sipariş çek (son 6 ay)."""
+        self.ensure_one()
+        order_number = (self.fetch_order_number or '').strip()
+        if not order_number:
+            raise UserError(_('Lütfen bir sipariş numarası girin!'))
+        Order = self.env['pazarama.order']
         api = self.get_api()
-        start_date = datetime.now() - timedelta(days=self.financial_day_range or 15)
-        end_date = datetime.now()
+        order_json, error = None, None
+        # Sipariş tarihi bilinmediği için son 6 ay 1'er aylık pencerelerle aranır
+        end = Order._now_turkey() + timedelta(minutes=5)
+        for _i in range(6):
+            start = end - timedelta(days=29)
+            orders, error = Order._fetch_orders(api, start, end, order_number=order_number)
+            if error:
+                break
+            match = [o for o in orders if str(o.get('orderNumber') or '') == order_number]
+            if match:
+                order_json = match[0]
+                break
+            end = start
+        if error:
+            raise UserError(_('❌ Pazarama API hatası:\n\n%s', error))
+        if not order_json:
+            raise UserError(_('❌ Sipariş bulunamadı: %s (son 6 ay)', order_number))
+        action = Order._sync_order_json(self, order_json, api)
+        self.fetch_order_number = False
+        rec = Order.search([('store_id', '=', self.id), ('order_id', '=', str(order_json.get('orderId')))], limit=1)
+        msg = f"✅ Sipariş çekildi ({order_number}) | {'Yeni oluşturuldu' if action == 'created' else 'Güncellendi'}"
+        if rec.error_message:
+            msg += f'\n⚠️ {rec.error_message}'
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Pazarama Sipariş Çek',
+                'message': msg,
+                'type': 'warning' if rec.error_message else 'success',
+                'sticky': bool(rec.error_message),
+            },
+        }
+
+    def action_sync_financials(self):
+        """Muhasebe ve Finans Servisi (paymentAgreement) → pazarama.settlement."""
+        self.ensure_one()
+        Order = self.env['pazarama.order']
+        api = self.get_api()
+        end_date = Order._now_turkey()
+        start_date = (end_date - timedelta(days=self.financial_day_range or 15)).replace(
+            hour=0, minute=0, second=0, microsecond=0)
 
         res = api.get_payment_agreements(start_date=start_date, end_date=end_date)
         if not res.get('success'):
-            raise UserError(_("Finansal veriler çekilemedi: %s") % res.get('error'))
+            raise UserError(_("Finansal veriler çekilemedi: %s", res.get('error')))
 
-        data_list = res.get('data', [])
-        
-        # Pazarama data is sometimes inside {'data': [...]} or just a list
-        if isinstance(data_list, dict) and 'data' in data_list:
-            data_list = data_list['data']
-        elif isinstance(data_list, dict) and 'paymentAgreements' in data_list:
-            data_list = data_list['paymentAgreements']
-
+        body = res.get('data') or {}
+        payload = body.get('data') if isinstance(body, dict) else None
+        data_list = (payload or {}).get('transactionList') if isinstance(payload, dict) else payload
         if not data_list or not isinstance(data_list, list):
             return {
                 'type': 'ir.actions.client',
                 'tag': 'display_notification',
                 'params': {
                     'title': _('Finansal Senkronizasyon'),
-                    'message': 'Belirtilen tarih aralığında yeni finansal işlem (Payment Agreement) bulunamadı.',
+                    'message': 'Belirtilen tarih aralığında finansal işlem bulunamadı.',
                     'sticky': False,
                     'type': 'info',
                 }
@@ -188,53 +289,30 @@ class PazaramaStore(models.Model):
         created = 0
         updated = 0
         settlement_model = self.env['pazarama.settlement']
-
         for item in data_list:
-            trx_id = str(item.get('id') or item.get('paymentAgreementId') or '')
-            order_id = item.get('orderId') or ''
-            
-            # Bazı kayıtlarda id olmayabiliyor, trx_id ve order_id birlikte kontrol edelim
-            domain = [('store_id', '=', self.id)]
-            if trx_id:
-                domain.append(('trx_id', '=', trx_id))
-            elif order_id:
-                domain.append(('order_id', '=', order_id))
-            else:
-                continue # no identifier
-
+            if not isinstance(item, dict):
+                continue
+            trx_id = str(item.get('trxId') or item.get('id') or '')
+            order_id = str(item.get('orderId') or '')  # pratikte sipariş numarası
+            if not trx_id and not order_id:
+                continue
+            domain = [('store_id', '=', self.id), ('trx_id', '=', trx_id), ('order_id', '=', order_id)]
             existing = settlement_model.search(domain, limit=1)
-            
-            # Tarih dönüşümleri
-            trx_date_str = item.get('transactionDate') or item.get('agreementDate')
-            trx_date = False
-            if trx_date_str:
-                try:
-                    trx_date = datetime.strptime(trx_date_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
-                except Exception:
-                    pass
-
-            transferred_date_str = item.get('allowanceDate') or item.get('paymentDate')
-            transferred_date = False
-            if transferred_date_str:
-                try:
-                    transferred_date = datetime.strptime(transferred_date_str[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S')
-                except Exception:
-                    pass
-
             vals = {
                 'store_id': self.id,
                 'order_id': order_id,
                 'trx_id': trx_id,
-                'amount': item.get('totalAmount') or item.get('amount') or 0.0,
-                'installment_number': item.get('installmentNumber', 1),
-                'commission_amount': item.get('commissionAmount', 0.0),
-                'coupon_discount': item.get('couponDiscount', 0.0),
-                'status': item.get('status') or item.get('paymentStatus') or 'Unknown',
-                'transaction_date': trx_date,
-                'transferred_date': transferred_date,
-                'raw_data': json.dumps(item, ensure_ascii=False)
+                'trx_code': str(item.get('trxCode') or ''),
+                'amount': item.get('amount') or 0.0,
+                'installment_number': item.get('installmentNumber') or 1,
+                'commission_amount': item.get('commissionAmount') or 0.0,
+                'coupon_discount': item.get('couponDiscount') or 0.0,
+                'allowance_amount': item.get('allowanceAmount') or 0.0,
+                'status': item.get('status') or 'Bilinmiyor',
+                'transaction_date': Order._parse_tr_datetime(item.get('transactionDate')),
+                'transferred_date': Order._parse_tr_datetime(item.get('transferredDate')),
+                'raw_data': json.dumps(item, ensure_ascii=False),
             }
-
             if existing:
                 existing.write(vals)
                 updated += 1
@@ -243,7 +321,6 @@ class PazaramaStore(models.Model):
                 created += 1
 
         self.sudo().write({'last_financial_sync': fields.Datetime.now()})
-
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
@@ -253,4 +330,14 @@ class PazaramaStore(models.Model):
                 'sticky': False,
                 'type': 'success',
             }
+        }
+
+    def action_view_settlements(self):
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.act_window',
+            'name': _('Pazarama Finansal İşlemler'),
+            'res_model': 'pazarama.settlement',
+            'view_mode': 'list,form',
+            'domain': [('store_id', '=', self.id)],
         }

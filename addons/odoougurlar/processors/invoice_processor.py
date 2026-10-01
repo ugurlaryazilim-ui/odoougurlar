@@ -431,6 +431,8 @@ class InvoiceProcessor(models.AbstractModel):
                 tax_office_name = getattr(sale_order.hb_order_id, 'tax_office', '') or ''
             elif hasattr(sale_order, 'pttavm_order_id') and sale_order.pttavm_order_id:
                 tax_office_name = getattr(sale_order.pttavm_order_id, 'tax_office', '') or ''
+            elif hasattr(sale_order, 'pazarama_order_id') and sale_order.pazarama_order_id:
+                tax_office_name = getattr(sale_order.pazarama_order_id, 'tax_office', '') or ''
             if tax_office_name:
                 tax_map = self.env['odoougurlar.tax.mapping'].sudo().search(
                     [('name', '=ilike', tax_office_name.strip())], limit=1

@@ -1,8 +1,13 @@
-import json
 import logging
-from odoo import api, fields, models, _
+from odoo import models
+
+from .pazarama_order import PAZARAMA_CANCEL_STATUSES
 
 _logger = logging.getLogger(__name__)
+
+# Kargo bildirimi yapılabilecek kalem durumları: 3 Sipariş Alındı (önce 12'ye alınır), 12 Hazırlanıyor
+_SHIPPABLE_STATUSES = (3, 12)
+
 
 class StockPicking(models.Model):
     _inherit = 'stock.picking'
@@ -19,21 +24,12 @@ class StockPicking(models.Model):
             if picking.state != 'done':
                 continue
 
-            # Pazarama siparişi mi?
             sale_order = picking.sale_id
-            if not sale_order:
-                group = getattr(picking, 'group_id', False)
-                if group:
-                    sale_order = self.env['sale.order'].search(
-                        [('procurement_group_id', '=', group.id)], limit=1
-                    )
-            
             if not sale_order or not sale_order.pazarama_order_id:
                 continue
 
             pazarama_order = sale_order.pazarama_order_id
             store = pazarama_order.store_id
-            
             if not store or not store.auto_send_cargo:
                 continue
 
@@ -52,40 +48,45 @@ class StockPicking(models.Model):
                 continue
 
             try:
-                api = store.get_api()
-                
-                # JSON parse loop DIŞINDA tek sefer yapılır
-                raw_data = json.loads(pazarama_order.raw_data) if pazarama_order.raw_data else {}
-                raw_items = raw_data.get('items', [])
-                # item_id → cargo company ID mapping oluştur (O(n) dict lookup)
-                cargo_id_map = {}
-                for raw_item in raw_items:
-                    item_id = raw_item.get('orderItemId')
-                    if item_id:
-                        cargo_id_map[item_id] = raw_item.get('cargo', {}).get('companyId', '')
-
-                for line in pazarama_order.line_ids:
-                    cargo_com_id = cargo_id_map.get(line.item_id, '')
-                    
-                    if not cargo_com_id:
-                        _logger.warning("Pazarama Kargo Firma ID'si bulunamadi. Tracking iptal: %s", line.item_id)
-                        continue
-
-                    # Kargo bildirim API'sini çağır
-                    result = api.update_tracking_number(
-                        order_number=pazarama_order.order_number,
-                        order_item_id=line.item_id,
-                        tracking_number=tracking_number,
-                        cargo_company_id=cargo_com_id
-                    )
-                    
-                    if result.get('success'):
-                        _logger.info("Kargo bilgisi Pazarama'ya gönderildi [%s/Item: %s]: %s",
-                                     pazarama_order.order_number, line.item_id, tracking_number)
-                    else:
-                        _logger.warning("Kargo bilgisi Pazarama'ya gönderilemedi [%s]: %s",
-                                        pazarama_order.order_number, result.get('error'))
+                picking._pazarama_send_tracking(pazarama_order, store, tracking_number)
             except Exception as e:
                 _logger.exception("Kargo bilgisi Pazarama gönderme hatası [%s]: %s", store.name, e)
 
         return res
+
+    def _pazarama_send_tracking(self, pazarama_order, store, tracking_number):
+        """İptal edilmemiş, henüz kargolanmamış kalemler için kargo bilgisini gönderir;
+        sonucu transferin geçmişine yazar."""
+        lines = pazarama_order.line_ids.filtered(
+            lambda l: l.status in _SHIPPABLE_STATUSES and l.status not in PAZARAMA_CANCEL_STATUSES)
+        if not lines:
+            return
+        api = store.get_api()
+        # Pazarama kargo işleminden önce kalemin 'Hazırlanıyor' (12) olmasını ister
+        waiting = lines.filtered(lambda l: l.status == 3)
+        if waiting and store.auto_accept_orders:
+            pazarama_order._accept_lines(waiting, self, 'Transfer doğrulandı', api)
+
+        sent, errors = [], []
+        for line in lines:
+            if not line.cargo_company_id:
+                errors.append(f"✗ {line.product_code or line.item_id}: kargo firma ID'si yok")
+                continue
+            result = api.update_tracking_number(
+                order_number=pazarama_order.order_number,
+                order_item_id=line.item_id,
+                tracking_number=tracking_number,
+                cargo_company_id=line.cargo_company_id,
+            )
+            if result.get('success'):
+                sent.append(line)
+            else:
+                errors.append(f"✗ {line.product_code or line.item_id}: {result.get('error')}")
+        if sent:
+            for line in sent:
+                line.status = 5
+        msg = [f"Pazarama kargo bildirimi ({tracking_number}): {len(sent)}/{len(lines)} kalem gönderildi."]
+        msg.extend(errors)
+        self.message_post(body='\n'.join(msg))
+        if errors:
+            _logger.warning("Pazarama kargo bildirimi [%s]: %s", pazarama_order.order_number, '; '.join(errors))
