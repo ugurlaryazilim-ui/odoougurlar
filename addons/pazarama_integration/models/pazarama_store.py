@@ -8,6 +8,7 @@ from odoo.exceptions import UserError
 _logger = logging.getLogger(__name__)
 
 _CRON_XMLID = 'pazarama_integration.ir_cron_pazarama_sync_orders'
+_FINANCE_ORDER_LIMIT = 300  # bir seferde sorgulanacak en fazla sipariş
 
 class PazaramaStore(models.Model):
     _name = 'pazarama.store'
@@ -63,7 +64,7 @@ class PazaramaStore(models.Model):
 
     # ─── Finansal İşlem Ayarları ─────────────────────────
     sync_financials = fields.Boolean(string='Finansal İşlemleri Senkronize Et', default=True)
-    financial_day_range = fields.Integer(string='Finansal Gün Aralığı', default=15)
+    financial_day_range = fields.Integer(string='Finansal Gün Aralığı', default=60, help='Son kaç günün siparişlerinin finans kaydı (sipariş numarasıyla) sorgulanır. Hakedişi aktarılmış siparişler tekrar sorgulanmaz.')
     platform_fee_rate = fields.Float(string='Platform Hizmet Bedeli Oranı (%)', default=1.47, digits=(5, 2))
     cargo_unit_price = fields.Float(string='Kargo Birim Fiyatı (desi)', default=110.39, digits=(10, 2))
     last_financial_sync = fields.Datetime(string='Son Finansal Senkron', readonly=True)
@@ -259,125 +260,98 @@ class PazaramaStore(models.Model):
         }
 
     def action_sync_financials(self):
-        """Muhasebe ve Finans Servisi (paymentAgreement) → pazarama.settlement."""
+        """Muhasebe ve Finans Servisi (paymentAgreement) → pazarama.settlement.
+
+        Pazarama'nın tarihli sorgusu (startDate / allowanceStartDate) kayıt olan günlerde
+        "İşleminiz şu anda gerçekleştirilemiyor" dönüyor (teşhis: 01.10.2026); sipariş numarasıyla
+        sorgu (orderId) ise çalışıyor. Bu yüzden son N günün siparişleri tek tek sorgulanır."""
         self.ensure_one()
-        Order = self.env['pazarama.order']
-        api = self.get_api()
-        res = self._fetch_payment_agreements(api)
-
-        body = res.get('data') or {}
-        payload = body.get('data') if isinstance(body, dict) else None
-        data_list = (payload or {}).get('transactionList') if isinstance(payload, dict) else payload
-        if not data_list or not isinstance(data_list, list):
-            return {
-                'type': 'ir.actions.client',
-                'tag': 'display_notification',
-                'params': {
-                    'title': _('Finansal Senkronizasyon'),
-                    'message': 'Belirtilen tarih aralığında finansal işlem bulunamadı.',
-                    'sticky': False,
-                    'type': 'info',
-                }
-            }
-
-        created = 0
-        updated = 0
-        settlement_model = self.env['pazarama.settlement']
-        for item in data_list:
-            if not isinstance(item, dict):
-                continue
-            trx_id = str(item.get('trxId') or item.get('id') or '')
-            order_id = str(item.get('orderId') or '')  # pratikte sipariş numarası
-            if not trx_id and not order_id:
-                continue
-            domain = [('store_id', '=', self.id), ('trx_id', '=', trx_id), ('order_id', '=', order_id)]
-            existing = settlement_model.search(domain, limit=1)
-            vals = {
-                'store_id': self.id,
-                'order_id': order_id,
-                'trx_id': trx_id,
-                'trx_code': str(item.get('trxCode') or ''),
-                'amount': item.get('amount') or 0.0,
-                'installment_number': item.get('installmentNumber') or 1,
-                'commission_amount': item.get('commissionAmount') or 0.0,
-                'coupon_discount': item.get('couponDiscount') or 0.0,
-                'allowance_amount': item.get('allowanceAmount') or 0.0,
-                'status': item.get('status') or 'Bilinmiyor',
-                'transaction_date': Order._parse_tr_datetime(item.get('transactionDate')),
-                'transferred_date': Order._parse_tr_datetime(item.get('transferredDate')),
-                'raw_data': json.dumps(item, ensure_ascii=False),
-            }
-            if existing:
-                existing.write(vals)
-                updated += 1
-            else:
-                settlement_model.create(vals)
-                created += 1
-
-        self.sudo().write({'last_financial_sync': fields.Datetime.now()})
+        res = self._sync_financials_by_order()
+        msg = (f"{res['queried']} sipariş sorgulandı.\nYeni işlem: {res['created']}\n"
+               f"Güncellenen: {res['updated']}")
+        if res['errors']:
+            msg += f"\nSorgulanamayan: {len(res['errors'])}\n" + '\n'.join(res['errors'][:5])
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
-                'title': _('Finansal Senkronizasyon Başarılı'),
-                'message': f"Yeni İşlem: {created}\nGüncellenen: {updated}",
-                'sticky': False,
-                'type': 'success',
+                'title': _('Finansal Senkronizasyon'),
+                'message': msg,
+                'sticky': bool(res['errors']),
+                'type': 'warning' if res['errors'] else 'success',
             }
         }
 
-    @api.model
-    def _finance_bodies(self, start_day, end_day, today):
-        """paymentAgreement için denenecek gövdeler (ad, gövde). Doküman yalnız tek örnek veriyor
-        (başlangıç "T03:00:00.000", bitiş geçmiş günün "T23:59:59.999"); Pazarama hatalı biçimde
-        yalnızca "İşleminiz şu anda gerçekleştirilemiyor" dediği için biçimler sırayla denenir."""
-        def d(day, suffix):
-            return day.strftime('%Y-%m-%d') + suffix
+    def _sync_financials_by_order(self, limit=_FINANCE_ORDER_LIMIT):
+        """Son 'Finansal Gün Aralığı' gündeki (iptal olmayan) siparişlerin finans kayıtlarını
+        sipariş numarasıyla çeker. Hakedişi aktarılmış (transferredDate dolu) siparişler atlanır."""
+        self.ensure_one()
+        Order = self.env['pazarama.order']
+        Settlement = self.env['pazarama.settlement']
+        api = self.get_api()
+        since = fields.Datetime.now() - timedelta(days=self.financial_day_range or 60)
+        orders = Order.search([
+            ('store_id', '=', self.id),
+            ('order_date', '>=', since),
+            ('order_status', 'not in', [6, 13]),
+        ], order='order_date desc')
+        paid = set(Settlement.search([
+            ('store_id', '=', self.id), ('order_id', 'in', orders.mapped('order_number')),
+            ('transferred_date', '!=', False),
+        ]).mapped('order_id'))
+        orders = orders.filtered(lambda o: o.order_number.isdigit() and o.order_number not in paid)[:limit]
 
-        def body(start, end, allowance=False):
-            return {
-                'startDate': None if allowance else start,
-                'endDate': None if allowance else end,
-                'allowanceStartDate': start if allowance else None,
-                'allowanceEndDate': end if allowance else None,
-                'orderId': None,
-            }
-        return [
-            ('doc', body(d(start_day, 'T03:00:00.000'), d(end_day, 'T23:59:59.999'))),
-            ('doc_today', body(d(start_day, 'T03:00:00.000'), d(today, 'T23:59:59.999'))),
-            ('midnight', body(d(start_day, 'T00:00:00.000'), d(end_day, 'T23:59:59.999'))),
-            ('utc_z', body(d(start_day, 'T00:00:00.000Z'), d(end_day, 'T23:59:59.999Z'))),
-            ('date_only', body(d(start_day, ''), d(end_day, ''))),
-            ('allowance', body(d(start_day, 'T03:00:00.000'), d(end_day, 'T23:59:59.999'), allowance=True)),
-        ]
+        result = {'queried': 0, 'created': 0, 'updated': 0, 'errors': []}
+        for order in orders:
+            res = api.get_payment_agreements({
+                'startDate': None, 'endDate': None, 'allowanceStartDate': None,
+                'allowanceEndDate': None, 'orderId': int(order.order_number),
+            })
+            result['queried'] += 1
+            if not res.get('success'):
+                result['errors'].append(f"{order.order_number}: {res.get('error')}")
+                _logger.warning("Pazarama finans %s sorgulanamadı: %s", order.order_number, res.get('error'))
+                if res.get('status') in (401, 403):
+                    break
+                continue
+            body = res.get('data') if isinstance(res.get('data'), dict) else {}
+            payload = body.get('data') if isinstance(body.get('data'), dict) else {}
+            for item in payload.get('transactionList') or []:
+                if isinstance(item, dict):
+                    result[self._upsert_settlement(item, order.order_number)] += 1
 
-    def _fetch_payment_agreements(self, api):
-        """Biçimleri sırayla dener; çalışan biçim hatırlanır ve sonraki seferde önce o denenir.
-        Hiçbiri çalışmazsa tüm denemelerin Pazarama yanıtıyla hata verilir."""
-        today = self.env['pazarama.order']._now_turkey().date()
-        end_day = today - timedelta(days=1)  # bitiş: dün (dokümandaki örnek gibi geçmiş gün)
-        start_day = end_day - timedelta(days=max((self.financial_day_range or 15) - 1, 0))
-        params = self.env['ir.config_parameter'].sudo()
-        known = params.get_param('pazarama_integration.finance_body_variant')
-        variants = self._finance_bodies(start_day, end_day, today)
-        variants.sort(key=lambda v: v[0] != known)
-        errors = []
-        for name, body in variants:
-            res = api.get_payment_agreements(body)
-            if res.get('success'):
-                if name != known:
-                    params.set_param('pazarama_integration.finance_body_variant', name)
-                    _logger.info("Pazarama finans: çalışan istek biçimi '%s': %s", name, json.dumps(body))
-                return res
-            errors.append(f"{name}: {res.get('error')}")
-            _logger.warning("Pazarama finans denemesi '%s' başarısız: %s | gövde: %s",
-                            name, res.get('error'), json.dumps(body))
-            if res.get('status') in (401, 403):
-                break  # yetki sorunu — diğer biçimleri denemenin anlamı yok
-        raise UserError(_("Finansal veriler çekilemedi (Pazarama tüm istek biçimlerini reddetti):\n\n%s\n\n"
-                          "Bu durumda sorun Pazarama tarafında olabilir; istek gövdeleri sunucu logunda "
-                          "'Pazarama finans denemesi' satırlarında. Pazarama desteğine iletilebilir.",
-                          '\n'.join(errors)))
+        self.sudo().write({'last_financial_sync': fields.Datetime.now()})
+        _logger.info("Pazarama finans [%s]: %d sipariş sorgulandı, %d yeni, %d güncellenen, %d hata",
+                     self.name, result['queried'], result['created'], result['updated'], len(result['errors']))
+        return result
+
+    def _upsert_settlement(self, item, order_number):
+        Order = self.env['pazarama.order']
+        Settlement = self.env['pazarama.settlement']
+        trx_id = str(item.get('trxId') or item.get('id') or '')
+        order_id = str(item.get('orderId') or order_number)  # pratikte sipariş numarası
+        vals = {
+            'store_id': self.id,
+            'order_id': order_id,
+            'trx_id': trx_id,
+            'trx_code': str(item.get('trxCode') or ''),
+            'amount': item.get('amount') or 0.0,
+            'installment_number': item.get('installmentNumber') or 1,
+            'commission_amount': item.get('commissionAmount') or 0.0,
+            'coupon_discount': item.get('couponDiscount') or 0.0,
+            'allowance_amount': item.get('allowanceAmount') or 0.0,
+            'status': item.get('status') or 'Bilinmiyor',
+            'transaction_date': Order._parse_tr_datetime(item.get('transactionDate')),
+            'transferred_date': Order._parse_tr_datetime(item.get('transferredDate')),
+            'raw_data': json.dumps(item, ensure_ascii=False),
+        }
+        existing = Settlement.search([('store_id', '=', self.id), ('trx_id', '=', trx_id),
+                                      ('order_id', '=', order_id)], limit=1)
+        if existing:
+            existing.write(vals)
+            return 'updated'
+        Settlement.create(vals)
+        return 'created'
 
     def action_finance_diagnostics(self):
         """Finans servisinin hangi sorgularda çalıştığını ölçer (gün gün, ödeme tarihi, sipariş no).
