@@ -21,6 +21,8 @@ _STREAM_OVERLAP = timedelta(minutes=30)
 # Ödeme onayı bekleyen paketler: doküman "Created olana kadar işlem yapmayın" diyor
 _SKIP_STATUSES = {'awaiting', 'verified'}
 _CANCEL_STATUSES = {'cancelled', 'unsupplied'}
+# Mağaza başına senkron kilidi (pg advisory lock ad alanı)
+_SYNC_LOCK_NS = 7471001
 
 
 class TrendyolOrderSync(models.Model):
@@ -65,6 +67,16 @@ class TrendyolOrderSync(models.Model):
         """
         store_name = store.name or ''
         store_id = store.id
+
+        # Aynı mağaza için tek senkron: cron sürerken "Şimdi Senkronize Et" (veya ikinci cron
+        # işçisi) aynı paketleri paralel işleyip duplicate key / serialization hataları üretiyordu.
+        # İşlem (transaction) bitince kilit kendiliğinden bırakılır.
+        self.env.cr.execute("SELECT pg_try_advisory_xact_lock(%s, %s)", (_SYNC_LOCK_NS, store_id))
+        if not self.env.cr.fetchone()[0]:
+            _logger.info("Trendyol senkronizasyon [%s] atlandı: başka bir senkron çalışıyor", store_name)
+            return {'error': f"{store_name} mağazasında senkronizasyon şu anda zaten çalışıyor. "
+                             f"Birkaç dakika sonra tekrar deneyin.",
+                    'busy': True, 'created': 0, 'updated': 0, 'errors': 0}
 
         try:
             api = store.get_api()
