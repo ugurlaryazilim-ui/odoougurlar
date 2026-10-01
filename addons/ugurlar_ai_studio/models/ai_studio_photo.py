@@ -48,6 +48,10 @@ class AiStudioPhoto(models.Model):
         max_width=1920, max_height=1920,
         help='Arka planı kaldırılmış versiyon',
     )
+    # Try-on'a giden temizlenmiş ürün görseli (arka plan + askı + mağaza etiketi silinmiş).
+    # "Tekrar Dene" aynı fotoğraf için birefnet + etiket taraması + Bria'yı yeniden ödemesin.
+    garment_clean_image = fields.Binary(string='Temizlenmiş Ürün Görseli', attachment=True, copy=False)
+    garment_clean_key = fields.Char(copy=False, help='Kaynak görsel özeti + ayarlar; değişirse önbellek geçersiz')
     quality_score = fields.Float(
         string='Kalite Puanı',
         digits=(5, 1),

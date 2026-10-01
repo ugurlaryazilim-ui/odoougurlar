@@ -1,5 +1,6 @@
 import logging
 import base64
+import hashlib
 import threading
 import time
 import json
@@ -1326,8 +1327,12 @@ class AiStudioSession(models.Model):
             _logger.warning('Etiket tespiti hatası: %s', tag_err)
             return []
 
-    def _prepare_garment_for_tryon(self, source_image, provider, session, auto_bg=True, security_tags=None):
+    def _prepare_garment_for_tryon(self, source_image, provider, session, auto_bg=True, security_tags=None,
+                                   photo=None):
         """Kaynak görseli AI try-on için hazırla: preprocess → bg_remove → hanger_remove → upload.
+
+        photo verilirse temizlenmiş görsel fotoğrafta saklanır; aynı kaynak ve ayarla
+        tekrar çağrıldığında (Tekrar Dene) ücretli adımlar atlanır.
 
         Returns:
             tuple: (garment_url, processed_b64, erase_cost) — CDN URL, işlenmiş base64, etiket silme maliyeti
@@ -1337,6 +1342,16 @@ class AiStudioSession(models.Model):
             convert_birefnet_output_to_rgb,
             crop_to_content,
         )
+        cache_key = None
+        if photo and security_tags is None and source_image:
+            raw = source_image if isinstance(source_image, bytes) else str(source_image).encode()
+            cache_key = '%s:bg%d' % (hashlib.sha1(raw).hexdigest(), int(bool(auto_bg)))
+            if photo.garment_clean_key == cache_key and photo.garment_clean_image:
+                garment_b64 = photo.garment_clean_image
+                _logger.info('Temizlenmiş ürün görseli önbellekten kullanıldı (photo=%s, session=%s)',
+                             photo.id, session.name)
+                return provider.upload_image(garment_b64), garment_b64, 0.0
+
         preprocessed = preprocess_garment_image(source_image, target_long_edge=1600)
         processed_b64 = preprocessed['image_base64']
         garment_b64 = processed_b64
@@ -1359,6 +1374,13 @@ class AiStudioSession(models.Model):
 
         # Mağaza alarmı / fiyat etiketi: ürüne kırpılmış görselde bul, maskeli AI ile sil
         garment_b64, erase_cost = self._remove_store_tags(session, garment_b64, security_tags)
+
+        if cache_key:
+            try:
+                with photo.env.cr.savepoint():
+                    photo.write({'garment_clean_image': garment_b64, 'garment_clean_key': cache_key})
+            except Exception as ce:
+                _logger.warning('Temizlenmiş ürün görseli saklanamadı (photo=%s): %s', photo.id, ce)
 
         garment_url = provider.upload_image(garment_b64)
         # garment_b64: try-on'a giden temizlenmiş ürün görseli (sonuç denetiminde referans)
@@ -1925,9 +1947,10 @@ class AiStudioSession(models.Model):
                         fal_api_key, _pre_url, gemini_api_key=gemini_api_key, product_context=product_context
                     )
                     _logger.info(
-                        'Kıyafet analizi tamamlandı: %s %s, hasGraphic=%s',
+                        'Kıyafet analizi tamamlandı: %s %s (yüzey: %s), hasGraphic=%s',
                         cached_analysis.get('garmentType', '?'),
                         cached_analysis.get('primaryColor', '?'),
+                        cached_analysis.get('surfaceEn') or '-',
                         cached_analysis.get('hasGraphic', False),
                     )
             except Exception as ae:
@@ -2071,7 +2094,8 @@ class AiStudioSession(models.Model):
                     # Ön yüz dışındaki açılarda (back, side) ön yüz koordinatları geçersizdir.
                     # security_tags=None verildiğinde _prepare_garment_for_tryon o görseli kendisi tarar.
                     garment_url, processed_garment_b64, erase_cost = self._prepare_garment_for_tryon(
-                        source_image, provider, session, auto_bg=auto_bg, security_tags=None
+                        source_image, provider, session, auto_bg=auto_bg, security_tags=None,
+                        photo=gen.source_photo_id,
                     )
                     # Hazırlık maliyeti (etiket silme + ilk kez türetilen manken) bu üretime yazılır
                     prep_cost = (erase_cost or 0.0) + (mannequin_cost or 0.0)
@@ -2543,7 +2567,8 @@ class AiStudioSession(models.Model):
 
                 # Etiketler _prepare_garment_for_tryon içinde ayrı taramayla bulunur
                 garment_url, processed_b64, erase_cost = self._prepare_garment_for_tryon(
-                    source_image, provider, session, auto_bg=auto_bg, security_tags=None
+                    source_image, provider, session, auto_bg=auto_bg, security_tags=None,
+                    photo=gen.source_photo_id,
                 )
 
                 detected_cat = session._detect_garment_type()

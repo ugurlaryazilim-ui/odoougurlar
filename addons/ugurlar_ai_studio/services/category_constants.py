@@ -160,10 +160,13 @@ SHOE_RULES = {
 # El pozları — view'e göre
 # NOT: "one hand on hip" gibi detaylı poz talimatları Seedream'de
 # fazla/kaynaşmış parmak sorununa yol açar. Basit tutulmalı.
+# Duruş/ifade cümlesi: mankenin kaskatı, simetrik pozu ve donuk ifadesi aynen
+# kopyalanmasın diye ağırlık aktarımı ve gevşek omuz istenir (el pozu yine basit).
 HAND_POSES = {
-    'front': 'Arms relaxed at the sides with natural hands.',
-    'back':  '',
-    'side':  'Arms relaxed at the sides.',
+    'front': ('Relaxed, natural stance with the weight on one leg, loose shoulders and a calm, '
+              'natural expression. Arms hang loosely with natural hands.'),
+    'back':  'Relaxed, natural stance with the weight shifted slightly onto one leg.',
+    'side':  'Relaxed, natural stance with loose shoulders. Arms hang loosely at the sides.',
     'detail': '',
 }
 
@@ -194,12 +197,12 @@ _BACK_INTRO = (
     "Image 1 shows the model from behind. Image 2 shows the back of the {garment} product. "
     "Back view of the same model, facing away from the camera, "
     "wearing the {desc} from Image 2 with its exact back design. "
-    "Take the back design only from Image 2; do not copy prints or details from the front. {front_ref}"
+    "Take the back design only from Image 2; do not copy prints or details from the front. {front_ref}{hand_pose} "
 )
 _SIDE_INTRO = (
     "Image 1 shows the model. Image 2 shows the {garment} product. "
     "Three-quarter side view, about 45 degrees, of the same model "
-    "wearing the {desc} from Image 2, showing its side profile and drape. {front_ref}"
+    "wearing the {desc} from Image 2, showing its side profile and drape. {front_ref}{hand_pose} "
 )
 _OUTRO = CLEAN_PRODUCT + " E-commerce catalog photo, full body. {background} {extra_prompt}"
 
@@ -268,7 +271,8 @@ SEEDREAM_TEMPLATES = {
 
 # Back/side görünümlerde ön görünüm referansı (Image 3) varsa eklenen cümle
 FRONT_REF_SENTENCE = (
-    "Image 3 is the finished front view: keep the same model, hair, outfit styling and shoes as Image 3. "
+    "Image 3 is the finished front view: keep the same model, hair, outfit styling and shoes as Image 3, "
+    "and the same garment color, shade and fabric texture as in Image 3. "
 )
 
 

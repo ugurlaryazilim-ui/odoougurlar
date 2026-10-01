@@ -92,7 +92,8 @@ class TestPromptBuilder(BaseCase):
         self.assertNotIn('knit knit', p)
         self.assertNotIn('Figure', p)
         self.assertLessEqual(p.lower().count('trousers'), 1, 'istenmeyen nesne tekrar edilmemeli')
-        self.assertLessEqual(len(p.split()), 125)
+        # şablon + duruş cümlesi + tek fotorealizm cümlesi; eski lock'lar ~1500 kelimeydi
+        self.assertLessEqual(len(p.split()), 140)
 
     def test_jumpsuit_does_not_get_bare_legs(self):
         p = self._build({'garmentType': 'Tulum', 'clothingCategory': 'dress', 'garmentLength': 'maxi'})
@@ -111,6 +112,22 @@ class TestPromptBuilder(BaseCase):
         analysis = {'garmentType': 'Bluz', 'clothingCategory': 'tops'}
         self.assertIn('Image 3', self._build(analysis, 'back', has_front_ref=True))
         self.assertNotIn('Image 3', self._build(analysis, 'back', has_front_ref=False))
+
+    def test_side_back_keep_front_color_and_relaxed_stance(self):
+        analysis = {'garmentType': 'Sweatshirt', 'clothingCategory': 'tops'}
+        for view in ('side', 'back'):
+            p = self._build(analysis, view, has_front_ref=True)
+            self.assertIn('same garment color, shade and fabric texture as in Image 3', p)
+            self.assertIn('Relaxed, natural stance', p)
+            self.assertNotIn('face', p.lower(), 'arka/yan çekimde yüz istemi başı çevirtebilir')
+
+    def test_surface_effect_goes_into_garment_description(self):
+        p = self._build({'garmentTypeEn': 'sweatshirt', 'clothingCategory': 'tops', 'primaryColorEn': 'navy',
+                         'fabricTypeEn': 'cotton', 'surfaceEn': 'heathered melange'})
+        self.assertIn('navy heathered melange cotton sweatshirt', p)
+        self.assertIn('navy cotton sweatshirt', self._build({
+            'garmentTypeEn': 'sweatshirt', 'clothingCategory': 'tops', 'primaryColorEn': 'navy',
+            'fabricTypeEn': 'cotton'}))
 
     def test_every_view_asks_for_clean_product(self):
         # negative_prompt desteklenmiyor: etiket kuralı pozitif cümleyle HER şablonda olmalı
