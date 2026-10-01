@@ -194,11 +194,10 @@ class SaleOrder(models.Model):
                 pz = order.pazarama_order_id
                 display = pz.order_status_display if hasattr(pz, 'order_status_display') and pz.order_status_display else str(pz.order_status or '')
                 pz_status = pz.order_status or 0
-                if pz_status in (6, 13, 14, 18):
+                # 6/13/14/18 iptal, 7/8/10 iade; 5/16/19 kargoda-teslimat noktasında, 11 teslim, 9 iade reddedildi
+                if pz_status in (6, 13, 14, 18, 7, 8, 10):
                     category = 'danger'
-                elif pz_status == 11:
-                    category = 'success'
-                elif pz_status in (5,):
+                elif pz_status in (5, 16, 19, 11, 9):
                     category = 'success'
                 else:
                     category = 'warning'

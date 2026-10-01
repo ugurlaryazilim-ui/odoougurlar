@@ -1,9 +1,9 @@
 """Pazarama sipariş toplu işlemleri — retry, refresh, delete, mark."""
-import json
 import logging
 
-from odoo import api, fields, models
-from .pazarama_order_sync import PAZARAMA_VALID_ORDER_STATUSES
+from odoo import models
+
+from .pazarama_order import PAZARAMA_CANCEL_STATUSES
 
 _logger = logging.getLogger(__name__)
 
@@ -12,45 +12,24 @@ class PazaramaOrderActions(models.Model):
     _inherit = 'pazarama.order'
 
     def action_retry_sync(self):
-        """Seçili hatalı sipariş kayıtlarını tekrar dene."""
-        errors = self.filtered(lambda o: not o.sale_order_id and o.raw_data)
+        """Odoo siparişi oluşmamış kayıtları kayıtlı kalemlerle tekrar dene (ör. ürün sonradan eklendiyse)."""
+        errors = self.filtered(lambda o: not o.sale_order_id and o.order_status not in PAZARAMA_CANCEL_STATUSES)
         if not errors:
-            return self._notify('Uyarı', 'Takılmıs, tekrar denenecek hatalı sipariş yok.', 'warning')
+            return self._notify('Uyarı', 'Tekrar denenecek hatalı sipariş yok.', 'warning')
 
         success = 0
         fail = 0
         for order in errors:
             try:
-                package_data = json.loads(order.raw_data)
-                store = order.store_id
-                if not store:
-                    store = self.env['pazarama.store'].search([('active', '=', True)], limit=1)
-                if not store:
-                    fail += 1
-                    continue
-                
-                # Geçerli statülerdeki siparişler için Sale Order oluştur
-                if order.order_status in PAZARAMA_VALID_ORDER_STATUSES:
-                    # Create odoo sale order from pazarama_order_sync method 
-                    shipment_addr = package_data.get('shipmentAddress') or {}
-                    billing_addr = package_data.get('billingAddress') or {}
-                    customer_email = package_data.get('customerEmail') or shipment_addr.get('customerEmail') or ''
-                    phone_number = shipment_addr.get('phoneNumber') or ''
-
-                    sale_order = self._create_odoo_sale_order(order, store, shipment_addr, billing_addr, customer_email, phone_number)
-                    order.write({
-                        'sale_order_id': sale_order.id,
-                        'store_id': store.id,
-                    })
-                    
-                    if store.auto_confirm and sale_order.state in ['draft', 'sent']:
-                        sale_order.action_confirm()
-
+                with self.env.cr.savepoint():
+                    order.with_context(pazarama_force_create=True)._reconcile_sale_order(order.store_id)
+                if order.sale_order_id:
                     success += 1
                 else:
                     fail += 1
             except Exception as e:
                 fail += 1
+                self.env.invalidate_all(flush=False)
                 _logger.exception("Pazarama Tekrar deneme hatası %s: %s", order.order_number, e)
 
         return self._notify(
@@ -60,77 +39,38 @@ class PazaramaOrderActions(models.Model):
         )
 
     def action_refresh_from_pazarama(self):
-        """Seçili siparişlerin durumunu Pazarama API'den güncelle."""
+        """Seçili siparişleri sipariş numarasıyla Pazarama'dan çekip tamamen güncelle."""
         if not self:
             return
 
-        store_orders = {}
+        updated = 0
+        failed = []
+        apis = {}
         for order in self:
             store = order.store_id
-            if not store:
+            if not store or not order.order_number:
                 continue
-            if store.id not in store_orders:
-                store_orders[store.id] = {'store': store, 'orders': self.env['pazarama.order']}
-            store_orders[store.id]['orders'] |= order
-
-        updated = 0
-        for data in store_orders.values():
-            store = data['store']
             try:
-                api = store.get_api()
-            except Exception as e:
-                _logger.warning("API bağlantı hatası [%s]: %s", store.name, e)
-                continue
-
-            for order in data['orders']:
-                if not order.order_number:
+                api = apis.get(store.id) or apis.setdefault(store.id, store.get_api())
+                order_json, error = self._fetch_single_order(api, order.order_number, order.order_date)
+                if error:
+                    failed.append(f"{order.order_number}: {error}")
                     continue
-                try:
-                    # Pazarama getOrders endpointini saat araligiyla verebiliriz ama orderNumber a gore filtremiz yok (Payload'da startDate, endDate istiyor).
-                    # Belgede orderNumber desteklendigini gorduk:
-                    # Request (Order / Saat&Dakika): "orderNumber": 735071747, "startDate":...
-                    # So we can pass orderNumber in getOrdersForApi.
-                    body = {
-                        'pageSize': 1,
-                        'pageNumber': 1,
-                        'orderNumber': order.order_number
-                    }
-                    result = api._request('POST', '/order/getOrdersForApi', data=body)
-                    
-                    if result['success']:
-                        content = result.get('data', {}).get('data', [])
-                        if content:
-                            pkg = content[0]
-                            new_status = pkg.get('orderStatus')
-                            vals = {
-                                'order_status': new_status if new_status else order.order_status,
-                                'raw_data': json.dumps(pkg, ensure_ascii=False),
-                            }
-                            
-                            # Update items
-                            # (Cargo tracking comes grouped under items, picking first one broadly)
-                            items = pkg.get('items', [])
-                            if items:
-                                first_item = items[0]
-                                first_cargo = first_item.get('cargo', {})
-                                # Kargo takip: cargo.trackingNumber → item.shipmentCode
-                                if first_cargo.get('trackingNumber'):
-                                    vals['cargo_tracking_number'] = str(first_cargo['trackingNumber'])
-                                elif first_item.get('shipmentCode'):
-                                    vals['cargo_tracking_number'] = str(first_item['shipmentCode'])
-                                if first_cargo.get('companyName'):
-                                    vals['cargo_provider'] = first_cargo['companyName']
+                if not order_json:
+                    failed.append(f"{order.order_number}: Pazarama'da bulunamadı")
+                    continue
+                with self.env.cr.savepoint():
+                    self._sync_order_json(store, order_json, api)
+                updated += 1
+            except Exception as e:
+                self.env.invalidate_all(flush=False)
+                failed.append(f"{order.order_number}: {e}")
+                _logger.warning("Durum güncelleme hatası %s: %s", order.order_number, e)
 
-                            order.write(vals)
-                            updated += 1
-                except Exception as e:
-                    _logger.warning("Durum güncelleme hatası %s: %s", order.order_number, e)
-
-        return self._notify(
-            'Durum Güncelleme',
-            f'✅ {updated}/{len(self)} sipariş Pazarama\'dan güncellendi.',
-            'success' if updated else 'warning',
-        )
+        msg = f'✅ {updated}/{len(self)} sipariş Pazarama\'dan güncellendi.'
+        if failed:
+            msg += '\n' + '\n'.join(failed[:10])
+        return self._notify('Durum Güncelleme', msg, 'success' if not failed else 'warning')
 
     def action_delete_error_orders(self):
         to_delete = self.filtered(lambda o: not o.sale_order_id)
@@ -141,7 +81,8 @@ class PazaramaOrderActions(models.Model):
         return self._notify('Silme', f'🗑️ {count} hatalı kayıt silindi.', 'success')
 
     def action_retry_all_errors(self):
-        errors = self.search([('sale_order_id', '=', False)])
+        errors = self.search([('sale_order_id', '=', False),
+                              ('order_status', 'not in', list(PAZARAMA_CANCEL_STATUSES))])
         if not errors:
             return self._notify('Bilgi', 'Tekrar denenecek hatalı sipariş yok.', 'info')
         return errors.action_retry_sync()

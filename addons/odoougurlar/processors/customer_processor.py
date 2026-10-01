@@ -334,7 +334,7 @@ class CustomerProcessor(models.AbstractModel):
                 # ─── TÜZEL KİŞİ (10 hane VKN veya diğer) ───
                 tax_office_name = ''
                 if sale_order:
-                    for attr in ('trendyol_order_id', 'n11_order_id', 'hb_order_id', 'pttavm_order_id'):
+                    for attr in ('trendyol_order_id', 'n11_order_id', 'hb_order_id', 'pttavm_order_id', 'pazarama_order_id'):
                         obj = getattr(sale_order, attr, None)
                         if obj:
                             tax_office_name = getattr(obj, 'tax_office', '') or ''
@@ -385,6 +385,8 @@ class CustomerProcessor(models.AbstractModel):
                 # PttAVM
                 elif hasattr(sale_order, 'pttavm_order_id') and sale_order.pttavm_order_id:
                     tax_office_name = getattr(sale_order.pttavm_order_id, 'tax_office', '') or ''
+                elif hasattr(sale_order, 'pazarama_order_id') and sale_order.pazarama_order_id:
+                    tax_office_name = getattr(sale_order.pazarama_order_id, 'tax_office', '') or ''
                 
             if tax_office_name:
                 tax_mapping = self.env['odoougurlar.tax.mapping'].sudo().search([('name', '=ilike', tax_office_name.strip())], limit=1)
@@ -472,6 +474,8 @@ class CustomerProcessor(models.AbstractModel):
                     tax_office_name = getattr(sale_order.hb_order_id, 'tax_office', '') or ''
                 elif hasattr(sale_order, 'pttavm_order_id') and sale_order.pttavm_order_id:
                     tax_office_name = getattr(sale_order.pttavm_order_id, 'tax_office', '') or ''
+                elif hasattr(sale_order, 'pazarama_order_id') and sale_order.pazarama_order_id:
+                    tax_office_name = getattr(sale_order.pazarama_order_id, 'tax_office', '') or ''
 
                 if tax_office_name:
                     tax_mapping = self.env['odoougurlar.tax.mapping'].sudo().search(
