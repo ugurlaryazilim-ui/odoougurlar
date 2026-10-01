@@ -1,9 +1,10 @@
 
 """Pttavm sipariş toplu işlemleri — retry, refresh, delete, mark."""
-import json
 import logging
 
-from odoo import api, fields, models
+from odoo import models
+
+from .pttavm_order import PTTAVM_CANCEL_STATUSES
 
 _logger = logging.getLogger(__name__)
 
@@ -12,41 +13,24 @@ class PttavmOrderActions(models.Model):
     _inherit = 'pttavm.order'
 
     def action_retry_sync(self):
-        """Seçili hatalı sipariş kayıtlarını tekrar dene."""
-        errors = self.filtered(lambda o: not o.sale_order_id and o.raw_data)
+        """Odoo siparişi oluşmamış kayıtları kayıtlı satırlarla tekrar dene (ör. ürün sonradan eklendiyse)."""
+        errors = self.filtered(lambda o: not o.sale_order_id and o.order_status not in PTTAVM_CANCEL_STATUSES)
         if not errors:
-            return self._notify('Uyarı', 'Takılmıs, tekrar denenecek hatalı sipariş yok.', 'warning')
+            return self._notify('Uyarı', 'Tekrar denenecek hatalı sipariş yok.', 'warning')
 
         success = 0
         fail = 0
         for order in errors:
             try:
-                package_data = json.loads(order.raw_data)
-                store = order.store_id
-                if not store:
-                    store = self.env['pttavm.store'].search([('active', '=', True)], limit=1)
-                if not store:
+                with self.env.cr.savepoint():
+                    order._reconcile_sale_order(order.store_id)
+                if order.sale_order_id:
+                    success += 1
+                else:
                     fail += 1
-                    continue
-                
-                # Kullanıcı talebi: Pttavm sipariş durumu ne olursa olsun Odoo satış siparişine aktar
-                shipment_addr = package_data.get('shipmentAddress') or {}
-                billing_addr = package_data.get('billingAddress') or {}
-                customer_email = package_data.get('customerEmail') or shipment_addr.get('customerEmail') or ''
-                phone_number = shipment_addr.get('phoneNumber') or ''
-
-                sale_order = self._create_odoo_sale_order(order, store, shipment_addr, billing_addr, customer_email, phone_number)
-                order.write({
-                    'sale_order_id': sale_order.id,
-                    'store_id': store.id,
-                })
-                
-                if store.auto_confirm and sale_order.state in ['draft', 'sent']:
-                    sale_order.action_confirm()
-
-                success += 1
             except Exception as e:
                 fail += 1
+                self.env.invalidate_all(flush=False)
                 _logger.exception("Pttavm Tekrar deneme hatası %s: %s", order.order_number, e)
 
         return self._notify(
@@ -56,73 +40,42 @@ class PttavmOrderActions(models.Model):
         )
 
     def action_refresh_from_pttavm(self):
-        """Seçili siparişlerin durumunu Pttavm API'den güncelle."""
+        """Seçili siparişleri PttAVM sipariş detayından (GET /orders/{siparisNo}) güncelle."""
         if not self:
             return
 
-        store_orders = {}
+        updated = 0
+        failed = []
+        apis = {}
         for order in self:
             store = order.store_id
-            if not store:
+            if not store or not order.order_number:
                 continue
-            if store.id not in store_orders:
-                store_orders[store.id] = {'store': store, 'orders': self.env['pttavm.order']}
-            store_orders[store.id]['orders'] |= order
-
-        updated = 0
-        for data in store_orders.values():
-            store = data['store']
             try:
-                api = store.get_api()
-            except Exception as e:
-                _logger.warning("API bağlantı hatası [%s]: %s", store.name, e)
-                continue
-
-            for order in data['orders']:
-                if not order.order_number:
+                api = apis.get(store.id) or apis.setdefault(store.id, store.get_api())
+                res = api.get_order_detail(order.order_number)
+                if not res.get('success'):
+                    failed.append(f"{order.order_number}: {res.get('error')}")
                     continue
-                try:
-                    # Pttavm getOrders endpointini saat araligiyla verebiliriz ama orderNumber a gore filtremiz yok (Payload'da startDate, endDate istiyor).
-                    # Belgede orderNumber desteklendigini gorduk:
-                    # Request (Order / Saat&Dakika): "orderNumber": 735071747, "startDate":...
-                    # So we can pass orderNumber in getOrdersForApi.
-                    body = {
-                        'pageSize': 1,
-                        'pageNumber': 1,
-                        'orderNumber': order.order_number
-                    }
-                    result = api._request('POST', '/order/getOrdersForApi', data=body)
-                    
-                    if result['success']:
-                        content = result.get('data', {}).get('data', [])
-                        if content:
-                            pkg = content[0]
-                            new_status = pkg.get('orderStatus')
-                            vals = {
-                                'order_status': new_status if new_status else order.order_status,
-                                'raw_data': json.dumps(pkg, ensure_ascii=False),
-                            }
-                            
-                            # Update items
-                            # (Cargo tracking comes grouped under items, picking first one broadly)
-                            items = pkg.get('items', [])
-                            if items:
-                                first_cargo = items[0].get('cargo', {})
-                                if first_cargo.get('trackingNumber'):
-                                    vals['cargo_tracking_number'] = str(first_cargo['trackingNumber'])
-                                if first_cargo.get('companyName'):
-                                    vals['cargo_provider'] = first_cargo['companyName']
+                data = res.get('data')
+                order_list = [data] if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                order_json = next((o for o in order_list if isinstance(o, dict)
+                                   and str(o.get('siparisNo') or '') == order.order_number), None)
+                if not order_json:
+                    failed.append(f"{order.order_number}: PttAVM'de bulunamadı")
+                    continue
+                with self.env.cr.savepoint():
+                    self._sync_order_json(store, order_json)
+                updated += 1
+            except Exception as e:
+                self.env.invalidate_all(flush=False)
+                failed.append(f"{order.order_number}: {e}")
+                _logger.warning("Durum güncelleme hatası %s: %s", order.order_number, e)
 
-                            order.write(vals)
-                            updated += 1
-                except Exception as e:
-                    _logger.warning("Durum güncelleme hatası %s: %s", order.order_number, e)
-
-        return self._notify(
-            'Durum Güncelleme',
-            f'✅ {updated}/{len(self)} sipariş Pttavm\'dan güncellendi.',
-            'success' if updated else 'warning',
-        )
+        msg = f'✅ {updated}/{len(self)} sipariş Pttavm\'dan güncellendi.'
+        if failed:
+            msg += '\n' + '\n'.join(failed[:10])
+        return self._notify('Durum Güncelleme', msg, 'success' if not failed else 'warning')
 
     def action_delete_error_orders(self):
         to_delete = self.filtered(lambda o: not o.sale_order_id)
@@ -133,7 +86,8 @@ class PttavmOrderActions(models.Model):
         return self._notify('Silme', f'🗑️ {count} hatalı kayıt silindi.', 'success')
 
     def action_retry_all_errors(self):
-        errors = self.search([('sale_order_id', '=', False)])
+        errors = self.search([('sale_order_id', '=', False),
+                              ('order_status', 'not in', list(PTTAVM_CANCEL_STATUSES))])
         if not errors:
             return self._notify('Bilgi', 'Tekrar denenecek hatalı sipariş yok.', 'info')
         return errors.action_retry_sync()
