@@ -54,21 +54,21 @@
                     </block>
 
                     <block title="Try-On Model Ayarları" name="tryon_settings">
+                        <setting string="Giydirme Modeli"
+                                 help="v4 Edit: ön görünümün seed'i ve görseli arka/yan çekimlere aktarılır. v5 Pro Edit: seed desteklemez, yalnız ön görsel referansı gider.">
+                            <div class="content-group">
+                                <div class="row mt16">
+                                    <label for="ai_studio_tryon_model" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="ai_studio_tryon_model" class="col-6"/>
+                                </div>
+                            </div>
+                        </setting>
                         <setting string="Seedream Çıktı Boyutu"
                                  help="Seedream v5 Pro çıktı çözünürlüğü ve görsel başına maliyet">
                             <div class="content-group">
                                 <div class="row mt16">
                                     <label for="ai_studio_seedream_image_size" class="col-3 col-lg-3 o_light_label"/>
                                     <field name="ai_studio_seedream_image_size" class="col-6"/>
-                                </div>
-                            </div>
-                        </setting>
-                        <setting string="Ön Görünüm Aday Sayısı"
-                                 help="Ön görünüm için üretilecek alternatif sayısı (1-4); reviewer en iyisini seçer">
-                            <div class="content-group">
-                                <div class="row mt16">
-                                    <label for="ai_studio_candidate_count" class="col-3 col-lg-3 o_light_label"/>
-                                    <field name="ai_studio_candidate_count" class="col-2"/>
                                 </div>
                             </div>
                         </setting>

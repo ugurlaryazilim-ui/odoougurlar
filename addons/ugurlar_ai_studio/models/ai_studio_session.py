@@ -189,6 +189,20 @@ def _get_seedream_image_size(env):
     return FalProvider.SEEDREAM_IMAGE_SIZES.get(key, FalProvider.SEEDREAM_IMAGE_SIZES['hd'])
 
 
+# Ayar değeri → virtual_tryon model_name. v4 Edit seed alır/döndürür (ön görünüm seed'i
+# arka/yan çekimlere aktarılır); v5 Pro Edit seed desteklemez.
+TRYON_MODELS = {
+    'seedream_v4': 'seedream/v4/edit',
+    'seedream_v5_pro': 'seedream/v5/pro/edit',
+}
+
+
+def _get_tryon_model(env):
+    """Ayarlardaki fal try-on modeli (varsayılan: Seedream v4 Edit)."""
+    key = env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.tryon_model', 'seedream_v4')
+    return TRYON_MODELS.get(key, TRYON_MODELS['seedream_v4'])
+
+
 # Görsel denetimin bulduğu ve tek görsellik düzenlemeyle giderilebilen hatalar
 # Düzeltilebilir hatalar. Etiket türü hatalar KONUMLA maskeli silinir (istem yok);
 # pantolon için Seedream'e yalnızca olumlu tarif gider: görsel modeller olumsuzlanan
@@ -345,14 +359,12 @@ def _get_extra_prompt_en(session):
 
 
 def _get_candidate_count(env, photo_type, provider_type):
-    """Ön görünüm için ayarlanan aday sayısı (Seedream/fal dışında ve diğer açılarda 1)."""
-    if photo_type != 'front' or provider_type != 'fal':
-        return 1
-    try:
-        count = int(env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.candidate_count', '1') or 1)
-    except ValueError:
-        count = 1
-    return max(1, min(4, count))
+    """Her görünümde tek aday üretilir.
+
+    Ön görünümde birden fazla aday üretilince arka/yan çekimler 1. aday referans alınarak
+    üretiliyordu; sonradan başka aday seçilince görünümler uyuşmuyordu. Tutarlılık için
+    ön görünüm de tek görsel üretir ve o görsel (ve seed'i) diğer açılara iletilir."""
+    return 1
 
 
 def _store_candidates(gen, image_urls):
@@ -1933,8 +1945,9 @@ class AiStudioSession(models.Model):
             # Cross-view tutarlılık verisi — front sonrası doldurulur
             outfit_consistency = None
             front_result_b64 = None  # Front try-on sonucu — back/side post-processing referansı
-            import random
-            front_seed = random.randint(100000, 99999999)  # Front try-on seed'i — back/side çağrıları için referans
+            # Ön görünümün API'nin döndürdüğü GERÇEK seed'i (Seedream v4 / FASHN döndürür,
+            # Seedream v5 Pro döndürmez). Arka/yan çağrılarına ön görselle birlikte iletilir.
+            front_seed = False
 
             # Varsa önceden tamamlanmış ön yüz üretiminden görsel ve seed'i yükle
             existing_front = session.generation_ids.filtered(
@@ -1942,9 +1955,9 @@ class AiStudioSession(models.Model):
             )
             if existing_front:
                 front_result_b64 = existing_front[0].generated_image
-                if existing_front[0].seed:
-                    front_seed = int(existing_front[0].seed)
-                _logger.info('Mevcut ön yüz üretiminden görsel ve seed (%s) referans olarak yüklendi (session=%s)', front_seed, session.name)
+                front_seed = existing_front[0].seed or False
+                _logger.info('Mevcut ön yüz üretimi referans olarak yüklendi (seed=%s, session=%s)',
+                             front_seed or 'yok', session.name)
 
             # Fetch prompt locks OUTSIDE the loop (Item 10)
             all_locks = env['ai.studio.prompt.template'].search([
@@ -2040,8 +2053,7 @@ class AiStudioSession(models.Model):
                         )
                         if f_done:
                             front_result_b64 = f_done[0].generated_image
-                            if f_done[0].seed:
-                                front_seed = int(f_done[0].seed)
+                            front_seed = f_done[0].seed or front_seed
                     if front_result_b64 and photo_type in ('back', 'side'):
                         try:
                             front_output_url = provider.upload_image(front_result_b64)
@@ -2064,8 +2076,8 @@ class AiStudioSession(models.Model):
                     # Hazırlık maliyeti (etiket silme + ilk kez türetilen manken) bu üretime yazılır
                     prep_cost = (erase_cost or 0.0) + (mannequin_cost or 0.0)
 
-                    # Seedream v5 Pro — region-precise editing, kiafet sadakati icin
-                    tryon_model = 'seedream/v5/pro/edit' if provider_type == 'fal' else 'tryon-v1.6'
+                    # fal: ayardaki Seedream modeli (v4 Edit seed'li / v5 Pro Edit)
+                    tryon_model = _get_tryon_model(env) if provider_type == 'fal' else 'tryon-v1.6'
                     tryon_resolution = '2K'  # Detay korumasi icin 2K zorunlu
                     if provider_type == 'fashn':
                         tryon_model = getattr(preset, f'fashn_model_{photo_type}', False) or preset.fashn_model_front or 'tryon-v1.6'
@@ -2144,6 +2156,14 @@ class AiStudioSession(models.Model):
                     # Çeviri / manken önbelleği yazımları try-on boyunca satır kilidi tutmasın
                     cr.commit()
 
+                    # Ön görünüm seed'siz gider (model seçer, sonuçta döner); arka/yan çekimler
+                    # ön görünümün seed'ini ve görselini (Image 3) birlikte alır.
+                    call_seed = front_seed if photo_type in ('back', 'side') else False
+                    if photo_type in ('back', 'side'):
+                        _logger.info('%s çekimi: ön görsel %s, seed %s iletiliyor (model=%s, session=%s)',
+                                     photo_type, 'Image 3 olarak' if front_output_url else 'YOK',
+                                     call_seed or 'yok', tryon_model, session.name)
+
                     # TRY-ON API ÇAĞRISI
                     tryon_result = provider.virtual_tryon(
                         model_image_url=model_url,
@@ -2161,7 +2181,7 @@ class AiStudioSession(models.Model):
                         resolution=tryon_resolution,
                         image_size=_get_seedream_image_size(env),
                         photo_type=photo_type,
-                        seed=front_seed,
+                        seed=call_seed,
                         garment_type=(analysis_data or {}).get('garmentType', '') if isinstance(analysis_data, dict) else '',
                         on_enqueue=_make_enqueue_recorder(self.pool, gen.id),
                     )
@@ -2175,7 +2195,8 @@ class AiStudioSession(models.Model):
                     gen_b64, gen_seed = self._download_tryon_result(tryon_result)
 
                     if gen_b64:
-                        saved_seed = gen_seed if gen_seed else front_seed
+                        # Yalnızca API'nin döndürdüğü gerçek seed kaydedilir (v5 Pro döndürmez)
+                        saved_seed = gen_seed or call_seed or False
                         gen.write({
                             'generated_image': gen_b64,
                             'state': 'done',
@@ -2402,7 +2423,7 @@ class AiStudioSession(models.Model):
             gemini_api_key = env['ir.config_parameter'].sudo().get_param(
                 'ugurlar_ai_studio.gemini_api_key', ''
             )
-            tryon_model = 'seedream/v5/pro/edit'
+            tryon_model = _get_tryon_model(env)
             tryon_resolution = '2K'
 
             session = env['ai.studio.session'].browse(session_id)
@@ -2583,8 +2604,8 @@ class AiStudioSession(models.Model):
                 front_result_b64 = None
                 front_output_url = None
                 detail_urls = []
-                import random
-                front_seed = random.randint(100000, 99999999)
+                # Ön görünüm yeniden üretimi seed'siz; arka/yan ön görünümün gerçek seed'ini alır
+                front_seed = False
 
                 # PERF: Boydan manken çekimlerinde detay fotoğraflarını göndermiyoruz (hız ve oran tutarlılığı)
                 detail_urls = []
@@ -2642,10 +2663,15 @@ class AiStudioSession(models.Model):
                     _logger.warning('Failed to build retry prompt: %s', pe)
 
                 if provider_type == 'fal':
-                    # Seedream v5 Pro — region-precise editing, kiafet sadakati icin
-                    tryon_model = 'seedream/v5/pro/edit'
+                    # Ayardaki Seedream modeli (v4 Edit seed'li / v5 Pro Edit)
+                    tryon_model = _get_tryon_model(env)
                 elif provider_type == 'fashn':
                     tryon_model = getattr(preset, f'fashn_model_{photo_type}', False) or preset.fashn_model_front or 'tryon-v1.6'
+
+                if photo_type in ('back', 'side'):
+                    _logger.info('%s yeniden üretimi: ön görsel %s, seed %s iletiliyor (model=%s, session=%s)',
+                                 photo_type, 'Image 3 olarak' if front_output_url else 'YOK',
+                                 front_seed or 'yok', tryon_model, session.name)
 
                 if lease_owner:
                     _renew_session_lease(cr, session_id, lease_owner)
@@ -2680,7 +2706,7 @@ class AiStudioSession(models.Model):
                         'generated_image': gen_b64,
                         'state': 'done',
                         'error_message': False,
-                        'seed': gen_seed,
+                        'seed': gen_seed or (front_seed if photo_type in ('back', 'side') else False) or False,
                         # Yeniden üretimin maliyeti de kaydedilmeli (önceden yazılmıyordu)
                         'cost': (tryon_result or {}).get('cost', 0.0) + prep_cost,
                         'fal_endpoint': '%s/%s' % (provider_type, tryon_model),

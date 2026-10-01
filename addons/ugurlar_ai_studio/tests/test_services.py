@@ -6,7 +6,7 @@ import base64
 import io
 from unittest.mock import patch
 
-from odoo.tests import BaseCase, tagged
+from odoo.tests import BaseCase, TransactionCase, tagged
 
 from ..services import category_constants as cc
 from ..services import fal_provider as fal_provider_module
@@ -221,6 +221,58 @@ class TestSeedreamArguments(BaseCase):
         captured, _result = self._call(photo_type='front', on_enqueue=lambda rid, app: seen.append((rid, app)))
         captured['on_enqueue']('req-1')
         self.assertEqual(seen, [('req-1', 'bytedance/seedream/v5/pro/edit')])
+
+
+@tagged('post_install', '-at_install', 'ugurlar_ai_studio')
+class TestSeedreamV4Arguments(BaseCase):
+    """Seedream v4 Edit: seed alır/döndürür; ön görünüm seed'i arka/yan çekimlere aktarılır."""
+
+    def _call(self, **kwargs):
+        captured = {}
+
+        def fake_run(self, endpoint, arguments, on_enqueue=None, **kw):
+            captured['endpoint'] = endpoint
+            captured['arguments'] = arguments
+            return {'images': [{'url': 'https://example.com/out.jpg'}], 'seed': 746406749}
+
+        with patch.object(FalProvider, 'run_queued', fake_run):
+            result = FalProvider('test-key').virtual_tryon(
+                'MODEL', 'GARMENT', model_name='seedream/v4/edit', prompt='p', **kwargs)
+        return captured, result
+
+    def test_endpoint_and_seed_are_sent(self):
+        captured, result = self._call(photo_type='back', front_output_url='FRONT', seed=123)
+        args = captured['arguments']
+        self.assertEqual(captured['endpoint'], 'fal-ai/bytedance/seedream/v4/edit')
+        self.assertEqual(args['seed'], 123)
+        self.assertEqual(args['image_urls'], ['MODEL', 'GARMENT', 'FRONT'])
+        self.assertEqual(args['max_images'], 1)
+        self.assertNotIn('output_format', args)  # v4 şemasında yok
+        self.assertEqual(result['seed'], 746406749)
+
+    def test_front_without_seed(self):
+        captured, _result = self._call(photo_type='front', seed=False)
+        self.assertNotIn('seed', captured['arguments'])
+        self.assertEqual(captured['arguments']['image_urls'], ['MODEL', 'GARMENT'])
+
+    def test_cost_per_image(self):
+        _captured, result = self._call(photo_type='front')
+        self.assertAlmostEqual(result['cost'], 0.03, places=4)
+
+
+
+@tagged('post_install', '-at_install', 'ugurlar_ai_studio')
+class TestTryonSettings(TransactionCase):
+
+    def test_single_candidate_and_model_setting(self):
+        from ..models.ai_studio_session import _get_candidate_count, _get_tryon_model
+        params = self.env['ir.config_parameter'].sudo()
+        params.set_param('ugurlar_ai_studio.candidate_count', '4')
+        self.assertEqual(_get_candidate_count(self.env, 'front', 'fal'), 1)
+        params.set_param('ugurlar_ai_studio.tryon_model', 'seedream_v4')
+        self.assertEqual(_get_tryon_model(self.env), 'seedream/v4/edit')
+        params.set_param('ugurlar_ai_studio.tryon_model', 'seedream_v5_pro')
+        self.assertEqual(_get_tryon_model(self.env), 'seedream/v5/pro/edit')
 
 
 @tagged('post_install', '-at_install', 'ugurlar_ai_studio')
