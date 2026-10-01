@@ -23,6 +23,16 @@ def ty_timestamp(dt_utc):
     return int((dt_utc + timedelta(hours=3)).replace(tzinfo=timezone.utc).timestamp() * 1000)
 
 
+def ty_epoch_ms(dt_utc):
+    """UTC naive datetime → GERÇEK epoch (ms).
+
+    Yalnız orderDate "GMT+3 epoch"tur; lastModifiedDate, packageHistories ve
+    agreedDeliveryDate gerçek epoch'tur. Akış servisinin lastModified filtresi de
+    gerçek epoch ister (+3 saat kaydırılırsa pencere ileride kalır ve akış boş döner).
+    """
+    return int(dt_utc.replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+
 def ty_datetime(ts_ms):
     """Trendyol GMT+3 zaman damgası (ms) → UTC naive datetime (Odoo'nun beklediği)."""
     return datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).replace(tzinfo=None) - timedelta(hours=3)
@@ -110,8 +120,8 @@ class TrendyolAPI:
         filtreler aynı akış boyunca değiştirilmemelidir (değişirse 400).
         """
         params = {
-            'lastModifiedStartDate': ty_timestamp(modified_start),
-            'lastModifiedEndDate': ty_timestamp(modified_end),
+            'lastModifiedStartDate': ty_epoch_ms(modified_start),
+            'lastModifiedEndDate': ty_epoch_ms(modified_end),
             'size': min(size, 200),
         }
         if next_cursor:

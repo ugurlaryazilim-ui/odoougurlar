@@ -80,7 +80,7 @@ class TrendyolOrderSync(models.Model):
         })
 
         run_started = fields.Datetime.now()
-        counters = {'created': 0, 'updated': 0, 'errors': 0}
+        counters = {'created': 0, 'updated': 0, 'errors': 0, 'received': 0}
         error_details = []
 
         # Yeni sipariş olarak içeri alınacak en eski sipariş tarihi
@@ -112,7 +112,7 @@ class TrendyolOrderSync(models.Model):
                     log.write({
                         'state': 'error' if (counters['errors'] or not stream_ok) else 'done',
                         'end_date': fields.Datetime.now(),
-                        'records_processed': sum(counters.values()),
+                        'records_processed': counters['received'],
                         'records_created': counters['created'],
                         'records_updated': counters['updated'],
                         'records_failed': counters['errors'],
@@ -135,8 +135,8 @@ class TrendyolOrderSync(models.Model):
             _logger.error("Trendyol senkronizasyon genel hatası [%s]: %s", store_name, str(e))
 
         _logger.info(
-            "Trendyol senkronizasyon [%s] tamamlandı: %s yeni, %s güncellenen, %s hata",
-            store_name, counters['created'], counters['updated'], counters['errors'],
+            "Trendyol senkronizasyon [%s] tamamlandı: %s paket alındı, %s yeni, %s güncellenen, %s hata",
+            store_name, counters['received'], counters['created'], counters['updated'], counters['errors'],
         )
 
         return dict(counters)
@@ -179,6 +179,7 @@ class TrendyolOrderSync(models.Model):
     def _process_package_batch(self, packages, store, order_cutoff, counters, error_details):
         """Paketleri işle: iptaller önce (kısmi iptalde eski paket kapanıp Nebim'den silinmeden
         yeni paket işlenirse yeni sipariş Nebim'de "mükerrer" sayılıp gönderilmez)."""
+        counters['received'] = counters.get('received', 0) + len(packages)
         # Aynı paket akışta birden çok kez gelebilir: en son hali kalsın
         by_id = {}
         for pkg in packages:
