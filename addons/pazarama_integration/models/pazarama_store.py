@@ -379,6 +379,58 @@ class PazaramaStore(models.Model):
                           "'Pazarama finans denemesi' satırlarında. Pazarama desteğine iletilebilir.",
                           '\n'.join(errors)))
 
+    def action_finance_diagnostics(self):
+        """Finans servisinin hangi sorgularda çalıştığını ölçer (gün gün, ödeme tarihi, sipariş no).
+        Sonuç ekranda ve logda ('Pazarama finans teşhis') görünür; hiçbir kayıt yazılmaz."""
+        self.ensure_one()
+        api = self.get_api()
+        today = self.env['pazarama.order']._now_turkey().date()
+
+        def day_body(day, allowance=False):
+            start, end = day.strftime('%Y-%m-%dT03:00:00.000'), day.strftime('%Y-%m-%dT23:59:59.999')
+            return {'startDate': None if allowance else start, 'endDate': None if allowance else end,
+                    'allowanceStartDate': start if allowance else None,
+                    'allowanceEndDate': end if allowance else None, 'orderId': None}
+
+        probes = []
+        for i in range(1, 8):
+            day = today - timedelta(days=i)
+            probes.append((f"işlem tarihi {day:%d.%m}", day_body(day)))
+        for i in range(1, 8):
+            day = today - timedelta(days=i)
+            probes.append((f"ödeme tarihi {day:%d.%m}", day_body(day, allowance=True)))
+        old_day = today.replace(year=today.year - 3)
+        probes.append((f"çok eski gün {old_day:%d.%m.%Y}", day_body(old_day)))
+        delivered = self.env['pazarama.order'].search(
+            [('store_id', '=', self.id), ('order_status', '=', 11)], order='order_date desc', limit=2)
+        for order in delivered:
+            if order.order_number.isdigit():
+                probes.append((f"sipariş no {order.order_number}",
+                               {'startDate': None, 'endDate': None, 'allowanceStartDate': None,
+                                'allowanceEndDate': None, 'orderId': int(order.order_number)}))
+
+        lines = []
+        for name, body in probes:
+            res = api.get_payment_agreements(body)
+            if res.get('success'):
+                payload = (res.get('data') or {}).get('data') if isinstance(res.get('data'), dict) else None
+                count = len(payload.get('transactionList') or []) if isinstance(payload, dict) else 0
+                line = f"✅ {name}: başarılı, {count} işlem"
+            else:
+                line = f"❌ {name}: {res.get('error')}"
+            lines.append(line)
+            _logger.info("Pazarama finans teşhis | %s | gövde: %s", line, json.dumps(body))
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Pazarama Finans Teşhisi'),
+                'message': '\n'.join(lines),
+                'sticky': True,
+                'type': 'info',
+            }
+        }
+
     def action_view_settlements(self):
         self.ensure_one()
         return {
