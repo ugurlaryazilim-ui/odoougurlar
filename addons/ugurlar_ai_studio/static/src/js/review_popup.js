@@ -691,13 +691,7 @@ async function _openReviewPopup(initialSessionId) {
                 return;
             }
             item.is_approved = true;
-
-            // Sonraki onaylanmamış, revize beklenmeyen ve hariç tutulmamış görsele geç
-            const nextIdx = items.findIndex((it, idx) => idx > currentIndex && !it.is_approved && !it.pending_revision && !it.is_excluded);
-            if (nextIdx >= 0) {
-                currentIndex = nextIdx;
-            }
-            render();
+            await advanceAfterAction();
         } catch(e) {
             showToast('Onay hatası: ' + e.message);
             render();
@@ -745,14 +739,10 @@ async function _openReviewPopup(initialSessionId) {
                 item.is_approved = false;
                 item.is_primary = false;
                 showToast(`🚫 ${item.photo_type_label} ürüne kaydedilirken hariç tutulacak.`, 'success');
-                // Sonraki onaylanmamış ve hariç tutulmamış görsele geç
-                const nextIdx = items.findIndex((it, idx) => idx > currentIndex && !it.is_approved && !it.pending_revision && !it.is_excluded);
-                if (nextIdx >= 0) {
-                    currentIndex = nextIdx;
-                }
-            } else {
-                showToast(`✅ ${item.photo_type_label} tekrar dahil edildi.`, 'success');
+                await advanceAfterAction();
+                return;
             }
+            showToast(`✅ ${item.photo_type_label} tekrar dahil edildi.`, 'success');
             render();
         } catch(e) {
             showToast('Hata: ' + e.message);
@@ -821,16 +811,11 @@ async function _openReviewPopup(initialSessionId) {
             item.pending_revision = true;
             item.new_generation_id = result.new_generation_id;
 
-            // Sonraki incelenmemiş görsele geç
-            const nextIdx = items.findIndex((it, idx) => idx > currentIndex && !it.is_approved && !it.pending_revision);
-            if (nextIdx >= 0) {
-                currentIndex = nextIdx;
-            }
-
-            // Revizyon polling başlat
+            // Revizyon polling başlat (bu oturumda kalınırsa yeni sürüm gelince güncellenir)
             startRevisionPolling();
 
-            render();
+            // Oturumda bakılacak görsel varsa ona, yoksa sıradaki onay bekleyen oturuma geç
+            await advanceAfterAction();
         } catch(e) {
             showToast('Red hatası: ' + e.message);
             render();
@@ -925,6 +910,83 @@ async function _openReviewPopup(initialSessionId) {
         }, 5000); // 5 saniyede bir kontrol et
     }
 
+    /** Bu oturumda henüz karar verilmemiş görsel (önce ileride, sonra baştan aranır). */
+    function findNextReviewable() {
+        const open = (it) => !it.is_approved && !it.pending_revision && !it.is_excluded;
+        const after = items.findIndex((it, idx) => idx > currentIndex && open(it));
+        return after >= 0 ? after : items.findIndex(open);
+    }
+
+    /**
+     * Onay / red / hariç tutma sonrası: oturumda bakılacak görsel varsa ona geç.
+     * Kalmadıysa ve revize sürüyorsa beklemeden sıradaki oturuma geç; bu oturum
+     * revize bitince onay kuyruğuna kendiliğinden döner (onaylar sunucuda kayıtlı).
+     */
+    async function advanceAfterAction() {
+        const nextIdx = findNextReviewable();
+        if (nextIdx >= 0) {
+            currentIndex = nextIdx;
+            render();
+            return;
+        }
+        if (items.some(i => i.pending_revision)) {
+            await goToNextSession(`⏳ ${data.session_name} revizede; yeni görsel hazır olunca onay listesine döner.`);
+            return;
+        }
+        render();  // hepsi karara bağlandı: "Tamamla ve Kaydet"
+    }
+
+    /** Kilidi bırakıp onay kuyruğundaki sıradaki oturumu aynı pencerede aç. */
+    async function goToNextSession(doneMessage) {
+        const previousSessionId = sessionId;
+        const res = await _jsonRpc('/ai_studio/next_review_session', {
+            exclude_session_ids: [previousSessionId],
+        }).catch(() => null);
+        const nextSessionId = res && res.session_id;
+        if (!nextSessionId) {
+            showToast(`${doneMessage} Onay bekleyen başka oturum yok.`, 'success');
+            close();
+            reloadCurrentView();
+            return;
+        }
+        const nextLockToken = newLockToken();
+        const nextLock = await _jsonRpc('/ai_studio/acquire_lock', { session_id: nextSessionId, lock_token: nextLockToken }).catch(() => null);
+        if (!nextLock || !nextLock.success) {
+            showToast(`${doneMessage} Sonraki oturum kilitli veya erişilemiyor.`, 'success');
+            close();
+            reloadCurrentView();
+            return;
+        }
+        const nextData = await _jsonRpc('/ai_studio/review_data', { session_id: nextSessionId, lock_token: nextLockToken }).catch(() => null);
+        if (!nextData || nextData.error || !nextData.items || nextData.items.length === 0) {
+            await _jsonRpc('/ai_studio/release_lock', { session_id: nextSessionId, lock_token: nextLockToken }).catch(() => {});
+            showToast(`${doneMessage} İncelenecek başka oturum yok.`, 'success');
+            close();
+            reloadCurrentView();
+            return;
+        }
+        // Önceki oturumun kilidi ve revize takibi bırakılır (revize sunucuda sürer)
+        await _jsonRpc('/ai_studio/release_lock', { session_id: previousSessionId, lock_token: lockToken }).catch(() => {});
+        if (revisionPollTimer) { clearInterval(revisionPollTimer); revisionPollTimer = null; }
+        // Closure değişkenlerini güncelle (heartbeat & close doğru session'ı hedeflesin)
+        sessionId = nextSessionId;
+        lockToken = nextLockToken;
+        lockLostWarned = false;
+        showRejectModal = false;
+        data.session_id = nextData.session_id;
+        data.session_name = nextData.session_name;
+        data.product_name = nextData.product_name;
+        data.next_session_id = nextData.next_session_id;
+        data.reject_reasons = nextData.reject_reasons || rejectReasons;
+        rejectReasons = data.reject_reasons;
+        userRole = nextData.user_role || userRole;
+        canApprove = (userRole === 'reviewer' || userRole === 'manager');
+        items = nextData.items;
+        currentIndex = Math.max(0, findNextReviewable());
+        showToast(`${doneMessage} Sıradaki oturuma geçildi (${nextData.session_name}).`, 'success');
+        render();
+    }
+
     async function complete() {
         const approvedItems = items.filter(i => i.is_approved);
         if (approvedItems.length === 0) {
@@ -958,53 +1020,8 @@ async function _openReviewPopup(initialSessionId) {
                 return;
             }
 
-            // Eski session kilidini serbest bırak
-            await _jsonRpc('/ai_studio/release_lock', { session_id: sessionId, lock_token: lockToken }).catch(() => {});
-
-            // Sonraki review session var mı?
-            if (data.next_session_id) {
-                // Yeni session için kilit al
-                const nextLockToken = newLockToken();
-                const nextLock = await _jsonRpc('/ai_studio/acquire_lock', { session_id: data.next_session_id, lock_token: nextLockToken }).catch(() => null);
-                if (!nextLock || !nextLock.success) {
-                    showToast(`✅ ${previousSessionName} başarıyla kaydedildi! Sonraki oturum kilitli veya erişilemiyor.`, 'success');
-                    close();
-                    reloadCurrentView();
-                    return;
-                }
-
-                // Sonraki session'ı yükle
-                currentIndex = 0;
-                const nextData = await _jsonRpc('/ai_studio/review_data', { session_id: data.next_session_id, lock_token: nextLockToken });
-                if (nextData.error || !nextData.items || nextData.items.length === 0) {
-                    showToast(`✅ ${previousSessionName} başarıyla kaydedildi! İncelenecek başka oturum yok.`, 'success');
-                    await _jsonRpc('/ai_studio/release_lock', { session_id: data.next_session_id, lock_token: nextLockToken }).catch(() => {});
-                    close();
-                    reloadCurrentView();
-                    return;
-                }
-                // Closure değişkenlerini güncelle (heartbeat & close doğru session'ı hedeflesin)
-                sessionId = data.next_session_id;
-                lockToken = nextLockToken;
-                lockLostWarned = false;
-                // Verileri güncelle
-                data.session_id = nextData.session_id;
-                data.session_name = nextData.session_name;
-                data.product_name = nextData.product_name;
-                data.next_session_id = nextData.next_session_id;
-                data.reject_reasons = nextData.reject_reasons || rejectReasons;
-                rejectReasons = data.reject_reasons;
-                userRole = nextData.user_role || userRole;
-                canApprove = (userRole === 'reviewer' || userRole === 'manager');
-                items = nextData.items;
-                currentIndex = 0;
-                showToast(`✅ ${previousSessionName} kaydedildi. Sıradaki oturuma geçildi (${nextData.session_name}).`, 'success');
-                render();
-            } else {
-                showToast(`✅ ${previousSessionName} başarıyla kaydedildi!`, 'success');
-                close();
-                reloadCurrentView();
-            }
+            // Kilit goToNextSession'da bırakılır (sonraki oturum yoksa close() ile)
+            await goToNextSession(`✅ ${previousSessionName} kaydedildi.`);
         } catch(e) {
             showToast('❌ Kaydetme hatası: ' + e.message, 'error');
             if (btn) { btn.disabled = false; btn.textContent = `✅ Tamamla ve Kaydet (${approvedItems.length} görsel)`; }

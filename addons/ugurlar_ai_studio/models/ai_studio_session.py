@@ -1502,6 +1502,32 @@ class AiStudioSession(models.Model):
         gen_seed = tryon_result.get('seed') or False
         return gen_b64, gen_seed
 
+    @api.model
+    def _review_queue_domain(self):
+        """Onay kuyruğu: incelemedeki ve revizesi (yeniden üretimi) sürmeyen oturumlar.
+
+        Revizeye gönderilen görselin yeni sürümü bitene kadar oturum kuyrukta
+        görünmez; bitince kendiliğinden geri gelir.
+        """
+        return [
+            ('state', '=', 'review'),
+            ('generation_ids', 'not any', [('state', 'in', ('pending', 'processing'))]),
+        ]
+
+    @api.model
+    def get_review_queue(self, limit=50):
+        """Toplu Onay ekranı: kuyruktaki oturumlar + revizesi süren oturum sayısı."""
+        sessions = self.search_read(
+            self._review_queue_domain(),
+            ['name', 'product_id', 'generation_count', 'approval_rate', 'create_date'],
+            limit=limit, order='create_date desc',
+        )
+        in_revision = self.search_count([
+            ('state', '=', 'review'),
+            ('generation_ids', 'any', [('state', 'in', ('pending', 'processing'))]),
+        ])
+        return {'sessions': sessions, 'in_revision_count': in_revision}
+
     def action_start_processing(self):
         """AI işlemeyi başlat."""
         self.ensure_one()

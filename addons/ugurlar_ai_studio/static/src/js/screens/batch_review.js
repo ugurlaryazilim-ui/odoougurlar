@@ -12,7 +12,7 @@ export class BatchReview extends Component {
 
     setup() {
         this.orm = useService("orm");
-        this.state = useState({ sessions: [] });
+        this.state = useState({ sessions: [], inRevisionCount: 0 });
 
         onWillStart(() => this.loadSessions());
         // Popup kapanınca / başka onaycı bitirince liste bayatlamasın
@@ -32,12 +32,10 @@ export class BatchReview extends Component {
     }
 
     async loadSessions() {
-        this.state.sessions = await this.orm.searchRead(
-            "ai.studio.session",
-            [["state", "=", "review"]],
-            ["name", "product_id", "generation_count", "approval_rate", "create_date"],
-            { limit: 50, order: "create_date desc" }
-        );
+        // Revizesi süren oturumlar yeni sürüm bitene kadar listede gösterilmez
+        const queue = await this.orm.call("ai.studio.session", "get_review_queue", []);
+        this.state.sessions = queue.sessions;
+        this.state.inRevisionCount = queue.in_revision_count;
     }
 
     async openSession(sessionId) {

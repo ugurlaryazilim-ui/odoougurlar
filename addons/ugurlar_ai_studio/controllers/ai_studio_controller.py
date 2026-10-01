@@ -777,6 +777,34 @@ class AiStudioController(http.Controller):
     # ═══════════════════════════════════════════════════════════
     REVIEW_LOCK_TIMEOUT_MINUTES = 5
 
+    def _next_review_session(self, exclude_ids=()):
+        """Onay kuyruğundaki ilk oturum: revizesi süren ve başka kullanıcının
+        aktif kilidi olan oturumlar atlanır."""
+        from datetime import timedelta
+        Session = request.env['ai.studio.session']
+        domain = Session._review_queue_domain()
+        if exclude_ids:
+            domain.append(('id', 'not in', [int(i) for i in exclude_ids]))
+        lock_limit = fields.Datetime.now() - timedelta(minutes=self.REVIEW_LOCK_TIMEOUT_MINUTES)
+        user = request.env.user
+        for session in Session.search(domain, order='id asc', limit=20):
+            locked_by_other = (session.review_locked_by and session.review_locked_by != user
+                               and session.review_lock_time and session.review_lock_time > lock_limit)
+            if not locked_by_other:
+                return session
+        return Session
+
+    @http.route('/ai_studio/next_review_session', type='jsonrpc', auth='user', methods=['POST'])
+    def next_review_session(self, exclude_session_ids=None):
+        """İnceleme popup'ı: revize beklerken / kaydettikten sonra geçilecek oturum."""
+        try:
+            session = self._next_review_session(exclude_session_ids or [])
+            return {'session_id': session.id or False}
+        except Exception as e:
+            request.env.cr.rollback()
+            _logger.exception('next_review_session hatasi: %s', e)
+            return {'session_id': False, 'error': str(e)}
+
     @http.route('/ai_studio/acquire_lock', type='jsonrpc', auth='user', methods=['POST'])
     def acquire_review_lock(self, session_id, lock_token=''):
         """Oturumu inceleme için kilitle. Başka kullanıcı/sekme inceliyorsa engelle."""
@@ -967,11 +995,8 @@ class AiStudioController(http.Controller):
             reasons = request.env['ai.studio.reject.reason'].search([])
             reason_list = [{'id': r.id, 'name': r.name} for r in reasons]
 
-            # Sonraki review session
-            next_session = request.env['ai.studio.session'].search([
-                ('state', '=', 'review'),
-                ('id', '!=', session.id),
-            ], limit=1, order='id asc')
+            # Sonraki review session (revizesi sürenler ve başkasının incelediği hariç)
+            next_session = self._next_review_session([session.id])
 
             # Kullanıcı rolünü belirle
             user = request.env.user
