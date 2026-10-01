@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="n11_refund_tree" model="ir.ui.view">
+        <field name="name">n11.refund.tree</field>
+        <field name="model">n11.refund</field>
+        <field name="arch" type="xml">
+            <list string="N11 İade Talepleri" create="false" edit="false">
+                <field name="refund_date"/>
+                <field name="refund_id"/>
+                <field name="order_number"/>
+                <field name="n11_order_id" optional="hide"/>
+                <field name="sale_order_id" optional="show"/>
+                <field name="customer_name"/>
+                <field name="product_name"/>
+                <field name="quantity"/>
+                <field name="refund_amount" sum="Toplam"/>
+                <field name="refund_type" optional="show"/>
+                <field name="approval_remaining_time" optional="show"/>
+                <field name="status" widget="badge"
+                       decoration-warning="status in ('REQUESTED', 'APPROVAL_WAITING', 'PENDING', 'PENDED')"
+                       decoration-success="status in ('APPROVED', 'MANUAL_REFUND')"
+                       decoration-danger="status in ('DENIED',)"
+                       decoration-muted="status in ('CANCELLED',)"/>
+                <field name="store_id" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="n11_refund_form" model="ir.ui.view">
+        <field name="name">n11.refund.form</field>
+        <field name="model">n11.refund</field>
+        <field name="arch" type="xml">
+            <form string="N11 İade Talebi" create="false" edit="false">
+                <header>
+                    <field name="status" widget="statusbar" statusbar_visible="REQUESTED,APPROVED"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="refund_id"/></h1>
+                    </div>
+                    <group>
+                        <group string="Sipariş">
+                            <field name="store_id"/>
+                            <field name="order_number"/>
+                            <field name="n11_order_id"/>
+                            <field name="sale_order_id"/>
+                            <field name="order_date"/>
+                            <field name="customer_name"/>
+                            <field name="customer_email"/>
+                        </group>
+                        <group string="İade">
+                            <field name="refund_date"/>
+                            <field name="approved_date" invisible="not approved_date"/>
+                            <field name="denied_date" invisible="not denied_date"/>
+                            <field name="cancelled_date" invisible="not cancelled_date"/>
+                            <field name="approval_remaining_time" invisible="not approval_remaining_time"/>
+                            <field name="executer"/>
+                            <field name="refund_type"/>
+                            <field name="shipment_company_name"/>
+                            <field name="shipment_code"/>
+                            <field name="refund_number"/>
+                        </group>
+                    </group>
+                    <group string="Ürün">
+                        <group>
+                            <field name="product_name"/>
+                            <field name="attribute_names"/>
+                            <field name="product_code"/>
+                            <field name="product_id"/>
+                        </group>
+                        <group>
+                            <field name="quantity"/>
+                            <field name="total_amount"/>
+                            <field name="refund_amount"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Müşteri Açıklaması">
+                            <field name="description"/>
+                        </page>
+                        <page string="Ham Veri">
+                            <field name="raw_data" widget="text"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="n11_refund_search" model="ir.ui.view">
+        <field name="name">n11.refund.search</field>
+        <field name="model">n11.refund</field>
+        <field name="arch" type="xml">
+            <search string="N11 İade Talepleri">
+                <field name="order_number"/>
+                <field name="refund_id"/>
+                <field name="customer_name"/>
+                <field name="product_name"/>
+                <field name="shipment_code"/>
+                <filter name="waiting" string="Bekleyen"
+                        domain="[('status', 'in', ('REQUESTED', 'APPROVAL_WAITING', 'PENDING', 'PENDED'))]"/>
+                <filter name="approved" string="Onaylanan" domain="[('status', 'in', ('APPROVED', 'MANUAL_REFUND'))]"/>
+                <filter name="denied" string="Reddedilen" domain="[('status', '=', 'DENIED')]"/>
+                <group>
+                    <filter name="group_status" string="Durum" context="{'group_by': 'status'}"/>
+                    <filter name="group_store" string="Mağaza" context="{'group_by': 'store_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_n11_refunds" model="ir.actions.act_window">
+        <field name="name">N11 İade Talepleri</field>
+        <field name="res_model">n11.refund</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="n11_refund_search"/>
+    </record>
+</odoo>

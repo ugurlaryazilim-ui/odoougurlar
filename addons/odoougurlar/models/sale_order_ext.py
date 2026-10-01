@@ -179,7 +179,8 @@ class SaleOrder(models.Model):
                 n11 = order.n11_order_id
                 display = n11.order_status_display if hasattr(n11, 'order_status_display') and n11.order_status_display else (n11.order_status or '')
                 status_raw = (n11.order_status or '').lower()
-                if 'iptal' in status_raw or 'cancel' in status_raw or 'iade' in status_raw:
+                if ('iptal' in status_raw or 'cancel' in status_raw or 'iade' in status_raw
+                        or 'unsupplied' in status_raw):
                     category = 'danger'
                 elif 'teslim' in status_raw or 'deliver' in status_raw:
                     category = 'success'

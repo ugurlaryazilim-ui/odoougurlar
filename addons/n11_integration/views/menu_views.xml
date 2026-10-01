@@ -13,5 +13,6 @@
     <!-- Alt Menüler -->
     <menuitem id="menu_n11_stores" name="Mağazalar" parent="menu_n11_root" action="action_n11_store" sequence="10"/>
     <menuitem id="menu_n11_orders" name="N11 Siparişleri" parent="menu_n11_root" action="action_n11_orders" sequence="20"/>
+    <menuitem id="menu_n11_refunds" name="İade Talepleri" parent="menu_n11_root" action="action_n11_refunds" sequence="30"/>
     <menuitem id="menu_n11_settings" name="Ayarlar" parent="menu_n11_root" action="action_n11_config_settings" sequence="100"/>
 </odoo>

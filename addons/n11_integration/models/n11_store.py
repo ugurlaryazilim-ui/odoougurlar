@@ -24,6 +24,8 @@ class N11Store(models.Model):
     sync_interval = fields.Integer(string='Senkron Aralığı (dk)', default=1, help='Bu değer cron ile senkronize çalışarak hangi sıklıkta N11 API\'ye çıkılacağını gösterir.')
     order_day_range = fields.Integer(string='Senkronizasyon Gün Aralığı', default=1, help="Geçmişe dönük kaç günlük sipariş çekilecek?")
     last_sync = fields.Datetime(string='Son Senkronizasyon', readonly=True)
+    last_sync_error = fields.Text(string='Son Senkron Hatası', readonly=True)
+    last_sync_error_date = fields.Datetime(string='Hata Zamanı', readonly=True)
 
     # ─── Tek Sipariş Çekme ───────────────────────────────
     fetch_order_number = fields.Char(
@@ -35,6 +37,10 @@ class N11Store(models.Model):
     # ─── Sipariş Ayarları ────────────────────────────────
     auto_confirm = fields.Boolean(string='Siparişi Otomatik Onayla', default=True, help="Odoo'ya düşen siparişler otomatik onaylanır ve Nebim sürecini tetikler.")
     auto_cancel = fields.Boolean(string='İptalleri Otomatik İptal Et', default=True)
+    auto_accept_orders = fields.Boolean(
+        string="Siparişi n11'de Otomatik Onayla", default=False,
+        help="Açıksa Odoo'da onaylanan siparişin 'Yeni' (Created) kalemleri hemen n11'de onaylanır "
+             "(Picking). Kapalıysa onay, depo transferi doğrulandığında gönderilir.")
 
     # ─── Müşteri Ayarları ────────────────────────────────
     customer_prefix = fields.Char(string='Müşteri Kodu Ön Ek', default='N11-', help='N11 müşterilerinin kodlarına eklenen ek')
@@ -65,6 +71,8 @@ class N11Store(models.Model):
     # ─── Counts ──────────────────────────────────────────
     order_count = fields.Integer(string='Sipariş Sayısı', compute='_compute_order_count')
     settlement_count = fields.Integer(string='Finansal Kayıt', compute='_compute_counts')
+    refund_count = fields.Integer(string='İade Talebi', compute='_compute_refund_count')
+    error_order_count = fields.Integer(string='Hatalı Sipariş', compute='_compute_refund_count')
 
     @api.depends('order_ids')
     def _compute_order_count(self):
@@ -85,6 +93,36 @@ class N11Store(models.Model):
         counts = {store.id: count for store, count in data}
         for store in self:
             store.settlement_count = counts.get(store.id, 0)
+
+    def _compute_refund_count(self):
+        refunds = dict(self.env['n11.refund'].sudo()._read_group(
+            [('store_id', 'in', self.ids)], groupby=['store_id'], aggregates=['__count']))
+        errors = dict(self.env['n11.order'].sudo()._read_group(
+            [('store_id', 'in', self.ids), ('error_message', '!=', False)],
+            groupby=['store_id'], aggregates=['__count']))
+        for store in self:
+            store.refund_count = refunds.get(store, 0)
+            store.error_order_count = errors.get(store, 0)
+
+    def _write_sync_state(self, last_sync=None, error=False):
+        """Senkron durumunu ayrı cursor ile yazar: cron işlemi mağaza satırına yazmaz, böylece
+        aynı anda formdan kaydedilen mağazayla çakışıp (serialization) geri alınmaz."""
+        self.ensure_one()
+        try:
+            with self.pool.cursor() as cr2:
+                # Ana işlem satırı kilitlediyse sonsuza dek beklemesin
+                cr2.execute("SET LOCAL lock_timeout = '5s'")
+                if last_sync:
+                    cr2.execute("UPDATE n11_store SET last_sync = %s WHERE id = %s", (last_sync, self.id))
+                if error:
+                    cr2.execute("UPDATE n11_store SET last_sync_error = %s, last_sync_error_date = %s WHERE id = %s",
+                                (str(error)[:2000], fields.Datetime.now(), self.id))
+                elif last_sync:
+                    cr2.execute("UPDATE n11_store SET last_sync_error = NULL, last_sync_error_date = NULL "
+                                "WHERE id = %s AND last_sync_error IS NOT NULL", (self.id,))
+            self.invalidate_recordset(['last_sync', 'last_sync_error', 'last_sync_error_date'])
+        except Exception as e:
+            _logger.warning("N11 mağaza senkron durumu yazılamadı (%s): %s", self.name, e)
 
     def write(self, vals):
         res = super().write(vals)
@@ -142,9 +180,11 @@ class N11Store(models.Model):
                     }
                 }
             else:
-                raise UserError(_("Bağlantı Hatası: %s" % result.get('error')))
+                raise UserError(_("Bağlantı Hatası: %s", result.get('error')))
+        except UserError:
+            raise
         except Exception as e:
-            raise UserError(_("Bağlantı Hatası: %s" % str(e)))
+            raise UserError(_("Bağlantı Hatası: %s", str(e)))
 
     def action_sync_now(self):
         self.ensure_one()
@@ -164,9 +204,46 @@ class N11Store(models.Model):
         }
 
     def action_sync_financials(self):
-        """N11 için finansal mutabakat servisi henüz desteklenmiyor."""
+        """n11 API'sinde finans / hakediş servisi yok (doküman kontrol edildi)."""
         self.ensure_one()
-        raise UserError(_("N11 için finansal mutabakat servisi bu sürümde desteklenmemektedir. Lütfen paneli kullanınız."))
+        raise UserError(_("n11 API'si finansal mutabakat servisi sunmuyor. Lütfen paneli kullanınız."))
+
+    def action_sync_returns(self):
+        self.ensure_one()
+        res = self.env['n11.refund'].sudo().sync_returns_for_store(self)
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('N11 İade Talepleri'),
+                'message': f"Yeni: {res.get('created', 0)} | Güncellenen: {res.get('updated', 0)}",
+                'type': 'success',
+                'sticky': False,
+            },
+        }
+
+    def action_view_refunds(self):
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.act_window',
+            'name': _('İade Talepleri'),
+            'res_model': 'n11.refund',
+            'view_mode': 'list,form',
+            'domain': [('store_id', '=', self.id)],
+        }
+
+    def action_view_orders(self, only_errors=False):
+        self.ensure_one()
+        domain = [('store_id', '=', self.id)]
+        if only_errors or self.env.context.get('only_errors'):
+            domain.append(('error_message', '!=', False))
+        return {
+            'type': 'ir.actions.act_window',
+            'name': _('N11 Siparişleri'),
+            'res_model': 'n11.order',
+            'view_mode': 'list,form',
+            'domain': domain,
+        }
 
     def action_fetch_single_order(self):
         """Sipariş numarası ile tek sipariş çek."""
@@ -180,36 +257,27 @@ class N11Store(models.Model):
 
         try:
             api = self.get_api()
-            result = api.get_shipment_packages(order_number=order_number)
+            result = api.get_order_packages(order_number)
 
             if not result.get('success'):
                 raise UserError(_('❌ N11 API hatası:\n\n%s') % result.get('error', 'Bilinmeyen hata'))
 
-            data = result.get('data', {})
-            content = data if isinstance(data, list) else data.get('content', data.get('shipmentPackages', []))
-
-            if not content:
+            packages = [p for p in result.get('data') or [] if str(p.get('orderNumber')) == order_number]
+            if not packages:
                 raise UserError(_('❌ Sipariş bulunamadı: %s\n\nBu numarada sipariş N11\'de mevcut değil.') % order_number)
 
             N11Order = self.env['n11.order']
             created = 0
             updated = 0
-
-            if isinstance(content, list):
-                packages = content
-            else:
-                packages = [content]
-
-            for package in packages:
-                try:
-                    with self.env.cr.savepoint():
-                        res = N11Order._process_order_json(package, self)
-                        if res == 'created':
-                            created += 1
-                        elif res == 'updated':
-                            updated += 1
-                except Exception as e:
-                    raise UserError(_('❌ Sipariş işleme hatası:\n\n%s') % str(e))
+            try:
+                with self.env.cr.savepoint():
+                    res = N11Order._sync_order_packages(self, api, order_number, packages, None, refetch=False)
+                    if res == 'created':
+                        created += 1
+                    elif res in ('updated', 'unchanged'):
+                        updated += 1
+            except Exception as e:
+                raise UserError(_('❌ Sipariş işleme hatası:\n\n%s') % str(e))
 
             self.fetch_order_number = False
 
