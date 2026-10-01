@@ -13,5 +13,6 @@
     <!-- Alt Menüler -->
     <menuitem id="menu_pazarama_stores" name="Mağazalar" parent="menu_pazarama_root" action="action_pazarama_store" sequence="10"/>
     <menuitem id="menu_pazarama_orders" name="Pazarama Siparişleri" parent="menu_pazarama_root" action="action_pazarama_orders" sequence="20"/>
+    <menuitem id="menu_pazarama_settlements" name="Finansal İşlemler" parent="menu_pazarama_root" action="action_pazarama_settlements" sequence="30"/>
     <menuitem id="menu_pazarama_settings" name="Ayarlar" parent="menu_pazarama_root" action="action_pazarama_config_settings" sequence="100"/>
 </odoo>

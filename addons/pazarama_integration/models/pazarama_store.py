@@ -340,6 +340,10 @@ class PazaramaStore(models.Model):
             'commission_amount': item.get('commissionAmount') or 0.0,
             'coupon_discount': item.get('couponDiscount') or 0.0,
             'allowance_amount': item.get('allowanceAmount') or 0.0,
+            'integration_amount': item.get('integrationAmount') or 0.0,
+            'cargo_debt': item.get('merchantCargoDebt') or 0.0,
+            'stoppage_amount': item.get('stoppageAmount') or 0.0,
+            'pazarama_order_id': Order.search([('store_id', '=', self.id), ('order_number', '=', order_id)], limit=1).id,
             'status': item.get('status') or 'Bilinmiyor',
             'transaction_date': Order._parse_tr_datetime(item.get('transactionDate')),
             'transferred_date': Order._parse_tr_datetime(item.get('transferredDate')),
@@ -407,10 +411,6 @@ class PazaramaStore(models.Model):
 
     def action_view_settlements(self):
         self.ensure_one()
-        return {
-            'type': 'ir.actions.act_window',
-            'name': _('Pazarama Finansal İşlemler'),
-            'res_model': 'pazarama.settlement',
-            'view_mode': 'list,form',
-            'domain': [('store_id', '=', self.id)],
-        }
+        action = self.env['ir.actions.act_window']._for_xml_id('pazarama_integration.action_pazarama_settlements')
+        action['domain'] = [('store_id', '=', self.id)]
+        return action
