@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="pazarama_settlement_list" model="ir.ui.view">
+        <field name="name">pazarama.settlement.list</field>
+        <field name="model">pazarama.settlement</field>
+        <field name="arch" type="xml">
+            <list string="Pazarama Finansal İşlemler" create="false" edit="false"
+                  decoration-muted="not transferred_date">
+                <field name="transaction_date"/>
+                <field name="order_id"/>
+                <field name="pazarama_order_id" optional="hide"/>
+                <field name="sale_order_id" optional="show"/>
+                <field name="status" widget="badge"/>
+                <field name="amount" sum="Toplam Tutar"/>
+                <field name="commission_amount" sum="Komisyon"/>
+                <field name="coupon_discount" optional="hide" sum="Kupon"/>
+                <field name="integration_amount" optional="show" sum="Entegrasyon"/>
+                <field name="cargo_debt" optional="show" sum="Kargo"/>
+                <field name="stoppage_amount" optional="show" sum="Stopaj"/>
+                <field name="allowance_amount" sum="Net Hakediş"/>
+                <field name="transferred_date"/>
+                <field name="installment_number" optional="hide"/>
+                <field name="trx_code" optional="hide"/>
+                <field name="store_id" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="pazarama_settlement_form" model="ir.ui.view">
+        <field name="name">pazarama.settlement.form</field>
+        <field name="model">pazarama.settlement</field>
+        <field name="arch" type="xml">
+            <form string="Pazarama Finansal İşlem" create="false" edit="false">
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="order_id"/></h1>
+                    </div>
+                    <group>
+                        <group string="İşlem">
+                            <field name="store_id"/>
+                            <field name="pazarama_order_id"/>
+                            <field name="sale_order_id"/>
+                            <field name="status"/>
+                            <field name="transaction_date"/>
+                            <field name="transferred_date"/>
+                            <field name="trx_code"/>
+                            <field name="trx_id"/>
+                            <field name="installment_number"/>
+                        </group>
+                        <group string="Tutarlar">
+                            <field name="amount"/>
+                            <field name="commission_amount"/>
+                            <field name="coupon_discount"/>
+                            <field name="integration_amount"/>
+                            <field name="cargo_debt"/>
+                            <field name="stoppage_amount"/>
+                            <field name="allowance_amount"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Ham Veri">
+                            <field name="raw_data" widget="text"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="pazarama_settlement_search" model="ir.ui.view">
+        <field name="name">pazarama.settlement.search</field>
+        <field name="model">pazarama.settlement</field>
+        <field name="arch" type="xml">
+            <search string="Pazarama Finansal İşlemler">
+                <field name="order_id"/>
+                <field name="sale_order_id"/>
+                <field name="trx_code"/>
+                <filter name="transferred" string="Aktarılmış" domain="[('transferred_date', '!=', False)]"/>
+                <filter name="not_transferred" string="Aktarılmamış" domain="[('transferred_date', '=', False)]"/>
+                <separator/>
+                <filter name="transaction_date" string="İşlem Tarihi" date="transaction_date"/>
+                <group>
+                    <filter name="group_status" string="Statü" context="{'group_by': 'status'}"/>
+                    <filter name="group_transferred" string="Aktarım Tarihi" context="{'group_by': 'transferred_date:day'}"/>
+                    <filter name="group_store" string="Mağaza" context="{'group_by': 'store_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_pazarama_settlements" model="ir.actions.act_window">
+        <field name="name">Pazarama Finansal İşlemler</field>
+        <field name="res_model">pazarama.settlement</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="pazarama_settlement_search"/>
+    </record>
+</odoo>
