@@ -1,5 +1,5 @@
 import logging
-from odoo import api, fields, models, _
+from odoo import models
 
 _logger = logging.getLogger(__name__)
 
@@ -7,7 +7,7 @@ class StockPicking(models.Model):
     _inherit = 'stock.picking'
 
     def button_validate(self):
-        """Picking tamamlandığında N11'ya kargo bilgisi gönder."""
+        """Picking tamamlandığında N11'de henüz onaylanmamış (Created) kalemleri onayla."""
         res = super().button_validate()
 
         # Wizard döndüyse (backorder vb.) şimdilik bildirim yapmayalım
@@ -18,39 +18,23 @@ class StockPicking(models.Model):
             if picking.state != 'done':
                 continue
 
-            # N11 siparişi mi?
             sale_order = picking.sale_id
-            if not sale_order:
-                group = getattr(picking, 'group_id', False)
-                if group:
-                    sale_order = self.env['sale.order'].search(
-                        [('procurement_group_id', '=', group.id)], limit=1
-                    )
-            
             if not sale_order or not sale_order.n11_order_id:
                 continue
 
             n11_order = sale_order.n11_order_id
             store = n11_order.store_id
-            
             if not store or not store.auto_send_cargo:
                 continue
 
-            try:
-                api = store.get_api()
-                
-                # Sipariş hazır/kargo bilgisi talep et
-                line_ids = [int(l.n11_item_id) for l in sale_order.order_line if l.n11_item_id]
-                if not line_ids:
-                    continue
+            # n11 yalnızca 'Created' kalemlerin onayını kabul eder; onaylıları tekrar göndermeyelim
+            lines = n11_order.line_ids.filtered(lambda l: l.status == 'Created' and l.item_id)
+            if not lines:
+                continue
 
-                result = api.update_order_status_to_picking(line_ids)
-                
-                if result.get('success'):
-                    picking.message_post(body="N11 Siparişi Picking (Onaylandı) Statüsüne alındı.")
-                else:
-                    _logger.warning("N11 API Hatası [%s]: %s", n11_order.order_number, result.get('error'))
+            try:
+                n11_order._accept_lines(store, lines, picking, 'Transfer doğrulandı')
             except Exception as e:
-                _logger.exception("Kargo bilgisi N11 gönderme hatası [%s]: %s", store.name, e)
+                _logger.exception("N11 onay gönderme hatası [%s]: %s", store.name, e)
 
         return res

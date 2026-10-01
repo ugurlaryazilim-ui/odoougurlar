@@ -382,7 +382,7 @@ class InvoiceProcessor(models.AbstractModel):
                 email_address = getattr(sale_order.hb_order_id, 'customer_email', '') or ''
                 payment_agent = 'HepsiBuradaMp'
             elif hasattr(sale_order, 'n11_order_id') and sale_order.n11_order_id:
-                email_address = getattr(sale_order.n11_order_id, 'buyer_email', '') or ''
+                email_address = getattr(sale_order.n11_order_id, 'customer_email', '') or ''
                 payment_agent = 'N11Mp'
             elif hasattr(sale_order, 'pttavm_order_id') and sale_order.pttavm_order_id:
                 email_address = getattr(sale_order.pttavm_order_id, 'customer_email', '') or ''

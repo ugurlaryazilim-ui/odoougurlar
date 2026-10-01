@@ -1,8 +1,9 @@
 """N11 sipariş toplu işlemleri — retry, refresh, delete, mark."""
-import json
 import logging
 
-from odoo import api, fields, models
+from odoo import models
+
+from .n11_order import N11_CANCEL_STATUSES
 
 _logger = logging.getLogger(__name__)
 
@@ -11,115 +12,59 @@ class N11OrderActions(models.Model):
     _inherit = 'n11.order'
 
     def action_retry_sync(self):
-        """Seçili hatalı sipariş kayıtlarını tekrar dene."""
-        errors = self.filtered(lambda o: not o.sale_order_id and o.raw_data)
+        """Odoo siparişi oluşmamış kayıtları tekrar dene (ör. ürün sonradan eklendiyse)."""
+        errors = self.filtered(lambda o: not o.sale_order_id)
         if not errors:
-            return self._notify('Uyarı', 'Takılmıs, tekrar denenecek hatalı sipariş yok.', 'warning')
+            return self._notify('Uyarı', 'Tekrar denenecek hatalı sipariş yok.', 'warning')
 
         success = 0
         fail = 0
         for order in errors:
             try:
-                package_data = json.loads(order.raw_data)
-                store = order.store_id
-                if not store:
-                    store = self.env['n11.store'].search([('active', '=', True)], limit=1)
-                if not store:
-                    fail += 1
-                    continue
-                
-                # N11'de order_status Char — string karşılaştırma
-                if order.order_status not in ['Rejected', 'Rejected By Seller']:
-                    shipment_addr = package_data.get('shippingAddress') or {}
-                    billing_addr = package_data.get('billingAddress') or {}
-                    customer_email = package_data.get('customerEmail') or ''
-                    phone_number = shipment_addr.get('gsm') or ''
-
-                    sale_order = self._create_odoo_sale_order(
-                        order, store, shipment_addr, billing_addr,
-                        customer_email, phone_number, package_data
-                    )
-                    order.write({
-                        'sale_order_id': sale_order.id,
-                        'store_id': store.id,
-                    })
-                    
-                    if store.auto_confirm and sale_order.state in ['draft', 'sent']:
-                        sale_order.action_confirm()
-
+                with self.env.cr.savepoint():
+                    order._reconcile_sale_order(order.store_id)
+                    order._auto_accept(order.store_id)
+                if order.sale_order_id:
                     success += 1
                 else:
                     fail += 1
             except Exception as e:
                 fail += 1
+                self.env.invalidate_all(flush=False)
                 _logger.exception("N11 Tekrar deneme hatası %s: %s", order.order_number, e)
 
         return self._notify(
             'Tekrar Deneme Sonucu',
-            f'✅ Başarılı: {success}\n❌ Başarısız/Atlanan: {fail}',
+            f'✅ Başarılı: {success}\n❌ Başarısız/Atlanan (iptal veya ürün eksik): {fail}',
             'success' if fail == 0 else 'warning',
         )
 
     def action_refresh_from_n11(self):
-        """Seçili siparişlerin durumunu N11 API'den güncelle."""
+        """Seçili siparişleri sipariş numarasıyla N11 API'den yeniden çekip güncelle."""
         if not self:
             return
 
-        store_orders = {}
+        updated = 0
+        apis = {}
         for order in self:
             store = order.store_id
-            if not store:
+            if not store or not order.order_number:
                 continue
-            if store.id not in store_orders:
-                store_orders[store.id] = {'store': store, 'orders': self.env['n11.order']}
-            store_orders[store.id]['orders'] |= order
-
-        updated = 0
-        for data in store_orders.values():
-            store = data['store']
             try:
-                api = store.get_api()
-            except Exception as e:
-                _logger.warning("API bağlantı hatası [%s]: %s", store.name, e)
-                continue
-
-            for order in data['orders']:
-                if not order.order_number:
+                if store.id not in apis:
+                    apis[store.id] = store.get_api()
+                api = apis[store.id]
+                result = api.get_order_packages(order.order_number)
+                if not result.get('success') or not result.get('data'):
+                    _logger.warning("Durum güncelleme hatası %s: %s", order.order_number,
+                                    result.get('error') or 'paket bulunamadı')
                     continue
-                try:
-                    # N11 shipmentPackages endpoint — kendi API'si
-                    result = api.get_shipment_packages(
-                        start_date=order.order_date,
-                        end_date=fields.Datetime.now(),
-                        page=0, size=10
-                    )
-                    
-                    if result.get('success'):
-                        content = result.get('data', {}).get('content', [])
-                        # orderNumber ile eşleştir
-                        pkg = None
-                        for item in content:
-                            if str(item.get('orderNumber')) == order.order_number:
-                                pkg = item
-                                break
-                        
-                        if pkg:
-                            new_status = pkg.get('shipmentPackageStatus')
-                            vals = {
-                                'order_status': new_status if new_status else order.order_status,
-                                'raw_data': json.dumps(pkg, ensure_ascii=False),
-                            }
-                            
-                            # Kargo bilgisi
-                            if pkg.get('cargoTrackingNumber'):
-                                vals['cargo_tracking_number'] = str(pkg['cargoTrackingNumber'])
-                            if pkg.get('cargoProviderName'):
-                                vals['cargo_provider'] = pkg['cargoProviderName']
-
-                            order.write(vals)
-                            updated += 1
-                except Exception as e:
-                    _logger.warning("Durum güncelleme hatası %s: %s", order.order_number, e)
+                with self.env.cr.savepoint():
+                    self._sync_order_packages(store, api, order.order_number, result['data'], None, refetch=False)
+                updated += 1
+            except Exception as e:
+                self.env.invalidate_all(flush=False)
+                _logger.warning("Durum güncelleme hatası %s: %s", order.order_number, e)
 
         return self._notify(
             'Durum Güncelleme',
@@ -136,7 +81,7 @@ class N11OrderActions(models.Model):
         return self._notify('Silme', f'🗑️ {count} hatalı kayıt silindi.', 'success')
 
     def action_retry_all_errors(self):
-        errors = self.search([('sale_order_id', '=', False)])
+        errors = self.search([('sale_order_id', '=', False), ('order_status', 'not in', list(N11_CANCEL_STATUSES))])
         if not errors:
             return self._notify('Bilgi', 'Tekrar denenecek hatalı sipariş yok.', 'info')
         return errors.action_retry_sync()

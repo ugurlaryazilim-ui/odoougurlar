@@ -8,16 +8,26 @@
                 <header>
                     <button name="action_test_connection" type="object" string="Bağlantı Test Et" class="btn-primary"/>
                     <button name="action_sync_now" type="object" string="Şimdi Senkronize Et" class="btn-secondary"/>
-                    <button name="action_sync_financials" type="object" string="Finansal Senkron" class="btn-secondary"/>
+                    <button name="action_sync_returns" type="object" string="İade Taleplerini Çek" class="btn-secondary"
+                            invisible="not process_returns"/>
                 </header>
                 <sheet>
                     <div class="oe_button_box" name="button_box">
-                        <button class="oe_stat_button" icon="fa-shopping-cart">
+                        <button class="oe_stat_button" icon="fa-shopping-cart" name="action_view_orders" type="object">
                             <field name="order_count" widget="statinfo" string="Siparişler"/>
                         </button>
-                        <button class="oe_stat_button" icon="fa-money">
-                            <field name="settlement_count" widget="statinfo" string="Finans"/>
+                        <button class="oe_stat_button" icon="fa-exclamation-triangle" name="action_view_orders" type="object"
+                                context="{'only_errors': True}" invisible="not error_order_count">
+                            <field name="error_order_count" widget="statinfo" string="Hatalı"/>
                         </button>
+                        <button class="oe_stat_button" icon="fa-undo" name="action_view_refunds" type="object"
+                                invisible="not process_returns and not refund_count">
+                            <field name="refund_count" widget="statinfo" string="İadeler"/>
+                        </button>
+                    </div>
+                    <div class="alert alert-danger" role="alert" invisible="not last_sync_error">
+                        <strong>Son senkronizasyon hatası</strong> (<field name="last_sync_error_date" readonly="1" class="oe_inline"/>):
+                        <field name="last_sync_error" readonly="1" nolabel="1"/>
                     </div>
                     <div class="oe_title">
                         <h1>
@@ -55,6 +65,7 @@
                                 <group string="Sipariş İşleme">
                                     <field name="auto_confirm"/>
                                     <field name="auto_cancel"/>
+                                    <field name="auto_accept_orders"/>
                                 </group>
                             </group>
                         </page>
@@ -62,26 +73,10 @@
                             <group>
                                 <group string="İade Ayarları">
                                     <field name="process_returns"/>
-                                    <field name="return_day_range"/>
+                                    <field name="return_day_range" invisible="not process_returns"/>
                                 </group>
-                                <group string="Kargo Otomasyonu">
-                                    <field name="auto_send_cargo"/>
-                                    <field name="cargo_include_order_number"/>
-                                    <field name="default_package_count"/>
-                                    <field name="default_desi"/>
-                                </group>
-                            </group>
-                        </page>
-                        <page string="Finans / Mutabakat">
-                            <group>
-                                <group string="Finans Senkronizasyonu">
-                                    <field name="sync_financials"/>
-                                    <field name="financial_day_range"/>
-                                    <field name="last_financial_sync" readonly="1"/>
-                                </group>
-                                <group string="Komisyon ve Kesintiler">
-                                    <field name="platform_fee_rate"/>
-                                    <field name="cargo_unit_price"/>
+                                <group string="Sipariş Onayı">
+                                    <field name="auto_send_cargo" string="Transfer Doğrulanınca n11'de Onayla"/>
                                 </group>
                             </group>
                         </page>
@@ -100,6 +95,7 @@
                 <field name="name"/>
                 <field name="auto_sync"/>
                 <field name="last_sync"/>
+                <field name="last_sync_error" optional="show"/>
                 <field name="active"/>
             </list>
         </field>

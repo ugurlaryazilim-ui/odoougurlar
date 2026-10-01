@@ -13,10 +13,6 @@
                                 <label for="n11_warehouse_id" class="col-3 col-lg-3 o_light_label"/>
                                 <field name="n11_warehouse_id" class="col-4"/>
                             </div>
-                            <div class="row">
-                                <label for="n11_backup_warehouse_id" class="col-3 col-lg-3 o_light_label"/>
-                                <field name="n11_backup_warehouse_id" class="col-4"/>
-                            </div>
                         </setting>
                     </block>
                     

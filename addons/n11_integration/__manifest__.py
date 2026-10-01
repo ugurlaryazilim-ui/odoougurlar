@@ -1,6 +1,6 @@
 {
     'name': 'N11 Entegrasyonu',
-    'version': '19.0.1.0.0',
+    'version': '19.0.1.1.0',
     'summary': 'N11 Sipariş Entegrasyonu',
     'description': 'N11 Pazaryeri API üzerinden siparişlerin çekilmesi, Odoo\'da oluşturulması ve Nebim entegrasyonuna hazır hale getirilmesi.',
     'author': 'Uğurlar',
@@ -12,6 +12,7 @@
         'views/n11_config_views.xml',
         'views/n11_store_views.xml',
         'views/n11_order_views.xml',
+        'views/n11_refund_views.xml',
         'views/sale_order_views.xml',
         'views/menu_views.xml',
     ],

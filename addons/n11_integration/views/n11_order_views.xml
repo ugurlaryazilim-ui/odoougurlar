@@ -5,7 +5,21 @@
         <field name="model">n11.order</field>
         <field name="arch" type="xml">
             <form string="N11 Siparişi" create="false" edit="false">
+                <header>
+                    <button name="action_refresh_from_n11" type="object" string="N11'dan Güncelle" class="btn-primary"/>
+                    <button name="action_retry_sync" type="object" string="Tekrar Dene" class="btn-secondary"
+                            invisible="sale_order_id"/>
+                </header>
                 <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button class="oe_stat_button" icon="fa-undo" name="action_view_refunds" type="object"
+                                invisible="not refund_count">
+                            <field name="refund_count" widget="statinfo" string="İade"/>
+                        </button>
+                    </div>
+                    <div class="alert alert-warning" role="alert" invisible="not error_message">
+                        <field name="error_message" readonly="1" nolabel="1"/>
+                    </div>
                     <div class="oe_title">
                         <h1>
                             <field name="order_number"/>
@@ -17,24 +31,52 @@
                             <field name="sale_order_id"/>
                             <field name="order_date"/>
                             <field name="order_status_display" string="N11 Durumu"/>
+                            <field name="agreed_delivery_date"/>
+                            <field name="order_id"/>
+                            <field name="total_price"/>
+                            <field name="seller_invoice_total"/>
                         </group>
                         <group>
                             <field name="customer_name"/>
                             <field name="customer_email"/>
+                            <field name="invoice_type"/>
+                            <field name="tax_number" invisible="not tax_number"/>
                             <field name="tax_office"/>
                             <field name="cargo_provider"/>
                             <field name="cargo_tracking_number"/>
+                            <field name="cargo_tracking_link" widget="url" invisible="not cargo_tracking_link"/>
+                            <field name="delivery_address_type" invisible="not delivery_address_type"/>
+                            <field name="is_micro" invisible="not is_micro"/>
+                            <field name="last_modified_date"/>
                         </group>
                     </group>
                     <notebook>
                         <page string="Satırlar">
                             <field name="line_ids">
-                                <list>
+                                <list decoration-muted="status in ('Unpacked',)"
+                                      decoration-danger="status in ('Cancelled', 'CANCELLED', 'Canceled', 'UnSupplied')">
+                                    <field name="item_id" optional="hide"/>
+                                    <field name="package_id" optional="hide"/>
                                     <field name="product_name"/>
                                     <field name="product_code"/>
                                     <field name="quantity"/>
                                     <field name="sale_price"/>
+                                    <field name="vat_rate" optional="hide"/>
+                                    <field name="status" column_invisible="1"/>
                                     <field name="status_display" string="Durum"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="İade Talepleri" invisible="not refund_count">
+                            <field name="refund_ids">
+                                <list>
+                                    <field name="refund_id"/>
+                                    <field name="refund_date"/>
+                                    <field name="product_name"/>
+                                    <field name="quantity"/>
+                                    <field name="refund_amount"/>
+                                    <field name="refund_type"/>
+                                    <field name="status" widget="badge"/>
                                 </list>
                             </field>
                         </page>
@@ -59,17 +101,51 @@
                 </header>
                 <field name="order_number"/>
                 <field name="order_date"/>
+                <field name="agreed_delivery_date" optional="show"/>
                 <field name="customer_name"/>
                 <field name="total_price"/>
                 <field name="order_status" column_invisible="1"/>
                 <field name="order_status_display" string="N11 Durumu" widget="badge"
-                       decoration-success="order_status in ('Delivered', 'DELIVERED', 'Completed')"
-                       decoration-info="order_status in ('Shipped', 'SHIPPED')"
-                       decoration-warning="order_status in ('New', 'Approved', 'Picking', 'PICKING', 'Invoiced')"
-                       decoration-danger="order_status in ('Cancelled', 'CANCELLED', 'Rejected', 'Rejected By Seller')"/>
+                       decoration-success="order_status in ('Delivered',)"
+                       decoration-info="order_status in ('Shipped',)"
+                       decoration-warning="order_status in ('Created', 'Picking', 'Unpacked')"
+                       decoration-danger="order_status in ('Cancelled', 'CANCELLED', 'Canceled', 'UnSupplied')"/>
                 <field name="store_id"/>
                 <field name="sale_order_id"/>
+                <field name="error_message" optional="show"/>
             </list>
+        </field>
+    </record>
+
+    <record id="n11_order_search" model="ir.ui.view">
+        <field name="name">n11.order.search</field>
+        <field name="model">n11.order</field>
+        <field name="arch" type="xml">
+            <search string="N11 Siparişleri">
+                <field name="order_number"/>
+                <field name="customer_name"/>
+                <field name="cargo_tracking_number"/>
+                <field name="sale_order_id"/>
+                <field name="store_id"/>
+                <filter name="ship_today" string="Bugün Kargolanmalı"
+                        domain="[('order_status', 'in', ('Created', 'Picking')),
+                                 ('agreed_delivery_date', '&lt;', (context_today() + relativedelta(days=1)).strftime('%Y-%m-%d 00:00:00'))]"/>
+                <filter name="late" string="Kargolama Gecikmiş"
+                        domain="[('order_status', 'in', ('Created', 'Picking')),
+                                 ('agreed_delivery_date', '&lt;', context_today().strftime('%Y-%m-%d 00:00:00'))]"/>
+                <separator/>
+                <filter name="has_error" string="Hatalı / Uyarılı" domain="[('error_message', '!=', False)]"/>
+                <filter name="no_sale_order" string="Odoo Siparişi Yok" domain="[('sale_order_id', '=', False)]"/>
+                <filter name="partial" string="Kısmi İptal" domain="[('partially_cancelled', '=', True)]"/>
+                <separator/>
+                <filter name="open" string="Açık" domain="[('order_status', 'in', ('Created', 'Picking'))]"/>
+                <filter name="cancelled" string="İptal / Tedarik Edilemedi"
+                        domain="[('order_status', 'in', ('Cancelled', 'CANCELLED', 'Canceled', 'UnSupplied'))]"/>
+                <group>
+                    <filter name="group_status" string="Durum" context="{'group_by': 'order_status'}"/>
+                    <filter name="group_store" string="Mağaza" context="{'group_by': 'store_id'}"/>
+                </group>
+            </search>
         </field>
     </record>
 
@@ -99,5 +175,6 @@
         <field name="name">N11 Siparişleri</field>
         <field name="res_model">n11.order</field>
         <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="n11_order_search"/>
     </record>
 </odoo>
