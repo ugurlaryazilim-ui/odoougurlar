@@ -478,6 +478,15 @@
 }
 
 /* --- Batch Grid --- */
+.ais-batch-revision-note {
+    margin-bottom: 10px;
+    padding: 8px 12px;
+    border-radius: var(--ais-radius);
+    background: var(--ais-card-bg);
+    font-size: 13px;
+    color: var(--ais-text-muted);
+}
+
 .ais-batch-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);

@@ -8,6 +8,9 @@
                 <h2 class="ais-title">📋 Toplu Onay</h2>
                 <button class="btn btn-link" t-on-click="loadSessions" title="Listeyi yenile">🔄 Yenile</button>
             </div>
+            <div t-if="state.inRevisionCount" class="ais-batch-revision-note">
+                ⏳ <t t-out="state.inRevisionCount"/> oturumda revize sürüyor; yeni görsel hazır olunca listeye döner.
+            </div>
             <div class="ais-batch-grid">
                 <t t-foreach="state.sessions" t-as="session" t-key="session.id">
                     <div class="ais-batch-card" t-on-click="() => this.openSession(session.id)">
