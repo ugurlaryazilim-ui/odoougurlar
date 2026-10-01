@@ -31,9 +31,18 @@ class ResConfigSettings(models.TransientModel):
         help='Google Gemini API anahtarı. Boş bırakılırsa fal.ai (Proxy/any-llm) kullanılır.',
     )
 
+    ai_studio_tryon_model = fields.Selection([
+        ('seedream_v4', "Seedream v4 Edit (seed'li — ön görünüm seed'i arka/yan çekimlere aktarılır)"),
+        ('seedream_v5_pro', 'Seedream v5 Pro Edit (seed yok)'),
+    ], string='Giydirme Modeli',
+        default='seedream_v4',
+        config_parameter='ugurlar_ai_studio.tryon_model',
+        help="fal sağlayıcısında giydirme modeli. v4 Edit seed alır ve döndürür: ön görünümün seed'i ve "
+             "görseli arka/yan çekimlere birlikte iletilir. v5 Pro Edit seed desteklemez.",
+    )
     ai_studio_seedream_image_size = fields.Selection([
-        ('hd', '1664×2496 — Yüksek detay ($0.135/görsel)'),
-        ('standard', '1248×1872 — Standart ($0.0675/görsel)'),
+        ('hd', '1664×2496 — Yüksek detay (v5 Pro: $0.135, v4: ~$0.03 /görsel)'),
+        ('standard', '1248×1872 — Standart (v5 Pro: $0.0675, v4: ~$0.03 /görsel)'),
     ], string='Seedream Çıktı Boyutu',
         default='hd',
         config_parameter='ugurlar_ai_studio.seedream_image_size',

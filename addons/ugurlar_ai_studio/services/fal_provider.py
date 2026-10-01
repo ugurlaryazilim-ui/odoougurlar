@@ -53,6 +53,8 @@ class FalProvider(AIProviderBase):
         'flux_schnell': 'fal-ai/flux/schnell',
         'nano_banana': 'fal-ai/nano-banana-2/edit',
         'seedream': 'bytedance/seedream/v5/pro/edit',
+        # v4 Edit seed alır ve döndürür: ön görünüm seed'i arka/yan çekimlere aktarılabilir
+        'seedream_v4': 'fal-ai/bytedance/seedream/v4/edit',
         'any_llm': 'fal-ai/any-llm',
     }
 
@@ -64,6 +66,7 @@ class FalProvider(AIProviderBase):
         'fal-ai/flux-pro/v1.1': 0.05,
         'fal-ai/nano-banana-2/edit': 0.04,
         'bytedance/seedream/v5/pro/edit': 0.135,
+        'fal-ai/bytedance/seedream/v4/edit': 0.03,  # fal liste fiyatı (görsel başına) — faturayla teyit edilmeli
         'fal-ai/any-llm': 0.001,
         'fal-ai/flux-kontext/dev': 0.025,
     }
@@ -117,6 +120,8 @@ class FalProvider(AIProviderBase):
     def _compute_cost(self, endpoint, n_outputs, n_refs, arguments):
         """Gerçek fal fiyatına göre maliyet (USD)."""
         n_outputs = max(1, n_outputs)
+        if 'seedream/v4' in endpoint:
+            return round(self.get_estimated_cost(endpoint) * n_outputs, 4)
         if 'seedream' in endpoint:
             size = arguments.get('image_size') or {}
             pixels = (size.get('width', 2048) * size.get('height', 2048)) if isinstance(size, dict) else 2048 * 2048
@@ -141,7 +146,9 @@ class FalProvider(AIProviderBase):
         model_name = kwargs.get('model_name') or 'tryon-v1.6'
         endpoint = kwargs.get('endpoint')
         if not endpoint:
-            if 'seedream' in model_name:
+            if 'seedream/v4' in model_name:
+                endpoint = self.ENDPOINTS['seedream_v4']
+            elif 'seedream' in model_name:
                 endpoint = self.ENDPOINTS['seedream']
             elif 'nano-banana' in model_name:
                 endpoint = self.ENDPOINTS['nano_banana']
@@ -158,10 +165,12 @@ class FalProvider(AIProviderBase):
 
         n_refs = 0
         if 'seedream' in endpoint:
-            # ═══ SEEDREAM v5 PRO EDIT ═══
-            # Şema: prompt, image_urls(<=10), image_size, num_images, output_format,
+            # ═══ SEEDREAM (v5 Pro Edit / v4 Edit) ═══
+            # v5 Pro şeması: prompt, image_urls(<=10), image_size, num_images, output_format,
             # sync_mode, enable_safety_checker. seed / negative_prompt / aspect_ratio /
-            # resolution DESTEKLENMEZ (gönderilirse sessizce yok sayılır).
+            # resolution DESTEKLENMEZ (gönderilirse sessizce yok sayılır), seed döndürmez.
+            # v4 Edit şeması: prompt, image_urls, image_size, num_images, max_images, seed,
+            # enable_safety_checker, enhance_prompt_mode; output_format YOK; seed döndürür.
             # Görsel rolleri prompt şablonlarıyla eşleşir:
             #   Image 1 = manken, Image 2 = ürün, Image 3 = ön görünüm (back/side)
             image_urls_list = [model_image_url, garment_image_url]
@@ -184,9 +193,15 @@ class FalProvider(AIProviderBase):
                 'image_urls': image_urls_list,
                 'image_size': kwargs.get('image_size') or self.SEEDREAM_IMAGE_SIZES['hd'],
                 'num_images': max(1, min(6, int(kwargs.get('num_samples') or 1))),
-                'output_format': 'png' if kwargs.get('output_format') == 'png' else 'jpeg',
                 'enable_safety_checker': bool(kwargs.get('enable_safety_checker', True)),
             }
+            if 'seedream/v4' in endpoint:
+                arguments['max_images'] = 1
+                arguments['enhance_prompt_mode'] = 'standard'
+                if kwargs.get('seed'):
+                    arguments['seed'] = int(kwargs['seed'])
+            else:
+                arguments['output_format'] = 'png' if kwargs.get('output_format') == 'png' else 'jpeg'
 
         elif 'nano-banana' in endpoint:
             # ═══ NANO-BANANA PATH ═══ (aspect_ratio / resolution / negative destekler)
