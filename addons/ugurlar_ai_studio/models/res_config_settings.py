@@ -36,7 +36,7 @@ class ResConfigSettings(models.TransientModel):
         ('seedream_v5_pro', 'Seedream v5 Pro Edit (seed yok)'),
     ], string='Giydirme Modeli',
         default='seedream_v4',
-        config_parameter='ugurlar_ai_studio.tryon_model',
+        config_parameter='ugurlar_ai_studio.fal_tryon_model',
         help="fal sağlayıcısında giydirme modeli. v4 Edit seed alır ve döndürür: ön görünümün seed'i ve "
              "görseli arka/yan çekimlere birlikte iletilir. v5 Pro Edit seed desteklemez.",
     )

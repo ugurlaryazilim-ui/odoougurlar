@@ -199,7 +199,7 @@ TRYON_MODELS = {
 
 def _get_tryon_model(env):
     """Ayarlardaki fal try-on modeli (varsayılan: Seedream v4 Edit)."""
-    key = env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.tryon_model', 'seedream_v4')
+    key = env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fal_tryon_model', 'seedream_v4')
     return TRYON_MODELS.get(key, TRYON_MODELS['seedream_v4'])
 
 

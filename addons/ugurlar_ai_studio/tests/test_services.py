@@ -269,9 +269,9 @@ class TestTryonSettings(TransactionCase):
         params = self.env['ir.config_parameter'].sudo()
         params.set_param('ugurlar_ai_studio.candidate_count', '4')
         self.assertEqual(_get_candidate_count(self.env, 'front', 'fal'), 1)
-        params.set_param('ugurlar_ai_studio.tryon_model', 'seedream_v4')
+        params.set_param('ugurlar_ai_studio.fal_tryon_model', 'seedream_v4')
         self.assertEqual(_get_tryon_model(self.env), 'seedream/v4/edit')
-        params.set_param('ugurlar_ai_studio.tryon_model', 'seedream_v5_pro')
+        params.set_param('ugurlar_ai_studio.fal_tryon_model', 'seedream_v5_pro')
         self.assertEqual(_get_tryon_model(self.env), 'seedream/v5/pro/edit')
 
 
