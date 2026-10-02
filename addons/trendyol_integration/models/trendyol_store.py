@@ -134,6 +134,13 @@ class TrendyolStore(models.Model):
              '(örn. 10,99 + KDV = 13,19 TL). Faturalar sipariş numarası taşımadığından sipariş '
              'özetinde bu tutar kullanılır. 0 ise aşağıdaki oran kullanılır.',
     )
+    platform_fee_same_day = fields.Float(
+        string='Platform Hizmet Bedeli (Bugün Kargoda, KDV dahil)',
+        default=5.99,
+        digits=(10, 2),
+        help='fastDeliveryType = SameDayShipping olan gönderilere kesilen indirimli platform bedeli. '
+             'Toplu fatura dağıtımında bu paketlere bu tutar ayrılır, kalan diğer paketlere eşit bölünür.',
+    )
     platform_fee_rate = fields.Float(
         string='Platform Hizmet Bedeli Oranı (%)',
         default=1.47,
@@ -325,7 +332,7 @@ class TrendyolStore(models.Model):
         Settlement._update_order_financial_summary(self, since=fields.Datetime.now() - timedelta(minutes=5))
         msg = (f"{res['payment_orders']} ödeme emri işlendi.\n"
                f"Dağıtılan fatura: {res['allocated']} ({res['rows']} sipariş satırı)\n"
-               f"Uyarı (eşit bölünmeyen): {res['warnings']}\nEşleşmeyen: {res['unmatched']}")
+               f"Uyarı (dağıtılamayan): {res['warnings']}\nEşleşmeyen: {res['unmatched']}")
         if res['errors']:
             msg += f"\nHata: {len(res['errors'])}\n" + '\n'.join(res['errors'][:5])
         return {
