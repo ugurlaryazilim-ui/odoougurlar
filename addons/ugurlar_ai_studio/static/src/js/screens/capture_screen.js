@@ -1,6 +1,6 @@
 /** @odoo-module **/
 
-import { Component, useState, useRef, onMounted, onWillUnmount } from "@odoo/owl";
+import { Component, useState, useRef, onMounted, onPatched, onWillUnmount } from "@odoo/owl";
 import { _t } from "@web/core/l10n/translation";
 import { useService } from "@web/core/utils/hooks";
 
@@ -51,18 +51,42 @@ export class CaptureScreen extends Component {
             capturing: false,
             submitting: false,
             cropFrameStyle: "",
+            // Akış var ama video oynamıyor (iOS otomatik oynatmayı engelledi): dokunarak başlatılır
+            previewBlocked: false,
+            previewLive: false,
         });
 
         // Önizleme object-fit:cover ile kırpılır; kaydedilen alan kameranın ortasındaki
         // 2:3 bölgedir. Çerçeve, o bölgenin ekrandaki yerini gösterir.
         this.updateCropFrame = () => this._updateCropFrame();
+        // iOS arka plana alınınca kamera akışını durdurur; dönüşte görüntüyü geri getir
+        this.onVisibilityChange = () => {
+            if (document.visibilityState !== "visible" || this.unmounted || this.state.submitting) {
+                return;
+            }
+            const track = this.stream && this.stream.getVideoTracks()[0];
+            if (!track || track.readyState === "ended") {
+                this.startCamera();
+            } else {
+                this._playPreview();
+            }
+        };
         onMounted(() => {
             window.addEventListener("resize", this.updateCropFrame);
+            document.addEventListener("visibilitychange", this.onVisibilityChange);
             this.startCamera();
+        });
+        // Hata ekranından dönüşte <video> yeniden oluşur: akışı yeni elemana bağla
+        onPatched(() => {
+            const video = this.videoRef.el;
+            if (this.stream && video && video.srcObject !== this.stream) {
+                this._attachStream();
+            }
         });
         onWillUnmount(() => {
             this.unmounted = true;
             window.removeEventListener("resize", this.updateCropFrame);
+            document.removeEventListener("visibilitychange", this.onVisibilityChange);
             this.stopCamera();
         });
     }
@@ -99,10 +123,71 @@ export class CaptureScreen extends Component {
         }
         this.stream = stream;
         this.state.cameraActive = true;
-        if (this.videoRef.el) {
-            this.videoRef.el.srcObject = stream;
-            this.videoRef.el.onloadedmetadata = this.updateCropFrame;
+        await this._attachStream();
+    }
+
+    /**
+     * Akışı <video>'ya bağlar ve oynatır. iOS (özellikle 27+) yalnız muted + playsinline
+     * videoyu otomatik oynatır; play() açıkça çağrılmazsa önizleme siyah kalır ama çekim
+     * yine çalıştığından kullanıcı görmeden çekmiş olur.
+     */
+    async _attachStream() {
+        const video = this.videoRef.el;
+        if (!video || !this.stream) {
+            return;
         }
+        video.muted = true;
+        video.defaultMuted = true;
+        video.setAttribute("muted", "");
+        video.setAttribute("playsinline", "");
+        video.setAttribute("webkit-playsinline", "");
+        video.onloadedmetadata = this.updateCropFrame;
+        video.onplaying = () => {
+            this.state.previewLive = true;
+            this.state.previewBlocked = false;
+            this.updateCropFrame();
+        };
+        video.onpause = () => {
+            this.state.previewLive = false;
+        };
+        if (video.srcObject !== this.stream) {
+            video.srcObject = this.stream;
+        }
+        await this._playPreview();
+    }
+
+    async _playPreview() {
+        const video = this.videoRef.el;
+        if (!video || !this.stream) {
+            return;
+        }
+        try {
+            await video.play();
+            this.state.previewBlocked = false;
+        } catch (e) {
+            // NotAllowedError: kullanıcı dokunuşu gerekir. AbortError: yeni srcObject geldi, yok say
+            if (e && e.name !== "AbortError") {
+                console.warn("Kamera önizlemesi başlatılamadı:", e);
+                this.state.previewBlocked = true;
+            }
+        }
+    }
+
+    /** "Önizlemeyi başlat" dokunuşu: kullanıcı hareketi içindeki play() iOS'ta izinlidir. */
+    async resumePreview() {
+        const track = this.stream && this.stream.getVideoTracks()[0];
+        if (!track || track.readyState === "ended") {
+            await this.startCamera();
+            return;
+        }
+        await this._playPreview();
+    }
+
+    /** Önizleme gerçekten kare gösteriyor mu? Göstermiyorsa çekime izin verilmez. */
+    get previewReady() {
+        const video = this.videoRef.el;
+        return !!(this.state.cameraActive && this.state.previewLive && video
+            && !video.paused && video.readyState >= 2 && video.videoWidth);
     }
 
     /** Video karesinin 2:3 kırpımı yeterliyse kayıt oradan alınır (çerçeve = kayıt). */
@@ -148,7 +233,13 @@ export class CaptureScreen extends Component {
             this.stream.getTracks().forEach(track => track.stop());
             this.stream = null;
         }
+        // iOS: eski akış elemanda kalırsa yeni getUserMedia önizlemesi siyah açılabilir
+        if (this.videoRef.el) {
+            this.videoRef.el.srcObject = null;
+        }
         this.state.cameraActive = false;
+        this.state.previewLive = false;
+        this.state.previewBlocked = false;
     }
 
     async toggleCamera() {
@@ -206,6 +297,16 @@ export class CaptureScreen extends Component {
 
     async capturePhoto() {
         if (!this.videoRef.el || this.state.capturing) return;
+        if (!this.previewReady) {
+            // Önizleme engelliyse deklanşör dokunuşu (kullanıcı hareketi) onu başlatır
+            if (this.state.previewBlocked) {
+                await this.resumePreview();
+                return;
+            }
+            this.notification.add(_t("Kamera görüntüsü henüz gelmedi; önizleme görünmeden çekim yapılmaz."),
+                                  { type: "warning" });
+            return;
+        }
         this.state.capturing = true;
         try {
             const shot = await this._grabFrame();
