@@ -54,7 +54,6 @@ OTHER_FINANCIAL_API_TYPES = ['DeductionInvoices', 'PaymentOrder', 'Stoppage']
 
 # Ödeme emri bazında toplu faturalanan, sipariş paketlerine dağıtılan hizmet bedelleri
 FEE_ALLOCATION_TYPES = ('platform_fee', 'international_fee')
-_FEE_ALLOCATION_LOOKBACK_DAYS = 60
 _FEE_ALLOCATION_PO_LIMIT = 20  # çalışma başına ödeme emri (her biri 2 istek; finans servisi 100/dk)
 _FAST_TYPE_LOOKUP_LIMIT = 100  # çalışma başına teslimat tipi için sipariş servisi sorgusu
 
@@ -315,14 +314,7 @@ class TrendyolSettlement(models.Model):
         # 4) Bağsız settlement'ları siparişlere bağla
         self._relink_unlinked_settlements(store)
 
-        # 4b) Toplu hizmet bedeli faturalarını (Uluslararası / Platform) paketlere dağıt
-        try:
-            alloc = self._allocate_service_fees(api, store)
-            created += alloc['rows']
-            errors.extend(alloc['errors'])
-        except Exception as e:
-            errors.append(f"Hizmet bedeli dağıtımı: {e}")
-            _logger.exception("Hizmet bedeli dağıtım hatası [%s]", store.name)
+        # (Hizmet bedeli dağıtımı ayrı cron'da: trendyol.fee.payment.cron_allocate_fees)
 
         # 5) Sipariş bazlı finansal özet — yalnız son senkrondan beri değişen siparişler
         since = (store.last_financial_sync or start_date) - timedelta(hours=1)
@@ -451,10 +443,6 @@ class TrendyolSettlement(models.Model):
             # Son adım: fatura kalemleri, eşleştirme ve tüm siparişlerin özeti
             self._process_invoice_details(api, store, recent_only=False)
             self._relink_unlinked_settlements(store)
-            try:
-                self._allocate_service_fees(api, store)
-            except Exception as e:
-                _logger.warning("Finans geçmişi — hizmet bedeli dağıtımı başarısız [%s]: %s", store.name, e)
             self._update_order_financial_summary(store)
             self.env.cr.commit()
             result = (f"{state['from']} → {state['to']}: {state['created']} yeni kayıt "
@@ -1088,94 +1076,50 @@ class TrendyolSettlement(models.Model):
         ]
 
     @api.private
-    def _allocate_service_fees(self, api, store, force=False, payment_order_ids=None):
-        """Toplu hizmet bedeli faturalarını aynı ödeme emri + affiliate'teki paketlere dağıtır.
+    def _allocate_service_fees(self, api, store, force=False, payment_order_ids=None, limit=None):
+        """Hizmet bedeli faturalarını ödeme emri bazında paketlere dağıtır.
 
-        - Son 60 günün dağıtılmamış faturaları (her ödeme emri günde en fazla bir kez) denenir.
-        - Satış kaydı görülen ama faturası henüz Odoo'da olmayan ödeme emirleri de sorgulanır
-          (fatura satıştan haftalar sonra kesilir).
-        Dönüş: {'payment_orders', 'allocated', 'rows', 'warnings', 'unmatched', 'errors'}
+        Kuyruk trendyol.fee.payment takibinden gelir: Odoo'daki tüm satışların ödeme numaraları
+        (geçmişin tamamı) en yeniden eskiye partiler halinde işlenir. force: uyarı / eşleşmedi de denenir.
+        Dönüş: {'payment_orders', 'allocated', 'rows', 'warnings', 'unmatched', 'errors', 'remaining'}
         """
-        now = fields.Datetime.now()
-        since = now - timedelta(days=_FEE_ALLOCATION_LOOKBACK_DAYS)
-        result = {'payment_orders': 0, 'allocated': 0, 'rows': 0, 'warnings': 0, 'unmatched': 0, 'errors': []}
-
-        domain = self._fee_invoice_domain(store) + [('allocation_state', '!=', 'allocated')]
-        if payment_order_ids:
-            domain.append(('payment_order_id', 'in', list(payment_order_ids)))
-        else:
-            domain.append(('transaction_date', '>=', since))
-            if not force:
-                # Uyarıdakiler (eşit bölünmeyen) tutar değişmedikçe kendiliğinden düzelmez → elle tetiklenir
-                domain += [('allocation_state', '!=', 'warning'),
-                           '|', ('allocation_checked_at', '=', False),
-                           ('allocation_checked_at', '<', now - timedelta(days=1))]
-        invoices = self.search(domain, order='transaction_date desc')
+        Tracker = self.env['trendyol.fee.payment']
+        result = {'payment_orders': 0, 'checked': 0, 'allocated': 0, 'rows': 0, 'warnings': 0, 'unmatched': 0,
+                  'errors': [], 'remaining': 0}
 
         # Ödeme no henüz yok → ödeme emri işlenince dağıtılacak
-        waiting = invoices.filtered(lambda r: not r.payment_order_id and r.allocation_state != 'pending')
+        waiting = self.search(self._fee_invoice_domain(store) + [
+            '|', ('payment_order_id', '=', False), ('payment_order_id', '=', ''),
+            ('allocation_state', 'in', [False, 'warning', 'unmatched'])])
         if waiting:
             waiting.write({'allocation_state': 'pending', 'allocation_note': 'Ödeme no bekleniyor'})
 
-        po_ids = []
-        for po in list(payment_order_ids or []) + invoices.mapped('payment_order_id'):
-            if po and po not in po_ids:
-                po_ids.append(po)
-        if not payment_order_ids:
-            po_ids += [po for po in self._fee_scan_candidates(store, since) if po not in po_ids]
-        po_ids = po_ids[:_FEE_ALLOCATION_PO_LIMIT]
+        Tracker._refresh(store)
+        if payment_order_ids:
+            po_ids = [po for po in dict.fromkeys(payment_order_ids) if po]
+        else:
+            po_ids = Tracker._queue(store, limit or _FEE_ALLOCATION_PO_LIMIT, force=force)
 
-        scanned = []
+        result['checked'] = len(po_ids)
         for po in po_ids:
+            error = None
             try:
                 with self.env.cr.savepoint():
                     self._allocate_payment_order(api, store, po, result)
-                scanned.append(po)
             except Exception as e:
+                error = e
                 result['errors'].append(f"Ödeme {po}: {e}")
                 _logger.warning("Hizmet bedeli dağıtımı — ödeme %s [%s]: %s", po, store.name, e)
-        if scanned:
-            self._fee_scan_mark(store, scanned)
+            Tracker._update_state(store, po, error=error)
 
-        if result['payment_orders']:
-            _logger.info("Trendyol hizmet bedeli dağıtımı [%s]: %s ödeme, %s fatura dağıtıldı (%s satır), "
-                         "%s uyarı, %s eşleşmedi, %s hata", store.name, result['payment_orders'],
+        if not payment_order_ids:
+            result['remaining'] = len(Tracker._queue(store, None, force=False))
+        if po_ids:
+            _logger.info("Trendyol hizmet bedeli dağıtımı [%s]: %s ödeme kontrol edildi, %s fatura dağıtıldı "
+                         "(%s satır), %s uyarı, %s eşleşmedi, %s hata, kuyrukta %s", store.name, len(po_ids),
                          result['allocated'], result['rows'], result['warnings'], result['unmatched'],
-                         len(result['errors']))
+                         len(result['errors']), result['remaining'])
         return result
-
-    @api.private
-    def _fee_scan_candidates(self, store, since):
-        """Satışı ödenmiş ama hizmet bedeli faturası Odoo'da olmayan, bugün sorgulanmamış ödeme emirleri."""
-        self.env.cr.execute("""
-            SELECT DISTINCT s.payment_order_id
-              FROM trendyol_settlement s
-             WHERE s.store_id = %s AND s.source = 'settlements' AND s.transaction_type = 'sale'
-               AND COALESCE(s.payment_order_id, '') <> '' AND s.payment_date >= %s
-               AND NOT EXISTS (
-                   SELECT 1 FROM trendyol_settlement f
-                    WHERE f.store_id = s.store_id AND f.source = 'otherfinancials'
-                      AND f.transaction_type IN %s AND f.payment_order_id = s.payment_order_id)
-        """, (store.id, since, FEE_ALLOCATION_TYPES))
-        candidates = [r[0] for r in self.env.cr.fetchall()]
-        today = fields.Date.today().isoformat()
-        checked = {p.split(':')[0] for p in (store.fee_scanned_payment_orders or '').split(',')
-                   if p.endswith(':' + today)}
-        return sorted((po for po in candidates if po not in checked), reverse=True)
-
-    @api.private
-    def _fee_scan_mark(self, store, po_ids):
-        today = fields.Date.today().isoformat()
-        entries = [p for p in (store.fee_scanned_payment_orders or '').split(',')
-                   if p and p.endswith(':' + today) and p.split(':')[0] not in po_ids]
-        entries += [f"{po}:{today}" for po in po_ids]
-        try:
-            # Ayrı cursor: mağaza satırı ana işlemde kilitlenmesin (bkz. _sync_payment_orders)
-            with self.pool.cursor() as new_cr:
-                new_cr.execute("UPDATE trendyol_store SET fee_scanned_payment_orders = %s WHERE id = %s",
-                               (','.join(entries[-500:]), store.id))
-        except Exception as e:
-            _logger.warning("Hizmet bedeli tarama önbelleği yazılamadı (%s): %s", store.name, e)
 
     @api.private
     def _fetch_paged(self, fetch, **kwargs):

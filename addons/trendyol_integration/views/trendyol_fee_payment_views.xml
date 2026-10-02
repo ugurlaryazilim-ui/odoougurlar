@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_trendyol_fee_payment_list" model="ir.ui.view">
+        <field name="name">trendyol.fee.payment.list</field>
+        <field name="model">trendyol.fee.payment</field>
+        <field name="arch" type="xml">
+            <list string="Hizmet Bedeli Takibi" create="false" edit="false"
+                  decoration-success="state == 'allocated'"
+                  decoration-warning="state in ('warning', 'unmatched')"
+                  decoration-danger="state == 'error'"
+                  decoration-muted="state == 'no_invoice'">
+                <header>
+                    <button name="action_retry" type="object" string="Yeniden Dene"/>
+                </header>
+                <field name="payment_date"/>
+                <field name="payment_order_id"/>
+                <field name="store_id" optional="show"/>
+                <field name="package_count" sum="Paket"/>
+                <field name="invoice_count" sum="Fatura"/>
+                <field name="invoice_amount" sum="Fatura Tutarı"/>
+                <field name="allocated_amount" sum="Dağıtılan"/>
+                <field name="state" widget="badge"
+                       decoration-success="state == 'allocated'"
+                       decoration-warning="state in ('warning', 'unmatched', 'pending')"
+                       decoration-danger="state == 'error'"/>
+                <field name="note"/>
+                <field name="checked_at" optional="show"/>
+                <field name="check_count" optional="hide"/>
+                <button name="action_open_settlements" type="object" string="Kayıtlar" icon="fa-list"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_trendyol_fee_payment_search" model="ir.ui.view">
+        <field name="name">trendyol.fee.payment.search</field>
+        <field name="model">trendyol.fee.payment</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="payment_order_id"/>
+                <field name="store_id"/>
+                <filter string="Sorunlu" name="problem" domain="[('state', 'in', ('warning', 'unmatched', 'error'))]"/>
+                <filter string="Bekliyor" name="pending" domain="[('state', '=', 'pending')]"/>
+                <filter string="Fatura Yok" name="no_invoice" domain="[('state', '=', 'no_invoice')]"/>
+                <filter string="Dağıtıldı" name="allocated" domain="[('state', '=', 'allocated')]"/>
+                <separator/>
+                <filter string="Durum" name="group_state" context="{'group_by': 'state'}"/>
+                <filter string="Mağaza" name="group_store" context="{'group_by': 'store_id'}"/>
+                <filter string="Ödeme Ayı" name="group_month" context="{'group_by': 'payment_date:month'}"/>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_trendyol_fee_payments" model="ir.actions.act_window">
+        <field name="name">Hizmet Bedeli Takibi</field>
+        <field name="res_model">trendyol.fee.payment</field>
+        <field name="view_mode">list</field>
+        <field name="context">{'search_default_group_state': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Henüz takip edilen ödeme yok</p>
+            <p>Finansal senkron sonrası ödeme emirleri buraya düşer; hizmet bedeli faturaları 15 dakikada
+               bir partiler halinde siparişlere dağıtılır.</p>
+        </field>
+    </record>
+</odoo>
