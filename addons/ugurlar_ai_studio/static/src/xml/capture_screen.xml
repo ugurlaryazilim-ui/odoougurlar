@@ -14,6 +14,8 @@
                 </t>
                 <t t-else="">
                     <video t-ref="cameraVideo" autoplay="true" muted="true" playsinline="true" class="ais-camera-video"/>
+                    <!-- iOS: <video> önizlemesi siyah kalabildiği için kareler buraya çizilir -->
+                    <canvas t-ref="previewCanvas" t-att-class="state.previewMode === 'canvas' ? 'ais-camera-preview-canvas' : 'ais-camera-preview-canvas d-none'"/>
                     <!-- iOS otomatik oynatmayı engellerse: dokunarak önizlemeyi başlat -->
                     <div t-if="state.previewBlocked" class="ais-preview-blocked" t-on-click="resumePreview">
                         <span>📷 Kamera önizlemesini başlatmak için dokunun</span>
@@ -70,7 +72,7 @@
                     <button class="btn btn-back" t-on-click="props.onBackToScan">
                         <span class="back-icon">←</span> Geri
                     </button>
-                    <h2 class="ais-title-light">📸 Fotoğraf Çekimi</h2>
+                    <h2 class="ais-title-light" t-on-click="onTitleTap">📸 Fotoğraf Çekimi</h2>
                     <div class="ais-header-spacer"></div>
                 </div>
 
@@ -82,6 +84,17 @@
                             <strong class="ais-product-name" t-out="props.productInfo.name"/>
                         </div>
                     </t>
+                </div>
+            </div>
+
+            <!-- Teşhis paneli: başlığa 3 kez dokununca açılır -->
+            <div t-if="state.diagOpen" class="ais-camera-diag">
+                <pre t-out="state.diagText"/>
+                <div class="ais-camera-diag-actions">
+                    <button class="btn btn-sm btn-light" t-on-click="togglePreviewMode">
+                        Önizleme: <t t-out="state.previewMode"/> → <t t-out="state.previewMode === 'canvas' ? 'video' : 'canvas'"/>
+                    </button>
+                    <button class="btn btn-sm btn-light" t-on-click="toggleDiag">Kapat</button>
                 </div>
             </div>
 

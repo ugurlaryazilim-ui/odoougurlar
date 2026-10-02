@@ -597,3 +597,56 @@
     border: 1px solid rgba(255, 255, 255, 0.6);
     border-radius: 12px;
 }
+
+/* Canvas önizleme: videonun tam üstünde, aynı boyutta */
+.ais-camera-preview-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+    background: #000;
+    pointer-events: none;
+}
+
+/* Teşhis paneli */
+.ais-camera-diag {
+    position: absolute;
+    top: 110px;
+    left: 8px;
+    right: 8px;
+    z-index: 20;
+    background: rgba(0, 0, 0, 0.85);
+    color: #9f9;
+    border-radius: 8px;
+    padding: 8px;
+    font-size: 11px;
+}
+.ais-camera-diag pre {
+    color: inherit;
+    margin: 0 0 6px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-size: 11px;
+}
+.ais-camera-diag-actions {
+    display: flex;
+    gap: 6px;
+}
+
+/* iOS: video üstündeki cam (backdrop-filter) katmanları ve filtreli animasyonlar
+   MediaStream videosunun compositing'ini bozabiliyor; düz yarı saydam zemine geç */
+@supports (-webkit-touch-callout: none) {
+    .ais-capture-fullscreen *,
+    .ais-capture-fullscreen *::before,
+    .ais-capture-fullscreen *::after {
+        -webkit-backdrop-filter: none !important;
+        backdrop-filter: none !important;
+    }
+    .ais-capture-fullscreen .ais-guide-svg {
+        filter: none;
+    }
+    .ais-capture-fullscreen .ais-camera-guide {
+        animation: none;
+    }
+}
