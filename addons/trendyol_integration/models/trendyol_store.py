@@ -164,9 +164,6 @@ class TrendyolStore(models.Model):
     processed_payment_orders = fields.Text(
         string='İşlenen Ödeme Emirleri', readonly=True, copy=False,
         help='Kayıtlarına ödeme bilgisi işlenmiş Trendyol ödeme emri ID\'leri')
-    fee_scanned_payment_orders = fields.Text(
-        string='Hizmet Bedeli Taranan Ödemeler', readonly=True, copy=False,
-        help='Bugün hizmet bedeli faturası sorgulanmış ödeme emirleri (ödeme:tarih) — günde bir sorgu')
 
     # ─── İlişkiler ───────────────────────────────────────
     order_ids = fields.One2many('trendyol.order', 'store_id', string='Siparişler')
@@ -325,14 +322,15 @@ class TrendyolStore(models.Model):
         }
 
     def action_allocate_service_fees(self):
-        """Toplu Uluslararası / Platform Hizmet Bedeli faturalarını paketlere dağıt (son 60 gün)."""
+        """Hizmet bedeli kuyruğundan sıradaki 50 ödemeyi işle (uyarı / eşleşmedi dahil)."""
         self.ensure_one()
         Settlement = self.env['trendyol.settlement']
-        res = Settlement._allocate_service_fees(self.get_api(), self, force=True)
+        res = Settlement._allocate_service_fees(self.get_api(), self, force=True, limit=50)
         Settlement._update_order_financial_summary(self, since=fields.Datetime.now() - timedelta(minutes=5))
-        msg = (f"{res['payment_orders']} ödeme emri işlendi.\n"
+        msg = (f"{res['checked']} ödeme kontrol edildi ({res['payment_orders']} tanesinde dağıtılacak fatura vardı).\n"
                f"Dağıtılan fatura: {res['allocated']} ({res['rows']} sipariş satırı)\n"
-               f"Uyarı (dağıtılamayan): {res['warnings']}\nEşleşmeyen: {res['unmatched']}")
+               f"Uyarı (dağıtılamayan): {res['warnings']}\nEşleşmeyen: {res['unmatched']}\n"
+               f"Kuyrukta kalan ödeme: {res['remaining']} (15 dakikada bir otomatik işlenir)")
         if res['errors']:
             msg += f"\nHata: {len(res['errors'])}\n" + '\n'.join(res['errors'][:5])
         return {

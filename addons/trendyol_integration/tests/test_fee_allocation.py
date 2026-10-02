@@ -277,3 +277,45 @@ class TestFeeAllocation(TransactionCase):
                                        ('payment_order_id', '=', PO_MICRO), ('transaction_type', '=', 'platform_fee')])
         self.assertEqual(len(rows), 4)
         self.assertAlmostEqual(sum(rows.mapped('debt')), 52.76, places=2)
+
+    # ── Ödeme takibi (geçmişin tamamı, aşamalı) ────────────────────────────
+
+    def _tracker(self, po):
+        return self.env['trendyol.fee.payment'].search([('store_id', '=', self.store.id),
+                                                        ('payment_order_id', '=', po)])
+
+    def test_old_payment_order_is_queued(self):
+        """60 günden eski ödeme de takip listesine girip kuyruktan işlenir."""
+        old = fields.Datetime.now() - timedelta(days=120)
+        self.Settlement.search([('store_id', '=', self.store.id), ('payment_order_id', '=', PO)]).write(
+            {'payment_date': old})
+        res = self.Settlement._allocate_service_fees(self._api(), self.store, limit=20)
+        self.assertEqual(res['checked'], 1)
+        self.assertEqual(res['allocated'], 2)
+        tracker = self._tracker(PO)
+        self.assertEqual(tracker.state, 'allocated')
+        self.assertEqual(tracker.package_count, 2)
+        self.assertEqual(tracker.invoice_count, 2)
+        self.assertAlmostEqual(tracker.allocated_amount, 286.89 + 21.98, places=2)
+        # İkinci çalıştırmada kuyruk boş
+        res = self.Settlement._allocate_service_fees(self._api(), self.store, limit=20)
+        self.assertEqual((res['checked'], res['remaining']), (0, 0))
+
+    def test_no_invoice_rechecked_then_closed(self):
+        """Faturası olmayan ödeme 'Fatura Yok' olur; aynı gün tekrar sorgulanmaz, 45 günü geçince kapanır."""
+        api = self._api()
+        api.invoices = []
+        self.Settlement._allocate_service_fees(api, self.store, limit=20)
+        tracker = self._tracker(PO)
+        self.assertEqual(tracker.state, 'no_invoice')
+        Tracker = self.env['trendyol.fee.payment']
+        self.assertNotIn(PO, Tracker._queue(self.store, None))
+        tracker.checked_at = fields.Datetime.now() - timedelta(days=2)
+        self.assertIn(PO, Tracker._queue(self.store, None))      # ödeme 3 gün önce: yeniden sorgulanır
+        tracker.payment_date = fields.Datetime.now() - timedelta(days=60)
+        self.assertNotIn(PO, Tracker._queue(self.store, None))   # 45 günü geçti: kapandı
+        # Fatura sonradan gelirse (senkronla Odoo'ya düşer) ödeme yeniden kuyruğa girer
+        self.Settlement._process_settlement_item(
+            _invoice('AZD2026000944475', 'AZ-Uluslararası Hizmet Bedeli', 286.89), self.store, 'otherfinancials')
+        Tracker._refresh(self.store)
+        self.assertEqual(tracker.state, 'pending')

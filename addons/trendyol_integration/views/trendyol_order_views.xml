@@ -211,6 +211,8 @@
                 <filter string="Hakediş Ödendi" name="filter_paid" domain="[('is_paid', '=', True)]"/>
                 <filter string="Teslim Edildi, Ödenmedi" name="filter_unpaid"
                         domain="[('is_paid', '=', False), ('trendyol_status', '=', 'delivered')]"/>
+                <filter string="Hizmet Bedeli Eksik" name="filter_fee_missing"
+                        domain="[('is_paid', '=', True), ('platform_fee_invoiced', '=', False)]"/>
                 <separator/>
                 <group>
                     <filter string="Mağaza" name="group_store" context="{'group_by': 'store_id'}"/>

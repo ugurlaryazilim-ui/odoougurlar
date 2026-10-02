@@ -81,6 +81,12 @@
               action="action_trendyol_settlements"
               sequence="15"/>
 
+    <menuitem id="menu_trendyol_fee_payments"
+              name="Hizmet Bedeli Takibi"
+              parent="menu_trendyol_sync"
+              action="action_trendyol_fee_payments"
+              sequence="16"/>
+
     <menuitem id="menu_trendyol_cron"
               name="Zamanlanmış Görevler"
               parent="menu_trendyol_sync"

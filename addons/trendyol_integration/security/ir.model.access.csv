@@ -12,3 +12,5 @@ access_trendyol_sync_log_manager,trendyol.sync.log.manager,model_trendyol_sync_l
 access_trendyol_settlement,trendyol.settlement,model_trendyol_settlement,base.group_user,1,0,0,0
 access_trendyol_backfill_wizard,trendyol.financial.backfill.wizard,model_trendyol_financial_backfill_wizard,sales_team.group_sale_manager,1,1,1,1
 access_trendyol_settlement_manager,trendyol.settlement.manager,model_trendyol_settlement,sales_team.group_sale_manager,1,1,1,1
+access_trendyol_fee_payment,trendyol.fee.payment,model_trendyol_fee_payment,base.group_user,1,0,0,0
+access_trendyol_fee_payment_manager,trendyol.fee.payment.manager,model_trendyol_fee_payment,sales_team.group_sale_manager,1,1,1,1
