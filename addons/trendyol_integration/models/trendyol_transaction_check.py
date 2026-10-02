@@ -33,7 +33,10 @@ class TrendyolTransactionCheck(models.Model):
     credit = fields.Float(string='Alacak', digits=(12, 2), readonly=True)
     debt = fields.Float(string='Borç', digits=(12, 2), readonly=True)
     net_amount = fields.Float(string='Net Tutar', digits=(12, 2), readonly=True,
-                              help='Alacak − Borç')
+                              help='Paneldeki "Net Tutar": Satış − İade − İndirim − Komisyon − Uluslararası Hizmet Bedeli')
+    net_order_amount = fields.Float(
+        string='Net Sipariş Tutarı', digits=(12, 2), readonly=True,
+        help='Paneldeki "Net Sipariş Tutarı": Net Tutar − Platform Hizmet Bedeli − Gönderi Kargo − İade Kargo − Ceza')
     seller_revenue = fields.Float(string='Hakedişe Etki', digits=(12, 2), readonly=True,
                                   help='Panelde "Net Sipariş Tutarı" karşılığı (Finansal İşlemler → Hakedişe Etki toplamı)')
     payment_order_id = fields.Char(string='Hakediş Ödeme No', readonly=True)
@@ -43,6 +46,13 @@ class TrendyolTransactionCheck(models.Model):
 
     def init(self):
         tools.drop_view_if_exists(self.env.cr, self._table)
+        # Panel "Net Tutar": satış − iade − indirim/kupon (iptaller dahil) − komisyon − uluslararası bedel
+        net = """(SUM(CASE WHEN s.transaction_type = 'sale' THEN s.credit - s.debt
+                          WHEN s.transaction_type = 'return' THEN s.credit - s.debt
+                          WHEN s.transaction_type IN ('discount', 'discount_cancel', 'coupon', 'coupon_cancel',
+                                                      'international_fee') THEN s.credit - s.debt
+                          ELSE 0 END)
+                  - SUM(COALESCE(s.signed_commission, 0)))"""
         self.env.cr.execute(f"""
             CREATE OR REPLACE VIEW {self._table} AS (
                 SELECT
@@ -68,7 +78,9 @@ class TrendyolTransactionCheck(models.Model):
                     STRING_AGG(DISTINCT NULLIF(s.barcode, ''), ', ') AS barcode,
                     SUM(COALESCE(s.credit, 0)) AS credit,
                     SUM(COALESCE(s.debt, 0)) AS debt,
-                    SUM(COALESCE(s.credit, 0) - COALESCE(s.debt, 0)) AS net_amount,
+                    {net} AS net_amount,
+                    {net} - SUM(CASE WHEN s.transaction_type IN ('platform_fee', 'shipping_cargo', 'return_cargo', 'penalty')
+                                     THEN s.debt - s.credit ELSE 0 END) AS net_order_amount,
                     SUM(COALESCE(s.signed_seller_revenue, 0)) AS seller_revenue,
                     STRING_AGG(DISTINCT NULLIF(s.payment_order_id, ''), ', ') AS payment_order_id,
                     STRING_AGG(DISTINCT NULLIF(s.receipt_id, ''), ', ') AS receipt_id,
