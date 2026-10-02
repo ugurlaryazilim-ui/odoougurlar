@@ -1,3 +1,4 @@
+import json
 import logging
 import pytz
 from collections import defaultdict
@@ -55,6 +56,7 @@ OTHER_FINANCIAL_API_TYPES = ['DeductionInvoices', 'PaymentOrder', 'Stoppage']
 FEE_ALLOCATION_TYPES = ('platform_fee', 'international_fee')
 _FEE_ALLOCATION_LOOKBACK_DAYS = 60
 _FEE_ALLOCATION_PO_LIMIT = 20  # çalışma başına ödeme emri (her biri 2 istek; finans servisi 100/dk)
+_FAST_TYPE_LOOKUP_LIMIT = 100  # çalışma başına teslimat tipi için sipariş servisi sorgusu
 
 # Hakedişe etkisi: +1 artırır, -1 azaltır (tutar mutlak değerle alınır)
 _REVENUE_SIGN = {
@@ -1025,7 +1027,9 @@ class TrendyolSettlement(models.Model):
 
             # Fatura yoksa tahmini hesapla
             if not has_platform_invoice and seller_revenue > 0.01:
-                if store.platform_fee_fixed:
+                if order.fast_delivery_type == 'SameDayShipping' and store.platform_fee_same_day:
+                    platform_fee = store.platform_fee_same_day
+                elif store.platform_fee_fixed:
                     platform_fee = store.platform_fee_fixed
                 elif store.platform_fee_rate:
                     net_after_discount = (order.total_amount or 0) - (order.total_discount or 0)
@@ -1054,6 +1058,8 @@ class TrendyolSettlement(models.Model):
             is_paid = bool(sale_records) and all(r.payment_order_id for r in sale_records)
             paid_dates = [r.payment_date for r in sale_records if r.payment_date]
             paid_date = max(paid_dates) if paid_dates else False
+            if order.platform_fee_invoiced != has_platform_invoice:
+                changed['platform_fee_invoiced'] = has_platform_invoice
             if order.is_paid != is_paid:
                 changed['is_paid'] = is_paid
             if order.paid_date != paid_date:
@@ -1187,7 +1193,12 @@ class TrendyolSettlement(models.Model):
 
     @api.private
     def _allocate_payment_order(self, api, store, payment_order_id, result):
-        """Tek ödeme emri: faturaları tazele, Sale/Discount paketlerini çek, dağıt."""
+        """Tek ödeme emri: faturaları tazele, Sale/Discount paketlerini çek, gider türü bazında dağıt.
+
+        Faturalar tek tek değil (ödeme + affiliate + tür) grubu olarak dağıtılır: TR/AZ'de grup tek
+        toplu faturadır, mikro ihracatta gönderi / ülke başına kesilmiş birden çok fatura olur.
+        Gruba yeni fatura gelirse (veya tutar değişirse) grup baştan hesaplanır.
+        """
         # 1) Kesinti faturaları (yeni gelenler + affiliate bilgisi)
         invoices_raw, error = self._fetch_paged(
             api.get_other_financials, transaction_type='DeductionInvoices', payment_order_id=payment_order_id)
@@ -1196,39 +1207,47 @@ class TrendyolSettlement(models.Model):
         for item in invoices_raw:
             self._process_settlement_item(item, store, 'otherfinancials')
 
-        invoices = self.search(self._fee_invoice_domain(store) + [
-            ('payment_order_id', '=', payment_order_id), ('allocation_state', '!=', 'allocated')])
-        if not invoices:
+        invoices = self.search(self._fee_invoice_domain(store) + [('payment_order_id', '=', payment_order_id)])
+        if not invoices or all(inv.allocation_state == 'allocated' for inv in invoices):
             return
         result['payment_orders'] += 1
 
-        # 2) Dağıtım tabanı: aynı ödeme emrindeki Sale + Discount kayıtları (affiliate yalnız API'de)
+        # 2) Dağıtım tabanı: aynı ödeme emrindeki Sale + Discount kayıtları (affiliate / ülke yalnız API'de)
         rows, error = self._fetch_paged(
             api.get_settlements, transaction_types=['Sale', 'Discount'], payment_order_id=payment_order_id)
         if error:
             raise UserError(f"Settlements: {error}")
-        packages = defaultdict(dict)  # affiliate → {paket: {'net', 'order_number', 'has_sale'}}
+        packages = defaultdict(dict)  # affiliate → {paket: {'net', 'order_number', 'has_sale', 'country'}}
         for row in rows:
             package_id = str(row.get('shipmentPackageId') or '')
             if not package_id:
                 continue
             pkg = packages[row.get('affiliate') or ''].setdefault(
-                package_id, {'net': 0.0, 'order_number': str(row.get('orderNumber') or ''), 'has_sale': False})
+                package_id, {'net': 0.0, 'order_number': str(row.get('orderNumber') or ''),
+                             'has_sale': False, 'country': row.get('country') or ''})
             pkg['net'] += (row.get('credit') or 0.0) - (row.get('debt') or 0.0)
             if normalize_tr(row.get('transactionType')) in ('satis', 'sale'):
                 pkg['has_sale'] = True
 
-        for invoice in invoices:
-            state = self._allocate_invoice(invoice, packages, store)
-            if state == 'allocated':
-                result['allocated'] += 1
-                result['rows'] += len(self.search([('source', '=', 'fee_allocation'),
-                                                   ('store_id', '=', store.id),
-                                                   ('receipt_id', '=', invoice.trendyol_id)]))
-            elif state == 'warning':
-                result['warnings'] += 1
-            elif state == 'unmatched':
-                result['unmatched'] += 1
+        # Kalemleri platform-invoice servisiyle sipariş bazında yazılmış faturalar gruba girmez
+        itemized = set(self.search([('store_id', '=', store.id), ('source', '=', 'platform_invoice'),
+                                    ('receipt_id', 'in', invoices.mapped('trendyol_id'))]).mapped('receipt_id'))
+        groups = defaultdict(lambda: self.browse())
+        for inv in invoices:
+            if inv.trendyol_id in itemized:
+                if inv.allocation_state != 'allocated':
+                    inv.write({'allocation_state': 'allocated', 'allocation_checked_at': fields.Datetime.now(),
+                               'allocation_note': 'Kalemleri sipariş bazında kayıtlı (platform faturası)'})
+                continue
+            groups[(self._invoice_affiliate(inv, packages), inv.transaction_type)] |= inv
+
+        for (affiliate, tx_type), group in groups.items():
+            if all(inv.allocation_state == 'allocated' for inv in group):
+                continue
+            pkgs = packages.get(affiliate, {}) if affiliate is not None else {}
+            state = self._allocate_group(api, store, payment_order_id, affiliate, tx_type, group, pkgs, result)
+            key = {'allocated': 'allocated', 'warning': 'warnings', 'unmatched': 'unmatched'}[state]
+            result[key] += len(group)
 
     @api.model
     def _split_amount(self, amount, weights):
@@ -1243,95 +1262,194 @@ class TrendyolSettlement(models.Model):
         return shares
 
     @api.private
-    def _invoice_packages(self, invoice, packages):
-        """Faturanın affiliate'ine ait paketler. Eski kayıtta affiliate yoksa tek kanal / 'AZ-' öneki ile çıkarılır."""
+    def _invoice_affiliate(self, invoice, packages):
+        """Faturanın affiliate'i. Eski kayıtta yoksa tek kanal / 'AZ-' öneki ile çıkarılır (bulunamazsa None)."""
         if invoice.affiliate:
-            return packages.get(invoice.affiliate) or {}
+            return invoice.affiliate
         if len(packages) == 1:
-            return next(iter(packages.values()))
+            return next(iter(packages))
         is_az = normalize_tr(invoice.transaction_type_raw).startswith('az-')
-        matches = [pk for aff, pk in packages.items() if ('AZ' in (aff or '').upper()) == is_az]
-        return matches[0] if len(matches) == 1 else {}
+        matches = [aff for aff in packages if ('AZ' in (aff or '').upper()) == is_az]
+        return matches[0] if len(matches) == 1 else None
 
     @api.private
-    def _allocate_invoice(self, invoice, packages, store):
-        """Tek toplu faturayı paketlere dağıtıp sipariş satırlarını yazar. Dönüş: yeni durum."""
+    def _allocate_group(self, api, store, payment_order_id, affiliate, tx_type, invoices, all_pkgs, result):
+        """Aynı ödeme + affiliate + türdeki faturaların toplamını paketlere dağıtıp satırları yazar.
+        Dönüş: yeni durum (allocated / warning / unmatched)."""
         now = fields.Datetime.now()
-        amount = round((invoice.debt or 0.0) - (invoice.credit or 0.0), 2)
-        label = dict(SETTLEMENT_TYPES).get(invoice.transaction_type)
-        # İadeli/iptal paketler (net ≤ 0 veya satışı olmayan) pay almaz — doğrulanmadı, sayısı loglanır
-        pkgs = {pid: p for pid, p in self._invoice_packages(invoice, packages).items()
-                if p['has_sale'] and p['net'] > 0.005}
+        label = dict(SETTLEMENT_TYPES).get(tx_type)
+        amounts = {inv.id: round((inv.debt or 0.0) - (inv.credit or 0.0), 2) for inv in invoices}
+        total = round(sum(amounts.values()), 2)
+        # İadeli/iptal paketler (net ≤ 0 veya satışı olmayan) pay almaz
+        pkgs = {pid: p for pid, p in all_pkgs.items() if p['has_sale'] and p['net'] > 0.005}
 
         def mark(state, note):
-            invoice.write({'allocation_state': state, 'allocation_note': note, 'allocation_checked_at': now})
+            invoices.write({'allocation_state': state, 'allocation_note': note, 'allocation_checked_at': now})
             if state != 'allocated':
-                _logger.info("Trendyol hizmet bedeli %s (%s, ödeme %s): %s", invoice.trendyol_id, label,
-                             invoice.payment_order_id, note)
+                _logger.info("Trendyol hizmet bedeli %s (%s, ödeme %s): %s",
+                             ', '.join(invoices.mapped('trendyol_id')), label, payment_order_id, note)
             return state
 
-        if self.search_count([('store_id', '=', store.id), ('source', '=', 'platform_invoice'),
-                              ('receipt_id', '=', invoice.trendyol_id)]):
-            return mark('allocated', 'Kalemleri sipariş bazında kayıtlı (platform faturası)')
-        if amount <= 0:
-            return mark('unmatched', f"Tutar {amount:.2f} — dağıtılacak borç yok")
+        if total <= 0:
+            return mark('unmatched', f"Tutar {total:.2f} — dağıtılacak borç yok")
         if not pkgs:
-            return mark('unmatched', f"Ödeme {invoice.payment_order_id} içinde aynı kanala ait satış paketi bulunamadı")
+            return mark('unmatched', f"Ödeme {payment_order_id} içinde aynı kanala ait satış paketi bulunamadı")
 
-        if invoice.transaction_type == 'platform_fee':
-            cents = int(round(amount * 100))
-            if cents % len(pkgs):
-                return mark('warning', f"{amount:.2f} TL {len(pkgs)} pakete eşit bölünmüyor "
-                                       f"({amount / len(pkgs):.4f}) — dağıtılmadı")
-            shares = {pid: cents // len(pkgs) / 100.0 for pid in pkgs}
+        if tx_type == 'platform_fee':
+            shares, note = self._platform_shares(api, store, total, pkgs, result)
+            if shares is None:
+                return mark('warning', note)
+            receipts = {pid: invoices for pid in shares}
         else:
-            shares = self._split_amount(amount, {pid: p['net'] for pid, p in pkgs.items()})
+            shares, receipts, note = self._international_shares(invoices, amounts, pkgs)
 
-        existing = {r.trendyol_id: r for r in self.search([
-            ('store_id', '=', store.id), ('source', '=', 'fee_allocation'),
-            ('receipt_id', '=', invoice.trendyol_id)])}
+        self._write_fee_rows(store, payment_order_id, affiliate, tx_type, label, shares, receipts, pkgs)
+        result['rows'] += len(shares)
+
+        skipped = len(all_pkgs) - len(pkgs)
+        if skipped:
+            note += f" ({skipped} iade/iptal paket pay almadı)"
+        if len(invoices) > 1:
+            note = f"{len(invoices)} fatura toplamı {total:.2f} TL: {note}"
+        return mark('allocated', note)
+
+    @api.private
+    def _platform_shares(self, api, store, total, pkgs, result):
+        """Platform bedeli: Bugün Kargoda (SameDayShipping) paketlere mağaza ayarındaki indirimli bedel,
+        kalan diğer paketlere eşit. Kuruşu kuruşuna tutmazsa (None, açıklama) döner — tahmin yapılmaz."""
+        cents, count = int(round(total * 100)), len(pkgs)
+        types = self._package_delivery_types(api, store, pkgs, result)
+        same_day = [pid for pid in pkgs if types.get(pid) == 'SameDayShipping']
+        sd_cents = int(round((store.platform_fee_same_day or 0.0) * 100))
+        if same_day and sd_cents:
+            rest, others = cents - sd_cents * len(same_day), count - len(same_day)
+            if (others == 0 and rest == 0) or (others and rest > 0 and rest % others == 0):
+                std = rest // others if others else 0
+                shares = {pid: (sd_cents if pid in same_day else std) / 100.0 for pid in pkgs}
+                return shares, (f"{count} pakete dağıtıldı ({len(same_day)} Bugün Kargoda × "
+                                f"{sd_cents / 100:.2f}, {others} × {std / 100:.2f})")
+        if cents % count == 0:
+            note = f"{count} pakete eşit dağıtıldı ({cents // count / 100:.2f})"
+            if same_day:
+                note += f" — {len(same_day)} Bugün Kargoda paketine indirim uygulanmamış"
+            return {pid: cents // count / 100.0 for pid in pkgs}, note
+        unknown = count - len(types)
+        detail = f"{len(same_day)} Bugün Kargoda"
+        if unknown:
+            detail += f", {unknown} paketin teslimat tipi bilinmiyor"
+        return None, f"{total:.2f} TL {count} pakete dağıtılamadı ({detail}; eşit pay {total / count:.4f})"
+
+    @api.private
+    def _package_delivery_types(self, api, store, pkgs, result):
+        """Paket → fastDeliveryType. Önce Odoo siparişi (alan / ham JSON), yoksa sipariş servisi (sınırlı)."""
+        Order = self.env['trendyol.order']
+        types, missing = {}, []
+        for pid, p in pkgs.items():
+            order = Order.browse(self._find_order(store, pid, p['order_number']) or [])
+            ftype = order.fast_delivery_type
+            if not ftype and order.raw_data:
+                try:
+                    ftype = json.loads(order.raw_data).get('fastDeliveryType')
+                except (ValueError, AttributeError):
+                    ftype = False
+                if ftype:
+                    order.write({'fast_delivery_type': ftype})
+            if ftype:
+                types[pid] = ftype
+            elif p['order_number']:
+                missing.append((pid, p['order_number'], order))
+        for pid, order_number, order in missing:
+            if result.get('lookups', 0) >= _FAST_TYPE_LOOKUP_LIMIT:
+                break
+            result['lookups'] = result.get('lookups', 0) + 1
+            res = api.get_orders(order_number=order_number) or {}
+            content = ((res.get('data') or {}).get('content') or []) if res.get('success') else []
+            match = [o for o in content if str(o.get('shipmentPackageId') or o.get('id') or '') == pid] or content
+            ftype = match[0].get('fastDeliveryType') if match else False
+            if ftype:
+                types[pid] = ftype
+                if order:
+                    order.write({'fast_delivery_type': ftype})
+        return types
+
+    @api.model
+    def _international_shares(self, invoices, amounts, pkgs):
+        """Uluslararası bedel: net tutar oranında. Birden çok fatura varsa (mikro ihracat: ülke başına)
+        her fatura tutarına uyan ülke grubuna eşlenir; eşlenemezse toplam tüm paketlere oransal bölünür.
+        Dönüş: (paylar, paket → kaynak faturalar, açıklama)"""
+        by_country = defaultdict(dict)
+        for pid, p in pkgs.items():
+            by_country[p.get('country') or ''][pid] = p['net']
+        if len(invoices) > 1 and len(invoices) == len(by_country) and '' not in by_country:
+            rate = sum(amounts.values()) / sum(p['net'] for p in pkgs.values())
+            assign = {}
+            for inv in invoices:
+                cands = [c for c, nets in by_country.items() if c not in assign.values()
+                         and abs(sum(nets.values()) * rate - amounts[inv.id]) <= 0.02 + 0.01 * len(nets)]
+                if len(cands) != 1:
+                    break
+                assign[inv] = cands[0]
+            if len(assign) == len(invoices):
+                shares, receipts = {}, {}
+                for inv, country in assign.items():
+                    for pid, share in self._split_amount(amounts[inv.id], by_country[country]).items():
+                        shares[pid], receipts[pid] = share, inv
+                return shares, receipts, f"{len(shares)} pakete ülke bazında oransal dağıtıldı ({len(assign)} ülke)"
+        total = round(sum(amounts.values()), 2)
+        shares = self._split_amount(total, {pid: p['net'] for pid, p in pkgs.items()})
+        return shares, {pid: invoices for pid in shares}, f"{len(shares)} pakete net tutar oranında dağıtıldı"
+
+    @api.private
+    def _write_fee_rows(self, store, payment_order_id, affiliate, tx_type, label, shares, receipts, pkgs):
+        """Paket başına dağıtım satırını yazar/günceller; artık pay almayan paketin satırı silinir."""
+        domain = [('store_id', '=', store.id), ('source', '=', 'fee_allocation'),
+                  ('payment_order_id', '=', payment_order_id), ('transaction_type', '=', tx_type),
+                  ('affiliate', '=', affiliate) if affiliate else ('affiliate', 'in', [False, ''])]
+        existing = {r.trendyol_id: r for r in self.search(domain)}
         keep = set()
         for pid, share in shares.items():
-            tid = f"alloc_{invoice.trendyol_id}_{pid}"
+            tid = f"alloc_{payment_order_id}_{tx_type}_{pid}"
             keep.add(tid)
+            sources = receipts[pid]
+            receipt = ', '.join(sources.mapped('trendyol_id'))
             order_number = pkgs[pid]['order_number']
+            dates = [d for d in sources.mapped('transaction_date') if d]
             vals = {
                 'trendyol_id': tid,
                 'store_id': store.id,
                 'order_id': self._find_order(store, pid, order_number),
-                'transaction_date': invoice.transaction_date,
-                'transaction_type': invoice.transaction_type,
-                'transaction_type_raw': invoice.transaction_type_raw,
-                'description': f"{label} (dağıtılmış, fatura {invoice.trendyol_id})",
+                'transaction_date': max(dates) if dates else False,
+                'transaction_type': tx_type,
+                'transaction_type_raw': sources[:1].transaction_type_raw,
+                'description': f"{label} (dağıtılmış, fatura {receipt})",
                 'source': 'fee_allocation',
                 'debt': share,
                 'credit': 0.0,
                 'order_number': order_number,
                 'shipment_package_id': pid,
-                'receipt_id': invoice.trendyol_id,
-                'payment_order_id': invoice.payment_order_id,
-                'payment_date': invoice.payment_date,
-                'affiliate': invoice.affiliate,
+                'receipt_id': receipt,
+                'payment_order_id': payment_order_id,
+                'payment_date': sources[:1].payment_date,
+                'affiliate': affiliate or False,
             }
             row = existing.get(tid)
             if row:
-                changed = {k: v for k, v in vals.items()
-                           if k in ('debt', 'order_id', 'transaction_type', 'payment_date', 'description')
-                           and (abs((row[k] or 0.0) - (v or 0.0)) > 0.005 if k == 'debt'
-                                else (row[k].id if k == 'order_id' else row[k]) != (v or False))}
+                changed = {}
+                for key in ('debt', 'order_id', 'transaction_date', 'payment_date', 'description', 'receipt_id'):
+                    old = row[key].id if key == 'order_id' else row[key]
+                    new = vals[key]
+                    if key == 'debt':
+                        if abs((old or 0.0) - (new or 0.0)) > 0.005:
+                            changed[key] = new
+                    elif (old or False) != (new or False):
+                        changed[key] = new
                 if changed:
                     row.write(changed)
             else:
                 self.create(vals)
-        stale = [r for tid, r in existing.items() if tid not in keep]
+        stale = [r.id for tid, r in existing.items() if tid not in keep]
         if stale:
-            self.browse([r.id for r in stale]).unlink()
-
-        skipped = len(self._invoice_packages(invoice, packages)) - len(pkgs)
-        note = f"{len(shares)} pakete dağıtıldı"
-        if skipped:
-            note += f" ({skipped} iade/iptal paket pay almadı)"
-        return mark('allocated', note)
+            self.browse(stale).unlink()
 
     def action_allocate_fees(self):
         """Seçili toplu faturaların (uyarı / eşleşmedi dahil) dağıtımını yeniden dene."""

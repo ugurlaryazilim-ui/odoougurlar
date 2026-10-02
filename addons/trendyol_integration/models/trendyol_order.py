@@ -64,6 +64,9 @@ class TrendyolOrder(models.Model):
     cargo_tracking_link = fields.Char(string='Kargo Takip Linki', readonly=True)
     cargo_deci = fields.Float(string='Kargo Desi', readonly=True, digits=(5, 1),
                                help='Paketin volumetrik ağırlığı (desi)')
+    fast_delivery_type = fields.Char(string='Hızlı Teslimat Tipi', readonly=True,
+                                     help='Trendyol fastDeliveryType (FastDelivery / SameDayShipping …). '
+                                          'Bugün Kargoda (SameDayShipping) gönderilerin platform bedeli indirimlidir.')
 
     # ─── Finansal ────────────────────────────────────────
     total_amount = fields.Float(string='Toplam Tutar', readonly=True)
@@ -91,6 +94,9 @@ class TrendyolOrder(models.Model):
 
     # ─── Finansal Özet (Settlements API'den) ─────────────
     platform_fee = fields.Float(string='Platform Hizmet Bedeli', readonly=True, digits=(12, 2))
+    platform_fee_invoiced = fields.Boolean(
+        string='Platform Bedeli Faturalı', readonly=True,
+        help='İşaretliyse platform bedeli Trendyol faturasından (dağıtılmış) gelir; değilse mağaza ayarından tahmindir.')
     international_fee = fields.Float(string='Uluslararası Hizmet Bedeli', readonly=True, digits=(12, 2))
     shipping_cost = fields.Float(string='Gönderi Kargo Tutarı', readonly=True, digits=(12, 2))
     return_cargo_cost = fields.Float(string='İade Kargo Tutarı', readonly=True, digits=(12, 2))
@@ -171,6 +177,9 @@ class TrendyolOrder(models.Model):
                 vals['raw_data'] = json.dumps(package_data, ensure_ascii=False)
             if not existing.store_id:
                 vals['store_id'] = store.id
+            fast_type = package_data.get('fastDeliveryType')
+            if fast_type and not is_split_part and existing.fast_delivery_type != fast_type:
+                vals['fast_delivery_type'] = fast_type
 
             # Komisyon bilgisi — yalnız değişen değerler (her senkronda tüm siparişleri yazmasın)
             if store.process_commission:
@@ -542,6 +551,7 @@ class TrendyolOrder(models.Model):
             'cargo_tracking_number': str(data.get('cargoTrackingNumber', '')),
             'cargo_tracking_link': data.get('cargoTrackingLink', ''),
             'cargo_deci': data.get('cargoDeci') or data.get('deci', 0) or 1,
+            'fast_delivery_type': data.get('fastDeliveryType') or False,
             'total_amount': (data.get('grossAmount')
                             or data.get('packageGrossAmount')
                             or data.get('totalPrice')

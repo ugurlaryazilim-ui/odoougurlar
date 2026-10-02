@@ -125,6 +125,7 @@
                                 </group>
                                 <group string="Tahmini Hesaplama (Fatura kesilmemişse)">
                                     <field name="platform_fee_fixed"/>
+                                    <field name="platform_fee_same_day"/>
                                     <field name="platform_fee_rate" invisible="platform_fee_fixed"/>
                                     <field name="cargo_unit_price"/>
                                 </group>

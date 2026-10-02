@@ -30,6 +30,14 @@
                 <field name="total_commission" optional="hide" sum="Toplam Komisyon"/>
                 <field name="commission_rate" optional="hide"/>
                 <field name="net_amount" optional="hide" sum="Net Toplam"/>
+                <field name="seller_revenue" optional="hide" sum="Hakediş"/>
+                <field name="shipping_cost" optional="hide" sum="Kargo"/>
+                <field name="platform_fee" optional="hide" sum="Platform"/>
+                <field name="platform_fee_invoiced" optional="hide" widget="boolean"/>
+                <field name="international_fee" optional="hide" sum="Uluslararası"/>
+                <field name="return_cargo_cost" optional="hide" sum="İade Kargo"/>
+                <field name="penalty_amount" optional="hide" sum="Ceza"/>
+                <field name="stoppage_amount" optional="hide" sum="Stopaj"/>
                 <field name="final_net_amount" optional="hide" sum="Net Sipariş Toplamı"/>
                 <field name="is_paid" optional="hide" widget="boolean"/>
                 <field name="sale_order_id" optional="show"/>
@@ -93,6 +101,7 @@
                             <field name="cargo_provider"/>
                             <field name="cargo_tracking_number"/>
                             <field name="cargo_tracking_link" widget="url"/>
+                            <field name="fast_delivery_type"/>
                         </group>
                     </group>
 
@@ -117,6 +126,7 @@
                         <group>
                             <field name="net_amount" string="Toplam Net Tutar"/>
                             <field name="platform_fee"/>
+                            <field name="platform_fee_invoiced"/>
                             <field name="international_fee" invisible="not international_fee"/>
                             <field name="shipping_cost"/>
                         </group>
