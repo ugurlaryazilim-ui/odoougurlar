@@ -91,6 +91,7 @@ class TrendyolOrder(models.Model):
 
     # ─── Finansal Özet (Settlements API'den) ─────────────
     platform_fee = fields.Float(string='Platform Hizmet Bedeli', readonly=True, digits=(12, 2))
+    international_fee = fields.Float(string='Uluslararası Hizmet Bedeli', readonly=True, digits=(12, 2))
     shipping_cost = fields.Float(string='Gönderi Kargo Tutarı', readonly=True, digits=(12, 2))
     return_cargo_cost = fields.Float(string='İade Kargo Tutarı', readonly=True, digits=(12, 2))
     penalty_amount = fields.Float(string='Ceza Tutarı', readonly=True, digits=(12, 2))
@@ -100,7 +101,7 @@ class TrendyolOrder(models.Model):
     paid_date = fields.Datetime(string='Ödeme Tarihi', readonly=True)
     seller_revenue = fields.Float(string='Satıcı Hakediş', readonly=True, digits=(12, 2))
     final_net_amount = fields.Float(string='Net Sipariş Tutarı', readonly=True, digits=(12, 2),
-                                    help='Hakediş - Platform Hizmet - Kargo - İade Kargo - Ceza - Stopaj')
+                                    help='Hakediş - Platform Hizmet - Uluslararası Hizmet - Kargo - İade Kargo - Ceza - Stopaj')
 
     # Bölünmüş (split) siparişte bu kayda bağlanan parça paket ID'leri: ",id1,id2,"
     split_package_ids = fields.Char(string="Bölünmüş Paket ID'leri", readonly=True, index=True)

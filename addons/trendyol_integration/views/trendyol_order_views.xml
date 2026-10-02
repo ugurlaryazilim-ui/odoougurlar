@@ -117,6 +117,7 @@
                         <group>
                             <field name="net_amount" string="Toplam Net Tutar"/>
                             <field name="platform_fee"/>
+                            <field name="international_fee" invisible="not international_fee"/>
                             <field name="shipping_cost"/>
                         </group>
                         <group>

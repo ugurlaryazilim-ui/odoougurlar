@@ -28,6 +28,11 @@
                 <field name="payment_order_id" optional="hide"/>
                 <field name="receipt_id" optional="hide"/>
                 <field name="source" optional="hide"/>
+                <field name="affiliate" optional="hide"/>
+                <field name="allocation_state" optional="hide" widget="badge"
+                       decoration-success="allocation_state == 'allocated'"
+                       decoration-warning="allocation_state in ('warning', 'pending')"
+                       decoration-danger="allocation_state == 'unmatched'"/>
             </list>
         </field>
     </record>
@@ -40,7 +45,15 @@
         <field name="model">trendyol.settlement</field>
         <field name="arch" type="xml">
             <form string="Finansal İşlem" create="false" edit="false">
+                <header invisible="not allocation_state">
+                    <button name="action_allocate_fees" type="object" string="Dağıtımı Yeniden Dene"
+                            invisible="allocation_state == 'allocated'"/>
+                    <field name="allocation_state" widget="statusbar"/>
+                </header>
                 <sheet>
+                    <div class="alert alert-info" role="alert" invisible="not allocation_note">
+                        <field name="allocation_note"/>
+                    </div>
                     <group>
                         <group string="İşlem Bilgileri">
                             <field name="trendyol_id"/>
@@ -49,6 +62,7 @@
                             <field name="transaction_type_raw"/>
                             <field name="description"/>
                             <field name="source"/>
+                            <field name="affiliate"/>
                         </group>
                         <group string="Sipariş">
                             <field name="store_id"/>
@@ -92,6 +106,12 @@
                 <filter string="Satış" name="filter_sale" domain="[('transaction_type', '=', 'sale')]"/>
                 <filter string="İade" name="filter_return" domain="[('transaction_type', '=', 'return')]"/>
                 <filter string="Platform" name="filter_platform" domain="[('transaction_type', '=', 'platform_fee')]"/>
+                <filter string="Uluslararası" name="filter_international" domain="[('transaction_type', '=', 'international_fee')]"/>
+                <separator/>
+                <filter string="Kaynak Toplu Fatura" name="filter_bulk_invoice" domain="[('allocation_state', '!=', False)]"/>
+                <filter string="Dağıtılmamış Toplu Fatura" name="filter_not_allocated"
+                        domain="[('allocation_state', 'in', ('pending', 'warning', 'unmatched'))]"/>
+                <filter string="Dağıtılmış Hizmet Bedeli" name="filter_fee_allocation" domain="[('source', '=', 'fee_allocation')]"/>
                 <filter string="Stopaj" name="filter_stoppage" domain="[('transaction_type', '=', 'stoppage')]"/>
                 <separator/>
                 <filter string="Ödendi" name="filter_paid" domain="[('payment_order_id', '!=', False)]"/>

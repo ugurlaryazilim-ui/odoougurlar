@@ -1,4 +1,6 @@
 import logging
+from datetime import timedelta
+
 from odoo import api, fields, models, _
 from odoo.exceptions import UserError, ValidationError
 from .trendyol_api import TrendyolAPI
@@ -155,6 +157,9 @@ class TrendyolStore(models.Model):
     processed_payment_orders = fields.Text(
         string='İşlenen Ödeme Emirleri', readonly=True, copy=False,
         help='Kayıtlarına ödeme bilgisi işlenmiş Trendyol ödeme emri ID\'leri')
+    fee_scanned_payment_orders = fields.Text(
+        string='Hizmet Bedeli Taranan Ödemeler', readonly=True, copy=False,
+        help='Bugün hizmet bedeli faturası sorgulanmış ödeme emirleri (ödeme:tarih) — günde bir sorgu')
 
     # ─── İlişkiler ───────────────────────────────────────
     order_ids = fields.One2many('trendyol.order', 'store_id', string='Siparişler')
@@ -309,6 +314,28 @@ class TrendyolStore(models.Model):
                            f'Yeni kayıt: {result.get("created", 0)}',
                 'type': 'success',
                 'sticky': False,
+            },
+        }
+
+    def action_allocate_service_fees(self):
+        """Toplu Uluslararası / Platform Hizmet Bedeli faturalarını paketlere dağıt (son 60 gün)."""
+        self.ensure_one()
+        Settlement = self.env['trendyol.settlement']
+        res = Settlement._allocate_service_fees(self.get_api(), self, force=True)
+        Settlement._update_order_financial_summary(self, since=fields.Datetime.now() - timedelta(minutes=5))
+        msg = (f"{res['payment_orders']} ödeme emri işlendi.\n"
+               f"Dağıtılan fatura: {res['allocated']} ({res['rows']} sipariş satırı)\n"
+               f"Uyarı (eşit bölünmeyen): {res['warnings']}\nEşleşmeyen: {res['unmatched']}")
+        if res['errors']:
+            msg += f"\nHata: {len(res['errors'])}\n" + '\n'.join(res['errors'][:5])
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Trendyol Hizmet Bedeli Dağıtımı',
+                'message': msg,
+                'type': 'warning' if (res['errors'] or res['warnings'] or res['unmatched']) else 'success',
+                'sticky': bool(res['errors'] or res['warnings'] or res['unmatched']),
             },
         }
 
