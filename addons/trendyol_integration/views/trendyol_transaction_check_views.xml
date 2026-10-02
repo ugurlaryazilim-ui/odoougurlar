@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_trendyol_transaction_check_list" model="ir.ui.view">
+        <field name="name">trendyol.transaction.check.list</field>
+        <field name="model">trendyol.transaction.check</field>
+        <field name="arch" type="xml">
+            <list string="İşlem Kontrol" create="false" edit="false" delete="false"
+                  decoration-muted="sale_amount == 0">
+                <field name="order_date"/>
+                <field name="order_number"/>
+                <field name="store_id"/>
+                <field name="sale_amount" sum="Satış"/>
+                <field name="return_amount" sum="İade" optional="hide"/>
+                <field name="discount_amount" sum="İndirim"/>
+                <field name="commission_amount" sum="Komisyon"/>
+                <field name="platform_fee" sum="Platform"/>
+                <field name="shipping_cost" sum="Gönderi Kargo"/>
+                <field name="return_cargo_cost" sum="İade Kargo"/>
+                <field name="penalty_amount" sum="Ceza"/>
+                <field name="commission_rate"/>
+                <field name="international_fee" sum="Uluslararası"/>
+                <field name="stoppage_amount" sum="Stopaj" optional="hide"/>
+                <field name="barcode"/>
+                <field name="credit" sum="Alacak"/>
+                <field name="debt" sum="Borç"/>
+                <field name="net_amount" sum="Net Tutar"/>
+                <field name="seller_revenue" sum="Hakedişe Etki" optional="hide"/>
+                <field name="payment_order_id"/>
+                <field name="receipt_id"/>
+                <field name="affiliate"/>
+                <field name="is_paid" optional="hide"/>
+                <field name="order_id" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_trendyol_transaction_check_pivot" model="ir.ui.view">
+        <field name="name">trendyol.transaction.check.pivot</field>
+        <field name="model">trendyol.transaction.check</field>
+        <field name="arch" type="xml">
+            <pivot string="İşlem Kontrol">
+                <field name="store_id" type="row"/>
+                <field name="order_date" interval="month" type="col"/>
+                <field name="sale_amount" type="measure"/>
+                <field name="seller_revenue" type="measure"/>
+            </pivot>
+        </field>
+    </record>
+
+    <record id="view_trendyol_transaction_check_search" model="ir.ui.view">
+        <field name="name">trendyol.transaction.check.search</field>
+        <field name="model">trendyol.transaction.check</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="order_number"/>
+                <field name="barcode"/>
+                <field name="payment_order_id"/>
+                <field name="receipt_id"/>
+                <field name="store_id"/>
+                <filter string="Ödendi" name="paid" domain="[('is_paid', '=', True)]"/>
+                <filter string="Ödenmedi" name="unpaid" domain="[('is_paid', '=', False)]"/>
+                <separator/>
+                <filter string="İadeli" name="returned" domain="[('return_amount', '!=', 0)]"/>
+                <filter string="Platform Bedeli Yok" name="no_platform" domain="[('platform_fee', '=', 0)]"/>
+                <filter string="Kargo Bedeli Yok" name="no_cargo" domain="[('shipping_cost', '=', 0)]"/>
+                <filter string="Uluslararası" name="international" domain="[('international_fee', '!=', 0)]"/>
+                <separator/>
+                <filter string="Türkiye (TRENDYOLTR)" name="aff_tr" domain="[('affiliate', 'ilike', 'TRENDYOLTR')]"/>
+                <filter string="Azerbaycan (AZ)" name="aff_az" domain="[('affiliate', 'ilike', 'AZ')]"/>
+                <separator/>
+                <filter string="Sipariş Tarihi" name="filter_order_date" date="order_date"/>
+                <group>
+                    <filter string="Mağaza" name="group_store" context="{'group_by': 'store_id'}"/>
+                    <filter string="Sipariş Ayı" name="group_month" context="{'group_by': 'order_date:month'}"/>
+                    <filter string="Affiliate" name="group_affiliate" context="{'group_by': 'affiliate'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_trendyol_transaction_check" model="ir.actions.act_window">
+        <field name="name">İşlem Kontrol</field>
+        <field name="res_model">trendyol.transaction.check</field>
+        <field name="view_mode">list,pivot</field>
+        <field name="search_view_id" ref="view_trendyol_transaction_check_search"/>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Finansal işlem bulunamadı</p>
+            <p>Finansal senkron sonrası siparişler satış, indirim, komisyon ve kesintileriyle tek satırda listelenir.
+               Sağ üstteki dişli → Dışa Aktar ile Excel'e alabilirsiniz.</p>
+        </field>
+    </record>
+</odoo>

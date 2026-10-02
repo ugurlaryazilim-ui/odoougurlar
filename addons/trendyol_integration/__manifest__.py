@@ -1,6 +1,6 @@
 {
     'name': 'Trendyol Entegrasyonu',
-    'version': '19.0.4.6.0',
+    'version': '19.0.4.7.0',
     'summary': 'Trendyol Çoklu Mağaza Sipariş ve Finans Entegrasyonu',
     'description': 'Trendyol pazaryeri çoklu mağaza desteğiyle sipariş yönetimi, finansal işlem takibi ve senkronizasyon',
     'author': 'Uğurlar',
@@ -14,6 +14,7 @@
         'views/trendyol_order_views.xml',
         'views/trendyol_settlement_views.xml',
         'views/trendyol_fee_payment_views.xml',
+        'views/trendyol_transaction_check_views.xml',
         'wizard/financial_backfill_wizard_views.xml',
         'views/sale_order_views.xml',
         'views/trendyol_sync_log_views.xml',
