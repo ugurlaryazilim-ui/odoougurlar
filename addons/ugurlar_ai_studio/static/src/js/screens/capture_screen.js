@@ -8,12 +8,50 @@ import { useService } from "@web/core/utils/hooks";
 const OUTPUT_ASPECT = 2 / 3;
 // Uzun kenar üst sınırı: yükleme boyutunu makul tutar, AI için fazlasıyla yeterli
 const MAX_LONG_EDGE = 3000;
-// Bu çözünürlüğün altındaki çekimde kullanıcı uyarılır
-const MIN_SHORT_EDGE = 1000;
+// iOS Safari'de ImageCapture yok; kayıt video karesinden alınır
+const IS_IOS = /iP(hone|ad|od)/.test(navigator.userAgent)
+    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+// Bu çözünürlüğün altındaki çekimde kullanıcı uyarılır (iOS 1080p karesinin 2:3 kırpımı 720 px)
+const MIN_SHORT_EDGE = IS_IOS ? 700 : 1000;
 const JPEG_QUALITY = 0.92;
 // AI ön işleme görseli bu uzun kenara indirir: video karesi bunu karşılıyorsa sensör
 // fotoğrafına gerek yok ve kaydedilen alan önizlemedeki çerçeveyle birebir aynı olur
 const AI_LONG_EDGE = 1600;
+// Önizleme bu sürede kare üretmezse bir alt çözünürlük kademesiyle yeniden açılır
+const PREVIEW_WATCHDOG_MS = 3500;
+// "video": <video> doğrudan gösterilir. "canvas": kareler görünür bir canvas'a çizilir.
+// iOS 27 + iPhone 16 Pro'da <video> önizlemesi siyah kalırken kareler okunabiliyor
+// (çekim çalışıyor); canvas'a kendimiz çizince görüntü gelir. Teşhis panelinden değiştirilebilir.
+const PREVIEW_MODE_KEY = "ais_camera_preview_mode";
+
+function loadPreviewMode() {
+    try {
+        const saved = window.localStorage.getItem(PREVIEW_MODE_KEY);
+        if (saved === "video" || saved === "canvas") {
+            return saved;
+        }
+    } catch {
+        // gizli sekme vb.: varsayılan kullanılır
+    }
+    return IS_IOS ? "canvas" : "video";
+}
+
+/** Denenecek çözünürlük kademeleri. iOS'ta 4K istemek siyah önizlemeye yol açabiliyor. */
+function cameraAttempts(facingMode) {
+    const simple = { video: { facingMode }, audio: false };
+    if (IS_IOS) {
+        return [
+            { video: { facingMode: { ideal: facingMode }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
+            { video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+            simple,
+        ];
+    }
+    return [
+        // En yüksek çözünürlük: tarayıcı desteklediği en yakın değeri seçer
+        { video: { facingMode: { ideal: facingMode }, width: { ideal: 3840 }, height: { ideal: 2160 } }, audio: false },
+        simple,
+    ];
+}
 
 export class CaptureScreen extends Component {
     static template = "ugurlar_ai_studio.CaptureScreen";
@@ -27,6 +65,7 @@ export class CaptureScreen extends Component {
         this.notification = useService("notification");
         this.videoRef = useRef("cameraVideo");
         this.canvasRef = useRef("captureCanvas");
+        this.previewCanvasRef = useRef("previewCanvas");
         this.fileInputRef = useRef("fileInput");
         // Reaktif olmayan akış referansı: unmount sonrası gelen stream'i durdurabilmek için
         this.stream = null;
@@ -54,14 +93,24 @@ export class CaptureScreen extends Component {
             // Akış var ama video oynamıyor (iOS otomatik oynatmayı engelledi): dokunarak başlatılır
             previewBlocked: false,
             previewLive: false,
+            previewMode: loadPreviewMode(),
+            diagOpen: false,
+            diagText: "",
         });
+        this.resLevel = 0;
+        this.framesDrawn = 0;
+        this.lastError = "";
 
         // Önizleme object-fit:cover ile kırpılır; kaydedilen alan kameranın ortasındaki
         // 2:3 bölgedir. Çerçeve, o bölgenin ekrandaki yerini gösterir.
         this.updateCropFrame = () => this._updateCropFrame();
         // iOS arka plana alınınca kamera akışını durdurur; dönüşte görüntüyü geri getir
         this.onVisibilityChange = () => {
-            if (document.visibilityState !== "visible" || this.unmounted || this.state.submitting) {
+            if (document.visibilityState !== "visible") {
+                this._stopPreviewLoop();
+                return;
+            }
+            if (this.unmounted || this.state.submitting) {
                 return;
             }
             const track = this.stream && this.stream.getVideoTracks()[0];
@@ -87,28 +136,27 @@ export class CaptureScreen extends Component {
             this.unmounted = true;
             window.removeEventListener("resize", this.updateCropFrame);
             document.removeEventListener("visibilitychange", this.onVisibilityChange);
+            clearInterval(this._diagTimer);
             this.stopCamera();
         });
     }
 
-    async startCamera() {
+    /** @param {number} [level] çözünürlük kademesi (şablondaki "Tekrar Dene" olay nesnesi geçirir) */
+    async startCamera(level) {
         // Hızlı "kamera değiştir" dokunuşlarında yalnız EN SON başlatma geçerli
         const token = (this._camSeq = (this._camSeq || 0) + 1);
         this.state.cameraError = null;
-        const attempts = [
-            // En yüksek çözünürlük: tarayıcı desteklediği en yakın değeri seçer
-            { video: { facingMode: { ideal: this.state.facingMode }, width: { ideal: 3840 }, height: { ideal: 2160 } }, audio: false },
-            // iOS / eski cihaz fallback — basit kısıtlar
-            { video: { facingMode: this.state.facingMode }, audio: false },
-        ];
+        const attempts = cameraAttempts(this.state.facingMode);
+        let index = typeof level === "number" ? Math.min(level, attempts.length - 1) : 0;
         let stream = null;
         let lastError = null;
-        for (const constraints of attempts) {
+        for (; index < attempts.length; index++) {
             try {
-                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                stream = await navigator.mediaDevices.getUserMedia(attempts[index]);
                 break;
             } catch (e) {
                 lastError = e;
+                this.lastError = `getUserMedia[${index}]: ${e && e.name} ${e && e.message}`;
             }
         }
         if (!stream) {
@@ -122,8 +170,34 @@ export class CaptureScreen extends Component {
             return;
         }
         this.stream = stream;
+        this.resLevel = index;
+        this.framesDrawn = 0;
         this.state.cameraActive = true;
         await this._attachStream();
+        this._armWatchdog(token, attempts.length);
+    }
+
+    /** Önizleme kare üretmiyorsa bir alt kademeyle yeniden açar (iOS 4K/sanal lens siyahı). */
+    _armWatchdog(token, attemptCount) {
+        clearTimeout(this._watchdog);
+        this._watchdog = setTimeout(() => {
+            if (this.unmounted || token !== this._camSeq || !this.stream || this.state.previewBlocked
+                || document.visibilityState !== "visible") {
+                return;
+            }
+            const video = this.videoRef.el;
+            const alive = video && video.videoWidth > 0 && video.readyState >= 2 && video.currentTime > 0;
+            if (alive || this.resLevel + 1 >= attemptCount) {
+                if (!alive) {
+                    this.lastError = this.lastError || "Önizleme karesi gelmedi (tüm kademeler denendi)";
+                }
+                return;
+            }
+            this.lastError = `Kademe ${this.resLevel} kare üretmedi, alt çözünürlük deneniyor`;
+            const next = this.resLevel + 1;
+            this.stopCamera();
+            this.startCamera(next);
+        }, PREVIEW_WATCHDOG_MS);
     }
 
     /**
@@ -146,6 +220,7 @@ export class CaptureScreen extends Component {
             this.state.previewLive = true;
             this.state.previewBlocked = false;
             this.updateCropFrame();
+            this._startPreviewLoop();
         };
         video.onpause = () => {
             this.state.previewLive = false;
@@ -164,13 +239,133 @@ export class CaptureScreen extends Component {
         try {
             await video.play();
             this.state.previewBlocked = false;
+            this._startPreviewLoop();
         } catch (e) {
             // NotAllowedError: kullanıcı dokunuşu gerekir. AbortError: yeni srcObject geldi, yok say
             if (e && e.name !== "AbortError") {
                 console.warn("Kamera önizlemesi başlatılamadı:", e);
+                this.lastError = `play(): ${e.name} ${e.message}`;
                 this.state.previewBlocked = true;
             }
         }
+    }
+
+    // ---- Canvas önizleme -------------------------------------------------
+
+    _startPreviewLoop() {
+        this._stopPreviewLoop();
+        if (this.state.previewMode !== "canvas" || this.unmounted || !this.stream) {
+            return;
+        }
+        const step = () => {
+            this._previewRaf = null;
+            if (this.unmounted || !this.stream || this.state.previewMode !== "canvas") {
+                return;
+            }
+            this._drawPreview();
+            this._previewRaf = requestAnimationFrame(step);
+        };
+        this._previewRaf = requestAnimationFrame(step);
+    }
+
+    _stopPreviewLoop() {
+        if (this._previewRaf) {
+            cancelAnimationFrame(this._previewRaf);
+            this._previewRaf = null;
+        }
+    }
+
+    /** Video karesini önizleme canvas'ına object-fit:cover ile çizer (ekran çözünürlüğünde). */
+    _drawPreview() {
+        const video = this.videoRef.el;
+        const canvas = this.previewCanvasRef.el;
+        if (!video || !canvas || !video.videoWidth || video.readyState < 2) {
+            return;
+        }
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const W = Math.round(canvas.clientWidth * dpr);
+        const H = Math.round(canvas.clientHeight * dpr);
+        if (!W || !H) {
+            return;
+        }
+        if (canvas.width !== W || canvas.height !== H) {
+            canvas.width = W;
+            canvas.height = H;
+        }
+        const vw = video.videoWidth, vh = video.videoHeight;
+        const scale = Math.max(W / vw, H / vh);
+        const sw = W / scale, sh = H / scale;
+        try {
+            canvas.getContext("2d").drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, W, H);
+        } catch (e) {
+            this.lastError = `drawImage: ${e.name} ${e.message}`;
+            return;
+        }
+        this.framesDrawn++;
+        if (!this.state.previewLive) {
+            this.state.previewLive = true;
+            this.updateCropFrame();
+        }
+    }
+
+    togglePreviewMode() {
+        this.state.previewMode = this.state.previewMode === "canvas" ? "video" : "canvas";
+        try {
+            window.localStorage.setItem(PREVIEW_MODE_KEY, this.state.previewMode);
+        } catch {
+            // kaydedilemezse yalnız bu oturum için geçerli
+        }
+        if (this.state.previewMode === "canvas") {
+            this._startPreviewLoop();
+        } else {
+            this._stopPreviewLoop();
+        }
+        this._refreshDiag();
+    }
+
+    // ---- Teşhis paneli (başlığa 3 kez dokun) -----------------------------
+
+    onTitleTap() {
+        const now = Date.now();
+        this._taps = (this._taps || []).filter(t => now - t < 1000);
+        this._taps.push(now);
+        if (this._taps.length >= 3) {
+            this._taps = [];
+            this.toggleDiag();
+        }
+    }
+
+    toggleDiag() {
+        this.state.diagOpen = !this.state.diagOpen;
+        clearInterval(this._diagTimer);
+        if (this.state.diagOpen) {
+            this._refreshDiag();
+            this._diagTimer = setInterval(() => this._refreshDiag(), 1000);
+        }
+    }
+
+    _refreshDiag() {
+        if (!this.state.diagOpen) {
+            return;
+        }
+        const ua = navigator.userAgent;
+        const osMatch = ua.match(/OS (\d+[_\d]*) like Mac OS X/);
+        const track = this.stream && this.stream.getVideoTracks()[0];
+        const st = track && track.getSettings ? track.getSettings() : {};
+        const video = this.videoRef.el;
+        const lines = [
+            `Cihaz: ${IS_IOS ? "iOS " + (osMatch ? osMatch[1].replace(/_/g, ".") : "?") : navigator.platform}`,
+            `Önizleme modu: ${this.state.previewMode} | kademe: ${this.resLevel} | çizilen kare: ${this.framesDrawn}`,
+            track
+                ? `Kamera: ${track.label || "-"} | ${st.width || "?"}x${st.height || "?"} @${st.frameRate ? Math.round(st.frameRate) : "?"}fps | ${track.readyState}${track.muted ? " (muted)" : ""}`
+                : "Kamera: akış yok",
+            video
+                ? `Video: readyState=${video.readyState} paused=${video.paused} ${video.videoWidth}x${video.videoHeight} t=${video.currentTime.toFixed(1)}`
+                : "Video: eleman yok",
+            `Durum: active=${this.state.cameraActive} live=${this.state.previewLive} blocked=${this.state.previewBlocked}`,
+            `Son hata: ${this.lastError || "-"}`,
+        ];
+        this.state.diagText = lines.join("\n");
     }
 
     /** "Önizlemeyi başlat" dokunuşu: kullanıcı hareketi içindeki play() iOS'ta izinlidir. */
@@ -229,6 +424,8 @@ export class CaptureScreen extends Component {
     }
 
     stopCamera() {
+        clearTimeout(this._watchdog);
+        this._stopPreviewLoop();
         if (this.stream) {
             this.stream.getTracks().forEach(track => track.stop());
             this.stream = null;
