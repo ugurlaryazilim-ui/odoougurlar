@@ -24,6 +24,7 @@
                 <field name="credit" sum="Alacak"/>
                 <field name="debt" sum="Borç"/>
                 <field name="net_amount" sum="Net Tutar"/>
+                <field name="net_order_amount" sum="Net Sipariş Tutarı"/>
                 <field name="seller_revenue" sum="Hakedişe Etki" optional="hide"/>
                 <field name="payment_order_id"/>
                 <field name="receipt_id"/>
@@ -42,7 +43,7 @@
                 <field name="store_id" type="row"/>
                 <field name="order_date" interval="month" type="col"/>
                 <field name="sale_amount" type="measure"/>
-                <field name="seller_revenue" type="measure"/>
+                <field name="net_order_amount" type="measure"/>
             </pivot>
         </field>
     </record>
