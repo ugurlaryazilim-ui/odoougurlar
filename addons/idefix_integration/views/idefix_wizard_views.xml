@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="idefix_unsupplied_wizard_form" model="ir.ui.view">
+        <field name="name">idefix.unsupplied.wizard.form</field>
+        <field name="model">idefix.unsupplied.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Tedarik Edilemedi Bildir">
+                <div class="alert alert-warning" role="alert">
+                    Seçilen kalemler Idefix'te iptal edilir. Sevkiyatta kalan ürünler Idefix'te aynı sipariş
+                    numarasıyla yeni bir sevkiyat olarak oluşur; bu sevkiyatın Odoo siparişi iptal edilip
+                    kalan ürünler için yeni sipariş açılır.
+                </div>
+                <group>
+                    <field name="idefix_order_id"/>
+                    <field name="reason_id" options="{'no_create': True, 'no_open': True}"/>
+                    <field name="line_ids" widget="many2many_tags"
+                           options="{'no_create': True}"/>
+                </group>
+                <footer>
+                    <button name="action_confirm" type="object" string="Idefix'e Bildir" class="btn-primary"
+                            confirm="Seçili kalemler Idefix'te tedarik edilemedi olarak bildirilecek. Bu işlem geri alınamaz. Devam edilsin mi?"/>
+                    <button name="action_refresh_reasons" type="object" string="Sebepleri Güncelle" class="btn-secondary"/>
+                    <button string="Vazgeç" special="cancel" class="btn-secondary"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="idefix_claim_decline_wizard_form" model="ir.ui.view">
+        <field name="name">idefix.claim.decline.wizard.form</field>
+        <field name="model">idefix.claim.decline.wizard</field>
+        <field name="arch" type="xml">
+            <form string="İade Red Talebi">
+                <div class="alert alert-info" role="alert">
+                    Red talebi Idefix tarafından incelenir; iade 'Red Talebi İnceleniyor' statüsüne geçer.
+                </div>
+                <group>
+                    <field name="refund_ids" widget="many2many_tags" readonly="1"/>
+                    <field name="reason_id" options="{'no_create': True, 'no_open': True}"/>
+                    <field name="description"/>
+                    <field name="image_urls" placeholder="https://..."/>
+                </group>
+                <footer>
+                    <button name="action_confirm" type="object" string="Red Talebi Gönder" class="btn-primary"/>
+                    <button name="action_refresh_reasons" type="object" string="Sebepleri Güncelle" class="btn-secondary"/>
+                    <button string="Vazgeç" special="cancel" class="btn-secondary"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+</odoo>

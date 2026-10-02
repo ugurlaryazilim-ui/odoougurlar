@@ -1,58 +1,38 @@
-"""Idefix sipariş toplu işlemleri — retry, refresh, delete, mark."""
-import json
+"""Idefix sipariş toplu işlemleri — retry, refresh, delete."""
 import logging
 
-from odoo import api, fields, models
-from .idefix_order_sync import IDEFIX_VALID_ORDER_STATUSES
+from odoo import models
+
+from .idefix_order import IDEFIX_CANCEL_STATUSES
 
 _logger = logging.getLogger(__name__)
+
+_REFRESH_BATCH = 50
+
 
 class IdefixOrderActions(models.Model):
     """Toplu işlem ve UI aksiyon metodları."""
     _inherit = 'idefix.order'
 
     def action_retry_sync(self):
-        """Seçili hatalı sipariş kayıtlarını tekrar dene."""
-        errors = self.filtered(lambda o: not o.sale_order_id and o.raw_data)
+        """Odoo siparişi oluşmamış kayıtları kayıtlı kalemlerle tekrar dene (ör. ürün sonradan eklendiyse)."""
+        errors = self.filtered(lambda o: not o.sale_order_id and o.order_status not in IDEFIX_CANCEL_STATUSES)
         if not errors:
-            return self._notify('Uyarı', 'Takılmıs, tekrar denenecek hatalı sipariş yok.', 'warning')
+            return self._notify('Uyarı', 'Tekrar denenecek hatalı sipariş yok.', 'warning')
 
         success = 0
         fail = 0
         for order in errors:
             try:
-                package_data = json.loads(order.raw_data)
-                store = order.store_id
-                if not store:
-                    store = self.env['idefix.store'].search([('active', '=', True)], limit=1)
-                if not store:
-                    fail += 1
-                    continue
-                
-                # Geçerli statülerdeki siparişler için Sale Order oluştur
-                if order.order_status in IDEFIX_VALID_ORDER_STATUSES:
-                    shipment_addr = package_data.get('shippingAddress') or {}
-                    billing_addr = package_data.get('invoiceAddress') or {}
-                    customer_email = package_data.get('customerContactMail') or ''
-                    phone_number = shipment_addr.get('phone') or ''
-
-                    sale_order = self._create_odoo_sale_order(
-                        order, store, shipment_addr, billing_addr,
-                        customer_email, phone_number
-                    )
-                    order.write({
-                        'sale_order_id': sale_order.id,
-                        'store_id': store.id,
-                    })
-                    
-                    if store.auto_confirm and sale_order.state in ['draft', 'sent']:
-                        sale_order.action_confirm()
-
+                with self.env.cr.savepoint():
+                    order.with_context(idefix_force_create=True)._reconcile_sale_order(order.store_id)
+                if order.sale_order_id:
                     success += 1
                 else:
                     fail += 1
             except Exception as e:
                 fail += 1
+                self.env.invalidate_all(flush=False)
                 _logger.exception("Idefix Tekrar deneme hatası %s: %s", order.order_number, e)
 
         return self._notify(
@@ -62,71 +42,44 @@ class IdefixOrderActions(models.Model):
         )
 
     def action_refresh_from_idefix(self):
-        """Seçili siparişlerin durumunu Idefix API'den güncelle."""
+        """Seçili sevkiyatları shipment ID ile Idefix'ten çekip tamamen güncelle."""
         if not self:
             return
 
-        store_orders = {}
-        for order in self:
-            store = order.store_id
-            if not store:
-                continue
-            if store.id not in store_orders:
-                store_orders[store.id] = {'store': store, 'orders': self.env['idefix.order']}
-            store_orders[store.id]['orders'] |= order
-
         updated = 0
-        for data in store_orders.values():
-            store = data['store']
+        failed = []
+        for store in self.mapped('store_id'):
+            orders = self.filtered(lambda o: o.store_id == store and o.order_id)
             try:
                 api = store.get_api()
             except Exception as e:
-                _logger.warning("API bağlantı hatası [%s]: %s", store.name, e)
+                failed.append(f"{store.name}: {e}")
                 continue
+            for start in range(0, len(orders), _REFRESH_BATCH):
+                batch = orders[start:start + _REFRESH_BATCH]
+                found, error = self._fetch_orders(api, ids=batch.mapped('order_id'))
+                if error:
+                    failed.append(f"{store.name}: {error}")
+                    break
+                by_id = {str(o.get('id')): o for o in found}
+                for order in batch:
+                    order_json = by_id.get(order.order_id)
+                    if not order_json:
+                        failed.append(f"{order.order_number} / {order.order_id}: Idefix'te bulunamadı")
+                        continue
+                    try:
+                        with self.env.cr.savepoint():
+                            self._sync_order_json(store, order_json, api)
+                        updated += 1
+                    except Exception as e:
+                        self.env.invalidate_all(flush=False)
+                        failed.append(f"{order.order_number}: {e}")
+                        _logger.warning("Durum güncelleme hatası %s: %s", order.order_number, e)
 
-            for order in data['orders']:
-                if not order.order_id:
-                    continue
-                try:
-                    # Idefix'in kendi list endpoint'ini kullan
-                    result = api.get_orders(
-                        start_date=order.order_date,
-                        end_date=fields.Datetime.now(),
-                        page=1, limit=50
-                    )
-                    
-                    if result.get('success'):
-                        items = result.get('data', {}).get('items', [])
-                        # order_id ile eşleştir
-                        pkg = None
-                        for item in items:
-                            if str(item.get('id')) == order.order_id:
-                                pkg = item
-                                break
-                        
-                        if pkg:
-                            new_status = pkg.get('status')
-                            vals = {
-                                'order_status': new_status if new_status else order.order_status,
-                                'raw_data': json.dumps(pkg, ensure_ascii=False),
-                            }
-                            
-                            # Kargo bilgisi
-                            if pkg.get('cargoTrackingNumber'):
-                                vals['cargo_tracking_number'] = str(pkg['cargoTrackingNumber'])
-                            if pkg.get('cargoCompany'):
-                                vals['cargo_provider'] = pkg['cargoCompany']
-
-                            order.write(vals)
-                            updated += 1
-                except Exception as e:
-                    _logger.warning("Durum güncelleme hatası %s: %s", order.order_number, e)
-
-        return self._notify(
-            'Durum Güncelleme',
-            f'✅ {updated}/{len(self)} sipariş Idefix\'dan güncellendi.',
-            'success' if updated else 'warning',
-        )
+        msg = f'✅ {updated}/{len(self)} sevkiyat Idefix\'ten güncellendi.'
+        if failed:
+            msg += '\n' + '\n'.join(failed[:10])
+        return self._notify('Durum Güncelleme', msg, 'success' if not failed else 'warning')
 
     def action_delete_error_orders(self):
         to_delete = self.filtered(lambda o: not o.sale_order_id)
@@ -137,7 +90,8 @@ class IdefixOrderActions(models.Model):
         return self._notify('Silme', f'🗑️ {count} hatalı kayıt silindi.', 'success')
 
     def action_retry_all_errors(self):
-        errors = self.search([('sale_order_id', '=', False)])
+        errors = self.search([('sale_order_id', '=', False),
+                              ('order_status', 'not in', list(IDEFIX_CANCEL_STATUSES))])
         if not errors:
             return self._notify('Bilgi', 'Tekrar denenecek hatalı sipariş yok.', 'info')
         return errors.action_retry_sync()

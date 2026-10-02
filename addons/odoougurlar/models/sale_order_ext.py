@@ -207,11 +207,11 @@ class SaleOrder(models.Model):
                 ix = order.idefix_order_id
                 display = ix.order_status_display if hasattr(ix, 'order_status_display') and ix.order_status_display else (ix.order_status or '')
                 status_raw = (ix.order_status or '').lower()
-                if status_raw in ('cancelled', 'canceled', 'refunded', 'returned'):
+                # Idefix sevkiyat statüleri: shipment_cancelled / _unsupplied / _split / _undeliver kapandı,
+                # shipment_in_cargo / _delivered / _approved kargoda-teslim
+                if status_raw in ('shipment_cancelled', 'shipment_unsupplied', 'shipment_split', 'shipment_undeliver'):
                     category = 'danger'
-                elif status_raw in ('delivered',):
-                    category = 'success'
-                elif status_raw in ('shipped',):
+                elif status_raw in ('shipment_in_cargo', 'shipment_delivered', 'shipment_approved'):
                     category = 'success'
                 else:
                     category = 'warning'

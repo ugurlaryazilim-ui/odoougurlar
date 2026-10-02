@@ -13,5 +13,7 @@
     <!-- Alt Menüler -->
     <menuitem id="menu_idefix_stores" name="Mağazalar" parent="menu_idefix_root" action="action_idefix_store" sequence="10"/>
     <menuitem id="menu_idefix_orders" name="Idefix Siparişleri" parent="menu_idefix_root" action="action_idefix_orders" sequence="20"/>
+    <menuitem id="menu_idefix_refunds" name="İade Talepleri" parent="menu_idefix_root" action="action_idefix_refunds" sequence="25"/>
+    <menuitem id="menu_idefix_settlements" name="Finansal İşlemler" parent="menu_idefix_root" action="action_idefix_settlements" sequence="30"/>
     <menuitem id="menu_idefix_settings" name="Ayarlar" parent="menu_idefix_root" action="action_idefix_config_settings" sequence="100"/>
 </odoo>

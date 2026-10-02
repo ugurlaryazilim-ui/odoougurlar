@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="idefix_refund_list" model="ir.ui.view">
+        <field name="name">idefix.refund.list</field>
+        <field name="model">idefix.refund</field>
+        <field name="arch" type="xml">
+            <list string="Idefix İade Talepleri" create="false" edit="false"
+                  decoration-muted="claim_state in ('approved', 'decline')">
+                <header>
+                    <button name="action_approve" type="object" string="İadeyi Onayla" class="btn-primary"
+                            confirm="Seçili iade kalemleri Idefix'te onaylanacak. Devam edilsin mi?"/>
+                    <button name="action_open_decline_wizard" type="object" string="Red Talebi" class="btn-secondary"/>
+                </header>
+                <field name="refund_date"/>
+                <field name="refund_number"/>
+                <field name="order_number"/>
+                <field name="sale_order_id" optional="show"/>
+                <field name="customer_name"/>
+                <field name="product_name"/>
+                <field name="product_code" optional="show"/>
+                <field name="refund_type"/>
+                <field name="refund_amount" sum="İade Tutarı"/>
+                <field name="claim_state" column_invisible="1"/>
+                <field name="refund_status_name" string="Statü" widget="badge"
+                       decoration-warning="claim_state == 'waiting_vendor_approve'"
+                       decoration-info="claim_state in ('ready', 'in_cargo', 'vendor_decline_request')"
+                       decoration-success="claim_state == 'approved'"
+                       decoration-danger="claim_state == 'decline'"/>
+                <field name="auto_approve_date" optional="show"/>
+                <field name="shipment_code" optional="hide"/>
+                <field name="store_id" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="idefix_refund_form" model="ir.ui.view">
+        <field name="name">idefix.refund.form</field>
+        <field name="model">idefix.refund</field>
+        <field name="arch" type="xml">
+            <form string="Idefix İade Talebi" create="false" edit="false">
+                <header>
+                    <button name="action_approve" type="object" string="İadeyi Onayla" class="btn-primary"
+                            invisible="claim_state != 'waiting_vendor_approve'"
+                            confirm="İade kalemi Idefix'te onaylanacak. Devam edilsin mi?"/>
+                    <button name="action_open_decline_wizard" type="object" string="Red Talebi" class="btn-secondary"
+                            invisible="claim_state != 'waiting_vendor_approve'"/>
+                    <field name="claim_state" invisible="1"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="refund_number"/></h1>
+                    </div>
+                    <group>
+                        <group string="İade">
+                            <field name="store_id"/>
+                            <field name="refund_status_name" string="Statü"/>
+                            <field name="refund_type"/>
+                            <field name="refund_date"/>
+                            <field name="state_updated_at"/>
+                            <field name="auto_approve_date"/>
+                            <field name="is_controversial"/>
+                        </group>
+                        <group string="Sipariş">
+                            <field name="order_number"/>
+                            <field name="order_date"/>
+                            <field name="idefix_order_id"/>
+                            <field name="sale_order_id"/>
+                            <field name="customer_name"/>
+                        </group>
+                        <group string="Ürün">
+                            <field name="product_name"/>
+                            <field name="product_code"/>
+                            <field name="quantity"/>
+                            <field name="total_amount"/>
+                            <field name="refund_amount"/>
+                        </group>
+                        <group string="Kargo">
+                            <field name="shipment_company_name"/>
+                            <field name="shipment_code"/>
+                            <field name="cargo_tracking_number"/>
+                        </group>
+                    </group>
+                    <group>
+                        <field name="description"/>
+                        <field name="vendor_note" invisible="not vendor_note"/>
+                        <field name="decline_note" invisible="not decline_note"/>
+                    </group>
+                    <notebook>
+                        <page string="Ham Veri">
+                            <field name="raw_data" widget="text"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="idefix_refund_search" model="ir.ui.view">
+        <field name="name">idefix.refund.search</field>
+        <field name="model">idefix.refund</field>
+        <field name="arch" type="xml">
+            <search string="Idefix İade Talepleri">
+                <field name="order_number"/>
+                <field name="refund_id"/>
+                <field name="customer_name"/>
+                <field name="product_code"/>
+                <field name="shipment_code"/>
+                <filter name="waiting" string="Onay Bekliyor" domain="[('claim_state', '=', 'waiting_vendor_approve')]"/>
+                <filter name="on_way" string="Yolda" domain="[('claim_state', 'in', ('ready', 'in_cargo'))]"/>
+                <filter name="done" string="Sonuçlandı" domain="[('claim_state', 'in', ('approved', 'decline'))]"/>
+                <separator/>
+                <filter name="refund_date" string="İade Tarihi" date="refund_date"/>
+                <group>
+                    <filter name="group_state" string="Statü" context="{'group_by': 'refund_status_name'}"/>
+                    <filter name="group_reason" string="Sebep" context="{'group_by': 'refund_type'}"/>
+                    <filter name="group_store" string="Mağaza" context="{'group_by': 'store_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_idefix_refunds" model="ir.actions.act_window">
+        <field name="name">Idefix İade Talepleri</field>
+        <field name="res_model">idefix.refund</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="idefix_refund_search"/>
+    </record>
+</odoo>

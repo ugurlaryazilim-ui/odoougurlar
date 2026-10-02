@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="idefix_settlement_list" model="ir.ui.view">
+        <field name="name">idefix.settlement.list</field>
+        <field name="model">idefix.settlement</field>
+        <field name="arch" type="xml">
+            <list string="Idefix Finansal İşlemler" create="false" edit="false"
+                  decoration-muted="not transferred_date">
+                <field name="transaction_date"/>
+                <field name="order_id"/>
+                <field name="trx_id" optional="hide"/>
+                <field name="sale_order_id" optional="show"/>
+                <field name="status" widget="badge"/>
+                <field name="gross_amount" optional="hide" sum="Brüt"/>
+                <field name="amount" sum="Toplam Tutar"/>
+                <field name="coupon_discount" optional="show" sum="Platform İndirimi"/>
+                <field name="vendor_discount" optional="hide" sum="Satıcı İndirimi"/>
+                <field name="commission_amount" sum="Komisyon"/>
+                <field name="allowance_amount" sum="Net Hakediş"/>
+                <field name="transferred_date"/>
+                <field name="store_id" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="idefix_settlement_form" model="ir.ui.view">
+        <field name="name">idefix.settlement.form</field>
+        <field name="model">idefix.settlement</field>
+        <field name="arch" type="xml">
+            <form string="Idefix Finansal İşlem" create="false" edit="false">
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="order_id"/></h1>
+                    </div>
+                    <group>
+                        <group string="İşlem">
+                            <field name="store_id"/>
+                            <field name="idefix_order_id"/>
+                            <field name="sale_order_id"/>
+                            <field name="trx_id"/>
+                            <field name="status"/>
+                            <field name="transaction_date"/>
+                            <field name="transferred_date"/>
+                        </group>
+                        <group string="Tutarlar">
+                            <field name="gross_amount"/>
+                            <field name="coupon_discount"/>
+                            <field name="vendor_discount"/>
+                            <field name="amount"/>
+                            <field name="commission_amount"/>
+                            <field name="allowance_amount"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="idefix_settlement_search" model="ir.ui.view">
+        <field name="name">idefix.settlement.search</field>
+        <field name="model">idefix.settlement</field>
+        <field name="arch" type="xml">
+            <search string="Idefix Finansal İşlemler">
+                <field name="order_id"/>
+                <field name="trx_id"/>
+                <field name="sale_order_id"/>
+                <filter name="transferred" string="Hakediş Hesaplandı" domain="[('transferred_date', '!=', False)]"/>
+                <filter name="not_transferred" string="Hakediş Bekliyor" domain="[('transferred_date', '=', False)]"/>
+                <separator/>
+                <filter name="transaction_date" string="İşlem Tarihi" date="transaction_date"/>
+                <group>
+                    <filter name="group_status" string="Statü" context="{'group_by': 'status'}"/>
+                    <filter name="group_transferred" string="Hakediş Tarihi" context="{'group_by': 'transferred_date:day'}"/>
+                    <filter name="group_store" string="Mağaza" context="{'group_by': 'store_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_idefix_settlements" model="ir.actions.act_window">
+        <field name="name">Idefix Finansal İşlemler</field>
+        <field name="res_model">idefix.settlement</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="idefix_settlement_search"/>
+    </record>
+</odoo>
