@@ -571,3 +571,29 @@
     box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
     pointer-events: none;
 }
+
+/* iOS önizleme engellendiğinde / beklerken gösterilen katman */
+.ais-preview-blocked,
+.ais-preview-waiting {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 5;
+    color: #fff;
+    font-size: 16px;
+    text-align: center;
+    padding: 24px;
+    pointer-events: none;
+}
+.ais-preview-blocked {
+    background: rgba(0, 0, 0, 0.75);
+    cursor: pointer;
+    pointer-events: auto;
+}
+.ais-preview-blocked span {
+    padding: 14px 20px;
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    border-radius: 12px;
+}

@@ -13,7 +13,14 @@
                     </div>
                 </t>
                 <t t-else="">
-                    <video t-ref="cameraVideo" autoplay="true" playsinline="true" class="ais-camera-video"/>
+                    <video t-ref="cameraVideo" autoplay="true" muted="true" playsinline="true" class="ais-camera-video"/>
+                    <!-- iOS otomatik oynatmayı engellerse: dokunarak önizlemeyi başlat -->
+                    <div t-if="state.previewBlocked" class="ais-preview-blocked" t-on-click="resumePreview">
+                        <span>📷 Kamera önizlemesini başlatmak için dokunun</span>
+                    </div>
+                    <div t-elif="state.cameraActive and !state.previewLive" class="ais-preview-waiting">
+                        <span>Kamera görüntüsü bekleniyor…</span>
+                    </div>
                     <!-- Kaydedilecek 2:3 alan; dışı karartılır -->
                     <div t-if="state.cropFrameStyle" class="ais-crop-frame" t-att-style="state.cropFrameStyle"/>
                     
@@ -158,7 +165,7 @@
                     </button>
 
                     <button class="ais-btn-shutter" t-on-click="capturePhoto" aria-label="Fotoğraf çek"
-                            t-att-disabled="!state.cameraActive or state.capturing or state.submitting">
+                            t-att-disabled="!state.cameraActive or (!state.previewLive and !state.previewBlocked) or state.capturing or state.submitting">
                         <div class="shutter-inner"></div>
                     </button>
                     
