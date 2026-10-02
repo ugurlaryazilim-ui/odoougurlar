@@ -10,5 +10,15 @@
             <field name="interval_type">minutes</field>
             <field name="active" eval="True"/>
         </record>
+
+        <record id="ir_cron_amazon_pii_cleanup" model="ir.cron">
+            <field name="name">Amazon: Kişisel Veri Temizliği</field>
+            <field name="model_id" ref="model_amazon_store"/>
+            <field name="state">code</field>
+            <field name="code">model.cron_amazon_pii_cleanup()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="active" eval="True"/>
+        </record>
     </data>
 </odoo>

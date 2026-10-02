@@ -62,6 +62,23 @@ class AmazonStore(models.Model):
     sync_interval = fields.Integer(string='Senkron Aralığı (dk)', default=15)
     last_sync = fields.Datetime('Son Senkronizasyon', readonly=True)
 
+    # ─── Finans ──────────────────────────────────────────
+    sync_financials = fields.Boolean(
+        string='Finansal İşlemleri Senkronize Et', default=True,
+        help='Kargolanan siparişlerin komisyon/kesinti/iade kayıtları (Finances API) cron ile çekilir.')
+    financial_day_range = fields.Integer(
+        string='Finansal Gün Aralığı', default=30,
+        help='Son kaç günün siparişleri için finans kaydı sorgulanır. Her sipariş günde en fazla bir kez sorgulanır.')
+    last_financial_sync = fields.Datetime(string='Son Finansal Senkron', readonly=True)
+
+    # ─── Kişisel Veri Saklama (Amazon Data Protection Policy) ───
+    pii_cleanup_enabled = fields.Boolean(
+        string='Kişisel Verileri Otomatik Temizle', default=False,
+        help='Açıkken, saklama süresi dolan kargolanmış/iptal Amazon siparişlerinde (amazon.order kaydı) '
+             'alıcı e-posta, telefon, adres ve ham JSON içindeki kişisel veriler silinir, ad maskelenir. '
+             'Odoo satış siparişi, müşteri kartı ve faturalar yasal saklama zorunluluğu nedeniyle değişmez.')
+    pii_retention_days = fields.Integer(string='Saklama Süresi (Gün)', default=30)
+
     def get_api_endpoint(self):
         """Çevre ve bölgeye göre doğru endpointi döner."""
         endpoints = {
@@ -142,8 +159,11 @@ class AmazonStore(models.Model):
     def action_refetch_all_missing_customers(self):
         """Eksik veya 'Amazon Müşterisi' adıyla kaydolmuş siparişleri Amazon SP-API'den yeniden çekip günceller."""
         self.ensure_one()
+        # Kişisel verisi saklama süresi dolup temizlenmiş siparişler yeniden doldurulmaz
         orders = self.env['sale.order'].search([
             ('amazon_store_id', '=', self.id),
+            ('state', '!=', 'cancel'),
+            '|', ('amazon_order_id', '=', False), ('amazon_order_id.pii_cleaned', '=', False),
         ])
         updated_count = 0
         for order in orders:

@@ -146,6 +146,12 @@ class AmazonOrderSync(models.Model):
                     store.action_sync_orders()
                 except Exception as e:
                     _logger.exception("Amazon %s senkronizasyon hatası: %s", store.name, e)
+                if store.sync_financials:
+                    try:
+                        with self.env.cr.savepoint():
+                            store._sync_financials()
+                    except Exception as e:
+                        _logger.exception("Amazon %s finans senkronizasyon hatası: %s", store.name, e)
         except Exception as e:
             _logger.exception("Amazon cron senkronizasyon hatası: %s", e)
 
@@ -465,6 +471,9 @@ class AmazonOrderSync(models.Model):
         """
         order_lines = []
         _tax_cache = {}
+        line_fields = self.env['sale.order.line']._fields
+        # Odoo 19: tax_ids (eski sürümlerde tax_id) — bilinmeyen alan create'te ValueError verir
+        tax_field = 'tax_ids' if 'tax_ids' in line_fields else ('tax_id' if 'tax_id' in line_fields else False)
         _ean_cache = {}  # ASIN → EAN cache (aynı siparişte aynı ASIN'i tekrar çekme)
 
         for item in items_val:
@@ -473,6 +482,8 @@ class AmazonOrderSync(models.Model):
             qty = float(item.get('QuantityOrdered', 1))
             item_price = float(item.get('ItemPrice', {}).get('Amount', 0.0))
             item_tax = float(item.get('ItemTax', {}).get('Amount', 0.0))
+            # Satıcı/Amazon promosyonu ItemPrice'tan düşülmez, ayrı gelir → müşterinin ödediği tutar
+            promotion = float((item.get('PromotionDiscount') or {}).get('Amount', 0.0) or 0.0)
 
             # ─── ADIM 1: SellerSKU ile ürün ara (tiresiz eşleşme dahil) ───
             product = product_map.get(sku)
@@ -551,7 +562,8 @@ class AmazonOrderSync(models.Model):
                     sku, asin, amazon_order_id,
                 )
 
-            unit_price_incl = item_price / qty if qty > 0 else item_price
+            line_total = item_price - promotion if 0 < promotion < item_price else item_price
+            unit_price_incl = line_total / qty if qty > 0 else line_total
 
             ol_vals = {
                 'product_uom_qty': qty,
@@ -583,8 +595,8 @@ class AmazonOrderSync(models.Model):
                     ], limit=1)
                     _tax_cache[vat_rate] = tax
                 include_tax = _tax_cache[vat_rate]
-                if include_tax:
-                    ol_vals['tax_id'] = [(6, 0, [include_tax.id])]
+                if include_tax and tax_field:
+                    ol_vals[tax_field] = [(6, 0, [include_tax.id])]
                 else:
                     # KDV dahil vergi bulunamadı — price_unit'i KDV Hariç tutara dönüştür
                     ol_vals['price_unit'] = unit_price_incl / (1.0 + (vat_rate / 100.0))
@@ -626,33 +638,40 @@ class AmazonOrderSync(models.Model):
             if amazon_order_rec.order_status == 'Pending' and status != 'Pending':
                 is_missing_pii = True
 
-        # İptal durumu kontrolü
-        if existing_order and not force_update:
-            if existing_order.state not in ['done', 'cancel']:
-                if status == 'Canceled' and existing_order.state != 'cancel':
-                    existing_order.action_cancel()
-            
-            total_order_amount = float(order_data.get('OrderTotal', {}).get('Amount', 0.0))
-            partner_name = existing_order.partner_id.name if existing_order.partner_id else ''
+        # ─── İptal: Amazon'da iptal edilen sipariş Odoo'da da iptal edilir ───
+        # İptal edilen siparişte Amazon kişisel veri vermez → PII/satır yenilemesine girilmez
+        # (aksi halde her cron'da boş "Amazon Müşterisi" partner'ı oluşur).
+        if existing_order and status == 'Canceled':
+            self._cancel_amazon_sale_order(existing_order, amazon_order_rec, amazon_order_id)
+            if amazon_order_rec and amazon_order_rec.order_status != status:
+                amazon_order_rec.write({'order_status': status})
+            return processed, 0, 0, msgs
 
-            # Müşteri bilgisi eksikse, statü Pending'den çıktıysa veya fiyat tutmuyorsa güncellemeyi zorla
-            if is_missing_pii or partner_name in ('', 'Amazon Müşterisi') or \
-               (total_order_amount > 0 and abs(existing_order.amount_total - total_order_amount) > 0.01):
-                force_update = True
+        if existing_order and not force_update:
+            partner_name = existing_order.partner_id.name if existing_order.partner_id else ''
+            pii_missing = is_missing_pii or partner_name in ('', 'Amazon Müşterisi')
+
             # ─── KRİTİK: Draft sipariş + Pending olmayan durum = MUTLAKA onayla ───
             # Sipariş ilk geldiğinde Pending → draft bırakıldı. Cron tekrar çalıştığında
-            # PII ve tutar zaten doğru olabilir ama sipariş hâlâ draft ise, picking
-            # oluşmamıştır → force_update ile devam et ki satır 672-678 onaylasın.
-            elif existing_order.state == 'draft' and status not in ('Pending', 'Canceled'):
+            # sipariş hâlâ draft ise picking oluşmamıştır → force_update ile onaylanır.
+            if existing_order.state == 'draft' and status != 'Pending':
                 force_update = True
                 _logger.info(
                     "Amazon sipariş %s draft durumda ama statü '%s' — force_update ile onaylanacak.",
                     amazon_order_id, status)
+            # Müşteri bilgisi eksik → yeniden çek. RDT alınamıyorsa her cron'da 5-6 istek
+            # atmamak için aynı sipariş en fazla saatte bir denenir.
+            elif pii_missing and status != 'Pending' and self._pii_retry_due(amazon_order_rec):
+                force_update = True
             else:
                 return processed, 0, 0, msgs
 
         # Canceled ise ve ERP'de yoksa alma
-        if status == 'Canceled' and not existing_order:
+        if status == 'Canceled':
+            return processed, 0, 0, msgs
+
+        # Kişisel verisi temizlenmiş (saklama süresi dolmuş) sipariş yeniden doldurulmaz
+        if amazon_order_rec and amazon_order_rec.pii_cleaned:
             return processed, 0, 0, msgs
 
         # ─── PENDING SİPARİŞ: API çağrıları yapmadan atla ───
@@ -708,8 +727,13 @@ class AmazonOrderSync(models.Model):
         # BuyerInfo.BuyerName ise Amazon tarafından bazen sadece soyad (örn: "Karter") olarak verilebilir.
         buyer_name = shipping_address.get('Name') or buyer_info.get('BuyerName') or 'Amazon Müşterisi'
         
-        # Müşteri Yarat / Güncelle
-        partner = self._get_or_create_partner(buyer_name, buyer_info, shipping_address)
+        # Müşteri Yarat / Güncelle — mevcut siparişte PII hâlâ gelmediyse partner'a dokunma
+        # (her denemede yeni boş "Amazon Müşterisi" kaydı açılmasın)
+        has_pii = buyer_name != 'Amazon Müşterisi' or bool(shipping_address.get('AddressLine1'))
+        if existing_order and not has_pii:
+            partner = existing_order.partner_id
+        else:
+            partner = self._get_or_create_partner(buyer_name, buyer_info, shipping_address)
         
         # Order Items'ları çek
         items_val = self._fetch_order_items(amazon_order_id, session, auth, base_url)
@@ -822,8 +846,9 @@ class AmazonOrderSync(models.Model):
                     if picking.state not in ('done', 'cancel'):
                         picking.sudo().write({'partner_id': partner.id})
 
-            # Fiyat ve KDV düzeltmesi (eğer tutar Amazon ile tutmuyorsa veya force_update ise)
-            if items_val and (abs(existing_order.amount_total - total_order_amount) > 0.01 or force_update):
+            # Satırlar yalnızca TASLAK siparişte yeniden kurulur. Odoo onaylı siparişte satır
+            # silmeye izin vermez (UserError) — eskiden tutar tutmayınca her cron'da hata alınıyordu.
+            if items_val and existing_order.state in ('draft', 'sent'):
                 new_lines = self._prepare_sale_order_lines(
                     items_val, product_map, amazon_order_id, msgs,
                     session=session, auth=auth, base_url=base_url)
@@ -1105,13 +1130,16 @@ class AmazonOrderSync(models.Model):
         
         street = ' '.join(street_parts).strip()
 
+        # Eşleşme: Amazon alıcı e-postası (alıcıya özel, maskeli adres) veya aynı isim + aynı ilçe.
+        # Yalnız isim/telefonla eşleştirme başka bir müşterinin/tedarikçinin kartını ezebiliyordu.
+        top = [('parent_id', '=', False)]
         partner = False
-        if email and email != 'Amazon Müşterisi':
-            partner = ResPartner.search([('email', '=', email)], limit=1)
-        if not partner and phone:
-            partner = ResPartner.search([('phone', '=', phone)], limit=1)
-        if not partner and name and name != 'Amazon Müşterisi':
-            partner = ResPartner.search([('name', '=ilike', name)], limit=1)
+        if email and '@' in email:
+            partner = ResPartner.search(top + [('email', '=ilike', email)], limit=1)
+        if not partner and name and name != 'Amazon Müşterisi' and district_name:
+            partner = ResPartner.search(top + [
+                ('name', '=ilike', name), ('city', '=ilike', district_name),
+            ], limit=1)
 
         vals = {
             'name': name if name else 'Amazon Müşterisi',
@@ -1126,10 +1154,13 @@ class AmazonOrderSync(models.Model):
         }
 
         if partner:
+            # Boş gelen alanlar mevcut bilgiyi silmesin; ad yalnızca daha tam ise değişsin
+            update_vals = {k: v for k, v in vals.items() if v and k not in ('name', 'customer_rank')}
             if name and name != 'Amazon Müşterisi':
                 if partner.name == 'Amazon Müşterisi' or len(name.split()) > len((partner.name or '').split()):
-                    vals['name'] = name
-            partner.write(vals)
+                    update_vals['name'] = name
+            if update_vals:
+                partner.write(update_vals)
         else:
             partner = ResPartner.create(vals)
 
@@ -1189,4 +1220,195 @@ class AmazonOrderSync(models.Model):
         except Exception as e:
             _logger.error("Amazon Catalog API fetch hatası (ASIN %s): %s", asin, e)
         return ''
+
+    # ─── Yardımcılar ─────────────────────────────────────────
+
+    @api.private
+    def _build_session(self):
+        """LWA token'lı requests oturumu + (varsa) AWS imzası ve endpoint."""
+        self.ensure_one()
+        session = requests.Session()
+        session.headers.update({
+            'x-amz-access-token': self.generate_access_token(),
+            'User-Agent': 'OdooUgurlar/1.0',
+            'Content-Type': 'application/json'
+        })
+        return session, self._get_aws_auth(), self.get_api_endpoint()
+
+    @api.model
+    def _pii_retry_due(self, amazon_order_rec):
+        """Müşteri bilgisi eksik sipariş yeniden çekilmeli mi? (saatte en fazla bir deneme)"""
+        if not amazon_order_rec:
+            return True
+        if amazon_order_rec.pii_cleaned:
+            return False
+        last = amazon_order_rec.write_date
+        return not last or last < fields.Datetime.now() - timedelta(hours=1)
+
+    @api.model
+    def _cancel_blocker(self, so):
+        """Otomatik iptali engelleyen durum (sevk edilmiş / faturası kesilmiş) — yoksa False."""
+        if so.picking_ids.filtered(lambda p: p.state == 'done'):
+            return 'sevk edildiği'
+        if so.invoice_ids.filtered(lambda m: m.state == 'posted'):
+            return 'faturası kesildiği'
+        return False
+
+    @api.private
+    def _cancel_amazon_sale_order(self, so, amazon_order_rec, amazon_order_id):
+        """Amazon'da iptal edilen siparişi Odoo'da iptal eder.
+
+        Sevk edilmiş / faturası kesilmiş siparişe dokunulmaz, chatter'a bir kez uyarı yazılır.
+        _action_cancel kullanılır: action_cancel kilitli (locked) siparişte UserError veriyor;
+        Nebim silme kancası (odoougurlar) _action_cancel üzerinde olduğu için o da çalışır.
+        """
+        if so.state == 'cancel':
+            return
+        blocker = self._cancel_blocker(so)
+        if blocker:
+            msg = (f"Amazon siparişi {amazon_order_id} iptal edildi ancak {so.name} {blocker} "
+                   f"için otomatik iptal edilmedi; elle kontrol edin.")
+            if not amazon_order_rec or amazon_order_rec.error_message != msg:
+                if amazon_order_rec:
+                    amazon_order_rec.error_message = msg
+                so.message_post(body=msg)
+                _logger.warning(msg)
+            return
+        try:
+            with self.env.cr.savepoint():
+                so.sudo()._action_cancel()
+            so.message_post(body=f"Amazon siparişi {amazon_order_id} iptal edildiği için iptal edildi.")
+            _logger.info("Amazon — Odoo sipariş iptal edildi: %s (%s)", so.name, amazon_order_id)
+        except Exception as e:
+            _logger.warning("Amazon — sipariş iptal hatası %s (%s): %s", so.name, amazon_order_id, e)
+
+    # ─── Finans (Finances API v0) ────────────────────────────
+
+    def action_sync_financials(self):
+        self.ensure_one()
+        res = self._sync_financials()
+        msg = (f"{res['queried']} sipariş sorgulandı.\nYeni işlem: {res['created']}\n"
+               f"Güncellenen: {res['updated']}")
+        if res['errors']:
+            msg += f"\nSorgulanamayan: {len(res['errors'])}\n" + '\n'.join(res['errors'][:5])
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Amazon Finansal Senkronizasyon'),
+                'message': msg,
+                'type': 'warning' if res['errors'] else 'success',
+                'sticky': bool(res['errors']),
+            }
+        }
+
+    @api.private
+    def _sync_financials(self, limit=25):
+        """Kargolanmış siparişlerin finans olaylarını (komisyon, kesinti, iade) sipariş bazında çeker.
+
+        GET /finances/v0/orders/{orderId}/financialEvents — rate 0.5/sn, burst 30. Son 48 saatin
+        siparişleri henüz finans olayına düşmemiş olabilir. Her sipariş günde en fazla bir kez sorgulanır,
+        her çalışmada en fazla `limit` sipariş (burst sınırının altında).
+        """
+        self.ensure_one()
+        result = {'queried': 0, 'created': 0, 'updated': 0, 'errors': []}
+        now = fields.Datetime.now()
+        orders = self.env['amazon.order'].search([
+            ('store_id', '=', self.id),
+            ('order_status', 'in', ['Shipped', 'PartiallyShipped']),
+            ('order_date', '>=', now - timedelta(days=self.financial_day_range or 30)),
+            ('order_date', '<=', now - timedelta(hours=48)),
+            '|', ('finance_checked_at', '=', False),
+            ('finance_checked_at', '<', now - timedelta(days=1)),
+        ], order='order_date desc', limit=limit)
+        if not orders:
+            return result
+
+        session, auth, base_url = self._build_session()
+        Event = self.env['amazon.finance.event']
+        for order in orders:
+            endpoint = f"{base_url}/finances/v0/orders/{order.amazon_order_number}/financialEvents"
+            params = {'MaxResultsPerPage': 100}
+            status_code = 0
+            error = None
+            while True:
+                try:
+                    res = session.get(endpoint, auth=auth, params=params, timeout=30)
+                except requests.RequestException as e:
+                    error = str(e)
+                    break
+                status_code = res.status_code
+                if status_code != 200:
+                    error = f"HTTP {status_code} {res.text[:150]}"
+                    break
+                payload = res.json().get('payload') or {}
+                created, updated = Event._upsert_from_payload(self, order, payload.get('FinancialEvents') or {})
+                result['created'] += created
+                result['updated'] += updated
+                next_token = payload.get('NextToken')
+                if not next_token:
+                    break
+                params = {'MaxResultsPerPage': 100, 'NextToken': next_token}
+            result['queried'] += 1
+            if error:
+                result['errors'].append(f"{order.amazon_order_number}: {error}")
+                _logger.warning("Amazon finans %s sorgulanamadı: %s", order.amazon_order_number, error)
+                # 429 (kota) / 401-403 (yetki) → bu çalışmayı bitir, sonraki cron'da devam
+                if status_code in (401, 403, 429):
+                    break
+                continue
+            order.write({'finance_checked_at': now})
+
+        self.write({'last_financial_sync': now})
+        _logger.info("Amazon finans [%s]: %d sipariş, %d yeni, %d güncellenen, %d hata",
+                     self.name, result['queried'], result['created'], result['updated'], len(result['errors']))
+        return result
+
+    # ─── Kişisel Veri Temizliği (Amazon DPP) ─────────────────
+
+    @api.model
+    def _mask_name(self, name):
+        return ' '.join(f"{part[0]}***" for part in (name or '').split()) or False
+
+    @api.model
+    def cron_amazon_pii_cleanup(self):
+        """Saklama süresi dolan amazon.order kayıtlarındaki kişisel verileri temizler.
+
+        Yalnızca 'Kişisel Verileri Otomatik Temizle' açık mağazalar. Süre sipariş tarihinden sayılır ve
+        sipariş çekme aralığından kısa olamaz (temizlenen veri cron'da tekrar çekilmesin).
+        Odoo satış siparişi / müşteri kartı / fatura yasal saklama zorunluluğu nedeniyle değişmez.
+        """
+        AmazonOrder = self.env['amazon.order']
+        for store in self.search([('pii_cleanup_enabled', '=', True)]):
+            days = max(store.pii_retention_days or 30, (store.order_day_range or 14) + 1)
+            orders = AmazonOrder.search([
+                ('store_id', '=', store.id),
+                ('pii_cleaned', '=', False),
+                ('order_status', 'in', ['Shipped', 'Canceled']),
+                ('order_date', '<', fields.Datetime.now() - timedelta(days=days)),
+            ], limit=500)
+            for order in orders:
+                raw = order.raw_payload
+                if raw:
+                    try:
+                        data = json.loads(raw)
+                        for key in ('BuyerInfo', 'ShippingAddress'):
+                            data.pop(key, None)
+                            if isinstance(data.get('Order'), dict):
+                                data['Order'].pop(key, None)
+                        raw = json.dumps(data, ensure_ascii=False, indent=2)
+                    except (ValueError, TypeError, AttributeError):
+                        raw = False
+                order.write({
+                    'customer_name': self._mask_name(order.customer_name),
+                    'customer_email': False,
+                    'customer_phone': False,
+                    'shipping_address': False,
+                    'postal_code': False,
+                    'raw_payload': raw,
+                    'pii_cleaned': True,
+                })
+            if orders:
+                _logger.info("Amazon [%s]: %d siparişin kişisel verisi temizlendi (>%d gün).",
+                             store.name, len(orders), days)
 

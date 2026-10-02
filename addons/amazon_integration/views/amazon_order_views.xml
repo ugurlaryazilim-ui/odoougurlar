@@ -20,6 +20,7 @@
                     <field name="total_price" sum="Toplam Tutar"/>
                     <field name="currency"/>
                     <field name="sale_order_id"/>
+                    <field name="error_message" optional="hide"/>
                 </list>
             </field>
         </record>
@@ -38,6 +39,9 @@
                                 icon="fa-refresh"/>
                     </header>
                     <sheet>
+                        <div class="alert alert-warning" role="alert" invisible="not error_message">
+                            <field name="error_message" readonly="1"/>
+                        </div>
                         <div class="oe_title">
                             <h1>
                                 <field name="amazon_order_number" readonly="1"/>
@@ -70,6 +74,12 @@
                                 <field name="cargo_tracking_number" readonly="1"/>
                                 <field name="easyship_tracking_id" readonly="1"/>
                             </group>
+                            <group string="Hakediş" invisible="not finance_event_ids">
+                                <field name="commission_total"/>
+                                <field name="fee_total"/>
+                                <field name="net_total"/>
+                                <field name="finance_checked_at"/>
+                            </group>
                         </group>
 
                         <notebook>
@@ -82,6 +92,20 @@
                                         <field name="quantity"/>
                                         <field name="price"/>
                                         <field name="item_tax"/>
+                                    </list>
+                                </field>
+                            </page>
+                            <page string="Finansal İşlemler" name="finance">
+                                <field name="finance_event_ids" readonly="1">
+                                    <list string="Finansal İşlemler">
+                                        <field name="posted_date"/>
+                                        <field name="event_type"/>
+                                        <field name="principal" sum="Toplam"/>
+                                        <field name="tax" sum="Toplam"/>
+                                        <field name="promotion" sum="Toplam"/>
+                                        <field name="commission" sum="Toplam"/>
+                                        <field name="other_fees" sum="Toplam"/>
+                                        <field name="net_amount" sum="Toplam"/>
                                     </list>
                                 </field>
                             </page>
@@ -107,6 +131,7 @@
                     <filter string="Kargolanacak (Unshipped)" name="unshipped" domain="[('order_status', '=', 'Unshipped')]"/>
                     <filter string="Kargolandı (Shipped)" name="shipped" domain="[('order_status', '=', 'Shipped')]"/>
                     <filter string="İptal Edilenler" name="canceled" domain="[('order_status', '=', 'Canceled')]"/>
+                    <filter string="Uyarısı Olanlar" name="has_error" domain="[('error_message', '!=', False)]"/>
                     <separator/>
                     <group>
                         <filter string="Mağaza" name="group_store" context="{'group_by': 'store_id'}"/>
