@@ -7,6 +7,8 @@
             <list string="İşlem Kontrol" create="false" edit="false" delete="false"
                   decoration-muted="sale_amount == 0">
                 <field name="order_date"/>
+                <field name="delivery_date"/>
+                <field name="due_date"/>
                 <field name="order_number"/>
                 <field name="store_id"/>
                 <field name="sale_amount" sum="Satış"/>
@@ -70,9 +72,12 @@
                 <filter string="Azerbaycan (AZ)" name="aff_az" domain="[('affiliate', 'ilike', 'AZ')]"/>
                 <separator/>
                 <filter string="Sipariş Tarihi" name="filter_order_date" date="order_date"/>
+                <filter string="Teslim Tarihi" name="filter_delivery_date" date="delivery_date"/>
+                <filter string="Vade Tarihi" name="filter_due_date" date="due_date"/>
                 <group>
                     <filter string="Mağaza" name="group_store" context="{'group_by': 'store_id'}"/>
                     <filter string="Sipariş Ayı" name="group_month" context="{'group_by': 'order_date:month'}"/>
+                    <filter string="Vade Günü" name="group_due_day" context="{'group_by': 'due_date:day'}"/>
                     <filter string="Affiliate" name="group_affiliate" context="{'group_by': 'affiliate'}"/>
                 </group>
             </search>

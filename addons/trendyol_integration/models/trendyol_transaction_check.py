@@ -15,6 +15,9 @@ class TrendyolTransactionCheck(models.Model):
     _rec_name = 'order_number'
 
     order_date = fields.Datetime(string='Sipariş Tarihi', readonly=True)
+    delivery_date = fields.Datetime(string='Teslim Tarihi', readonly=True,
+                                    help='Satış kaydının oluştuğu tarih (Trendyol satışı teslimatta kaydeder)')
+    due_date = fields.Datetime(string='Vade Tarihi', readonly=True, help='Satış kaydının ödeme (vade) tarihi')
     order_number = fields.Char(string='Sipariş No', readonly=True)
     store_id = fields.Many2one('trendyol.store', string='Mağaza', readonly=True)
     order_id = fields.Many2one('trendyol.order', string='Trendyol Sipariş', readonly=True)
@@ -63,6 +66,8 @@ class TrendyolTransactionCheck(models.Model):
                     COALESCE(MIN(o.order_date),
                              MIN(s.transaction_date) FILTER (WHERE s.transaction_type = 'sale'),
                              MIN(s.transaction_date)) AS order_date,
+                    MIN(s.transaction_date) FILTER (WHERE s.transaction_type = 'sale') AS delivery_date,
+                    MAX(s.payment_date) FILTER (WHERE s.transaction_type = 'sale') AS due_date,
                     SUM(CASE WHEN s.transaction_type = 'sale' THEN s.credit - s.debt ELSE 0 END) AS sale_amount,
                     SUM(CASE WHEN s.transaction_type = 'return' THEN s.debt - s.credit ELSE 0 END) AS return_amount,
                     SUM(CASE WHEN s.transaction_type IN ('discount', 'discount_cancel', 'coupon', 'coupon_cancel')
