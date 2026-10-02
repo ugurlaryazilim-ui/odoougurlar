@@ -21,6 +21,7 @@ SETTLEMENT_TYPES = [
     ('provision_positive', 'Provizyon +'),
     ('provision_negative', 'Provizyon -'),
     ('platform_fee', 'Platform Hizmet Bedeli'),
+    ('international_fee', 'Uluslararası Hizmet Bedeli'),
     ('shipping_cargo', 'Gönderi Kargo Bedeli'),
     ('return_cargo', 'İade Kargo Bedeli'),
     ('penalty', 'Ceza'),
@@ -49,6 +50,11 @@ SETTLEMENT_API_TYPES = [
     'DeliveryFee', 'DeliveryFeeCancel', 'PayByLink',
 ]
 OTHER_FINANCIAL_API_TYPES = ['DeductionInvoices', 'PaymentOrder', 'Stoppage']
+
+# Ödeme emri bazında toplu faturalanan, sipariş paketlerine dağıtılan hizmet bedelleri
+FEE_ALLOCATION_TYPES = ('platform_fee', 'international_fee')
+_FEE_ALLOCATION_LOOKBACK_DAYS = 60
+_FEE_ALLOCATION_PO_LIMIT = 20  # çalışma başına ödeme emri (her biri 2 istek; finans servisi 100/dk)
 
 # Hakedişe etkisi: +1 artırır, -1 azaltır (tutar mutlak değerle alınır)
 _REVENUE_SIGN = {
@@ -84,7 +90,22 @@ class TrendyolSettlement(models.Model):
         ('otherfinancials', 'Other Financials'),
         ('cargo_invoice', 'Kargo Faturası'),
         ('platform_invoice', 'Platform Faturası Detayı'),
+        ('fee_allocation', 'Hizmet Bedeli Dağıtımı'),
     ], string='Kaynak', readonly=True)
+    affiliate = fields.Char(string='Affiliate', readonly=True,
+                            help="Trendyol satış kanalı (örn. TRENDYOLTR, TRENDYOLAZJV)")
+
+    # ─── Toplu fatura dağıtımı (sipariş/paket bilgisi olmayan kesinti faturaları) ───
+    allocation_state = fields.Selection([
+        ('pending', 'Bekliyor'),
+        ('allocated', 'Dağıtıldı'),
+        ('unmatched', 'Eşleşmedi'),
+        ('warning', 'Uyarı'),
+    ], string='Dağıtım Durumu', readonly=True, index=True, copy=False,
+        help="Dağıtıldı: fatura sipariş paketlerine satır olarak dağıtıldı (kaynak faturanın hakediş "
+             "etkisi 0 olur, çift sayılmaz). Uyarı: tutar paketlere tam bölünmedi, dağıtılmadı.")
+    allocation_note = fields.Char(string='Dağıtım Notu', readonly=True, copy=False)
+    allocation_checked_at = fields.Datetime(string='Son Dağıtım Denemesi', readonly=True, copy=False)
 
     # ─── Finansal ────────────────────────────────────────
     debt = fields.Float(string='Borç', digits=(12, 2), readonly=True)
@@ -141,12 +162,19 @@ class TrendyolSettlement(models.Model):
         return 1
 
     @api.depends('debt', 'credit', 'seller_revenue', 'commission_amount',
-                 'transaction_type', 'transaction_type_raw')
+                 'transaction_type', 'transaction_type_raw', 'source', 'allocation_state')
     def _compute_signed(self):
         for rec in self:
             sign = rec._effect_sign()
-            rec.signed_seller_revenue = sign * abs(rec.seller_revenue or 0.0)
             rec.signed_commission = sign * abs(rec.commission_amount or 0.0)
+            if rec.source == 'settlements' or abs(rec.seller_revenue or 0.0) > 0.005:
+                rec.signed_seller_revenue = sign * abs(rec.seller_revenue or 0.0)
+            elif rec.transaction_type == 'payment' or rec.allocation_state == 'allocated':
+                # Ödeme emri hakediş değil; dağıtılmış toplu fatura sipariş satırlarında sayılıyor
+                rec.signed_seller_revenue = 0.0
+            else:
+                # Kesinti/fatura satırları (kargo, hizmet bedelleri, ceza, stopaj): etki = alacak − borç
+                rec.signed_seller_revenue = (rec.credit or 0.0) - (rec.debt or 0.0)
 
     # ═══════════════════════════════════════════════════════
     # SİNIFLANDIRMA
@@ -193,7 +221,7 @@ class TrendyolSettlement(models.Model):
         (['iade kargo'], 'return_cargo'),
         (['yurtdisi operasyon iade'], 'return_cargo'),
         (['platform hizmet'], 'platform_fee'),
-        (['uluslararasi hizmet'], 'platform_fee'),
+        (['uluslararasi hizmet'], 'international_fee'),
         (['komisyon'], 'commission'),
         (['komisyon fatura'], 'commission'),
         (['ceza'], 'penalty'),
@@ -284,6 +312,15 @@ class TrendyolSettlement(models.Model):
 
         # 4) Bağsız settlement'ları siparişlere bağla
         self._relink_unlinked_settlements(store)
+
+        # 4b) Toplu hizmet bedeli faturalarını (Uluslararası / Platform) paketlere dağıt
+        try:
+            alloc = self._allocate_service_fees(api, store)
+            created += alloc['rows']
+            errors.extend(alloc['errors'])
+        except Exception as e:
+            errors.append(f"Hizmet bedeli dağıtımı: {e}")
+            _logger.exception("Hizmet bedeli dağıtım hatası [%s]", store.name)
 
         # 5) Sipariş bazlı finansal özet — yalnız son senkrondan beri değişen siparişler
         since = (store.last_financial_sync or start_date) - timedelta(hours=1)
@@ -412,6 +449,10 @@ class TrendyolSettlement(models.Model):
             # Son adım: fatura kalemleri, eşleştirme ve tüm siparişlerin özeti
             self._process_invoice_details(api, store, recent_only=False)
             self._relink_unlinked_settlements(store)
+            try:
+                self._allocate_service_fees(api, store)
+            except Exception as e:
+                _logger.warning("Finans geçmişi — hizmet bedeli dağıtımı başarısız [%s]: %s", store.name, e)
             self._update_order_financial_summary(store)
             self.env.cr.commit()
             result = (f"{state['from']} → {state['to']}: {state['created']} yeni kayıt "
@@ -664,6 +705,13 @@ class TrendyolSettlement(models.Model):
                             page_result.get('data', {}).get('content', []),
                             serial_number, invoice, store)
 
+                # Kalemleri sipariş satırı olarak yazılan toplu fatura hakedişte iki kez sayılmasın
+                if invoice.allocation_state != 'allocated' and self.search_count([
+                        ('store_id', '=', store.id), ('source', '=', 'cargo_invoice'),
+                        ('receipt_id', '=', serial_number)]):
+                    invoice.write({'allocation_state': 'allocated',
+                                   'allocation_note': 'Kalemleri sipariş bazında kayıtlı (kargo faturası)'})
+
             except Exception as e:
                 _logger.warning("Cargo invoice [%s] işleme hatası: %s",
                                 serial_number, e)
@@ -866,6 +914,7 @@ class TrendyolSettlement(models.Model):
             'payment_order_id': str(data.get('paymentOrderId', '') or ''),
             'payment_date': pay_date,
             'payment_period': data.get('paymentPeriod', 0) or 0,
+            'affiliate': data.get('affiliate') or False,
         }
 
         if existing:
@@ -888,7 +937,7 @@ class TrendyolSettlement(models.Model):
             return False
 
     _UPDATABLE_FIELDS = ('transaction_type', 'debt', 'credit', 'commission_rate', 'commission_amount',
-                         'seller_revenue', 'payment_order_id', 'payment_date', 'payment_period')
+                         'seller_revenue', 'payment_order_id', 'payment_date', 'payment_period', 'affiliate')
 
     @api.private
     def _update_existing(self, record, vals):
@@ -902,11 +951,15 @@ class TrendyolSettlement(models.Model):
             elif (old or False) != (new or False):
                 if key == 'payment_order_id' and not new:
                     continue  # boş gelen değer dolu ödeme bilgisini silmesin
-                if key == 'payment_date' and not new:
+                if key in ('payment_date', 'affiliate') and not new:
                     continue
                 changed[key] = new
         if not record.order_id and vals.get('order_id'):
             changed['order_id'] = vals['order_id']
+        # Dağıtılmış toplu faturanın tutarı değiştiyse paylar yeniden hesaplanır
+        if record.allocation_state == 'allocated' and ('debt' in changed or 'credit' in changed) \
+                and record.transaction_type in FEE_ALLOCATION_TYPES:
+            changed.update({'allocation_state': 'pending', 'allocation_checked_at': False})
         if changed:
             record.write(changed)
 
@@ -939,6 +992,7 @@ class TrendyolSettlement(models.Model):
 
         for order, settlements in order_map.items():
             platform_fee = 0.0
+            international_fee = 0.0
             shipping_cost = 0.0
             return_cargo_cost = 0.0
             penalty_amount = 0.0
@@ -952,6 +1006,8 @@ class TrendyolSettlement(models.Model):
                 if s.transaction_type == 'platform_fee':
                     platform_fee += s.debt
                     has_platform_invoice = True
+                elif s.transaction_type == 'international_fee':
+                    international_fee += s.debt
                 elif s.transaction_type == 'shipping_cargo':
                     shipping_cost += s.debt
                     has_cargo_invoice = True
@@ -980,11 +1036,12 @@ class TrendyolSettlement(models.Model):
                 deci = order.cargo_deci or 1
                 shipping_cost = round(deci * store.cargo_unit_price, 2)
 
-            net_revenue = (seller_revenue - platform_fee - shipping_cost
+            net_revenue = (seller_revenue - platform_fee - international_fee - shipping_cost
                            - return_cargo_cost - penalty_amount - stoppage_amount)
 
             summary = {
                 'platform_fee': platform_fee,
+                'international_fee': international_fee,
                 'shipping_cost': shipping_cost,
                 'return_cargo_cost': return_cargo_cost,
                 'penalty_amount': penalty_amount,
@@ -1008,6 +1065,282 @@ class TrendyolSettlement(models.Model):
     # ═══════════════════════════════════════════════════════
     # TOPLU İŞLEM
     # ═══════════════════════════════════════════════════════
+
+    # ═══════════════════════════════════════════════════════
+    # HİZMET BEDELİ DAĞITIMI (toplu fatura → paket bazlı satır)
+    # ═══════════════════════════════════════════════════════
+
+    @api.private
+    def _fee_invoice_domain(self, store):
+        """Sipariş/paket bilgisi olmayan (toplu) Uluslararası / Platform Hizmet Bedeli faturaları."""
+        return [
+            ('store_id', '=', store.id),
+            ('source', '=', 'otherfinancials'),
+            ('transaction_type', 'in', list(FEE_ALLOCATION_TYPES)),
+            '|', ('order_number', '=', False), ('order_number', '=', ''),
+            '|', ('shipment_package_id', '=', False), ('shipment_package_id', '=', ''),
+        ]
+
+    @api.private
+    def _allocate_service_fees(self, api, store, force=False, payment_order_ids=None):
+        """Toplu hizmet bedeli faturalarını aynı ödeme emri + affiliate'teki paketlere dağıtır.
+
+        - Son 60 günün dağıtılmamış faturaları (her ödeme emri günde en fazla bir kez) denenir.
+        - Satış kaydı görülen ama faturası henüz Odoo'da olmayan ödeme emirleri de sorgulanır
+          (fatura satıştan haftalar sonra kesilir).
+        Dönüş: {'payment_orders', 'allocated', 'rows', 'warnings', 'unmatched', 'errors'}
+        """
+        now = fields.Datetime.now()
+        since = now - timedelta(days=_FEE_ALLOCATION_LOOKBACK_DAYS)
+        result = {'payment_orders': 0, 'allocated': 0, 'rows': 0, 'warnings': 0, 'unmatched': 0, 'errors': []}
+
+        domain = self._fee_invoice_domain(store) + [('allocation_state', '!=', 'allocated')]
+        if payment_order_ids:
+            domain.append(('payment_order_id', 'in', list(payment_order_ids)))
+        else:
+            domain.append(('transaction_date', '>=', since))
+            if not force:
+                # Uyarıdakiler (eşit bölünmeyen) tutar değişmedikçe kendiliğinden düzelmez → elle tetiklenir
+                domain += [('allocation_state', '!=', 'warning'),
+                           '|', ('allocation_checked_at', '=', False),
+                           ('allocation_checked_at', '<', now - timedelta(days=1))]
+        invoices = self.search(domain, order='transaction_date desc')
+
+        # Ödeme no henüz yok → ödeme emri işlenince dağıtılacak
+        waiting = invoices.filtered(lambda r: not r.payment_order_id and r.allocation_state != 'pending')
+        if waiting:
+            waiting.write({'allocation_state': 'pending', 'allocation_note': 'Ödeme no bekleniyor'})
+
+        po_ids = []
+        for po in list(payment_order_ids or []) + invoices.mapped('payment_order_id'):
+            if po and po not in po_ids:
+                po_ids.append(po)
+        if not payment_order_ids:
+            po_ids += [po for po in self._fee_scan_candidates(store, since) if po not in po_ids]
+        po_ids = po_ids[:_FEE_ALLOCATION_PO_LIMIT]
+
+        scanned = []
+        for po in po_ids:
+            try:
+                with self.env.cr.savepoint():
+                    self._allocate_payment_order(api, store, po, result)
+                scanned.append(po)
+            except Exception as e:
+                result['errors'].append(f"Ödeme {po}: {e}")
+                _logger.warning("Hizmet bedeli dağıtımı — ödeme %s [%s]: %s", po, store.name, e)
+        if scanned:
+            self._fee_scan_mark(store, scanned)
+
+        if result['payment_orders']:
+            _logger.info("Trendyol hizmet bedeli dağıtımı [%s]: %s ödeme, %s fatura dağıtıldı (%s satır), "
+                         "%s uyarı, %s eşleşmedi, %s hata", store.name, result['payment_orders'],
+                         result['allocated'], result['rows'], result['warnings'], result['unmatched'],
+                         len(result['errors']))
+        return result
+
+    @api.private
+    def _fee_scan_candidates(self, store, since):
+        """Satışı ödenmiş ama hizmet bedeli faturası Odoo'da olmayan, bugün sorgulanmamış ödeme emirleri."""
+        self.env.cr.execute("""
+            SELECT DISTINCT s.payment_order_id
+              FROM trendyol_settlement s
+             WHERE s.store_id = %s AND s.source = 'settlements' AND s.transaction_type = 'sale'
+               AND COALESCE(s.payment_order_id, '') <> '' AND s.payment_date >= %s
+               AND NOT EXISTS (
+                   SELECT 1 FROM trendyol_settlement f
+                    WHERE f.store_id = s.store_id AND f.source = 'otherfinancials'
+                      AND f.transaction_type IN %s AND f.payment_order_id = s.payment_order_id)
+        """, (store.id, since, FEE_ALLOCATION_TYPES))
+        candidates = [r[0] for r in self.env.cr.fetchall()]
+        today = fields.Date.today().isoformat()
+        checked = {p.split(':')[0] for p in (store.fee_scanned_payment_orders or '').split(',')
+                   if p.endswith(':' + today)}
+        return sorted((po for po in candidates if po not in checked), reverse=True)
+
+    @api.private
+    def _fee_scan_mark(self, store, po_ids):
+        today = fields.Date.today().isoformat()
+        entries = [p for p in (store.fee_scanned_payment_orders or '').split(',')
+                   if p and p.endswith(':' + today) and p.split(':')[0] not in po_ids]
+        entries += [f"{po}:{today}" for po in po_ids]
+        try:
+            # Ayrı cursor: mağaza satırı ana işlemde kilitlenmesin (bkz. _sync_payment_orders)
+            with self.pool.cursor() as new_cr:
+                new_cr.execute("UPDATE trendyol_store SET fee_scanned_payment_orders = %s WHERE id = %s",
+                               (','.join(entries[-500:]), store.id))
+        except Exception as e:
+            _logger.warning("Hizmet bedeli tarama önbelleği yazılamadı (%s): %s", store.name, e)
+
+    @api.private
+    def _fetch_paged(self, fetch, **kwargs):
+        """Sayfalı finans servisi çağrısı → (kayıtlar, hata)."""
+        items, page = [], 0
+        while True:
+            res = fetch(page=page, size=1000, **kwargs)
+            if not res.get('success'):
+                return items, res.get('error') or 'API hatası'
+            data = res.get('data') or {}
+            items.extend(data.get('content') or [])
+            page += 1
+            if page >= (data.get('totalPages') or 1):
+                return items, None
+
+    @api.private
+    def _allocate_payment_order(self, api, store, payment_order_id, result):
+        """Tek ödeme emri: faturaları tazele, Sale/Discount paketlerini çek, dağıt."""
+        # 1) Kesinti faturaları (yeni gelenler + affiliate bilgisi)
+        invoices_raw, error = self._fetch_paged(
+            api.get_other_financials, transaction_type='DeductionInvoices', payment_order_id=payment_order_id)
+        if error:
+            raise UserError(f"DeductionInvoices: {error}")
+        for item in invoices_raw:
+            self._process_settlement_item(item, store, 'otherfinancials')
+
+        invoices = self.search(self._fee_invoice_domain(store) + [
+            ('payment_order_id', '=', payment_order_id), ('allocation_state', '!=', 'allocated')])
+        if not invoices:
+            return
+        result['payment_orders'] += 1
+
+        # 2) Dağıtım tabanı: aynı ödeme emrindeki Sale + Discount kayıtları (affiliate yalnız API'de)
+        rows, error = self._fetch_paged(
+            api.get_settlements, transaction_types=['Sale', 'Discount'], payment_order_id=payment_order_id)
+        if error:
+            raise UserError(f"Settlements: {error}")
+        packages = defaultdict(dict)  # affiliate → {paket: {'net', 'order_number', 'has_sale'}}
+        for row in rows:
+            package_id = str(row.get('shipmentPackageId') or '')
+            if not package_id:
+                continue
+            pkg = packages[row.get('affiliate') or ''].setdefault(
+                package_id, {'net': 0.0, 'order_number': str(row.get('orderNumber') or ''), 'has_sale': False})
+            pkg['net'] += (row.get('credit') or 0.0) - (row.get('debt') or 0.0)
+            if normalize_tr(row.get('transactionType')) in ('satis', 'sale'):
+                pkg['has_sale'] = True
+
+        for invoice in invoices:
+            state = self._allocate_invoice(invoice, packages, store)
+            if state == 'allocated':
+                result['allocated'] += 1
+                result['rows'] += len(self.search([('source', '=', 'fee_allocation'),
+                                                   ('store_id', '=', store.id),
+                                                   ('receipt_id', '=', invoice.trendyol_id)]))
+            elif state == 'warning':
+                result['warnings'] += 1
+            elif state == 'unmatched':
+                result['unmatched'] += 1
+
+    @api.model
+    def _split_amount(self, amount, weights):
+        """Tutarı ağırlıklara göre 2 haneli paylara böler; kuruş farkı en büyük paya eklenir.
+        Payların toplamı tutara tam eşittir. weights: {anahtar: ağırlık>0}"""
+        total = sum(weights.values())
+        shares = {k: round(amount * w / total, 2) for k, w in weights.items()}
+        diff = round(amount - sum(shares.values()), 2)
+        if abs(diff) >= 0.005:
+            biggest = max(shares, key=lambda k: shares[k])
+            shares[biggest] = round(shares[biggest] + diff, 2)
+        return shares
+
+    @api.private
+    def _invoice_packages(self, invoice, packages):
+        """Faturanın affiliate'ine ait paketler. Eski kayıtta affiliate yoksa tek kanal / 'AZ-' öneki ile çıkarılır."""
+        if invoice.affiliate:
+            return packages.get(invoice.affiliate) or {}
+        if len(packages) == 1:
+            return next(iter(packages.values()))
+        is_az = normalize_tr(invoice.transaction_type_raw).startswith('az-')
+        matches = [pk for aff, pk in packages.items() if ('AZ' in (aff or '').upper()) == is_az]
+        return matches[0] if len(matches) == 1 else {}
+
+    @api.private
+    def _allocate_invoice(self, invoice, packages, store):
+        """Tek toplu faturayı paketlere dağıtıp sipariş satırlarını yazar. Dönüş: yeni durum."""
+        now = fields.Datetime.now()
+        amount = round((invoice.debt or 0.0) - (invoice.credit or 0.0), 2)
+        label = dict(SETTLEMENT_TYPES).get(invoice.transaction_type)
+        # İadeli/iptal paketler (net ≤ 0 veya satışı olmayan) pay almaz — doğrulanmadı, sayısı loglanır
+        pkgs = {pid: p for pid, p in self._invoice_packages(invoice, packages).items()
+                if p['has_sale'] and p['net'] > 0.005}
+
+        def mark(state, note):
+            invoice.write({'allocation_state': state, 'allocation_note': note, 'allocation_checked_at': now})
+            if state != 'allocated':
+                _logger.info("Trendyol hizmet bedeli %s (%s, ödeme %s): %s", invoice.trendyol_id, label,
+                             invoice.payment_order_id, note)
+            return state
+
+        if self.search_count([('store_id', '=', store.id), ('source', '=', 'platform_invoice'),
+                              ('receipt_id', '=', invoice.trendyol_id)]):
+            return mark('allocated', 'Kalemleri sipariş bazında kayıtlı (platform faturası)')
+        if amount <= 0:
+            return mark('unmatched', f"Tutar {amount:.2f} — dağıtılacak borç yok")
+        if not pkgs:
+            return mark('unmatched', f"Ödeme {invoice.payment_order_id} içinde aynı kanala ait satış paketi bulunamadı")
+
+        if invoice.transaction_type == 'platform_fee':
+            cents = int(round(amount * 100))
+            if cents % len(pkgs):
+                return mark('warning', f"{amount:.2f} TL {len(pkgs)} pakete eşit bölünmüyor "
+                                       f"({amount / len(pkgs):.4f}) — dağıtılmadı")
+            shares = {pid: cents // len(pkgs) / 100.0 for pid in pkgs}
+        else:
+            shares = self._split_amount(amount, {pid: p['net'] for pid, p in pkgs.items()})
+
+        existing = {r.trendyol_id: r for r in self.search([
+            ('store_id', '=', store.id), ('source', '=', 'fee_allocation'),
+            ('receipt_id', '=', invoice.trendyol_id)])}
+        keep = set()
+        for pid, share in shares.items():
+            tid = f"alloc_{invoice.trendyol_id}_{pid}"
+            keep.add(tid)
+            order_number = pkgs[pid]['order_number']
+            vals = {
+                'trendyol_id': tid,
+                'store_id': store.id,
+                'order_id': self._find_order(store, pid, order_number),
+                'transaction_date': invoice.transaction_date,
+                'transaction_type': invoice.transaction_type,
+                'transaction_type_raw': invoice.transaction_type_raw,
+                'description': f"{label} (dağıtılmış, fatura {invoice.trendyol_id})",
+                'source': 'fee_allocation',
+                'debt': share,
+                'credit': 0.0,
+                'order_number': order_number,
+                'shipment_package_id': pid,
+                'receipt_id': invoice.trendyol_id,
+                'payment_order_id': invoice.payment_order_id,
+                'payment_date': invoice.payment_date,
+                'affiliate': invoice.affiliate,
+            }
+            row = existing.get(tid)
+            if row:
+                changed = {k: v for k, v in vals.items()
+                           if k in ('debt', 'order_id', 'transaction_type', 'payment_date', 'description')
+                           and (abs((row[k] or 0.0) - (v or 0.0)) > 0.005 if k == 'debt'
+                                else (row[k].id if k == 'order_id' else row[k]) != (v or False))}
+                if changed:
+                    row.write(changed)
+            else:
+                self.create(vals)
+        stale = [r for tid, r in existing.items() if tid not in keep]
+        if stale:
+            self.browse([r.id for r in stale]).unlink()
+
+        skipped = len(self._invoice_packages(invoice, packages)) - len(pkgs)
+        note = f"{len(shares)} pakete dağıtıldı"
+        if skipped:
+            note += f" ({skipped} iade/iptal paket pay almadı)"
+        return mark('allocated', note)
+
+    def action_allocate_fees(self):
+        """Seçili toplu faturaların (uyarı / eşleşmedi dahil) dağıtımını yeniden dene."""
+        stores = self.mapped('store_id')
+        for store in stores:
+            pos = set(self.filtered(lambda r: r.store_id == store).mapped('payment_order_id')) - {False, ''}
+            if pos:
+                self._allocate_service_fees(store.get_api(), store, payment_order_ids=pos)
+        return True
 
     @api.model
     def sync_all_financials(self):

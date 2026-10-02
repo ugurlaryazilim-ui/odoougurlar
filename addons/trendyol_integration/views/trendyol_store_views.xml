@@ -16,6 +16,9 @@
                             string="🔄 Şimdi Senkronize Et" class="btn-secondary"/>
                     <button name="action_sync_financials" type="object"
                             string="💰 Finansal Senkron" class="btn-secondary"/>
+                    <button name="action_allocate_service_fees" type="object"
+                            string="🧾 Hizmet Bedellerini Dağıt" class="btn-secondary"
+                            help="Toplu Uluslararası / Platform Hizmet Bedeli faturalarını (son 60 gün) sipariş paketlerine dağıtır"/>
                 </header>
                 <sheet>
                     <div class="oe_button_box" name="button_box">
