@@ -1,6 +1,6 @@
 {
     'name': 'Amazon SP-API Integration',
-    'version': '19.0.1.0.0',
+    'version': '19.0.1.1.0',
     'category': 'Sales/Integration',
     'summary': 'Amazon Selling Partner API (SP-API) entegrasyonu',
     'author': 'Odoo Ugurlar',
@@ -13,6 +13,7 @@
         'views/sale_order_views.xml',
         'views/amazon_config_views.xml',
         'views/amazon_sync_log_views.xml',
+        'views/amazon_finance_views.xml',
         'views/amazon_menus.xml',
     ],
     'installable': True,

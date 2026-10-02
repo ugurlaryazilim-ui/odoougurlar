@@ -60,11 +60,30 @@ class AmazonOrder(models.Model):
     sale_order_id = fields.Many2one('sale.order', string='Odoo Siparişi', readonly=True, ondelete='set null')
     line_ids = fields.One2many('amazon.order.line', 'order_id', string='Sipariş Satırları')
     raw_payload = fields.Text(string='Raw JSON', help='Amazon SP-API üzerinden gelen orijinal JSON verisi')
+    error_message = fields.Char(string='Uyarı', readonly=True)
+
+    # Finans
+    finance_event_ids = fields.One2many('amazon.finance.event', 'amazon_order_id', string='Finansal İşlemler')
+    finance_checked_at = fields.Datetime(string='Son Finans Sorgusu', readonly=True)
+    commission_total = fields.Float(string='Komisyon', digits=(12, 2), compute='_compute_finance_totals')
+    fee_total = fields.Float(string='Toplam Kesinti', digits=(12, 2), compute='_compute_finance_totals')
+    net_total = fields.Float(string='Net Hakediş', digits=(12, 2), compute='_compute_finance_totals')
+
+    # Kişisel veri saklama politikası
+    pii_cleaned = fields.Boolean(string='Kişisel Veri Temizlendi', readonly=True, copy=False)
 
     @api.depends('amazon_order_number')
     def _compute_name(self):
         for rec in self:
             rec.name = rec.amazon_order_number or _('Yeni Amazon Siparişi')
+
+    @api.depends('finance_event_ids.commission', 'finance_event_ids.other_fees', 'finance_event_ids.net_amount')
+    def _compute_finance_totals(self):
+        for rec in self:
+            events = rec.finance_event_ids
+            rec.commission_total = sum(events.mapped('commission'))
+            rec.fee_total = sum(events.mapped('commission')) + sum(events.mapped('other_fees'))
+            rec.net_total = sum(events.mapped('net_amount'))
 
     @api.depends('order_status')
     def _compute_status_display(self):

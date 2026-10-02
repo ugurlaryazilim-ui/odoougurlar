@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="view_amazon_finance_event_list" model="ir.ui.view">
+            <field name="name">amazon.finance.event.list</field>
+            <field name="model">amazon.finance.event</field>
+            <field name="arch" type="xml">
+                <list string="Amazon Finansal İşlemler" create="false" edit="false">
+                    <field name="posted_date"/>
+                    <field name="order_number"/>
+                    <field name="sale_order_id" optional="show"/>
+                    <field name="event_type" widget="badge"
+                           decoration-success="event_type == 'shipment'"
+                           decoration-danger="event_type in ('refund', 'chargeback', 'guarantee')"/>
+                    <field name="principal" sum="Toplam"/>
+                    <field name="tax" sum="Toplam" optional="show"/>
+                    <field name="shipping" sum="Toplam" optional="hide"/>
+                    <field name="promotion" sum="Toplam" optional="show"/>
+                    <field name="commission" sum="Toplam"/>
+                    <field name="other_fees" sum="Toplam"/>
+                    <field name="net_amount" sum="Toplam"/>
+                    <field name="currency" optional="hide"/>
+                    <field name="store_id" optional="hide"/>
+                </list>
+            </field>
+        </record>
+
+        <record id="view_amazon_finance_event_form" model="ir.ui.view">
+            <field name="name">amazon.finance.event.form</field>
+            <field name="model">amazon.finance.event</field>
+            <field name="arch" type="xml">
+                <form string="Amazon Finansal İşlem" create="false" edit="false">
+                    <sheet>
+                        <group>
+                            <group>
+                                <field name="order_number"/>
+                                <field name="amazon_order_id"/>
+                                <field name="sale_order_id"/>
+                                <field name="event_type"/>
+                                <field name="posted_date"/>
+                                <field name="store_id"/>
+                            </group>
+                            <group>
+                                <field name="principal"/>
+                                <field name="tax"/>
+                                <field name="shipping"/>
+                                <field name="promotion"/>
+                                <field name="commission"/>
+                                <field name="other_fees"/>
+                                <field name="net_amount"/>
+                                <field name="currency"/>
+                            </group>
+                        </group>
+                        <notebook>
+                            <page string="Kesinti Detayı" name="fees">
+                                <field name="fee_breakdown"/>
+                            </page>
+                            <page string="Ham Veri" name="raw">
+                                <field name="raw_data"/>
+                            </page>
+                        </notebook>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <record id="view_amazon_finance_event_search" model="ir.ui.view">
+            <field name="name">amazon.finance.event.search</field>
+            <field name="model">amazon.finance.event</field>
+            <field name="arch" type="xml">
+                <search>
+                    <field name="order_number"/>
+                    <field name="sale_order_id"/>
+                    <field name="store_id"/>
+                    <filter string="Satış" name="shipment" domain="[('event_type', '=', 'shipment')]"/>
+                    <filter string="İade" name="refund" domain="[('event_type', '=', 'refund')]"/>
+                    <separator/>
+                    <filter string="İşlem Tarihi" name="posted_date" date="posted_date"/>
+                    <group>
+                        <filter string="İşlem Tipi" name="group_type" context="{'group_by': 'event_type'}"/>
+                        <filter string="Ay" name="group_month" context="{'group_by': 'posted_date:month'}"/>
+                    </group>
+                </search>
+            </field>
+        </record>
+
+        <record id="action_amazon_finance_event" model="ir.actions.act_window">
+            <field name="name">Amazon Finansal İşlemler</field>
+            <field name="res_model">amazon.finance.event</field>
+            <field name="view_mode">list,form</field>
+            <field name="search_view_id" ref="view_amazon_finance_event_search"/>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">Henüz finansal işlem yok.</p>
+                <p>Kargolanan siparişlerin komisyon ve kesintileri cron ile çekilir; mağaza formundaki
+                    "Finansal İşlemleri Çek" butonuyla da çalıştırabilirsiniz.</p>
+            </field>
+        </record>
+    </data>
+</odoo>
