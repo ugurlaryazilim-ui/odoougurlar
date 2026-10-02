@@ -319,3 +319,34 @@ class TestFeeAllocation(TransactionCase):
             _invoice('AZD2026000944475', 'AZ-Uluslararası Hizmet Bedeli', 286.89), self.store, 'otherfinancials')
         Tracker._refresh(self.store)
         self.assertEqual(tracker.state, 'pending')
+
+    # ── TR kanalı: yurt dışı / Türkiye paketleri aynı ödemede ───────────────
+
+    def _mixed_api(self, platform):
+        """57757402 benzeri: aynı ödemede 3 Türkiye paketi + 1 Suudi Arabistan (mikro ihracat) paketi."""
+        po, aff = '57757402', 'TRENDYOLTR'
+        pkgs = [('3738696790', '11106654445', 'Türkiye', 1699.00), ('3700000001', '11100000001', 'Türkiye', 999.00),
+                ('3700000002', '11100000002', 'Türkiye', 499.00),
+                ('3727557147', '11093919406', 'Suudi Arabistan', 15287.31)]
+        sales = [_sale(p, o, 'Satış', credit=amt, po=po, affiliate=aff, country=c) for p, o, c, amt in pkgs]
+        invoices = [_invoice('DDF2026011303930', 'Uluslararası Hizmet Bedeli', 917.24, po=po, affiliate=aff),
+                    _invoice('DDF2026011311444', 'Platform Hizmet Bedeli', platform, po=po, affiliate=aff)]
+        return po, FakeApi(invoices, sales)
+
+    def test_international_only_on_export_packages(self):
+        po, api = self._mixed_api(platform=4 * 13.19)
+        res = self.Settlement._allocate_service_fees(api, self.store, payment_order_ids={po})
+        self.assertEqual((res['allocated'], res['warnings']), (2, 0))
+        self.assertAlmostEqual(self._row('3727557147', 'international_fee', po).debt, 917.24, places=2)
+        self.assertFalse(self._row('3738696790', 'international_fee', po))
+        self.assertAlmostEqual(self._row('3738696790', 'platform_fee', po).debt, 13.19, places=2)
+
+    def test_tr_equal_split_not_matching_tariff_is_warning(self):
+        """TR'de toplam pakete tam bölünse bile tarifeyle uyuşmuyorsa dağıtılmaz (eski siparişte tip bilinmiyor:
+        2×13,19 + 2×5,99 = 38,36 → eşit 9,59 olurdu)."""
+        po, api = self._mixed_api(platform=2 * 13.19 + 2 * 5.99)
+        res = self.Settlement._allocate_service_fees(api, self.store, payment_order_ids={po})
+        self.assertEqual(res['warnings'], 1)
+        self.assertFalse(self._row('3738696790', 'platform_fee', po))
+        invoice = self.Settlement.search([('trendyol_id', '=', 'DDF2026011311444'), ('store_id', '=', self.store.id)])
+        self.assertIn('2 paket Bugün Kargoda olmalı', invoice.allocation_note)

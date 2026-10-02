@@ -1240,17 +1240,23 @@ class TrendyolSettlement(models.Model):
             return mark('unmatched', f"Ödeme {payment_order_id} içinde aynı kanala ait satış paketi bulunamadı")
 
         if tx_type == 'platform_fee':
-            shares, note = self._platform_shares(api, store, total, pkgs, result)
+            shares, note = self._platform_shares(api, store, affiliate, total, pkgs, result)
             if shares is None:
                 return mark('warning', note)
             receipts = {pid: invoices for pid in shares}
         else:
+            # Uluslararası bedel yalnız yurt dışı (mikro ihracat / AZ) paketlerine: aynı ödemede aynı kanalda
+            # (TRENDYOLTR) Türkiye paketleri de bulunur, onlar pay almaz
+            pkgs = {pid: p for pid, p in pkgs.items()
+                    if p.get('country') and normalize_tr(p['country']) not in ('turkiye', 'turkey')}
+            if not pkgs:
+                return mark('unmatched', f"Ödeme {payment_order_id} içinde yurt dışı satış paketi bulunamadı")
             shares, receipts, note = self._international_shares(invoices, amounts, pkgs)
 
         self._write_fee_rows(store, payment_order_id, affiliate, tx_type, label, shares, receipts, pkgs)
         result['rows'] += len(shares)
 
-        skipped = len(all_pkgs) - len(pkgs)
+        skipped = len([p for p in all_pkgs.values() if not (p['has_sale'] and p['net'] > 0.005)])
         if skipped:
             note += f" ({skipped} iade/iptal paket pay almadı)"
         if len(invoices) > 1:
@@ -1258,30 +1264,49 @@ class TrendyolSettlement(models.Model):
         return mark('allocated', note)
 
     @api.private
-    def _platform_shares(self, api, store, total, pkgs, result):
-        """Platform bedeli: Bugün Kargoda (SameDayShipping) paketlere mağaza ayarındaki indirimli bedel,
-        kalan diğer paketlere eşit. Kuruşu kuruşuna tutmazsa (None, açıklama) döner — tahmin yapılmaz."""
+    def _platform_shares(self, api, store, affiliate, total, pkgs, result):
+        """Platform bedeli paylaşımı. Kuruşu kuruşuna doğrulanamazsa (None, açıklama) döner — tahmin yapılmaz.
+
+        - AZ kanalı: paket başı eşit (10,99).
+        - TR kanalı: tarife bilinir — Bugün Kargoda (SameDayShipping) paketler indirimli bedel, diğerleri
+          standart bedel (mağaza ayarları: 5,99 / 13,19). Faturadan kaç paketin indirimli olduğu hesaplanır;
+          teslimat tipi bilinen paketlerle birebir tutarsa dağıtılır. Toplam pakete eşit bölünse bile standart
+          bedelle uyuşmayan sonuç kabul edilmez (eski siparişlerde Bugün Kargoda tanınamayabilir).
+        """
         cents, count = int(round(total * 100)), len(pkgs)
+        std = int(round((store.platform_fee_fixed or 0.0) * 100))
+        sd = int(round((store.platform_fee_same_day or 0.0) * 100))
+        if 'AZ' in (affiliate or '').upper() or not std:
+            if cents % count == 0:
+                return ({pid: cents // count / 100.0 for pid in pkgs},
+                        f"{count} pakete eşit dağıtıldı ({cents // count / 100:.2f})")
+            return None, f"{total:.2f} TL {count} pakete eşit bölünmüyor ({total / count:.4f})"
+
         types = self._package_delivery_types(api, store, pkgs, result)
-        same_day = [pid for pid in pkgs if types.get(pid) == 'SameDayShipping']
-        sd_cents = int(round((store.platform_fee_same_day or 0.0) * 100))
-        if same_day and sd_cents:
-            rest, others = cents - sd_cents * len(same_day), count - len(same_day)
-            if (others == 0 and rest == 0) or (others and rest > 0 and rest % others == 0):
-                std = rest // others if others else 0
-                shares = {pid: (sd_cents if pid in same_day else std) / 100.0 for pid in pkgs}
-                return shares, (f"{count} pakete dağıtıldı ({len(same_day)} Bugün Kargoda × "
-                                f"{sd_cents / 100:.2f}, {others} × {std / 100:.2f})")
-        if cents % count == 0:
-            note = f"{count} pakete eşit dağıtıldı ({cents // count / 100:.2f})"
-            if same_day:
-                note += f" — {len(same_day)} Bugün Kargoda paketine indirim uygulanmamış"
-            return {pid: cents // count / 100.0 for pid in pkgs}, note
-        unknown = count - len(types)
-        detail = f"{len(same_day)} Bugün Kargoda"
+        known_sd = [pid for pid in pkgs if types.get(pid) == 'SameDayShipping']
+        unknown = [pid for pid in pkgs if pid not in types]
+        diff = count * std - cents  # = indirimli paket sayısı × (std − sd)
+        step = std - sd if sd and sd < std else 0
+        need = diff // step if step and diff >= 0 and diff % step == 0 else (0 if diff == 0 else None)
+        if need is not None and need <= count:
+            if need == len(known_sd):
+                shares = {pid: (sd if pid in known_sd else std) / 100.0 for pid in pkgs}
+                return shares, (f"{count} pakete dağıtıldı ({len(known_sd)} Bugün Kargoda × {sd / 100:.2f}, "
+                                f"{count - len(known_sd)} × {std / 100:.2f})")
+            if len(known_sd) < need <= len(known_sd) + len(unknown):
+                return None, (f"{total:.2f} TL: {need} paket Bugün Kargoda olmalı, {len(known_sd)} tanesi bilinen; "
+                              f"kalan {need - len(known_sd)} tanesi teslimat tipi bilinmeyen {len(unknown)} paket "
+                              f"arasında — hangisi olduğu belirlenemedi")
+        expected = (count - len(known_sd)) * std + len(known_sd) * sd
+        extra = cents - expected
+        detail = f"{len(known_sd)} Bugün Kargoda"
         if unknown:
-            detail += f", {unknown} paketin teslimat tipi bilinmiyor"
-        return None, f"{total:.2f} TL {count} pakete dağıtılamadı ({detail}; eşit pay {total / count:.4f})"
+            detail += f", {len(unknown)} paketin teslimat tipi bilinmiyor"
+        note = (f"{total:.2f} TL {count} pakete dağıtılamadı ({detail}); beklenen {expected / 100:.2f}, "
+                f"fark {extra / 100:+.2f}")
+        if std and extra > 0 and extra % std == 0:
+            note += f" — faturada {extra // std} paket fazla ücretlendirilmiş (bu ödemede satışı olmayan gönderi)"
+        return None, note
 
     @api.private
     def _package_delivery_types(self, api, store, pkgs, result):
