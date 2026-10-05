@@ -6,6 +6,8 @@ from odoo import fields, http
 from odoo.exceptions import AccessError, UserError
 from odoo.http import request
 
+from odoo.addons.sms_system.services.turatel import normalize_number
+
 _logger = logging.getLogger(__name__)
 
 
@@ -28,7 +30,29 @@ class TailorController(http.Controller):
     @http.route('/ugurlar_tailor/invoice_detail', type='jsonrpc', auth='user')
     def invoice_detail(self, invoice_no=''):
         connector = request.env['ugurlar.tailor.mssql.connector']
-        return connector.get_invoice_detail(invoice_no)
+        detail = connector.get_invoice_detail(invoice_no)
+        if detail:
+            # Nebim'deki numara cep değilse (sabit hat vb.) kullanılmaz
+            mobile = normalize_number(detail.get('customer_mobile'))
+            detail['customer_mobile'] = '0' + mobile if mobile else ''
+            detail['mobile_source'] = 'nebim' if mobile else ''
+            if not mobile and detail.get('customer_code'):
+                detail.update(self._mobile_from_history(detail['customer_code']))
+        return detail
+
+    @staticmethod
+    def _mobile_from_history(customer_code):
+        """Aynı müşteri kodunun önceki terzi siparişindeki cep numarası.
+
+        Kasa / genel müşteri kodları birçok kişide ortaktır: kodun siparişlerinde birden fazla farklı
+        numara varsa öneri yapılmaz (başka müşterinin numarası gelmesin).
+        """
+        orders = request.env['ugurlar.tailor.order'].search(
+            [('customer_phone', '=', customer_code), ('customer_mobile', '!=', False)], order='id desc', limit=20)
+        numbers = {normalize_number(o.customer_mobile) for o in orders} - {None}
+        if len(numbers) == 1:
+            return {'customer_mobile': '0' + numbers.pop(), 'mobile_source': 'history'}
+        return {}
 
     @http.route('/ugurlar_tailor/verify_product', type='jsonrpc', auth='user')
     def verify_product(self, invoice_no='', barcode=''):

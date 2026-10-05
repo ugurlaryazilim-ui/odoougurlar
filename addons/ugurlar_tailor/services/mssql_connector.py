@@ -133,24 +133,46 @@ class TailorMssqlConnector(models.AbstractModel):
                 row['invoice_date'] = str(row['invoice_date'])
         return results
 
+    # View'da müşteri cep telefonu sütunu (Nebim prCurrAccCommunication'dan); yoksa sorgu onsuz çalışır
+    _MOBILE_COLUMN = 'MusteriCep'
+    _column_cache = {}
+
+    @api.private
+    def _view_has_column(self, conn, view_name, column):
+        # Yalnız 'var' sonucu saklanır: view sonradan güncellenince yeniden başlatmadan algılansın
+        key = (self.env.cr.dbname, view_name, column)
+        if not self._column_cache.get(key):
+            rows = self._execute_query(
+                "SELECT 1 AS ok FROM sys.columns WHERE object_id = OBJECT_ID(%s) AND name = %s",
+                (view_name, column), conn=conn)
+            self._column_cache[key] = bool(rows)
+        return self._column_cache[key]
+
     def get_invoice_detail(self, invoice_no):
         """Belirli bir faturanın başlık + ürün detaylarını tek sorguda getirir."""
         view_name = self._get_mssql_config()['view_name']
-        query = f"""
-            SELECT {self._HEADER_COLUMNS},
-                Barkod as barcode,
-                UrunKodu as product_code,
-                Adet as quantity
-            FROM {view_name}
-            WHERE UGRFaturaNo = %s
-        """
-        rows = self._execute_query(query, (invoice_no,))
+        conn = self._get_connection()
+        try:
+            has_mobile = self._view_has_column(conn, view_name, self._MOBILE_COLUMN)
+            mobile_col = f', {self._MOBILE_COLUMN} as customer_mobile' if has_mobile else ''
+            query = f"""
+                SELECT {self._HEADER_COLUMNS}{mobile_col},
+                    Barkod as barcode,
+                    UrunKodu as product_code,
+                    Adet as quantity
+                FROM {view_name}
+                WHERE UGRFaturaNo = %s
+            """
+            rows = self._execute_query(query, (invoice_no,), conn=conn)
+        finally:
+            conn.close()
         if not rows:
             return None
 
         first = rows[0]
         header = {k: first.get(k) for k in ('invoice_no', 'invoice_date', 'customer_code',
                                               'customer_name', 'sales_person')}
+        header['customer_mobile'] = (first.get('customer_mobile') or '').strip()
         if header.get('invoice_date'):
             header['invoice_date'] = str(header['invoice_date'])
         header['items'] = [{'barcode': r['barcode'], 'product_code': r['product_code'],
