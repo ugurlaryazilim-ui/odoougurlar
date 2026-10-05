@@ -193,6 +193,10 @@ _ANALYSIS_SCHEMA = {
         "collarTypeEn": {"type": "STRING"},
         "sleeveType": {"type": "STRING"},
         "closureEn": {"type": "STRING"},
+        "trimsEn": {"type": "STRING"},
+        "isSet": {"type": "BOOLEAN"},
+        "setTopEn": {"type": "STRING"},
+        "setBottomEn": {"type": "STRING"},
         "hasGraphic": {"type": "BOOLEAN"},
         "graphicDescriptionEn": {"type": "STRING"},
         "garmentLength": {"type": "STRING", "enum": ["mini", "knee", "midi", "maxi", "standard"]},
@@ -224,6 +228,7 @@ OFFICIAL STORE PRODUCT INFORMATION (ground truth for the category):
 - Manto, Kaban, Palto, Mont, Ceket, Blazer, Trençkot, Pardösü, Hırka, Kazak, Bluz, Gömlek, Tişört, Tunik → 'outerwear' or 'tops', never 'dress' (worn over trousers even if long or belted).
 - Etek, Şort, Pantolon, Jean, Tayt → 'bottoms'.
 - Elbise, Abiye, Tulum → 'dress'.
+- Takım, Set, Eşofman Takımı, Pijama Takımı → a matching two-piece set (top + bottom sold together): isSet true, clothingCategory 'tops', never 'dress'.
 """
 
     prompt = f"""You are a senior fashion merchandiser analyzing a product photo.
@@ -236,6 +241,7 @@ Category rules:
 - Dresses, evening dresses, jumpsuits → 'dress'.
 - Coats, jackets, cardigans, sweaters, blouses, shirts, t-shirts → 'outerwear' or 'tops', even if long or belted.
 - For dresses and skirts, garmentLength must be 'mini', 'knee', 'midi' or 'maxi'; otherwise 'standard'.
+- A top and a separate bottom (trousers, skirt or shorts) in the same fabric/color shown together as one product is a matching set: isSet true, clothingCategory 'tops', never 'dress'. Describe the top in setTopEn and the bottom in setBottomEn.
 
 Fields ending in "En" must be plain lowercase English; they go straight into an English image prompt.
 The other text fields are in Turkish.
@@ -253,7 +259,11 @@ Return JSON:
   "collarType": "Turkish collar/neckline if visible",
   "collarTypeEn": "without the word 'neckline', e.g. 'V', 'crew', 'shirt collar', 'turtleneck'",
   "sleeveType": "sleeve type if visible (e.g. uzun kollu, kolsuz, askılı)",
-  "closureEn": "the garment's own front fastening exactly as seen, e.g. 'single metal ring clasp at the front, no buttons', 'five-button front', 'concealed zipper', 'open front, no fastening'; empty for pullovers and bottoms",
+  "closureEn": "the garment's own front fastening exactly as seen, e.g. 'single metal ring clasp at the front, no buttons', 'five-button front', 'two-button v placket', 'concealed zipper', 'open front, no fastening'; empty only when there is no fastening at all",
+  "trimsEn": "every button, snap, toggle, buckle, zipper pull, metal ring or rivet visible on the garment with its count, color, material, size and position, e.g. 'two large dark brown horn buttons on the v placket, two small matching buttons on each cuff'; empty only if there are none",
+  "isSet": true or false (a matching top and bottom sold together as one product),
+  "setTopEn": "for a set: the top piece, e.g. 'cream crew-neck sweatshirt'; otherwise empty",
+  "setBottomEn": "for a set: the bottom piece, e.g. 'cream wide-leg trousers'; otherwise empty",
   "hasGraphic": true or false,
   "graphicDescriptionEn": "short English description of a print/graphic, or empty",
   "garmentLength": "mini | knee | midi | maxi | standard"
@@ -342,9 +352,14 @@ def detect_image_tags(api_key, image_url, gemini_api_key=None, generated=False, 
     tags = (parsed or {}).get('securityTags') or []
     tags = [t for t in tags if isinstance(t, dict) and isinstance(t.get('box_2d'), list)
             and len(t['box_2d']) == 4]
-    if tags:
-        _logger.info('detect_image_tags: %d etiket tespit edildi (%s)',
-                     len(tags), ', '.join(str(t.get('label')) for t in tags))
+    # Ürünün kendi dikili etiketi silinmez; listede tutulursa "silme sonrası hâlâ görünüyor"
+    # sanılıp boşuna yeniden taranıyordu (fitilli örgü onlarca design_label olarak dönebiliyor)
+    design = sum(1 for t in tags if t.get('label') == 'design_label')
+    tags = [t for t in tags if t.get('label') != 'design_label']
+    if tags or design:
+        _logger.info('detect_image_tags: %d etiket tespit edildi (%s)%s',
+                     len(tags), ', '.join(str(t.get('label')) for t in tags),
+                     ' — %d tasarım etiketi yok sayıldı' % design if design else '')
     return tags
 
 
@@ -573,7 +588,9 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
 
     category = analysis.get('clothingCategory', 'tops')
     garment_type_raw = analysis.get('garmentType', 'garment')
-    sub_type = _detect_sub_type(category, f"{garment_type_raw} {category}".lower())
+    is_set = bool(analysis.get('isSet'))
+    # Takım (üst + alt tek ürün): elbise/üst sanılırsa alt parça kayboluyor ya da elbiseye dönüyordu
+    sub_type = 'coord' if is_set else _detect_sub_type(category, f"{garment_type_raw} {category}".lower())
 
     # İngilizce ürün adı; alt tiple çelişen kelimeleri normalize et
     # (ör. "Triko Tunik" elbise ise "knit dress" — aksi halde model üst giyim sanıp
@@ -588,6 +605,13 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         garment = 'skirt'
     elif sub_type == 'shorts' and 'shorts' not in g_low:
         garment = 'shorts'
+    elif sub_type == 'coord':
+        garment = 'two-piece set'
+    set_top = str(analysis.get('setTopEn') or '').strip().rstrip('.') or 'the top'
+    set_bottom = str(analysis.get('setBottomEn') or '').strip().rstrip('.') or 'the matching trousers'
+    set_pieces = f"{set_top} and {set_bottom}"
+    # Düğme / kopça / fermuar: tarif edilmezse model rengini, malzemesini ve sayısını uyduruyor
+    trims = str(analysis.get('trimsEn') or '').strip().rstrip('.')
 
     # ═══ FASHN PROVIDER (minimal prompt, kendi try-on modeli) ═══
     if provider_type == 'fashn':
@@ -637,7 +661,7 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
 
     # Yaka / kol notu (sadece ön görünüm)
     collar_note = ''
-    if sub_type in ('tops', 'dress', 'jumpsuit') and photo_type == 'front':
+    if sub_type in ('tops', 'dress', 'jumpsuit', 'coord') and photo_type == 'front':
         collar = _to_english(analysis, 'collarType')
         if collar:
             # "shirt collar neckline" gibi çift ifade olmasın
@@ -692,7 +716,15 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         front_ref=front_ref,
         background=background,
         extra_prompt=(extra_prompt or '').strip(),
+        set_pieces=set_pieces,
     )
+    if trims:
+        if photo_type == 'front':
+            base_prompt += (f" Copy every button and trim exactly from Image 2: {trims}. Keep their number, size, "
+                            "color, material and position identical; do not restyle or replace them.")
+        else:
+            base_prompt += (f" Buttons and trims visible from this angle look exactly as in Image 2 ({trims}): "
+                            "same size, color and material.")
 
     # Prompt kilitleri (fotorealizm). Sahne seçiliyse stüdyo tarifi içerenler
     # sahneyle çelişeceği için atlanır.
