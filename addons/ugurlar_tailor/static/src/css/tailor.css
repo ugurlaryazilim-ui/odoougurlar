@@ -595,6 +595,7 @@
     text-transform: uppercase;
 }
 
+.badge-waiting { background: #fee2e2; color: #b91c1c; }
 .badge-pending { background: #dbeafe; color: #1d4ed8; }
 .badge-in-progress { background: #fef3c7; color: #92400e; }
 .badge-completed { background: #d1fae5; color: #065f46; }

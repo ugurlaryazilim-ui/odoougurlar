@@ -27,12 +27,12 @@
             <form>
                 <header>
                     <button name="action_approve_reyon" string="Onayla" type="object" class="btn-success" invisible="state != 'waiting_approval'"/>
-                    <button name="action_reject_reyon" string="Reddet" type="object" class="btn-danger" invisible="state != 'waiting_approval'"/>
+                    <button name="action_reject_reyon" string="Reddet" type="object" class="btn-danger" invisible="state != 'waiting_approval'" confirm="Reyon siparişi reddedilip iptal edilecek. Emin misiniz?"/>
                     <button name="action_send_to_tailor" string="Terziye Gönder" type="object" class="btn-primary" invisible="state != 'pending'"/>
                     <button name="action_mark_completed" string="Hazır" type="object" class="btn-primary" invisible="state != 'in_progress'"/>
                     <button name="action_mark_delivered" string="Teslim Edildi" type="object" class="btn-primary" invisible="state != 'completed'"/>
                     <button name="action_cancel" string="İptal Et" type="object" class="btn-danger" invisible="state in ('delivered', 'cancelled')" confirm="Bu siparişi iptal etmek istediğinize emin misiniz?"/>
-                    <button name="action_reset_to_pending" string="Sıfırla" type="object" class="btn-secondary" invisible="state == 'pending'"/>
+                    <button name="action_reset_to_pending" string="Sıfırla" type="object" class="btn-secondary" invisible="state in ('pending', 'waiting_approval', 'delivered')"/>
                     <button name="action_print_label" string="Etiket Yazdir" type="object" class="btn-warning" icon="fa-print" invisible="state in ('waiting_approval', 'cancelled')"/>
                     <field name="state" widget="statusbar" statusbar_visible="waiting_approval,pending,in_progress,completed,delivered"/>
                 </header>

@@ -30,6 +30,7 @@
     <menuitem id="menu_tailor_config"
               name="Tanımlar"
               parent="menu_tailor_root"
+              groups="ugurlar_tailor.group_tailor_manager"
               sequence="50"/>
 
     <menuitem id="menu_tailor_tailors"

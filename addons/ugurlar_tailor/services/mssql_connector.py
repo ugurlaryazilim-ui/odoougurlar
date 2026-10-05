@@ -1,4 +1,5 @@
 import logging
+import re
 
 from odoo import models, api
 from odoo.exceptions import UserError
@@ -35,12 +36,15 @@ class TailorMssqlConnector(models.AbstractModel):
         ICP = self.env['ir.config_parameter'].sudo()
         config = {
             'server': ICP.get_param('ugurlar_tailor.mssql_server', ''),
-            'port': int(ICP.get_param('ugurlar_tailor.mssql_port', '1433')),
+            'port': int(ICP.get_param('ugurlar_tailor.mssql_port', '1433') or 1433),
             'database': ICP.get_param('ugurlar_tailor.mssql_database', ''),
             'user': ICP.get_param('ugurlar_tailor.mssql_user', ''),
             'password': ICP.get_param('ugurlar_tailor.mssql_password', ''),
             'view_name': ICP.get_param('ugurlar_tailor.mssql_view_name', 'vw_TerziFaturalar'),
         }
+        # View adı SQL'e doğrudan yazılır (parametre olamaz): yalnız tanımlayıcı karakterlerine izin ver
+        if not re.fullmatch(r'[\w.\[\]]+', config['view_name'] or ''):
+            raise UserError('Terzi MSSQL view adı geçersiz! Yalnız harf, rakam, alt çizgi, nokta ve köşeli parantez kullanılabilir.')
         if not config['server'] or not config['database']:
             raise UserError(
                 'Terzi MSSQL bağlantı ayarları yapılandırılmamış!\n'
@@ -66,8 +70,8 @@ class TailorMssqlConnector(models.AbstractModel):
             )
             return conn
         except Exception as e:
-            _logger.error('MSSQL bağlantı hatası: %s', str(e))
-            raise UserError(f'MSSQL bağlantı hatası: {str(e)}')
+            _logger.error('MSSQL bağlantı hatası: %s', e)
+            raise UserError('Nebim veritabanına bağlanılamadı. Lütfen daha sonra tekrar deneyin veya sistem yöneticisine bildirin.')
 
     @api.private
     def _execute_query(self, query, params=None):
@@ -79,8 +83,8 @@ class TailorMssqlConnector(models.AbstractModel):
             results = cursor.fetchall()
             return results
         except Exception as e:
-            _logger.error('MSSQL sorgu hatası: %s', str(e))
-            raise UserError(f'SQL sorgu hatası: {str(e)}')
+            _logger.error('MSSQL sorgu hatası: %s', e)
+            raise UserError('Nebim sorgusu başarısız oldu. Lütfen daha sonra tekrar deneyin veya sistem yöneticisine bildirin.')
         finally:
             conn.close()
 

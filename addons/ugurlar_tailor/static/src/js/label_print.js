@@ -8,6 +8,16 @@
  *   - Tum siparisler icin: 1x Musteri OZET nushasi (tek etiket)
  */
 
+/** Etikete giden her metin kaçışlanır: not / müşteri adı vb. HTML olarak çalışmasın (XSS). */
+function esc(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
 function _buildOrderLabel(data, copyType) {
     const config = {
         terzi: {
@@ -25,7 +35,7 @@ function _buildOrderLabel(data, copyType) {
     const c = config[copyType];
 
     const servicesHtml = data.services.map(s =>
-        `<div style="padding:1px 4px;">• ${s.name}</div>`
+        `<div style="padding:1px 4px;">• ${esc(s.name)}</div>`
     ).join('');
 
     return `
@@ -34,26 +44,26 @@ function _buildOrderLabel(data, copyType) {
             <div class="label-store">UĞURLAR</div>
             <div class="label-sub">Terzi Takip Sistemi</div>
             <hr class="label-div"/>
-            <div class="label-r"><span class="ll">Sipariş No:</span><span class="vv" style="font-size:13px;font-weight:bold;">${data.name}</span></div>
-            <div class="label-r"><span class="ll">Fatura No:</span><span class="vv">${data.invoice_no}</span></div>
+            <div class="label-r"><span class="ll">Sipariş No:</span><span class="vv" style="font-size:13px;font-weight:bold;">${esc(data.name)}</span></div>
+            <div class="label-r"><span class="ll">Fatura No:</span><span class="vv">${esc(data.invoice_no)}</span></div>
             <hr class="label-div"/>
-            <div class="label-r"><span class="ll">Müşteri:</span><span class="vv">${data.customer_name}</span></div>
-            ${data.customer_phone ? `<div class="label-r"><span class="ll">Müşteri No:</span><span class="vv">${data.customer_phone}</span></div>` : ''}
-            ${data.sales_person ? `<div class="label-r"><span class="ll">Satış Per.:</span><span class="vv">${data.sales_person}</span></div>` : ''}
+            <div class="label-r"><span class="ll">Müşteri:</span><span class="vv">${esc(data.customer_name)}</span></div>
+            ${data.customer_phone ? `<div class="label-r"><span class="ll">Müşteri No:</span><span class="vv">${esc(data.customer_phone)}</span></div>` : ''}
+            ${data.sales_person ? `<div class="label-r"><span class="ll">Satış Per.:</span><span class="vv">${esc(data.sales_person)}</span></div>` : ''}
             <hr class="label-div"/>
-            <div class="label-r"><span class="ll">Ürün:</span><span class="vv">${data.product_code || data.product_name}</span></div>
-            <div class="label-r"><span class="ll">Barkod:</span><span class="vv">${data.product_barcode}</span></div>
+            <div class="label-r"><span class="ll">Ürün:</span><span class="vv">${esc(data.product_code || data.product_name)}</span></div>
+            <div class="label-r"><span class="ll">Barkod:</span><span class="vv">${esc(data.product_barcode)}</span></div>
             <hr class="label-div"/>
-            <div class="label-r"><span class="ll">Terzi:</span><span class="vv" style="font-weight:bold;font-size:12px;">${data.tailor_name}</span></div>
+            <div class="label-r"><span class="ll">Terzi:</span><span class="vv" style="font-weight:bold;font-size:12px;">${esc(data.tailor_name)}</span></div>
             <hr class="label-div"/>
             <div class="label-section">YAPILACAK İŞLEMLER</div>
             ${servicesHtml}
             <hr class="label-div"/>
-            <div class="label-dt">${data.date}</div>
+            <div class="label-dt">${esc(data.date)}</div>
             <div class="label-note-main">${c.line1}</div>
             <div class="label-note-sub">${c.line2}</div>
             <div class="label-thanks">TEŞEKKÜR EDERİZ</div>
-            ${data.notes ? `<hr class="label-div"/><div style="font-size:10px;"><b>Not:</b> ${data.notes}</div>` : ''}
+            ${data.notes ? `<hr class="label-div"/><div style="font-size:10px;"><b>Not:</b> ${esc(data.notes)}</div>` : ''}
         </div>
     `;
 }
@@ -72,13 +82,13 @@ function _buildGiftLabel(data) {
                 Bu urun size hediye edilmistir.
             </div>
             <hr class="label-div"/>
-            <div class="label-r"><span class="ll">Fis No:</span><span class="vv" style="font-size:13px;font-weight:bold;">${data.name}</span></div>
-            <div class="label-r"><span class="ll">Fatura No:</span><span class="vv">${data.invoice_no}</span></div>
+            <div class="label-r"><span class="ll">Fis No:</span><span class="vv" style="font-size:13px;font-weight:bold;">${esc(data.name)}</span></div>
+            <div class="label-r"><span class="ll">Fatura No:</span><span class="vv">${esc(data.invoice_no)}</span></div>
             <hr class="label-div"/>
-            <div class="label-r"><span class="ll">Urun:</span><span class="vv">${data.product_code || data.product_name}</span></div>
-            <div class="label-r"><span class="ll">Barkod:</span><span class="vv">${data.product_barcode}</span></div>
+            <div class="label-r"><span class="ll">Urun:</span><span class="vv">${esc(data.product_code || data.product_name)}</span></div>
+            <div class="label-r"><span class="ll">Barkod:</span><span class="vv">${esc(data.product_barcode)}</span></div>
             <hr class="label-div"/>
-            <div class="label-dt">${data.date}</div>
+            <div class="label-dt">${esc(data.date)}</div>
             <div style="margin-top:10px;padding:6px 4px;border:2px solid #000;border-radius:4px;">
                 <div style="text-align:center;font-size:13px;font-weight:900;margin-bottom:4px;">DEGISIM KOSULLARI</div>
                 <div style="font-size:11px;font-weight:600;line-height:1.5;">
@@ -87,7 +97,7 @@ function _buildGiftLabel(data) {
                     * Urun kullanilmamis ve etiketli olmalidir.
                 </div>
             </div>
-            ${data.notes ? `<hr class="label-div"/><div style="text-align:center;font-size:14px;font-weight:900;padding:6px 0;letter-spacing:1px;">${data.notes}</div>` : `<div style="text-align:center;font-size:18px;font-weight:900;margin-top:12px;padding:8px 0;letter-spacing:2px;">MUTLU GUNLER DILERIZ</div>`}
+            ${data.notes ? `<hr class="label-div"/><div style="text-align:center;font-size:14px;font-weight:900;padding:6px 0;letter-spacing:1px;">${esc(data.notes)}</div>` : `<div style="text-align:center;font-size:18px;font-weight:900;margin-top:12px;padding:8px 0;letter-spacing:2px;">MUTLU GUNLER DILERIZ</div>`}
         </div>
     `;
 }
@@ -98,12 +108,12 @@ function _buildCustomerSummaryLabel(dataArray) {
 
     // Her urun icin islemler listesi
     const itemsHtml = dataArray.map(d => {
-        const svcs = d.services.map(s => `• ${s.name}`).join('<br/>');
+        const svcs = d.services.map(s => `• ${esc(s.name)}`).join('<br/>');
         return `
             <div style="margin-bottom:8px; padding:6px; border:2px dashed #000; border-radius:4px;">
-                <div style="font-weight:900;font-size:14px;">${d.product_code || d.product_name}</div>
-                <div style="font-size:12px;font-weight:600;">(${d.product_barcode})</div>
-                <div style="font-size:13px;font-weight:800;margin-top:3px;">Terzi: ${d.tailor_name}</div>
+                <div style="font-weight:900;font-size:14px;">${esc(d.product_code || d.product_name)}</div>
+                <div style="font-size:12px;font-weight:600;">(${esc(d.product_barcode)})</div>
+                <div style="font-size:13px;font-weight:800;margin-top:3px;">Terzi: ${esc(d.tailor_name)}</div>
                 <div style="font-size:12px;font-weight:600;margin-top:3px;">${svcs}</div>
             </div>
         `;
@@ -115,17 +125,17 @@ function _buildCustomerSummaryLabel(dataArray) {
             <div class="label-store">UĞURLAR</div>
             <div class="label-sub">Terzi Takip Sistemi</div>
             <hr class="label-div"/>
-            <div class="label-r"><span class="ll">Sipariş No:</span><span class="vv" style="font-size:13px;font-weight:bold;">${dataArray.map(d => d.name).join(', ')}</span></div>
-            <div class="label-r"><span class="ll">Fatura No:</span><span class="vv">${first.invoice_no}</span></div>
+            <div class="label-r"><span class="ll">Sipariş No:</span><span class="vv" style="font-size:13px;font-weight:bold;">${esc(dataArray.map(d => d.name).join(', '))}</span></div>
+            <div class="label-r"><span class="ll">Fatura No:</span><span class="vv">${esc(first.invoice_no)}</span></div>
             <hr class="label-div"/>
-            <div class="label-r"><span class="ll">Müşteri:</span><span class="vv">${first.customer_name}</span></div>
-            ${first.customer_phone ? `<div class="label-r"><span class="ll">Müşteri No:</span><span class="vv">${first.customer_phone}</span></div>` : ''}
-            ${first.sales_person ? `<div class="label-r"><span class="ll">Satış Per.:</span><span class="vv">${first.sales_person}</span></div>` : ''}
+            <div class="label-r"><span class="ll">Müşteri:</span><span class="vv">${esc(first.customer_name)}</span></div>
+            ${first.customer_phone ? `<div class="label-r"><span class="ll">Müşteri No:</span><span class="vv">${esc(first.customer_phone)}</span></div>` : ''}
+            ${first.sales_person ? `<div class="label-r"><span class="ll">Satış Per.:</span><span class="vv">${esc(first.sales_person)}</span></div>` : ''}
             <hr class="label-div"/>
             <div class="label-section">SİPARİŞ ÖZETİ (${dataArray.length} ürün)</div>
             ${itemsHtml}
             <hr class="label-div"/>
-            <div class="label-dt">${first.date}</div>
+            <div class="label-dt">${esc(first.date)}</div>
             <div class="label-note-main">3. Nüsha müşteride kalacak</div>
             <div class="label-note-sub">İşlemler bittiğinde ürünlerinizi mağazamızdan teslim alabilirsiniz.</div>
             <div class="label-thanks">TEŞEKKÜR EDERİZ</div>
@@ -136,7 +146,7 @@ function _buildCustomerSummaryLabel(dataArray) {
 function _printHtml(labelsHtml, title) {
     const html = `<!DOCTYPE html><html><head>
         <meta charset="utf-8">
-        <title>${title}</title>
+        <title>${esc(title)}</title>
         <style>
             @page { size: 80mm auto; margin: 2mm; }
             * { margin:0; padding:0; box-sizing:border-box; }
