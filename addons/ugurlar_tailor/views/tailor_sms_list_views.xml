@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <record id="view_tailor_sms_list_wizard" model="ir.ui.view">
+        <field name="name">ugurlar.tailor.sms.list.wizard.form</field>
+        <field name="model">ugurlar.tailor.sms.list.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Terzi Müşterilerini SMS Listesine Aktar">
+                <field name="from_selection" invisible="1"/>
+                <p class="text-muted">
+                    Siparişlerdeki müşteri cep numaraları SMS rehberine eklenir (aynı numara bir kez).
+                    Kara listedeki ve İYS durumu olan kişilere dokunulmaz.
+                </p>
+                <group>
+                    <group invisible="from_selection">
+                        <field name="date_from"/>
+                        <field name="date_to"/>
+                        <field name="include_cancelled"/>
+                    </group>
+                    <group>
+                        <field name="order_count"/>
+                        <field name="number_count"/>
+                    </group>
+                </group>
+                <group>
+                    <field name="list_id" options="{'no_create': True}"/>
+                    <field name="new_list_name" invisible="list_id"/>
+                </group>
+                <footer>
+                    <button name="action_export" string="Aktar" type="object" class="btn-primary"/>
+                    <button string="Vazgeç" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_tailor_sms_list_wizard" model="ir.actions.act_window">
+        <field name="name">Terzi Müşterilerini Aktar</field>
+        <field name="res_model">ugurlar.tailor.sms.list.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <!-- Sipariş listesinde seçili siparişlerden -->
+    <record id="action_tailor_sms_list_wizard_binding" model="ir.actions.act_window">
+        <field name="name">SMS Listesine Ekle</field>
+        <field name="res_model">ugurlar.tailor.sms.list.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+        <field name="binding_model_id" ref="model_ugurlar_tailor_order"/>
+        <field name="binding_view_types">list</field>
+        <field name="group_ids" eval="[(4, ref('sms_system.group_sms_manager'))]"/>
+    </record>
+
+    <menuitem id="menu_sms_import_tailor"
+              name="Terzi Müşterilerini Aktar"
+              parent="sms_system.menu_sms_book"
+              action="action_tailor_sms_list_wizard"
+              groups="sms_system.group_sms_manager"
+              sequence="20"/>
+</odoo>
