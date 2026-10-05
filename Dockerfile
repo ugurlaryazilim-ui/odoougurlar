@@ -32,6 +32,10 @@ RUN F=/usr/lib/python3/dist-packages/reportlab/fonts G=/usr/share/fonts/type1/gs
 COPY --chown=odoo:odoo ./addons /opt/ugurlar-addons
 COPY --chown=odoo:odoo ./config /etc/odoo
 
+# Prod imajında /mnt/extra-addons boş kalır; conf'ta durursa Odoo her açılışta "invalid addons directory"
+# uyarısı verir. Yerel geliştirmede repo'daki config/ bağlandığı için bu değişiklik yalnız imajı etkiler.
+RUN sed -i 's#^addons_path = .*#addons_path = /opt/ugurlar-addons#' /etc/odoo/odoo.conf  && grep -q '^addons_path = /opt/ugurlar-addons$' /etc/odoo/odoo.conf
+
 # 2.5. Orijinal Odoo kodundaki MemoryError hatasını yamalıyoruz
 RUN python3 /opt/ugurlar-addons/patch_odoo.py
 
