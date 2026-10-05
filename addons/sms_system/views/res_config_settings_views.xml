@@ -6,7 +6,8 @@
         <field name="inherit_id" ref="base.res_config_settings_view_form"/>
         <field name="arch" type="xml">
             <xpath expr="//form" position="inside">
-                <app data-string="SMS" string="SMS" name="sms_system" groups="base.group_system">
+                <!-- logo: tarayıcı önbelleğindeki eski icon.png yerine yeni adres -->
+                <app data-string="SMS" string="SMS" name="sms_system" logo="/sms_system/static/description/sms_logo.png" groups="base.group_system">
                     <block title="Turatel SMS Gönderim Hesabı" name="sms_turatel">
                         <setting string="Kanal Kodu / Kullanıcı / Şifre" help="Turatel'in verdiği SMS gönderim hesabı bilgileri">
                             <div class="content-group">

@@ -1,6 +1,6 @@
 {
     'name': 'SMS Sistemi (Turatel)',
-    'version': '19.0.1.1.1',
+    'version': '19.0.1.2.0',
     'category': 'Marketing',
     'summary': 'Turatel üzerinden SMS gönderimi — şablonlar, gönderim kaydı, diğer modüller için ortak servis',
     'description': """
@@ -26,5 +26,5 @@
     'installable': True,
     'application': True,
     'license': 'LGPL-3',
-    'icon': '/sms_system/static/description/icon.png',
+    'icon': '/sms_system/static/description/sms_logo.png',
 }

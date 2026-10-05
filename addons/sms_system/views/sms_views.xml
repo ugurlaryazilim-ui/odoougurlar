@@ -164,7 +164,7 @@
     </record>
 
     <!-- ═══════════ Menü ═══════════ -->
-    <menuitem id="menu_sms_root" name="SMS" web_icon="sms_system,static/description/icon.png" sequence="96"
+    <menuitem id="menu_sms_root" name="SMS" web_icon="sms_system,static/description/sms_logo.png" sequence="96"
               groups="sms_system.group_sms_user"/>
     <menuitem id="menu_sms_new" name="Yeni SMS" parent="menu_sms_root" action="action_sms_send_wizard" sequence="30"/>
     <menuitem id="menu_sms_messages" name="Gönderilenler" parent="menu_sms_root" action="action_sms_message" sequence="5"/>
