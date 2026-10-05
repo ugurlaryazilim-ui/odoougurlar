@@ -1,16 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
     <data>
-        <!-- Terzi Kullanici Grubu -->
+        <!-- Terzi Kullanıcı: tüm çalışanlar (base.group_user) sipariş açıp ilerletebilir -->
         <record id="group_tailor_user" model="res.groups">
-            <field name="name">Terzi / Kullanici</field>
+            <field name="name">Terzi / Kullanıcı</field>
             <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
         </record>
 
-        <!-- Terzi Yonetici Grubu -->
+        <!-- Terzi Yönetici: terzi/hizmet/fiyat tanımları, sipariş silme, reyon onayı, durum düzeltme -->
         <record id="group_tailor_manager" model="res.groups">
-            <field name="name">Terzi / Yonetici</field>
+            <field name="name">Terzi / Yönetici</field>
             <field name="implied_ids" eval="[(4, ref('group_tailor_user'))]"/>
+        </record>
+
+        <!-- Sistem yöneticileri otomatik terzi yöneticisi -->
+        <record id="base.group_system" model="res.groups">
+            <field name="implied_ids" eval="[(4, ref('group_tailor_manager'))]"/>
         </record>
     </data>
 </odoo>

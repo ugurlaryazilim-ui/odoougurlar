@@ -42,6 +42,19 @@ class ResConfigSettings(models.TransientModel):
         help='Nebim ERP\'deki fatura view adı (ör: vw_TerziFaturalar)',
     )
 
+    # ── Sipariş / Bildirim ──
+    tailor_default_days = fields.Integer(
+        string='Varsayılan Teslim Süresi (gün)', config_parameter='ugurlar_tailor.default_days', default=3,
+    )
+    tailor_sms_ready_enabled = fields.Boolean(
+        string='Hazır Olunca SMS Gönder', config_parameter='ugurlar_tailor.sms_ready_enabled',
+        help='Sipariş "Hazır" olunca müşteri cep telefonuna Odoo SMS (IAP kredisi gerekir) gönderilir',
+    )
+    tailor_sms_ready_text = fields.Char(
+        string='SMS Metni', config_parameter='ugurlar_tailor.sms_ready_text',
+        help='{musteri} ve {siparis} yer tutucuları kullanılabilir',
+    )
+
     # ── Reyon Ayarları ──
     reyon_manager_ids = fields.Many2many(
         related='company_id.reyon_manager_ids',

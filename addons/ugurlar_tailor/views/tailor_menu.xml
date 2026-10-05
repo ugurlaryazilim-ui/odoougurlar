@@ -26,10 +26,19 @@
               action="action_tailor_order"
               sequence="10"/>
 
+    <!-- ═══════════════ Raporlar ═══════════════ -->
+    <menuitem id="menu_tailor_settlement"
+              name="Terzi Hakediş"
+              parent="menu_tailor_root"
+              action="action_tailor_settlement"
+              groups="ugurlar_tailor.group_tailor_manager"
+              sequence="40"/>
+
     <!-- ═══════════════ Tanımlar ═══════════════ -->
     <menuitem id="menu_tailor_config"
               name="Tanımlar"
               parent="menu_tailor_root"
+              groups="ugurlar_tailor.group_tailor_manager"
               sequence="50"/>
 
     <menuitem id="menu_tailor_tailors"

@@ -23,7 +23,7 @@
                     </div>
 
                     <!-- NUSHA 3: MUSTERI -->
-                    <t t-if="o.customer_name != 'MAĞAZA (REYON)'">
+                    <t t-if="not o.is_reyon">
                         <div class="page tailor-label" style="page-break-before: always;">
                             <t t-call="ugurlar_tailor.report_tailor_label_copy">
                                 <t t-set="copy_title">MUSTERI NUSHASI</t>
@@ -140,7 +140,7 @@
             <hr class="label-div"/>
 
             <div class="label-r">
-                <span class="ll">Siparis No:</span>
+                <span class="ll">Sipariş No:</span>
                 <span class="vv" style="font-size:13px; font-weight:bold;"><t t-out="o.name"/></span>
             </div>
             <div class="label-r">
@@ -151,12 +151,12 @@
             <hr class="label-div"/>
 
             <div class="label-r">
-                <span class="ll">Musteri:</span>
+                <span class="ll">Müşteri:</span>
                 <span class="vv"><t t-out="o.customer_name"/></span>
             </div>
             <t t-if="o.customer_phone">
                 <div class="label-r">
-                    <span class="ll">Telefon:</span>
+                    <span class="ll">Müşteri No:</span>
                     <span class="vv"><t t-out="o.customer_phone"/></span>
                 </div>
             </t>
@@ -170,7 +170,7 @@
             <hr class="label-div"/>
 
             <div class="label-r">
-                <span class="ll">Urun:</span>
+                <span class="ll">Ürün:</span>
                 <span class="vv"><t t-out="o.product_code or o.product_name or ''"/></span>
             </div>
             <div class="label-r">

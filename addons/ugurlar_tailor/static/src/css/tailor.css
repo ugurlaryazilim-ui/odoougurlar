@@ -595,6 +595,7 @@
     text-transform: uppercase;
 }
 
+.badge-waiting { background: #fee2e2; color: #b91c1c; }
 .badge-pending { background: #dbeafe; color: #1d4ed8; }
 .badge-in-progress { background: #fef3c7; color: #92400e; }
 .badge-completed { background: #d1fae5; color: #065f46; }
@@ -695,4 +696,56 @@
     font-weight: 500;
     margin-top: 1rem;
     padding: 0.5rem;
+}
+
+/* ─── Sayaçlar / geciken / fotoğraf ───────────────────────── */
+.tailor-stats {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+    cursor: pointer;
+}
+.tailor-stat {
+    background: #fff;
+    border-radius: 10px;
+    padding: 10px 4px;
+    text-align: center;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.tailor-stat b {
+    display: block;
+    font-size: 20px;
+    color: var(--tailor-primary-dark);
+}
+.tailor-stat span {
+    font-size: 11px;
+    color: #64748b;
+}
+.tailor-stat-danger b {
+    color: #dc2626;
+}
+.tailor-overdue {
+    border-left: 4px solid #dc2626;
+}
+.badge-overdue { background: #dc2626; color: #fff; }
+.tailor-photo-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.tailor-photo-btn {
+    background: #eef2ff;
+    color: #3730a3;
+    cursor: pointer;
+}
+.tailor-photo-thumb {
+    width: 56px;
+    height: 56px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0;
+}
+@media (max-width: 600px) {
+    .tailor-stats { grid-template-columns: repeat(3, 1fr); }
 }

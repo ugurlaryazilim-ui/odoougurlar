@@ -32,8 +32,10 @@ class UgurlarTailor(models.Model):
 
     @api.depends('order_ids')
     def _compute_order_count(self):
+        counts = dict(self.env['ugurlar.tailor.order']._read_group(
+            [('tailor_id', 'in', self.ids)], ['tailor_id'], ['__count']))
         for rec in self:
-            rec.order_count = len(rec.order_ids)
+            rec.order_count = counts.get(rec, 0)
 
     def action_view_orders(self):
         """Stat button — terziye ait siparişleri göster."""

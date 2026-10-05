@@ -6,6 +6,7 @@ import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
 import { printMultipleTailorLabels } from "../label_print";
 import { openCameraScanner } from "@ugurlar_barcode/js/camera_scanner";
+import { readPhoto } from "../photo_utils";
 
 export class TailorStoreItem extends Component {
     static template = "ugurlar_tailor.TailorStoreItem";
@@ -25,6 +26,7 @@ export class TailorStoreItem extends Component {
             tailors: [],
             submitting: false,
             createdCount: 0,
+            promisedDate: "",
         });
 
         this.storeSearchInputRef = useRef("storeSearchInput");
@@ -54,7 +56,7 @@ export class TailorStoreItem extends Component {
         try {
             this.state.services = await rpc("/ugurlar_tailor/services", {});
         } catch (e) {
-            this.notification.add(_t("Hizmetler yuklenemedi: %(error)s", { error: e.message }), { type: "danger" });
+            this.notification.add(_t("Hizmetler yüklenemedi: %(error)s", { error: e.message }), { type: "danger" });
         }
     }
 
@@ -62,7 +64,7 @@ export class TailorStoreItem extends Component {
         try {
             this.state.tailors = await rpc("/ugurlar_tailor/tailors", {});
         } catch (e) {
-            this.notification.add(_t("Terziler yuklenemedi: %(error)s", { error: e.message }), { type: "danger" });
+            this.notification.add(_t("Terziler yüklenemedi: %(error)s", { error: e.message }), { type: "danger" });
         }
     }
 
@@ -75,7 +77,7 @@ export class TailorStoreItem extends Component {
 
         // Cift eklemeyi onle
         if (this.state.items.find(i => i.barcode === q)) {
-            this.notification.add(_t("Bu urun zaten listeye eklendi."), { type: "warning" });
+            this.notification.add(_t("Bu ürün zaten listeye eklendi."), { type: "warning" });
             this.state.searchQuery = "";
             return;
         }
@@ -91,16 +93,17 @@ export class TailorStoreItem extends Component {
                     tailor_id: null,
                     service_ids: [],
                     notes: "",
+                    photo: "",
                 });
                 this.state.searchQuery = "";
                 if (this.storeSearchInputRef.el) {
                     this.storeSearchInputRef.el.focus();
                 }
             } else {
-                this.notification.add(_t("Urun bulunamadi."), { type: "warning" });
+                this.notification.add(_t("Ürün bulunamadı."), { type: "warning" });
             }
         } catch (e) {
-            this.notification.add(_t("Arama hatasi: %(error)s", { error: e.message }), { type: "danger" });
+            this.notification.add(_t("Arama hatası: %(error)s", { error: e.message }), { type: "danger" });
         }
         this.state.searching = false;
     }
@@ -133,6 +136,16 @@ export class TailorStoreItem extends Component {
         const item = this.state.items.find(i => i.barcode === barcode);
         if (item) {
             item.notes = ev.target.value;
+        }
+    }
+
+    async onPhotoChange(barcode, ev) {
+        const item = this.state.items.find(i => i.barcode === barcode);
+        if (!item) return;
+        try {
+            item.photo = await readPhoto(ev.target.files[0]);
+        } catch {
+            this.notification.add(_t("Fotoğraf okunamadı."), { type: "warning" });
         }
     }
 
@@ -171,7 +184,7 @@ export class TailorStoreItem extends Component {
             if (item.service_ids.length === 0) continue;
             if (!item.tailor_id) {
                 this.notification.add(
-                    _t("%(product)s icin terzi seciniz!", { product: item.product_name || item.barcode }),
+                    _t("%(product)s için terzi seçiniz!", { product: item.product_name || item.barcode }),
                     { type: "warning" }
                 );
                 return;
@@ -194,11 +207,13 @@ export class TailorStoreItem extends Component {
                 tailor_id: item.tailor_id,
                 notes: item.notes || "",
                 services: services,
+                promised_date: this.state.promisedDate || false,
+                photo: item.photo || "",
             });
         }
 
         if (orders.length === 0) {
-            this.notification.add(_t("En az bir urun icin hizmet seciniz!"), { type: "warning" });
+            this.notification.add(_t("En az bir ürün için hizmet seçiniz!"), { type: "warning" });
             return;
         }
 
@@ -207,7 +222,7 @@ export class TailorStoreItem extends Component {
             const result = await rpc("/ugurlar_tailor/create_order", { orders });
             if (result.success) {
                 this.notification.add(
-                    _t("%(count)s siparis basariyla onaya gonderildi!", { count: result.orders.length }),
+                    _t("%(count)s sipariş başarıyla onaya gönderildi!", { count: result.orders.length }),
                     { type: "success" }
                 );
                 
@@ -219,7 +234,7 @@ export class TailorStoreItem extends Component {
                 this.notification.add(_t("Hata: %(error)s", { error: result.error || "" }), { type: "danger" });
             }
         } catch (e) {
-            this.notification.add(_t("Siparis olusturma hatasi: %(error)s", { error: e.message }), { type: "danger" });
+            this.notification.add(_t("Sipariş oluşturma hatası: %(error)s", { error: e.message }), { type: "danger" });
         }
         this.state.submitting = false;
     }

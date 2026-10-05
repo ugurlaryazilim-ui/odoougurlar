@@ -3,6 +3,7 @@ from collections import defaultdict
 import logging
 
 from odoo import http
+from odoo.exceptions import AccessError, UserError
 from odoo.http import request
 
 _logger = logging.getLogger(__name__)
@@ -79,62 +80,98 @@ class TailorController(http.Controller):
     # ── Sipariş Oluştur ──
     @http.route('/ugurlar_tailor/create_order', type='jsonrpc', auth='user')
     def create_order(self, orders=None):
-        """Toplu sipariş oluşturma — her ürün için ayrı sipariş."""
+        """Toplu sipariş oluşturma — her ürün için ayrı sipariş.
+
+        Fiyatlar istemciden alınmaz: terziye özel fiyat, yoksa hizmetin varsayılan
+        fiyatı sunucuda hesaplanır. Terzi ve hizmetlerin aktif olduğu doğrulanır.
+        """
         if not orders:
             return {'success': False, 'error': 'Sipariş verisi boş!'}
 
-        created = []
-        Order = request.env['ugurlar.tailor.order']
-        OrderLine = request.env['ugurlar.tailor.order.line']
+        env = request.env
+        Order = env['ugurlar.tailor.order']
+        tailor_ids = {int(o['tailor_id']) for o in orders if o.get('tailor_id')}
+        tailors = env['ugurlar.tailor'].browse(list(tailor_ids)).exists().filtered('active')
+        service_ids = {int(svc['id']) for o in orders for svc in (o.get('services') or []) if svc.get('id')}
+        services = env['ugurlar.tailor.service'].browse(list(service_ids)).exists().filtered('active')
+        special = {
+            (p.tailor_id.id, p.service_id.id): p.price
+            for p in env['ugurlar.tailor.price'].search([('tailor_id', 'in', tailors.ids)])
+        }
 
+        # Nebim view'ında ürün adı yok: barkoddan Odoo ürün adını bul (tek sorgu)
+        barcodes = [o.get('barcode') for o in orders if o.get('barcode')]
+        product_names = {
+            p.barcode: p.name
+            for p in env['product.product'].search([('barcode', 'in', barcodes)])
+        } if barcodes else {}
+
+        order_vals = []
         for order_data in orders:
-            # Sipariş oluştur
-            order = Order.create({
+            tailor_id = int(order_data.get('tailor_id') or 0)
+            if tailor_id not in tailors.ids:
+                return {'success': False, 'error': 'Geçersiz veya pasif terzi seçildi!'}
+            svc_ids = [int(svc['id']) for svc in (order_data.get('services') or []) if svc.get('id')]
+            if not svc_ids:
+                return {'success': False, 'error': 'Her ürün için en az bir hizmet seçiniz!'}
+            lines = []
+            for sid in dict.fromkeys(svc_ids):  # sırayı koruyarak tekrarları at
+                service = services.filtered(lambda s, sid=sid: s.id == sid)
+                if not service:
+                    return {'success': False, 'error': 'Geçersiz veya pasif hizmet seçildi!'}
+                price = special.get((tailor_id, sid), service.price)
+                lines.append((0, 0, {'service_id': sid, 'price': price}))
+            # Faturasız sipariş = reyon siparişi (onaydan geçer; model create'te zorlanır)
+            is_reyon = bool(order_data.get('is_reyon')) or not order_data.get('invoice_no')
+            order_vals.append({
                 'invoice_no': order_data.get('invoice_no', ''),
-                'is_reyon': order_data.get('is_reyon', False),
-                'state': 'waiting_approval' if order_data.get('is_reyon') else 'pending',
+                'is_reyon': is_reyon,
+                'state': 'waiting_approval' if is_reyon else 'pending',
                 'product_barcode': order_data.get('barcode', ''),
                 'product_code': order_data.get('product_code', ''),
-                'product_name': order_data.get('product_name', ''),
+                'product_name': product_names.get(order_data.get('barcode'))
+                or order_data.get('product_name', ''),
                 'customer_name': order_data.get('customer_name', ''),
                 'customer_phone': order_data.get('customer_phone', ''),
                 'sales_person': order_data.get('sales_person', ''),
-                'tailor_id': order_data.get('tailor_id') or False,
+                'tailor_id': tailor_id,
                 'notes': order_data.get('notes', ''),
+                'customer_mobile': (order_data.get('customer_mobile') or '').strip(),
+                'line_ids': lines,
             })
+            if order_data.get('promised_date'):
+                order_vals[-1]['promised_date'] = order_data['promised_date']
+            photo = order_data.get('photo') or ''
+            if photo:
+                # data:image/jpeg;base64,... -> yalnız base64 kısmı
+                order_vals[-1]['photo'] = photo.split(',', 1)[1] if photo.startswith('data:') else photo
 
-            # Hizmet satırları oluştur
-            for svc in order_data.get('services', []):
-                OrderLine.create({
-                    'order_id': order.id,
-                    'service_id': svc['id'],
-                    'price': svc['price'],
-                })
-
-            created.append({
-                'id': order.id,
-                'name': order.name,
-                'total_price': order.total_price,
-            })
+        created_orders = Order.create(order_vals)
+        created = [{'id': o.id, 'name': o.name, 'total_price': o.total_price} for o in created_orders]
 
         # Etiket PDF URL'i olustur
-        order_ids = [o['id'] for o in created]
-        label_url = '/report/pdf/ugurlar_tailor.report_tailor_label/%s' % ','.join(str(i) for i in order_ids)
+        label_url = '/report/pdf/ugurlar_tailor.report_tailor_label/%s' % ','.join(
+            str(i) for i in created_orders.ids)
 
-        return {'success': True, 'orders': created, 'label_url': label_url}
+        # Etiket verisi aynı cevapta döner (her sipariş için ayrı istek atılmasın)
+        labels = [self._label_payload(o) for o in created_orders if o.state != 'waiting_approval']
+        return {'success': True, 'orders': created, 'label_url': label_url, 'labels': labels}
 
     # ── Sipariş Listesi ──
     @http.route('/ugurlar_tailor/orders', type='jsonrpc', auth='user')
     def get_orders(self, status=None, search='', page=1, limit=20):
         domain = []
-        if status:
+        if status and status != 'overdue':
             domain.append(('state', '=', status))
+        if status == 'overdue':
+            domain = [('is_overdue', '=', True)]
         if search:
-            domain.append('|')
-            domain.append('|')
-            domain.append(('invoice_no', 'ilike', search))
-            domain.append(('customer_name', 'ilike', search))
-            domain.append(('name', 'ilike', search))
+            search = search.strip()
+            domain += ['|', '|', '|',
+                       ('invoice_no', 'ilike', search),
+                       ('customer_name', 'ilike', search),
+                       ('name', 'ilike', search),
+                       ('product_barcode', '=', search)]
 
         offset = (int(page) - 1) * int(limit)
         total = request.env['ugurlar.tailor.order'].search_count(domain)
@@ -143,7 +180,8 @@ class TailorController(http.Controller):
             ['id', 'name', 'invoice_no', 'product_name', 'product_barcode',
              'customer_name', 'customer_phone', 'sales_person',
              'tailor_id', 'total_price', 'state', 'notes',
-             'create_date', 'completed_at', 'delivered_at', 'cancelled_at'],
+             'create_date', 'completed_at', 'delivered_at', 'cancelled_at',
+             'promised_date', 'is_overdue', 'customer_mobile'],
             order='create_date desc',
             limit=int(limit),
             offset=offset,
@@ -168,6 +206,15 @@ class TailorController(http.Controller):
             'limit': int(limit),
         }
 
+    # ── Ana menü sayaçları ──
+    @http.route('/ugurlar_tailor/stats', type='jsonrpc', auth='user')
+    def stats(self):
+        Order = request.env['ugurlar.tailor.order']
+        counts = dict(Order._read_group([('state', 'in', ('waiting_approval', 'pending', 'in_progress', 'completed'))],
+                                        ['state'], ['__count']))
+        counts['overdue'] = Order.search_count([('is_overdue', '=', True)])
+        return counts
+
     # ── Sipariş Durum Güncelle ──
     @http.route('/ugurlar_tailor/update_status', type='jsonrpc', auth='user')
     def update_status(self, order_id=0, status=''):
@@ -183,25 +230,20 @@ class TailorController(http.Controller):
             'cancelled': 'action_cancel',
         }
         method = action_map.get(status)
-        if method:
+        if not method:
+            return {'success': False, 'error': 'Geçersiz durum!'}
+        try:
             getattr(order, method)()
-            return {'success': True}
-        return {'success': False, 'error': 'Geçersiz durum!'}
+        except (UserError, AccessError) as e:
+            request.env.cr.rollback()
+            return {'success': False, 'error': str(e)}
+        return {'success': True}
 
     # ── Etiket Verisi ──
-    @http.route('/ugurlar_tailor/label_data', type='jsonrpc', auth='user')
-    def label_data(self, order_id=0):
-        """Etiket yazdırma için sipariş verisini döndür."""
-        order = request.env['ugurlar.tailor.order'].browse(int(order_id))
-        if not order.exists():
-            return {'error': 'Sipariş bulunamadı!'}
-
-        lines = request.env['ugurlar.tailor.order.line'].search_read(
-            [('order_id', '=', order.id)],
-            ['service_name', 'price'],
-        )
-
+    @staticmethod
+    def _label_payload(order):
         return {
+            'id': order.id,
             'name': order.name,
             'invoice_no': order.invoice_no or '',
             'customer_name': order.customer_name or '',
@@ -214,5 +256,26 @@ class TailorController(http.Controller):
             'total_price': order.total_price,
             'notes': order.notes or '',
             'date': order.create_date.strftime('%d.%m.%Y %H:%M') if order.create_date else '',
-            'services': [{'name': l['service_name'], 'price': l['price']} for l in lines],
+            'promised_date': order.promised_date.strftime('%d.%m.%Y') if order.promised_date else '',
+            'services': [{'name': line.service_name, 'price': line.price} for line in order.line_ids],
         }
+
+    @http.route('/ugurlar_tailor/label_data', type='jsonrpc', auth='user')
+    def label_data(self, order_id=0):
+        """Etiket yazdırma için sipariş verisini döndür."""
+        order = request.env['ugurlar.tailor.order'].browse(int(order_id))
+        if not order.exists():
+            return {'error': 'Sipariş bulunamadı!'}
+        return self._label_payload(order)
+
+    # ── Mağaza bilgisi (hediye fişi başlığı) ──
+    @http.route('/ugurlar_tailor/company_info', type='jsonrpc', auth='user')
+    def company_info(self):
+        company = request.env.company
+        partner = company.partner_id
+        address = ', '.join(filter(None, [
+            partner.street, partner.street2,
+            ' '.join(filter(None, [partner.zip, partner.city])),
+            partner.state_id.name,
+        ]))
+        return {'name': company.name or '', 'address': address, 'phone': partner.phone or company.phone or ''}

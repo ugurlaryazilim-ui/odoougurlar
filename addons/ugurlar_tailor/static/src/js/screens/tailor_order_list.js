@@ -56,15 +56,15 @@ export class TailorOrderList extends Component {
             this.state.orders = result.orders || [];
             this.state.total = result.total || 0;
         } catch (e) {
-            this.notification.add(_t("Siparisler yuklenemedi: %(error)s", { error: e.message }), { type: "danger" });
+            this.notification.add(_t("Siparişler yüklenemedi: %(error)s", { error: e.message }), { type: "danger" });
         }
         this.state.loading = false;
     }
 
     async updateStatus(orderId, newStatus) {
         this.dialog.add(ConfirmationDialog, {
-            title: _t("Durum Degisikligi"),
-            body: _t("Siparisi '%(status)s' durumuna gecirmek istediginize emin misiniz?", { status: this.getStatusLabel(newStatus) }),
+            title: _t("Durum Değişikliği"),
+            body: _t("Siparişi '%(status)s' durumuna geçirmek istediğinize emin misiniz?", { status: this.getStatusLabel(newStatus) }),
             confirm: async () => {
                 try {
                     const result = await rpc("/ugurlar_tailor/update_status", {
@@ -72,11 +72,13 @@ export class TailorOrderList extends Component {
                         status: newStatus,
                     });
                     if (result.success) {
-                        this.notification.add(_t("Durum guncellendi!"), { type: "success" });
+                        this.notification.add(_t("Durum güncellendi!"), { type: "success" });
                         await this.loadOrders();
+                    } else {
+                        this.notification.add(result.error || _t("Durum güncellenemedi."), { type: "danger" });
                     }
                 } catch (e) {
-                    this.notification.add(_t("Durum guncelleme hatasi: %(error)s", { error: e.message }), { type: "danger" });
+                    this.notification.add(_t("Durum güncelleme hatası: %(error)s", { error: e.message }), { type: "danger" });
                 }
             },
             cancel: () => {},
@@ -92,11 +94,18 @@ export class TailorOrderList extends Component {
         return flow[currentStatus] || null;
     }
 
+    formatDate(value) {
+        if (!value) return "";
+        const [y, m, d] = String(value).slice(0, 10).split("-");
+        return `${d}.${m}.${y}`;
+    }
+
     getStatusLabel(status) {
         const labels = {
+            waiting_approval: _t("Onay Bekliyor"),
             pending: _t("Bekliyor"),
             in_progress: _t("Terzide"),
-            completed: _t("Hazir"),
+            completed: _t("Hazır"),
             delivered: _t("Teslim"),
             cancelled: _t("İptal"),
         };
@@ -105,6 +114,7 @@ export class TailorOrderList extends Component {
 
     getStatusClass(status) {
         const classes = {
+            waiting_approval: "badge-waiting",
             pending: "badge-pending",
             in_progress: "badge-in-progress",
             completed: "badge-completed",
@@ -159,7 +169,7 @@ export class TailorOrderList extends Component {
             }
             printTailorLabel(data);
         } catch (e) {
-            this.notification.add(_t("Etiket verisi alinamadi: %(error)s", { error: e.message }), { type: "danger" });
+            this.notification.add(_t("Etiket verisi alınamadı: %(error)s", { error: e.message }), { type: "danger" });
         }
     }
 
@@ -185,6 +195,8 @@ export class TailorOrderList extends Component {
                     if (result.success) {
                         this.notification.add(_t("Sipariş iptal edildi!"), { type: "warning" });
                         await this.loadOrders();
+                    } else {
+                        this.notification.add(result.error || _t("Sipariş iptal edilemedi."), { type: "danger" });
                     }
                 } catch (e) {
                     this.notification.add(_t("İptal hatası: %(error)s", { error: e.message }), { type: "danger" });

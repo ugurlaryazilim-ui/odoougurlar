@@ -1,4 +1,5 @@
 import logging
+import re
 
 from odoo import models, api
 from odoo.exceptions import UserError
@@ -35,12 +36,15 @@ class TailorMssqlConnector(models.AbstractModel):
         ICP = self.env['ir.config_parameter'].sudo()
         config = {
             'server': ICP.get_param('ugurlar_tailor.mssql_server', ''),
-            'port': int(ICP.get_param('ugurlar_tailor.mssql_port', '1433')),
+            'port': int(ICP.get_param('ugurlar_tailor.mssql_port', '1433') or 1433),
             'database': ICP.get_param('ugurlar_tailor.mssql_database', ''),
             'user': ICP.get_param('ugurlar_tailor.mssql_user', ''),
             'password': ICP.get_param('ugurlar_tailor.mssql_password', ''),
             'view_name': ICP.get_param('ugurlar_tailor.mssql_view_name', 'vw_TerziFaturalar'),
         }
+        # View adı SQL'e doğrudan yazılır (parametre olamaz): yalnız tanımlayıcı karakterlerine izin ver
+        if not re.fullmatch(r'[\w.\[\]]+', config['view_name'] or ''):
+            raise UserError('Terzi MSSQL view adı geçersiz! Yalnız harf, rakam, alt çizgi, nokta ve köşeli parantez kullanılabilir.')
         if not config['server'] or not config['database']:
             raise UserError(
                 'Terzi MSSQL bağlantı ayarları yapılandırılmamış!\n'
@@ -66,44 +70,62 @@ class TailorMssqlConnector(models.AbstractModel):
             )
             return conn
         except Exception as e:
-            _logger.error('MSSQL bağlantı hatası: %s', str(e))
-            raise UserError(f'MSSQL bağlantı hatası: {str(e)}')
+            _logger.error('MSSQL bağlantı hatası: %s', e)
+            raise UserError('Nebim veritabanına bağlanılamadı. Lütfen daha sonra tekrar deneyin veya sistem yöneticisine bildirin.')
 
     @api.private
-    def _execute_query(self, query, params=None):
-        """SQL sorgusu çalıştırır ve sonuçları dict listesi olarak döner."""
-        conn = self._get_connection()
+    def _execute_query(self, query, params=None, conn=None):
+        """SQL sorgusu çalıştırır ve sonuçları dict listesi olarak döner.
+
+        conn verilirse o bağlantı kullanılır (kapatmak çağıranın işi).
+        """
+        own = conn is None
+        if own:
+            conn = self._get_connection()
         try:
             cursor = conn.cursor(as_dict=True)
             cursor.execute(query, params or ())
-            results = cursor.fetchall()
-            return results
+            return cursor.fetchall()
         except Exception as e:
-            _logger.error('MSSQL sorgu hatası: %s', str(e))
-            raise UserError(f'SQL sorgu hatası: {str(e)}')
+            _logger.error('MSSQL sorgu hatası: %s', e)
+            raise UserError('Nebim sorgusu başarısız oldu. Lütfen daha sonra tekrar deneyin veya sistem yöneticisine bildirin.')
         finally:
-            conn.close()
+            if own:
+                conn.close()
 
-    def search_invoices(self, search_term):
-        """Fatura arama — Nebim view'ından UGRFaturaNo ile arar."""
-        if not search_term or len(search_term) < 3:
-            raise UserError('En az 3 karakter giriniz.')
-
-        config = self._get_mssql_config()
-        view_name = config['view_name']
-
-        query = f"""
-            SELECT DISTINCT TOP 20
+    _HEADER_COLUMNS = """
                 UGRFaturaNo as invoice_no,
                 FaturaTarihi as invoice_date,
                 MusteriKodu as customer_code,
                 MusteriAdi as customer_name,
-                SatisPersoneli as sales_person
-            FROM {view_name}
-            WHERE UGRFaturaNo LIKE %s
-            ORDER BY FaturaTarihi DESC
+                SatisPersoneli as sales_person"""
+
+    def search_invoices(self, search_term):
+        """Fatura arama — Nebim view'ından UGRFaturaNo ile arar.
+
+        Barkod okutulunca tam numara gelir: önce tam eşleşme (indeks kullanılır), sonra
+        "ile başlayan", en son "içeren" denenir; '%term%' tam tarama yalnız gerekirse çalışır.
         """
-        results = self._execute_query(query, (f'%{search_term}%',))
+        search_term = (search_term or '').strip()
+        if len(search_term) < 3:
+            raise UserError('En az 3 karakter giriniz.')
+
+        view_name = self._get_mssql_config()['view_name']
+        conn = self._get_connection()
+        try:
+            results = []
+            for op, value in (('=', search_term), ('LIKE', f'{search_term}%'), ('LIKE', f'%{search_term}%')):
+                query = f"""
+                    SELECT DISTINCT TOP 20 {self._HEADER_COLUMNS}
+                    FROM {view_name}
+                    WHERE UGRFaturaNo {op} %s
+                    ORDER BY FaturaTarihi DESC
+                """
+                results = self._execute_query(query, (value,), conn=conn)
+                if results:
+                    break
+        finally:
+            conn.close()
 
         # Datetime nesnelerini string'e çevir
         for row in results:
@@ -112,48 +134,32 @@ class TailorMssqlConnector(models.AbstractModel):
         return results
 
     def get_invoice_detail(self, invoice_no):
-        """Belirli bir faturanın başlık + ürün detaylarını getirir."""
-        config = self._get_mssql_config()
-        view_name = config['view_name']
-
-        # Başlık bilgisi
-        header_query = f"""
-            SELECT DISTINCT TOP 1
-                UGRFaturaNo as invoice_no,
-                FaturaTarihi as invoice_date,
-                MusteriKodu as customer_code,
-                MusteriAdi as customer_name,
-                SatisPersoneli as sales_person
-            FROM {view_name}
-            WHERE UGRFaturaNo = %s
-        """
-        headers = self._execute_query(header_query, (invoice_no,))
-        if not headers:
-            return None
-
-        header = headers[0]
-        if header.get('invoice_date'):
-            header['invoice_date'] = str(header['invoice_date'])
-
-        # Ürün detayları
-        detail_query = f"""
-            SELECT
+        """Belirli bir faturanın başlık + ürün detaylarını tek sorguda getirir."""
+        view_name = self._get_mssql_config()['view_name']
+        query = f"""
+            SELECT {self._HEADER_COLUMNS},
                 Barkod as barcode,
                 UrunKodu as product_code,
                 Adet as quantity
             FROM {view_name}
             WHERE UGRFaturaNo = %s
         """
-        items = self._execute_query(detail_query, (invoice_no,))
+        rows = self._execute_query(query, (invoice_no,))
+        if not rows:
+            return None
 
-        header['items'] = items
+        first = rows[0]
+        header = {k: first.get(k) for k in ('invoice_no', 'invoice_date', 'customer_code',
+                                              'customer_name', 'sales_person')}
+        if header.get('invoice_date'):
+            header['invoice_date'] = str(header['invoice_date'])
+        header['items'] = [{'barcode': r['barcode'], 'product_code': r['product_code'],
+                            'quantity': r['quantity']} for r in rows]
         return header
 
     def verify_product(self, invoice_no, barcode):
         """Barkod ile ürün doğrulama — faturada bu barkod var mı?"""
-        config = self._get_mssql_config()
-        view_name = config['view_name']
-
+        view_name = self._get_mssql_config()['view_name']
         query = f"""
             SELECT
                 Barkod as barcode,
