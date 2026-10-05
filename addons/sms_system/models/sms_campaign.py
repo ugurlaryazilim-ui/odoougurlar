@@ -5,7 +5,10 @@ from datetime import timedelta
 
 import pytz
 
+from markupsafe import Markup
+
 from odoo import _, api, fields, models
+from odoo.tools import html_escape
 from odoo.exceptions import UserError
 
 from ..services.turatel import MAX_SEGMENTS, prepare_text, segment_count
@@ -68,6 +71,8 @@ class SmsSystemCampaign(models.Model):
     sent_count = fields.Integer(string='Gönderilen', compute='_compute_stats')
     error_count = fields.Integer(string='Hatalı', compute='_compute_stats')
     pending_count = fields.Integer(string='Bekleyen', compute='_compute_stats')
+    progress = fields.Float(string='İlerleme', compute='_compute_stats', help='Gönderilen + hatalı / toplam (%)')
+    phone_preview = fields.Html(string='Telefonda Görünüm', compute='_compute_phone_preview', sanitize=True)
 
     # ── Hesaplar ──
 
@@ -148,6 +153,37 @@ class SmsSystemCampaign(models.Model):
             camp.sent_count = d.get('sent', 0) + d.get('test', 0)
             camp.error_count = d.get('error', 0)
             camp.pending_count = d.get('queued', 0) + d.get('sending', 0)
+            done = camp.sent_count + camp.error_count
+            camp.progress = (100.0 * done / camp.total_count) if camp.total_count else 0.0
+
+    @api.depends('final_body', 'preview_segments')
+    def _compute_phone_preview(self):
+        originator = self._icp('sms_system.turatel_originator') or 'SMS'
+        for camp in self:
+            text = html_escape(camp.final_body or _('Metin yazın...')).replace('\n', Markup('<br/>'))
+            camp.phone_preview = Markup(
+                '<div style="max-width:300px;border:8px solid #222;border-radius:28px;padding:14px 12px 22px;'
+                'background:#f5f5f7;font-family:-apple-system,Segoe UI,sans-serif">'
+                '<div style="text-align:center;font-size:12px;color:#666;margin-bottom:10px"><b>%s</b></div>'
+                '<div style="background:#e5e5ea;color:#000;border-radius:16px;padding:9px 12px;font-size:14px;'
+                'line-height:1.35;white-space:normal;word-wrap:break-word">%s</div>'
+                '<div style="font-size:11px;color:#888;margin-top:8px;text-align:right">%s karakter · %s SMS</div>'
+                '</div>') % (html_escape(originator), text, len(camp.final_body or ''), camp.preview_segments)
+
+    def action_send_test_to_me(self):
+        """Metni kullanıcının kendi cep telefonuna tek SMS olarak gönder ({ad} = kullanıcının adı)."""
+        self.ensure_one()
+        number = self.env.user.partner_id.phone
+        if not number:
+            raise UserError(_('Profilinizde telefon yok. Sağ üstte adınız > Profilim > Telefon alanını doldurun.'))
+        body = PLACEHOLDER.sub(lambda m: self.env.user.name if m.group(1) == 'ad' else '', self._build_body())
+        msg = self.env['sms.system.message'].send_sms(number, body, record=self)
+        ok = msg.state in ('sent', 'test')
+        return {'type': 'ir.actions.client', 'tag': 'display_notification',
+                'params': {'title': _('Deneme SMS'), 'type': 'success' if ok else 'danger',
+                           'message': (_('%s numarasına gönderildi.') % msg.number) + (
+                               _(' (Test modu açık: gerçekte gönderilmedi.)') if msg.state == 'test' else '')
+                           if ok else (msg.error or _('Gönderilemedi.'))}}
 
     @api.onchange('template_id')
     def _onchange_template_id(self):

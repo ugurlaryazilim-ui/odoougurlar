@@ -109,7 +109,7 @@ class SmsContactImport(models.TransientModel):
     _name = 'sms.system.contact.import'
     _description = 'SMS Rehberine Excel/CSV Aktar'
 
-    file = fields.Binary(string='Dosya', required=True)
+    file = fields.Binary(string='Dosya')
     filename = fields.Char()
     list_id = fields.Many2one('sms.system.list', string='Eklenecek Liste')
     new_list_name = fields.Char(string='ya da Yeni Liste')
@@ -120,8 +120,28 @@ class SmsContactImport(models.TransientModel):
     result = fields.Text(string='Sonuç', readonly=True)
     done = fields.Boolean()
 
+    def action_download_sample(self):
+        """Doldurulacak örnek Excel'i indir."""
+        import openpyxl
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = 'Rehber'
+        ws.append(['Ad Soyad', 'Telefon', 'Müşteri Kodu'])
+        ws.append(['Ayşe Yılmaz', '0532 123 45 67', 'M0001'])
+        ws.append(['Mehmet Demir', '5551234567', ''])
+        for col, width in (('A', 28), ('B', 18), ('C', 16)):
+            ws.column_dimensions[col].width = width
+        buf = io.BytesIO()
+        wb.save(buf)
+        att = self.env['ir.attachment'].create({
+            'name': 'sms_rehber_ornek.xlsx', 'raw': buf.getvalue(), 'res_model': self._name, 'res_id': self.id,
+            'mimetype': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})
+        return {'type': 'ir.actions.act_url', 'url': '/web/content/%s?download=true' % att.id, 'target': 'download'}
+
     def action_import(self):
         self.ensure_one()
+        if not self.file:
+            raise UserError(_('Bir Excel ya da CSV dosyası seçin.'))
         if not self.list_id and not (self.new_list_name or '').strip():
             raise UserError(_('Bir liste seçin ya da yeni liste adı yazın.'))
         rows = read_file(base64.b64decode(self.file), self.filename)

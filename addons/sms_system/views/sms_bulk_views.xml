@@ -85,7 +85,12 @@
         <field name="view_mode">list,form</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">Rehber boş</p>
-            <p>Excel/CSV aktarın ya da Kişiler / Kullanıcılar listesinden "SMS Listesine Ekle" işlemini kullanın.</p>
+            <p>Numaraları üç yoldan ekleyebilirsiniz:</p>
+            <ul class="text-start d-inline-block">
+                <li><b>Excel/CSV Aktar</b> (Rehber menüsü) — örnek dosya sihirbazdan indirilir.</li>
+                <li><b>Kişiler</b> ya da <b>Kullanıcılar</b> listesinde kayıtları seçip <b>İşlem &gt; SMS Listesine Ekle</b>.</li>
+                <li><b>Terzi Müşterilerini Aktar</b> (Rehber menüsü).</li>
+            </ul>
         </field>
     </record>
 
@@ -150,6 +155,7 @@
                 <field name="total_count"/>
                 <field name="sent_count"/>
                 <field name="error_count"/>
+                <field name="progress" widget="progressbar" optional="show"/>
                 <field name="state" widget="badge" decoration-success="state == 'done'"
                        decoration-info="state in ('scheduled', 'sending')"/>
                 <field name="user_id" optional="hide"/>
@@ -171,6 +177,8 @@
                             invisible="state not in ('scheduled', 'sending')"
                             confirm="Henüz gönderilmemiş SMS'ler iptal edilecek. Devam edilsin mi?"/>
                     <button name="action_draft" string="Taslağa Al" type="object" invisible="state not in ('scheduled', 'cancel')"/>
+                    <button name="action_send_test_to_me" string="Bana Deneme Gönder" type="object" icon="fa-mobile"
+                            invisible="state != 'draft'" help="Metni profilinizdeki telefona tek SMS olarak gönderir"/>
                     <field name="state" widget="statusbar" statusbar_visible="draft,sending,done"/>
                 </header>
                 <sheet>
@@ -209,6 +217,7 @@
                             <field name="personalized" invisible="not personalized"/>
                         </group>
                         <group string="Sonuç" invisible="state in ('draft', 'scheduled')">
+                            <field name="progress" widget="progressbar"/>
                             <field name="sent_count"/>
                             <field name="error_count"/>
                             <field name="pending_count" invisible="not pending_count"/>
@@ -217,13 +226,18 @@
                             <field name="finished_at"/>
                         </group>
                     </group>
-                    <group string="Metin">
-                        <field name="body" nolabel="1" colspan="2" readonly="state != 'draft'"
-                               placeholder="Sayın {ad}, ... ({ad} yazarsanız her kişinin adı gelir)"/>
-                    </group>
-                    <group string="Örnek (gönderilecek hali)">
-                        <field name="final_body" nolabel="1" colspan="2"/>
-                    </group>
+                    <div class="row">
+                        <div class="col-lg-7">
+                            <label for="body" string="Metin" class="fw-bold"/>
+                            <field name="body" nolabel="1" readonly="state != 'draft'"
+                                   placeholder="Sayın {ad}, ... ({ad} yazarsanız her kişinin adı gelir)"/>
+                            <field name="final_body" invisible="1"/>
+                        </div>
+                        <div class="col-lg-5">
+                            <label for="phone_preview" string="Telefonda böyle görünecek" class="fw-bold"/>
+                            <field name="phone_preview" nolabel="1" readonly="1"/>
+                        </div>
+                    </div>
                 </sheet>
                 <chatter/>
             </form>
@@ -252,7 +266,14 @@
         <field name="view_mode">list,form</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">İlk toplu SMS'inizi oluşturun</p>
-            <p>Önce Rehber'e kişi aktarın, listeye bağlayın; sonra burada liste ve metin seçip gönderin.</p>
+            <p><b>Başlarken:</b></p>
+            <ol class="text-start d-inline-block">
+                <li><b>Ayarlar &gt; SMS</b>: Turatel kanal kodu, kullanıcı, şifre ve mesaj başlığını girin; "Bağlantıyı Test Et".</li>
+                <li><b>Rehber &gt; Excel/CSV Aktar</b>: müşteri ya da personel listenizi yükleyin (örnek Excel oradan indirilebilir).</li>
+                <li><b>Yeni</b>: başlık, liste ve metni girin; sağda telefondaki görünümü kontrol edin.</li>
+                <li><b>Bana Deneme Gönder</b> ile önce kendinize gönderin, sonra <b>Gönder</b>.</li>
+            </ol>
+            <p class="text-muted">Kampanya/indirim (ticari) SMS'i için İYS bağlantısı gerekir (Ayarlar &gt; SMS &gt; İYS).</p>
         </field>
     </record>
 
@@ -280,6 +301,7 @@
                 <div invisible="done" class="text-muted mb-2">
                     İlk satırda başlık olsun: <b>Ad</b>, <b>Telefon</b> (isteğe bağlı <b>Müşteri Kodu</b>).
                     Başlık yoksa telefon sütunu içerikten bulunur. Kara listedeki ve İYS durumu olan kişilere dokunulmaz.
+                    <button name="action_download_sample" type="object" string="Örnek Excel indir" class="btn-link p-0 ms-1" icon="fa-download"/>
                 </div>
                 <group invisible="done">
                     <field name="file" filename="filename"/>
