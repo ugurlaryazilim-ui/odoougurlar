@@ -192,6 +192,7 @@ _ANALYSIS_SCHEMA = {
         "collarType": {"type": "STRING"},
         "collarTypeEn": {"type": "STRING"},
         "sleeveType": {"type": "STRING"},
+        "closureEn": {"type": "STRING"},
         "hasGraphic": {"type": "BOOLEAN"},
         "graphicDescriptionEn": {"type": "STRING"},
         "garmentLength": {"type": "STRING", "enum": ["mini", "knee", "midi", "maxi", "standard"]},
@@ -252,6 +253,7 @@ Return JSON:
   "collarType": "Turkish collar/neckline if visible",
   "collarTypeEn": "without the word 'neckline', e.g. 'V', 'crew', 'shirt collar', 'turtleneck'",
   "sleeveType": "sleeve type if visible (e.g. uzun kollu, kolsuz, askılı)",
+  "closureEn": "the garment's own front fastening exactly as seen, e.g. 'single metal ring clasp at the front, no buttons', 'five-button front', 'concealed zipper', 'open front, no fastening'; empty for pullovers and bottoms",
   "hasGraphic": true or false,
   "graphicDescriptionEn": "short English description of a print/graphic, or empty",
   "garmentLength": "mini | knee | midi | maxi | standard"
@@ -298,22 +300,44 @@ _TAG_PROMPT = """This garment was photographed inside a clothing store. Find eve
 - hangtag: brand hangtag hanging on a string, plastic fastener or safety pin
 - tag_pin: the pin, plastic loop or string that attaches a tag
 Also report the garment's own sewn-flat design elements that look similar (woven brand patch, leather patch) as "design_label", but ONLY when you are sure they are stitched into the garment. If you are unsure whether a small rectangle on the waistband is a store alarm tag or a brand patch, report it as "alarm_tag".
-Never report buttons, rivets, zipper pulls, buckles, drawstrings or prints.
+Never report buttons, rivets, zipper pulls, buckles, drawstrings, prints, or metal rings, hoops, clasps, hooks, brooches, chains and eyelets: store alarm tags are plastic, metal hardware is part of the garment design.
 Include the whole object and its attachment in the box. Give each item a confidence from 0.0 to 1.0 and report anything at least 50% likely.
 box_2d is [ymin, xmin, ymax, xmax] normalized to 0-1000.
 Return JSON: {"securityTags": [{"box_2d": [ymin, xmin, ymax, xmax], "label": "alarm_tag", "confidence": 0.9}]}
 Return {"securityTags": []} if there is none."""
 
 
-def detect_image_tags(api_key, image_url, gemini_api_key=None):
+# AI sonucu için: try-on modeli silinmiş alarmın yerine pim, klips, sarkan halka vb. çizebiliyor
+_RESULT_TAG_PROMPT = """This is an AI-generated e-commerce photo of a model wearing a garment. Find every small foreign object attached to or hanging from the garment that is NOT part of the garment's design and must be removed:
+- alarm_tag: store security (EAS) hard tag, or any rigid plastic piece, disc, clip or capsule clipped on the fabric
+- price_tag: paper or cardboard tag or sticker
+- hangtag: tag hanging on a string or fastener
+- tag_pin: a pin, plastic loop, string, clip or small dangling object attached to the fabric (very often at the waistband, belt loops, back pockets, hem or side seam)
+Report the garment's own stitched elements (brand patch, woven label) as "design_label" only when you are sure they are sewn flat into the garment.
+Never report buttons, rivets, zipper pulls, belt buckles, drawstrings, prints, or metal rings, hoops, clasps, hooks, brooches, chains and eyelets that belong to the garment design.
+Include the whole object and its attachment in the box. Give each item a confidence from 0.0 to 1.0 and report anything at least 50% likely.
+box_2d is [ymin, xmin, ymax, xmax] normalized to 0-1000.
+Return JSON: {"securityTags": [{"box_2d": [ymin, xmin, ymax, xmax], "label": "tag_pin", "confidence": 0.9}]}
+Return {"securityTags": []} if there is none."""
+
+
+def detect_image_tags(api_key, image_url, gemini_api_key=None, generated=False, garment_hint=''):
     """Kıyafet görselindeki mağaza alarmı / fiyat etiketlerini tespit eder.
+
+    generated=True: AI sonucu (manken üzerinde) için ayrı istem — eklenen pim/klips/sarkan
+    nesneleri de arar. garment_hint: ürün adı ("Halka Detaylı ..."): adında geçen tasarım
+    detayı alarm sanılıp silinmesin.
 
     Returns:
         list: [{'box_2d': [ymin, xmin, ymax, xmax], 'label': str, 'confidence': float}] veya []
     """
     if not image_url or not gemini_api_key:
         return []
-    parsed = _gemini_json(gemini_api_key, _TAG_PROMPT, image_url, schema=_TAG_SCHEMA,
+    prompt = _RESULT_TAG_PROMPT if generated else _TAG_PROMPT
+    if garment_hint:
+        prompt += (f'\nThe product is: "{garment_hint}". Design details named in the product name '
+                   '(e.g. a ring, buckle, chain or brooch) belong to the garment: never report them.')
+    parsed = _gemini_json(gemini_api_key, prompt, image_url, schema=_TAG_SCHEMA,
                           timeout=25, deterministic=True)
     tags = (parsed or {}).get('securityTags') or []
     tags = [t for t in tags if isinstance(t, dict) and isinstance(t.get('box_2d'), list)
@@ -626,6 +650,10 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
             collar_note += "Thin spaghetti straps. "
         elif any(k in sleeve_lower for k in ['sleeveless', 'kolsuz']):
             collar_note += "Sleeveless. "
+        # Kapama tarif edilmezse model (özellikle silinen etiketin yanında) fermuar/düğme uyduruyor
+        closure = str(analysis.get('closureEn') or '').strip().rstrip('.')
+        if closure:
+            collar_note += f"Front fastening exactly as in Image 2: {closure}. "
 
     # Grafik / baskı notu
     graphic_note = ''

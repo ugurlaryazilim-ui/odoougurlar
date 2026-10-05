@@ -845,3 +845,73 @@
     height: 100%;
     object-fit: cover;
 }
+
+/* ─── Elle alarm / etiket silme ──────────────────────── */
+.ais-rp-erase-start {
+    align-self: center;
+    margin: 0 0 8px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #374151;
+    background: #f3f4f6;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    cursor: pointer;
+}
+.ais-rp-erase-start:hover {
+    background: #e5e7eb;
+}
+.ais-rp-erase-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: #1e3a8a;
+    background: #eff6ff;
+    border-bottom: 1px solid #bfdbfe;
+}
+.ais-rp-erase-actions {
+    display: flex;
+    gap: 6px;
+}
+.ais-rp-erase-actions .ais-rp-btn {
+    padding: 4px 10px;
+    font-size: 12px;
+}
+.ais-rp-btn-erase {
+    color: #fff;
+    background: #2563eb;
+    border-color: #2563eb;
+}
+.ais-rp-btn-erase:disabled {
+    opacity: 0.5;
+}
+.ais-rp-erase-wrap {
+    cursor: default;
+}
+.ais-rp-erase-stage {
+    position: relative;
+    display: inline-block;
+    line-height: 0;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: crosshair;
+}
+.ais-rp-erase-stage .ais-rp-img {
+    pointer-events: none;
+}
+.ais-rp-erase-box {
+    position: absolute;
+    border: 2px solid #ef4444;
+    background: rgba(239, 68, 68, 0.25);
+    border-radius: 3px;
+    pointer-events: none;
+}
+.ais-rp-erase-box-temp {
+    border-style: dashed;
+}

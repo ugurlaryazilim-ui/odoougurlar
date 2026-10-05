@@ -206,6 +206,10 @@ async function _openReviewPopup(initialSessionId) {
     let revisionPollTimer = null;
     let heartbeatTimer = null;
     let lockLostWarned = false;
+    // Elle etiket/alarm silme: işaretlenen kutular (görsele oranla 0-1) hangi üretime ait
+    let eraseItemId = null;
+    let eraseBoxes = [];
+    let erasing = false;
 
     // ═══ HEARTBEAT — her 2dk'da kilidi canlı tut ═══
     heartbeatTimer = setInterval(async () => {
@@ -247,6 +251,13 @@ async function _openReviewPopup(initialSessionId) {
     function render() {
         const item = items[currentIndex];
         if (!item) return;
+        // Başka görsele geçilince silme modu kapanır
+        if (eraseItemId !== null && eraseItemId !== item.id && !erasing) {
+            eraseItemId = null;
+            eraseBoxes = [];
+        }
+        const eraseActive = eraseItemId === item.id;
+        const canErase = canApprove && item.state === 'done' && !item.pending_revision;
 
         const activeItems = items.filter(i => !i.is_excluded);
         const excludedCount = items.filter(i => i.is_excluded).length;
@@ -370,9 +381,33 @@ async function _openReviewPopup(initialSessionId) {
                                         ⚠ ${item.qc_issues.map(escapeHtml).join(' · ')}
                                     </div>
                                 ` : ''}
-                                <div class="ais-rp-img-wrap ais-rp-zoomable" data-zoom-src="${item.generated_url_full}">
-                                    <img src="${item.generated_url}" class="ais-rp-img" alt="AI Sonucu"/>
-                                </div>
+                                ${eraseActive ? `
+                                    <div class="ais-rp-erase-bar">
+                                        <span>Silinecek alarm/etiketin üzerine kutu çizin veya dokunun</span>
+                                        <div class="ais-rp-erase-actions">
+                                            <button class="ais-rp-btn ais-rp-btn-nav" id="ais-rp-erase-cancel" ${erasing ? 'disabled' : ''}>Vazgeç</button>
+                                            <button class="ais-rp-btn ais-rp-btn-nav" id="ais-rp-erase-clear" ${erasing || !eraseBoxes.length ? 'disabled' : ''}>Temizle</button>
+                                            <button class="ais-rp-btn ais-rp-btn-erase" id="ais-rp-erase-apply" ${erasing || !eraseBoxes.length ? 'disabled' : ''}>
+                                                ${erasing ? '⏳ Siliniyor...' : `🧽 Sil (${eraseBoxes.length})`}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="ais-rp-img-wrap ais-rp-erase-wrap">
+                                        <div class="ais-rp-erase-stage" id="ais-rp-erase-stage">
+                                            <img src="${item.generated_url}" class="ais-rp-img" alt="AI Sonucu" draggable="false"/>
+                                            ${eraseBoxes.map(b => `<div class="ais-rp-erase-box" style="left:${b.x * 100}%; top:${b.y * 100}%; width:${b.w * 100}%; height:${b.h * 100}%;"></div>`).join('')}
+                                        </div>
+                                    </div>
+                                ` : `
+                                    <div class="ais-rp-img-wrap ais-rp-zoomable" data-zoom-src="${item.generated_url_full}">
+                                        <img src="${item.generated_url}" class="ais-rp-img" alt="AI Sonucu"/>
+                                    </div>
+                                    ${canErase ? `
+                                        <button class="ais-rp-erase-start" id="ais-rp-erase-start" title="Görselde kalan alarm, etiket veya pimi işaretleyip silin">
+                                            🧽 Alarm / Etiket Sil
+                                        </button>
+                                    ` : ''}
+                                `}
                                 ${canApprove && (item.candidates || []).length ? `
                                     <div class="ais-rp-candidates">
                                         <span class="ais-rp-candidates-label">Alternatifler</span>
@@ -552,7 +587,7 @@ async function _openReviewPopup(initialSessionId) {
             let translateTimer = null;
             promptInput.addEventListener('input', (e) => {
                 revisionPrompt = e.target.value;
-                // Debounce: 800ms sonra çeviri yap
+                // Debounce: yazma bitince (500ms) çeviri yap
                 if (translateTimer) clearTimeout(translateTimer);
                 if (!revisionPrompt.trim()) {
                     revisionPromptEn = '';
@@ -569,17 +604,24 @@ async function _openReviewPopup(initialSessionId) {
                         const result = await _jsonRpc('/ai_studio/translate_revision', {
                             text: sourceText,
                         });
-                        // Bu arada metin değiştiyse eski çeviriyi kullanma
-                        if (result && result.translated && sourceText === revisionPrompt) {
+                        // Bu arada metin değiştiyse eski çeviriyi kullanma (yenisi zaten yolda)
+                        if (sourceText !== revisionPrompt) return;
+                        const enEl2 = document.getElementById('ais-rp-revision-prompt-en');
+                        if (result && result.translated) {
                             revisionPromptEn = result.translated;
                             revisionPromptEnSource = sourceText;
-                            const enEl2 = document.getElementById('ais-rp-revision-prompt-en');
                             if (enEl2) enEl2.value = revisionPromptEn;
+                        } else if (enEl2) {
+                            // "Çevriliyor..." takılı kalmasın; gönderimde sunucu yeniden çevirir
+                            enEl2.value = '';
+                            enEl2.placeholder = 'Çeviri alınamadı — gönderince otomatik çevrilecek';
                         }
                     } catch (err) {
                         console.error('Translation error:', err);
+                        const enEl3 = document.getElementById('ais-rp-revision-prompt-en');
+                        if (enEl3 && sourceText === revisionPrompt) enEl3.value = '';
                     }
-                }, 800);
+                }, 500);
             });
         }
         
@@ -631,6 +673,36 @@ async function _openReviewPopup(initialSessionId) {
             });
         });
 
+        // Elle alarm/etiket silme
+        const eraseStartBtn = overlay.querySelector('#ais-rp-erase-start');
+        if (eraseStartBtn) {
+            eraseStartBtn.addEventListener('click', () => {
+                eraseItemId = items[currentIndex].id;
+                eraseBoxes = [];
+                render();
+            });
+        }
+        const eraseCancelBtn = overlay.querySelector('#ais-rp-erase-cancel');
+        if (eraseCancelBtn) {
+            eraseCancelBtn.addEventListener('click', () => {
+                eraseItemId = null;
+                eraseBoxes = [];
+                render();
+            });
+        }
+        const eraseClearBtn = overlay.querySelector('#ais-rp-erase-clear');
+        if (eraseClearBtn) {
+            eraseClearBtn.addEventListener('click', () => { eraseBoxes = []; render(); });
+        }
+        const eraseApplyBtn = overlay.querySelector('#ais-rp-erase-apply');
+        if (eraseApplyBtn) {
+            eraseApplyBtn.addEventListener('click', applyErase);
+        }
+        const eraseStage = overlay.querySelector('#ais-rp-erase-stage');
+        if (eraseStage && !erasing) {
+            bindEraseDrawing(eraseStage);
+        }
+
         // Zoom: Container-based zoom
         overlay.querySelectorAll('.ais-rp-zoomable').forEach(wrap => {
             const img = wrap.querySelector('.ais-rp-img');
@@ -659,6 +731,93 @@ async function _openReviewPopup(initialSessionId) {
             // Tablette hover yok: dokununca tam boy görüntüleyici (iki parmakla yakınlaştırma)
             wrap.addEventListener('click', () => openFullscreenImage(zoomSrc));
         });
+    }
+
+    /** Fare veya parmakla kutu çiz; kısa dokunuş noktanın çevresine küçük bir kutu koyar. */
+    function bindEraseDrawing(stage) {
+        let start = null;
+        let temp = null;
+        const point = (e) => {
+            const r = stage.getBoundingClientRect();
+            return {
+                x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+                y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+                ratio: r.width / Math.max(1, r.height),
+            };
+        };
+        stage.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            stage.setPointerCapture(e.pointerId);
+            start = point(e);
+            temp = document.createElement('div');
+            temp.className = 'ais-rp-erase-box ais-rp-erase-box-temp';
+            stage.appendChild(temp);
+        });
+        stage.addEventListener('pointermove', (e) => {
+            if (!start || !temp) return;
+            const p = point(e);
+            temp.style.left = `${Math.min(start.x, p.x) * 100}%`;
+            temp.style.top = `${Math.min(start.y, p.y) * 100}%`;
+            temp.style.width = `${Math.abs(p.x - start.x) * 100}%`;
+            temp.style.height = `${Math.abs(p.y - start.y) * 100}%`;
+        });
+        const finish = (e, cancelled) => {
+            if (!start) return;
+            const p = point(e);
+            let x = Math.min(start.x, p.x);
+            let y = Math.min(start.y, p.y);
+            let w = Math.abs(p.x - start.x);
+            let h = Math.abs(p.y - start.y);
+            start = null;
+            if (temp) { temp.remove(); temp = null; }
+            if (cancelled) return;
+            if (w < 0.02 && h < 0.02) {
+                // Dokunuş: genişliğin %8'i kadar kare kutu
+                w = 0.08;
+                h = 0.08 * p.ratio;
+                x = Math.min(1 - w, Math.max(0, p.x - w / 2));
+                y = Math.min(1 - h, Math.max(0, p.y - h / 2));
+            }
+            if (w * h > 0.12) {
+                showToast('Alan çok büyük; yalnız etiketin çevresini seçin.', 'warning');
+                return;
+            }
+            eraseBoxes.push({ x, y, w, h });
+            render();
+        };
+        stage.addEventListener('pointerup', (e) => finish(e, false));
+        stage.addEventListener('pointercancel', (e) => finish(e, true));
+    }
+
+    async function applyErase() {
+        const item = items[currentIndex];
+        if (!item || !eraseBoxes.length || erasing) return;
+        erasing = true;
+        render();
+        const boxes = eraseBoxes.map(b => [
+            Math.round(b.y * 1000), Math.round(b.x * 1000),
+            Math.round((b.y + b.h) * 1000), Math.round((b.x + b.w) * 1000),
+        ]);
+        try {
+            const res = await _jsonRpc('/ai_studio/erase_regions', { generation_id: item.id, boxes });
+            if (!res || res.error) {
+                showToast('Silinemedi: ' + ((res && res.error) || 'Sunucu yanıt vermedi'));
+            } else {
+                const freshData = await _jsonRpc('/ai_studio/review_data', { session_id: data.session_id });
+                const fresh = (freshData.items || []).find(fi => fi.id === item.id);
+                const idx = items.findIndex(it => it.id === item.id);
+                if (fresh && idx >= 0) {
+                    items[idx] = { ...fresh, is_primary: items[idx].is_primary, is_approved: items[idx].is_approved };
+                }
+                eraseItemId = null;
+                eraseBoxes = [];
+                showToast('İşaretli bölge silindi. Önceki hali "Alternatifler"de duruyor.', 'success');
+            }
+        } catch (e) {
+            showToast('Silinemedi: ' + e.message);
+        }
+        erasing = false;
+        render();
     }
 
     function openFullscreenImage(src) {
