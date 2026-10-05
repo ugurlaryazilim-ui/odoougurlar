@@ -1,9 +1,70 @@
 import logging
+from collections import OrderedDict
 
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
+
+# Aynı metin (red formunda yazılıp silinen, revizyonda tekrar çevrilen) ikinci kez API'ye gitmesin
+_TRANSLATION_CACHE = OrderedDict()
+_TRANSLATION_CACHE_SIZE = 500
+_TRANSLATE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+
+
+def translate_tr_en(text, gemini_key=''):
+    """Türkçe moda düzenleme talimatını İngilizce'ye çevir; başarısızsa ''.
+
+    Gemini'de "thinking" kapalı: çeviri için gereksiz, açıkken yanıt 5-10 sn sürüyordu.
+    deep-translator'ın kendi zaman aşımı olmadığından ayrı thread'de sınırlı beklenir.
+    """
+    text = (text or '').strip()
+    if not text:
+        return ''
+    cached = _TRANSLATION_CACHE.get(text)
+    if cached:
+        _TRANSLATION_CACHE.move_to_end(text)
+        return cached
+    translated = ''
+    if gemini_key:
+        try:
+            import requests
+            prompt = (
+                "Translate this fashion image editing instruction to clear, precise English. "
+                "Context: This is an edit request for a fashion e-commerce photo. "
+                "Return ONLY the English translation, nothing else.\n\n"
+                f"Turkish instruction: {text}"
+            )
+            resp = requests.post(_TRANSLATE_URL, json={
+                'contents': [{'parts': [{'text': prompt}]}],
+                'generationConfig': {'temperature': 0, 'thinkingConfig': {'thinkingBudget': 0}},
+            }, headers={'Content-Type': 'application/json', 'x-goog-api-key': gemini_key}, timeout=8)
+            if resp.status_code == 200:
+                candidates = resp.json().get('candidates') or []
+                if candidates:
+                    parts = (candidates[0].get('content') or {}).get('parts') or [{}]
+                    translated = (parts[0].get('text') or '').strip()
+            else:
+                _logger.warning('Gemini çeviri başarısız (status=%s), deep-translator deneniyor', resp.status_code)
+        except Exception as e:
+            _logger.warning('Gemini çeviri hatası: %s — deep-translator deneniyor', e.__class__.__name__)
+    if not translated:
+        try:
+            from concurrent.futures import ThreadPoolExecutor
+            from deep_translator import GoogleTranslator
+            pool = ThreadPoolExecutor(max_workers=1)
+            try:
+                future = pool.submit(GoogleTranslator(source='tr', target='en').translate, text)
+                translated = (future.result(timeout=6) or '').strip()
+            finally:
+                pool.shutdown(wait=False)
+        except Exception as e:
+            _logger.warning('deep-translator hatası: %s', e.__class__.__name__)
+    if translated:
+        _TRANSLATION_CACHE[text] = translated
+        while len(_TRANSLATION_CACHE) > _TRANSLATION_CACHE_SIZE:
+            _TRANSLATION_CACHE.popitem(last=False)
+    return translated
 
 
 class AiStudioGeneration(models.Model):
@@ -238,6 +299,66 @@ class AiStudioGeneration(models.Model):
                 },
             )
 
+    def action_erase_regions(self, boxes):
+        """Reviewer'ın işaretlediği bölgeleri (alarm, pim, etiket) maskeli AI ile sil.
+
+        boxes: [[ymin, xmin, ymax, xmax], ...] 0-1000 normalize. Silme yalnız işaretli
+        bölgeye uygulanır (görselin geri kalanı birebir korunur). Önceki görsel aday
+        olarak saklanır: "Alternatifler"den tek dokunuşla geri alınabilir.
+        """
+        self.ensure_one()
+        self._check_ai_studio_group('reviewer')
+        if self.state != 'done' or not self.generated_image:
+            raise UserError(_('Sadece tamamlanmış üretimlerde silme yapılabilir.'))
+        clean = []
+        for box in (boxes or [])[:10]:
+            try:
+                ymin, xmin, ymax, xmax = (max(0, min(1000, int(v))) for v in box[:4])
+            except (TypeError, ValueError):
+                continue
+            if ymax - ymin < 5 or xmax - xmin < 5:
+                continue
+            if (ymax - ymin) * (xmax - xmin) > 120000:  # erase_regions %15 üstünü reddeder
+                raise UserError(_('İşaretlenen alan çok büyük; yalnız etiketin çevresini seçin.'))
+            clean.append({'box_2d': [ymin, xmin, ymax, xmax], 'label': 'alarm_tag', 'confidence': 1.0})
+        if not clean:
+            raise UserError(_('Silinecek alan işaretlenmedi.'))
+        fal_key = self.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fal_api_key')
+        if not fal_key:
+            raise UserError(_('fal.ai API anahtarı tanımlı değil.'))
+        import base64
+        from ..services.fal_provider import FalProvider
+        # Kutu tam işaretlendiği için dar dolgu: çevre kumaşı korunur
+        data, cost = FalProvider(fal_key).erase_regions(self.generated_image, clean, pad_ratio=0.12)
+        if not data:
+            raise UserError(_('Silme başarısız oldu, lütfen tekrar deneyin.'))
+        previous = self.generated_image
+        new_image = base64.b64encode(data)
+        self.env['ai.studio.generation.candidate'].sudo().create({
+            'generation_id': self.id, 'sequence': 99, 'image': previous,
+        })
+        # Etiket uyarıları giderildi; diğer denetim uyarıları kalır
+        from ..services.garment_analyzer import VISUAL_QC_ISSUES
+        tag_issues = {VISUAL_QC_ISSUES['store_tag_visible'], VISUAL_QC_ISSUES['added_label']}
+        details = self.quality_details or ''
+        if '⚠' in details:
+            head, tail = details.split('⚠', 1)
+            rest = [i.strip() for i in tail.split(';') if i.strip() and i.strip() not in tag_issues]
+            details = head.rstrip(' |') + (' | ⚠ ' + '; '.join(rest) if rest else '')
+        vals = {
+            'generated_image': new_image,
+            'quality_details': (details + ' | Reviewer etiket sildi').strip(' |'),
+            'cost': (self.cost or 0.0) + cost,
+        }
+        self.write(vals)
+        if self.is_approved and self.source_photo_id:
+            self.source_photo_id.image_processed = new_image
+        self.session_id.message_post(body=_('%(type)s görselinde %(n)d bölge elle silindi.') % {
+            'type': dict(self._fields['photo_type'].selection).get(self.photo_type, ''),
+            'n': len(clean),
+        })
+        return True
+
     def action_toggle_exclude(self):
         """Hariç tutma durumunu değiştir (toggle)."""
         self._check_ai_studio_group('reviewer')
@@ -261,48 +382,20 @@ class AiStudioGeneration(models.Model):
                 )
         return True
 
-    def _translate_prompt(self, prompt_text):
-        if not prompt_text or not prompt_text.strip():
+    def _translate_prompt(self, prompt_text, keep_source_on_failure=True):
+        """Türkçe talimatı İngilizce'ye çevir (Gemini, olmazsa deep-translator).
+
+        keep_source_on_failure=False ise çeviri başarısızken '' döner (UI'daki
+        İngilizce alana Türkçe metin yazılmasın).
+        """
+        text = (prompt_text or '').strip()
+        if not text:
             return ''
-        
-        # ═══ YÖNTEM 1: Gemini Flash (BİRİNCİL — güvenilir) ═══
-        try:
-            gemini_key = self.env['ir.config_parameter'].sudo().get_param(
-                'ugurlar_ai_studio.gemini_api_key', ''
-            )
-            if gemini_key:
-                import requests as _req
-                prompt = (
-                    "Translate this fashion image editing instruction to clear, precise English. "
-                    "Context: This is an edit request for a fashion e-commerce photo. "
-                    "Return ONLY the English translation, nothing else.\n\n"
-                    f"Turkish instruction: {prompt_text}"
-                )
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-                resp = _req.post(url, json={
-                    'contents': [{'parts': [{'text': prompt}]}],
-                }, headers={'Content-Type': 'application/json', 'x-goog-api-key': gemini_key}, timeout=10)
-                
-                if resp.status_code == 200:
-                    data = resp.json()
-                    candidates = data.get('candidates', [])
-                    if candidates:
-                        en_text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '').strip()
-                        if en_text:
-                            return en_text
-        except Exception:
-            pass  # Gemini başarısız, deep-translator dene
-        
-        # ═══ YÖNTEM 2: deep-translator (FALLBACK — ücretsiz) ═══
-        try:
-            from deep_translator import GoogleTranslator
-            translated = GoogleTranslator(source='tr', target='en').translate(prompt_text)
-            if translated:
-                return translated
-        except Exception:
-            pass
-        
-        return prompt_text
+        gemini_key = self.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.gemini_api_key', '')
+        translated = translate_tr_en(text, gemini_key)
+        if translated:
+            return translated
+        return prompt_text if keep_source_on_failure else ''
 
     @api.onchange('revision_prompt')
     def _onchange_revision_prompt(self):

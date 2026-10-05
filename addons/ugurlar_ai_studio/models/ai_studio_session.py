@@ -218,7 +218,7 @@ AUTO_FIX_INSTRUCTIONS = {
 }
 
 
-def _auto_fix_defects(env, generated_b64, codes, boxes=None):
+def _auto_fix_defects(env, generated_b64, codes, boxes=None, garment_hint=''):
     """Denetimin bulduğu düzeltilebilir hataları gider.
 
     - Elbise altı pantolon: Seedream düzenlemesi (bütünsel değişiklik)
@@ -252,26 +252,55 @@ def _auto_fix_defects(env, generated_b64, codes, boxes=None):
                 fixed.append('pants_under_dress')
         tag_codes = [c for c in ('store_tag_visible', 'added_label') if c in fixable]
         if tag_codes:
-            # Denetimin kutuları ORİJİNAL görsele aittir; pantolon düzeltmesi görseli
-            # yeniden ürettiyse konumlar kaymıştır — yeni görselde yeniden tespit et
-            usable_boxes = [] if 'pants_under_dress' in fixed else (boxes or [])
-            tag_boxes = [dict(b, confidence=1.0, label='alarm_tag') for b in usable_boxes
-                         if b.get('code') in tag_codes]
-            if not tag_boxes:
-                from ..services.garment_analyzer import detect_image_tags
-                tag_boxes = detect_image_tags(
-                    None, current, gemini_api_key=icp.get_param('ugurlar_ai_studio.gemini_api_key', ''))
-            # Konum yoksa düzeltme yapılmaz (istemli düzenleme etiketi yeniden çizebilir);
-            # denetim uyarısı reviewer'da görünür
-            data, cost = provider.erase_regions(current, tag_boxes, pad_ratio=0.35) if tag_boxes else (None, 0.0)
+            data, cost = _erase_result_tags(
+                provider, current, icp.get_param('ugurlar_ai_studio.gemini_api_key', ''),
+                # Denetimin kutuları ORİJİNAL görsele aittir; pantolon düzeltmesi görseli
+                # yeniden ürettiyse konumlar kaymıştır — yalnız yeni tespit kullanılır
+                qc_boxes=[] if 'pants_under_dress' in fixed else [
+                    b for b in (boxes or []) if b.get('code') in tag_codes],
+                garment_hint=garment_hint)
+            total_cost += cost
             if data:
-                current, total_cost = base64.b64encode(_convert_to_jpeg(data)), total_cost + cost
+                current = data
                 fixed.extend(tag_codes)
     except Exception as e:
         _logger.warning('Otomatik düzeltme başarısız (%s): %s', fixable, e)
     if not fixed:
         return None, 0.0, []
     return current, total_cost, fixed
+
+
+def _erase_result_tags(provider, image_b64, gemini_api_key, qc_boxes=None, passes=(0.35, 0.7),
+                       garment_hint=''):
+    """AI sonucundaki alarm/etiket/pimi maskeli silip DOĞRULA; kalıntı varsa daha geniş maskeyle tekrarla.
+
+    Denetimin (iki görselli, genel) kutuları ile etikete özel tespitin kutuları birleştirilir;
+    her geçişten sonra etikete özel tespit yeniden çalışır. İstemli düzenleme kullanılmaz:
+    model "remove the tag" denince etiketi yeniden çizmeye meyillidir.
+
+    Returns:
+        (base64 veya None, float cost)
+    """
+    from ..services.garment_analyzer import detect_image_tags
+    current, total_cost, changed = image_b64, 0.0, False
+    boxes = [dict(b, confidence=1.0, label='alarm_tag') for b in (qc_boxes or [])]
+    boxes += detect_image_tags(None, current, gemini_api_key=gemini_api_key, generated=True,
+                                  garment_hint=garment_hint)
+    for attempt, pad in enumerate(passes, start=1):
+        if not boxes:
+            break
+        data, cost = provider.erase_regions(current, boxes, pad_ratio=pad)
+        if not data:
+            break
+        current, total_cost, changed = base64.b64encode(_convert_to_jpeg(data)), total_cost + cost, True
+        remaining = detect_image_tags(None, current, gemini_api_key=gemini_api_key, generated=True,
+                                  garment_hint=garment_hint)
+        if not remaining:
+            _logger.info('Sonuçtaki etiket silindi ve doğrulandı (geçiş %d)', attempt)
+            break
+        _logger.warning('Sonuçta silme sonrası %d etiket kaldı (geçiş %d)', len(remaining), attempt)
+        boxes = remaining
+    return (current if changed else None), total_cost
 
 
 def _needs_bare_legs(session, analysis=None):
@@ -326,7 +355,8 @@ def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', anal
         auto_fix = icp.get_param('ugurlar_ai_studio.auto_tag_fix', 'True') == 'True'
         if visual_qc and auto_fix:
             fixed_b64, fix_cost, fixed_codes = _auto_fix_defects(
-                env, generated_b64, visual_qc.get('codes', []), visual_qc.get('boxes'))
+                env, generated_b64, visual_qc.get('codes', []), visual_qc.get('boxes'),
+                garment_hint=(gen.session_id.product_id.display_name or '') if gen else '')
             if fixed_b64:
                 _logger.info('Otomatik düzeltildi %s (gen=%s)', fixed_codes, gen.id if gen else '?')
                 generated_b64 = fixed_b64
@@ -1319,7 +1349,8 @@ class AiStudioSession(models.Model):
             if not gemini_api_key:
                 return []
             from ..services.garment_analyzer import detect_image_tags
-            tags = detect_image_tags(None, image, gemini_api_key=gemini_api_key)
+            tags = detect_image_tags(None, image, gemini_api_key=gemini_api_key,
+                                     garment_hint=session.product_id.display_name or '')
             if tags:
                 _logger.info('Görselde %d etiket/alarm tespit edildi, temizlenecek', len(tags))
             return tags

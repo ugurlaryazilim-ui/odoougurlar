@@ -3,14 +3,10 @@ import json
 import logging
 
 from odoo import _, fields, http
+from odoo.exceptions import UserError
 from odoo.http import request
 import psycopg2
-import requests as _req
 from datetime import date, timedelta
-try:
-    from deep_translator import GoogleTranslator
-except ImportError:
-    GoogleTranslator = None
 
 _logger = logging.getLogger(__name__)
 
@@ -569,6 +565,25 @@ class AiStudioController(http.Controller):
             _logger.exception('select_candidate hatasi: %s', e)
             return {'error': str(e)}
 
+    @http.route('/ai_studio/erase_regions', type='jsonrpc', auth='user', methods=['POST'])
+    def erase_regions(self, generation_id, boxes=None):
+        """Reviewer'ın AI sonucunda işaretlediği alarm/etiket bölgelerini sil. Sadece onaycı ve yönetici."""
+        try:
+            if not request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'):
+                return {'error': 'Bu işlemi yapmaya yetkiniz yok.'}
+            gen = request.env['ai.studio.generation'].browse(int(generation_id)).exists()
+            if not gen:
+                return {'error': 'Üretim bulunamadı.'}
+            gen.action_erase_regions(boxes or [])
+            return {'success': True, 'generation_id': gen.id}
+        except UserError as e:
+            request.env.cr.rollback()
+            return {'error': str(e)}
+        except Exception as e:
+            request.env.cr.rollback()
+            _logger.exception('erase_regions hatasi: %s', e)
+            return {'error': 'Silme sırasında hata oluştu, lütfen tekrar deneyin.'}
+
     @http.route('/ai_studio/cancel_revision', type='jsonrpc', auth='user', methods=['POST'])
     def cancel_revision(self, generation_id):
         """Devam eden veya takılı kalan bir revizyonu iptal et ve önceki haline döndür."""
@@ -618,56 +633,19 @@ class AiStudioController(http.Controller):
     def translate_revision(self, text=''):
         """Türkçe revizyon metnini İngilizce'ye çevir.
         
-        Öncelik: Gemini Flash (güvenilir, ~$0.001)
-        Fallback: deep-translator (ücretsiz ama Docker'da rate limit riski)
+        Öncelik: Gemini Flash, olmazsa deep-translator (ai_studio_generation.translate_tr_en)
         """
         # Gemini anahtarı kullanır: yalnızca onaycı/yönetici
         if not request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'):
             return {'error': 'Bu işlemi yapmaya yetkiniz yok.'}
         if not text or not text.strip():
             return {'translated': ''}
-        
-        # YÖNTEM 1: Gemini Flash (BİRİNCİL — güvenilir)
-        try:
-            gemini_key = request.env['ir.config_parameter'].sudo().get_param(
-                'ugurlar_ai_studio.gemini_api_key', ''
-            )
-            if gemini_key:
-                prompt = (
-                    "Translate this fashion image editing instruction to clear, precise English. "
-                    "Context: This is an edit request for a fashion e-commerce photo. "
-                    "Return ONLY the English translation, nothing else.\n\n"
-                    f"Turkish instruction: {text}"
-                )
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-                resp = _req.post(url, json={
-                    'contents': [{'parts': [{'text': prompt}]}],
-                }, headers={'Content-Type': 'application/json', 'x-goog-api-key': gemini_key}, timeout=10)
-                
-                if resp.status_code == 200:
-                    data = resp.json()
-                    candidates = data.get('candidates', [])
-                    if candidates:
-                        en_text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '').strip()
-                        if en_text:
-                            return {'translated': en_text}
-                _logger.warning('Gemini ceviri basarisiz (status=%s), deep-translator deneniyor', resp.status_code)
-        except Exception as e:
-            _logger.warning('Gemini ceviri hatasi: %s — deep-translator deneniyor', e)
-        
-        # YÖNTEM 2: deep-translator (FALLBACK — ücretsiz ama rate limit riski)
-        try:
-            if GoogleTranslator:
-                translated = GoogleTranslator(source='tr', target='en').translate(text)
-                if translated:
-                    return {'translated': translated}
-        except Exception as e:
-            _logger.warning('deep-translator hatasi: %s', e)
-        
         # Türkçe metni "çeviri" diye döndürme: İngilizce alana yazılır ve modele Türkçe gider.
         # Boş dönünce revizyon thread'i çeviriyi (HTTP isteği dışında) yeniden dener.
-        _logger.error('Ceviri tamamen basarisiz, arka planda tekrar denenecek: %s', text[:100])
-        return {'translated': ''}
+        translated = request.env['ai.studio.generation']._translate_prompt(text, keep_source_on_failure=False)
+        if not translated:
+            _logger.error('Ceviri tamamen basarisiz, arka planda tekrar denenecek: %s', text[:100])
+        return {'translated': translated}
 
     @http.route('/ai_studio/retry_generation', type='jsonrpc', auth='user', methods=['POST'])
     def retry_generation(self, generation_id):
