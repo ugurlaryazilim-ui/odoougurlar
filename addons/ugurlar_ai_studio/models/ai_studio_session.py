@@ -303,6 +303,10 @@ def _erase_result_tags(provider, image_b64, gemini_api_key, qc_boxes=None, passe
     return (current if changed else None), total_cost
 
 
+# Ürün görseli temizleme (arka plan + etiket silme) mantığı değişince artırılır
+GARMENT_CLEAN_VERSION = 'v2'
+
+
 def _needs_bare_legs(session, analysis=None):
     """Elbise / etek / şort: manken bacakları açık olmalı (tulum hariç)."""
     from ..services.garment_analyzer import _detect_sub_type
@@ -1376,7 +1380,9 @@ class AiStudioSession(models.Model):
         cache_key = None
         if photo and security_tags is None and source_image:
             raw = source_image if isinstance(source_image, bytes) else str(source_image).encode()
-            cache_key = '%s:bg%d' % (hashlib.sha1(raw).hexdigest(), int(bool(auto_bg)))
+            # Sürüm eki: etiket tespit kuralları değişince eski temizlenmiş görseller kullanılmasın
+            # (v2: metal halka/kopça artık alarm sanılıp silinmiyor)
+            cache_key = '%s:bg%d:%s' % (hashlib.sha1(raw).hexdigest(), int(bool(auto_bg)), GARMENT_CLEAN_VERSION)
             if photo.garment_clean_key == cache_key and photo.garment_clean_image:
                 garment_b64 = photo.garment_clean_image
                 _logger.info('Temizlenmiş ürün görseli önbellekten kullanıldı (photo=%s, session=%s)',
