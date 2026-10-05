@@ -8,7 +8,7 @@
             <list decoration-info="state == 'pending'" decoration-warning="state == 'in_progress'" decoration-success="state == 'completed'" decoration-muted="state == 'delivered'" decoration-danger="state == 'cancelled'">
                 <field name="name"/>
                 <field name="invoice_no"/>
-                <field name="is_reyon" column_invisible="True"/>
+                <field name="is_reyon" optional="show" string="Reyon"/>
                 <field name="product_name"/>
                 <field name="customer_name"/>
                 <field name="tailor_id"/>
@@ -33,7 +33,7 @@
                     <button name="action_mark_delivered" string="Teslim Edildi" type="object" class="btn-primary" invisible="state != 'completed'"/>
                     <button name="action_cancel" string="İptal Et" type="object" class="btn-danger" invisible="state in ('delivered', 'cancelled')" confirm="Bu siparişi iptal etmek istediğinize emin misiniz?"/>
                     <button name="action_reset_to_pending" string="Sıfırla" type="object" class="btn-secondary" invisible="state in ('pending', 'waiting_approval', 'delivered')"/>
-                    <button name="action_print_label" string="Etiket Yazdir" type="object" class="btn-warning" icon="fa-print" invisible="state in ('waiting_approval', 'cancelled')"/>
+                    <button name="action_print_label" string="Etiket Yazdır" type="object" class="btn-warning" icon="fa-print" invisible="state in ('waiting_approval', 'cancelled')"/>
                     <field name="state" widget="statusbar" statusbar_visible="waiting_approval,pending,in_progress,completed,delivered"/>
                 </header>
                 <sheet>
@@ -96,18 +96,30 @@
                 <field name="invoice_no"/>
                 <field name="customer_name"/>
                 <field name="tailor_id"/>
+                <field name="product_barcode"/>
+                <filter string="Onay Bekleyen" name="waiting_approval" domain="[('state', '=', 'waiting_approval')]"/>
                 <filter string="Bekliyor" name="pending" domain="[('state', '=', 'pending')]"/>
                 <filter string="Terzide" name="in_progress" domain="[('state', '=', 'in_progress')]"/>
-                <filter string="Hazir" name="completed" domain="[('state', '=', 'completed')]"/>
+                <filter string="Hazır" name="completed" domain="[('state', '=', 'completed')]"/>
                 <filter string="Teslim" name="delivered" domain="[('state', '=', 'delivered')]"/>
                 <filter string="İptal" name="cancelled" domain="[('state', '=', 'cancelled')]"/>
+                <separator/>
+                <filter string="Reyon" name="reyon" domain="[('is_reyon', '=', True)]"/>
+                <filter string="Faturalı" name="invoiced" domain="[('is_reyon', '=', False)]"/>
+                <separator/>
+                <filter string="Tarih" name="filter_create_date" date="create_date"/>
+                <group>
+                    <filter string="Terzi" name="group_tailor" context="{'group_by': 'tailor_id'}"/>
+                    <filter string="Durum" name="group_state" context="{'group_by': 'state'}"/>
+                    <filter string="Gün" name="group_day" context="{'group_by': 'create_date:day'}"/>
+                </group>
             </search>
         </field>
     </record>
 
     <!-- ═══════════════ Order Action ═══════════════ -->
     <record id="action_tailor_order" model="ir.actions.act_window">
-        <field name="name">Siparisler</field>
+        <field name="name">Siparişler</field>
         <field name="res_model">ugurlar.tailor.order</field>
         <field name="view_mode">list,form</field>
     </record>

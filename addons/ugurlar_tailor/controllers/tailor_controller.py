@@ -99,6 +99,13 @@ class TailorController(http.Controller):
             for p in env['ugurlar.tailor.price'].search([('tailor_id', 'in', tailors.ids)])
         }
 
+        # Nebim view'ında ürün adı yok: barkoddan Odoo ürün adını bul (tek sorgu)
+        barcodes = [o.get('barcode') for o in orders if o.get('barcode')]
+        product_names = {
+            p.barcode: p.name
+            for p in env['product.product'].search([('barcode', 'in', barcodes)])
+        } if barcodes else {}
+
         order_vals = []
         for order_data in orders:
             tailor_id = int(order_data.get('tailor_id') or 0)
@@ -122,7 +129,8 @@ class TailorController(http.Controller):
                 'state': 'waiting_approval' if is_reyon else 'pending',
                 'product_barcode': order_data.get('barcode', ''),
                 'product_code': order_data.get('product_code', ''),
-                'product_name': order_data.get('product_name', ''),
+                'product_name': product_names.get(order_data.get('barcode'))
+                or order_data.get('product_name', ''),
                 'customer_name': order_data.get('customer_name', ''),
                 'customer_phone': order_data.get('customer_phone', ''),
                 'sales_person': order_data.get('sales_person', ''),
@@ -138,7 +146,9 @@ class TailorController(http.Controller):
         label_url = '/report/pdf/ugurlar_tailor.report_tailor_label/%s' % ','.join(
             str(i) for i in created_orders.ids)
 
-        return {'success': True, 'orders': created, 'label_url': label_url}
+        # Etiket verisi aynı cevapta döner (her sipariş için ayrı istek atılmasın)
+        labels = [self._label_payload(o) for o in created_orders if o.state != 'waiting_approval']
+        return {'success': True, 'orders': created, 'label_url': label_url, 'labels': labels}
 
     # ── Sipariş Listesi ──
     @http.route('/ugurlar_tailor/orders', type='jsonrpc', auth='user')
@@ -210,19 +220,10 @@ class TailorController(http.Controller):
         return {'success': True}
 
     # ── Etiket Verisi ──
-    @http.route('/ugurlar_tailor/label_data', type='jsonrpc', auth='user')
-    def label_data(self, order_id=0):
-        """Etiket yazdırma için sipariş verisini döndür."""
-        order = request.env['ugurlar.tailor.order'].browse(int(order_id))
-        if not order.exists():
-            return {'error': 'Sipariş bulunamadı!'}
-
-        lines = request.env['ugurlar.tailor.order.line'].search_read(
-            [('order_id', '=', order.id)],
-            ['service_name', 'price'],
-        )
-
+    @staticmethod
+    def _label_payload(order):
         return {
+            'id': order.id,
             'name': order.name,
             'invoice_no': order.invoice_no or '',
             'customer_name': order.customer_name or '',
@@ -235,5 +236,25 @@ class TailorController(http.Controller):
             'total_price': order.total_price,
             'notes': order.notes or '',
             'date': order.create_date.strftime('%d.%m.%Y %H:%M') if order.create_date else '',
-            'services': [{'name': l['service_name'], 'price': l['price']} for l in lines],
+            'services': [{'name': line.service_name, 'price': line.price} for line in order.line_ids],
         }
+
+    @http.route('/ugurlar_tailor/label_data', type='jsonrpc', auth='user')
+    def label_data(self, order_id=0):
+        """Etiket yazdırma için sipariş verisini döndür."""
+        order = request.env['ugurlar.tailor.order'].browse(int(order_id))
+        if not order.exists():
+            return {'error': 'Sipariş bulunamadı!'}
+        return self._label_payload(order)
+
+    # ── Mağaza bilgisi (hediye fişi başlığı) ──
+    @http.route('/ugurlar_tailor/company_info', type='jsonrpc', auth='user')
+    def company_info(self):
+        company = request.env.company
+        partner = company.partner_id
+        address = ', '.join(filter(None, [
+            partner.street, partner.street2,
+            ' '.join(filter(None, [partner.zip, partner.city])),
+            partner.state_id.name,
+        ]))
+        return {'name': company.name or '', 'address': address, 'phone': partner.phone or company.phone or ''}

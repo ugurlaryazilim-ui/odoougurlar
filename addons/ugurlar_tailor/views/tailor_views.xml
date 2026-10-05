@@ -26,7 +26,7 @@
                                 type="object"
                                 class="oe_stat_button"
                                 icon="fa-scissors">
-                            <field name="order_count" widget="statinfo" string="Siparis"/>
+                            <field name="order_count" widget="statinfo" string="Sipariş"/>
                         </button>
                     </div>
                     <widget name="web_ribbon" title="Arşivlenmiş" bg_color="text-bg-danger" invisible="active"/>

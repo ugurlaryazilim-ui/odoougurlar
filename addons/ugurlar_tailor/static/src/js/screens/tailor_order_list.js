@@ -56,15 +56,15 @@ export class TailorOrderList extends Component {
             this.state.orders = result.orders || [];
             this.state.total = result.total || 0;
         } catch (e) {
-            this.notification.add(_t("Siparisler yuklenemedi: %(error)s", { error: e.message }), { type: "danger" });
+            this.notification.add(_t("Siparişler yüklenemedi: %(error)s", { error: e.message }), { type: "danger" });
         }
         this.state.loading = false;
     }
 
     async updateStatus(orderId, newStatus) {
         this.dialog.add(ConfirmationDialog, {
-            title: _t("Durum Degisikligi"),
-            body: _t("Siparisi '%(status)s' durumuna gecirmek istediginize emin misiniz?", { status: this.getStatusLabel(newStatus) }),
+            title: _t("Durum Değişikliği"),
+            body: _t("Siparişi '%(status)s' durumuna geçirmek istediğinize emin misiniz?", { status: this.getStatusLabel(newStatus) }),
             confirm: async () => {
                 try {
                     const result = await rpc("/ugurlar_tailor/update_status", {
@@ -78,7 +78,7 @@ export class TailorOrderList extends Component {
                         this.notification.add(result.error || _t("Durum güncellenemedi."), { type: "danger" });
                     }
                 } catch (e) {
-                    this.notification.add(_t("Durum guncelleme hatasi: %(error)s", { error: e.message }), { type: "danger" });
+                    this.notification.add(_t("Durum güncelleme hatası: %(error)s", { error: e.message }), { type: "danger" });
                 }
             },
             cancel: () => {},
@@ -99,7 +99,7 @@ export class TailorOrderList extends Component {
             waiting_approval: _t("Onay Bekliyor"),
             pending: _t("Bekliyor"),
             in_progress: _t("Terzide"),
-            completed: _t("Hazir"),
+            completed: _t("Hazır"),
             delivered: _t("Teslim"),
             cancelled: _t("İptal"),
         };
@@ -163,7 +163,7 @@ export class TailorOrderList extends Component {
             }
             printTailorLabel(data);
         } catch (e) {
-            this.notification.add(_t("Etiket verisi alinamadi: %(error)s", { error: e.message }), { type: "danger" });
+            this.notification.add(_t("Etiket verisi alınamadı: %(error)s", { error: e.message }), { type: "danger" });
         }
     }
 

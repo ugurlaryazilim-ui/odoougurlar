@@ -39,7 +39,7 @@ class UgurlarTailorOrder(models.Model):
 
     # ── Müşteri Bilgileri (Nebim'den) ──
     customer_name = fields.Char(string='Müşteri Adı', required=True)
-    customer_phone = fields.Char(string='Müşteri Telefon')
+    customer_phone = fields.Char(string='Müşteri Kodu', help="Nebim müşteri kodu (fatura view'ında telefon kolonu yok)")
     sales_person = fields.Char(string='Satış Personeli')
 
     # ── Terzi ve Hizmetler ──

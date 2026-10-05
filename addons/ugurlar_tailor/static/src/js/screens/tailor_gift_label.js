@@ -24,6 +24,7 @@ export class TailorGiftLabel extends Component {
             selectedInvoice: null,
             selectedItems: {},   // barcode -> { selected: bool, gift_note: string }
             printing: false,
+            company: null,
         });
 
         this.searchInputRef = useRef("giftSearchInput");
@@ -36,7 +37,12 @@ export class TailorGiftLabel extends Component {
             }
         });
 
-        onMounted(() => {
+        onMounted(async () => {
+            try {
+                this.state.company = await rpc("/ugurlar_tailor/company_info", {});
+            } catch (e) {
+                console.error("Mağaza bilgisi alınamadı:", e);
+            }
             if (this.searchInputRef.el) {
                 this.searchInputRef.el.focus();
             }
@@ -134,7 +140,7 @@ export class TailorGiftLabel extends Component {
 
         this.state.printing = true;
         try {
-            printGiftLabelOnly(selectedItems);
+            printGiftLabelOnly(selectedItems, this.state.company);
             this.notification.add(
                 _t("%(count)s hediye etiketi yazdırılıyor...", { count: selectedItems.length }),
                 { type: "success" }

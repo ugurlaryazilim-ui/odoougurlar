@@ -8,10 +8,10 @@
             <field name="arch" type="xml">
                 <xpath expr="//form" position="inside">
                     <app data-string="Terzi Takip" string="Terzi Takip" name="ugurlar_tailor" groups="base.group_system">
-                        <block title="Nebim MSSQL Baglanti Ayarlari" name="tailor_mssql_settings">
+                        <block title="Nebim MSSQL Bağlantı Ayarları" name="tailor_mssql_settings">
                             <setting string="SQL Server Adresi" help="Nebim SQL Server IP veya hostname">
                                 <div class="content-group">
-                                    <field name="tailor_mssql_server" placeholder="192.168.0.225"/>
+                                    <field name="tailor_mssql_server" placeholder="192.168.0.10"/>
                                 </div>
                             </setting>
                             <setting string="SQL Port" help="SQL Server port numarasi">
@@ -19,29 +19,29 @@
                                     <field name="tailor_mssql_port"/>
                                 </div>
                             </setting>
-                            <setting string="SQL Veritabani" help="Nebim veritabani adi">
+                            <setting string="SQL Veritabanı" help="Nebim veritabanı adı">
                                 <div class="content-group">
                                     <field name="tailor_mssql_database" placeholder="UGURLAR"/>
                                 </div>
                             </setting>
-                            <setting string="View / Tablo Adi" help="Fatura verilerinin cekilecegi view adi">
+                            <setting string="View / Tablo Adı" help="Fatura verilerinin cekilecegi view adı">
                                 <div class="content-group">
                                     <field name="tailor_mssql_view_name" placeholder="dbo.vw_TerziFaturalar"/>
                                 </div>
                             </setting>
-                            <setting string="SQL Kullanici Adi" help="SQL Server kullanici adi">
+                            <setting string="SQL Kullanıcı Adı" help="SQL Server kullanıcı adı">
                                 <div class="content-group">
-                                    <field name="tailor_mssql_user" placeholder="kadri"/>
+                                    <field name="tailor_mssql_user" placeholder="nebim_okuma"/>
                                 </div>
                             </setting>
-                            <setting string="SQL Sifre" help="SQL Server sifresi">
+                            <setting string="SQL Şifre" help="SQL Server şifresi">
                                 <div class="content-group">
                                     <field name="tailor_mssql_password" password="True"/>
                                 </div>
                             </setting>
                         </block>
 
-                        <block title="Reyon Ayarlari" name="tailor_reyon_settings">
+                        <block title="Reyon Ayarları" name="tailor_reyon_settings">
                             <setting string="Reyon Yöneticileri" help="Reyon işlemi onayı bildirimlerinin gideceği yöneticiler">
                                 <div class="content-group">
                                     <field name="reyon_manager_ids" widget="many2many_tags" options="{'no_create': True}"/>

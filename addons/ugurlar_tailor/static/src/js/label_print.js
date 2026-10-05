@@ -68,36 +68,39 @@ function _buildOrderLabel(data, copyType) {
     `;
 }
 
-function _buildGiftLabel(data) {
+function _buildGiftLabel(data, company) {
+    // Mağaza adı/adres/telefon şirket kaydından gelir (koda gömülü değil)
+    const store = (company && company.name) || 'UĞURLAR';
+    const address = company && company.address ? esc(company.address) : '';
+    const phone = company && company.phone ? `Tel: ${esc(company.phone)}` : '';
     return `
         <div class="label">
-            <div class="label-hdr" style="border-bottom:3px double #000;font-size:20px;letter-spacing:2px;">* HEDIYE FISI *</div>
-            <div class="label-store">UGURLAR</div>
+            <div class="label-hdr" style="border-bottom:3px double #000;font-size:20px;letter-spacing:2px;">* HEDİYE FİŞİ *</div>
+            <div class="label-store">${esc(store.toLocaleUpperCase('tr-TR'))}</div>
             <div style="text-align:center;font-size:9px;font-weight:600;line-height:1.4;margin-bottom:4px;">
-                Orhanbey, Ataturk Cd. No:57, 16010 Osmangazi/Bursa<br/>
-                Tel: (0224) 221 76 03
+                ${address}${address && phone ? '<br/>' : ''}${phone}
             </div>
             <hr class="label-div"/>
             <div style="text-align:center;font-size:14px;font-weight:900;padding:6px 4px;line-height:1.4;">
-                Bu urun size hediye edilmistir.
+                Bu ürün size hediye edilmiştir.
             </div>
             <hr class="label-div"/>
-            <div class="label-r"><span class="ll">Fis No:</span><span class="vv" style="font-size:13px;font-weight:bold;">${esc(data.name)}</span></div>
+            <div class="label-r"><span class="ll">Fiş No:</span><span class="vv" style="font-size:13px;font-weight:bold;">${esc(data.name)}</span></div>
             <div class="label-r"><span class="ll">Fatura No:</span><span class="vv">${esc(data.invoice_no)}</span></div>
             <hr class="label-div"/>
-            <div class="label-r"><span class="ll">Urun:</span><span class="vv">${esc(data.product_code || data.product_name)}</span></div>
+            <div class="label-r"><span class="ll">Ürün:</span><span class="vv">${esc(data.product_code || data.product_name)}</span></div>
             <div class="label-r"><span class="ll">Barkod:</span><span class="vv">${esc(data.product_barcode)}</span></div>
             <hr class="label-div"/>
             <div class="label-dt">${esc(data.date)}</div>
             <div style="margin-top:10px;padding:6px 4px;border:2px solid #000;border-radius:4px;">
-                <div style="text-align:center;font-size:13px;font-weight:900;margin-bottom:4px;">DEGISIM KOSULLARI</div>
+                <div style="text-align:center;font-size:13px;font-weight:900;margin-bottom:4px;">DEĞİŞİM KOŞULLARI</div>
                 <div style="font-size:11px;font-weight:600;line-height:1.5;">
-                    * Degisim icin bu fis ile magazamiza basvurunuz.<br/>
-                    * Degisim suresi: Teslim tarihinden itibaren 14 gundur.<br/>
-                    * Urun kullanilmamis ve etiketli olmalidir.
+                    * Değişim için bu fiş ile mağazamıza başvurunuz.<br/>
+                    * Değişim süresi: Teslim tarihinden itibaren 14 gündür.<br/>
+                    * Ürün kullanılmamış ve etiketli olmalıdır.
                 </div>
             </div>
-            ${data.notes ? `<hr class="label-div"/><div style="text-align:center;font-size:14px;font-weight:900;padding:6px 0;letter-spacing:1px;">${esc(data.notes)}</div>` : `<div style="text-align:center;font-size:18px;font-weight:900;margin-top:12px;padding:8px 0;letter-spacing:2px;">MUTLU GUNLER DILERIZ</div>`}
+            ${data.notes ? `<hr class="label-div"/><div style="text-align:center;font-size:14px;font-weight:900;padding:6px 0;letter-spacing:1px;">${esc(data.notes)}</div>` : `<div style="text-align:center;font-size:18px;font-weight:900;margin-top:12px;padding:8px 0;letter-spacing:2px;">MUTLU GÜNLER DİLERİZ</div>`}
         </div>
     `;
 }
@@ -310,10 +313,10 @@ export function printMultipleTailorLabels(dataArray) {
 /**
  * SADECE hediye etiketi yazdir (bağımsız ekrandan).
  */
-export function printGiftLabelOnly(dataArray) {
+export function printGiftLabelOnly(dataArray, company = null) {
     let allLabels = '';
     for (const data of dataArray) {
-        allLabels += _buildGiftLabel(data);
+        allLabels += _buildGiftLabel(data, company);
     }
     const names = dataArray.map(d => d.product_code || d.product_barcode || d.name).join(', ');
     _printHtml(allLabels, `Hediye Etiketi — ${names}`);
