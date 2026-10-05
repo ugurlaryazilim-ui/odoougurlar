@@ -29,6 +29,7 @@ export class TailorNewOrder extends Component {
             submitting: false,
             createdCount: 0,
             customerMobile: "",
+            mobileSource: "",
             promisedDate: "",
             history: [],
             showHistory: false,
@@ -113,6 +114,11 @@ export class TailorNewOrder extends Component {
                     };
                 });
                 this.state.itemSelections = selections;
+                // Telefon Nebim'den (ya da önceki terzi siparişinden) gelirse doldur; personel değiştirebilir
+                if (detail.customer_mobile && !this.state.customerMobile) {
+                    this.state.customerMobile = detail.customer_mobile;
+                }
+                this.state.mobileSource = detail.customer_mobile ? detail.mobile_source : "";
                 this.loadHistory(detail.customer_code);
             }
         } catch (e) {
@@ -284,6 +290,7 @@ export class TailorNewOrder extends Component {
             this.state.step = 1;
             this.state.selectedInvoice = null;
             this.state.customerMobile = "";
+            this.state.mobileSource = "";
             this.state.promisedDate = "";
         } else {
             this.props.onNavigate("main_menu");

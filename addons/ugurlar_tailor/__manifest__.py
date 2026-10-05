@@ -1,6 +1,6 @@
 {
     'name': 'Terzi Takip',
-    'version': '19.0.1.6.0',
+    'version': '19.0.1.6.1',
     'category': 'Services',
     'summary': 'Mağaza terzi takip ve yönetim sistemi — Nebim ERP entegrasyonlu',
     'description': """

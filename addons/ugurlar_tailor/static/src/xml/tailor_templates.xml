@@ -139,6 +139,11 @@
                         <input type="tel" class="tailor-input tailor-input-sm" placeholder="05xx xxx xx xx (hazır SMS bildirimi)"
                                t-model="state.customerMobile"/>
                     </div>
+                    <div class="tailor-info-row text-muted small" t-if="state.mobileSource">
+                        <span class="tailor-info-label"/>
+                        <span t-if="state.mobileSource === 'nebim'">Nebim müşteri kartından geldi — müşteriye teyit edin.</span>
+                        <span t-else="">Müşterinin önceki terzi siparişinden geldi — müşteriye teyit edin.</span>
+                    </div>
                     <div class="tailor-info-row">
                         <span class="tailor-info-label">Teslim:</span>
                         <input type="date" class="tailor-input tailor-input-sm" t-model="state.promisedDate"

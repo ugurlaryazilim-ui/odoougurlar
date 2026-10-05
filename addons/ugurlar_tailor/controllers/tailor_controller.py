@@ -28,7 +28,18 @@ class TailorController(http.Controller):
     @http.route('/ugurlar_tailor/invoice_detail', type='jsonrpc', auth='user')
     def invoice_detail(self, invoice_no=''):
         connector = request.env['ugurlar.tailor.mssql.connector']
-        return connector.get_invoice_detail(invoice_no)
+        detail = connector.get_invoice_detail(invoice_no)
+        if detail:
+            detail['mobile_source'] = 'nebim' if detail.get('customer_mobile') else ''
+            if not detail.get('customer_mobile') and detail.get('customer_code'):
+                # Nebim'de yoksa: aynı müşterinin önceki terzi siparişinde yazılmış numara
+                prev = request.env['ugurlar.tailor.order'].search(
+                    [('customer_phone', '=', detail['customer_code']), ('customer_mobile', '!=', False)],
+                    order='id desc', limit=1)
+                if prev:
+                    detail['customer_mobile'] = prev.customer_mobile
+                    detail['mobile_source'] = 'history'
+        return detail
 
     @http.route('/ugurlar_tailor/verify_product', type='jsonrpc', auth='user')
     def verify_product(self, invoice_no='', barcode=''):
