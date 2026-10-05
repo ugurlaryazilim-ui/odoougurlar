@@ -1,7 +1,7 @@
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
-from ..services.turatel import normalize_number, prepare_text, segment_count
+from ..services.turatel import MAX_SEGMENTS, normalize_number, prepare_text, segment_count
 
 
 class SmsSendWizard(models.TransientModel):
@@ -21,6 +21,7 @@ class SmsSendWizard(models.TransientModel):
     char_count = fields.Integer(string='Karakter', compute='_compute_counts')
     segments = fields.Integer(string='Parça (tahmini)', compute='_compute_counts')
     number_ok = fields.Boolean(compute='_compute_counts')
+    too_long = fields.Boolean(compute='_compute_counts')
 
     @api.model
     def default_get(self, fields_list):
@@ -46,6 +47,7 @@ class SmsSendWizard(models.TransientModel):
             wiz.char_count = len(text)
             wiz.segments = segment_count(text, sms_type) if text else 0
             wiz.number_ok = bool(normalize_number(wiz.number))
+            wiz.too_long = wiz.segments > MAX_SEGMENTS
 
     def action_send(self):
         self.ensure_one()
@@ -54,7 +56,7 @@ class SmsSendWizard(models.TransientModel):
         record = None
         if self.res_model and self.res_id and self.res_model in self.env:
             record = self.env[self.res_model].browse(self.res_id).exists() or None
-        msg = self.env['sms.system.message'].send_sms(self.number, self.body, record=record,
+        msg = self.env['sms.system.message'].with_context(sms_manual=True).send_sms(self.number, self.body, record=record,
                                                       template=self.template_id or None)
         states = dict(msg._fields['state'].selection)
         ok = msg.state in ('sent', 'test')

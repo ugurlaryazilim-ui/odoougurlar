@@ -3,6 +3,8 @@ from odoo.exceptions import ValidationError
 
 from ..services.turatel import normalize_number
 
+UPSERT_CHUNK = 5000
+
 
 class SmsSystemList(models.Model):
     """Toplu SMS alıcı listesi (müşteri ya da personel)."""
@@ -119,7 +121,10 @@ class SmsSystemContact(models.Model):
         if not seen:
             return result
         Contact = self.with_context(active_test=False)
-        existing = {c.mobile: c for c in Contact.search([('mobile', 'in', list(seen))])}
+        numbers = list(seen)
+        existing = {}
+        for i in range(0, len(numbers), UPSERT_CHUNK):
+            existing.update({c.mobile: c for c in Contact.search([('mobile', 'in', numbers[i:i + UPSERT_CHUNK])])})
         list_cmds = [(4, lst.id) for lst in (lists or [])]
         to_create = []
         for num, row in seen.items():
@@ -145,9 +150,9 @@ class SmsSystemContact(models.Model):
                     'customer_code': row.get('customer_code') or False,
                     'partner_id': row.get('partner_id') or False, 'list_ids': list_cmds,
                 })
-        if to_create:
-            Contact.create(to_create)
-            result['created'] = len(to_create)
+        for i in range(0, len(to_create), UPSERT_CHUNK):
+            Contact.create(to_create[i:i + UPSERT_CHUNK])
+        result['created'] = len(to_create)
         return result
 
     def action_opt_out(self):

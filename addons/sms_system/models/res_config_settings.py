@@ -24,6 +24,10 @@ class ResConfigSettings(models.TransientModel):
 
     sms_daily_limit = fields.Integer(string='Günlük toplu SMS sınırı', config_parameter='sms_system.daily_limit',
                                      help='Son 24 saatte toplu SMS ile gönderilebilecek en fazla numara (0 = sınırsız)')
+    sms_user_daily_limit = fields.Integer(string='Kullanıcı başı günlük elle SMS', default=50,
+                                          config_parameter='sms_system.user_daily_limit',
+                                          help='"Yeni SMS" ile bir çalışanın 24 saatte gönderebileceği en fazla SMS '
+                                               '(SMS yöneticileri ve otomatik bildirimler hariç; 0 = sınırsız)')
     sms_optout_text = fields.Char(string='Ret metni', config_parameter='sms_system.optout_text',
                                   help='Ticari SMS sonuna eklenir; ör. "SMS almamak için RET yazıp 4609 a gönderin"')
 

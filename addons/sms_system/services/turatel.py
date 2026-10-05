@@ -26,18 +26,28 @@ ASCII_MAP = str.maketrans({'İ': 'I', 'ı': 'i', 'Ğ': 'G', 'ğ': 'g', 'Ş': 'S'
 
 # Olası hata kodları — Turatel'in güncel listesiyle ilk canlı testte doğrulanacak; ham cevap her zaman saklanır
 ERROR_HINTS = {
-    '20': 'Gönderilen XML hatalı veya eksik',
-    '30': 'Kanal kodu / kullanıcı adı / şifre hatalı ya da hesap aktif değil',
-    '40': 'Mesaj başlığı (Originator) hesapta tanımlı değil',
-    '50': 'Hesapta yeterli kredi yok',
+    '20': 'Gönderilen XML hatalı veya eksik — metinde desteklenmeyen karakter olabilir',
+    '30': 'Kanal kodu / kullanıcı adı / şifre hatalı ya da hesap aktif değil — Ayarlar > SMS bilgilerini kontrol edin',
+    '40': 'Mesaj başlığı (Originator) hesapta tanımlı değil — Ayarlar > SMS > Mesaj Başlığı Turatel hesabındaki ile aynı olmalı',
+    '50': 'Hesapta yeterli kredi yok — Turatel üzerinden kredi yükleyin',
     '51': 'Numara hatalı veya gönderime kapalı',
     '70': 'Eksik veya hatalı parametre',
-    '85': 'Mükerrer gönderim',
+    '85': 'Mükerrer gönderim — aynı metin aynı numaraya kısa sürede tekrar gönderilmiş',
 }
+
+MAX_SEGMENTS = 7  # bundan uzun metinler gönderilmez (operatör reddedebilir, kredi israfı)
 
 
 class TuratelError(Exception):
-    """Turatel'den hata kodu ya da bağlantı hatası."""
+    """Turatel'den hata kodu ya da bağlantı hatası.
+
+    retryable: yalnız ağ/sunucu kaynaklı geçici hatalarda True; hesap, başlık, kredi, numara
+    gibi hatalar yeniden denenince düzelmez.
+    """
+
+    def __init__(self, message, retryable=False):
+        super().__init__(message)
+        self.retryable = retryable
 
 
 def normalize_number(raw):
@@ -112,9 +122,9 @@ class TuratelClient:
             resp = requests.post(self.url, data=xml.encode('utf-8'), timeout=self.timeout,
                                  headers={'Content-Type': 'text/xml; charset=utf-8'})
         except requests.RequestException as e:
-            raise TuratelError('Turatel sunucusuna ulaşılamadı: %s' % e.__class__.__name__) from e
+            raise TuratelError('Turatel sunucusuna ulaşılamadı: %s' % e.__class__.__name__, retryable=True) from e
         if resp.status_code != 200:
-            raise TuratelError('Turatel HTTP %s döndü' % resp.status_code)
+            raise TuratelError('Turatel HTTP %s döndü' % resp.status_code, retryable=resp.status_code >= 500)
         return (resp.text or '').strip()
 
     @staticmethod

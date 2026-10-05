@@ -3,11 +3,10 @@ access_sms_message_user,sms.system.message.user,model_sms_system_message,group_s
 access_sms_message_manager,sms.system.message.manager,model_sms_system_message,group_sms_manager,1,1,1,1
 access_sms_template_user,sms.system.template.user,model_sms_system_template,group_sms_user,1,0,0,0
 access_sms_template_manager,sms.system.template.manager,model_sms_system_template,group_sms_manager,1,1,1,1
-access_sms_contact_user,sms.system.contact.user,model_sms_system_contact,group_sms_user,1,0,0,0
 access_sms_contact_manager,sms.system.contact.manager,model_sms_system_contact,group_sms_manager,1,1,1,1
-access_sms_list_user,sms.system.list.user,model_sms_system_list,group_sms_user,1,0,0,0
 access_sms_list_manager,sms.system.list.manager,model_sms_system_list,group_sms_manager,1,1,1,1
 access_sms_campaign_manager,sms.system.campaign.manager,model_sms_system_campaign,group_sms_manager,1,1,1,1
 access_sms_contact_import_manager,sms.system.contact.import.manager,model_sms_system_contact_import,group_sms_manager,1,1,1,1
 access_sms_add_to_list_manager,sms.system.add.to.list.manager,model_sms_system_add_to_list,group_sms_manager,1,1,1,1
 access_sms_send_wizard_user,sms.system.send.wizard.user,model_sms_system_send_wizard,group_sms_user,1,1,1,1
+access_sms_campaign_confirm_manager,sms.system.campaign.confirm.manager,model_sms_system_campaign_confirm,group_sms_manager,1,1,1,1

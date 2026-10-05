@@ -161,9 +161,8 @@
         <field name="arch" type="xml">
             <form>
                 <header>
-                    <button name="action_send" string="Gönder" type="object" class="btn-primary"
-                            invisible="state != 'draft'"
-                            confirm="Toplu SMS listelerdeki tüm alıcılara gönderilecek (planlı tarih varsa o saatte). Devam edilsin mi?"/>
+                    <button name="action_confirm_send" string="Gönder" type="object" class="btn-primary"
+                            invisible="state != 'draft'"/>
                     <button name="action_retry_errors" string="Hatalıları Yeniden Gönder" type="object"
                             invisible="state != 'done' or not error_count"/>
                     <button name="action_cancel" string="Durdur / İptal" type="object"
@@ -182,7 +181,13 @@
                     <div class="oe_title">
                         <h1><field name="name" placeholder="ör. Bayram mesai saatleri" readonly="state != 'draft'"/></h1>
                     </div>
-                    <div class="alert alert-warning" role="alert" invisible="message_type != 'commercial'">
+                    <field name="iys_enabled" invisible="1"/>
+                    <div class="alert alert-danger" role="alert" invisible="message_type != 'commercial' or iys_enabled">
+                        <b>Ticari SMS şu an gönderilemez.</b> Kampanya/indirim SMS'i yasa gereği yalnız İYS'de izni olan
+                        numaralara gidebilir. İYS (SmartADM) bağlantısı Ayarlar &gt; SMS ekranından kurulunca bu tür açılır.
+                        Mağaza duyurusu gibi reklam içermeyen mesajlar için "Bilgilendirme" türünü seçin.
+                    </div>
+                    <div class="alert alert-warning" role="alert" invisible="message_type != 'commercial' or not iys_enabled">
                         Ticari SMS yalnız İYS onaylı numaralara gider; ret metni (Ayarlar &gt; SMS) otomatik eklenir.
                     </div>
                     <group>
@@ -249,6 +254,20 @@
     </record>
 
     <!-- ═══════════ Sihirbazlar ═══════════ -->
+    <record id="view_sms_campaign_confirm" model="ir.ui.view">
+        <field name="name">sms.system.campaign.confirm.form</field>
+        <field name="model">sms.system.campaign.confirm</field>
+        <field name="arch" type="xml">
+            <form string="Toplu SMS Onayı">
+                <field name="summary" nolabel="1" readonly="1"/>
+                <footer>
+                    <button name="action_confirm" string="Onayla ve Gönder" type="object" class="btn-primary"/>
+                    <button string="Vazgeç" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
     <record id="view_sms_contact_import" model="ir.ui.view">
         <field name="name">sms.system.contact.import.form</field>
         <field name="model">sms.system.contact.import</field>

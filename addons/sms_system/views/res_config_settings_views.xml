@@ -43,6 +43,9 @@
                         </setting>
                     </block>
                     <block title="Toplu SMS" name="sms_bulk">
+                        <setting help="&quot;Yeni SMS&quot; ile bir çalışanın 24 saatte gönderebileceği en fazla SMS (yöneticiler ve otomatik bildirimler hariç, 0 = sınırsız)">
+                            <field name="sms_user_daily_limit"/>
+                        </setting>
                         <setting help="Son 24 saatte toplu SMS ile gönderilebilecek en fazla numara (0 = sınırsız). Yanlışlıkla büyük gönderime karşı emniyet.">
                             <field name="sms_daily_limit"/>
                         </setting>

@@ -147,7 +147,9 @@
                     <field name="res_model" invisible="1"/>
                     <field name="res_id" invisible="1"/>
                 </group>
+                <field name="too_long" invisible="1"/>
                 <div class="text-danger" invisible="number_ok or not number">Numara geçersiz görünüyor.</div>
+                <div class="text-danger" invisible="not too_long">Metin çok uzun: en fazla 7 parça gönderilebilir.</div>
                 <footer>
                     <button name="action_send" string="Gönder" type="object" class="btn-primary"/>
                     <button string="Vazgeç" class="btn-secondary" special="cancel"/>
