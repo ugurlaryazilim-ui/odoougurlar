@@ -260,6 +260,20 @@ SEEDREAM_TEMPLATES = {
     ('skirt', 'back'): _BACK_INTRO + "{leg_rule} {shoe_rule} " + _OUTRO,
     ('skirt', 'side'): _SIDE_INTRO + "{leg_rule} {shoe_rule} " + _OUTRO,
 
+    # ── TAKIM (üst + alt tek ürün) ──
+    ('coord', 'front'): _FRONT_INTRO + (
+        "This product is a matching two-piece set: {set_pieces}. Replace the model's entire original outfit "
+        "with both pieces worn together exactly as in Image 2. The bottom piece is separate from the top; "
+        "do not merge them into a dress. {collar_note}{graphic_note}"
+        "The whole outfit is visible from the neckline to the trouser hems. The same shoes as in Image 1. {hand_pose} "
+    ) + _OUTRO,
+    ('coord', 'back'): _BACK_INTRO + (
+        "Both pieces of the matching set ({set_pieces}) are worn together; the bottom piece is separate from the top. "
+    ) + _OUTRO,
+    ('coord', 'side'): _SIDE_INTRO + (
+        "Both pieces of the matching set ({set_pieces}) are worn together; the bottom piece is separate from the top. "
+    ) + _OUTRO,
+
     # ── SHORTS ──
     ('shorts', 'front'): _FRONT_INTRO + (
         "Replace the model's original bottoms, including any trousers, with these shorts. "

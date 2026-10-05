@@ -8,6 +8,7 @@ import uuid
 import io
 import os
 import random
+import re
 import requests
 from datetime import timedelta
 from PIL import Image, ImageDraw, Image as PILImage
@@ -307,10 +308,26 @@ def _erase_result_tags(provider, image_b64, gemini_api_key, qc_boxes=None, passe
 GARMENT_CLEAN_VERSION = 'v2'
 
 
+_SET_RE = re.compile(r'(?<!\w)(?:takim\w*|set|setler|co-ord|coord)(?!\w)')
+
+
+def _mark_coord_set(session, analysis):
+    """Takım ürünü (üst + alt tek ürün): ürün adı / Reyon / Ürün Grubu ya da analiz 'takım' diyorsa işaretle."""
+    if not isinstance(analysis, dict):
+        return analysis
+    if analysis.get('isSet') or session._is_coord_set():
+        analysis['isSet'] = True
+        analysis['clothingCategory'] = 'tops'  # elbiseye çevrilmesin
+        _logger.info('Takım ürünü: üst ve alt parça birlikte giydirilecek (session=%s)', session.id)
+    return analysis
+
+
 def _needs_bare_legs(session, analysis=None):
     """Elbise / etek / şort: manken bacakları açık olmalı (tulum hariç)."""
     from ..services.garment_analyzer import _detect_sub_type
     analysis = analysis if isinstance(analysis, dict) else {}
+    if analysis.get('isSet'):
+        return False  # takımın alt parçası ürünün kendisi
     category = analysis.get('clothingCategory', '')
     if session._detect_garment_type() == 'one_piece' and category not in ('dress', 'one_piece'):
         category = 'dress'
@@ -992,6 +1009,26 @@ class AiStudioSession(models.Model):
         fallback = self.model_preset_id.garment_type if self.model_preset_id else 'tops'
         _logger.info('_detect_garment_type: Eşleşme yok, fallback=%s', fallback)
         return fallback
+
+    def _is_coord_set(self):
+        """Ürün adı, Reyon / Ürün Grubu niteliği ya da kategorisi 'takım' diyor mu? (Takım Çekimi modu hariç)"""
+        self.ensure_one()
+        if self.session_type == 'set' or not self.product_id:
+            return False
+        from ..services.category_constants import normalize_tr
+        tmpl = self.product_id.product_tmpl_id
+        texts = [tmpl.name or '']
+        try:
+            for line in tmpl.attribute_line_ids:
+                if (line.attribute_id.name or '') in ('Reyon', 'Ürün Grubu'):
+                    texts.extend(v.name for v in line.value_ids if v.name)
+        except Exception:
+            pass
+        categ = tmpl.categ_id
+        while categ:
+            texts.append(categ.name or '')
+            categ = categ.parent_id
+        return bool(_SET_RE.search(normalize_tr(' '.join(texts))))
 
     def _get_product_context_text(self):
         """Ürün adı, kod, kategori ve nitelikleri metin olarak döndürür (Gemini & Prompt için)."""
@@ -2009,6 +2046,7 @@ class AiStudioSession(models.Model):
                     cached_analysis = analyze_garment(
                         fal_api_key, _pre_url, gemini_api_key=gemini_api_key, product_context=product_context
                     )
+                    _mark_coord_set(session, cached_analysis)
                     _logger.info(
                         'Kıyafet analizi tamamlandı: %s %s (yüzey: %s), hasGraphic=%s',
                         cached_analysis.get('garmentType', '?'),
@@ -2176,7 +2214,8 @@ class AiStudioSession(models.Model):
                     
                     # Gemini analizi dress/one_piece diyorsa ama keyword fallback tops dönüyorsa → Gemini'ye güven
                     gemini_clothing_cat = (cached_analysis or {}).get('clothingCategory', '')
-                    if detected_cat == 'tops' and gemini_clothing_cat in ('dress', 'one_piece', 'one-piece', 'full-body'):
+                    if detected_cat == 'tops' and gemini_clothing_cat in ('dress', 'one_piece', 'one-piece', 'full-body') \
+                            and not (cached_analysis or {}).get('isSet'):
                         _logger.info(
                             'Batch category override: _detect=%s AMMA Gemini=%s → one_piece',
                             detected_cat, gemini_clothing_cat,
@@ -2645,9 +2684,10 @@ class AiStudioSession(models.Model):
                                                product_context=session._get_product_context_text())
                 except Exception as ae:
                     _logger.warning('Retry kıyafet analizi başarısız: %s', ae)
+                _mark_coord_set(session, analysis)
                 if isinstance(analysis, dict):
                     gemini_cat = analysis.get('clothingCategory', '')
-                    if gemini_cat in ('dress', 'one_piece', 'one-piece', 'full-body'):
+                    if gemini_cat in ('dress', 'one_piece', 'one-piece', 'full-body') and not analysis.get('isSet'):
                         detected_cat = 'one_piece'
                         analysis['clothingCategory'] = 'dress'
                     elif detected_cat in ('tops', 'bottoms', 'one_piece'):
