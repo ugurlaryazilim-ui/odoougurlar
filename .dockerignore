@@ -1,0 +1,19 @@
+# Docker build bağlamı: imaja yalnız addons/ ve config/ kopyalanıyor (Dockerfile).
+# Bunlar dışındakiler ve addons içindeki derleme çıktıları bağlama gönderilmesin.
+.git
+.playwright-mcp
+*.png
+*.xlsx
+*.log
+*.json
+!addons/**/*.json
+nebimdosyalar
+falaimdler
+ugurlar-chat
+docs
+scripts
+nginx
+# Windows masaüstü senkron ajanı (PyInstaller .exe çıktıları ~115 MB) — Odoo modülü kullanmıyor
+addons/ugurlar_images/sync_agent
+addons/**/*.zip
+addons/**/__pycache__
