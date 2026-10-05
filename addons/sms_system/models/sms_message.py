@@ -1,9 +1,10 @@
 import logging
+from datetime import timedelta
 
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
-from ..services.turatel import (TuratelClient, TuratelError, normalize_number, prepare_text,
+from ..services.turatel import (MAX_SEGMENTS, TuratelClient, TuratelError, normalize_number, prepare_text,
                                 segment_count)
 
 _logger = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ class SmsSystemMessage(models.Model):
     template_id = fields.Many2one('sms.system.template', string='Şablon', ondelete='set null')
     user_id = fields.Many2one('res.users', string='Gönderen', default=lambda self: self.env.user, index=True)
     campaign_id = fields.Many2one('sms.system.campaign', string='Toplu SMS', index=True, ondelete='cascade')
+    manual = fields.Boolean(string='Elle Gönderildi', help='"Yeni SMS" penceresinden serbest metinle gönderildi')
     contact_id = fields.Many2one('sms.system.contact', string='Rehber Kişisi', index='btree_not_null',
                                  ondelete='set null')
 
@@ -90,6 +92,12 @@ class SmsSystemMessage(models.Model):
 
         cfg = self._settings()
         text, sms_type = prepare_text(body, ascii_mode=cfg['ascii_mode'])
+        if segment_count(text, sms_type) > MAX_SEGMENTS:
+            raise UserError(_('SMS metni çok uzun (%(n)s parça). En fazla %(max)s parça gönderilebilir; metni kısaltın.',
+                              n=segment_count(text, sms_type), max=MAX_SEGMENTS))
+        manual = bool(self.env.context.get('sms_manual'))
+        if manual:
+            self._check_manual_limit(len(normalized))
         sender = originator or cfg['originator']
         messages = self.create([{
             'number': num,
@@ -100,6 +108,7 @@ class SmsSystemMessage(models.Model):
             'res_model': record._name if record else False,
             'res_id': record.id if record else False,
             'template_id': template.id if template else False,
+            'manual': manual,
         } for num in normalized])
         messages.sudo()._deliver(cfg)
         if record and hasattr(record, 'message_post'):
@@ -108,6 +117,20 @@ class SmsSystemMessage(models.Model):
                 record.message_post(body=_('SMS → %(num)s [%(state)s]: %(text)s') % {
                     'num': msg.number, 'state': states[msg.state], 'text': msg.body})
         return messages
+
+    @api.model
+    def _check_manual_limit(self, count):
+        """'Yeni SMS' ile serbest metin gönderiminde kullanıcı başı 24 saatlik sınır (yönetici muaf)."""
+        if self.env.user.has_group('sms_system.group_sms_manager'):
+            return
+        limit = int(self.env['ir.config_parameter'].sudo().get_param('sms_system.user_daily_limit', '50') or 0)
+        if not limit:
+            return
+        since = fields.Datetime.now() - timedelta(days=1)
+        used = self.sudo().search_count([('user_id', '=', self.env.uid), ('manual', '=', True),
+                                         ('create_date', '>=', since)])
+        if used + count > limit:
+            raise UserError(_('Günlük elle SMS sınırınız doldu (%(limit)s). Yöneticinize başvurun.', limit=limit))
 
     def _deliver(self, cfg=None):
         """Kayıtları Turatel'e gönder (sudo ile çağrılır)."""
@@ -128,7 +151,9 @@ class SmsSystemMessage(models.Model):
                            'sent_at': fields.Datetime.now(), 'error': False})
             except TuratelError as e:
                 _logger.warning('SMS gönderilemedi (%s): %s', msg.id, e)
-                msg.write({'state': 'error', 'error': str(e), 'retry_count': msg.retry_count + 1})
+                # Kalıcı hatalar (hesap/başlık/kredi/numara) otomatik yeniden denenmez
+                msg.write({'state': 'error', 'error': str(e),
+                           'retry_count': msg.retry_count + 1 if e.retryable else MAX_RETRY})
 
     def _deliver_pack(self, cfg, client):
         """Aynı metni taşıyan kayıtları tek Turatel isteğiyle gönder (toplu SMS kuyruğu, sudo)."""

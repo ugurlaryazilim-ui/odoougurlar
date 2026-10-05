@@ -1,20 +1,25 @@
 import logging
+import time
 from collections import OrderedDict
 from datetime import timedelta
 
 import pytz
 
+from markupsafe import Markup
+
 from odoo import _, api, fields, models
+from odoo.tools import html_escape
 from odoo.exceptions import UserError
 
-from ..services.turatel import TuratelError, prepare_text, segment_count
+from ..services.turatel import MAX_SEGMENTS, prepare_text, segment_count
 from .sms_template import PLACEHOLDER
 
 _logger = logging.getLogger(__name__)
 
 PACK_SIZE = 500          # Turatel'e tek istekte giden en fazla numara
 MIN_TIME_LEFT = 20       # cron süresinin sonuna bu kadar saniye kala dur, kalan sonraki çalışmada
-STUCK_MINUTES = 15       # 'gönderiliyor'da bu kadar kalan kayıt belirsiz sayılır (tekrar gönderilmez)
+STUCK_MINUTES = 15
+CREATE_CHUNK = 5000      # büyük kampanyada gönderim kayıtları parça parça oluşturulur       # 'gönderiliyor'da bu kadar kalan kayıt belirsiz sayılır (tekrar gönderilmez)
 
 
 class SmsSystemCampaign(models.Model):
@@ -55,7 +60,10 @@ class SmsSystemCampaign(models.Model):
                                      help='Kara listede ya da (ticari ise) İYS onayı olmayan numaralar')
     preview_segments = fields.Integer(string='Parça / SMS', compute='_compute_preview')
     preview_credit = fields.Integer(string='Tahmini Kredi', compute='_compute_preview')
+    preview_iys_pending = fields.Integer(string='İYS kontrolü bekleyen', compute='_compute_preview',
+                                         help='Gönderimden hemen önce İYS\'den sorgulanacak numaralar (izin 24 saatten eski)')
     personalized = fields.Boolean(string='Kişiye Özel', compute='_compute_preview')
+    iys_enabled = fields.Boolean(compute='_compute_iys_enabled')
 
     # Sonuç
     skipped_count = fields.Integer(string='Atlanan', readonly=True)
@@ -63,6 +71,8 @@ class SmsSystemCampaign(models.Model):
     sent_count = fields.Integer(string='Gönderilen', compute='_compute_stats')
     error_count = fields.Integer(string='Hatalı', compute='_compute_stats')
     pending_count = fields.Integer(string='Bekleyen', compute='_compute_stats')
+    progress = fields.Float(string='İlerleme', compute='_compute_stats', help='Gönderilen + hatalı / toplam (%)')
+    phone_preview = fields.Html(string='Telefonda Görünüm', compute='_compute_phone_preview', sanitize=True)
 
     # ── Hesaplar ──
 
@@ -84,6 +94,15 @@ class SmsSystemCampaign(models.Model):
         if self.message_type == 'commercial':
             domain.append(('iys_status', '=', 'approved'))
         return domain
+
+    def _iys_stale(self):
+        """Ticari gönderim adayları içinde izni 24 saatten eski (ya da hiç bakılmamış) olanlar."""
+        self.ensure_one()
+        from .sms_iys import FRESH
+        limit_dt = fields.Datetime.now() - FRESH
+        return self.env['sms.system.contact'].sudo().search([
+            ('list_ids', 'in', self.list_ids.ids), ('opt_out', '=', False), ('iys_status', '!=', 'rejected'),
+            '|', ('iys_checked_at', '=', False), ('iys_checked_at', '<', limit_dt)], order='id')
 
     def _recipients(self):
         """(gönderilecek kişiler, atlanan sayısı) — numara bazında tekil."""
@@ -113,7 +132,14 @@ class SmsSystemCampaign(models.Model):
             else:
                 camp.preview_count = camp.total_count
                 camp.preview_skipped = camp.skipped_count
+            camp.preview_iys_pending = (len(camp._iys_stale()) if camp.message_type == 'commercial'
+                                        and camp.state in ('draft', 'scheduled') and camp.list_ids else 0)
             camp.preview_credit = camp.preview_count * camp.preview_segments
+
+    def _compute_iys_enabled(self):
+        enabled = self._icp('sms_system.iys_enabled') == 'True'
+        for camp in self:
+            camp.iys_enabled = enabled
 
     def _compute_stats(self):
         Message = self.env['sms.system.message'].sudo()
@@ -127,6 +153,37 @@ class SmsSystemCampaign(models.Model):
             camp.sent_count = d.get('sent', 0) + d.get('test', 0)
             camp.error_count = d.get('error', 0)
             camp.pending_count = d.get('queued', 0) + d.get('sending', 0)
+            done = camp.sent_count + camp.error_count
+            camp.progress = (100.0 * done / camp.total_count) if camp.total_count else 0.0
+
+    @api.depends('final_body', 'preview_segments')
+    def _compute_phone_preview(self):
+        originator = self._icp('sms_system.turatel_originator') or 'SMS'
+        for camp in self:
+            text = html_escape(camp.final_body or _('Metin yazın...')).replace('\n', Markup('<br/>'))
+            camp.phone_preview = Markup(
+                '<div style="max-width:300px;border:8px solid #222;border-radius:28px;padding:14px 12px 22px;'
+                'background:#f5f5f7;font-family:-apple-system,Segoe UI,sans-serif">'
+                '<div style="text-align:center;font-size:12px;color:#666;margin-bottom:10px"><b>%s</b></div>'
+                '<div style="background:#e5e5ea;color:#000;border-radius:16px;padding:9px 12px;font-size:14px;'
+                'line-height:1.35;white-space:normal;word-wrap:break-word">%s</div>'
+                '<div style="font-size:11px;color:#888;margin-top:8px;text-align:right">%s karakter · %s SMS</div>'
+                '</div>') % (html_escape(originator), text, len(camp.final_body or ''), camp.preview_segments)
+
+    def action_send_test_to_me(self):
+        """Metni kullanıcının kendi cep telefonuna tek SMS olarak gönder ({ad} = kullanıcının adı)."""
+        self.ensure_one()
+        number = self.env.user.partner_id.phone
+        if not number:
+            raise UserError(_('Profilinizde telefon yok. Sağ üstte adınız > Profilim > Telefon alanını doldurun.'))
+        body = PLACEHOLDER.sub(lambda m: self.env.user.name if m.group(1) == 'ad' else '', self._build_body())
+        msg = self.env['sms.system.message'].send_sms(number, body, record=self)
+        ok = msg.state in ('sent', 'test')
+        return {'type': 'ir.actions.client', 'tag': 'display_notification',
+                'params': {'title': _('Deneme SMS'), 'type': 'success' if ok else 'danger',
+                           'message': (_('%s numarasına gönderildi.') % msg.number) + (
+                               _(' (Test modu açık: gerçekte gönderilmedi.)') if msg.state == 'test' else '')
+                           if ok else (msg.error or _('Gönderilemedi.'))}}
 
     @api.onchange('template_id')
     def _onchange_template_id(self):
@@ -145,6 +202,11 @@ class SmsSystemCampaign(models.Model):
             raise UserError(_(
                 'Ticari (kampanya/indirim) SMS için İYS izin kontrolü zorunludur. '
                 'İYS (SmartADM) entegrasyonu henüz etkin değil; bilgilendirme ya da personel türünü kullanın.'))
+        if self.preview_segments > MAX_SEGMENTS:
+            raise UserError(_('Metin çok uzun (%(n)s parça). En fazla %(max)s parça gönderilebilir.',
+                              n=self.preview_segments, max=MAX_SEGMENTS))
+        if self.message_type == 'commercial' and not count:
+            count = len(self._iys_stale())
         if not count:
             raise UserError(_('Gönderilecek alıcı yok (listeler boş, kara listede ya da İYS onaylı değil).'))
         limit = int(self._icp('sms_system.daily_limit', '0') or 0)
@@ -174,6 +236,15 @@ class SmsSystemCampaign(models.Model):
 
     # ── Butonlar ──
 
+    def action_confirm_send(self):
+        """Gönder butonu: alıcı ve kredi sayısını gösteren onay penceresi."""
+        self.ensure_one()
+        contacts, _skipped = self._recipients()
+        self._check_can_send(len(contacts))
+        wiz = self.env['sms.system.campaign.confirm'].create({'campaign_id': self.id})
+        return {'type': 'ir.actions.act_window', 'res_model': wiz._name, 'res_id': wiz.id,
+                'view_mode': 'form', 'target': 'new', 'name': _('Toplu SMS Onayı')}
+
     def action_send(self):
         """Gönder (planlı tarih varsa planla)."""
         for camp in self:
@@ -181,7 +252,12 @@ class SmsSystemCampaign(models.Model):
                 raise UserError(_('Yalnız taslak toplu SMS gönderilebilir.'))
             contacts, _skipped = camp._recipients()
             camp._check_can_send(len(contacts))
-            if camp.scheduled_at and camp.scheduled_at > fields.Datetime.now():
+            if camp.message_type == 'commercial':
+                camp.write({'state': 'scheduled', 'scheduled_at': camp.scheduled_at or fields.Datetime.now()})
+                camp.message_post(body=_('Ticari SMS: gönderimden önce alıcıların İYS izinleri kontrol edilecek, '
+                                         'ardından gönderim başlayacak.'))
+                self.env.ref('sms_system.cron_sms_campaign_queue').sudo()._trigger(camp.scheduled_at)
+            elif camp.scheduled_at and camp.scheduled_at > fields.Datetime.now():
                 camp.state = 'scheduled'
                 camp.message_post(body=_('%(n)s alıcıya planlandı.%(warn)s', n=len(contacts),
                                          warn=camp._commercial_hour_warning(camp.scheduled_at)))
@@ -238,7 +314,9 @@ class SmsSystemCampaign(models.Model):
                 'res_model': self._name, 'res_id': self.id, 'template_id': self.template_id.id or False,
                 'user_id': self.env.user.id,
             })
-        self.env['sms.system.message'].sudo().create(vals_list)
+        Message = self.env['sms.system.message'].sudo()
+        for i in range(0, len(vals_list), CREATE_CHUNK):
+            Message.create(vals_list[i:i + CREATE_CHUNK])
         self.write({'state': 'sending', 'started_at': fields.Datetime.now(), 'skipped_count': skipped})
         self.message_post(body=_('%(n)s alıcıya gönderim başladı (%(s)s numara atlandı).%(warn)s',
                                  n=len(vals_list), s=skipped, warn=self._commercial_hour_warning()))
@@ -248,7 +326,26 @@ class SmsSystemCampaign(models.Model):
         """Planlananları başlat, kuyruktaki gönderimleri paketler halinde Turatel'e ilet."""
         IrCron = self.env['ir.cron']
         now = fields.Datetime.now()
+        Iys = self.env['sms.system.iys']
         for camp in self.search([('state', '=', 'scheduled'), ('scheduled_at', '<=', now)]):
+            if camp.message_type == 'commercial':
+                if not Iys._enabled():
+                    camp.write({'state': 'draft'})
+                    camp.message_post(body=_('İYS kontrolü kapalı olduğu için ticari SMS gönderilmedi.'))
+                    continue
+                stale = camp._iys_stale()
+                if stale:
+                    try:
+                        stats = Iys.refresh_contacts(stale, deadline=time.monotonic() + 200, guard=False)
+                    except Exception as e:  # noqa: BLE001 — bağlantı hatası: sonraki çalışmada tekrar
+                        _logger.warning('Ticari SMS İYS kontrolü başarısız (%s): %s', camp.id, e)
+                        continue
+                    IrCron._commit_progress()
+                    if stats.get('stopped') == 'error':
+                        camp.message_post(body=_('İYS kontrolü yapılamadı, tekrar denenecek: %s') % stats.get('error'))
+                        continue
+                    if camp._iys_stale():
+                        continue  # süre yetmedi; kalanlar sonraki çalışmada
             try:
                 camp._start()
             except UserError as e:
@@ -302,3 +399,34 @@ class SmsSystemCampaign(models.Model):
         self.write({'state': 'done', 'finished_at': fields.Datetime.now()})
         self.message_post(body=_('Tamamlandı: %(sent)s gönderildi, %(err)s hatalı, %(skip)s atlandı.',
                                  sent=self.sent_count, err=self.error_count, skip=self.skipped_count))
+
+
+class SmsSystemCampaignConfirm(models.TransientModel):
+    _name = 'sms.system.campaign.confirm'
+    _description = 'Toplu SMS Onayı'
+
+    campaign_id = fields.Many2one('sms.system.campaign', required=True, ondelete='cascade')
+    summary = fields.Html(compute='_compute_summary', sanitize=True)
+
+    @api.depends('campaign_id')
+    def _compute_summary(self):
+        now = fields.Datetime.now()
+        for wiz in self:
+            camp = wiz.campaign_id
+            if camp.scheduled_at and camp.scheduled_at > now:
+                local = fields.Datetime.context_timestamp(camp, camp.scheduled_at)
+                when = _('%s tarihinde') % local.strftime('%d.%m.%Y %H:%M')
+            else:
+                when = _('hemen')
+            types = dict(camp._fields['message_type'].selection)
+            wiz.summary = _(
+                '<p><b>%(n)s</b> kişiye %(when)s gönderilecek (%(s)s numara atlanacak).</p>'
+                '<p>Tahmini kredi: <b>%(c)s</b> (%(seg)s parça/SMS). Tür: %(t)s.</p>'
+                '<p class="text-muted">Gönderim başladıktan sonra yalnız henüz gitmemiş mesajlar durdurulabilir.</p>',
+                n=camp.preview_count, when=when, s=camp.preview_skipped, c=camp.preview_credit,
+                seg=camp.preview_segments, t=types[camp.message_type])
+
+    def action_confirm(self):
+        self.ensure_one()
+        self.campaign_id.action_send()
+        return {'type': 'ir.actions.act_window_close'}

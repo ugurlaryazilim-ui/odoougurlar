@@ -28,6 +28,9 @@
                     <button name="action_opt_out" string="Kara Listeye Al" type="object" invisible="opt_out"
                             confirm="Bu numaraya artık hiçbir toplu SMS gönderilmeyecek. Devam edilsin mi?"/>
                     <button name="action_opt_in" string="Kara Listeden Çıkar" type="object" invisible="not opt_out"/>
+                    <button name="action_iys_query" string="İYS'den Sorgula" type="object" icon="fa-shield"/>
+                    <button name="action_iys_consent" string="İYS İzni Al" type="object" icon="fa-check-square-o"
+                            invisible="iys_status == 'approved'"/>
                 </header>
                 <sheet>
                     <widget name="web_ribbon" title="Kara Listede" bg_color="text-bg-danger" invisible="not opt_out"/>
@@ -43,6 +46,7 @@
                             <field name="list_ids" widget="many2many_tags"/>
                             <field name="iys_status"/>
                             <field name="iys_checked_at"/>
+                            <field name="iys_source" invisible="not iys_source"/>
                             <field name="opt_out" readonly="1"/>
                             <field name="opt_out_reason" invisible="not opt_out"/>
                             <field name="opt_out_date" invisible="not opt_out"/>
@@ -83,7 +87,12 @@
         <field name="view_mode">list,form</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">Rehber boş</p>
-            <p>Excel/CSV aktarın ya da Kişiler / Kullanıcılar listesinden "SMS Listesine Ekle" işlemini kullanın.</p>
+            <p>Numaraları üç yoldan ekleyebilirsiniz:</p>
+            <ul class="text-start d-inline-block">
+                <li><b>Excel/CSV Aktar</b> (Rehber menüsü) — örnek dosya sihirbazdan indirilir.</li>
+                <li><b>Kişiler</b> ya da <b>Kullanıcılar</b> listesinde kayıtları seçip <b>İşlem &gt; SMS Listesine Ekle</b>.</li>
+                <li><b>Terzi Müşterilerini Aktar</b> (Rehber menüsü).</li>
+            </ul>
         </field>
     </record>
 
@@ -148,6 +157,7 @@
                 <field name="total_count"/>
                 <field name="sent_count"/>
                 <field name="error_count"/>
+                <field name="progress" widget="progressbar" optional="show"/>
                 <field name="state" widget="badge" decoration-success="state == 'done'"
                        decoration-info="state in ('scheduled', 'sending')"/>
                 <field name="user_id" optional="hide"/>
@@ -161,15 +171,16 @@
         <field name="arch" type="xml">
             <form>
                 <header>
-                    <button name="action_send" string="Gönder" type="object" class="btn-primary"
-                            invisible="state != 'draft'"
-                            confirm="Toplu SMS listelerdeki tüm alıcılara gönderilecek (planlı tarih varsa o saatte). Devam edilsin mi?"/>
+                    <button name="action_confirm_send" string="Gönder" type="object" class="btn-primary"
+                            invisible="state != 'draft'"/>
                     <button name="action_retry_errors" string="Hatalıları Yeniden Gönder" type="object"
                             invisible="state != 'done' or not error_count"/>
                     <button name="action_cancel" string="Durdur / İptal" type="object"
                             invisible="state not in ('scheduled', 'sending')"
                             confirm="Henüz gönderilmemiş SMS'ler iptal edilecek. Devam edilsin mi?"/>
                     <button name="action_draft" string="Taslağa Al" type="object" invisible="state not in ('scheduled', 'cancel')"/>
+                    <button name="action_send_test_to_me" string="Bana Deneme Gönder" type="object" icon="fa-mobile"
+                            invisible="state != 'draft'" help="Metni profilinizdeki telefona tek SMS olarak gönderir"/>
                     <field name="state" widget="statusbar" statusbar_visible="draft,sending,done"/>
                 </header>
                 <sheet>
@@ -182,7 +193,13 @@
                     <div class="oe_title">
                         <h1><field name="name" placeholder="ör. Bayram mesai saatleri" readonly="state != 'draft'"/></h1>
                     </div>
-                    <div class="alert alert-warning" role="alert" invisible="message_type != 'commercial'">
+                    <field name="iys_enabled" invisible="1"/>
+                    <div class="alert alert-danger" role="alert" invisible="message_type != 'commercial' or iys_enabled">
+                        <b>Ticari SMS şu an gönderilemez.</b> Kampanya/indirim SMS'i yasa gereği yalnız İYS'de izni olan
+                        numaralara gidebilir. İYS (SmartADM) bağlantısı Ayarlar &gt; SMS ekranından kurulunca bu tür açılır.
+                        Mağaza duyurusu gibi reklam içermeyen mesajlar için "Bilgilendirme" türünü seçin.
+                    </div>
+                    <div class="alert alert-warning" role="alert" invisible="message_type != 'commercial' or not iys_enabled">
                         Ticari SMS yalnız İYS onaylı numaralara gider; ret metni (Ayarlar &gt; SMS) otomatik eklenir.
                     </div>
                     <group>
@@ -198,9 +215,11 @@
                             <field name="preview_skipped"/>
                             <field name="preview_segments"/>
                             <field name="preview_credit"/>
+                            <field name="preview_iys_pending" invisible="message_type != 'commercial' or not preview_iys_pending"/>
                             <field name="personalized" invisible="not personalized"/>
                         </group>
                         <group string="Sonuç" invisible="state in ('draft', 'scheduled')">
+                            <field name="progress" widget="progressbar"/>
                             <field name="sent_count"/>
                             <field name="error_count"/>
                             <field name="pending_count" invisible="not pending_count"/>
@@ -209,13 +228,18 @@
                             <field name="finished_at"/>
                         </group>
                     </group>
-                    <group string="Metin">
-                        <field name="body" nolabel="1" colspan="2" readonly="state != 'draft'"
-                               placeholder="Sayın {ad}, ... ({ad} yazarsanız her kişinin adı gelir)"/>
-                    </group>
-                    <group string="Örnek (gönderilecek hali)">
-                        <field name="final_body" nolabel="1" colspan="2"/>
-                    </group>
+                    <div class="row">
+                        <div class="col-lg-7">
+                            <label for="body" string="Metin" class="fw-bold"/>
+                            <field name="body" nolabel="1" readonly="state != 'draft'"
+                                   placeholder="Sayın {ad}, ... ({ad} yazarsanız her kişinin adı gelir)"/>
+                            <field name="final_body" invisible="1"/>
+                        </div>
+                        <div class="col-lg-5">
+                            <label for="phone_preview" string="Telefonda böyle görünecek" class="fw-bold"/>
+                            <field name="phone_preview" nolabel="1" readonly="1"/>
+                        </div>
+                    </div>
                 </sheet>
                 <chatter/>
             </form>
@@ -244,11 +268,79 @@
         <field name="view_mode">list,form</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">İlk toplu SMS'inizi oluşturun</p>
-            <p>Önce Rehber'e kişi aktarın, listeye bağlayın; sonra burada liste ve metin seçip gönderin.</p>
+            <p><b>Başlarken:</b></p>
+            <ol class="text-start d-inline-block">
+                <li><b>Ayarlar &gt; SMS</b>: Turatel kanal kodu, kullanıcı, şifre ve mesaj başlığını girin; "Bağlantıyı Test Et".</li>
+                <li><b>Rehber &gt; Excel/CSV Aktar</b>: müşteri ya da personel listenizi yükleyin (örnek Excel oradan indirilebilir).</li>
+                <li><b>Yeni</b>: başlık, liste ve metni girin; sağda telefondaki görünümü kontrol edin.</li>
+                <li><b>Bana Deneme Gönder</b> ile önce kendinize gönderin, sonra <b>Gönder</b>.</li>
+            </ol>
+            <p class="text-muted">Kampanya/indirim (ticari) SMS'i için İYS bağlantısı gerekir (Ayarlar &gt; SMS &gt; İYS).</p>
         </field>
     </record>
 
     <!-- ═══════════ Sihirbazlar ═══════════ -->
+    <record id="view_sms_iys_consent" model="ir.ui.view">
+        <field name="name">sms.system.iys.consent.form</field>
+        <field name="model">sms.system.iys.consent</field>
+        <field name="arch" type="xml">
+            <form string="İYS İzni Al">
+                <field name="step" invisible="1"/>
+                <field name="trigger_id" invisible="1"/>
+                <div class="text-muted mb-2" invisible="step != 'start'">
+                    Müşteriden kampanya/indirim SMS'i almak için izin alın. İzin İYS'ye kaydedilir; müşteri istediği
+                    zaman "RET" yazarak iptal edebilir.
+                </div>
+                <group invisible="step != 'start'">
+                    <field name="mobile" placeholder="0532 123 45 67" readonly="step != 'start'"/>
+                    <field name="name"/>
+                    <field name="list_id" options="{'no_create': True}"/>
+                    <field name="method" widget="radio"/>
+                    <field name="source" invisible="method != 'form'" required="method == 'form'"/>
+                    <field name="consent_date" invisible="method != 'form'"/>
+                </group>
+                <div class="alert alert-info" role="status" invisible="step != 'start' or method != 'form'">
+                    İYS kuralı gereği izin en geç 3 iş günü içinde yüklenmelidir. İmzalı formu saklayın.
+                </div>
+                <div invisible="step != 'code'">
+                    <p>Müşterinin telefonuna onay kodu gönderildi. Müşteriden kodu isteyip girin:</p>
+                    <group><field name="activation_key" placeholder="123456"/></group>
+                </div>
+                <div class="alert alert-success" role="status" invisible="step != 'done'"><field name="result" nolabel="1"/></div>
+                <footer>
+                    <button name="action_send_code" string="Kodu Gönder" type="object" class="btn-primary"
+                            invisible="step != 'start' or method != 'code'"/>
+                    <button name="action_load_form" string="İzni Kaydet" type="object" class="btn-primary"
+                            invisible="step != 'start' or method != 'form'"/>
+                    <button name="action_approve" string="Onayla" type="object" class="btn-primary" invisible="step != 'code'"/>
+                    <button name="action_send_code" string="Kodu Tekrar Gönder" type="object" class="btn-link" invisible="step != 'code'"/>
+                    <button string="Kapat" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_sms_iys_consent" model="ir.actions.act_window">
+        <field name="name">İYS İzni Al</field>
+        <field name="res_model">sms.system.iys.consent</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <record id="view_sms_campaign_confirm" model="ir.ui.view">
+        <field name="name">sms.system.campaign.confirm.form</field>
+        <field name="model">sms.system.campaign.confirm</field>
+        <field name="arch" type="xml">
+            <form string="Toplu SMS Onayı">
+                <field name="summary" nolabel="1" readonly="1"/>
+                <footer>
+                    <button name="action_confirm" string="Onayla ve Gönder" type="object" class="btn-primary"/>
+                    <button string="Vazgeç" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
     <record id="view_sms_contact_import" model="ir.ui.view">
         <field name="name">sms.system.contact.import.form</field>
         <field name="model">sms.system.contact.import</field>
@@ -258,6 +350,7 @@
                 <div invisible="done" class="text-muted mb-2">
                     İlk satırda başlık olsun: <b>Ad</b>, <b>Telefon</b> (isteğe bağlı <b>Müşteri Kodu</b>).
                     Başlık yoksa telefon sütunu içerikten bulunur. Kara listedeki ve İYS durumu olan kişilere dokunulmaz.
+                    <button name="action_download_sample" type="object" string="Örnek Excel indir" class="btn-link p-0 ms-1" icon="fa-download"/>
                 </div>
                 <group invisible="done">
                     <field name="file" filename="filename"/>
@@ -324,6 +417,16 @@
         <field name="group_ids" eval="[(4, ref('sms_system.group_sms_manager'))]"/>
     </record>
 
+    <record id="action_server_sms_contact_iys_query" model="ir.actions.server">
+        <field name="name">İYS'den Sorgula</field>
+        <field name="model_id" ref="model_sms_system_contact"/>
+        <field name="binding_model_id" ref="model_sms_system_contact"/>
+        <field name="binding_view_types">list,form</field>
+        <field name="state">code</field>
+        <field name="code">action = records.action_iys_query()</field>
+        <field name="group_ids" eval="[(4, ref('sms_system.group_sms_manager'))]"/>
+    </record>
+
     <!-- ═══════════ Menü ═══════════ -->
     <menuitem id="menu_sms_campaign" name="Toplu SMS" parent="menu_sms_root" action="action_sms_campaign" sequence="1"
               groups="sms_system.group_sms_manager"/>
@@ -333,4 +436,5 @@
     <menuitem id="menu_sms_list" name="Listeler" parent="menu_sms_book" action="action_sms_list" sequence="2"/>
     <menuitem id="menu_sms_optout" name="Kara Liste" parent="menu_sms_book" action="action_sms_contact_optout" sequence="3"/>
     <menuitem id="menu_sms_import" name="Excel/CSV Aktar" parent="menu_sms_book" action="action_sms_contact_import" sequence="10"/>
+    <menuitem id="menu_sms_iys_consent" name="İYS İzni Al" parent="menu_sms_book" action="action_sms_iys_consent" sequence="5"/>
 </odoo>

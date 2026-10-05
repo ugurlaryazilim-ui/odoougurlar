@@ -1,6 +1,6 @@
 {
     'name': 'SMS Sistemi (Turatel)',
-    'version': '19.0.1.1.1',
+    'version': '19.0.1.6.0',
     'category': 'Marketing',
     'summary': 'Turatel üzerinden SMS gönderimi — şablonlar, gönderim kaydı, diğer modüller için ortak servis',
     'description': """
@@ -11,6 +11,7 @@
         * Test modu, başarısız gönderimleri yeniden deneme
         * Rehber ve listeler (Excel/CSV, Odoo kişileri/kullanıcılar), kara liste
         * Toplu SMS: önizleme, planlı gönderim, paketli kuyruk, günlük sınır
+        * İYS (SmartADM): izin sorgusu, artımlı senkron; ticari SMS yalnız onaylı numaralara
         * Diğer modüller: env['sms.system.message'].send_sms(numara, metin, record=kayıt)
     """,
     'author': 'Uğurlar',
@@ -26,5 +27,5 @@
     'installable': True,
     'application': True,
     'license': 'LGPL-3',
-    'icon': '/sms_system/static/description/icon.png',
+    'icon': '/sms_system/static/description/sms_logo.png',
 }
