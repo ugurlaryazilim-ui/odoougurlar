@@ -2,11 +2,18 @@ import json
 from collections import defaultdict
 import logging
 
-from odoo import http
+from odoo import fields, http
 from odoo.exceptions import AccessError, UserError
 from odoo.http import request
 
 _logger = logging.getLogger(__name__)
+
+
+def _local_dt(record, value, fmt='%d.%m.%Y %H:%M'):
+    """UTC datetime'ı kullanıcının saat dilimine çevirip biçimle."""
+    if not value:
+        return ''
+    return fields.Datetime.context_timestamp(record, fields.Datetime.to_datetime(value)).strftime(fmt)
 
 
 class TailorController(http.Controller):
@@ -187,6 +194,11 @@ class TailorController(http.Controller):
             offset=offset,
         )
 
+        # Tarihler kullanıcının saat diliminde (UTC basılınca 3 saat geri görünüyordu)
+        Order = request.env['ugurlar.tailor.order']
+        for o in orders:
+            o['create_date_local'] = _local_dt(Order, o['create_date'])
+
         # Tüm hizmet satırlarını tek sorguda getir ve order_id'ye göre grupla
         order_ids = [o['id'] for o in orders]
         all_lines = request.env['ugurlar.tailor.order.line'].search_read(
@@ -255,7 +267,7 @@ class TailorController(http.Controller):
             'tailor_name': order.tailor_id.name if order.tailor_id else '-',
             'total_price': order.total_price,
             'notes': order.notes or '',
-            'date': order.create_date.strftime('%d.%m.%Y %H:%M') if order.create_date else '',
+            'date': _local_dt(order, order.create_date),
             'promised_date': order.promised_date.strftime('%d.%m.%Y') if order.promised_date else '',
             'services': [{'name': line.service_name, 'price': line.price} for line in order.line_ids],
         }

@@ -28,6 +28,10 @@ export class TailorMainMenu extends Component {
         this.props.onNavigate("order_list");
     }
 
+    openList(status) {
+        this.props.onNavigate("order_list", { status });
+    }
+
     onGiftLabel() {
         this.props.onNavigate("gift_label");
     }

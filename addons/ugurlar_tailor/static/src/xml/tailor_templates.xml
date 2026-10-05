@@ -6,7 +6,8 @@
         <div class="tailor-app">
             <TailorMainMenu t-if="state.screen === 'main_menu'" onNavigate.bind="switchScreen"/>
             <TailorNewOrder t-if="state.screen === 'new_order'" onNavigate.bind="switchScreen" scanner="scanner"/>
-            <TailorOrderList t-if="state.screen === 'order_list'" onNavigate.bind="switchScreen" scanner="scanner"/>
+            <TailorOrderList t-if="state.screen === 'order_list'" onNavigate.bind="switchScreen" scanner="scanner"
+                             initialStatus="state.listStatus"/>
             <TailorGiftLabel t-if="state.screen === 'gift_label'" onNavigate.bind="switchScreen" scanner="scanner"/>
             <TailorStoreItem t-if="state.screen === 'store_item'" onNavigate.bind="switchScreen" scanner="scanner"/>
         </div>
@@ -19,12 +20,12 @@
                 <h1>Terzi Takip</h1>
                 <p class="tailor-subtitle">Mağaza Terzi Yönetim Sistemi</p>
             </div>
-            <div class="tailor-stats" t-on-click="onOrderList">
-                <div class="tailor-stat"><b t-esc="stats.waiting_approval"/><span>Onay</span></div>
-                <div class="tailor-stat"><b t-esc="stats.pending"/><span>Bekliyor</span></div>
-                <div class="tailor-stat"><b t-esc="stats.in_progress"/><span>Terzide</span></div>
-                <div class="tailor-stat"><b t-esc="stats.completed"/><span>Hazır</span></div>
-                <div t-att-class="'tailor-stat' + (stats.overdue ? ' tailor-stat-danger' : '')"><b t-esc="stats.overdue"/><span>Geciken</span></div>
+            <div class="tailor-stats">
+                <div class="tailor-stat" t-on-click="() =&gt; this.openList('waiting_approval')"><b t-esc="stats.waiting_approval"/><span>Onay</span></div>
+                <div class="tailor-stat" t-on-click="() =&gt; this.openList('pending')"><b t-esc="stats.pending"/><span>Bekliyor</span></div>
+                <div class="tailor-stat" t-on-click="() =&gt; this.openList('in_progress')"><b t-esc="stats.in_progress"/><span>Terzide</span></div>
+                <div class="tailor-stat" t-on-click="() =&gt; this.openList('completed')"><b t-esc="stats.completed"/><span>Hazır</span></div>
+                <div t-att-class="'tailor-stat' + (stats.overdue ? ' tailor-stat-danger' : '')" t-on-click="() =&gt; this.openList('overdue')"><b t-esc="stats.overdue"/><span>Geciken</span></div>
             </div>
             <div class="tailor-menu-grid">
                 <div class="tailor-menu-card tailor-card-primary" t-on-click="onNewOrder">
@@ -239,14 +240,9 @@
                     <i class="fa fa-barcode"/>
                 </button>
                 <select class="tailor-select" t-on-change="onFilterChange">
-                    <option value="">Tümü</option>
-                    <option value="overdue">&#9888; Geciken</option>
-                    <option value="waiting_approval">Onay Bekleyen</option>
-                    <option value="pending">Bekliyor</option>
-                    <option value="in_progress">Terzide</option>
-                    <option value="completed">Hazır</option>
-                    <option value="delivered">Teslim</option>
-                    <option value="cancelled">İptal</option>
+                    <t t-foreach="statusOptions" t-as="opt" t-key="opt[0]">
+                        <option t-att-value="opt[0]" t-att-selected="state.statusFilter === opt[0]" t-esc="opt[1]"/>
+                    </t>
                 </select>
             </div>
 
@@ -275,8 +271,8 @@
                             <div t-if="order.tailor_id"><t t-esc="order.tailor_id[1]"/></div>
                             <div><t t-esc="order.total_price?.toFixed(2)"/> TL</div>
                             <div t-if="order.promised_date">Teslim: <strong t-esc="formatDate(order.promised_date)"/></div>
-                            <div t-if="order.create_date" class="tailor-order-date">
-                                <t t-esc="order.create_date"/>
+                            <div t-if="order.create_date_local" class="tailor-order-date">
+                                <t t-esc="order.create_date_local"/>
                             </div>
                             <div t-if="order.services and order.services.length" class="tailor-order-services">
                                 <t t-foreach="order.services" t-as="s" t-key="s.id">

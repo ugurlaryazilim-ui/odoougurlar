@@ -19,6 +19,7 @@ export class TailorAction extends Component {
         this.scanner = new TailorBarcodeScanner();
         this.state = useState({
             screen: "main_menu",
+            listStatus: "",
         });
 
         onMounted(() => {
@@ -30,7 +31,9 @@ export class TailorAction extends Component {
         });
     }
 
-    switchScreen(screen) {
+    switchScreen(screen, params = {}) {
+        // Sayaç kartından gelince liste o duruma süzülü açılır
+        this.state.listStatus = params.status || "";
         this.state.screen = screen;
     }
 }

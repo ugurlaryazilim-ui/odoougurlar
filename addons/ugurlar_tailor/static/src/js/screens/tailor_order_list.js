@@ -13,7 +13,19 @@ export class TailorOrderList extends Component {
     static props = {
         onNavigate: Function,
         scanner: { type: Object, optional: true },
+        initialStatus: { type: String, optional: true },
     };
+
+    statusOptions = [
+        ["", _t("Tümü")],
+        ["overdue", _t("⚠ Geciken")],
+        ["waiting_approval", _t("Onay Bekleyen")],
+        ["pending", _t("Bekliyor")],
+        ["in_progress", _t("Terzide")],
+        ["completed", _t("Hazır")],
+        ["delivered", _t("Teslim")],
+        ["cancelled", _t("İptal")],
+    ];
 
     setup() {
         this.notification = useService("notification");
@@ -24,7 +36,7 @@ export class TailorOrderList extends Component {
             page: 1,
             limit: 20,
             search: "",
-            statusFilter: "",
+            statusFilter: this.props.initialStatus || "",
             loading: false,
         });
 

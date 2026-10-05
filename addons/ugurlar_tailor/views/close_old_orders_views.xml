@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <record id="view_tailor_close_old_wizard" model="ir.ui.view">
+        <field name="name">ugurlar.tailor.close.old.wizard.form</field>
+        <field name="model">ugurlar.tailor.close.old.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Eski Siparişleri Kapat">
+                <p class="text-muted">
+                    Durumu güncellenmeden kalmış eski siparişleri tek seferde kapatır. Her siparişe not düşülür.
+                </p>
+                <group>
+                    <field name="days"/>
+                    <field name="from_states"/>
+                    <field name="target_state"/>
+                    <field name="order_count"/>
+                </group>
+                <footer>
+                    <button name="action_apply" string="Uygula" type="object" class="btn-primary"
+                            confirm="Seçilen siparişlerin durumu toplu değiştirilecek. Emin misiniz?"/>
+                    <button string="Vazgeç" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_tailor_close_old_wizard" model="ir.actions.act_window">
+        <field name="name">Eski Siparişleri Kapat</field>
+        <field name="res_model">ugurlar.tailor.close.old.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <menuitem id="menu_tailor_close_old"
+              name="Eski Siparişleri Kapat"
+              parent="menu_tailor_config"
+              action="action_tailor_close_old_wizard"
+              groups="ugurlar_tailor.group_tailor_manager"
+              sequence="90"/>
+</odoo>
