@@ -19,5 +19,14 @@
             <field name="interval_type">minutes</field>
             <field name="active" eval="True"/>
         </record>
+        <record id="cron_sms_iys" model="ir.cron">
+            <field name="name">SMS: İYS izin senkronu</field>
+            <field name="model_id" ref="model_sms_system_iys"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_iys()</field>
+            <field name="interval_number">30</field>
+            <field name="interval_type">minutes</field>
+            <field name="active" eval="True"/>
+        </record>
     </data>
 </odoo>

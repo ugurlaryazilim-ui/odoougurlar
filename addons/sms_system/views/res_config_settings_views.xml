@@ -42,6 +42,39 @@
                             </div>
                         </setting>
                     </block>
+                    <block title="İYS İzin Kontrolü (SmartADM)" name="sms_iys">
+                        <setting help="Ticari (kampanya/indirim) SMS yalnız İYS onaylı numaralara gider. Rehber yarım saatte bir otomatik senkronlanır.">
+                            <field name="sms_iys_enabled"/>
+                            <div class="mt8">
+                                <button name="action_iys_test" type="object" string="Bağlantıyı Test Et" class="btn-secondary" icon="fa-plug"/>
+                                <button name="action_iys_sync_now" type="object" string="Şimdi Senkronize Et" class="btn-link" icon="fa-refresh"/>
+                            </div>
+                        </setting>
+                        <setting string="SmartADM Hesabı" help="Turatel'in verdiği SmartADM (İzin Yönetimi) bilgileri">
+                            <div class="content-group">
+                                <div class="row mt8">
+                                    <label for="sms_iys_customer_code" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_iys_customer_code" class="col-lg-8"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_iys_username" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_iys_username" class="col-lg-8"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_iys_password" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_iys_password" password="True" class="col-lg-8"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_iys_store" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_iys_store" class="col-lg-8"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_iys_url" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_iys_url" class="col-lg-8" placeholder="https://adm.smartadm.net/webservice/api"/>
+                                </div>
+                            </div>
+                        </setting>
+                    </block>
                     <block title="Toplu SMS" name="sms_bulk">
                         <setting help="&quot;Yeni SMS&quot; ile bir çalışanın 24 saatte gönderebileceği en fazla SMS (yöneticiler ve otomatik bildirimler hariç, 0 = sınırsız)">
                             <field name="sms_user_daily_limit"/>

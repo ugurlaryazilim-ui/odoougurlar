@@ -28,6 +28,7 @@
                     <button name="action_opt_out" string="Kara Listeye Al" type="object" invisible="opt_out"
                             confirm="Bu numaraya artık hiçbir toplu SMS gönderilmeyecek. Devam edilsin mi?"/>
                     <button name="action_opt_in" string="Kara Listeden Çıkar" type="object" invisible="not opt_out"/>
+                    <button name="action_iys_query" string="İYS'den Sorgula" type="object" icon="fa-shield"/>
                 </header>
                 <sheet>
                     <widget name="web_ribbon" title="Kara Listede" bg_color="text-bg-danger" invisible="not opt_out"/>
@@ -43,6 +44,7 @@
                             <field name="list_ids" widget="many2many_tags"/>
                             <field name="iys_status"/>
                             <field name="iys_checked_at"/>
+                            <field name="iys_source" invisible="not iys_source"/>
                             <field name="opt_out" readonly="1"/>
                             <field name="opt_out_reason" invisible="not opt_out"/>
                             <field name="opt_out_date" invisible="not opt_out"/>
@@ -203,6 +205,7 @@
                             <field name="preview_skipped"/>
                             <field name="preview_segments"/>
                             <field name="preview_credit"/>
+                            <field name="preview_iys_pending" invisible="message_type != 'commercial' or not preview_iys_pending"/>
                             <field name="personalized" invisible="not personalized"/>
                         </group>
                         <group string="Sonuç" invisible="state in ('draft', 'scheduled')">
@@ -340,6 +343,16 @@
         <field name="target">new</field>
         <field name="binding_model_id" ref="base.model_res_users"/>
         <field name="binding_view_types">list</field>
+        <field name="group_ids" eval="[(4, ref('sms_system.group_sms_manager'))]"/>
+    </record>
+
+    <record id="action_server_sms_contact_iys_query" model="ir.actions.server">
+        <field name="name">İYS'den Sorgula</field>
+        <field name="model_id" ref="model_sms_system_contact"/>
+        <field name="binding_model_id" ref="model_sms_system_contact"/>
+        <field name="binding_view_types">list,form</field>
+        <field name="state">code</field>
+        <field name="code">action = records.action_iys_query()</field>
         <field name="group_ids" eval="[(4, ref('sms_system.group_sms_manager'))]"/>
     </record>
 

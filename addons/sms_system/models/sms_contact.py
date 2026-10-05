@@ -1,9 +1,11 @@
 from odoo import _, api, fields, models
-from odoo.exceptions import ValidationError
+from odoo.exceptions import UserError, ValidationError
 
+from ..services.smartadm import SmartAdmError
 from ..services.turatel import normalize_number
 
 UPSERT_CHUNK = 5000
+GUARD_MIN_INTERACTIVE = 50  # bu kadardan az elle sorguda hata oranı koruması uygulanmaz
 
 
 class SmsSystemList(models.Model):
@@ -63,6 +65,7 @@ class SmsSystemContact(models.Model):
     ], string='İYS İzni', default='unknown', required=True, index=True,
         help='Ticari (kampanya) SMS yalnız İYS onaylı numaralara gider')
     iys_checked_at = fields.Datetime(string='İYS Kontrol Tarihi', readonly=True)
+    iys_source = fields.Char(string='İYS Kaynağı', readonly=True, help='İznin alındığı yer (HS_WEB, HS_FIZIKSEL_ORTAM ...)')
     opt_out = fields.Boolean(string='Kara Listede', index=True,
                              help='Kara listedeki numaralara hiçbir toplu SMS gönderilmez')
     opt_out_reason = fields.Char(string='Kara Liste Sebebi')
@@ -154,6 +157,29 @@ class SmsSystemContact(models.Model):
             Contact.create(to_create[i:i + UPSERT_CHUNK])
         result['created'] = len(to_create)
         return result
+
+    def action_iys_query(self):
+        """Seçili kişilerin İYS iznini şimdi sorgula (en fazla 200)."""
+        if len(self) > 200:
+            raise UserError(_('Tek seferde en fazla 200 kişi sorgulanabilir; geri kalanını otomatik senkron yapar.'))
+        Iys = self.env['sms.system.iys']
+        try:
+            stats = Iys.refresh_contacts(self, guard=len(self) > GUARD_MIN_INTERACTIVE)
+        except SmartAdmError as e:
+            raise UserError(str(e)) from e
+        if stats.get('stopped') == 'error':
+            raise UserError(stats.get('error') or _('İYS sorgusu başarısız.'))
+        return {
+            'type': 'ir.actions.client', 'tag': 'display_notification',
+            'params': {
+                'title': _('İYS Sorgusu'), 'type': 'success', 'sticky': stats['stopped'] == 'guard',
+                'message': _('%(d)s sorgulandı: %(a)s onaylı, %(r)s ret, %(n)s İYS kaydında yok.%(g)s',
+                             d=stats['done'], a=stats['approved'], r=stats['rejected'], n=stats['not_found'],
+                             g=_(' Numaraların çoğu İYS\'de olmadığı için sorgu durduruldu (hesap koruması).')
+                             if stats['stopped'] == 'guard' else ''),
+                'next': {'type': 'ir.actions.client', 'tag': 'soft_reload'},
+            },
+        }
 
     def action_opt_out(self):
         self.write({'opt_out': True, 'opt_out_reason': self.env.context.get('opt_out_reason') or _('Elle')})

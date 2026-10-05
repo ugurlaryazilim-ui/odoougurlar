@@ -1,6 +1,7 @@
 from odoo import _, fields, models
 from odoo.exceptions import UserError
 
+from ..services.smartadm import SmartAdmError
 from ..services.turatel import ERROR_HINTS, TuratelError
 
 
@@ -30,6 +31,42 @@ class ResConfigSettings(models.TransientModel):
                                                '(SMS yöneticileri ve otomatik bildirimler hariç; 0 = sınırsız)')
     sms_optout_text = fields.Char(string='Ret metni', config_parameter='sms_system.optout_text',
                                   help='Ticari SMS sonuna eklenir; ör. "SMS almamak için RET yazıp 4609 a gönderin"')
+
+    sms_iys_enabled = fields.Boolean(string='İYS kontrolü etkin', config_parameter='sms_system.iys_enabled',
+                                     help='Açıkken ticari SMS yalnız İYS onaylı numaralara gider ve rehber otomatik senkronlanır')
+    sms_iys_customer_code = fields.Char(string='SmartADM Müşteri Kodu', config_parameter='sms_system.iys_customer_code',
+                                        groups='base.group_system')
+    sms_iys_username = fields.Char(string='SmartADM Kullanıcı Adı', config_parameter='sms_system.iys_username',
+                                   groups='base.group_system')
+    sms_iys_password = fields.Char(string='SmartADM Şifre', config_parameter='sms_system.iys_password',
+                                   groups='base.group_system')
+    sms_iys_store = fields.Char(string='Mağaza Adı (RemoteStoreId)', config_parameter='sms_system.iys_store',
+                                help='İsteğe bağlı; SmartADM kayıtlarında işlemin hangi mağazadan yapıldığı görünür')
+    sms_iys_url = fields.Char(string='SmartADM API Adresi', config_parameter='sms_system.iys_url',
+                              help='Boşsa https://adm.smartadm.net/webservice/api')
+
+    def action_iys_test(self):
+        self.ensure_one()
+        self.execute()
+        try:
+            self.env['sms.system.iys'].test_connection()
+        except SmartAdmError as e:
+            raise UserError(str(e)) from e
+        return {'type': 'ir.actions.client', 'tag': 'display_notification',
+                'params': {'title': _('SmartADM'), 'type': 'success',
+                           'message': _('Bağlantı başarılı, oturum açıldı.')}}
+
+    def action_iys_sync_now(self):
+        self.ensure_one()
+        self.execute()
+        Iys = self.env['sms.system.iys']
+        if not Iys._enabled():
+            raise UserError(_('Önce "İYS kontrolü etkin" seçeneğini açıp kaydedin.'))
+        Iys._icp().set_param('sms_system.iys_paused_until', False)
+        self.env.ref('sms_system.cron_sms_iys').sudo()._trigger()
+        return {'type': 'ir.actions.client', 'tag': 'display_notification',
+                'params': {'title': _('İYS'), 'type': 'info',
+                           'message': _('Senkron arka planda başladı; rehberdeki İYS durumları birkaç dakika içinde güncellenir.')}}
 
     def action_sms_check_credit(self):
         self.ensure_one()

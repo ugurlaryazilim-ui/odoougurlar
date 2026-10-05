@@ -1,4 +1,5 @@
 import logging
+import time
 from collections import OrderedDict
 from datetime import timedelta
 
@@ -56,6 +57,8 @@ class SmsSystemCampaign(models.Model):
                                      help='Kara listede ya da (ticari ise) İYS onayı olmayan numaralar')
     preview_segments = fields.Integer(string='Parça / SMS', compute='_compute_preview')
     preview_credit = fields.Integer(string='Tahmini Kredi', compute='_compute_preview')
+    preview_iys_pending = fields.Integer(string='İYS kontrolü bekleyen', compute='_compute_preview',
+                                         help='Gönderimden hemen önce İYS\'den sorgulanacak numaralar (izin 24 saatten eski)')
     personalized = fields.Boolean(string='Kişiye Özel', compute='_compute_preview')
     iys_enabled = fields.Boolean(compute='_compute_iys_enabled')
 
@@ -87,6 +90,15 @@ class SmsSystemCampaign(models.Model):
             domain.append(('iys_status', '=', 'approved'))
         return domain
 
+    def _iys_stale(self):
+        """Ticari gönderim adayları içinde izni 24 saatten eski (ya da hiç bakılmamış) olanlar."""
+        self.ensure_one()
+        from .sms_iys import FRESH
+        limit_dt = fields.Datetime.now() - FRESH
+        return self.env['sms.system.contact'].sudo().search([
+            ('list_ids', 'in', self.list_ids.ids), ('opt_out', '=', False), ('iys_status', '!=', 'rejected'),
+            '|', ('iys_checked_at', '=', False), ('iys_checked_at', '<', limit_dt)], order='id')
+
     def _recipients(self):
         """(gönderilecek kişiler, atlanan sayısı) — numara bazında tekil."""
         self.ensure_one()
@@ -115,6 +127,8 @@ class SmsSystemCampaign(models.Model):
             else:
                 camp.preview_count = camp.total_count
                 camp.preview_skipped = camp.skipped_count
+            camp.preview_iys_pending = (len(camp._iys_stale()) if camp.message_type == 'commercial'
+                                        and camp.state in ('draft', 'scheduled') and camp.list_ids else 0)
             camp.preview_credit = camp.preview_count * camp.preview_segments
 
     def _compute_iys_enabled(self):
@@ -155,6 +169,8 @@ class SmsSystemCampaign(models.Model):
         if self.preview_segments > MAX_SEGMENTS:
             raise UserError(_('Metin çok uzun (%(n)s parça). En fazla %(max)s parça gönderilebilir.',
                               n=self.preview_segments, max=MAX_SEGMENTS))
+        if self.message_type == 'commercial' and not count:
+            count = len(self._iys_stale())
         if not count:
             raise UserError(_('Gönderilecek alıcı yok (listeler boş, kara listede ya da İYS onaylı değil).'))
         limit = int(self._icp('sms_system.daily_limit', '0') or 0)
@@ -200,7 +216,12 @@ class SmsSystemCampaign(models.Model):
                 raise UserError(_('Yalnız taslak toplu SMS gönderilebilir.'))
             contacts, _skipped = camp._recipients()
             camp._check_can_send(len(contacts))
-            if camp.scheduled_at and camp.scheduled_at > fields.Datetime.now():
+            if camp.message_type == 'commercial':
+                camp.write({'state': 'scheduled', 'scheduled_at': camp.scheduled_at or fields.Datetime.now()})
+                camp.message_post(body=_('Ticari SMS: gönderimden önce alıcıların İYS izinleri kontrol edilecek, '
+                                         'ardından gönderim başlayacak.'))
+                self.env.ref('sms_system.cron_sms_campaign_queue').sudo()._trigger(camp.scheduled_at)
+            elif camp.scheduled_at and camp.scheduled_at > fields.Datetime.now():
                 camp.state = 'scheduled'
                 camp.message_post(body=_('%(n)s alıcıya planlandı.%(warn)s', n=len(contacts),
                                          warn=camp._commercial_hour_warning(camp.scheduled_at)))
@@ -269,7 +290,26 @@ class SmsSystemCampaign(models.Model):
         """Planlananları başlat, kuyruktaki gönderimleri paketler halinde Turatel'e ilet."""
         IrCron = self.env['ir.cron']
         now = fields.Datetime.now()
+        Iys = self.env['sms.system.iys']
         for camp in self.search([('state', '=', 'scheduled'), ('scheduled_at', '<=', now)]):
+            if camp.message_type == 'commercial':
+                if not Iys._enabled():
+                    camp.write({'state': 'draft'})
+                    camp.message_post(body=_('İYS kontrolü kapalı olduğu için ticari SMS gönderilmedi.'))
+                    continue
+                stale = camp._iys_stale()
+                if stale:
+                    try:
+                        stats = Iys.refresh_contacts(stale, deadline=time.monotonic() + 200, guard=False)
+                    except Exception as e:  # noqa: BLE001 — bağlantı hatası: sonraki çalışmada tekrar
+                        _logger.warning('Ticari SMS İYS kontrolü başarısız (%s): %s', camp.id, e)
+                        continue
+                    IrCron._commit_progress()
+                    if stats.get('stopped') == 'error':
+                        camp.message_post(body=_('İYS kontrolü yapılamadı, tekrar denenecek: %s') % stats.get('error'))
+                        continue
+                    if camp._iys_stale():
+                        continue  # süre yetmedi; kalanlar sonraki çalışmada
             try:
                 camp._start()
             except UserError as e:
