@@ -36,7 +36,6 @@
     'assets': {
         'web.assets_backend': [
             'ads_manager/static/src/dashboard/**/*',
-            'ads_manager/static/src/components/**/*',
             'ads_manager/static/src/scss/**/*',
         ],
     },

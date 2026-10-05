@@ -15,6 +15,15 @@ RUN pip install --break-system-packages pandas "openpyxl>=3.1.5" boto3 requests-
 RUN pip install --break-system-packages --ignore-installed fal-client
 RUN pip install --break-system-packages --ignore-installed fashn
 
+# 1.5. Barkod etiketindeki Courier yazısı: reportlab eski gsfonts adını (n022003l.pfb) arıyor,
+#      Debian trixie'de yok ("Can't find .pfb for face 'Courier'") — Nimbus Mono'ya bağla
+RUN F=/usr/lib/python3/dist-packages/reportlab/fonts G=/usr/share/fonts/type1/gsfonts \
+ && mkdir -p $G \
+ && ln -sf $F/NimbusMonoPS-Regular.pfb $G/n022003l.pfb \
+ && ln -sf $F/NimbusMonoPS-Bold.pfb $G/n022004l.pfb \
+ && ln -sf $F/NimbusMonoPS-Italic.pfb $G/n022023l.pfb \
+ && ln -sf $F/NimbusMonoPS-BoldItalic.pfb $G/n022024l.pfb
+
 # 2. Yazdığımız tüm eklentileri (addons klasörü) ve yapılandırma dosyasını Docker İmajının içine kopyalıyoruz
 COPY ./addons /mnt/extra-addons
 COPY ./config /etc/odoo
