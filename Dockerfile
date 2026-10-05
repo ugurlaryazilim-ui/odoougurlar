@@ -26,10 +26,13 @@ RUN F=/usr/lib/python3/dist-packages/reportlab/fonts G=/usr/share/fonts/type1/gs
 
 # 2. Yazdığımız tüm eklentileri (addons klasörü) ve yapılandırma dosyasını Docker İmajının içine kopyalıyoruz
 # --chown: ayrı "chown -R" katmanı tüm eklentileri imaja ikinci kez yazıyordu (yavaş build, büyük imaj)
-COPY --chown=odoo:odoo ./addons /mnt/extra-addons
+# /opt/ugurlar-addons: odoo imajı /mnt/extra-addons'u VOLUME tanımlıyor; eklentiler oraya kopyalanınca
+# her deploy'da tüm eklentilerin kopyası yeni bir isimsiz volume'a yazılıp sunucuda birikiyordu.
+# addons_path önce /mnt/extra-addons'a bakar: yerelde canlı bağlanan kod, prod'da (boş) imaj kopyası kullanılır.
+COPY --chown=odoo:odoo ./addons /opt/ugurlar-addons
 COPY --chown=odoo:odoo ./config /etc/odoo
 
 # 2.5. Orijinal Odoo kodundaki MemoryError hatasını yamalıyoruz
-RUN python3 /mnt/extra-addons/patch_odoo.py
+RUN python3 /opt/ugurlar-addons/patch_odoo.py
 
 USER odoo
