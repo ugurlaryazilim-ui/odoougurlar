@@ -218,5 +218,29 @@
                 </div>
             </t>
         </template>
+
+        <template id="report_tailor_slip">
+            <t t-call="web.html_container">
+                <t t-foreach="docs.mapped('tailor_id')" t-as="tailor">
+                    <div class="page" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 11px; width: 76mm; margin: 0 auto;">
+                        <div style="text-align:center; font-weight:bold; font-size:16px; border-bottom:2px solid #000; padding:4px 0;">TERZİ TESLİM FİŞİ</div>
+                        <div style="text-align:center; font-weight:bold; font-size:14px; margin-top:4px;"><t t-out="tailor.name"/></div>
+                        <t t-set="group" t-value="docs.filtered(lambda o: o.tailor_id == tailor)"/>
+                        <div style="text-align:center; margin-bottom:6px;"><t t-out="len(group)"/> ürün</div>
+                        <t t-foreach="group" t-as="o">
+                            <div style="border-bottom:1px dashed #000; padding:3px 0;">
+                                <b><t t-out="o.name"/></b> — <t t-out="o.product_code or o.product_name"/><br/>
+                                <t t-foreach="o.line_ids" t-as="l">
+                                    • <t t-out="l.service_name"/><t t-if="l.measure"> (<t t-out="l.measure"/>)</t><br/>
+                                </t>
+                                <t t-if="o.promised_date">Teslim: <b><t t-out="o.promised_date.strftime('%d.%m.%Y')"/></b></t>
+                            </div>
+                        </t>
+                        <div style="margin-top:18px;">Teslim eden: ____________________</div>
+                        <div style="margin-top:18px;">Teslim alan (terzi): ____________________</div>
+                    </div>
+                </t>
+            </t>
+        </template>
     </data>
 </odoo>

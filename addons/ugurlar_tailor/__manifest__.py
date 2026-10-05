@@ -1,6 +1,6 @@
 {
     'name': 'Terzi Takip',
-    'version': '19.0.1.4.0',
+    'version': '19.0.1.5.0',
     'category': 'Services',
     'summary': 'Mağaza terzi takip ve yönetim sistemi — Nebim ERP entegrasyonlu',
     'description': """
@@ -44,6 +44,7 @@
             'ugurlar_tailor/static/src/js/screens/tailor_order_list.js',
             'ugurlar_tailor/static/src/js/screens/tailor_gift_label.js',
             'ugurlar_tailor/static/src/js/screens/tailor_store_item.js',
+            'ugurlar_tailor/static/src/js/screens/tailor_bulk.js',
         ],
     },
     'installable': True,

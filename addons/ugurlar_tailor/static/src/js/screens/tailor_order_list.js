@@ -74,6 +74,13 @@ export class TailorOrderList extends Component {
     }
 
     async updateStatus(orderId, newStatus) {
+        if (newStatus === "completed") {
+            // Hazır ürünün mağazadaki yeri (raf/askı); boş bırakılabilir
+            const location = window.prompt(_t("Raf / askı konumu (boş bırakılabilir):"), "");
+            if (location === null) return;
+            await this._doUpdate(orderId, newStatus, location);
+            return;
+        }
         this.dialog.add(ConfirmationDialog, {
             title: _t("Durum Değişikliği"),
             body: _t("Siparişi '%(status)s' durumuna geçirmek istediğinize emin misiniz?", { status: this.getStatusLabel(newStatus) }),
@@ -95,6 +102,20 @@ export class TailorOrderList extends Component {
             },
             cancel: () => {},
         });
+    }
+
+    async _doUpdate(orderId, newStatus, location = null) {
+        try {
+            const result = await rpc("/ugurlar_tailor/update_status", { order_id: orderId, status: newStatus, location });
+            if (result.success) {
+                this.notification.add(_t("Durum güncellendi!"), { type: "success" });
+                await this.loadOrders();
+            } else {
+                this.notification.add(result.error || _t("Durum güncellenemedi."), { type: "danger" });
+            }
+        } catch (e) {
+            this.notification.add(_t("Durum güncelleme hatası: %(error)s", { error: e.message }), { type: "danger" });
+        }
     }
 
     getNextStatus(currentStatus) {

@@ -29,5 +29,17 @@
             <field name="binding_model_id" ref="model_ugurlar_tailor_order"/>
             <field name="paperformat_id" ref="paperformat_tailor_label"/>
         </record>
+
+        <!-- ═══════════════ Terzi Teslim Fişi (seçili siparişler, terzi başına sayfa) ═══════════════ -->
+        <record id="action_report_tailor_slip" model="ir.actions.report">
+            <field name="name">Terzi Teslim Fişi</field>
+            <field name="model">ugurlar.tailor.order</field>
+            <field name="report_type">qweb-pdf</field>
+            <field name="report_name">ugurlar_tailor.report_tailor_slip</field>
+            <field name="report_file">ugurlar_tailor.report_tailor_slip</field>
+            <field name="print_report_name">'Terzi_Teslim_Fisi'</field>
+            <field name="binding_model_id" ref="model_ugurlar_tailor_order"/>
+            <field name="paperformat_id" ref="paperformat_tailor_label"/>
+        </record>
     </data>
 </odoo>

@@ -11,8 +11,11 @@ class UgurlarTailorService(models.Model):
     _description = 'Terzi Hizmeti'
     _order = 'sequence, name'
 
-    name = fields.Char(string='Hizmet Adi', required=True)
-    price = fields.Float(string='Varsayılan Fiyat', digits=(10, 2), required=True, default=0.0)
+    name = fields.Char(string='Hizmet Adı', required=True)
+    price = fields.Float(string='Terzi Fiyatı', digits=(10, 2), required=True, default=0.0,
+                         help='Terziye ödenen varsayılan tutar (terziye özel fiyat yoksa)')
+    customer_price = fields.Float(string='Müşteri Ücreti', digits=(10, 2), default=0.0,
+                                  help='Müşteriden alınan varsayılan ücret; 0 = ücretsiz')
     active = fields.Boolean(string='Aktif', default=True)
     sequence = fields.Integer(string='Sıra', default=10)
 

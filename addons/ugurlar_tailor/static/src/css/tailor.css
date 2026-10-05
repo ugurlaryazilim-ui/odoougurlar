@@ -749,3 +749,49 @@
 @media (max-width: 600px) {
     .tailor-stats { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* ─── v2: ölçü, ücret, geçmiş, toplu işlem ─────────────────── */
+.tailor-service-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.tailor-measure-input {
+    margin-left: 26px;
+    max-width: 220px;
+}
+.tailor-money-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+.tailor-money-row input {
+    max-width: 140px;
+}
+.tailor-history-link {
+    color: var(--tailor-primary-dark);
+    font-weight: 600;
+}
+.tailor-history {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin: 4px 0 8px;
+    font-size: 13px;
+}
+.tailor-history-row + .tailor-history-row {
+    border-top: 1px dashed #e2e8f0;
+    margin-top: 6px;
+    padding-top: 6px;
+}
+.tailor-card-bulk {
+    border-color: #0ea5e9;
+}
+.tailor-bulk-targets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}

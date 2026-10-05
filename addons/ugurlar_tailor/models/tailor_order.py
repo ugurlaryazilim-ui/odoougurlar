@@ -53,9 +53,26 @@ class UgurlarTailorOrder(models.Model):
         string='Hizmet Satırları',
     )
     total_price = fields.Float(
-        string='Toplam Tutar', digits=(10, 2),
+        string='Terzi Tutarı', digits=(10, 2),
         compute='_compute_total_price', store=True,
+        help='Terziye ödenecek toplam (hakediş)',
     )
+
+    # ── Müşteri ücreti / tahsilat ──
+    customer_charge = fields.Float(string='Müşteri Ücreti', digits=(10, 2), tracking=True,
+                                   help='Müşteriden alınan toplam ücret; 0 = ücretsiz')
+    deposit = fields.Float(string='Kapora', digits=(10, 2), tracking=True)
+    balance = fields.Float(string='Kalan', digits=(10, 2), compute='_compute_balance', store=True)
+    is_paid = fields.Boolean(string='Ödendi', tracking=True)
+
+    # ── Mağazadaki yer / performans ──
+    location = fields.Char(string='Raf / Askı', tracking=True, index=True,
+                           help='Hazır ürünün mağazada durduğu yer')
+    duration_days = fields.Float(string='İş Süresi (gün)', digits=(10, 1), compute='_compute_duration',
+                                 store=True, aggregator='avg', help='Sipariş açılışından Hazır olana kadar')
+    late_done = fields.Integer(string='Geç Biten', compute='_compute_duration', store=True, aggregator='sum',
+                               help='Söz verilen tarihten sonra Hazır olduysa 1')
+    customer_order_count = fields.Integer(string='Müşterinin Siparişleri', compute='_compute_customer_order_count')
 
     # ── Durum Takibi ──
     state = fields.Selection([
@@ -106,6 +123,49 @@ class UgurlarTailorOrder(models.Model):
                   ('state', 'in', ('pending', 'in_progress'))]
         positive = (operator == '=') == value
         return domain if positive else ['!', '&'] + domain
+
+    @api.depends('customer_charge', 'deposit', 'is_paid')
+    def _compute_balance(self):
+        for order in self:
+            order.balance = 0.0 if order.is_paid else max((order.customer_charge or 0) - (order.deposit or 0), 0.0)
+
+    @api.depends('create_date', 'completed_at', 'promised_date')
+    def _compute_duration(self):
+        for order in self:
+            if order.create_date and order.completed_at:
+                order.duration_days = round((order.completed_at - order.create_date).total_seconds() / 86400, 1)
+                done = fields.Datetime.context_timestamp(order, order.completed_at).date()
+                order.late_done = 1 if order.promised_date and done > order.promised_date else 0
+            else:
+                order.duration_days = 0.0
+                order.late_done = 0
+
+    def _customer_domain(self):
+        self.ensure_one()
+        keys = []
+        if self.customer_mobile:
+            keys.append(('customer_mobile', '=', self.customer_mobile))
+        if self.customer_phone:
+            keys.append(('customer_phone', '=', self.customer_phone))
+        if not keys:
+            return None
+        return (['|'] * (len(keys) - 1)) + keys
+
+    def _compute_customer_order_count(self):
+        for order in self:
+            domain = order._customer_domain() if order.id else None
+            order.customer_order_count = self.search_count(domain + [('id', '!=', order.id)]) if domain else 0
+
+    def action_view_customer_orders(self):
+        self.ensure_one()
+        domain = self._customer_domain() or [('id', '=', 0)]
+        return {
+            'type': 'ir.actions.act_window', 'name': _('Müşterinin Terzi Siparişleri'),
+            'res_model': self._name, 'view_mode': 'list,form', 'domain': domain + [('id', '!=', self.id)],
+        }
+
+    def action_mark_paid(self):
+        self.write({'is_paid': True})
 
     @api.depends('line_ids.price')
     def _compute_total_price(self):

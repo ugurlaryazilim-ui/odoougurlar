@@ -22,7 +22,8 @@ class UgurlarTailorOrderLine(models.Model):
         string='Hizmet Adı',
         related='service_id.name', store=True,
     )
-    price = fields.Float(string='Fiyat', digits=(10, 2), required=True)
+    price = fields.Float(string='Terzi Fiyatı', digits=(10, 2), required=True)
+    measure = fields.Char(string='Ölçü / Not', help='Ör. 3 cm kısalt')
 
     @api.model
     def _get_service_price(self, tailor, service):

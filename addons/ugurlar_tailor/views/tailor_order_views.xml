@@ -12,7 +12,10 @@
                 <field name="product_name"/>
                 <field name="customer_name"/>
                 <field name="tailor_id"/>
-                <field name="total_price" sum="Toplam"/>
+                <field name="total_price" sum="Terzi" optional="show"/>
+                <field name="customer_charge" sum="Ücret" optional="hide"/>
+                <field name="balance" sum="Kalan" optional="show"/>
+                <field name="location" optional="show"/>
                 <field name="promised_date" optional="show"/>
                 <field name="is_overdue" column_invisible="True"/>
                 <field name="state" widget="badge" decoration-danger="state == 'waiting_approval'" decoration-info="state == 'pending'" decoration-warning="state == 'in_progress'" decoration-success="state == 'completed'" decoration-muted="state == 'delivered'"/>
@@ -35,12 +38,20 @@
                     <button name="action_mark_delivered" string="Teslim Edildi" type="object" class="btn-primary" invisible="state != 'completed'"/>
                     <button name="action_cancel" string="İptal Et" type="object" class="btn-danger" invisible="state in ('delivered', 'cancelled')" confirm="Bu siparişi iptal etmek istediğinize emin misiniz?"/>
                     <button name="action_reset_to_pending" string="Sıfırla" type="object" class="btn-secondary" invisible="state in ('pending', 'waiting_approval', 'delivered')"/>
+                    <button name="action_mark_paid" string="Ödendi" type="object" class="btn-success"
+                            invisible="is_paid or not customer_charge or state == 'cancelled'"/>
                     <button name="action_send_sms" string="SMS Gönder" type="object" icon="fa-comment"
                             invisible="state in ('waiting_approval', 'cancelled')"/>
                     <button name="action_print_label" string="Etiket Yazdır" type="object" class="btn-warning" icon="fa-print" invisible="state in ('waiting_approval', 'cancelled')"/>
                     <field name="state" widget="statusbar" statusbar_visible="waiting_approval,pending,in_progress,completed,delivered"/>
                 </header>
                 <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_view_customer_orders" type="object" class="oe_stat_button" icon="fa-history"
+                                invisible="not customer_order_count">
+                            <field name="customer_order_count" widget="statinfo" string="Müşteri Geçmişi"/>
+                        </button>
+                    </div>
                     <div class="oe_title">
                         <h1><field name="name" readonly="1"/></h1>
                     </div>
@@ -68,7 +79,9 @@
                             <field name="reminder_count" invisible="not reminder_count"/>
                         </group>
                         <group>
+                            <field name="location"/>
                             <field name="completed_at"/>
+                            <field name="duration_days" invisible="not completed_at"/>
                             <field name="delivered_at"/>
                             <field name="cancelled_at" invisible="state != 'cancelled'"/>
                         </group>
@@ -78,11 +91,20 @@
                             <field name="line_ids">
                                 <list editable="bottom">
                                     <field name="service_id"/>
+                                    <field name="measure"/>
                                     <field name="price"/>
                                 </list>
                             </field>
-                            <group class="oe_subtotal_footer">
-                                <field name="total_price" class="oe_subtotal_footer_separator"/>
+                            <group>
+                                <group string="Müşteri">
+                                    <field name="customer_charge"/>
+                                    <field name="deposit"/>
+                                    <field name="balance"/>
+                                    <field name="is_paid"/>
+                                </group>
+                                <group class="oe_subtotal_footer">
+                                    <field name="total_price" class="oe_subtotal_footer_separator"/>
+                                </group>
                             </group>
                         </page>
                         <page string="Notlar" name="notes">
@@ -109,6 +131,8 @@
                 <field name="customer_name"/>
                 <field name="tailor_id"/>
                 <field name="product_barcode"/>
+                <field name="location"/>
+                <field name="customer_mobile"/>
                 <filter string="Geciken" name="overdue" domain="[('is_overdue', '=', True)]"/>
                 <filter string="Onay Bekleyen" name="waiting_approval" domain="[('state', '=', 'waiting_approval')]"/>
                 <filter string="Bekliyor" name="pending" domain="[('state', '=', 'pending')]"/>
@@ -117,6 +141,7 @@
                 <filter string="Teslim" name="delivered" domain="[('state', '=', 'delivered')]"/>
                 <filter string="İptal" name="cancelled" domain="[('state', '=', 'cancelled')]"/>
                 <separator/>
+                <filter string="Tahsil Edilecek" name="unpaid" domain="[('balance', '>', 0)]"/>
                 <filter string="Reyon" name="reyon" domain="[('is_reyon', '=', True)]"/>
                 <filter string="Faturalı" name="invoiced" domain="[('is_reyon', '=', False)]"/>
                 <separator/>
@@ -196,6 +221,33 @@
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">Teslim edilmiş terzi siparişi yok</p>
             <p>Teslim edilen siparişlerin terzi bazında toplamı. Tarih filtresiyle dönem seçip Excel'e aktarabilirsiniz.</p>
+        </field>
+    </record>
+
+    <!-- ═══════════════ Terzi Performans ═══════════════ -->
+    <record id="view_tailor_order_pivot_perf" model="ir.ui.view">
+        <field name="name">ugurlar.tailor.order.pivot.perf</field>
+        <field name="model">ugurlar.tailor.order</field>
+        <field name="priority">20</field>
+        <field name="arch" type="xml">
+            <pivot string="Terzi Performans" sample="1">
+                <field name="tailor_id" type="row"/>
+                <field name="completed_at" interval="month" type="col"/>
+                <field name="duration_days" type="measure"/>
+                <field name="late_done" type="measure"/>
+            </pivot>
+        </field>
+    </record>
+
+    <record id="action_tailor_performance" model="ir.actions.act_window">
+        <field name="name">Terzi Performans</field>
+        <field name="res_model">ugurlar.tailor.order</field>
+        <field name="view_mode">pivot,graph,list</field>
+        <field name="view_id" ref="view_tailor_order_pivot_perf"/>
+        <field name="domain">[('completed_at', '!=', False)]</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Henüz hazır olan sipariş yok</p>
+            <p>Terzi bazında iş sayısı, ortalama iş süresi (gün) ve söz verilen tarihten geç biten iş sayısı.</p>
         </field>
     </record>
 

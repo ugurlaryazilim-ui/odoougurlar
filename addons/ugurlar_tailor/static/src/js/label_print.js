@@ -25,6 +25,25 @@ function _barcodeImg(value) {
     return `<div style="text-align:center;margin-top:6px;"><img src="${src}" style="width:70mm;height:14mm;" alt=""/></div>`;
 }
 
+function _money(v) {
+    return `${Number(v || 0).toFixed(2)} TL`;
+}
+
+/** Müşteri nüshasında ücret / kapora / kalan (ücretsizse "Ücretsiz"). */
+function _moneyHtml(dataArray) {
+    const charge = dataArray.reduce((s, d) => s + (d.customer_charge || 0), 0);
+    const deposit = dataArray.reduce((s, d) => s + (d.deposit || 0), 0);
+    const balance = dataArray.reduce((s, d) => s + (d.balance || 0), 0);
+    if (!charge) {
+        return `<div class="label-r" style="text-align:center;font-weight:800;">Ücret: Ücretsiz</div>`;
+    }
+    return `
+        <hr class="label-div"/>
+        <div class="label-r"><span class="ll">Ücret:</span><span class="vv">${_money(charge)}</span></div>
+        <div class="label-r"><span class="ll">Kapora:</span><span class="vv">${_money(deposit)}</span></div>
+        <div class="label-r"><span class="ll">Kalan:</span><span class="vv" style="font-weight:900;">${_money(balance)}</span></div>`;
+}
+
 function _buildOrderLabel(data, copyType) {
     const config = {
         terzi: {
@@ -42,7 +61,7 @@ function _buildOrderLabel(data, copyType) {
     const c = config[copyType];
 
     const servicesHtml = data.services.map(s =>
-        `<div style="padding:1px 4px;">• ${esc(s.name)}</div>`
+        `<div style="padding:1px 4px;">• ${esc(s.name)}${s.measure ? ` — <b>${esc(s.measure)}</b>` : ''}</div>`
     ).join('');
 
     return `
@@ -120,7 +139,7 @@ function _buildCustomerSummaryLabel(dataArray) {
 
     // Her urun icin islemler listesi
     const itemsHtml = dataArray.map(d => {
-        const svcs = d.services.map(s => `• ${esc(s.name)}`).join('<br/>');
+        const svcs = d.services.map(s => `• ${esc(s.name)}${s.measure ? ` (${esc(s.measure)})` : ''}`).join('<br/>');
         return `
             <div style="margin-bottom:8px; padding:6px; border:2px dashed #000; border-radius:4px;">
                 <div style="font-weight:900;font-size:14px;">${esc(d.product_code || d.product_name)}</div>
@@ -149,6 +168,7 @@ function _buildCustomerSummaryLabel(dataArray) {
             <hr class="label-div"/>
             ${first.promised_date ? `<div class="label-r" style="text-align:center;font-weight:900;font-size:14px;">Teslim: ${esc(first.promised_date)}</div>` : ''}
             <div class="label-dt">${esc(first.date)}</div>
+            ${_moneyHtml(dataArray)}
             <div class="label-note-main">3. Nüsha müşteride kalacak</div>
             <div class="label-note-sub">İşlemler bittiğinde ürünlerinizi mağazamızdan teslim alabilirsiniz.</div>
             <div class="label-thanks">TEŞEKKÜR EDERİZ</div>
@@ -337,4 +357,31 @@ export function printGiftLabelOnly(dataArray, company = null) {
     }
     const names = dataArray.map(d => d.product_code || d.product_barcode || d.name).join(', ');
     _printHtml(allLabels, `Hediye Etiketi — ${names}`);
+}
+
+/**
+ * Terzi teslim fişi: terziye bir seferde verilen siparişlerin listesi (terzi başına bir fiş, imza alanlı).
+ * slips: [{ tailor_name, orders: [label payload] }]
+ */
+export function printTailorSlips(slips) {
+    let html = '';
+    for (const slip of slips) {
+        const rows = slip.orders.map((o) => `
+            <div style="border-bottom:1px dashed #000;padding:4px 0;">
+                <div style="font-weight:900;">${esc(o.name)} — ${esc(o.product_code || o.product_name)}</div>
+                <div style="font-size:12px;">${o.services.map((s) => `${esc(s.name)}${s.measure ? ` (${esc(s.measure)})` : ''}`).join(', ')}</div>
+                ${o.promised ? `<div style="font-size:12px;">Teslim: <b>${esc(o.promised)}</b></div>` : ''}
+            </div>`).join('');
+        html += `
+            <div class="label">
+                <div class="label-hdr">TERZİ TESLİM FİŞİ</div>
+                <div class="label-store">${esc(slip.tailor_name)}</div>
+                <div class="label-sub">${esc(new Date().toLocaleString('tr-TR'))} — ${slip.orders.length} ürün</div>
+                <hr class="label-div"/>
+                ${rows}
+                <div style="margin-top:18px;font-size:12px;">Teslim eden: ____________________</div>
+                <div style="margin-top:18px;font-size:12px;">Teslim alan (terzi): ____________________</div>
+            </div>`;
+    }
+    _printHtml(html, 'Terzi Teslim Fişi');
 }
