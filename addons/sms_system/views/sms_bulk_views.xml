@@ -325,9 +325,9 @@
     </record>
 
     <!-- ═══════════ Menü ═══════════ -->
-    <menuitem id="menu_sms_campaign" name="Toplu SMS" parent="menu_sms_root" action="action_sms_campaign" sequence="7"
+    <menuitem id="menu_sms_campaign" name="Toplu SMS" parent="menu_sms_root" action="action_sms_campaign" sequence="1"
               groups="sms_system.group_sms_manager"/>
-    <menuitem id="menu_sms_book" name="Rehber" parent="menu_sms_root" sequence="15"
+    <menuitem id="menu_sms_book" name="Rehber" parent="menu_sms_root" sequence="20"
               groups="sms_system.group_sms_manager"/>
     <menuitem id="menu_sms_contact" name="Kişiler" parent="menu_sms_book" action="action_sms_contact" sequence="1"/>
     <menuitem id="menu_sms_list" name="Listeler" parent="menu_sms_book" action="action_sms_list" sequence="2"/>
