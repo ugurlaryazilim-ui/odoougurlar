@@ -1,6 +1,6 @@
 {
     'name': 'Terzi Takip',
-    'version': '19.0.1.3.0',
+    'version': '19.0.1.5.0',
     'category': 'Services',
     'summary': 'Mağaza terzi takip ve yönetim sistemi — Nebim ERP entegrasyonlu',
     'description': """
@@ -16,16 +16,18 @@
         * Raporlama ve istatistik
     """,
     'author': 'Uğurlar',
-    'depends': ['base', 'mail', 'ugurlar_barcode'],
+    'depends': ['base', 'mail', 'ugurlar_barcode', 'sms_system'],
     'data': [
         'security/ugurlar_tailor_security.xml',
         'security/ir.model.access.csv',
         'data/tailor_service_data.xml',
+        'data/tailor_sms_data.xml',
         'views/tailor_service_views.xml',
         'views/tailor_order_views.xml',
         'views/tailor_views.xml',
         'views/tailor_menu.xml',
         'views/tailor_settings_views.xml',
+        'views/close_old_orders_views.xml',
         'report/tailor_label_report.xml',
         'report/tailor_label_templates.xml',
     ],
@@ -42,6 +44,7 @@
             'ugurlar_tailor/static/src/js/screens/tailor_order_list.js',
             'ugurlar_tailor/static/src/js/screens/tailor_gift_label.js',
             'ugurlar_tailor/static/src/js/screens/tailor_store_item.js',
+            'ugurlar_tailor/static/src/js/screens/tailor_bulk.js',
         ],
     },
     'installable': True,

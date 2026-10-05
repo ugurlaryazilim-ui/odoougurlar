@@ -8,3 +8,4 @@ access_tailor_manager,ugurlar.tailor.manager,model_ugurlar_tailor,group_tailor_m
 access_tailor_service_manager,ugurlar.tailor.service.manager,model_ugurlar_tailor_service,group_tailor_manager,1,1,1,1
 access_tailor_price_manager,ugurlar.tailor.price.manager,model_ugurlar_tailor_price,group_tailor_manager,1,1,1,1
 access_tailor_order_manager,ugurlar.tailor.order.manager,model_ugurlar_tailor_order,group_tailor_manager,1,1,1,1
+access_tailor_close_old_manager,ugurlar.tailor.close.old.manager,model_ugurlar_tailor_close_old_wizard,group_tailor_manager,1,1,1,1

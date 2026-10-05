@@ -13,7 +13,19 @@ export class TailorOrderList extends Component {
     static props = {
         onNavigate: Function,
         scanner: { type: Object, optional: true },
+        initialStatus: { type: String, optional: true },
     };
+
+    statusOptions = [
+        ["", _t("Tümü")],
+        ["overdue", _t("⚠ Geciken")],
+        ["waiting_approval", _t("Onay Bekleyen")],
+        ["pending", _t("Bekliyor")],
+        ["in_progress", _t("Terzide")],
+        ["completed", _t("Hazır")],
+        ["delivered", _t("Teslim")],
+        ["cancelled", _t("İptal")],
+    ];
 
     setup() {
         this.notification = useService("notification");
@@ -24,7 +36,7 @@ export class TailorOrderList extends Component {
             page: 1,
             limit: 20,
             search: "",
-            statusFilter: "",
+            statusFilter: this.props.initialStatus || "",
             loading: false,
         });
 
@@ -62,6 +74,13 @@ export class TailorOrderList extends Component {
     }
 
     async updateStatus(orderId, newStatus) {
+        if (newStatus === "completed") {
+            // Hazır ürünün mağazadaki yeri (raf/askı); boş bırakılabilir
+            const location = window.prompt(_t("Raf / askı konumu (boş bırakılabilir):"), "");
+            if (location === null) return;
+            await this._doUpdate(orderId, newStatus, location);
+            return;
+        }
         this.dialog.add(ConfirmationDialog, {
             title: _t("Durum Değişikliği"),
             body: _t("Siparişi '%(status)s' durumuna geçirmek istediğinize emin misiniz?", { status: this.getStatusLabel(newStatus) }),
@@ -83,6 +102,20 @@ export class TailorOrderList extends Component {
             },
             cancel: () => {},
         });
+    }
+
+    async _doUpdate(orderId, newStatus, location = null) {
+        try {
+            const result = await rpc("/ugurlar_tailor/update_status", { order_id: orderId, status: newStatus, location });
+            if (result.success) {
+                this.notification.add(_t("Durum güncellendi!"), { type: "success" });
+                await this.loadOrders();
+            } else {
+                this.notification.add(result.error || _t("Durum güncellenemedi."), { type: "danger" });
+            }
+        } catch (e) {
+            this.notification.add(_t("Durum güncelleme hatası: %(error)s", { error: e.message }), { type: "danger" });
+        }
     }
 
     getNextStatus(currentStatus) {
@@ -158,6 +191,28 @@ export class TailorOrderList extends Component {
 
     goBack() {
         this.props.onNavigate("main_menu");
+    }
+
+    async sendSms(order, number = "") {
+        try {
+            const res = await rpc("/ugurlar_tailor/send_sms", { order_id: order.id, number });
+            if (res.success) {
+                this.notification.add(
+                    res.state === "test" ? _t("SMS test modunda kaydedildi (gönderilmedi).") : _t("SMS gönderildi."),
+                    { type: "success" });
+                return;
+            }
+            if (res.need_number) {
+                const entered = window.prompt(_t("Müşteri cep telefonu (05xx xxx xx xx):"), "");
+                if (entered) {
+                    await this.sendSms(order, entered);
+                }
+                return;
+            }
+            this.notification.add(res.error || _t("SMS gönderilemedi."), { type: "danger" });
+        } catch (e) {
+            this.notification.add(_t("SMS hatası: %(error)s", { error: e.message }), { type: "danger" });
+        }
     }
 
     async printLabel(orderId) {

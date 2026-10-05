@@ -94,6 +94,7 @@ export class TailorStoreItem extends Component {
                     service_ids: [],
                     notes: "",
                     photo: "",
+                    measures: {},
                 });
                 this.state.searchQuery = "";
                 if (this.storeSearchInputRef.el) {
@@ -136,6 +137,13 @@ export class TailorStoreItem extends Component {
         const item = this.state.items.find(i => i.barcode === barcode);
         if (item) {
             item.notes = ev.target.value;
+        }
+    }
+
+    onMeasureChange(barcode, serviceId, ev) {
+        const item = this.state.items.find((i) => i.barcode === barcode);
+        if (item) {
+            item.measures[serviceId] = ev.target.value;
         }
     }
 
@@ -192,6 +200,7 @@ export class TailorStoreItem extends Component {
 
             const services = item.service_ids.map((sid) => ({
                 id: sid,
+                measure: item.measures[sid] || "",
                 price: this.getServicePrice(sid, item.tailor_id),
             }));
 

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- Metinler SMS > Şablonlar ekranından değiştirilebilir (upgrade'de ezilmez) -->
+    <data noupdate="1">
+        <record id="sms_template_tailor_ready" model="sms.system.template">
+            <field name="name">Terzi - Sipariş Hazır</field>
+            <field name="code">tailor_ready</field>
+            <field name="model">ugurlar.tailor.order</field>
+            <field name="body">Sayın {musteri}, {siparis} numaralı terzi siparişiniz hazırdır. Mağazamızdan teslim alabilirsiniz. {magaza}</field>
+        </record>
+        <record id="sms_template_tailor_reminder" model="sms.system.template">
+            <field name="name">Terzi - Hatırlatma</field>
+            <field name="code">tailor_reminder</field>
+            <field name="model">ugurlar.tailor.order</field>
+            <field name="body">Sayın {musteri}, {siparis} numaralı terzi siparişiniz hazır olup sizi bekliyor. {magaza}</field>
+        </record>
+
+        <record id="cron_tailor_ready_reminders" model="ir.cron">
+            <field name="name">Terzi: Teslim alınmayanlara hatırlatma SMS'i</field>
+            <field name="model_id" ref="model_ugurlar_tailor_order"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_ready_reminders()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="active" eval="True"/>
+        </record>
+    </data>
+</odoo>

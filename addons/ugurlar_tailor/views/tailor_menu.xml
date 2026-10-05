@@ -34,6 +34,13 @@
               groups="ugurlar_tailor.group_tailor_manager"
               sequence="40"/>
 
+    <menuitem id="menu_tailor_performance"
+              name="Terzi Performans"
+              parent="menu_tailor_root"
+              action="action_tailor_performance"
+              groups="ugurlar_tailor.group_tailor_manager"
+              sequence="45"/>
+
     <!-- ═══════════════ Tanımlar ═══════════════ -->
     <menuitem id="menu_tailor_config"
               name="Tanımlar"

@@ -6,9 +6,11 @@
         <div class="tailor-app">
             <TailorMainMenu t-if="state.screen === 'main_menu'" onNavigate.bind="switchScreen"/>
             <TailorNewOrder t-if="state.screen === 'new_order'" onNavigate.bind="switchScreen" scanner="scanner"/>
-            <TailorOrderList t-if="state.screen === 'order_list'" onNavigate.bind="switchScreen" scanner="scanner"/>
+            <TailorOrderList t-if="state.screen === 'order_list'" onNavigate.bind="switchScreen" scanner="scanner"
+                             initialStatus="state.listStatus"/>
             <TailorGiftLabel t-if="state.screen === 'gift_label'" onNavigate.bind="switchScreen" scanner="scanner"/>
             <TailorStoreItem t-if="state.screen === 'store_item'" onNavigate.bind="switchScreen" scanner="scanner"/>
+            <TailorBulk t-if="state.screen === 'bulk'" onNavigate.bind="switchScreen" scanner="scanner"/>
         </div>
     </t>
 
@@ -19,12 +21,12 @@
                 <h1>Terzi Takip</h1>
                 <p class="tailor-subtitle">Mağaza Terzi Yönetim Sistemi</p>
             </div>
-            <div class="tailor-stats" t-on-click="onOrderList">
-                <div class="tailor-stat"><b t-esc="stats.waiting_approval"/><span>Onay</span></div>
-                <div class="tailor-stat"><b t-esc="stats.pending"/><span>Bekliyor</span></div>
-                <div class="tailor-stat"><b t-esc="stats.in_progress"/><span>Terzide</span></div>
-                <div class="tailor-stat"><b t-esc="stats.completed"/><span>Hazır</span></div>
-                <div t-att-class="'tailor-stat' + (stats.overdue ? ' tailor-stat-danger' : '')"><b t-esc="stats.overdue"/><span>Geciken</span></div>
+            <div class="tailor-stats">
+                <div class="tailor-stat" t-on-click="() =&gt; this.openList('waiting_approval')"><b t-esc="stats.waiting_approval"/><span>Onay</span></div>
+                <div class="tailor-stat" t-on-click="() =&gt; this.openList('pending')"><b t-esc="stats.pending"/><span>Bekliyor</span></div>
+                <div class="tailor-stat" t-on-click="() =&gt; this.openList('in_progress')"><b t-esc="stats.in_progress"/><span>Terzide</span></div>
+                <div class="tailor-stat" t-on-click="() =&gt; this.openList('completed')"><b t-esc="stats.completed"/><span>Hazır</span></div>
+                <div t-att-class="'tailor-stat' + (stats.overdue ? ' tailor-stat-danger' : '')" t-on-click="() =&gt; this.openList('overdue')"><b t-esc="stats.overdue"/><span>Geciken</span></div>
             </div>
             <div class="tailor-menu-grid">
                 <div class="tailor-menu-card tailor-card-primary" t-on-click="onNewOrder">
@@ -41,6 +43,11 @@
                     <div class="tailor-card-icon">&#127873;</div>
                     <div class="tailor-card-title">Hediye Etiketi</div>
                     <div class="tailor-card-desc">Hediye fişi yazdırın</div>
+                </div>
+                <div class="tailor-menu-card tailor-card-bulk" t-on-click="onBulk">
+                    <div class="tailor-card-icon">&#128230;&#8644;</div>
+                    <div class="tailor-card-title">Toplu İşlem</div>
+                    <div class="tailor-card-desc">Barkod okutarak terziye gönder / hazır / teslim</div>
                 </div>
                 <div class="tailor-menu-card tailor-card-reyon" t-on-click="onStoreItem">
                     <div class="tailor-card-icon">&#128717;</div>
@@ -113,6 +120,20 @@
                         <span class="tailor-info-label">Satış Pers.:</span>
                         <span class="tailor-info-value" t-esc="state.selectedInvoice.sales_person || '-'"/>
                     </div>
+                    <div class="tailor-info-row" t-if="state.history.length">
+                        <span class="tailor-info-label">Geçmiş:</span>
+                        <a href="#" class="tailor-history-link" t-on-click.prevent="() =&gt; this.state.showHistory = !this.state.showHistory">
+                            Önceki <t t-esc="state.history.length"/> terzi siparişi
+                        </a>
+                    </div>
+                    <div t-if="state.showHistory" class="tailor-history">
+                        <t t-foreach="state.history" t-as="h" t-key="h.name">
+                            <div class="tailor-history-row">
+                                <b t-esc="h.name"/> · <t t-esc="h.date"/> · <t t-esc="h.product"/>
+                                <div class="text-muted"><t t-esc="h.services"/> — <t t-esc="h.state"/></div>
+                            </div>
+                        </t>
+                    </div>
                     <div class="tailor-info-row">
                         <span class="tailor-info-label">Cep Tel.:</span>
                         <input type="tel" class="tailor-input tailor-input-sm" placeholder="05xx xxx xx xx (hazır SMS bildirimi)"
@@ -154,15 +175,21 @@
                                 <label>Hizmetler:</label>
                                 <div class="tailor-service-grid">
                                     <t t-foreach="this.getTailorServices(state.itemSelections[item.barcode]?.tailor_id)" t-as="svc" t-key="svc.id">
-                                        <label class="tailor-service-check">
-                                            <input type="checkbox"
-                                                   t-on-change="() =&gt; this.onServiceToggle(item.barcode, svc.id)"
-                                                   t-att-checked="(state.itemSelections[item.barcode]?.service_ids || []).includes(svc.id)"/>
-                                            <span>
-                                                <t t-esc="svc.name"/>
-                                                (<t t-esc="this.getServicePrice(svc.id, state.itemSelections[item.barcode]?.tailor_id).toFixed(2)"/> TL)
-                                            </span>
-                                        </label>
+                                        <div class="tailor-service-cell">
+                                            <label class="tailor-service-check">
+                                                <input type="checkbox"
+                                                       t-on-change="() =&gt; this.onServiceToggle(item.barcode, svc.id)"
+                                                       t-att-checked="(state.itemSelections[item.barcode]?.service_ids || []).includes(svc.id)"/>
+                                                <span>
+                                                    <t t-esc="svc.name"/>
+                                                    (<t t-esc="this.getServicePrice(svc.id, state.itemSelections[item.barcode]?.tailor_id).toFixed(2)"/> TL)
+                                                </span>
+                                            </label>
+                                            <input t-if="(state.itemSelections[item.barcode]?.service_ids || []).includes(svc.id)"
+                                                   type="text" class="tailor-input tailor-input-sm tailor-measure-input"
+                                                   placeholder="Ölçü / not (ör. 3 cm)"
+                                                   t-on-change="(ev) =&gt; this.onMeasureChange(item.barcode, svc.id, ev)"/>
+                                        </div>
                                     </t>
                                 </div>
                             </div>
@@ -172,6 +199,17 @@
                                 <input type="text" class="tailor-input tailor-input-sm"
                                        placeholder="Not ekleyin..."
                                        t-on-change="(ev) =&gt; this.onNotesChange(item.barcode, ev)"/>
+                            </div>
+
+                            <!-- Müşteri ücreti / kapora -->
+                            <div t-if="state.itemSelections[item.barcode]?.tailor_id" class="tailor-item-row tailor-money-row tailor-fade-in">
+                                <label>Müşteri ücreti:</label>
+                                <input type="number" min="0" step="0.01" class="tailor-input tailor-input-sm"
+                                       t-att-placeholder="this.getDefaultCharge(item.barcode).toFixed(2) + ' (0 = ücretsiz)'"
+                                       t-on-change="(ev) =&gt; this.onMoneyChange(item.barcode, 'customer_charge', ev)"/>
+                                <label>Kapora:</label>
+                                <input type="number" min="0" step="0.01" class="tailor-input tailor-input-sm" placeholder="0"
+                                       t-on-change="(ev) =&gt; this.onMoneyChange(item.barcode, 'deposit', ev)"/>
                             </div>
 
                             <!-- Fotoğraf — terzi öncesi durum -->
@@ -239,14 +277,9 @@
                     <i class="fa fa-barcode"/>
                 </button>
                 <select class="tailor-select" t-on-change="onFilterChange">
-                    <option value="">Tümü</option>
-                    <option value="overdue">&#9888; Geciken</option>
-                    <option value="waiting_approval">Onay Bekleyen</option>
-                    <option value="pending">Bekliyor</option>
-                    <option value="in_progress">Terzide</option>
-                    <option value="completed">Hazır</option>
-                    <option value="delivered">Teslim</option>
-                    <option value="cancelled">İptal</option>
+                    <t t-foreach="statusOptions" t-as="opt" t-key="opt[0]">
+                        <option t-att-value="opt[0]" t-att-selected="state.statusFilter === opt[0]" t-esc="opt[1]"/>
+                    </t>
                 </select>
             </div>
 
@@ -275,12 +308,18 @@
                             <div t-if="order.tailor_id"><t t-esc="order.tailor_id[1]"/></div>
                             <div><t t-esc="order.total_price?.toFixed(2)"/> TL</div>
                             <div t-if="order.promised_date">Teslim: <strong t-esc="formatDate(order.promised_date)"/></div>
-                            <div t-if="order.create_date" class="tailor-order-date">
-                                <t t-esc="order.create_date"/>
+                            <div t-if="order.location">&#128205; Raf/Askı: <strong t-esc="order.location"/></div>
+                            <div t-if="order.customer_charge">
+                                Müşteri ücreti: <t t-esc="order.customer_charge.toFixed(2)"/> TL
+                                <span t-if="order.is_paid" class="tailor-badge badge-completed">Ödendi</span>
+                                <span t-elif="order.balance" class="tailor-badge badge-waiting">Kalan <t t-esc="order.balance.toFixed(2)"/> TL</span>
+                            </div>
+                            <div t-if="order.create_date_local" class="tailor-order-date">
+                                <t t-esc="order.create_date_local"/>
                             </div>
                             <div t-if="order.services and order.services.length" class="tailor-order-services">
                                 <t t-foreach="order.services" t-as="s" t-key="s.id">
-                                    <span class="tailor-service-tag" t-esc="s.service_name"/>
+                                    <span class="tailor-service-tag"><t t-esc="s.service_name"/><t t-if="s.measure"> — <t t-esc="s.measure"/></t></span>
                                 </t>
                             </div>
                         </div>
@@ -288,6 +327,10 @@
                             <button t-if="order.state != 'waiting_approval' and order.state != 'cancelled'" class="tailor-btn tailor-btn-sm" style="background:#f39c12;color:#fff;"
                                     t-on-click="() =&gt; this.printLabel(order.id)">
                                 Etiket Yazdır
+                            </button>
+                            <button t-if="order.state == 'completed'" class="tailor-btn tailor-btn-sm" style="background:#0ea5e9;color:#fff;"
+                                    t-on-click="() =&gt; this.sendSms(order)">
+                                &#128172; SMS
                             </button>
                             <button t-if="getNextStatus(order.state)"
                                     class="tailor-btn tailor-btn-sm tailor-btn-primary"
@@ -490,15 +533,21 @@
                                 <label>Hizmetler:</label>
                                 <div class="tailor-service-grid">
                                     <t t-foreach="this.getTailorServices(item.tailor_id)" t-as="svc" t-key="svc.id">
-                                        <label class="tailor-service-check">
-                                            <input type="checkbox"
-                                                   t-on-change="() =&gt; this.onServiceToggle(item.barcode, svc.id)"
-                                                   t-att-checked="(item.service_ids || []).includes(svc.id)"/>
-                                            <span>
-                                                <t t-esc="svc.name"/>
-                                                (<t t-esc="this.getServicePrice(svc.id, item.tailor_id).toFixed(2)"/> TL)
-                                            </span>
-                                        </label>
+                                        <div class="tailor-service-cell">
+                                            <label class="tailor-service-check">
+                                                <input type="checkbox"
+                                                       t-on-change="() =&gt; this.onServiceToggle(item.barcode, svc.id)"
+                                                       t-att-checked="(item.service_ids || []).includes(svc.id)"/>
+                                                <span>
+                                                    <t t-esc="svc.name"/>
+                                                    (<t t-esc="this.getServicePrice(svc.id, item.tailor_id).toFixed(2)"/> TL)
+                                                </span>
+                                            </label>
+                                            <input t-if="(item.service_ids || []).includes(svc.id)"
+                                                   type="text" class="tailor-input tailor-input-sm tailor-measure-input"
+                                                   placeholder="Ölçü / not (ör. 3 cm)"
+                                                   t-on-change="(ev) =&gt; this.onMeasureChange(item.barcode, svc.id, ev)"/>
+                                        </div>
                                     </t>
                                 </div>
                             </div>
@@ -558,6 +607,59 @@
                         </button>
                     </div>
                 </div>
+            </div>
+        </div>
+    </t>
+
+    <!-- Toplu Barkod İşlemi -->
+    <t t-name="ugurlar_tailor.TailorBulk">
+        <div class="tailor-screen tailor-bulk">
+            <div class="tailor-toolbar">
+                <button class="tailor-btn tailor-btn-back" t-on-click="goBack">&#8592; Geri</button>
+                <h2>Toplu İşlem</h2>
+            </div>
+            <div class="tailor-bulk-targets">
+                <t t-foreach="targets" t-as="tg" t-key="tg[0]">
+                    <button t-att-class="'tailor-btn ' + (state.target === tg[0] ? 'tailor-btn-primary' : 'tailor-btn-back')"
+                            t-on-click="() =&gt; { this.state.target = tg[0]; this.state.results = null; }" t-esc="tg[1]"/>
+                </t>
+            </div>
+            <div class="tailor-item-row" t-if="state.target === 'completed'">
+                <label>Raf / Askı:</label>
+                <input type="text" class="tailor-input tailor-input-sm" placeholder="Tümü için (isteğe bağlı)"
+                       t-model="state.location"/>
+            </div>
+            <div class="tailor-search-box tailor-search-box-elevated">
+                <input type="text" class="tailor-input tailor-barcode-input tailor-input-lg" t-ref="bulkInput"
+                       placeholder="Sipariş barkodu okutun (TRZ-...)" t-model="state.code" t-on-keydown="onKeydown"/>
+                <button class="tailor-btn tailor-btn-camera" t-on-click="scanCamera" title="Kamera ile okut">
+                    <i class="fa fa-barcode"/>
+                </button>
+            </div>
+            <div class="tailor-orders">
+                <div t-if="!state.items.length" class="tailor-empty">Okutulan sipariş yok.</div>
+                <t t-foreach="state.items" t-as="it" t-key="it.id">
+                    <div class="tailor-order-card">
+                        <div class="tailor-order-header">
+                            <strong t-esc="it.name"/>
+                            <button class="tailor-btn tailor-btn-sm" style="background:#e74c3c;color:#fff;"
+                                    t-on-click="() =&gt; this.remove(it.id)">Çıkar</button>
+                        </div>
+                        <div class="tailor-order-body">
+                            <div><t t-esc="it.product_name"/> — <t t-esc="it.customer_name"/></div>
+                            <div>Terzi: <t t-esc="it.tailor_name"/></div>
+                            <div t-if="resultFor(it.id) and !resultFor(it.id).ok" class="text-danger">
+                                <t t-esc="resultFor(it.id).error"/>
+                            </div>
+                        </div>
+                    </div>
+                </t>
+            </div>
+            <div class="tailor-submit-bar" t-if="state.items.length">
+                <button class="tailor-btn tailor-btn-success tailor-btn-lg" t-on-click="apply" t-att-disabled="state.busy">
+                    <t t-if="state.busy"><span class="tailor-spinner"/> İşleniyor...</t>
+                    <t t-else=""><t t-esc="state.items.length"/> siparişi uygula</t>
+                </button>
             </div>
         </div>
     </t>

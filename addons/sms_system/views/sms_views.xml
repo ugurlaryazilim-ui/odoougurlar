@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- ═══════════ Gönderim kayıtları ═══════════ -->
+    <record id="view_sms_message_list" model="ir.ui.view">
+        <field name="name">sms.system.message.list</field>
+        <field name="model">sms.system.message</field>
+        <field name="arch" type="xml">
+            <list create="false" decoration-danger="state == 'error'" decoration-muted="state == 'test'" decoration-success="state == 'sent'">
+                <field name="create_date" string="Tarih"/>
+                <field name="number"/>
+                <field name="body"/>
+                <field name="segments" sum="Parça"/>
+                <field name="state" widget="badge" decoration-danger="state == 'error'" decoration-success="state == 'sent'"/>
+                <field name="res_model" optional="hide"/>
+                <field name="user_id" optional="show"/>
+                <field name="error" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_sms_message_form" model="ir.ui.view">
+        <field name="name">sms.system.message.form</field>
+        <field name="model">sms.system.message</field>
+        <field name="arch" type="xml">
+            <form create="false" edit="false">
+                <header>
+                    <button name="action_retry" string="Yeniden Gönder" type="object" class="btn-primary"
+                            invisible="state not in ('error', 'queued')" groups="sms_system.group_sms_manager"/>
+                    <button name="action_fetch_report" string="İletim Raporu Al" type="object"
+                            invisible="not provider_msg_id" groups="sms_system.group_sms_manager"/>
+                    <field name="state" widget="statusbar"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="number"/>
+                            <field name="originator"/>
+                            <field name="sms_type"/>
+                            <field name="segments"/>
+                            <field name="template_id"/>
+                        </group>
+                        <group>
+                            <field name="user_id"/>
+                            <field name="sent_at"/>
+                            <field name="provider_msg_id"/>
+                            <field name="provider_answer"/>
+                            <field name="retry_count"/>
+                            <field name="res_model"/>
+                            <field name="res_id"/>
+                        </group>
+                    </group>
+                    <group string="Metin"><field name="body" nolabel="1" colspan="2"/></group>
+                    <group string="Hata" invisible="not error"><field name="error" nolabel="1" colspan="2"/></group>
+                    <group string="İletim Raporu" invisible="not delivery_report">
+                        <field name="delivery_report" nolabel="1" colspan="2"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_sms_message_search" model="ir.ui.view">
+        <field name="name">sms.system.message.search</field>
+        <field name="model">sms.system.message</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="number"/>
+                <field name="body"/>
+                <field name="provider_msg_id"/>
+                <filter string="Gönderildi" name="sent" domain="[('state', '=', 'sent')]"/>
+                <filter string="Hata" name="error" domain="[('state', '=', 'error')]"/>
+                <filter string="Test" name="test" domain="[('state', '=', 'test')]"/>
+                <separator/>
+                <filter string="Tarih" name="filter_date" date="create_date"/>
+                <group>
+                    <filter string="Durum" name="group_state" context="{'group_by': 'state'}"/>
+                    <filter string="Kaynak" name="group_model" context="{'group_by': 'res_model'}"/>
+                    <filter string="Gönderen" name="group_user" context="{'group_by': 'user_id'}"/>
+                    <filter string="Gün" name="group_day" context="{'group_by': 'create_date:day'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_sms_message" model="ir.actions.act_window">
+        <field name="name">Gönderilen SMS'ler</field>
+        <field name="res_model">sms.system.message</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Henüz SMS gönderilmedi</p>
+            <p>Modüllerden ya da "Yeni SMS" ile gönderilen tüm SMS'ler burada listelenir.</p>
+        </field>
+    </record>
+
+    <!-- ═══════════ Şablonlar ═══════════ -->
+    <record id="view_sms_template_list" model="ir.ui.view">
+        <field name="name">sms.system.template.list</field>
+        <field name="model">sms.system.template</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name"/>
+                <field name="code"/>
+                <field name="body"/>
+                <field name="model" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_sms_template_form" model="ir.ui.view">
+        <field name="name">sms.system.template.form</field>
+        <field name="model">sms.system.template</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <field name="name"/>
+                        <field name="code"/>
+                        <field name="model"/>
+                        <field name="body"/>
+                        <field name="placeholders"/>
+                        <field name="active"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_sms_template" model="ir.actions.act_window">
+        <field name="name">SMS Şablonları</field>
+        <field name="res_model">sms.system.template</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- ═══════════ SMS Gönder sihirbazı ═══════════ -->
+    <record id="view_sms_send_wizard" model="ir.ui.view">
+        <field name="name">sms.system.send.wizard.form</field>
+        <field name="model">sms.system.send.wizard</field>
+        <field name="arch" type="xml">
+            <form string="SMS Gönder">
+                <group>
+                    <field name="number" placeholder="0532 123 45 67"/>
+                    <field name="number_ok" invisible="1"/>
+                    <field name="template_id" options="{'no_create': True}"/>
+                    <field name="body" placeholder="Mesaj metni..."/>
+                    <field name="char_count" readonly="1"/>
+                    <field name="segments" readonly="1"/>
+                    <field name="res_model" invisible="1"/>
+                    <field name="res_id" invisible="1"/>
+                </group>
+                <div class="text-danger" invisible="number_ok or not number">Numara geçersiz görünüyor.</div>
+                <footer>
+                    <button name="action_send" string="Gönder" type="object" class="btn-primary"/>
+                    <button string="Vazgeç" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_sms_send_wizard" model="ir.actions.act_window">
+        <field name="name">Yeni SMS</field>
+        <field name="res_model">sms.system.send.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <!-- ═══════════ Menü ═══════════ -->
+    <menuitem id="menu_sms_root" name="SMS" web_icon="sms_system,static/description/icon.png" sequence="96"
+              groups="sms_system.group_sms_user"/>
+    <menuitem id="menu_sms_new" name="Yeni SMS" parent="menu_sms_root" action="action_sms_send_wizard" sequence="5"/>
+    <menuitem id="menu_sms_messages" name="Gönderilenler" parent="menu_sms_root" action="action_sms_message" sequence="10"/>
+    <menuitem id="menu_sms_templates" name="Şablonlar" parent="menu_sms_root" action="action_sms_template" sequence="20"
+              groups="sms_system.group_sms_manager"/>
+</odoo>

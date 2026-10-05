@@ -48,11 +48,16 @@ class ResConfigSettings(models.TransientModel):
     )
     tailor_sms_ready_enabled = fields.Boolean(
         string='Hazır Olunca SMS Gönder', config_parameter='ugurlar_tailor.sms_ready_enabled',
-        help='Sipariş "Hazır" olunca müşteri cep telefonuna Odoo SMS (IAP kredisi gerekir) gönderilir',
+        help='Sipariş "Hazır" olunca müşteri cep telefonuna SMS (SMS modülü / Turatel) gönderilir',
     )
-    tailor_sms_ready_text = fields.Char(
-        string='SMS Metni', config_parameter='ugurlar_tailor.sms_ready_text',
-        help='{musteri} ve {siparis} yer tutucuları kullanılabilir',
+    tailor_sms_reminder_enabled = fields.Boolean(
+        string='Teslim Alınmayanlara Hatırlatma', config_parameter='ugurlar_tailor.sms_reminder_enabled',
+    )
+    tailor_sms_reminder_days = fields.Integer(
+        string='Kaç gün sonra', config_parameter='ugurlar_tailor.sms_reminder_days', default=3,
+    )
+    tailor_sms_reminder_max = fields.Integer(
+        string='En fazla hatırlatma', config_parameter='ugurlar_tailor.sms_reminder_max', default=2,
     )
 
     # ── Reyon Ayarları ──

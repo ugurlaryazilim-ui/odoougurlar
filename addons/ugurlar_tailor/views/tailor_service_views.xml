@@ -9,6 +9,7 @@
                 <field name="sequence" widget="handle"/>
                 <field name="name"/>
                 <field name="price"/>
+                <field name="customer_price"/>
                 <field name="active"/>
             </list>
         </field>

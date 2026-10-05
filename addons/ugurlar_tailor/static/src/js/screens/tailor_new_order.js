@@ -30,6 +30,8 @@ export class TailorNewOrder extends Component {
             createdCount: 0,
             customerMobile: "",
             promisedDate: "",
+            history: [],
+            showHistory: false,
         });
 
         this.searchInputRef = useRef("searchInput");
@@ -105,9 +107,13 @@ export class TailorNewOrder extends Component {
                         service_ids: [],
                         notes: "",
                         photo: "",
+                        measures: {},
+                        customer_charge: "",
+                        deposit: "",
                     };
                 });
                 this.state.itemSelections = selections;
+                this.loadHistory(detail.customer_code);
             }
         } catch (e) {
             this.notification.add(_t("Fatura detayı alınamadı: %(error)s", { error: e.message }), { type: "danger" });
@@ -132,6 +138,34 @@ export class TailorNewOrder extends Component {
 
     onNotesChange(barcode, ev) {
         this.state.itemSelections[barcode].notes = ev.target.value;
+    }
+
+    onMeasureChange(barcode, serviceId, ev) {
+        this.state.itemSelections[barcode].measures[serviceId] = ev.target.value;
+    }
+
+    onMoneyChange(barcode, field, ev) {
+        this.state.itemSelections[barcode][field] = ev.target.value;
+    }
+
+    /** Seçilen hizmetlerin varsayılan müşteri ücreti toplamı (0 = ücretsiz). */
+    getDefaultCharge(barcode) {
+        const sel = this.state.itemSelections[barcode];
+        if (!sel) return 0;
+        return sel.service_ids.reduce((sum, sid) => {
+            const svc = this.state.services.find((s) => s.id === sid);
+            return sum + (svc ? svc.customer_price || 0 : 0);
+        }, 0);
+    }
+
+    async loadHistory(customerCode) {
+        this.state.history = [];
+        if (!customerCode) return;
+        try {
+            this.state.history = await rpc("/ugurlar_tailor/customer_history", { customer_code: customerCode });
+        } catch (e) {
+            console.error("Müşteri geçmişi alınamadı:", e);
+        }
     }
 
     async onPhotoChange(barcode, ev) {
@@ -187,6 +221,7 @@ export class TailorNewOrder extends Component {
 
             const services = sel.service_ids.map((sid) => ({
                 id: sid,
+                measure: sel.measures[sid] || "",
                 price: this.getServicePrice(sid, sel.tailor_id),
             }));
 
@@ -202,6 +237,8 @@ export class TailorNewOrder extends Component {
                 notes: sel.notes || "",
                 services: services,
                 customer_mobile: this.state.customerMobile || "",
+                customer_charge: sel.customer_charge,
+                deposit: sel.deposit || 0,
                 promised_date: this.state.promisedDate || false,
                 photo: sel.photo || "",
             });

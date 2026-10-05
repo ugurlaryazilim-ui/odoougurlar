@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <record id="view_sms_system_settings" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.sms.system</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app data-string="SMS" string="SMS" name="sms_system" groups="base.group_system">
+                    <block title="Turatel SMS Gönderim Hesabı" name="sms_turatel">
+                        <setting string="Kanal Kodu / Kullanıcı / Şifre" help="Turatel'in verdiği SMS gönderim hesabı bilgileri">
+                            <div class="content-group">
+                                <div class="row mt8">
+                                    <label for="sms_turatel_channel_code" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_turatel_channel_code" class="col-lg-8"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_turatel_username" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_turatel_username" class="col-lg-8"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_turatel_password" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_turatel_password" password="True" class="col-lg-8"/>
+                                </div>
+                            </div>
+                        </setting>
+                        <setting string="Mesaj Başlığı" help="Turatel'de onaylı gönderici adı (en fazla 11 karakter)">
+                            <field name="sms_turatel_originator" placeholder="ORNEKFIRMA"/>
+                        </setting>
+                        <setting help="Açıkken SMS gönderilmez, yalnız kayıt oluşur. Canlıya geçince kapatın.">
+                            <field name="sms_test_mode"/>
+                        </setting>
+                        <setting help="ı ş ğ İ Ş Ğ harfleri i s g I S G olarak gönderilir; mesaj daha az parçaya bölünür">
+                            <field name="sms_ascii_mode"/>
+                        </setting>
+                        <setting string="API Adresi" help="Boş bırakılırsa varsayılan Turatel adresi kullanılır">
+                            <field name="sms_turatel_url" placeholder="https://processor.smsorigin.com/xml/process.aspx"/>
+                            <div class="mt8">
+                                <button name="action_sms_check_credit" type="object" string="Bağlantıyı Test Et / Kalan Kredi"
+                                        class="btn-secondary" icon="fa-plug"/>
+                            </div>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+</odoo>

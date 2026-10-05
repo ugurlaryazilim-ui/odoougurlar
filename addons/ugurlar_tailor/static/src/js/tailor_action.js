@@ -8,17 +8,19 @@ import { TailorNewOrder } from "./screens/tailor_new_order";
 import { TailorOrderList } from "./screens/tailor_order_list";
 import { TailorGiftLabel } from "./screens/tailor_gift_label";
 import { TailorStoreItem } from "./screens/tailor_store_item";
+import { TailorBulk } from "./screens/tailor_bulk";
 import { TailorBarcodeScanner } from "./tailor_scanner";
 
 export class TailorAction extends Component {
     static template = "ugurlar_tailor.TailorAction";
-    static components = { TailorMainMenu, TailorNewOrder, TailorOrderList, TailorGiftLabel, TailorStoreItem };
+    static components = { TailorMainMenu, TailorNewOrder, TailorOrderList, TailorGiftLabel, TailorStoreItem, TailorBulk };
 
     setup() {
         this.notification = useService("notification");
         this.scanner = new TailorBarcodeScanner();
         this.state = useState({
             screen: "main_menu",
+            listStatus: "",
         });
 
         onMounted(() => {
@@ -30,7 +32,9 @@ export class TailorAction extends Component {
         });
     }
 
-    switchScreen(screen) {
+    switchScreen(screen, params = {}) {
+        // Sayaç kartından gelince liste o duruma süzülü açılır
+        this.state.listStatus = params.status || "";
         this.state.screen = screen;
     }
 }

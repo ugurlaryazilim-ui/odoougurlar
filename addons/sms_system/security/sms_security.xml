@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <data>
+        <!-- SMS Kullanıcı: tüm çalışanlar SMS gönderebilir, kendi gönderimlerini görür -->
+        <record id="group_sms_user" model="res.groups">
+            <field name="name">SMS / Kullanıcı</field>
+        </record>
+        <record id="base.group_user" model="res.groups">
+            <field name="implied_ids" eval="[(4, ref('group_sms_user'))]"/>
+        </record>
+
+        <!-- SMS Yönetici: şablonlar, tüm gönderimler; sistem yöneticileri otomatik -->
+        <record id="group_sms_manager" model="res.groups">
+            <field name="name">SMS / Yönetici</field>
+            <field name="implied_ids" eval="[(4, ref('group_sms_user'))]"/>
+        </record>
+        <record id="base.group_system" model="res.groups">
+            <field name="implied_ids" eval="[(4, ref('group_sms_manager'))]"/>
+        </record>
+
+        <record id="rule_sms_message_own" model="ir.rule">
+            <field name="name">SMS: kendi gönderimleri</field>
+            <field name="model_id" ref="model_sms_system_message"/>
+            <field name="domain_force">[('user_id', '=', user.id)]</field>
+            <field name="groups" eval="[(4, ref('group_sms_user'))]"/>
+        </record>
+        <record id="rule_sms_message_all" model="ir.rule">
+            <field name="name">SMS: tüm gönderimler (yönetici)</field>
+            <field name="model_id" ref="model_sms_system_message"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="groups" eval="[(4, ref('group_sms_manager'))]"/>
+        </record>
+    </data>
+</odoo>
