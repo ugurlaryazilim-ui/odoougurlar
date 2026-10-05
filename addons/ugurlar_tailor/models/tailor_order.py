@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 
 from odoo import models, fields, api, _
 from odoo.exceptions import AccessError, UserError
@@ -67,9 +68,42 @@ class UgurlarTailorOrder(models.Model):
     ], string='Durum', default='pending', required=True, tracking=True, index=True)
 
     notes = fields.Text(string='Notlar')
+
+    # ── Teslim sözü / müşteri iletişimi / fotoğraf ──
+    promised_date = fields.Date(
+        string='Söz Verilen Teslim', tracking=True,
+        default=lambda self: self._default_promised_date(),
+        help='Müşteriye söz verilen hazır olma tarihi; geçen siparişler "Geciken" görünür',
+    )
+    is_overdue = fields.Boolean(
+        string='Gecikti', compute='_compute_is_overdue', search='_search_is_overdue',
+    )
+    customer_mobile = fields.Char(string='Müşteri Cep Telefonu', help='Hazır olunca SMS bildirimi için')
+    ready_sms_sent = fields.Boolean(string='Hazır SMS Gönderildi', readonly=True, copy=False)
+    photo = fields.Image(string='Ürün Fotoğrafı', max_width=1280, max_height=1280, attachment=True)
     completed_at = fields.Datetime(string='Tamamlanma Tarihi', readonly=True)
     delivered_at = fields.Datetime(string='Teslim Tarihi', readonly=True)
     cancelled_at = fields.Datetime(string='İptal Tarihi', readonly=True)
+
+    @api.model
+    def _default_promised_date(self):
+        days = int(self.env['ir.config_parameter'].sudo().get_param('ugurlar_tailor.default_days', '3') or 3)
+        return fields.Date.context_today(self) + timedelta(days=days)
+
+    @api.depends('promised_date', 'state')
+    def _compute_is_overdue(self):
+        today = fields.Date.context_today(self)
+        for order in self:
+            order.is_overdue = bool(order.promised_date and order.promised_date < today
+                                    and order.state in ('pending', 'in_progress'))
+
+    def _search_is_overdue(self, operator, value):
+        if operator not in ('=', '!=') or not isinstance(value, bool):
+            raise UserError(_('Desteklenmeyen arama.'))
+        domain = [('promised_date', '<', fields.Date.context_today(self)),
+                  ('state', 'in', ('pending', 'in_progress'))]
+        positive = (operator == '=') == value
+        return domain if positive else ['!', '&'] + domain
 
     @api.depends('line_ids.price')
     def _compute_total_price(self):
@@ -196,8 +230,26 @@ class UgurlarTailorOrder(models.Model):
         self._set_state('in_progress')
 
     def action_mark_completed(self):
-        """Durumu 'Hazır' olarak güncelle."""
+        """Durumu 'Hazır' olarak güncelle; ayar açıksa müşteriye SMS gönder."""
         self._set_state('completed', {'completed_at': fields.Datetime.now()})
+        self._notify_ready_sms()
+
+    def _notify_ready_sms(self):
+        """Hazır bildirimi (Odoo SMS / IAP). Kapalıysa, numara yoksa ya da gönderilmişse atlanır."""
+        icp = self.env['ir.config_parameter'].sudo()
+        if icp.get_param('ugurlar_tailor.sms_ready_enabled') != 'True':
+            return
+        template = icp.get_param('ugurlar_tailor.sms_ready_text') or _(
+            'Sayın {musteri}, {siparis} numaralı terzi siparişiniz hazırdır. Mağazamızdan teslim alabilirsiniz.')
+        for order in self:
+            if order.ready_sms_sent or not order.customer_mobile or not hasattr(order, '_message_sms'):
+                continue
+            body = template.replace('{musteri}', order.customer_name or '').replace('{siparis}', order.name or '')
+            try:
+                order._message_sms(body, sms_numbers=[order.customer_mobile])
+                order.with_context(tailor_state_ok=True).ready_sms_sent = True
+            except Exception as e:
+                _logger.warning('Terzi hazır SMS gönderilemedi (%s): %s', order.name, e)
 
     def action_mark_delivered(self):
         """Durumu 'Teslim Edildi' olarak güncelle."""

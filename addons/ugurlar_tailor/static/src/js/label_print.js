@@ -18,6 +18,13 @@ function esc(value) {
         .replace(/'/g, "&#39;");
 }
 
+/** Sipariş no barkodu: ürün terziden dönünce okutulup durum tek dokunuşla ilerletilir. */
+function _barcodeImg(value) {
+    if (!value) return '';
+    const src = `/report/barcode/?barcode_type=Code128&value=${encodeURIComponent(value)}&width=600&height=120&humanreadable=0`;
+    return `<div style="text-align:center;margin-top:6px;"><img src="${src}" style="width:70mm;height:14mm;" alt=""/></div>`;
+}
+
 function _buildOrderLabel(data, copyType) {
     const config = {
         terzi: {
@@ -46,6 +53,7 @@ function _buildOrderLabel(data, copyType) {
             <hr class="label-div"/>
             <div class="label-r"><span class="ll">Sipariş No:</span><span class="vv" style="font-size:13px;font-weight:bold;">${esc(data.name)}</span></div>
             <div class="label-r"><span class="ll">Fatura No:</span><span class="vv">${esc(data.invoice_no)}</span></div>
+            ${data.promised_date ? `<div class="label-r"><span class="ll">Teslim:</span><span class="vv" style="font-weight:bold;">${esc(data.promised_date)}</span></div>` : ''}
             <hr class="label-div"/>
             <div class="label-r"><span class="ll">Müşteri:</span><span class="vv">${esc(data.customer_name)}</span></div>
             ${data.customer_phone ? `<div class="label-r"><span class="ll">Müşteri No:</span><span class="vv">${esc(data.customer_phone)}</span></div>` : ''}
@@ -59,6 +67,7 @@ function _buildOrderLabel(data, copyType) {
             <div class="label-section">YAPILACAK İŞLEMLER</div>
             ${servicesHtml}
             <hr class="label-div"/>
+            ${_barcodeImg(data.name)}
             <div class="label-dt">${esc(data.date)}</div>
             <div class="label-note-main">${c.line1}</div>
             <div class="label-note-sub">${c.line2}</div>
@@ -138,6 +147,7 @@ function _buildCustomerSummaryLabel(dataArray) {
             <div class="label-section">SİPARİŞ ÖZETİ (${dataArray.length} ürün)</div>
             ${itemsHtml}
             <hr class="label-div"/>
+            ${first.promised_date ? `<div class="label-r" style="text-align:center;font-weight:900;font-size:14px;">Teslim: ${esc(first.promised_date)}</div>` : ''}
             <div class="label-dt">${esc(first.date)}</div>
             <div class="label-note-main">3. Nüsha müşteride kalacak</div>
             <div class="label-note-sub">İşlemler bittiğinde ürünlerinizi mağazamızdan teslim alabilirsiniz.</div>
@@ -274,10 +284,17 @@ function _printHtml(labelsHtml, title) {
     doc.write(html);
     doc.close();
 
-    setTimeout(() => {
-        iframe.contentWindow.focus();
-        iframe.contentWindow.print();
-    }, 500);
+    // Barkod görselleri yüklenmeden yazdırılırsa etikette boş kalır: yüklenmelerini bekle (en fazla 4 sn)
+    const images = Array.from(doc.images || []);
+    const loaded = images.map((img) => img.complete ? Promise.resolve() : new Promise((res) => {
+        img.onload = img.onerror = res;
+    }));
+    Promise.race([Promise.all(loaded), new Promise((res) => setTimeout(res, 4000))]).then(() => {
+        setTimeout(() => {
+            iframe.contentWindow.focus();
+            iframe.contentWindow.print();
+        }, 200);
+    });
 }
 
 /**

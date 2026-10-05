@@ -6,6 +6,7 @@ import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
 import { printMultipleTailorLabels } from "../label_print";
 import { openCameraScanner } from "@ugurlar_barcode/js/camera_scanner";
+import { readPhoto } from "../photo_utils";
 
 export class TailorStoreItem extends Component {
     static template = "ugurlar_tailor.TailorStoreItem";
@@ -25,6 +26,7 @@ export class TailorStoreItem extends Component {
             tailors: [],
             submitting: false,
             createdCount: 0,
+            promisedDate: "",
         });
 
         this.storeSearchInputRef = useRef("storeSearchInput");
@@ -91,6 +93,7 @@ export class TailorStoreItem extends Component {
                     tailor_id: null,
                     service_ids: [],
                     notes: "",
+                    photo: "",
                 });
                 this.state.searchQuery = "";
                 if (this.storeSearchInputRef.el) {
@@ -133,6 +136,16 @@ export class TailorStoreItem extends Component {
         const item = this.state.items.find(i => i.barcode === barcode);
         if (item) {
             item.notes = ev.target.value;
+        }
+    }
+
+    async onPhotoChange(barcode, ev) {
+        const item = this.state.items.find(i => i.barcode === barcode);
+        if (!item) return;
+        try {
+            item.photo = await readPhoto(ev.target.files[0]);
+        } catch {
+            this.notification.add(_t("Fotoğraf okunamadı."), { type: "warning" });
         }
     }
 
@@ -194,6 +207,8 @@ export class TailorStoreItem extends Component {
                 tailor_id: item.tailor_id,
                 notes: item.notes || "",
                 services: services,
+                promised_date: this.state.promisedDate || false,
+                photo: item.photo || "",
             });
         }
 

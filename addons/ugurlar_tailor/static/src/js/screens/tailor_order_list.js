@@ -94,6 +94,12 @@ export class TailorOrderList extends Component {
         return flow[currentStatus] || null;
     }
 
+    formatDate(value) {
+        if (!value) return "";
+        const [y, m, d] = String(value).slice(0, 10).split("-");
+        return `${d}.${m}.${y}`;
+    }
+
     getStatusLabel(status) {
         const labels = {
             waiting_approval: _t("Onay Bekliyor"),

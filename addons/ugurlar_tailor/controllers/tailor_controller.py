@@ -136,8 +136,15 @@ class TailorController(http.Controller):
                 'sales_person': order_data.get('sales_person', ''),
                 'tailor_id': tailor_id,
                 'notes': order_data.get('notes', ''),
+                'customer_mobile': (order_data.get('customer_mobile') or '').strip(),
                 'line_ids': lines,
             })
+            if order_data.get('promised_date'):
+                order_vals[-1]['promised_date'] = order_data['promised_date']
+            photo = order_data.get('photo') or ''
+            if photo:
+                # data:image/jpeg;base64,... -> yalnız base64 kısmı
+                order_vals[-1]['photo'] = photo.split(',', 1)[1] if photo.startswith('data:') else photo
 
         created_orders = Order.create(order_vals)
         created = [{'id': o.id, 'name': o.name, 'total_price': o.total_price} for o in created_orders]
@@ -154,14 +161,17 @@ class TailorController(http.Controller):
     @http.route('/ugurlar_tailor/orders', type='jsonrpc', auth='user')
     def get_orders(self, status=None, search='', page=1, limit=20):
         domain = []
-        if status:
+        if status and status != 'overdue':
             domain.append(('state', '=', status))
+        if status == 'overdue':
+            domain = [('is_overdue', '=', True)]
         if search:
-            domain.append('|')
-            domain.append('|')
-            domain.append(('invoice_no', 'ilike', search))
-            domain.append(('customer_name', 'ilike', search))
-            domain.append(('name', 'ilike', search))
+            search = search.strip()
+            domain += ['|', '|', '|',
+                       ('invoice_no', 'ilike', search),
+                       ('customer_name', 'ilike', search),
+                       ('name', 'ilike', search),
+                       ('product_barcode', '=', search)]
 
         offset = (int(page) - 1) * int(limit)
         total = request.env['ugurlar.tailor.order'].search_count(domain)
@@ -170,7 +180,8 @@ class TailorController(http.Controller):
             ['id', 'name', 'invoice_no', 'product_name', 'product_barcode',
              'customer_name', 'customer_phone', 'sales_person',
              'tailor_id', 'total_price', 'state', 'notes',
-             'create_date', 'completed_at', 'delivered_at', 'cancelled_at'],
+             'create_date', 'completed_at', 'delivered_at', 'cancelled_at',
+             'promised_date', 'is_overdue', 'customer_mobile'],
             order='create_date desc',
             limit=int(limit),
             offset=offset,
@@ -194,6 +205,15 @@ class TailorController(http.Controller):
             'page': int(page),
             'limit': int(limit),
         }
+
+    # ── Ana menü sayaçları ──
+    @http.route('/ugurlar_tailor/stats', type='jsonrpc', auth='user')
+    def stats(self):
+        Order = request.env['ugurlar.tailor.order']
+        counts = dict(Order._read_group([('state', 'in', ('waiting_approval', 'pending', 'in_progress', 'completed'))],
+                                        ['state'], ['__count']))
+        counts['overdue'] = Order.search_count([('is_overdue', '=', True)])
+        return counts
 
     # ── Sipariş Durum Güncelle ──
     @http.route('/ugurlar_tailor/update_status', type='jsonrpc', auth='user')
@@ -236,6 +256,7 @@ class TailorController(http.Controller):
             'total_price': order.total_price,
             'notes': order.notes or '',
             'date': order.create_date.strftime('%d.%m.%Y %H:%M') if order.create_date else '',
+            'promised_date': order.promised_date.strftime('%d.%m.%Y') if order.promised_date else '',
             'services': [{'name': line.service_name, 'price': line.price} for line in order.line_ids],
         }
 

@@ -5,14 +5,16 @@
         <field name="name">ugurlar.tailor.order.list</field>
         <field name="model">ugurlar.tailor.order</field>
         <field name="arch" type="xml">
-            <list decoration-info="state == 'pending'" decoration-warning="state == 'in_progress'" decoration-success="state == 'completed'" decoration-muted="state == 'delivered'" decoration-danger="state == 'cancelled'">
+            <list decoration-bf="is_overdue" decoration-info="state == 'pending'" decoration-warning="state == 'in_progress'" decoration-success="state == 'completed'" decoration-muted="state == 'delivered'" decoration-danger="state == 'cancelled'">
                 <field name="name"/>
                 <field name="invoice_no"/>
                 <field name="is_reyon" optional="show" string="Reyon"/>
                 <field name="product_name"/>
                 <field name="customer_name"/>
                 <field name="tailor_id"/>
-                <field name="total_price"/>
+                <field name="total_price" sum="Toplam"/>
+                <field name="promised_date" optional="show"/>
+                <field name="is_overdue" column_invisible="True"/>
                 <field name="state" widget="badge" decoration-danger="state == 'waiting_approval'" decoration-info="state == 'pending'" decoration-warning="state == 'in_progress'" decoration-success="state == 'completed'" decoration-muted="state == 'delivered'"/>
                 <field name="create_date"/>
             </list>
@@ -51,12 +53,16 @@
                         <group>
                             <field name="customer_name"/>
                             <field name="customer_phone"/>
+                            <field name="customer_mobile" widget="phone"/>
                             <field name="sales_person"/>
                         </group>
                     </group>
                     <group>
                         <group>
                             <field name="tailor_id"/>
+                            <field name="promised_date"/>
+                            <field name="is_overdue" invisible="not is_overdue" widget="boolean_toggle" readonly="1"/>
+                            <field name="ready_sms_sent" invisible="not ready_sms_sent"/>
                         </group>
                         <group>
                             <field name="completed_at"/>
@@ -79,6 +85,9 @@
                         <page string="Notlar" name="notes">
                             <field name="notes" placeholder="Sipariş hakkında notlar..."/>
                         </page>
+                        <page string="Fotoğraf" name="photo">
+                            <field name="photo" widget="image" options="{'size': [400, 400]}"/>
+                        </page>
                     </notebook>
                 </sheet>
                 <chatter/>
@@ -97,6 +106,7 @@
                 <field name="customer_name"/>
                 <field name="tailor_id"/>
                 <field name="product_barcode"/>
+                <filter string="Geciken" name="overdue" domain="[('is_overdue', '=', True)]"/>
                 <filter string="Onay Bekleyen" name="waiting_approval" domain="[('state', '=', 'waiting_approval')]"/>
                 <filter string="Bekliyor" name="pending" domain="[('state', '=', 'pending')]"/>
                 <filter string="Terzide" name="in_progress" domain="[('state', '=', 'in_progress')]"/>
@@ -121,7 +131,69 @@
     <record id="action_tailor_order" model="ir.actions.act_window">
         <field name="name">Siparişler</field>
         <field name="res_model">ugurlar.tailor.order</field>
-        <field name="view_mode">list,form</field>
+        <field name="view_mode">list,kanban,form,pivot,graph</field>
+    </record>
+
+    <!-- ═══════════════ Kanban (duruma göre sütunlar) ═══════════════ -->
+    <record id="view_tailor_order_kanban" model="ir.ui.view">
+        <field name="name">ugurlar.tailor.order.kanban</field>
+        <field name="model">ugurlar.tailor.order</field>
+        <field name="arch" type="xml">
+            <kanban default_group_by="state" class="o_kanban_small_column" records_draggable="0">
+                <field name="state"/>
+                <field name="is_overdue"/>
+                <templates>
+                    <t t-name="card">
+                        <div class="d-flex justify-content-between">
+                            <field name="name" class="fw-bold"/>
+                            <span t-if="record.is_overdue.raw_value" class="badge text-bg-danger">Gecikti</span>
+                        </div>
+                        <field name="customer_name"/>
+                        <field name="product_name" class="text-muted small"/>
+                        <div class="d-flex justify-content-between mt-1">
+                            <field name="tailor_id"/>
+                            <field name="total_price" widget="monetary" options="{'currency_field': False}"/>
+                        </div>
+                        <field name="promised_date" class="small"/>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <!-- ═══════════════ Terzi Hakediş (pivot / grafik) ═══════════════ -->
+    <record id="view_tailor_order_pivot" model="ir.ui.view">
+        <field name="name">ugurlar.tailor.order.pivot</field>
+        <field name="model">ugurlar.tailor.order</field>
+        <field name="arch" type="xml">
+            <pivot string="Terzi Hakediş" sample="1">
+                <field name="tailor_id" type="row"/>
+                <field name="delivered_at" interval="month" type="col"/>
+                <field name="total_price" type="measure"/>
+            </pivot>
+        </field>
+    </record>
+
+    <record id="view_tailor_order_graph" model="ir.ui.view">
+        <field name="name">ugurlar.tailor.order.graph</field>
+        <field name="model">ugurlar.tailor.order</field>
+        <field name="arch" type="xml">
+            <graph string="Terzi Hakediş" type="bar" sample="1">
+                <field name="tailor_id"/>
+                <field name="total_price" type="measure"/>
+            </graph>
+        </field>
+    </record>
+
+    <record id="action_tailor_settlement" model="ir.actions.act_window">
+        <field name="name">Terzi Hakediş</field>
+        <field name="res_model">ugurlar.tailor.order</field>
+        <field name="view_mode">pivot,graph,list</field>
+        <field name="context">{'search_default_delivered': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Teslim edilmiş terzi siparişi yok</p>
+            <p>Teslim edilen siparişlerin terzi bazında toplamı. Tarih filtresiyle dönem seçip Excel'e aktarabilirsiniz.</p>
+        </field>
     </record>
 
     <!-- ═══════════════ Toplu İptal Server Action ═══════════════ -->

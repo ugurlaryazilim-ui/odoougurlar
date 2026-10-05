@@ -6,6 +6,7 @@ import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
 import { printTailorLabel, printMultipleTailorLabels } from "../label_print";
 import { openCameraScanner } from "@ugurlar_barcode/js/camera_scanner";
+import { readPhoto } from "../photo_utils";
 
 export class TailorNewOrder extends Component {
     static template = "ugurlar_tailor.TailorNewOrder";
@@ -27,6 +28,8 @@ export class TailorNewOrder extends Component {
             itemSelections: {},
             submitting: false,
             createdCount: 0,
+            customerMobile: "",
+            promisedDate: "",
         });
 
         this.searchInputRef = useRef("searchInput");
@@ -101,6 +104,7 @@ export class TailorNewOrder extends Component {
                         tailor_id: null,
                         service_ids: [],
                         notes: "",
+                        photo: "",
                     };
                 });
                 this.state.itemSelections = selections;
@@ -128,6 +132,14 @@ export class TailorNewOrder extends Component {
 
     onNotesChange(barcode, ev) {
         this.state.itemSelections[barcode].notes = ev.target.value;
+    }
+
+    async onPhotoChange(barcode, ev) {
+        try {
+            this.state.itemSelections[barcode].photo = await readPhoto(ev.target.files[0]);
+        } catch {
+            this.notification.add(_t("Fotoğraf okunamadı."), { type: "warning" });
+        }
     }
 
     getServicePrice(serviceId, tailorId) {
@@ -189,6 +201,9 @@ export class TailorNewOrder extends Component {
                 tailor_id: sel.tailor_id,
                 notes: sel.notes || "",
                 services: services,
+                customer_mobile: this.state.customerMobile || "",
+                promised_date: this.state.promisedDate || false,
+                photo: sel.photo || "",
             });
         }
 
@@ -231,6 +246,8 @@ export class TailorNewOrder extends Component {
         } else if (this.state.step === 2) {
             this.state.step = 1;
             this.state.selectedInvoice = null;
+            this.state.customerMobile = "";
+            this.state.promisedDate = "";
         } else {
             this.props.onNavigate("main_menu");
         }

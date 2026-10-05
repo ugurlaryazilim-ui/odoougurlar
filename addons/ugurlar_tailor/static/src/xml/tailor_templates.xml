@@ -19,6 +19,13 @@
                 <h1>Terzi Takip</h1>
                 <p class="tailor-subtitle">Mağaza Terzi Yönetim Sistemi</p>
             </div>
+            <div class="tailor-stats" t-on-click="onOrderList">
+                <div class="tailor-stat"><b t-esc="stats.waiting_approval"/><span>Onay</span></div>
+                <div class="tailor-stat"><b t-esc="stats.pending"/><span>Bekliyor</span></div>
+                <div class="tailor-stat"><b t-esc="stats.in_progress"/><span>Terzide</span></div>
+                <div class="tailor-stat"><b t-esc="stats.completed"/><span>Hazır</span></div>
+                <div t-att-class="'tailor-stat' + (stats.overdue ? ' tailor-stat-danger' : '')"><b t-esc="stats.overdue"/><span>Geciken</span></div>
+            </div>
             <div class="tailor-menu-grid">
                 <div class="tailor-menu-card tailor-card-primary" t-on-click="onNewOrder">
                     <div class="tailor-card-icon">+</div>
@@ -103,8 +110,18 @@
                         <span class="tailor-info-value" t-esc="state.selectedInvoice.customer_name"/>
                     </div>
                     <div class="tailor-info-row">
-                        <span class="tailor-info-label">Satis Pers.:</span>
+                        <span class="tailor-info-label">Satış Pers.:</span>
                         <span class="tailor-info-value" t-esc="state.selectedInvoice.sales_person || '-'"/>
+                    </div>
+                    <div class="tailor-info-row">
+                        <span class="tailor-info-label">Cep Tel.:</span>
+                        <input type="tel" class="tailor-input tailor-input-sm" placeholder="05xx xxx xx xx (hazır SMS bildirimi)"
+                               t-model="state.customerMobile"/>
+                    </div>
+                    <div class="tailor-info-row">
+                        <span class="tailor-info-label">Teslim:</span>
+                        <input type="date" class="tailor-input tailor-input-sm" t-model="state.promisedDate"
+                               title="Boş bırakılırsa varsayılan süre uygulanır"/>
                     </div>
                 </div>
 
@@ -155,6 +172,17 @@
                                 <input type="text" class="tailor-input tailor-input-sm"
                                        placeholder="Not ekleyin..."
                                        t-on-change="(ev) =&gt; this.onNotesChange(item.barcode, ev)"/>
+                            </div>
+
+                            <!-- Fotoğraf — terzi öncesi durum -->
+                            <div t-if="state.itemSelections[item.barcode]?.tailor_id" class="tailor-item-row tailor-photo-row tailor-fade-in">
+                                <label class="tailor-btn tailor-btn-sm tailor-photo-btn">
+                                    &#128247; Fotoğraf
+                                    <input type="file" accept="image/*" capture="environment" class="d-none"
+                                           t-on-change="(ev) =&gt; this.onPhotoChange(item.barcode, ev)"/>
+                                </label>
+                                <img t-if="state.itemSelections[item.barcode]?.photo" class="tailor-photo-thumb"
+                                     t-att-src="state.itemSelections[item.barcode].photo" alt=""/>
                             </div>
 
                             <!-- Toplam — sadece terzi secilince gorunur -->
@@ -212,6 +240,7 @@
                 </button>
                 <select class="tailor-select" t-on-change="onFilterChange">
                     <option value="">Tümü</option>
+                    <option value="overdue">&#9888; Geciken</option>
                     <option value="waiting_approval">Onay Bekleyen</option>
                     <option value="pending">Bekliyor</option>
                     <option value="in_progress">Terzide</option>
@@ -233,9 +262,10 @@
                     Sipariş bulunamadı.
                 </div>
                 <t t-foreach="state.orders" t-as="order" t-key="order.id">
-                    <div class="tailor-order-card">
+                    <div t-att-class="'tailor-order-card' + (order.is_overdue ? ' tailor-overdue' : '')">
                         <div class="tailor-order-header">
                             <strong t-esc="order.name"/>
+                            <span t-if="order.is_overdue" class="tailor-badge badge-overdue">Gecikti</span>
                             <span t-att-class="'tailor-badge ' + getStatusClass(order.state)"
                                   t-esc="getStatusLabel(order.state)"/>
                         </div>
@@ -244,6 +274,7 @@
                             <div><t t-esc="order.customer_name"/></div>
                             <div t-if="order.tailor_id"><t t-esc="order.tailor_id[1]"/></div>
                             <div><t t-esc="order.total_price?.toFixed(2)"/> TL</div>
+                            <div t-if="order.promised_date">Teslim: <strong t-esc="formatDate(order.promised_date)"/></div>
                             <div t-if="order.create_date" class="tailor-order-date">
                                 <t t-esc="order.create_date"/>
                             </div>
@@ -479,6 +510,16 @@
                                        t-on-change="(ev) =&gt; this.onNotesChange(item.barcode, ev)" t-att-value="item.notes"/>
                             </div>
 
+                            <!-- Fotoğraf -->
+                            <div t-if="item.tailor_id" class="tailor-item-row tailor-photo-row tailor-fade-in">
+                                <label class="tailor-btn tailor-btn-sm tailor-photo-btn">
+                                    &#128247; Fotoğraf
+                                    <input type="file" accept="image/*" capture="environment" class="d-none"
+                                           t-on-change="(ev) =&gt; this.onPhotoChange(item.barcode, ev)"/>
+                                </label>
+                                <img t-if="item.photo" class="tailor-photo-thumb" t-att-src="item.photo" alt=""/>
+                            </div>
+
                             <!-- Toplam -->
                             <div t-if="item.tailor_id" class="tailor-item-total tailor-fade-in">
                                 Toplam: <strong><t t-esc="this.getItemTotal(item.barcode).toFixed(2)"/> TL</strong>
@@ -487,6 +528,11 @@
                     </t>
                 </div>
 
+                <div class="tailor-item-row" t-if="state.items.length &gt; 0" style="margin-top:12px;">
+                    <label>Teslim:</label>
+                    <input type="date" class="tailor-input tailor-input-sm" t-model="state.promisedDate"
+                           title="Boş bırakılırsa varsayılan süre uygulanır"/>
+                </div>
                 <div class="tailor-submit-bar" t-if="state.items.length &gt; 0">
                     <button class="tailor-btn tailor-btn-success tailor-btn-lg"
                             t-on-click="submitOrders"

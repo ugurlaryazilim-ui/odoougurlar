@@ -41,6 +41,20 @@
                             </setting>
                         </block>
 
+                        <block title="Sipariş ve Bildirim" name="tailor_order_settings">
+                            <setting string="Varsayılan Teslim Süresi" help="Yeni siparişte söz verilen teslim tarihi bugünden bu kadar gün sonrası olur">
+                                <div class="content-group">
+                                    <field name="tailor_default_days"/> gün
+                                </div>
+                            </setting>
+                            <setting help="Sipariş 'Hazır' olunca müşterinin cep telefonuna SMS gider (Odoo SMS / IAP kredisi gerekir)">
+                                <field name="tailor_sms_ready_enabled"/>
+                                <div class="content-group" invisible="not tailor_sms_ready_enabled">
+                                    <field name="tailor_sms_ready_text" placeholder="Sayın {musteri}, {siparis} numaralı terzi siparişiniz hazırdır."/>
+                                </div>
+                            </setting>
+                        </block>
+
                         <block title="Reyon Ayarları" name="tailor_reyon_settings">
                             <setting string="Reyon Yöneticileri" help="Reyon işlemi onayı bildirimlerinin gideceği yöneticiler">
                                 <div class="content-group">
