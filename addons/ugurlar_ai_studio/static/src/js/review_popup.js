@@ -409,32 +409,32 @@ async function _openReviewPopup(initialSessionId) {
                             </div>
                         ` : item.is_approved ? `
                             <div class="ais-rp-approved-badge">✅ Bu görsel onaylandı</div>
-                            ${showStarBtn ? `
-                            <button class="ais-rp-btn ais-rp-btn-star ${item.is_primary ? 'active' : ''}" id="ais-rp-star">
-                                ⭐ Ana Görsel
-                            </button>
-                            ` : ''}
                             <button class="ais-rp-btn ais-rp-btn-unapprove" id="ais-rp-unapprove" style="background:#f59e0b; color:white;">
                                 ↩️ Onayı Geri Al
                             </button>
                             <button class="ais-rp-btn ais-rp-btn-exclude" id="ais-rp-toggle-exclude" style="background:#6b7280; color:white;" title="Bu yönü ürüne kaydetme">
                                 🚫 Dahil Etme
                             </button>
-                        ` : `
-                            <button class="ais-rp-btn ais-rp-btn-reject" id="ais-rp-reject" aria-label="Reddet">
-                                ❌ Reddet
-                            </button>
                             ${showStarBtn ? `
                             <button class="ais-rp-btn ais-rp-btn-star ${item.is_primary ? 'active' : ''}" id="ais-rp-star">
                                 ⭐ Ana Görsel
                             </button>
                             ` : ''}
+                        ` : `
+                            <button class="ais-rp-btn ais-rp-btn-reject" id="ais-rp-reject" aria-label="Reddet">
+                                ❌ Reddet
+                            </button>
                             <button class="ais-rp-btn ais-rp-btn-approve" id="ais-rp-approve" aria-label="Onayla">
                                 ✅ Onayla
                             </button>
                             <button class="ais-rp-btn ais-rp-btn-exclude" id="ais-rp-toggle-exclude" style="background:#6b7280; color:white;" title="Bu yönü ürüne kaydetme">
                                 🚫 Dahil Etme
                             </button>
+                            ${showStarBtn ? `
+                            <button class="ais-rp-btn ais-rp-btn-star ${item.is_primary ? 'active' : ''}" id="ais-rp-star">
+                                ⭐ Ana Görsel
+                            </button>
+                            ` : ''}
                         `}
                     </div>
                     <div class="ais-rp-nav">
