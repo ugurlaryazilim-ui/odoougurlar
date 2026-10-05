@@ -41,6 +41,14 @@
                             </div>
                         </setting>
                     </block>
+                    <block title="Toplu SMS" name="sms_bulk">
+                        <setting help="Son 24 saatte toplu SMS ile gönderilebilecek en fazla numara (0 = sınırsız). Yanlışlıkla büyük gönderime karşı emniyet.">
+                            <field name="sms_daily_limit"/>
+                        </setting>
+                        <setting help="Ticari SMS'lerin sonuna otomatik eklenir (İYS ret bilgisi). Turatel'in verdiği ret numarasını yazın.">
+                            <field name="sms_optout_text" placeholder="SMS almamak icin RET yazip XXXX e gonderin"/>
+                        </setting>
+                    </block>
                 </app>
             </xpath>
         </field>

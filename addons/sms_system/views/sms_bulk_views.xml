@@ -1,0 +1,336 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- ═══════════ Rehber ═══════════ -->
+    <record id="view_sms_contact_list" model="ir.ui.view">
+        <field name="name">sms.system.contact.list</field>
+        <field name="model">sms.system.contact</field>
+        <field name="arch" type="xml">
+            <list decoration-muted="opt_out" multi_edit="1">
+                <field name="name"/>
+                <field name="mobile"/>
+                <field name="customer_code" optional="show"/>
+                <field name="list_ids" widget="many2many_tags" optional="show"/>
+                <field name="source" optional="show"/>
+                <field name="iys_status" widget="badge" optional="show"
+                       decoration-success="iys_status == 'approved'" decoration-danger="iys_status == 'rejected'"/>
+                <field name="opt_out" optional="show"/>
+                <field name="create_date" string="Eklenme" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_sms_contact_form" model="ir.ui.view">
+        <field name="name">sms.system.contact.form</field>
+        <field name="model">sms.system.contact</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="action_opt_out" string="Kara Listeye Al" type="object" invisible="opt_out"
+                            confirm="Bu numaraya artık hiçbir toplu SMS gönderilmeyecek. Devam edilsin mi?"/>
+                    <button name="action_opt_in" string="Kara Listeden Çıkar" type="object" invisible="not opt_out"/>
+                </header>
+                <sheet>
+                    <widget name="web_ribbon" title="Kara Listede" bg_color="text-bg-danger" invisible="not opt_out"/>
+                    <group>
+                        <group>
+                            <field name="name"/>
+                            <field name="mobile" placeholder="0532 123 45 67"/>
+                            <field name="customer_code"/>
+                            <field name="partner_id"/>
+                            <field name="source"/>
+                        </group>
+                        <group>
+                            <field name="list_ids" widget="many2many_tags"/>
+                            <field name="iys_status"/>
+                            <field name="iys_checked_at"/>
+                            <field name="opt_out" readonly="1"/>
+                            <field name="opt_out_reason" invisible="not opt_out"/>
+                            <field name="opt_out_date" invisible="not opt_out"/>
+                            <field name="active" invisible="1"/>
+                        </group>
+                    </group>
+                    <field name="note" placeholder="Not..."/>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_sms_contact_search" model="ir.ui.view">
+        <field name="name">sms.system.contact.search</field>
+        <field name="model">sms.system.contact</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name" filter_domain="['|', '|', ('name', 'ilike', self), ('mobile', 'ilike', self), ('customer_code', 'ilike', self)]"/>
+                <field name="list_ids"/>
+                <filter string="Kara Liste" name="opt_out" domain="[('opt_out', '=', True)]"/>
+                <filter string="Gönderime Açık" name="reachable" domain="[('opt_out', '=', False)]"/>
+                <separator/>
+                <filter string="İYS Onaylı" name="iys_ok" domain="[('iys_status', '=', 'approved')]"/>
+                <filter string="İYS Bilinmiyor" name="iys_unknown" domain="[('iys_status', '=', 'unknown')]"/>
+                <separator/>
+                <filter string="Arşiv" name="inactive" domain="[('active', '=', False)]"/>
+                <group>
+                    <filter string="Kaynak" name="group_source" context="{'group_by': 'source'}"/>
+                    <filter string="İYS" name="group_iys" context="{'group_by': 'iys_status'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_sms_contact" model="ir.actions.act_window">
+        <field name="name">SMS Rehberi</field>
+        <field name="res_model">sms.system.contact</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Rehber boş</p>
+            <p>Excel/CSV aktarın ya da Kişiler / Kullanıcılar listesinden "SMS Listesine Ekle" işlemini kullanın.</p>
+        </field>
+    </record>
+
+    <record id="action_sms_contact_optout" model="ir.actions.act_window">
+        <field name="name">Kara Liste</field>
+        <field name="res_model">sms.system.contact</field>
+        <field name="view_mode">list,form</field>
+        <field name="context">{'search_default_opt_out': 1, 'default_opt_out': True}</field>
+    </record>
+
+    <!-- ═══════════ Listeler ═══════════ -->
+    <record id="view_sms_list_list" model="ir.ui.view">
+        <field name="name">sms.system.list.list</field>
+        <field name="model">sms.system.list</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name"/>
+                <field name="list_type"/>
+                <field name="contact_count"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_sms_list_form" model="ir.ui.view">
+        <field name="name">sms.system.list.form</field>
+        <field name="model">sms.system.list</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_view_contacts" type="object" class="oe_stat_button" icon="fa-users">
+                            <field name="contact_count" widget="statinfo" string="Kişi"/>
+                        </button>
+                    </div>
+                    <group>
+                        <field name="name"/>
+                        <field name="list_type"/>
+                        <field name="note"/>
+                        <field name="active" invisible="1"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_sms_list" model="ir.actions.act_window">
+        <field name="name">SMS Listeleri</field>
+        <field name="res_model">sms.system.list</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- ═══════════ Toplu SMS ═══════════ -->
+    <record id="view_sms_campaign_list" model="ir.ui.view">
+        <field name="name">sms.system.campaign.list</field>
+        <field name="model">sms.system.campaign</field>
+        <field name="arch" type="xml">
+            <list decoration-muted="state == 'cancel'" decoration-info="state in ('scheduled', 'sending')">
+                <field name="create_date" string="Tarih"/>
+                <field name="name"/>
+                <field name="message_type"/>
+                <field name="list_ids" widget="many2many_tags"/>
+                <field name="total_count"/>
+                <field name="sent_count"/>
+                <field name="error_count"/>
+                <field name="state" widget="badge" decoration-success="state == 'done'"
+                       decoration-info="state in ('scheduled', 'sending')"/>
+                <field name="user_id" optional="hide"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_sms_campaign_form" model="ir.ui.view">
+        <field name="name">sms.system.campaign.form</field>
+        <field name="model">sms.system.campaign</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="action_send" string="Gönder" type="object" class="btn-primary"
+                            invisible="state != 'draft'"
+                            confirm="Toplu SMS listelerdeki tüm alıcılara gönderilecek (planlı tarih varsa o saatte). Devam edilsin mi?"/>
+                    <button name="action_retry_errors" string="Hatalıları Yeniden Gönder" type="object"
+                            invisible="state != 'done' or not error_count"/>
+                    <button name="action_cancel" string="Durdur / İptal" type="object"
+                            invisible="state not in ('scheduled', 'sending')"
+                            confirm="Henüz gönderilmemiş SMS'ler iptal edilecek. Devam edilsin mi?"/>
+                    <button name="action_draft" string="Taslağa Al" type="object" invisible="state not in ('scheduled', 'cancel')"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,sending,done"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_view_messages" type="object" class="oe_stat_button" icon="fa-envelope"
+                                invisible="not total_count">
+                            <field name="total_count" widget="statinfo" string="Gönderim"/>
+                        </button>
+                    </div>
+                    <div class="oe_title">
+                        <h1><field name="name" placeholder="ör. Bayram mesai saatleri" readonly="state != 'draft'"/></h1>
+                    </div>
+                    <div class="alert alert-warning" role="alert" invisible="message_type != 'commercial'">
+                        Ticari SMS yalnız İYS onaylı numaralara gider; ret metni (Ayarlar &gt; SMS) otomatik eklenir.
+                    </div>
+                    <group>
+                        <group>
+                            <field name="message_type" readonly="state != 'draft'"/>
+                            <field name="list_ids" widget="many2many_tags" readonly="state != 'draft'"
+                                   options="{'no_create': True}"/>
+                            <field name="template_id" readonly="state != 'draft'" options="{'no_create': True}"/>
+                            <field name="scheduled_at" readonly="state != 'draft'"/>
+                        </group>
+                        <group string="Önizleme" invisible="state not in ('draft', 'scheduled')">
+                            <field name="preview_count"/>
+                            <field name="preview_skipped"/>
+                            <field name="preview_segments"/>
+                            <field name="preview_credit"/>
+                            <field name="personalized" invisible="not personalized"/>
+                        </group>
+                        <group string="Sonuç" invisible="state in ('draft', 'scheduled')">
+                            <field name="sent_count"/>
+                            <field name="error_count"/>
+                            <field name="pending_count" invisible="not pending_count"/>
+                            <field name="skipped_count"/>
+                            <field name="started_at"/>
+                            <field name="finished_at"/>
+                        </group>
+                    </group>
+                    <group string="Metin">
+                        <field name="body" nolabel="1" colspan="2" readonly="state != 'draft'"
+                               placeholder="Sayın {ad}, ... ({ad} yazarsanız her kişinin adı gelir)"/>
+                    </group>
+                    <group string="Örnek (gönderilecek hali)">
+                        <field name="final_body" nolabel="1" colspan="2"/>
+                    </group>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_sms_campaign_search" model="ir.ui.view">
+        <field name="name">sms.system.campaign.search</field>
+        <field name="model">sms.system.campaign</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name"/>
+                <filter string="Taslak" name="draft" domain="[('state', '=', 'draft')]"/>
+                <filter string="Devam Eden" name="running" domain="[('state', 'in', ('scheduled', 'sending'))]"/>
+                <filter string="Tamamlanan" name="done" domain="[('state', '=', 'done')]"/>
+                <group>
+                    <filter string="Tür" name="group_type" context="{'group_by': 'message_type'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_sms_campaign" model="ir.actions.act_window">
+        <field name="name">Toplu SMS</field>
+        <field name="res_model">sms.system.campaign</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">İlk toplu SMS'inizi oluşturun</p>
+            <p>Önce Rehber'e kişi aktarın, listeye bağlayın; sonra burada liste ve metin seçip gönderin.</p>
+        </field>
+    </record>
+
+    <!-- ═══════════ Sihirbazlar ═══════════ -->
+    <record id="view_sms_contact_import" model="ir.ui.view">
+        <field name="name">sms.system.contact.import.form</field>
+        <field name="model">sms.system.contact.import</field>
+        <field name="arch" type="xml">
+            <form string="Excel/CSV Aktar">
+                <field name="done" invisible="1"/>
+                <div invisible="done" class="text-muted mb-2">
+                    İlk satırda başlık olsun: <b>Ad</b>, <b>Telefon</b> (isteğe bağlı <b>Müşteri Kodu</b>).
+                    Başlık yoksa telefon sütunu içerikten bulunur. Kara listedeki ve İYS durumu olan kişilere dokunulmaz.
+                </div>
+                <group invisible="done">
+                    <field name="file" filename="filename"/>
+                    <field name="filename" invisible="1"/>
+                    <field name="source"/>
+                    <field name="list_id" options="{'no_create': True}"/>
+                    <field name="new_list_name" invisible="list_id"/>
+                    <field name="list_type" invisible="list_id"/>
+                </group>
+                <field name="result" invisible="not done" nolabel="1"/>
+                <footer>
+                    <button name="action_import" string="Aktar" type="object" class="btn-primary" invisible="done"/>
+                    <button name="action_open_list" string="Listeyi Aç" type="object" class="btn-primary" invisible="not done"/>
+                    <button string="Kapat" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_sms_contact_import" model="ir.actions.act_window">
+        <field name="name">Excel/CSV Aktar</field>
+        <field name="res_model">sms.system.contact.import</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <record id="view_sms_add_to_list" model="ir.ui.view">
+        <field name="name">sms.system.add.to.list.form</field>
+        <field name="model">sms.system.add.to.list</field>
+        <field name="arch" type="xml">
+            <form string="SMS Listesine Ekle">
+                <group>
+                    <field name="record_count"/>
+                    <field name="list_id" options="{'no_create': True}"/>
+                    <field name="new_list_name" invisible="list_id"/>
+                    <field name="list_type" invisible="list_id"/>
+                </group>
+                <div class="text-muted">Telefonu olmayan ya da geçersiz numaralı kayıtlar atlanır.</div>
+                <footer>
+                    <button name="action_add" string="Ekle" type="object" class="btn-primary"/>
+                    <button string="Vazgeç" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_sms_add_partner_to_list" model="ir.actions.act_window">
+        <field name="name">SMS Listesine Ekle</field>
+        <field name="res_model">sms.system.add.to.list</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+        <field name="binding_model_id" ref="base.model_res_partner"/>
+        <field name="binding_view_types">list</field>
+        <field name="group_ids" eval="[(4, ref('sms_system.group_sms_manager'))]"/>
+    </record>
+
+    <record id="action_sms_add_user_to_list" model="ir.actions.act_window">
+        <field name="name">SMS Listesine Ekle</field>
+        <field name="res_model">sms.system.add.to.list</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+        <field name="binding_model_id" ref="base.model_res_users"/>
+        <field name="binding_view_types">list</field>
+        <field name="group_ids" eval="[(4, ref('sms_system.group_sms_manager'))]"/>
+    </record>
+
+    <!-- ═══════════ Menü ═══════════ -->
+    <menuitem id="menu_sms_campaign" name="Toplu SMS" parent="menu_sms_root" action="action_sms_campaign" sequence="7"
+              groups="sms_system.group_sms_manager"/>
+    <menuitem id="menu_sms_book" name="Rehber" parent="menu_sms_root" sequence="15"
+              groups="sms_system.group_sms_manager"/>
+    <menuitem id="menu_sms_contact" name="Kişiler" parent="menu_sms_book" action="action_sms_contact" sequence="1"/>
+    <menuitem id="menu_sms_list" name="Listeler" parent="menu_sms_book" action="action_sms_list" sequence="2"/>
+    <menuitem id="menu_sms_optout" name="Kara Liste" parent="menu_sms_book" action="action_sms_contact_optout" sequence="3"/>
+    <menuitem id="menu_sms_import" name="Excel/CSV Aktar" parent="menu_sms_book" action="action_sms_contact_import" sequence="10"/>
+</odoo>

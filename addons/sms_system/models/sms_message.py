@@ -25,6 +25,7 @@ class SmsSystemMessage(models.Model):
     segments = fields.Integer(string='Parça (tahmini)')
     state = fields.Selection([
         ('queued', 'Kuyrukta'),
+        ('sending', 'Gönderiliyor'),
         ('sent', 'Gönderildi'),
         ('test', 'Test (gönderilmedi)'),
         ('error', 'Hata'),
@@ -39,6 +40,9 @@ class SmsSystemMessage(models.Model):
     res_id = fields.Integer(string='Kaynak Kayıt', index=True)
     template_id = fields.Many2one('sms.system.template', string='Şablon', ondelete='set null')
     user_id = fields.Many2one('res.users', string='Gönderen', default=lambda self: self.env.user, index=True)
+    campaign_id = fields.Many2one('sms.system.campaign', string='Toplu SMS', index=True, ondelete='cascade')
+    contact_id = fields.Many2one('sms.system.contact', string='Rehber Kişisi', index='btree_not_null',
+                                 ondelete='set null')
 
     # ── Ayarlar ──
 
@@ -126,10 +130,29 @@ class SmsSystemMessage(models.Model):
                 _logger.warning('SMS gönderilemedi (%s): %s', msg.id, e)
                 msg.write({'state': 'error', 'error': str(e), 'retry_count': msg.retry_count + 1})
 
+    def _deliver_pack(self, cfg, client):
+        """Aynı metni taşıyan kayıtları tek Turatel isteğiyle gönder (toplu SMS kuyruğu, sudo)."""
+        if not self:
+            return
+        first = self[0]
+        if not first.originator:
+            self.write({'state': 'error', 'error': _('Mesaj başlığı (Originator) ayarlanmamış.')})
+            return
+        if cfg['test_mode']:
+            self.write({'state': 'test', 'sent_at': fields.Datetime.now(), 'provider_answer': 'TEST'})
+            return
+        try:
+            msg_id, answer = client.send(self.mapped('number'), first.body, first.originator, first.sms_type)
+            self.write({'state': 'sent', 'provider_msg_id': msg_id, 'provider_answer': answer,
+                        'sent_at': fields.Datetime.now(), 'error': False})
+        except TuratelError as e:
+            _logger.warning('Toplu SMS paketi gönderilemedi (%s numara): %s', len(self), e)
+            self.write({'state': 'error', 'error': str(e)})
+
     # ── Butonlar / cron ──
 
     def action_retry(self):
-        self.filtered(lambda m: m.state in ('error', 'queued')).sudo()._deliver()
+        self.filtered(lambda m: m.state in ('error', 'queued') and not m.campaign_id).sudo()._deliver()
 
     def action_fetch_report(self):
         client = self._client()
@@ -144,7 +167,7 @@ class SmsSystemMessage(models.Model):
         """Ağ hatası vb. başarısız gönderimleri sınırlı sayıda yeniden dene (son 1 gün)."""
         since = fields.Datetime.subtract(fields.Datetime.now(), days=1)
         failed = self.sudo().search([('state', 'in', ('error', 'queued')), ('retry_count', '<', MAX_RETRY),
-                                     ('create_date', '>=', since)], limit=50)
+                                     ('campaign_id', '=', False), ('create_date', '>=', since)], limit=50)
         failed._deliver()
 
     @api.model

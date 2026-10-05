@@ -22,6 +22,11 @@ class ResConfigSettings(models.TransientModel):
     sms_test_mode = fields.Boolean(string='Test modu', config_parameter='sms_system.test_mode', default=True,
                                    help='Açıkken SMS gönderilmez, yalnız kayıt oluşur')
 
+    sms_daily_limit = fields.Integer(string='Günlük toplu SMS sınırı', config_parameter='sms_system.daily_limit',
+                                     help='Son 24 saatte toplu SMS ile gönderilebilecek en fazla numara (0 = sınırsız)')
+    sms_optout_text = fields.Char(string='Ret metni', config_parameter='sms_system.optout_text',
+                                  help='Ticari SMS sonuna eklenir; ör. "SMS almamak için RET yazıp 4609 a gönderin"')
+
     def action_sms_check_credit(self):
         self.ensure_one()
         self.execute()  # ekrandaki değerler kaydedilsin
