@@ -80,6 +80,8 @@ class UgurlarTailorOrder(models.Model):
     )
     customer_mobile = fields.Char(string='Müşteri Cep Telefonu', help='Hazır olunca SMS bildirimi için')
     ready_sms_sent = fields.Boolean(string='Hazır SMS Gönderildi', readonly=True, copy=False)
+    reminder_count = fields.Integer(string='Hatırlatma SMS Sayısı', readonly=True, copy=False)
+    last_reminder_at = fields.Datetime(string='Son Hatırlatma', readonly=True, copy=False)
     photo = fields.Image(string='Ürün Fotoğrafı', max_width=1280, max_height=1280, attachment=True)
     completed_at = fields.Datetime(string='Tamamlanma Tarihi', readonly=True)
     delivered_at = fields.Datetime(string='Teslim Tarihi', readonly=True)
@@ -234,22 +236,87 @@ class UgurlarTailorOrder(models.Model):
         self._set_state('completed', {'completed_at': fields.Datetime.now()})
         self._notify_ready_sms()
 
+    # ── SMS (sms_system / Turatel) ──
+
+    def _sms_values(self):
+        """Şablon yer tutucuları: {musteri} {siparis} {urun} {teslim} {magaza} {konum}."""
+        self.ensure_one()
+        return {
+            'musteri': self.customer_name or '',
+            'siparis': self.name or '',
+            'urun': self.product_name or self.product_code or '',
+            'teslim': self.promised_date.strftime('%d.%m.%Y') if self.promised_date else '',
+            'magaza': self.env.company.name or '',
+            'konum': getattr(self, 'location', '') or '',
+        }
+
+    def _send_template_sms(self, code, number=None):
+        """Şablonla SMS gönder; sms.system.message kaydını döndür (numara/şablon yoksa None)."""
+        self.ensure_one()
+        number = number or self.customer_mobile
+        template = self.env['sms.system.template'].sudo().get_by_code(code)
+        if not number or not template:
+            return None
+        return self.env['sms.system.message'].send_sms(
+            number, template=template, values=self._sms_values(), record=self)
+
     def _notify_ready_sms(self):
-        """Hazır bildirimi (Odoo SMS / IAP). Kapalıysa, numara yoksa ya da gönderilmişse atlanır."""
-        icp = self.env['ir.config_parameter'].sudo()
-        if icp.get_param('ugurlar_tailor.sms_ready_enabled') != 'True':
+        """'Hazır' olunca otomatik SMS (ayar açıksa, numara varsa, daha önce gönderilmediyse)."""
+        if self.env['ir.config_parameter'].sudo().get_param('ugurlar_tailor.sms_ready_enabled') != 'True':
             return
-        template = icp.get_param('ugurlar_tailor.sms_ready_text') or _(
-            'Sayın {musteri}, {siparis} numaralı terzi siparişiniz hazırdır. Mağazamızdan teslim alabilirsiniz.')
         for order in self:
-            if order.ready_sms_sent or not order.customer_mobile or not hasattr(order, '_message_sms'):
+            if order.ready_sms_sent or not order.customer_mobile:
                 continue
-            body = template.replace('{musteri}', order.customer_name or '').replace('{siparis}', order.name or '')
             try:
-                order._message_sms(body, sms_numbers=[order.customer_mobile])
-                order.with_context(tailor_state_ok=True).ready_sms_sent = True
-            except Exception as e:
-                _logger.warning('Terzi hazır SMS gönderilemedi (%s): %s', order.name, e)
+                msg = order._send_template_sms('tailor_ready')
+                if msg and msg.state in ('sent', 'test'):
+                    order.ready_sms_sent = True
+            except UserError as e:  # geçersiz numara vb. durum değişikliğini engellemesin
+                order.message_post(body=_('Hazır SMS gönderilemedi: %s') % e)
+
+    def action_send_sms(self):
+        """Formdaki 'SMS Gönder' — şablon seçilebilen pencere."""
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.act_window',
+            'name': _('SMS Gönder'),
+            'res_model': 'sms.system.send.wizard',
+            'view_mode': 'form',
+            'target': 'new',
+            'context': {
+                'default_number': self.customer_mobile or '',
+                'default_res_model': self._name,
+                'default_res_id': self.id,
+                'default_template_code': 'tailor_ready' if self.state == 'completed' else False,
+                'sms_values': self._sms_values(),
+            },
+        }
+
+    @api.model
+    def _cron_ready_reminders(self):
+        """Hazır olup X gündür teslim alınmamış siparişlere hatırlatma SMS'i (en çok N kez)."""
+        icp = self.env['ir.config_parameter'].sudo()
+        if icp.get_param('ugurlar_tailor.sms_reminder_enabled') != 'True':
+            return
+        days = int(icp.get_param('ugurlar_tailor.sms_reminder_days', '3') or 3)
+        max_count = int(icp.get_param('ugurlar_tailor.sms_reminder_max', '2') or 2)
+        limit = fields.Datetime.now() - timedelta(days=max(days, 1))
+        orders = self.search([
+            ('state', '=', 'completed'), ('customer_mobile', '!=', False),
+            ('reminder_count', '<', max_count), ('completed_at', '<=', limit),
+            '|', ('last_reminder_at', '=', False), ('last_reminder_at', '<=', limit),
+        ], limit=200)
+        for order in orders:
+            try:
+                msg = order._send_template_sms('tailor_reminder')
+            except UserError as e:
+                order.message_post(body=_('Hatırlatma SMS gönderilemedi: %s') % e)
+                msg = None
+            # Numara geçersiz/şablon yoksa da sayaç artar: her gün yeniden denenmesin
+            order.write({'reminder_count': order.reminder_count + 1,
+                         'last_reminder_at': fields.Datetime.now()})
+            if msg is None:
+                _logger.info('Terzi hatırlatma atlandı (%s)', order.name)
 
     def action_mark_delivered(self):
         """Durumu 'Teslim Edildi' olarak güncelle."""

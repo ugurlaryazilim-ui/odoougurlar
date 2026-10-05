@@ -49,8 +49,15 @@
                             </setting>
                             <setting help="Sipariş 'Hazır' olunca müşterinin cep telefonuna SMS gider (Odoo SMS / IAP kredisi gerekir)">
                                 <field name="tailor_sms_ready_enabled"/>
-                                <div class="content-group" invisible="not tailor_sms_ready_enabled">
-                                    <field name="tailor_sms_ready_text" placeholder="Sayın {musteri}, {siparis} numaralı terzi siparişiniz hazırdır."/>
+                                <div class="text-muted" invisible="not tailor_sms_ready_enabled">
+                                    Metin: SMS &gt; Şablonlar &gt; "Terzi - Sipariş Hazır"
+                                </div>
+                            </setting>
+                            <setting help="Hazır olup teslim alınmayan siparişlere hatırlatma SMS'i (metin: SMS &gt; Şablonlar &gt; Terzi - Hatırlatma)">
+                                <field name="tailor_sms_reminder_enabled"/>
+                                <div class="content-group" invisible="not tailor_sms_reminder_enabled">
+                                    <div><field name="tailor_sms_reminder_days" class="oe_inline"/> gün sonra, en fazla
+                                        <field name="tailor_sms_reminder_max" class="oe_inline"/> kez</div>
                                 </div>
                             </setting>
                         </block>

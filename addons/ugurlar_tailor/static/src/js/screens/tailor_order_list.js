@@ -172,6 +172,28 @@ export class TailorOrderList extends Component {
         this.props.onNavigate("main_menu");
     }
 
+    async sendSms(order, number = "") {
+        try {
+            const res = await rpc("/ugurlar_tailor/send_sms", { order_id: order.id, number });
+            if (res.success) {
+                this.notification.add(
+                    res.state === "test" ? _t("SMS test modunda kaydedildi (gönderilmedi).") : _t("SMS gönderildi."),
+                    { type: "success" });
+                return;
+            }
+            if (res.need_number) {
+                const entered = window.prompt(_t("Müşteri cep telefonu (05xx xxx xx xx):"), "");
+                if (entered) {
+                    await this.sendSms(order, entered);
+                }
+                return;
+            }
+            this.notification.add(res.error || _t("SMS gönderilemedi."), { type: "danger" });
+        } catch (e) {
+            this.notification.add(_t("SMS hatası: %(error)s", { error: e.message }), { type: "danger" });
+        }
+    }
+
     async printLabel(orderId) {
         try {
             const data = await rpc("/ugurlar_tailor/label_data", { order_id: orderId });

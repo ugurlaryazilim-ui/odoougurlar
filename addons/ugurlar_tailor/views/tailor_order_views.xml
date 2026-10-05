@@ -35,6 +35,8 @@
                     <button name="action_mark_delivered" string="Teslim Edildi" type="object" class="btn-primary" invisible="state != 'completed'"/>
                     <button name="action_cancel" string="İptal Et" type="object" class="btn-danger" invisible="state in ('delivered', 'cancelled')" confirm="Bu siparişi iptal etmek istediğinize emin misiniz?"/>
                     <button name="action_reset_to_pending" string="Sıfırla" type="object" class="btn-secondary" invisible="state in ('pending', 'waiting_approval', 'delivered')"/>
+                    <button name="action_send_sms" string="SMS Gönder" type="object" icon="fa-comment"
+                            invisible="state in ('waiting_approval', 'cancelled')"/>
                     <button name="action_print_label" string="Etiket Yazdır" type="object" class="btn-warning" icon="fa-print" invisible="state in ('waiting_approval', 'cancelled')"/>
                     <field name="state" widget="statusbar" statusbar_visible="waiting_approval,pending,in_progress,completed,delivered"/>
                 </header>
@@ -63,6 +65,7 @@
                             <field name="promised_date"/>
                             <field name="is_overdue" invisible="not is_overdue" widget="boolean_toggle" readonly="1"/>
                             <field name="ready_sms_sent" invisible="not ready_sms_sent"/>
+                            <field name="reminder_count" invisible="not reminder_count"/>
                         </group>
                         <group>
                             <field name="completed_at"/>

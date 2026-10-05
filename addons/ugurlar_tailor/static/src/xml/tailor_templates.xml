@@ -285,6 +285,10 @@
                                     t-on-click="() =&gt; this.printLabel(order.id)">
                                 Etiket Yazdır
                             </button>
+                            <button t-if="order.state == 'completed'" class="tailor-btn tailor-btn-sm" style="background:#0ea5e9;color:#fff;"
+                                    t-on-click="() =&gt; this.sendSms(order)">
+                                &#128172; SMS
+                            </button>
                             <button t-if="getNextStatus(order.state)"
                                     class="tailor-btn tailor-btn-sm tailor-btn-primary"
                                     t-on-click="() =&gt; this.updateStatus(order.id, this.getNextStatus(order.state))">

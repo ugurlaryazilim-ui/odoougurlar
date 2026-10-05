@@ -227,6 +227,30 @@ class TailorController(http.Controller):
         counts['overdue'] = Order.search_count([('is_overdue', '=', True)])
         return counts
 
+    # ── SMS (mobil liste) ──
+    @http.route('/ugurlar_tailor/send_sms', type='jsonrpc', auth='user')
+    def send_sms(self, order_id=0, number='', template_code=''):
+        """Siparişe şablonlu SMS. Numara verilirse siparişe de kaydedilir."""
+        order = request.env['ugurlar.tailor.order'].browse(int(order_id)).exists()
+        if not order:
+            return {'success': False, 'error': 'Sipariş bulunamadı!'}
+        number = (number or '').strip()
+        if number and number != order.customer_mobile:
+            order.customer_mobile = number
+        if not order.customer_mobile:
+            return {'success': False, 'error': 'Müşteri cep telefonu yok.', 'need_number': True}
+        code = template_code or ('tailor_ready' if order.state == 'completed' else 'tailor_reminder')
+        try:
+            msg = order._send_template_sms(code)
+        except UserError as e:
+            request.env.cr.rollback()
+            return {'success': False, 'error': str(e)}
+        if not msg:
+            return {'success': False, 'error': 'SMS şablonu bulunamadı.'}
+        if msg.state == 'error':
+            return {'success': False, 'error': msg.error or 'SMS gönderilemedi.'}
+        return {'success': True, 'state': msg.state}
+
     # ── Sipariş Durum Güncelle ──
     @http.route('/ugurlar_tailor/update_status', type='jsonrpc', auth='user')
     def update_status(self, order_id=0, status=''):
