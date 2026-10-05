@@ -29,6 +29,8 @@
                             confirm="Bu numaraya artık hiçbir toplu SMS gönderilmeyecek. Devam edilsin mi?"/>
                     <button name="action_opt_in" string="Kara Listeden Çıkar" type="object" invisible="not opt_out"/>
                     <button name="action_iys_query" string="İYS'den Sorgula" type="object" icon="fa-shield"/>
+                    <button name="action_iys_consent" string="İYS İzni Al" type="object" icon="fa-check-square-o"
+                            invisible="iys_status == 'approved'"/>
                 </header>
                 <sheet>
                     <widget name="web_ribbon" title="Kara Listede" bg_color="text-bg-danger" invisible="not opt_out"/>
@@ -278,6 +280,53 @@
     </record>
 
     <!-- ═══════════ Sihirbazlar ═══════════ -->
+    <record id="view_sms_iys_consent" model="ir.ui.view">
+        <field name="name">sms.system.iys.consent.form</field>
+        <field name="model">sms.system.iys.consent</field>
+        <field name="arch" type="xml">
+            <form string="İYS İzni Al">
+                <field name="step" invisible="1"/>
+                <field name="trigger_id" invisible="1"/>
+                <div class="text-muted mb-2" invisible="step != 'start'">
+                    Müşteriden kampanya/indirim SMS'i almak için izin alın. İzin İYS'ye kaydedilir; müşteri istediği
+                    zaman "RET" yazarak iptal edebilir.
+                </div>
+                <group invisible="step != 'start'">
+                    <field name="mobile" placeholder="0532 123 45 67" readonly="step != 'start'"/>
+                    <field name="name"/>
+                    <field name="list_id" options="{'no_create': True}"/>
+                    <field name="method" widget="radio"/>
+                    <field name="source" invisible="method != 'form'" required="method == 'form'"/>
+                    <field name="consent_date" invisible="method != 'form'"/>
+                </group>
+                <div class="alert alert-info" role="status" invisible="step != 'start' or method != 'form'">
+                    İYS kuralı gereği izin en geç 3 iş günü içinde yüklenmelidir. İmzalı formu saklayın.
+                </div>
+                <div invisible="step != 'code'">
+                    <p>Müşterinin telefonuna onay kodu gönderildi. Müşteriden kodu isteyip girin:</p>
+                    <group><field name="activation_key" placeholder="123456"/></group>
+                </div>
+                <div class="alert alert-success" role="status" invisible="step != 'done'"><field name="result" nolabel="1"/></div>
+                <footer>
+                    <button name="action_send_code" string="Kodu Gönder" type="object" class="btn-primary"
+                            invisible="step != 'start' or method != 'code'"/>
+                    <button name="action_load_form" string="İzni Kaydet" type="object" class="btn-primary"
+                            invisible="step != 'start' or method != 'form'"/>
+                    <button name="action_approve" string="Onayla" type="object" class="btn-primary" invisible="step != 'code'"/>
+                    <button name="action_send_code" string="Kodu Tekrar Gönder" type="object" class="btn-link" invisible="step != 'code'"/>
+                    <button string="Kapat" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_sms_iys_consent" model="ir.actions.act_window">
+        <field name="name">İYS İzni Al</field>
+        <field name="res_model">sms.system.iys.consent</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
     <record id="view_sms_campaign_confirm" model="ir.ui.view">
         <field name="name">sms.system.campaign.confirm.form</field>
         <field name="model">sms.system.campaign.confirm</field>
@@ -387,4 +436,5 @@
     <menuitem id="menu_sms_list" name="Listeler" parent="menu_sms_book" action="action_sms_list" sequence="2"/>
     <menuitem id="menu_sms_optout" name="Kara Liste" parent="menu_sms_book" action="action_sms_contact_optout" sequence="3"/>
     <menuitem id="menu_sms_import" name="Excel/CSV Aktar" parent="menu_sms_book" action="action_sms_contact_import" sequence="10"/>
+    <menuitem id="menu_sms_iys_consent" name="İYS İzni Al" parent="menu_sms_book" action="action_sms_iys_consent" sequence="5"/>
 </odoo>

@@ -181,6 +181,11 @@ class SmsSystemContact(models.Model):
             },
         }
 
+    def action_iys_consent(self):
+        self.ensure_one()
+        return {'type': 'ir.actions.act_window', 'res_model': 'sms.system.iys.consent', 'view_mode': 'form',
+                'target': 'new', 'name': _('İYS İzni Al'), 'context': {'default_contact_id': self.id}}
+
     def action_opt_out(self):
         self.write({'opt_out': True, 'opt_out_reason': self.env.context.get('opt_out_reason') or _('Elle')})
 

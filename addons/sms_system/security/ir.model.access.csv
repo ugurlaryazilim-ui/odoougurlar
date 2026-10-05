@@ -10,3 +10,4 @@ access_sms_contact_import_manager,sms.system.contact.import.manager,model_sms_sy
 access_sms_add_to_list_manager,sms.system.add.to.list.manager,model_sms_system_add_to_list,group_sms_manager,1,1,1,1
 access_sms_send_wizard_user,sms.system.send.wizard.user,model_sms_system_send_wizard,group_sms_user,1,1,1,1
 access_sms_campaign_confirm_manager,sms.system.campaign.confirm.manager,model_sms_system_campaign_confirm,group_sms_manager,1,1,1,1
+access_sms_iys_consent_manager,sms.system.iys.consent.manager,model_sms_system_iys_consent,group_sms_manager,1,1,1,1
