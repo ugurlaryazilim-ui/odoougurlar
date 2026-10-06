@@ -265,9 +265,9 @@ Return JSON:
   "collarType": "Turkish collar/neckline if visible",
   "collarTypeEn": "without the word 'neckline', e.g. 'V', 'crew', 'shirt collar', 'turtleneck'",
   "sleeveType": "sleeve type if visible (e.g. uzun kollu, kolsuz, askılı)",
-  "closureEn": "the garment's own front fastening exactly as seen, e.g. 'five-button front', 'single metal ring clasp at the front', 'concealed zipper'; empty when it has no fastening",
-  "waistEn": "trousers, skirts, shorts and jumpsuits only: the waistband exactly as seen, in positive words, e.g. 'wide fully elastic pull-on waistband, smooth all around', 'flat waistband with belt loops, button and zip fly', 'drawstring elastic waist'; empty for other garments",
-  "frontPanelEn": "trousers, skirts and shorts only: how the front panel looks below the waistband, in positive words, e.g. 'smooth plain front, soft unpressed knit', 'pressed center crease on each leg', 'two slanted side pockets'; empty for other garments",
+  "closureEn": "the garment's own front fastening exactly as seen: its type, count and position; empty when it has none",
+  "waistEn": "trousers, skirts, shorts and jumpsuits only: the waistband exactly as you see it, in positive words: its width, whether it is elastic or flat, and each part sewn on it with count and position. Describe only what is clearly visible; empty for other garments",
+  "frontPanelEn": "trousers, skirts and shorts only: how the front panel below the waistband looks, in positive words, with each part you clearly see and its position; empty for other garments",
   "trimsEn": "buttons, snaps, toggles, buckles, zipper pulls, metal rings or rivets that are clearly sewn on the garment, with count, color, size and position; empty if there are none",
   "designDetailsEn": "decorative design elements clearly part of the garment, with position, color and size: logos, brooches, appliques, embroidery, stones, studs, lace, mesh or sheer panels, cut-outs, contrast stripes or piping, pleats, ruffles; empty if there are none",
   "isSet": true or false (a matching top and bottom sold together as one product),
@@ -328,7 +328,7 @@ The hanger's hook and clips are never garment hardware, even when they are metal
 Also report the garment's own sewn-flat design elements that look similar (woven brand patch, leather patch) as "design_label", but ONLY when you are sure they are stitched into the garment. If you are unsure whether a small rectangle on the waistband is a store alarm tag or a brand patch, report it as "alarm_tag".
 Never report buttons, zippers, zipper pulls, rivets, buckles, drawstrings, prints, logos, embroidery, appliques, stones, beads, lace or mesh panels, or metal rings, hoops, clasps, hooks, brooches, chains and eyelets as tags: store alarm tags are plastic, metal hardware is part of the garment design.
 A zipper pull always sits at the end of a visible zipper track. A plastic stick, capsule or disc with no zipper track under it is an alarm_tag, even when it hangs like a zipper pull.
-When a store tag or its string touches, covers or hangs over one of these garment parts (for example a hangtag hanging over the zipper pull), also report that garment part with its own tight box as "garment_detail" so it is kept.
+When a store tag, a hanger clip or a string touches, covers or hangs over one of the garment's own parts (for example a hangtag over the zipper pull, or a hanger clip on a waistband tab, button or belt loop), also report that garment part with its own tight box as "garment_detail" so it is kept.
 Include the whole object and its attachment in the box. Give each item a confidence from 0.0 to 1.0 and report anything at least 50% likely.
 box_2d is [ymin, xmin, ymax, xmax] normalized to 0-1000.
 Return JSON: {"securityTags": [{"box_2d": [ymin, xmin, ymax, xmax], "label": "alarm_tag", "confidence": 0.9}]}
@@ -369,7 +369,8 @@ def clean_field(analysis, key):
 
 def design_hint(analysis):
     """Analizdeki ürünün kendi detayları (kapama, düğme, logo, broş, dantel...): silinmesin diye tespite verilir."""
-    parts = [clean_field(analysis, k) for k in ('closureEn', 'trimsEn', 'designDetailsEn', 'graphicDescriptionEn')]
+    parts = [clean_field(analysis, k) for k in ('closureEn', 'waistEn', 'frontPanelEn', 'trimsEn',
+                                                 'designDetailsEn', 'graphicDescriptionEn')]
     return '; '.join(p for p in parts if p)
 
 
@@ -893,7 +894,7 @@ def keep_area_sentence(boxes, limit=3):
             out.append(f"<bbox>{x1} {y1} {x2} {y2}</bbox>")
     if not out:
         return ''
-    return f" In Image 2 the area {' and '.join(out)} is plain fabric continuing its surroundings."
+    return f" Image 2{' and Image 2'.join(out)} is plain fabric continuing its surroundings."
 
 
 # Görsel denetim hata kodları → reviewer'a gösterilecek Türkçe metin
@@ -1008,7 +1009,7 @@ Only compare parts visible from the angle of Image 1; differences in pose, light
 
 def visual_quality_check(gemini_api_key, generated_image, garment_hint='', timeout=30,
                          reference_image=None, design_details='', check_missing=True,
-                         view_construction=None, removed_boxes=None):
+                         view_construction=None, removed_boxes=None, original_image=None):
     """AI çıktısını Gemini ile gerçek üretim hatalarına karşı denetle.
 
     reference_image (temizlenmiş ürün görseli) verilirse karşılaştırmalı denetim yapılır:
@@ -1035,6 +1036,13 @@ def visual_quality_check(gemini_api_key, generated_image, garment_hint='', timeo
         "Image 1 is the AI-generated photo. Image 2 is the real product (reference).\n"
         if reference_image else "Image 1 is the AI-generated photo.\n"
     )
+    original_image = original_image if reference_image else None
+    if original_image:
+        # Temizleme (etiket/askı silme) referansı bozmuş olabilir: ürünün gerçekte neye sahip
+        # olduğu ham fotoğraftan doğrulanır, gerçek pile/tırnak "eklenmiş" sayılmaz
+        reference_note += ("Image 3 is the original store photo of the same product (it may show a hanger, "
+                           "clips or store tags). Before reporting a detail as added or missing, check Image 3: "
+                           "a part the product has in Image 3 is not added.\n")
     prompt = f"""You are a strict QA reviewer for AI-generated fashion e-commerce photos.
 {reference_note}The product being modeled: {garment_hint or 'a garment'}.
 {f"The product's own design details (never report them as added_label or store_tag_visible): {design_details}." if design_details else ''}
@@ -1081,7 +1089,8 @@ Return {{"defects": [], "boxes": [], "addedDetails": [], "missingDetails": []}} 
         "required": ["defects"],
     }
     parsed = _gemini_json(gemini_api_key, prompt, generated_image, schema=schema, timeout=timeout,
-                          deterministic=True, extra_images=[reference_image] if reference_image else None)
+                          deterministic=True,
+                          extra_images=[i for i in (reference_image, original_image) if i] or None)
     if parsed is None:
         return None
     codes = [c for c in (parsed.get('defects') or []) if c in VISUAL_QC_ISSUES and c not in skip]

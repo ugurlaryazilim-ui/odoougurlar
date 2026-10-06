@@ -119,10 +119,10 @@ def reduce_noise(img_array, d=9, sigma_color=75, sigma_space=75):
 # Alan sınırı yakın çekim detay fotoğraflarında gerçek alarmı atmayacak kadar geniş.
 MIN_TAG_CONFIDENCE = 0.5
 MAX_TAG_AREA_RATIO = 0.15
-# Askı (kanca + çubuk) ve pantolon askısı mandalları: modele giderse bel bandında düğmeli tırnak /
-# kemer köprüsü olarak çiziliyordu. Askı çubuğu ürün genişliğinde olabilir: alan sınırı daha geniş.
+# Askı (kanca + çubuk) ve pantolon askısı mandalları. Kutuyla SİLİNMEZ: ürün genişliğindeki çubuğun
+# maskesi bel bandını (düğme, yan tırnak, pile başları) tamamen yutuyordu. Ürün metinle segmente
+# edilip (apply_garment_mask) askı zemine bırakılır.
 HANGER_LABELS = ('hanger', 'hanger_clip')
-MAX_HANGER_AREA_RATIO = 0.35
 
 
 def tag_box_to_pixels(item, w, h, pad_ratio=0.25, min_pad=10):
@@ -137,6 +137,8 @@ def tag_box_to_pixels(item, w, h, pad_ratio=0.25, min_pad=10):
     if isinstance(item, dict):
         if item.get('label') == 'design_label':
             return None  # ürünün kendi tasarım etiketi — dokunma
+        if item.get('label') in HANGER_LABELS:
+            return None  # askı segmentasyonla ayrılır, kutuyla silinmez
         if item.get('confidence') is not None:
             try:
                 if float(item['confidence']) < MIN_TAG_CONFIDENCE:
@@ -153,13 +155,13 @@ def tag_box_to_pixels(item, w, h, pad_ratio=0.25, min_pad=10):
     px2, py2 = min(w, int(xmax * w)), min(h, int(ymax * h))
     if px2 <= px1 or py2 <= py1:
         return None
-    label = item.get('label') if isinstance(item, dict) else None
-    max_ratio = MAX_HANGER_AREA_RATIO if label in HANGER_LABELS else MAX_TAG_AREA_RATIO
-    if (px2 - px1) * (py2 - py1) > max_ratio * w * h:
+    if (px2 - px1) * (py2 - py1) > MAX_TAG_AREA_RATIO * w * h:
         return None  # etiket değil (cep, logo, baskı...)
     # Dolgu kutunun geometrik ortalamasına göre ve iki yönde eşit: kalem tipi (ince uzun) alarmda
     # uzun kenarın %60'ı bel ortasında dikey bir şerit maskesine dönüşüyor, model şeridi fermuar sanıyordu
     pad = max(min_pad, int(((px2 - px1) * (py2 - py1)) ** 0.5 * pad_ratio))
+    # İnce uzun kutuda dolgu kısa kenarı aşmaz: maske yandaki ürün parçalarını yutmasın
+    pad = min(pad, max(min_pad, min(px2 - px1, py2 - py1)))
     return (max(0, px1 - pad), max(0, py1 - pad), min(w, px2 + pad), min(h, py2 + pad))
 
 
@@ -207,6 +209,37 @@ def crop_to_content(image_base64, margin_ratio=0.04, threshold=245):
         return image_base64
 
 
+# Segmentasyon maskesi ürünün (beyaz olmayan) piksellerinin en az bu kadarını tutmalı;
+# altındaysa model ürünü kaçırmıştır, askı silinmeden devam edilir
+MIN_GARMENT_MASK_KEEP = 0.4
+
+
+def apply_garment_mask(image_base64, mask_bytes, threshold=245):
+    """Ürün maskesi dışını (askı kancası, çubuğu, mandallar) beyaza boya → JPEG base64 veya None.
+
+    Maske ürünün çoğunu kaçırıyorsa None döner (görsel değiştirilmez).
+    """
+    if Image is None or not mask_bytes:
+        return None
+    img = Image.open(io.BytesIO(base64.b64decode(image_base64))).convert('RGB')
+    mask = Image.open(io.BytesIO(mask_bytes)).convert('L')
+    if mask.size != img.size:
+        mask = mask.resize(img.size, Image.NEAREST)
+    arr = np.array(img)
+    keep = np.array(mask) > 127
+    content = arr.min(axis=2) < threshold
+    total = int(content.sum())
+    if not total or not keep.any():
+        return None
+    kept = int((content & keep).sum()) / total
+    if kept < MIN_GARMENT_MASK_KEEP:
+        _logger.warning('Ürün maskesi ürünün yalnız %%%d kısmını tutuyor, askı silinmedi', round(kept * 100))
+        return None
+    arr[~keep] = 255
+    _logger.info('Askı/mandal ürün maskesiyle ayrıldı (ürünün %%%d kısmı korundu)', round(kept * 100))
+    return to_jpeg_base64(Image.fromarray(arr), quality=95)
+
+
 def texture_fill_tags_base64(image_base64, tag_boxes, pad_ratio=0.25):
     """Etiket bölgesini aynı satırlardaki komşu kumaşla doldur (AI silme izli kaldıysa).
 
@@ -221,9 +254,6 @@ def texture_fill_tags_base64(image_base64, tag_boxes, pad_ratio=0.25):
     h, w = arr.shape[:2]
     filled = 0
     for item in tag_boxes:
-        # Askı/mandal ürünün kenarında ya da dışında: yan şeridi kopyalamak zemini kumaşla boyar
-        if isinstance(item, dict) and item.get('label') in HANGER_LABELS:
-            continue
         rect = tag_box_to_pixels(item, w, h, pad_ratio=pad_ratio)
         if not rect:
             continue
@@ -326,8 +356,9 @@ def inpaint_security_tags(img_bgr, tag_boxes):
             continue
         # Görselin büyük bölümünü kaplayan kutu etiket değildir (ör. cep, logo);
         # inpaint geniş desenli alanı bulanık lekeye çevirir
-        max_ratio = MAX_HANGER_AREA_RATIO if isinstance(item, dict) and item.get('label') in HANGER_LABELS             else MAX_TAG_AREA_RATIO
-        if (px2 - px1) * (py2 - py1) > max_ratio * w * h:
+        if isinstance(item, dict) and item.get('label') in HANGER_LABELS:
+            continue
+        if (px2 - px1) * (py2 - py1) > MAX_TAG_AREA_RATIO * w * h:
             _logger.info('Inpaint: aşırı büyük etiket kutusu atlandı (%dx%d)', px2 - px1, py2 - py1)
             continue
 

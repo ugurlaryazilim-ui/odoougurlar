@@ -413,6 +413,34 @@ class FalProvider(AIProviderBase):
         original.save(out, format='JPEG', quality=95)
         return out.getvalue(), cost
 
+    SEGMENT_APP = 'fal-ai/evf-sam'
+    SEGMENT_NEGATIVE = 'clothes hanger, hanger hook, hanger bar, hanger clips, plastic clips'
+
+    def segment_garment(self, image_base64, garment_text='garment', timeout=60):
+        """Ürünü metinle segmente et (askı ve mandallar hariç) → (PNG maske baytları veya None, maliyet).
+
+        BiRefNet askıyı ön plan sayar; EVF-SAM "negative_prompt" ile askıyı maskeden çıkarır.
+        """
+        self._check_client()
+        import requests as req_lib
+        url = self.upload_image(image_base64)
+        result = fal_client.subscribe(self.SEGMENT_APP, arguments={
+            'image_url': url,
+            'prompt': garment_text or 'garment',
+            'negative_prompt': self.SEGMENT_NEGATIVE,
+            'mask_only': True,
+            'fill_holes': True,
+        }, client_timeout=timeout)
+        result = result or {}
+        image = result.get('image')
+        if not isinstance(image, dict):
+            images = result.get('images') or []
+            image = images[0] if images and isinstance(images[0], dict) else {}
+        mask_url = image.get('url') if isinstance(image, dict) else ''
+        if not mask_url:
+            return None, 0.0
+        return req_lib.get(mask_url, timeout=60).content, 0.005
+
     def single_image_edit(self, image_base64, prompt, timeout=120):
         """Tek görseli Seedream ile düzenle (etiket silme, manken bacak düzeltme vb.).
 
