@@ -194,7 +194,7 @@ CLEAN_PRODUCT = (
 _FRONT_INTRO = (
     "Image 1 shows the model. Image 2 shows the {garment} product. "
     "Photograph the same model from Image 1, with the same face, hair and body, "
-    "wearing the {desc} from Image 2 and reproducing its exact color, fabric, pattern and construction details. "
+    "wearing the {desc} from Image 2 and reproducing its exact color, fabric, pattern and shape. "
 )
 _BACK_INTRO = (
     "Image 1 shows the model from behind. Image 2 shows the back of the {garment} product. "
@@ -246,8 +246,8 @@ SEEDREAM_TEMPLATES = {
     # ── BOTTOMS (pantolon / jean) ──
     ('bottoms', 'front'): _FRONT_INTRO + (
         "The model wears the {garment} from Image 2 in place of the bottoms in Image 1. "
-        "The full trouser length is visible from waistband to hem. "
-        "Styled with " + DEFAULT_TOP + " tucked in and the same shoes as in Image 1. {hand_pose} "
+        "The full length is visible from waist to hem. "
+        "Styled with " + DEFAULT_TOP + " ending at the waist and the same shoes as in Image 1. {hand_pose} "
     ) + _OUTRO,
     ('bottoms', 'back'): _BACK_INTRO + (
         "The model wears the {garment} from Image 2 in place of the bottoms in Image 1. "
@@ -271,7 +271,7 @@ SEEDREAM_TEMPLATES = {
         "This product is a matching two-piece set: {set_pieces}. Replace the model's entire original outfit "
         "with both pieces worn together exactly as in Image 2. The bottom piece is separate from the top; "
         "do not merge them into a dress. {collar_note}{graphic_note}"
-        "The whole outfit is visible from the neckline to the trouser hems. The same shoes as in Image 1. {hand_pose} "
+        "The whole outfit is visible from the neckline to the hems. The same shoes as in Image 1. {hand_pose} "
     ) + _OUTRO,
     ('coord', 'back'): _BACK_INTRO + (
         "Both pieces of the matching set ({set_pieces}) are worn together; the bottom piece is separate from the top. "
@@ -316,7 +316,7 @@ SEEDREAM_NEGATIVES = {
     'shorts': "long pants, trousers, jeans, leggings, " + _COMMON_NEG,
     'jumpsuit': "bare legs, shorts, " + _COMMON_NEG,
     'tops': "bare chest, exposed stomach, shirtless, bare legs, shorts visible, underwear visible, " + _COMMON_NEG,
-    'bottoms': "wrong waistband, altered pockets, changed fabric texture, cropped hemline, " + _COMMON_NEG,
+    'bottoms': "changed fabric texture, cropped hemline, " + _COMMON_NEG,
 }
 
 
@@ -329,7 +329,7 @@ FASHN_VIEW_TEMPLATES = {
     'front': (
         "Professional e-commerce front view photography. "
         "Full-body model facing camera wearing garment. "
-        "Standard fit, plain pattern. Clean white studio background, even lighting. "
+        "Clean white studio background, even lighting. "
         "Natural relaxed standing pose, arms at the sides."
     ),
     'back': (

@@ -16,6 +16,7 @@ from ..services import garment_analyzer as analyzer_module
 from ..services.garment_analyzer import build_generation_prompt, detect_image_tags
 from ..services.garment_preprocessor import (
     crop_to_content, inpaint_security_tags, preprocess_garment_image, tag_box_to_pixels,
+    texture_fill_tags_base64,
 )
 from ..services.quality_checker import compute_quality_score, delta_e_ciede2000
 
@@ -117,7 +118,7 @@ class TestPromptBuilder(BaseCase):
         analysis = {'garmentType': 'Sweatshirt', 'clothingCategory': 'tops'}
         for view in ('side', 'back'):
             p = self._build(analysis, view, has_front_ref=True)
-            self.assertIn('same garment color, shade and fabric texture as in Image 3', p)
+            self.assertIn('garment color as Image 3', p)
             self.assertIn('Relaxed, natural stance', p)
             self.assertNotIn('face', p.lower(), 'arka/yan çekimde yüz istemi başı çevirtebilir')
 
@@ -141,7 +142,7 @@ class TestPromptBuilder(BaseCase):
 
     def test_back_view_takes_design_from_back_photo(self):
         p = self._build({'garmentType': 'Bluz', 'clothingCategory': 'tops'}, 'back')
-        self.assertIn('back design only from Image 2', p)
+        self.assertIn('All garment details for this angle come only from Image 2', p)
 
     def test_no_turkish_leaks_into_prompt(self):
         analysis = {'garmentType': 'Çiçekli Şifon Elbise', 'garmentTypeEn': 'floral chiffon dress',
@@ -159,6 +160,33 @@ class TestPromptBuilder(BaseCase):
         self.assertNotIn('Yakası', p)
         self.assertNotIn('collar neckline', p)
         self.assertNotIn('..', p)
+
+    def test_bottoms_describe_waistband_positively(self):
+        analysis = {'garmentTypeEn': 'wide-leg knit pants', 'clothingCategory': 'bottoms',
+                    'primaryColorEn': 'grey', 'fabricTypeEn': 'knit', 'surfaceEn': 'heathered melange',
+                    'waistEn': 'wide fully elastic pull-on waistband, smooth all around',
+                    'frontPanelEn': 'smooth plain front, soft unpressed knit',
+                    'trimsEn': 'none', 'designDetailsEn': 'no buttons or zippers', 'closureEn': 'N/A'}
+        p = self._build(analysis)
+        self.assertIn('Waistband exactly as in Image 2: wide fully elastic pull-on waistband', p)
+        self.assertIn('Front exactly as in Image 2: smooth plain front', p)
+        # Olumsuz değer prompta girmez; kumaş pantolon çağrışımı yok
+        self.assertNotIn('Keep these exactly', p)
+        for word in ('zipper', 'button', 'trouser', 'tucked', 'construction'):
+            self.assertNotIn(word, p.lower(), word)
+        # Bel tarifi ön detayıdır: arka görünüme taşınmaz
+        self.assertNotIn('Waistband exactly', self._build(analysis, 'back'))
+
+    def test_shoes_color_not_repeated(self):
+        p = self._build({'garmentTypeEn': 'pants', 'clothingCategory': 'bottoms'}, 'back',
+                        outfit_consistency={'shoesColor': 'white', 'shoesType': 'white low-top sneakers'})
+        self.assertIn('white low-top sneakers', p)
+        self.assertNotIn('white white', p)
+
+    def test_view_parts_negative_value_ignored(self):
+        p = self._build({'garmentTypeEn': 'pants', 'clothingCategory': 'bottoms'}, 'back',
+                        view_construction={'plain': False, 'partsEn': 'none'})
+        self.assertNotIn('has exactly', p)
 
     def test_all_templates_format(self):
         for (sub_type, photo_type) in cc.SEEDREAM_TEMPLATES:
@@ -348,6 +376,17 @@ class TestTagErasing(BaseCase):
         x1, y1, x2, y2 = rect
         self.assertTrue(x1 < 200 and y1 < 100 and x2 > 260 and y2 > 150, 'kutu dolgulu olmalı')
 
+    def test_hanger_boxes(self):
+        # Askı çubuğu geniş olabilir: etiket alan sınırına takılmaz
+        wide = {'box_2d': [0, 100, 200, 900], 'label': 'hanger', 'confidence': 0.9}
+        self.assertIsNotNone(tag_box_to_pixels(wide, 1000, 1000))
+        self.assertIsNone(tag_box_to_pixels(dict(wide, label='alarm_tag'), 1000, 1000))
+        # Doku dolgusu askı/mandal kutusuna uygulanmaz (zemini kumaşla boyardı)
+        img = Image.new('RGB', (400, 400), (90, 90, 90))
+        src = _jpeg_b64(img)
+        clip = [{'box_2d': [100, 400, 200, 500], 'label': 'hanger_clip', 'confidence': 0.9}]
+        self.assertIs(texture_fill_tags_base64(src, clip), src)
+
     def test_crop_to_content(self):
         img = Image.new('RGB', (1000, 1600), 'white')
         ImageDraw.Draw(img).rectangle([400, 600, 600, 1000], fill=(60, 30, 20))
@@ -421,6 +460,25 @@ class TestTagErasing(BaseCase):
         self.assertEqual(gj.call_args.kwargs['extra_images'], ['REF'])
         self.assertEqual(res['codes'], ['added_label'])
         self.assertEqual(len(res['boxes']), 1)
+
+    def test_visual_qc_returns_positive_fix(self):
+        fake = {'defects': ['detail_added'], 'addedDetails': ['belde düğmeli tırnak'],
+                'fixEn': 'The waistband is a smooth, continuous elastic band all around.'}
+        with patch.object(analyzer_module, '_gemini_json', return_value=fake):
+            res = analyzer_module.visual_quality_check('k', 'RESULT', reference_image='REF')
+        self.assertEqual(res['fidelity'], 1)
+        self.assertIn('smooth, continuous elastic band', res['fix'])
+        fake['fixEn'] = 'no tabs'
+        with patch.object(analyzer_module, '_gemini_json', return_value=fake):
+            res = analyzer_module.visual_quality_check('k', 'RESULT', reference_image='REF')
+        self.assertEqual(res['fix'], '', 'olumsuz düzeltme cümlesi kullanılmaz')
+
+    def test_tag_prompt_knows_hanger_clips(self):
+        with patch.object(analyzer_module, '_gemini_json', return_value={'securityTags': [
+                {'box_2d': [10, 100, 60, 160], 'label': 'hanger_clip', 'confidence': 0.9}]}) as gj:
+            tags = detect_image_tags(None, 'IMG', gemini_api_key='k')
+        self.assertEqual([t['label'] for t in tags], ['hanger_clip'])
+        self.assertIn('hanger_clip', gj.call_args.args[1])
 
     def test_erase_regions_skips_design_labels(self):
         with patch.object(fal_provider_module, 'fal_client') as fc:

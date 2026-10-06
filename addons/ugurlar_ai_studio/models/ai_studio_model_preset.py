@@ -71,6 +71,16 @@ class AiStudioModelPreset(models.Model):
                                          max_height=1920, attachment=True, copy=False)
     model_image_side_legs = fields.Image(string='Yandan Manken (Çıplak Bacak)', max_width=1920,
                                          max_height=1920, attachment=True, copy=False)
+    # Alt giyim / tulum / takım çekimlerinde kullanılan "düz siyah tayt" manken sürümleri.
+    # Mankenin kumaş pantolonu (kemer köprüsü, ön ütü çizgisi, fermuarlı ön) "in place of the
+    # bottoms in Image 1" denince ürünle harmanlanıyor, lastikli örme pantolona köprü/tırnak
+    # çiziliyordu. Yapısız tayt modele kopyalanacak parça bırakmaz. İlk ihtiyaçta bir kez türetilir.
+    model_image_front_plain = fields.Image(string='Önden Manken (Düz Alt)', max_width=1920,
+                                           max_height=1920, attachment=True, copy=False)
+    model_image_back_plain = fields.Image(string='Arkadan Manken (Düz Alt)', max_width=1920,
+                                          max_height=1920, attachment=True, copy=False)
+    model_image_side_plain = fields.Image(string='Yandan Manken (Düz Alt)', max_width=1920,
+                                          max_height=1920, attachment=True, copy=False)
     background_type = fields.Selection([
         ('white', 'Beyaz Stüdyo'),
         ('studio', 'Profesyonel Stüdyo'),
@@ -221,12 +231,49 @@ class AiStudioModelPreset(models.Model):
         "high-heeled pumps, with the lower legs visible below the skirt."
     )
 
+    PLAIN_BOTTOMS_EDIT_PROMPT = (
+        "Image 1 shows a fashion model. Keep the same person, face, hair, body, pose, top, shoes, "
+        "lighting and background exactly. Change only the lower-body outfit: the model now wears "
+        "plain black fitted stretch leggings, smooth and seamless, with a simple flat waistband, "
+        "reaching the ankles."
+    )
+
     def write(self, vals):
-        # Manken görseli değişirse ondan türetilmiş çıplak bacak sürümü geçersizdir
+        # Manken görseli değişirse ondan türetilmiş çıplak bacak / düz alt sürümleri geçersizdir
         for view in ('front', 'back', 'side'):
-            if 'model_image_%s' % view in vals and 'model_image_%s_legs' % view not in vals:
-                vals['model_image_%s_legs' % view] = False
+            if 'model_image_%s' % view in vals:
+                for suffix in ('_legs', '_plain'):
+                    if 'model_image_%s%s' % (view, suffix) not in vals:
+                        vals['model_image_%s%s' % (view, suffix)] = False
         return super().write(vals)
+
+    def _get_plain_bottoms_mannequin(self, view, fal_api_key):
+        """Alt giyim / tulum / takım için altında düz siyah tayt olan manken: (base64, maliyet).
+
+        Bir kez Seedream ile türetilip saklanır; üretilemezse orijinal görsel döner.
+        """
+        self.ensure_one()
+        base_field = 'model_image_%s' % view
+        plain_field = base_field + '_plain'
+        if self[plain_field]:
+            return self[plain_field], 0.0
+        if view != 'front' and not self[base_field]:
+            return self._get_plain_bottoms_mannequin('front', fal_api_key)
+        base = self[base_field]
+        if not base or not fal_api_key:
+            return base, 0.0
+        from ..services.fal_provider import FalProvider
+        try:
+            data, cost = FalProvider(fal_api_key).single_image_edit(base, self.PLAIN_BOTTOMS_EDIT_PROMPT)
+        except Exception as e:
+            _logger.warning('Düz alt manken üretilemedi (preset=%s, %s): %s', self.id, view, e)
+            return base, 0.0
+        if not data:
+            return base, 0.0
+        plain_b64 = base64.b64encode(data)
+        self.sudo().write({plain_field: plain_b64})
+        _logger.info('Düz alt (tayt) manken türetildi ve saklandı (preset=%s, %s)', self.id, view)
+        return plain_b64, cost
 
     def _get_bare_leg_mannequin(self, view, gemini_api_key, fal_api_key):
         """Elbise/etek/şort için bacakları açık manken görseli: (base64, maliyet).
@@ -384,7 +431,7 @@ class AiStudioModelPreset(models.Model):
     # istenmeyen şeyler listelenmez; istenen sonuç tarif edilir.
     MANNEQUIN_OUTFITS = {
         'tops': 'a plain fitted solid-color tank top, slim dark tailored trousers and simple dark leather shoes',
-        'bottoms': 'a plain fitted neutral tank top, slim light-grey trousers and clean white minimal sneakers',
+        'bottoms': 'a plain fitted neutral tank top, plain black fitted leggings and clean white minimal sneakers',
         'one_piece': 'a plain fitted solid-color sleeveless bodysuit, bare legs and simple nude high-heeled pumps',
         'shoes': 'a plain fitted solid-color tank top, slim dark trousers ending above the ankle',
         'bags': 'a plain fitted solid-color tank top, slim dark tailored trousers and simple dark leather shoes',

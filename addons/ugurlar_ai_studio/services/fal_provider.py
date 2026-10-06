@@ -511,18 +511,20 @@ class FalProvider(AIProviderBase):
             _img = _PILImage.open(_io.BytesIO(raw_bytes))
             _fmt = (_img.format or '').upper()
             w, h = _img.size
-            if _fmt != 'WEBP' or max(w, h) > 1600 or len(raw_bytes) > 1024 * 1024:
+            # Üst sınır 2048: ürün görseli 1600'e inince bel bandı / doku detayı modelde belirsizleşip
+            # yeniden çiziliyordu (çıktı 1664x2496)
+            if _fmt != 'WEBP' or max(w, h) > 2048 or len(raw_bytes) > 2 * 1024 * 1024:
                 if _img.mode in ('RGBA', 'LA', 'P'):
                     if _img.mode == 'P':
                         _img = _img.convert('RGBA')
                 elif _img.mode != 'RGB':
                     _img = _img.convert('RGB')
-                if max(w, h) > 1600:
-                    _img.thumbnail((1600, 1600), _PILImage.LANCZOS)
+                if max(w, h) > 2048:
+                    _img.thumbnail((2048, 2048), _PILImage.LANCZOS)
                 _out = _io.BytesIO()
                 # Önce WebP dene, yoksa JPEG'e düş
                 try:
-                    _img.save(_out, format='WEBP', quality=92, method=4)
+                    _img.save(_out, format='WEBP', quality=95, method=4)
                     raw_bytes = _out.getvalue()
                     content_type = 'image/webp'
                     _logger.info('fal CDN yükleme öncesi WebP formatına optimize edildi: %d KB (%dx%d)', len(raw_bytes) // 1024, _img.width, _img.height)

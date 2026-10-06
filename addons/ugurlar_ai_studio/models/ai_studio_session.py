@@ -198,6 +198,8 @@ def _get_seedream_image_size(env):
 TRYON_MODELS = {
     'seedream_v4': 'seedream/v4/edit',
     'seedream_v5_pro': 'seedream/v5/pro/edit',
+    # Özel try-on modeli: ürün piksellerini taşır, istem almaz (A/B karşılaştırma için)
+    'fashn_v16': 'fashn/tryon/v1.6',
 }
 
 
@@ -340,7 +342,7 @@ def _erase_result_tags(provider, image_b64, gemini_api_key, qc_boxes=None, passe
 
 
 # Ürün görseli temizleme (arka plan + etiket silme) mantığı değişince artırılır
-GARMENT_CLEAN_VERSION = 'v5'  # v5: dar maske + silme izi denetimi + komşu kumaş dolgusu
+GARMENT_CLEAN_VERSION = 'v6'  # v6: askı/mandal silme, kontrast/keskinlik yok, 2048 px
 
 
 _SET_RE = re.compile(r'(?<!\w)(?:takim\w*|set|setler|co-ord|coord)(?!\w)')
@@ -371,18 +373,37 @@ def _needs_bare_legs(session, analysis=None):
     return _detect_sub_type(category, text) in ('dress', 'skirt', 'shorts')
 
 
-def _get_mannequin_image(session, preset, photo_type, needs_bare_legs):
-    """Görünüme uygun manken görseli; elbise/etekte pantolonsuz sürüm.
+def _mannequin_variant(session, analysis=None):
+    """Manken sürümü: 'legs' (elbise/etek/şort), 'plain' (pantolon/tulum/takım) veya None (üst giyim)."""
+    if _needs_bare_legs(session, analysis):
+        return 'legs'
+    from ..services.garment_analyzer import _detect_sub_type
+    analysis = analysis if isinstance(analysis, dict) else {}
+    if analysis.get('isSet'):
+        return 'plain'
+    text = ' '.join(filter(None, [analysis.get('garmentType'), analysis.get('garmentTypeEn'),
+                                  session.product_id.product_tmpl_id.name]))
+    category = analysis.get('clothingCategory', '')
+    if not category and session._detect_garment_type() == 'bottoms':
+        category = 'bottoms'
+    return 'plain' if _detect_sub_type(category, text.lower()) in ('bottoms', 'jumpsuit') else None
+
+
+def _get_mannequin_image(session, preset, photo_type, variant):
+    """Görünüme uygun manken görseli: elbise/etekte pantolonsuz, pantolonda düz taytlı sürüm.
 
     Returns:
         (base64, float cost) — cost: bu çağrıda türetme yapıldıysa ücreti
     """
     view = photo_type if photo_type in ('front', 'back', 'side') else 'front'
-    if needs_bare_legs:
-        icp = session.env['ir.config_parameter'].sudo()
+    icp = session.env['ir.config_parameter'].sudo()
+    if variant == 'legs':
         return preset.sudo()._get_bare_leg_mannequin(
             view, icp.get_param('ugurlar_ai_studio.gemini_api_key', ''),
             icp.get_param('ugurlar_ai_studio.fal_api_key', ''))
+    if variant == 'plain':
+        return preset.sudo()._get_plain_bottoms_mannequin(
+            view, icp.get_param('ugurlar_ai_studio.fal_api_key', ''))
     return (getattr(preset, 'model_image_%s' % view) or preset.model_image_front), 0.0
 
 
@@ -450,28 +471,40 @@ def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', anal
         vals['quality_details'] = 'Otomatik düzeltildi | ' + vals['quality_details']
     # Çağıran _fidelity_retry ile yeniden üretim kararı verir; gen.write'a gitmeden çıkarılır
     vals['_fidelity'] = (visual_qc or {}).get('fidelity') or 0
+    vals['_fix'] = (visual_qc or {}).get('fix') or ''
     return vals
+
+
+def _with_fix(prompt, fix):
+    """Yeniden üretim istemine denetimin olumlu düzeltme cümlesini ekle (ürün kısmının gerçek hâli)."""
+    fix = ' '.join(str(fix or '').split()).strip()
+    if not fix or not prompt:
+        return prompt
+    return f"{prompt} {fix if fix.endswith('.') else fix + '.'}"
 
 
 def _fidelity_retry(env, gen, gen_b64, qc_vals, first_cost, regenerate, check):
     """Sonuç ürünü değiştirdiyse (eklenen / kaybolan detay) bir kez yeniden üret, daha doğrusunu seç.
 
-    regenerate() -> (b64, seed, cost); check(b64, base_cost) -> _run_quality_check değerleri.
-    first_cost: ilk denemenin üretim + hazırlık maliyeti (qc_vals'ta 'cost' yoksa).
+    regenerate(fix) -> (b64, seed, cost); fix: denetimin ürünün gerçek hâlini anlatan olumlu cümlesi
+    (aynı istemle yeniden üretim aynı detayı yine uyduruyordu). check(b64, base_cost) ->
+    _run_quality_check değerleri. first_cost: ilk denemenin üretim + hazırlık maliyeti.
 
     Returns:
         (b64, vals) — vals gen.write'a hazır ('_fidelity' çıkarılmış)
     """
     bad = qc_vals.pop('_fidelity', 0) or 0
+    fix = qc_vals.pop('_fix', '') or ''
     first_b64 = qc_vals.get('generated_image') or gen_b64
     enabled = env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fidelity_retry', 'True') == 'True'
     if not bad or not enabled:
         return first_b64, qc_vals
     gen_id = gen.id if gen else '?'
-    _logger.info('Doğruluk: %d ürün kusuru bulundu, bir kez yeniden üretiliyor (gen=%s)', bad, gen_id)
+    _logger.info('Doğruluk: %d ürün kusuru bulundu, bir kez yeniden üretiliyor (gen=%s, düzeltme=%s)',
+                 bad, gen_id, fix or '-')
     first_total = qc_vals.get('cost', first_cost) or 0.0
     try:
-        new_b64, new_seed, new_cost = regenerate()
+        new_b64, new_seed, new_cost = regenerate(fix)
         new_vals = check(new_b64, new_cost or 0.0) if new_b64 else None
     except Exception as e:
         _logger.warning('Doğruluk yeniden üretimi başarısız (gen=%s): %s', gen_id, e)
@@ -479,6 +512,7 @@ def _fidelity_retry(env, gen, gen_b64, qc_vals, first_cost, regenerate, check):
     if new_vals is None:
         return first_b64, qc_vals
     new_bad = new_vals.pop('_fidelity', 0) or 0
+    new_vals.pop('_fix', None)
     new_total = new_vals.get('cost', new_cost) or 0.0
     _logger.info('Doğruluk: 1. deneme %d, 2. deneme %d kusur (gen=%s)', bad, new_bad, gen_id)
     if new_bad < bad:
@@ -1240,117 +1274,6 @@ class AiStudioSession(models.Model):
             _logger.error("Kırpma hatası: %s", e)
             return image_base64
 
-    def _remove_hanger_hook(self, image_base64):
-        """Gorseldeki aski kancasini ve etiketleri temizler.
-
-        Yontem:
-        1. Ust %20'lik alani tara
-        2. Dar cikintilari (aski kancasi) tespit et
-        3. OpenCV inpainting ile temizle
-        4. Alternatif: piksel bazli temizleme (OpenCV yoksa)
-        """
-        if not image_base64:
-            return image_base64
-        try:
-            import io
-            import base64
-            from PIL import Image
-
-            img_data = base64.b64decode(image_base64)
-            img = Image.open(io.BytesIO(img_data))
-
-            # RGBA moduna cevir
-            if img.mode != 'RGBA':
-                img = img.convert('RGBA')
-
-            w, h = img.size
-
-            try:
-                import cv2
-                import numpy as np
-
-                # PIL -> numpy (BGRA)
-                img_array = np.array(img)
-                alpha = img_array[:, :, 3]
-
-                # Ust %20 alanin maske'sini olustur
-                top_region = int(h * 0.20)
-                mask = np.zeros((h, w), dtype=np.uint8)
-
-                # Alpha kanalinda opak olan yerleri bul
-                _ret, binary = cv2.threshold(alpha[:top_region], 30, 255, cv2.THRESH_BINARY)
-
-                # Kontur analizi — dar cikintilari bul
-                contours, _hier = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-                for cnt in contours:
-                    x, y, cw, ch = cv2.boundingRect(cnt)
-                    area = cv2.contourArea(cnt)
-
-                    # Aski kancasi ozellikleri:
-                    # - Dar (genislik < resim genisliginin %15'i)
-                    # - Uzun/ince (yukseklik/genislik orani > 1.5)
-                    # - Kucuk alan
-                    is_narrow = cw < (w * 0.15)
-                    is_tall_and_thin = ch > cw * 1.5 if cw > 0 else False
-                    is_small_area = area < (w * h * 0.02)
-
-                    if is_narrow and (is_tall_and_thin or is_small_area):
-                        # Bu bir aski kancasi — maskeye ekle
-                        cv2.drawContours(mask[:top_region], [cnt], -1, 255, cv2.FILLED)
-                        # Etrafina biraz tampon ekle
-                        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-                        mask[:top_region] = cv2.dilate(mask[:top_region], kernel, iterations=2)
-
-                # Maske'de temizlenecek alan varsa
-                if np.any(mask > 0):
-                    # RGB kanallarini al (inpainting icin)
-                    rgb = cv2.cvtColor(img_array[:, :, :3], cv2.COLOR_RGBA2BGR)
-                    # Inpaint ile temizle
-                    inpainted = cv2.inpaint(rgb, mask, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
-                    # Maskelenen alanlarin alpha'sini sifirla (seffaf yap)
-                    img_array[:, :, 3][mask > 0] = 0
-
-                    result_img = Image.fromarray(img_array)
-                    # RGBA'yi beyaz arkaplan üzerinde RGB JPEG'e dönüştür
-                    # (FASHN API yalnızca RGB JPEG kabul eder, PNG alpha ile garment algılayamaz)
-                    rgb_result = Image.new('RGB', result_img.size, (255, 255, 255))
-                    rgb_result.paste(result_img, mask=result_img.split()[3])
-                    buffered = io.BytesIO()
-                    rgb_result.save(buffered, format='JPEG', quality=95)
-                    _logger.info('Aski kancasi temizlendi (OpenCV inpainting)')
-                    return base64.b64encode(buffered.getvalue())
-                else:
-                    # Temizlenecek alan yok
-                    return image_base64
-
-            except ImportError:
-                # OpenCV yoksa eski yontem (piksel bazli)
-                pixels = img.load()
-                for y in range(int(h * 0.25)):
-                    non_transparent_count = 0
-                    for x in range(w):
-                        r, g, b, a = pixels[x, y]
-                        if a > 30:
-                            non_transparent_count += 1
-
-                    if non_transparent_count > 0 and non_transparent_count < (w * 0.10):
-                        for x in range(w):
-                            pixels[x, y] = (0, 0, 0, 0)
-                    elif non_transparent_count >= (w * 0.10):
-                        break
-
-                buffered = io.BytesIO()
-                # RGBA'yi beyaz arkaplan üzerinde RGB JPEG'e dönüştür
-                rgb_result = Image.new('RGB', img.size, (255, 255, 255))
-                rgb_result.paste(img, mask=img.split()[3])
-                rgb_result.save(buffered, format='JPEG', quality=95)
-                return base64.b64encode(buffered.getvalue())
-
-        except Exception as e:
-            _logger.error("Aski kancasi temizleme hatasi: %s", e)
-            return image_base64
-
     # --- Durum Geçişleri ---
 
     def action_photos_ready(self):
@@ -1529,7 +1452,10 @@ class AiStudioSession(models.Model):
                              photo.id, session.name)
                 return provider.upload_image(garment_b64), garment_b64, 0.0
 
-        preprocessed = preprocess_garment_image(source_image, target_long_edge=1600)
+        # Modele giden ürün görseli kontrast/keskinlik işlemi görmez: CLAHE + unsharp, askıda kalan
+        # örgünün orta katlanma çizgisini sertleştirip modele "ön orta dikiş" olarak çizdiriyordu
+        preprocessed = preprocess_garment_image(source_image, target_long_edge=2048,
+                                                apply_exposure_norm=False, apply_sharpening=False)
         processed_b64 = preprocessed['image_base64']
         garment_b64 = processed_b64
 
@@ -1542,9 +1468,9 @@ class AiStudioSession(models.Model):
                     rgb_b64 = base64.b64encode(rgb_data)
                 except Exception:
                     rgb_b64 = bg_removed_b64
-                garment_b64 = session._remove_hanger_hook(rgb_b64)
+                # Askı ve mandallar BiRefNet'te ön planda kalır; etiketlerle birlikte tespit edilip silinir
                 # Oda gidince ürün kadrajı doldurur: alarm görece büyür, tespit ve silme isabetlenir
-                garment_b64 = crop_to_content(garment_b64)
+                garment_b64 = crop_to_content(rgb_b64)
             except Exception as e:
                 _logger.warning('BG remove başarısız, orijinal kullanılacak: %s', e)
                 garment_b64 = processed_b64
@@ -1583,10 +1509,24 @@ class AiStudioSession(models.Model):
         if not tags:
             _logger.info('Ürün görselinde mağaza etiketi bulunamadı (session=%s)', session.id)
             return image_b64, 0.0
-        from ..services.garment_preprocessor import inpaint_tags_base64, texture_fill_tags_base64
-        boxes = [{'box_2d': [round(float(v)) for v in t['box_2d'][:4]]} for t in tags]
-        if erased is not None:
-            erased.extend(boxes)
+        from ..services.garment_preprocessor import (
+            HANGER_LABELS, inpaint_tags_base64, tag_box_to_pixels, texture_fill_tags_base64,
+        )
+
+        def _valid_boxes(items):
+            # Etiket türü ve güven korunur: silinmeyen (düşük güvenli / dev) kutu doku dolgusuna,
+            # iz denetimine ve "silinen bölge" kaydına girmez
+            out = []
+            for t in items or []:
+                if tag_box_to_pixels(t, 1000, 1000, pad_ratio=0, min_pad=0):
+                    out.append({'box_2d': [round(float(v)) for v in t['box_2d'][:4]],
+                                'label': t.get('label') or 'alarm_tag', 'confidence': t.get('confidence')})
+            return out
+
+        boxes = _valid_boxes(tags)
+        if not boxes:
+            _logger.info('Ürün görselinde silinecek güvenilir etiket kutusu yok (session=%s)', session.id)
+            return image_b64, 0.0
         icp = session.env['ir.config_parameter'].sudo()
         fal_key = icp.get_param('ugurlar_ai_studio.fal_api_key')
         gemini_key = icp.get_param('ugurlar_ai_studio.gemini_api_key', '')
@@ -1606,14 +1546,22 @@ class AiStudioSession(models.Model):
                     if attempt == 2:
                         break  # son geçiş: yeniden tarama sonucu kullanılmaz (ücretli çağrı)
                     tags = self._detect_security_tags(session, current, design_details)
-                    if not tags:
+                    if not _valid_boxes(tags):
                         _logger.info('Mağaza etiketi silindi ve doğrulandı (geçiş %d)', attempt)
                         break
+                    seen = {tuple(b['box_2d']) for b in boxes}
+                    boxes += [b for b in _valid_boxes(tags) if tuple(b['box_2d']) not in seen]
                     _logger.warning('Silme sonrası %d etiket hâlâ görünüyor (geçiş %d)', len(tags), attempt)
                 if current is not image_b64:
                     result = current
             except Exception as e:
                 _logger.warning('AI etiket silme başarısız, komşu kumaş dolgusu kullanılacak: %s', e)
+        if erased is not None:
+            # Askının kancası/çubuğu ürünün dışında: "bu bölge düz kumaş" denmez; mandal yerleri denir
+            erased.extend({'box_2d': b['box_2d'], 'label': b['label']} for b in boxes
+                          if b['label'] != 'hanger')
+        if any(b['label'] in HANGER_LABELS for b in boxes):
+            _logger.info('Askı/mandal ürün görselinden siliniyor (session=%s)', session.id)
         if result is not None:
             from ..services.garment_analyzer import erased_area_clean
             if erased_area_clean(gemini_key, result, boxes) is not False:
@@ -2242,12 +2190,14 @@ class AiStudioSession(models.Model):
                 _logger.warning('Kıyafet analizi başarısız, varsayılan kullanılacak: %s', ae)
 
             try:
-                needs_bare_legs = _needs_bare_legs(session, cached_analysis)
+                mannequin_variant = _mannequin_variant(session, cached_analysis)
             except Exception as nb_err:
-                _logger.warning('Bacak kuralı belirlenemedi: %s', nb_err)
-                needs_bare_legs = False
-            if needs_bare_legs:
+                _logger.warning('Manken sürümü belirlenemedi: %s', nb_err)
+                mannequin_variant = None
+            if mannequin_variant == 'legs':
                 _logger.info('Elbise/etek/şort: bacakları açık manken kullanılacak (session=%s)', session_id)
+            elif mannequin_variant == 'plain':
+                _logger.info('Alt giyim/tulum/takım: düz taytlı manken kullanılacak (session=%s)', session_id)
 
             # ═══ TÜM GENERATION'LARI İŞLE ═══
             # Cross-view tutarlılık verisi — front sonrası doldurulur
@@ -2346,7 +2296,7 @@ class AiStudioSession(models.Model):
 
                     # ═══ APILER İÇİN URL VE FORMAT AYARLARI ═══
                     # Elbise/etek/şort: pantolonlu manken ASLA gönderilmez (kök neden)
-                    model_image_data, mannequin_cost = _get_mannequin_image(session, preset, photo_type, needs_bare_legs)
+                    model_image_data, mannequin_cost = _get_mannequin_image(session, preset, photo_type, mannequin_variant)
 
                     if not model_image_data:
                         raise UserError(_('Preset manken resmi eksik.'))
@@ -2490,7 +2440,7 @@ class AiStudioSession(models.Model):
                         mode=session.quality_mode or 'quality',
                         model_name=tryon_model,
                         num_samples=_get_candidate_count(env, photo_type, provider_type),
-                        garment_photo_type='auto',
+                        garment_photo_type='flat-lay' if 'fashn/' in tryon_model else 'auto',
                         output_format='jpeg',
                         prompt=prompt_text,
                         negative_prompt=negative_prompt_text,
@@ -2534,7 +2484,7 @@ class AiStudioSession(models.Model):
                             front_result_b64 = gen_b64
 
                             # Elbise/etek/şortta sonucu kullanılmıyor: ücretli çağrıyı atla
-                            if outfit_consistency is None and not needs_bare_legs:
+                            if outfit_consistency is None and mannequin_variant != 'legs':
                                 try:
                                     from ..services.garment_analyzer import analyze_outfit_consistency
                                     outfit_consistency = analyze_outfit_consistency(
@@ -2563,13 +2513,14 @@ class AiStudioSession(models.Model):
                                     view_construction=view_construction, removed_boxes=keep_boxes,
                                 )
 
-                            def _regenerate():
+                            def _regenerate(fix=''):
                                 if lease_owner:
                                     _renew_session_lease(cr, session_id, lease_owner)
                                 cr.commit()
                                 # Aynı seed aynı sonucu verir (v4); ikinci kayıt cron kurtarmasına karışmasın
-                                res = provider.virtual_tryon(**dict(tryon_kwargs, seed=False, on_enqueue=None,
-                                                                    num_samples=1))
+                                res = provider.virtual_tryon(**dict(
+                                    tryon_kwargs, seed=False, on_enqueue=None, num_samples=1,
+                                    prompt=_with_fix(tryon_kwargs.get('prompt'), fix)))
                                 cr.commit()
                                 b64, seed = self._download_tryon_result(res or {})
                                 return b64, seed, (res or {}).get('cost', 0.05) + prep_cost
@@ -2920,8 +2871,8 @@ class AiStudioSession(models.Model):
                             )
                         )
 
-                needs_bare_legs = _needs_bare_legs(session, analysis)
-                model_image, mannequin_cost = _get_mannequin_image(session, preset, photo_type, needs_bare_legs)
+                mannequin_variant = _mannequin_variant(session, analysis)
+                model_image, mannequin_cost = _get_mannequin_image(session, preset, photo_type, mannequin_variant)
                 prep_cost = (erase_cost or 0.0) + (mannequin_cost or 0.0)
                 if not model_image:
                     raise Exception('Preset manken resmi eksik.')
@@ -2973,7 +2924,7 @@ class AiStudioSession(models.Model):
                             pass
 
                         # Elbise/etek/şortta sonucu kullanılmıyor (ücretli çağrıyı atla)
-                        if not needs_bare_legs:
+                        if mannequin_variant != 'legs':
                             try:
                                 from ..services.garment_analyzer import analyze_outfit_consistency
                                 outfit_consistency = analyze_outfit_consistency(
@@ -3037,7 +2988,7 @@ class AiStudioSession(models.Model):
                     mode=session.quality_mode or 'quality',
                     model_name=tryon_model,
                     num_samples=1,
-                    garment_photo_type='auto',
+                    garment_photo_type='flat-lay' if 'fashn/' in tryon_model else 'auto',
                     output_format='jpeg',
                     prompt=prompt_text,
                     negative_prompt=negative_prompt_text,
@@ -3078,11 +3029,13 @@ class AiStudioSession(models.Model):
                                 view_construction=view_construction, removed_boxes=keep_boxes,
                             )
 
-                        def _regenerate():
+                        def _regenerate(fix=''):
                             if lease_owner:
                                 _renew_session_lease(cr, session_id, lease_owner)
                             cr.commit()
-                            res = provider.virtual_tryon(**dict(tryon_kwargs, seed=False, on_enqueue=None))
+                            res = provider.virtual_tryon(**dict(
+                                tryon_kwargs, seed=False, on_enqueue=None,
+                                prompt=_with_fix(tryon_kwargs.get('prompt'), fix)))
                             cr.commit()
                             b64, seed = self._download_tryon_result(res or {})
                             return b64, seed, (res or {}).get('cost', 0.05) + prep_cost
@@ -3448,13 +3401,31 @@ class AiStudioSession(models.Model):
             return 'failed'
         if len(urls) > 1:
             _store_candidates(gen, urls[1:])
-        gen.write({
+        cost = FalProvider.ESTIMATED_COSTS.get(app, gen.cost or 0.0)
+        vals = {
             'generated_image': gen_b64,
             'state': 'done',
             'fal_endpoint': app,
-            'cost': FalProvider.ESTIMATED_COSTS.get(app, gen.cost or 0.0),
+            'cost': cost,
             'quality_details': _('Worker kesintisi sonrası fal kuyruğundan kurtarıldı (kalite denetimi yapılmadı).'),
-        })
+        }
+        # Kurtarılan sonuç da denetlenir: uydurma detay / etiket inceleme ekranında görünsün
+        photo = gen.source_photo_id
+        gemini_key = self.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.gemini_api_key', '')
+        if gemini_key and photo and photo.garment_clean_image:
+            try:
+                qc_vals = _run_quality_check(
+                    self.env, photo.image_original, gen_b64, gemini_key, category=gen.session_id.category or '',
+                    gen=gen, base_cost=cost, reference_image=photo.garment_clean_image,
+                    photo_type=gen.photo_type, check_missing=photo.photo_type == gen.photo_type,
+                    removed_boxes=json.loads(photo.garment_tag_boxes or '[]'))
+                qc_vals.pop('_fidelity', None)
+                qc_vals.pop('_fix', None)
+                qc_vals['quality_details'] = _('fal kuyruğundan kurtarıldı') + ' | ' + (qc_vals.get('quality_details') or '')
+                vals.update(qc_vals)
+            except Exception as qe:
+                _logger.warning('Kurtarılan sonucun denetimi başarısız (gen=%s): %s', gen.id, qe)
+        gen.write(vals)
         _logger.info('Cron: fal sonucu kurtarıldı (gen=%s, request_id=%s)', gen.id, request_id)
         return 'done'
 

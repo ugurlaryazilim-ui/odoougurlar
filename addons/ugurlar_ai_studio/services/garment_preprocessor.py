@@ -119,6 +119,10 @@ def reduce_noise(img_array, d=9, sigma_color=75, sigma_space=75):
 # Alan sınırı yakın çekim detay fotoğraflarında gerçek alarmı atmayacak kadar geniş.
 MIN_TAG_CONFIDENCE = 0.5
 MAX_TAG_AREA_RATIO = 0.15
+# Askı (kanca + çubuk) ve pantolon askısı mandalları: modele giderse bel bandında düğmeli tırnak /
+# kemer köprüsü olarak çiziliyordu. Askı çubuğu ürün genişliğinde olabilir: alan sınırı daha geniş.
+HANGER_LABELS = ('hanger', 'hanger_clip')
+MAX_HANGER_AREA_RATIO = 0.35
 
 
 def tag_box_to_pixels(item, w, h, pad_ratio=0.25, min_pad=10):
@@ -149,7 +153,9 @@ def tag_box_to_pixels(item, w, h, pad_ratio=0.25, min_pad=10):
     px2, py2 = min(w, int(xmax * w)), min(h, int(ymax * h))
     if px2 <= px1 or py2 <= py1:
         return None
-    if (px2 - px1) * (py2 - py1) > MAX_TAG_AREA_RATIO * w * h:
+    label = item.get('label') if isinstance(item, dict) else None
+    max_ratio = MAX_HANGER_AREA_RATIO if label in HANGER_LABELS else MAX_TAG_AREA_RATIO
+    if (px2 - px1) * (py2 - py1) > max_ratio * w * h:
         return None  # etiket değil (cep, logo, baskı...)
     # Dolgu kutunun geometrik ortalamasına göre ve iki yönde eşit: kalem tipi (ince uzun) alarmda
     # uzun kenarın %60'ı bel ortasında dikey bir şerit maskesine dönüşüyor, model şeridi fermuar sanıyordu
@@ -215,6 +221,9 @@ def texture_fill_tags_base64(image_base64, tag_boxes, pad_ratio=0.25):
     h, w = arr.shape[:2]
     filled = 0
     for item in tag_boxes:
+        # Askı/mandal ürünün kenarında ya da dışında: yan şeridi kopyalamak zemini kumaşla boyar
+        if isinstance(item, dict) and item.get('label') in HANGER_LABELS:
+            continue
         rect = tag_box_to_pixels(item, w, h, pad_ratio=pad_ratio)
         if not rect:
             continue
@@ -317,7 +326,8 @@ def inpaint_security_tags(img_bgr, tag_boxes):
             continue
         # Görselin büyük bölümünü kaplayan kutu etiket değildir (ör. cep, logo);
         # inpaint geniş desenli alanı bulanık lekeye çevirir
-        if (px2 - px1) * (py2 - py1) > MAX_TAG_AREA_RATIO * w * h:
+        max_ratio = MAX_HANGER_AREA_RATIO if isinstance(item, dict) and item.get('label') in HANGER_LABELS             else MAX_TAG_AREA_RATIO
+        if (px2 - px1) * (py2 - py1) > max_ratio * w * h:
             _logger.info('Inpaint: aşırı büyük etiket kutusu atlandı (%dx%d)', px2 - px1, py2 - py1)
             continue
 

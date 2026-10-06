@@ -11,6 +11,7 @@ PROMPT KONFİGÜRASYONU:
 """
 import json
 import logging
+import re
 
 _logger = logging.getLogger(__name__)
 
@@ -193,6 +194,8 @@ _ANALYSIS_SCHEMA = {
         "collarTypeEn": {"type": "STRING"},
         "sleeveType": {"type": "STRING"},
         "closureEn": {"type": "STRING"},
+        "waistEn": {"type": "STRING"},
+        "frontPanelEn": {"type": "STRING"},
         "trimsEn": {"type": "STRING"},
         "designDetailsEn": {"type": "STRING"},
         "isSet": {"type": "BOOLEAN"},
@@ -233,8 +236,9 @@ OFFICIAL STORE PRODUCT INFORMATION (ground truth for the category):
 """
 
     prompt = f"""You are a senior fashion merchandiser analyzing a product photo.
-Ignore hangers, clips, hands, mannequins and any store tags; describe only the garment's own design.
-A store hangtag may hang over the garment's zipper, buttons or logo: still describe those parts of the garment.
+Ignore hangers, hanger clips, hands, mannequins and any store tags; describe only the garment's own design.
+Store security tags (plastic discs, sticks, capsules or pencil-shaped ink tags pinned through the fabric), price tags and the clips of a trouser hanger are NOT part of the garment: never describe them as buttons, zippers, tabs or any other detail.
+Describe only what you can clearly see. Never guess what a tag or fold might hide; when unsure, leave the field empty.
 {context_section}
 If the garment hangs on a hanger, the front neckline may reveal the inside of the back panel (lining, back label, keyhole). Ignore anything seen through the neck opening and assume a clean standard front neckline, unless the garment itself has lace, mesh, net or sheer panels there: those are part of the design and go into designDetailsEn.
 
@@ -251,7 +255,7 @@ The other text fields are in Turkish.
 Return JSON:
 {{
   "garmentType": "Turkish type, e.g. Gömlek, Pantolon, Triko Elbise, Mini Etek",
-  "garmentTypeEn": "e.g. 'shirt', 'knit dress', 'wide-leg trousers', 'mini skirt', 'jumpsuit'",
+  "garmentTypeEn": "plain English type that matches the construction, e.g. 'shirt', 'knit dress', 'wide-leg knit pants', 'tailored trousers', 'jeans', 'mini skirt', 'jumpsuit'",
   "clothingCategory": "tops | bottoms | dress | outerwear | knitwear",
   "primaryColor": "Turkish dominant color, e.g. Siyah, Lacivert",
   "primaryColorEn": "e.g. 'black', 'navy', 'burgundy'",
@@ -261,9 +265,11 @@ Return JSON:
   "collarType": "Turkish collar/neckline if visible",
   "collarTypeEn": "without the word 'neckline', e.g. 'V', 'crew', 'shirt collar', 'turtleneck'",
   "sleeveType": "sleeve type if visible (e.g. uzun kollu, kolsuz, askılı)",
-  "closureEn": "the garment's own front fastening exactly as seen, e.g. 'single metal ring clasp at the front, no buttons', 'five-button front', 'two-button v placket', 'concealed zipper', 'open front, no fastening'; empty only when there is no fastening at all",
-  "trimsEn": "every button, snap, toggle, buckle, zipper pull, metal ring or rivet visible on the garment with its count, color, material, size and position, e.g. 'two large dark brown horn buttons on the v placket, two small matching buttons on each cuff'; empty only if there are none",
-  "designDetailsEn": "every decorative design element of the garment with its position, color and size: logos, emblems, brooches, appliques, embroidery, stones, beads, studs, lace, mesh, net or sheer panels, cut-outs, contrast stripes or piping, pleats, ruffles, zips used as decoration, e.g. 'black diamond mesh panel across the shoulders and at both cuffs', 'silver jewelled brooch on the left chest', 'small embroidered logo on the left chest'; empty only if there are none",
+  "closureEn": "the garment's own front fastening exactly as seen, e.g. 'five-button front', 'single metal ring clasp at the front', 'concealed zipper'; empty when it has no fastening",
+  "waistEn": "trousers, skirts, shorts and jumpsuits only: the waistband exactly as seen, in positive words, e.g. 'wide fully elastic pull-on waistband, smooth all around', 'flat waistband with belt loops, button and zip fly', 'drawstring elastic waist'; empty for other garments",
+  "frontPanelEn": "trousers, skirts and shorts only: how the front panel looks below the waistband, in positive words, e.g. 'smooth plain front, soft unpressed knit', 'pressed center crease on each leg', 'two slanted side pockets'; empty for other garments",
+  "trimsEn": "buttons, snaps, toggles, buckles, zipper pulls, metal rings or rivets that are clearly sewn on the garment, with count, color, size and position; empty if there are none",
+  "designDetailsEn": "decorative design elements clearly part of the garment, with position, color and size: logos, brooches, appliques, embroidery, stones, studs, lace, mesh or sheer panels, cut-outs, contrast stripes or piping, pleats, ruffles; empty if there are none",
   "isSet": true or false (a matching top and bottom sold together as one product),
   "setTopEn": "for a set: the top piece, e.g. 'cream crew-neck sweatshirt'; otherwise empty",
   "setBottomEn": "for a set: the bottom piece, e.g. 'cream wide-leg trousers'; otherwise empty",
@@ -275,7 +281,10 @@ Return ONLY valid JSON."""
 
     if gemini_api_key:
         _logger.info('Gemini ile kıyafet analizi yapılıyor...')
-        parsed = _gemini_json(gemini_api_key, prompt, image_url, schema=_ANALYSIS_SCHEMA, timeout=45)
+        # Deterministik: aynı fotoğraf her seferinde aynı detay listesini versin (sıcaklık 1.0 her
+        # çağrıda farklı, kimi zaman uydurulmuş düğme/fermuar üretiyordu)
+        parsed = _gemini_json(gemini_api_key, prompt, image_url, schema=_ANALYSIS_SCHEMA, timeout=45,
+                              deterministic=True)
         if parsed:
             return parsed
         _logger.warning('Gemini analizi başarısız, fal.ai fallback denenecek')
@@ -297,8 +306,8 @@ _TAG_SCHEMA = {
                 "properties": {
                     "box_2d": {"type": "ARRAY", "items": {"type": "INTEGER"}},
                     "label": {"type": "STRING",
-                              "enum": ["alarm_tag", "price_tag", "hangtag", "tag_pin", "design_label",
-                                       "garment_detail"]},
+                              "enum": ["alarm_tag", "price_tag", "hangtag", "tag_pin", "hanger", "hanger_clip",
+                                       "design_label", "garment_detail"]},
                     "confidence": {"type": "NUMBER"},
                 },
                 "required": ["box_2d", "label"],
@@ -313,6 +322,9 @@ _TAG_PROMPT = """This garment was photographed inside a clothing store. Find eve
 - price_tag: paper or cardboard price or barcode tag, or a price sticker
 - hangtag: brand hangtag hanging on a string, plastic fastener or safety pin
 - tag_pin: the pin, plastic loop or string that attaches a tag
+- hanger: the clothes hanger itself: its hook, bar or plastic/wooden body, wherever it is visible (above the garment, inside the neckline or across the waistband)
+- hanger_clip: each clip, clamp or peg of a trouser/skirt hanger gripping the garment, usually one on each side of the waistband or hem. Box each clip separately with the fabric it pinches.
+The hanger's hook and clips are never garment hardware, even when they are metal.
 Also report the garment's own sewn-flat design elements that look similar (woven brand patch, leather patch) as "design_label", but ONLY when you are sure they are stitched into the garment. If you are unsure whether a small rectangle on the waistband is a store alarm tag or a brand patch, report it as "alarm_tag".
 Never report buttons, zippers, zipper pulls, rivets, buckles, drawstrings, prints, logos, embroidery, appliques, stones, beads, lace or mesh panels, or metal rings, hoops, clasps, hooks, brooches, chains and eyelets as tags: store alarm tags are plastic, metal hardware is part of the garment design.
 A zipper pull always sits at the end of a visible zipper track. A plastic stick, capsule or disc with no zipper track under it is an alarm_tag, even when it hangs like a zipper pull.
@@ -337,12 +349,27 @@ Return JSON: {"securityTags": [{"box_2d": [ymin, xmin, ymax, xmax], "label": "ta
 Return {"securityTags": []} if there is none."""
 
 
-def design_hint(analysis):
-    """Analizdeki ürünün kendi detayları (kapama, düğme, logo, broş, dantel...): silinmesin diye tespite verilir."""
+_EMPTY_VALUE_RE = re.compile(
+    r'^(?:none|n/?a|nothing|not visible|not applicable|unknown|empty|no|without|there (?:is|are) no)\b|^-+$',
+    re.IGNORECASE)
+
+
+def clean_field(analysis, key):
+    """Analiz alanı prompta girecek biçimde: boş / olumsuz değerler ("none", "no buttons") atılır.
+
+    Olumsuz cümle nesneyi adıyla anar ("no zipper"): görsel model o nesneyi çizmeye meyillidir.
+    """
     if not isinstance(analysis, dict):
         return ''
-    parts = [str(analysis.get(k) or '').strip().rstrip('.')
-             for k in ('closureEn', 'trimsEn', 'designDetailsEn', 'graphicDescriptionEn')]
+    value = ' '.join(str(analysis.get(key) or '').split()).strip().rstrip('.').strip()
+    if not value or _EMPTY_VALUE_RE.match(value):
+        return ''
+    return value
+
+
+def design_hint(analysis):
+    """Analizdeki ürünün kendi detayları (kapama, düğme, logo, broş, dantel...): silinmesin diye tespite verilir."""
+    parts = [clean_field(analysis, k) for k in ('closureEn', 'trimsEn', 'designDetailsEn', 'graphicDescriptionEn')]
     return '; '.join(p for p in parts if p)
 
 
@@ -531,7 +558,7 @@ _TR_EN_WORDS = {
     'krep': 'crepe', 'tul': 'tulle', 'tül': 'tulle', 'dantel': 'lace', 'kot': 'denim',
     'polar': 'fleece', 'tvit': 'tweed', 'gabardin': 'gabardine', 'poplin': 'poplin',
     # türler
-    'elbise': 'dress', 'etek': 'skirt', 'pantolon': 'trousers', 'sort': 'shorts',
+    'elbise': 'dress', 'etek': 'skirt', 'pantolon': 'pants', 'sort': 'shorts',
     'şort': 'shorts', 'gomlek': 'shirt', 'gömlek': 'shirt', 'bluz': 'blouse',
     'kazak': 'sweater', 'hirka': 'cardigan', 'hırka': 'cardigan', 'ceket': 'jacket',
     'mont': 'jacket', 'kaban': 'coat', 'palto': 'coat', 'manto': 'long coat',
@@ -660,10 +687,15 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     set_top = str(analysis.get('setTopEn') or '').strip().rstrip('.') or 'the top'
     set_bottom = str(analysis.get('setBottomEn') or '').strip().rstrip('.') or 'the matching trousers'
     set_pieces = f"{set_top} and {set_bottom}"
-    # Düğme / kopça / fermuar: tarif edilmezse model rengini, malzemesini ve sayısını uyduruyor
-    trims = str(analysis.get('trimsEn') or '').strip().rstrip('.')
+    # Düğme / kopça / fermuar: tarif edilmezse model rengini, malzemesini ve sayısını uyduruyor.
+    # "none" / "no buttons" gibi olumsuz değerler atılır: nesneyi adıyla anmak çizdiriyordu
+    trims = clean_field(analysis, 'trimsEn')
     # Logo, broş, dantel/file panel, nakış...: tarif edilmezse model sadeleştirip siliyordu
-    details = str(analysis.get('designDetailsEn') or '').strip().rstrip('.')
+    details = clean_field(analysis, 'designDetailsEn')
+    # Bel ve ön panel (alt giyim): tarif edilmezse model boşluğu kumaş pantolon parçalarıyla
+    # (kemer köprüsü, düğmeli tırnak, ütü izi) dolduruyordu
+    waist = clean_field(analysis, 'waistEn')
+    front_panel = clean_field(analysis, 'frontPanelEn')
 
     # ═══ FASHN PROVIDER (minimal prompt, kendi try-on modeli) ═══
     if provider_type == 'fashn':
@@ -727,7 +759,7 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         elif any(k in sleeve_lower for k in ['sleeveless', 'kolsuz']):
             collar_note += "Sleeveless. "
         # Kapama tarif edilmezse model (özellikle silinen etiketin yanında) fermuar/düğme uyduruyor
-        closure = str(analysis.get('closureEn') or '').strip().rstrip('.')
+        closure = clean_field(analysis, 'closureEn')
         if closure:
             collar_note += f"Front fastening exactly as in Image 2: {closure}. "
 
@@ -773,6 +805,11 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     # Detay listesi YALNIZ ön görünüme: analiz ön fotoğraftan yapılır; arka/yan prompta yazılan
     # ön detaylar (fermuar, düğme, perçin) o açıya da çiziliyordu. Arka/yan Image 2'den kopyalar.
     if photo_type == 'front':
+        if sub_type in ('bottoms', 'skirt', 'shorts', 'jumpsuit', 'coord'):
+            if waist:
+                base_prompt += f" Waistband exactly as in Image 2: {waist}."
+            if front_panel and sub_type != 'jumpsuit':
+                base_prompt += f" Front exactly as in Image 2: {front_panel}."
         keep = '; '.join(x for x in (trims, details) if x)
         if keep:
             base_prompt += f" Keep these exactly as in Image 2, in the same place, size and color: {keep}."
@@ -800,7 +837,10 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
             if bottoms:
                 parts.append(bottoms)
         if sub_type not in ('dress', 'skirt'):
-            shoes = f"{outfit_consistency.get('shoesColor', '')} {outfit_consistency.get('shoesType', '')}".strip()
+            shoes_color = str(outfit_consistency.get('shoesColor') or '').strip()
+            shoes_type = str(outfit_consistency.get('shoesType') or '').strip()
+            # "white" + "white low-top sneakers" → "white white ..." olmasın
+            shoes = shoes_type if shoes_color.lower() in shoes_type.lower() else f"{shoes_color} {shoes_type}".strip()
             if shoes:
                 parts.append(shoes)
         if parts:
@@ -828,7 +868,7 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
 def view_construction_sentence(view_construction, sub_type=''):
     """Arka/yan: ürünün bu açıdaki gerçek yapısı olumlu dille (model boşluğu fermuar vb. ile doldurmasın)."""
     vc = view_construction if isinstance(view_construction, dict) else {}
-    parts = str(vc.get('partsEn') or '').strip().rstrip('.')
+    parts = clean_field(vc, 'partsEn')
     if parts:
         return f" From this angle the garment in Image 2 has exactly: {parts}."
     if vc.get('plain'):
@@ -853,7 +893,7 @@ def keep_area_sentence(boxes, limit=3):
             out.append(f"<bbox>{x1} {y1} {x2} {y2}</bbox>")
     if not out:
         return ''
-    return f" The area Image 2 {' and '.join(out)} is plain fabric like its surroundings."
+    return f" In Image 2 the area {' and '.join(out)} is plain fabric continuing its surroundings."
 
 
 # Görsel denetim hata kodları → reviewer'a gösterilecek Türkçe metin
@@ -926,14 +966,15 @@ def analyze_view_construction(gemini_api_key, image, view='back'):
         "on it: zippers, buttons, pockets, belt loops, slits, yokes, darts, drawstrings, logos, prints, "
         "patches, labels, embroidery or other decoration. Ordinary seams, hems, cuffs and a plain waistband "
         "or neckline do not count. Ignore blur, smudges or retouching marks: they are not parts. "
-        "plain is true when there is none. partsEn: short English list with places, e.g. "
-        "\"two patch pockets on the seat, five belt loops\"; empty when plain. "
+        "Hanger clips and store tags are not parts. "
+        "plain is true when there is none. partsEn: short English list of what you actually see, with "
+        "places, e.g. \"two patch pockets on the seat\"; empty when plain. "
         "Return JSON: {\"plain\": true, \"partsEn\": \"\"}",
         image, schema=_VIEW_SCHEMA, timeout=25, deterministic=True,
     )
     if not parsed or 'plain' not in parsed:
         return None
-    parts = str(parsed.get('partsEn') or '').strip().rstrip('.')
+    parts = clean_field(parsed, 'partsEn')
     plain = bool(parsed['plain']) and not parts
     return {'plain': plain, 'partsEn': '' if plain else parts}
 
@@ -958,9 +999,10 @@ def mannequin_legs_covered(gemini_api_key, image):
     return bool(parsed['legsCovered'])
 
 
-_FIDELITY_RULES = """- "detail_added": compare the garment in Image 1 with the product in Image 2 part by part. Report any garment part in Image 1 that the product does not have: zippers, buttons, rivets, eyelets, rings, buckles, pockets, seams, darts, slits, belts, straps, logos, prints, brooches, lace or embroidery. List each in "addedDetails" as a short Turkish name with its place, e.g. "arka belde fermuar".
+_FIDELITY_RULES = """- "detail_added": compare the garment in Image 1 with the product in Image 2 part by part. Report any garment part in Image 1 that the product does not have: zippers, a zip or button fly, buttons, rivets, eyelets, rings, buckles, belt loops, waistband tabs, pockets, seams, a center seam or pressed crease, darts, slits, belts, straps, logos, prints, brooches, lace or embroidery. Check the waistband closely. List each in "addedDetails" as a short Turkish name with its place, e.g. "arka belde fermuar".
 - "detail_missing": report any such part of the product in Image 2 that is missing or clearly changed in Image 1 (different count, shape, type or place, e.g. a zipper turned into an open neckline). List each in "missingDetails" as a short Turkish name with its place.
 Only compare parts visible from the angle of Image 1; differences in pose, lighting, folds or styling items (shoes, trousers of a top) are not defects.
+- "fixEn": when you report detail_added or detail_missing, write one short plain English sentence that describes how those parts of the product in Image 2 really look, using only positive words and never naming the wrong part, e.g. "The waistband is a smooth, continuous elastic band all around." Empty otherwise.
 """
 
 
@@ -1005,7 +1047,7 @@ Rules:
 - "added_label": {"a label, patch, badge, logo, tag or small object on the garment in Image 1 that does not exist on the product in Image 2 (check the waistband, back, hem and seams carefully)." if reference_image else "never report this code."}
 - "garment_mismatch": the garment in Image 1 is a different item from the product (different type, cut, neckline, length or color).
 {_FIDELITY_RULES if reference_image else ''}For every "store_tag_visible" and "added_label" finding{' and every added detail (each separately, code "detail_added")' if reference_image else ''}, add its bounding box on Image 1 as box_2d [ymin, xmin, ymax, xmax] normalized to 0-1000.
-Return JSON: {{"defects": ["code", ...], "boxes": [{{"code": "added_label", "box_2d": [ymin, xmin, ymax, xmax]}}], "addedDetails": ["..."], "missingDetails": ["..."]}}.
+Return JSON: {{"defects": ["code", ...], "boxes": [{{"code": "added_label", "box_2d": [ymin, xmin, ymax, xmax]}}], "addedDetails": ["..."], "missingDetails": ["..."], "fixEn": ""}}.
 Return {{"defects": [], "boxes": [], "addedDetails": [], "missingDetails": []}} if the photo is clean."""
     if reference_image:
         vc = view_construction if isinstance(view_construction, dict) else {}
@@ -1030,6 +1072,7 @@ Return {{"defects": [], "boxes": [], "addedDetails": [], "missingDetails": []}} 
             "defects": {"type": "ARRAY", "items": {"type": "STRING", "enum": list(VISUAL_QC_ISSUES)}},
             "addedDetails": {"type": "ARRAY", "items": {"type": "STRING"}},
             "missingDetails": {"type": "ARRAY", "items": {"type": "STRING"}},
+            "fixEn": {"type": "STRING"},
             "boxes": {"type": "ARRAY", "items": {"type": "OBJECT", "properties": {
                 "code": {"type": "STRING"},
                 "box_2d": {"type": "ARRAY", "items": {"type": "INTEGER"}},
@@ -1063,8 +1106,9 @@ Return {{"defects": [], "boxes": [], "addedDetails": [], "missingDetails": []}} 
     fidelity = len(added) + len(missing)
     fidelity += sum(1 for c in codes if c in ('detail_added', 'detail_missing') and not (added if c == 'detail_added' else missing))
     fidelity += 1 if 'garment_mismatch' in codes else 0
+    fix = clean_field(parsed, 'fixEn') if (added or missing) else ''
     return {'codes': codes, 'issues': issues, 'boxes': boxes, 'fidelity': fidelity,
-            'added': added, 'missing': missing}
+            'added': added, 'missing': missing, 'fix': fix}
 
 
 def _default_analysis():

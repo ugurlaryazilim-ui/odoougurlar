@@ -34,11 +34,14 @@ class ResConfigSettings(models.TransientModel):
     ai_studio_tryon_model = fields.Selection([
         ('seedream_v4', "Seedream v4 Edit (seed'li — ön görünüm seed'i arka/yan çekimlere aktarılır)"),
         ('seedream_v5_pro', 'Seedream v5 Pro Edit (seed yok)'),
+        ('fashn_v16', 'FASHN v1.6 Try-On (fal, özel giydirme modeli — 864×1296, ~$0.075/görsel)'),
     ], string='Giydirme Modeli',
         default='seedream_v4',
         config_parameter='ugurlar_ai_studio.fal_tryon_model',
         help="fal sağlayıcısında giydirme modeli. v4 Edit seed alır ve döndürür: ön görünümün seed'i ve "
-             "görseli arka/yan çekimlere birlikte iletilir. v5 Pro Edit seed desteklemez.",
+             "görseli arka/yan çekimlere birlikte iletilir. v5 Pro Edit seed desteklemez. FASHN v1.6 "
+             "ürün görselini tariften yeniden çizmez, piksellerini mankene taşır (istem kullanmaz); "
+             "çıktısı daha küçüktür.",
     )
     ai_studio_seedream_image_size = fields.Selection([
         ('hd', '1664×2496 — Yüksek detay (v5 Pro: $0.135, v4: ~$0.03 /görsel)'),
