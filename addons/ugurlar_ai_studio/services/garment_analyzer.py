@@ -309,12 +309,13 @@ _TAG_SCHEMA = {
 }
 
 _TAG_PROMPT = """This garment was photographed inside a clothing store. Find every store item attached to it that must be removed before the product photo is published:
-- alarm_tag: store security (EAS) hard tag. A rigid plastic piece, usually grey, white or black, round, oval or rectangular, about 2-6 cm, clipped ON TOP of the fabric with a pin. Very often on the waistband (front or back), hem, side seam or cuff.
+- alarm_tag: store security (EAS) hard tag. A rigid plastic piece, usually grey, white or black, round, oval or rectangular, about 2-6 cm, clipped ON TOP of the fabric with a pin. Also the long "pencil" or ink tag: a thin white or grey plastic stick or capsule, about 4-10 cm, pinned through the fabric and lying flat or hanging down. Very often on the waistband (front or back), hem, side seam or cuff.
 - price_tag: paper or cardboard price or barcode tag, or a price sticker
 - hangtag: brand hangtag hanging on a string, plastic fastener or safety pin
 - tag_pin: the pin, plastic loop or string that attaches a tag
 Also report the garment's own sewn-flat design elements that look similar (woven brand patch, leather patch) as "design_label", but ONLY when you are sure they are stitched into the garment. If you are unsure whether a small rectangle on the waistband is a store alarm tag or a brand patch, report it as "alarm_tag".
 Never report buttons, zippers, zipper pulls, rivets, buckles, drawstrings, prints, logos, embroidery, appliques, stones, beads, lace or mesh panels, or metal rings, hoops, clasps, hooks, brooches, chains and eyelets as tags: store alarm tags are plastic, metal hardware is part of the garment design.
+A zipper pull always sits at the end of a visible zipper track. A plastic stick, capsule or disc with no zipper track under it is an alarm_tag, even when it hangs like a zipper pull.
 When a store tag or its string touches, covers or hangs over one of these garment parts (for example a hangtag hanging over the zipper pull), also report that garment part with its own tight box as "garment_detail" so it is kept.
 Include the whole object and its attachment in the box. Give each item a confidence from 0.0 to 1.0 and report anything at least 50% likely.
 box_2d is [ymin, xmin, ymax, xmax] normalized to 0-1000.
@@ -324,7 +325,7 @@ Return {"securityTags": []} if there is none."""
 
 # AI sonucu için: try-on modeli silinmiş alarmın yerine pim, klips, sarkan halka vb. çizebiliyor
 _RESULT_TAG_PROMPT = """This is an AI-generated e-commerce photo of a model wearing a garment. Find every small foreign object attached to or hanging from the garment that is NOT part of the garment's design and must be removed:
-- alarm_tag: store security (EAS) hard tag, or any rigid plastic piece, disc, clip or capsule clipped on the fabric
+- alarm_tag: store security (EAS) hard tag, or any rigid plastic piece, disc, clip, stick or capsule clipped on the fabric
 - price_tag: paper or cardboard tag or sticker
 - hangtag: tag hanging on a string or fastener
 - tag_pin: a pin, plastic loop, string, clip or small dangling object attached to the fabric (very often at the waistband, belt loops, back pockets, hem or side seam)
@@ -896,7 +897,7 @@ Rules:
 - "store_tag_visible": a security alarm tag, price tag, hangtag or tag pin attached to the garment.
 - "added_label": {"a label, patch, badge, logo, tag or small object on the garment in Image 1 that does not exist on the product in Image 2 (check the waistband, back, hem and seams carefully)." if reference_image else "never report this code."}
 - "garment_mismatch": the garment in Image 1 is a different item from the product (different type, cut, neckline, length or color).
-{_FIDELITY_RULES if reference_image else ''}For every "store_tag_visible" and "added_label" finding, add its bounding box on Image 1 as box_2d [ymin, xmin, ymax, xmax] normalized to 0-1000.
+{_FIDELITY_RULES if reference_image else ''}For every "store_tag_visible" and "added_label" finding{' and every added detail (each separately, code "detail_added")' if reference_image else ''}, add its bounding box on Image 1 as box_2d [ymin, xmin, ymax, xmax] normalized to 0-1000.
 Return JSON: {{"defects": ["code", ...], "boxes": [{{"code": "added_label", "box_2d": [ymin, xmin, ymax, xmax]}}], "addedDetails": ["..."], "missingDetails": ["..."]}}.
 Return {{"defects": [], "boxes": [], "addedDetails": [], "missingDetails": []}} if the photo is clean."""
     if reference_image and not check_missing:
