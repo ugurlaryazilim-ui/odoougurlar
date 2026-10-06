@@ -342,7 +342,7 @@ def _erase_result_tags(provider, image_b64, gemini_api_key, qc_boxes=None, passe
 
 
 # Ürün görseli temizleme (arka plan + etiket silme) mantığı değişince artırılır
-GARMENT_CLEAN_VERSION = 'v6'  # v6: askı/mandal silme, kontrast/keskinlik yok, 2048 px
+GARMENT_CLEAN_VERSION = 'v7'  # v7: askı segmentasyonla ayrılır (kutu silme beli yutuyordu)
 
 
 _SET_RE = re.compile(r'(?<!\w)(?:takim\w*|set|setler|co-ord|coord)(?!\w)')
@@ -371,6 +371,14 @@ def _needs_bare_legs(session, analysis=None):
     text = ' '.join(filter(None, [analysis.get('garmentType'), analysis.get('garmentTypeEn'),
                                   session.product_id.product_tmpl_id.name, category]))
     return _detect_sub_type(category, text) in ('dress', 'skirt', 'shorts')
+
+
+def _garment_text(analysis):
+    """Segmentasyon istemi: analizdeki İngilizce ürün türü (ör. "pleated trousers")."""
+    analysis = analysis if isinstance(analysis, dict) else {}
+    if analysis.get('isSet'):
+        return 'clothing set, top and bottom'
+    return str(analysis.get('garmentTypeEn') or '').strip() or 'garment'
 
 
 def _mannequin_variant(session, analysis=None):
@@ -433,7 +441,7 @@ def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', anal
         visual_qc = visual_quality_check(gemini_api_key, generated_b64, garment_hint=hint,
                                          reference_image=reference_image, design_details=details,
                                          check_missing=check_missing, view_construction=view_construction,
-                                         removed_boxes=removed_boxes)
+                                         removed_boxes=removed_boxes, original_image=source_image)
 
         auto_fix = icp.get_param('ugurlar_ai_studio.auto_tag_fix', 'True') == 'True'
         if visual_qc and auto_fix:
@@ -448,7 +456,8 @@ def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', anal
                                                 reference_image=reference_image, design_details=details,
                                                 check_missing=check_missing,
                                                 view_construction=view_construction,
-                                                removed_boxes=removed_boxes) or visual_qc
+                                                removed_boxes=removed_boxes,
+                                                original_image=source_image) or visual_qc
                 # Pantolon düzeltmesi görseli referanssız yeniden çizer: ürünü bozduysa atılır.
                 # Uydurma detay silmesi kusuru artırdıysa (gerçek detay silindi) atılır; aynı kalırsa
                 # silinmiş hâli tutulur — denetim izli referansta parçayı "üründe var" sanabiliyor
@@ -1426,7 +1435,7 @@ class AiStudioSession(models.Model):
             return []
 
     def _prepare_garment_for_tryon(self, source_image, provider, session, auto_bg=True, security_tags=None,
-                                   photo=None, design_details=''):
+                                   photo=None, design_details='', garment_text=''):
         """Kaynak görseli AI try-on için hazırla: preprocess → bg_remove → hanger_remove → upload.
 
         photo verilirse temizlenmiş görsel fotoğrafta saklanır; aynı kaynak ve ayarla
@@ -1475,10 +1484,18 @@ class AiStudioSession(models.Model):
                 _logger.warning('BG remove başarısız, orijinal kullanılacak: %s', e)
                 garment_b64 = processed_b64
 
+        # Askı / mandal: ürün metinle segmente edilip zemine bırakılır (kutuyla silinmez)
+        mask_cost = 0.0
+        if security_tags is None and auto_bg:
+            security_tags = self._detect_security_tags(session, garment_b64, design_details)
+            garment_b64, security_tags, mask_cost = self._mask_out_hanger(
+                session, garment_b64, security_tags, garment_text, design_details)
+
         # Mağaza alarmı / fiyat etiketi: ürüne kırpılmış görselde bul, maskeli AI ile sil
         erased = []
         garment_b64, erase_cost = self._remove_store_tags(session, garment_b64, security_tags,
                                                           design_details=design_details, erased=erased)
+        erase_cost = (erase_cost or 0.0) + mask_cost
 
         if cache_key:
             try:
@@ -1491,6 +1508,32 @@ class AiStudioSession(models.Model):
         garment_url = provider.upload_image(garment_b64)
         # garment_b64: try-on'a giden temizlenmiş ürün görseli (sonuç denetiminde referans)
         return garment_url, garment_b64, erase_cost
+
+    def _mask_out_hanger(self, session, image_b64, tags, garment_text='', design_details=''):
+        """Askı/mandal tespit edildiyse ürünü EVF-SAM ile segmente et, askıyı zemine bırak.
+
+        Returns:
+            (base64 görsel, etiket listesi, float cost) — görsel değişirse etiketler yeni görselde
+            yeniden taranır (kırpma koordinatları değiştirir)
+        """
+        from ..services.garment_preprocessor import HANGER_LABELS, apply_garment_mask, crop_to_content
+        if not image_b64 or not any(isinstance(t, dict) and t.get('label') in HANGER_LABELS for t in tags or []):
+            return image_b64, tags, 0.0
+        fal_key = session.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fal_api_key')
+        if not fal_key:
+            return image_b64, tags, 0.0
+        from ..services.fal_provider import FalProvider
+        try:
+            mask, cost = FalProvider(fal_key).segment_garment(image_b64, garment_text or 'garment')
+            masked = apply_garment_mask(image_b64, mask)
+        except Exception as e:
+            _logger.warning('Askı segmentasyonu başarısız, askı görselde kalıyor (session=%s): %s', session.id, e)
+            return image_b64, tags, 0.0
+        if not masked:
+            return image_b64, tags, cost or 0.0
+        masked = crop_to_content(masked)
+        _logger.info('Askı ürün görselinden ayrıldı (session=%s, ürün=%s)', session.id, garment_text or '-')
+        return masked, self._detect_security_tags(session, masked, design_details), cost or 0.0
 
     def _remove_store_tags(self, session, image_b64, tags=None, design_details='', erased=None):
         """Görseldeki mağaza etiketlerini sil (Bria/FLUX → iz denetimi → komşu kumaş dolgusu).
@@ -1510,7 +1553,7 @@ class AiStudioSession(models.Model):
             _logger.info('Ürün görselinde mağaza etiketi bulunamadı (session=%s)', session.id)
             return image_b64, 0.0
         from ..services.garment_preprocessor import (
-            HANGER_LABELS, inpaint_tags_base64, tag_box_to_pixels, texture_fill_tags_base64,
+            inpaint_tags_base64, tag_box_to_pixels, texture_fill_tags_base64,
         )
 
         def _valid_boxes(items):
@@ -1557,11 +1600,8 @@ class AiStudioSession(models.Model):
             except Exception as e:
                 _logger.warning('AI etiket silme başarısız, komşu kumaş dolgusu kullanılacak: %s', e)
         if erased is not None:
-            # Askının kancası/çubuğu ürünün dışında: "bu bölge düz kumaş" denmez; mandal yerleri denir
-            erased.extend({'box_2d': b['box_2d'], 'label': b['label']} for b in boxes
-                          if b['label'] != 'hanger')
-        if any(b['label'] in HANGER_LABELS for b in boxes):
-            _logger.info('Askı/mandal ürün görselinden siliniyor (session=%s)', session.id)
+            # Yalnız gerçekten silinen mağaza etiketleri (askı/mandal kutuları _valid_boxes'a girmez)
+            erased.extend({'box_2d': b['box_2d'], 'label': b['label']} for b in boxes)
         if result is not None:
             from ..services.garment_analyzer import erased_area_clean
             if erased_area_clean(gemini_key, result, boxes) is not False:
@@ -2332,6 +2372,7 @@ class AiStudioSession(models.Model):
                         source_image, provider, session, auto_bg=auto_bg, security_tags=None,
                         photo=gen.source_photo_id,
                         design_details=design_hint(cached_analysis) if photo_type == 'front' else '',
+                        garment_text=_garment_text(cached_analysis),
                     )
                     # Hazırlık maliyeti (etiket silme + ilk kez türetilen manken) bu üretime yazılır
                     prep_cost = (erase_cost or 0.0) + (mannequin_cost or 0.0)
@@ -2855,6 +2896,7 @@ class AiStudioSession(models.Model):
                     source_image, provider, session, auto_bg=auto_bg, security_tags=None,
                     photo=gen.source_photo_id,
                     design_details=design_hint(analysis) if photo_type == 'front' else '',
+                    garment_text=_garment_text(analysis),
                 )
                 own_photo = (gen.source_photo_id.photo_type or photo_type) == photo_type
                 keep_boxes, view_construction = self._garment_view_info(

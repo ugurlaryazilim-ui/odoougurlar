@@ -15,7 +15,7 @@ from ..services.fal_provider import FalProvider
 from ..services import garment_analyzer as analyzer_module
 from ..services.garment_analyzer import build_generation_prompt, detect_image_tags
 from ..services.garment_preprocessor import (
-    crop_to_content, inpaint_security_tags, preprocess_garment_image, tag_box_to_pixels,
+    apply_garment_mask, crop_to_content, inpaint_security_tags, preprocess_garment_image, tag_box_to_pixels,
     texture_fill_tags_base64,
 )
 from ..services.quality_checker import compute_quality_score, delta_e_ciede2000
@@ -376,16 +376,58 @@ class TestTagErasing(BaseCase):
         x1, y1, x2, y2 = rect
         self.assertTrue(x1 < 200 and y1 < 100 and x2 > 260 and y2 > 150, 'kutu dolgulu olmalı')
 
-    def test_hanger_boxes(self):
-        # Askı çubuğu geniş olabilir: etiket alan sınırına takılmaz
-        wide = {'box_2d': [0, 100, 200, 900], 'label': 'hanger', 'confidence': 0.9}
-        self.assertIsNotNone(tag_box_to_pixels(wide, 1000, 1000))
-        self.assertIsNone(tag_box_to_pixels(dict(wide, label='alarm_tag'), 1000, 1000))
-        # Doku dolgusu askı/mandal kutusuna uygulanmaz (zemini kumaşla boyardı)
+    def test_hanger_boxes_never_erased(self):
+        # Askı çubuğu maskesi bel bandını (düğme, yan tırnak, pile) yutuyordu: askı/mandal kutuyla silinmez
+        for label in ('hanger', 'hanger_clip'):
+            self.assertIsNone(tag_box_to_pixels({'box_2d': [40, 100, 90, 900], 'label': label,
+                                                 'confidence': 0.9}, 1200, 1700))
         img = Image.new('RGB', (400, 400), (90, 90, 90))
         src = _jpeg_b64(img)
         clip = [{'box_2d': [100, 400, 200, 500], 'label': 'hanger_clip', 'confidence': 0.9}]
         self.assertIs(texture_fill_tags_base64(src, clip), src)
+
+    def test_thin_tag_padding_limited_to_short_side(self):
+        # 1200x1700'de ince uzun etiket: dolgu kısa kenarı aşmaz
+        x1, y1, x2, y2 = tag_box_to_pixels({'box_2d': [100, 300, 115, 600], 'label': 'alarm_tag',
+                                             'confidence': 0.9}, 1200, 1700, pad_ratio=0.6)
+        self.assertLessEqual(y2 - y1, 3 * (int(0.115 * 1700) - int(0.1 * 1700)) + 1)
+
+    def test_garment_mask_whitens_hanger(self):
+        img = Image.new('RGB', (200, 300), 'white')
+        d = ImageDraw.Draw(img)
+        d.rectangle([20, 10, 180, 25], fill=(30, 30, 30))   # askı çubuğu
+        d.rectangle([40, 30, 160, 290], fill=(150, 120, 90))  # pantolon
+        mask = Image.new('L', (200, 300), 0)
+        ImageDraw.Draw(mask).rectangle([40, 30, 160, 290], fill=255)
+        buf = io.BytesIO()
+        mask.save(buf, 'PNG')
+        out = apply_garment_mask(_jpeg_b64(img), buf.getvalue())
+        res = Image.open(io.BytesIO(base64.b64decode(out))).convert('RGB')
+        self.assertGreater(min(res.getpixel((100, 17))), 240, 'askı beyaza boyanır')
+        self.assertLess(res.getpixel((100, 150))[2], 120, 'ürün korunur')
+        # Ürünü kaçıran maske reddedilir
+        tiny = Image.new('L', (200, 300), 0)
+        ImageDraw.Draw(tiny).rectangle([40, 30, 60, 40], fill=255)
+        buf = io.BytesIO()
+        tiny.save(buf, 'PNG')
+        self.assertIsNone(apply_garment_mask(_jpeg_b64(img), buf.getvalue()))
+
+    def test_segment_garment_excludes_hanger(self):
+        class FakeResp:
+            content = b'PNG'
+        with patch.object(fal_provider_module, 'fal_client') as fc, \
+                patch('requests.get', return_value=FakeResp()):
+            fc.upload.return_value = 'https://cdn/x'
+            fc.subscribe.return_value = {'image': {'url': 'https://mask'}}
+            data, cost = FalProvider('k').segment_garment(_jpeg_b64(Image.new('RGB', (50, 50))), 'pleated trousers')
+            app, = fc.subscribe.call_args.args
+            args = fc.subscribe.call_args.kwargs['arguments']
+        self.assertEqual(app, 'fal-ai/evf-sam')
+        self.assertEqual(args['prompt'], 'pleated trousers')
+        self.assertIn('hanger', args['negative_prompt'])
+        self.assertTrue(args['mask_only'])
+        self.assertEqual(data, b'PNG')
+        self.assertGreater(cost, 0)
 
     def test_crop_to_content(self):
         img = Image.new('RGB', (1000, 1600), 'white')
@@ -472,6 +514,29 @@ class TestTagErasing(BaseCase):
         with patch.object(analyzer_module, '_gemini_json', return_value=fake):
             res = analyzer_module.visual_quality_check('k', 'RESULT', reference_image='REF')
         self.assertEqual(res['fix'], '', 'olumsuz düzeltme cümlesi kullanılmaz')
+
+    def test_analysis_prompt_names_no_example_parts(self):
+        with patch.object(analyzer_module, '_gemini_json', return_value={'garmentType': 'Pantolon'}) as gj:
+            analyzer_module.analyze_garment(None, 'IMG', gemini_api_key='k')
+        prompt = gj.call_args.args[1].lower()
+        # Örnek parça adları deterministik analizde aynen kopyalanıp prompta giriyordu
+        for word in ('belt loop', 'zip fly', 'crease', 'slanted side pocket', 'five-button'):
+            self.assertNotIn(word, prompt, word)
+        self.assertTrue(gj.call_args.kwargs['deterministic'])
+
+    def test_design_hint_includes_waistband(self):
+        hint = analyzer_module.design_hint({'waistEn': 'flat waistband with side adjuster tabs', 'trimsEn': 'none'})
+        self.assertEqual(hint, 'flat waistband with side adjuster tabs')
+
+    def test_bbox_follows_image_label(self):
+        s = analyzer_module.keep_area_sentence([{'box_2d': [40, 120, 90, 200]}])
+        self.assertIn('Image 2<bbox>120 40 200 90</bbox>', s)
+
+    def test_visual_qc_sees_original_photo(self):
+        with patch.object(analyzer_module, '_gemini_json', return_value={'defects': []}) as gj:
+            analyzer_module.visual_quality_check('k', 'RESULT', reference_image='REF', original_image='ORIG')
+        self.assertEqual(gj.call_args.kwargs['extra_images'], ['REF', 'ORIG'])
+        self.assertIn('Image 3 is the original store photo', gj.call_args.args[1])
 
     def test_tag_prompt_knows_hanger_clips(self):
         with patch.object(analyzer_module, '_gemini_json', return_value={'securityTags': [
