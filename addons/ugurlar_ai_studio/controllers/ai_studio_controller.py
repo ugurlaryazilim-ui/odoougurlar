@@ -936,6 +936,12 @@ class AiStudioController(http.Controller):
 
                 gen_url = '/web/image/ai.studio.generation/%d/generated_image' % gen.id
                 uniq = int(gen.write_date.timestamp()) if gen.write_date else 0
+                # Modele giden temizlenmiş ürün görseli (alarm silinmiş mi, iz kalmış mı — teşhis)
+                clean_url = ''
+                photo = gen.source_photo_id
+                if photo and photo.garment_clean_key:
+                    clean_url = '/web/image/ai.studio.photo/%d/garment_clean_image?unique=%s' % (
+                        photo.id, (photo.garment_clean_key or '')[:12])
 
                 items.append({
                     'id': gen.id,
@@ -950,6 +956,7 @@ class AiStudioController(http.Controller):
                     'original_url': '%s?width=1200&unique=%d' % (orig_url, uniq) if orig_url else '',
                     'original_url_full': '%s?unique=%d' % (orig_url, uniq) if orig_url else '',
                     'generated_url': '%s?width=1200&unique=%d' % (gen_url, uniq),
+                    'garment_clean_url': clean_url,
                     'generated_url_full': '%s?unique=%d' % (gen_url, uniq),
                     'error_message': gen.error_message or '',
                     'quality_score': gen.quality_score,

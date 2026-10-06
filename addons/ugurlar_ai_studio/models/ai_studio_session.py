@@ -340,7 +340,7 @@ def _erase_result_tags(provider, image_b64, gemini_api_key, qc_boxes=None, passe
 
 
 # Ürün görseli temizleme (arka plan + etiket silme) mantığı değişince artırılır
-GARMENT_CLEAN_VERSION = 'v4'  # v4: kalem tipi (uzun beyaz) alarm fermuar ucu sanılmıyor
+GARMENT_CLEAN_VERSION = 'v5'  # v5: dar maske + silme izi denetimi + komşu kumaş dolgusu
 
 
 _SET_RE = re.compile(r'(?<!\w)(?:takim\w*|set|setler|co-ord|coord)(?!\w)')
@@ -388,7 +388,8 @@ def _get_mannequin_image(session, preset, photo_type, needs_bare_legs):
 
 def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', analysis=None,
                        category='', gen=None, base_cost=0.0, reference_image=None,
-                       photo_type='front', check_missing=True):
+                       photo_type='front', check_missing=True, view_construction=None,
+                       removed_boxes=None):
     """Kalite skoru + (ayar açıksa) Gemini görsel denetimi + görünür etiketi otomatik silme.
 
     Returns:
@@ -410,7 +411,8 @@ def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', anal
         hint = f"{hint} ({category})".strip()
         visual_qc = visual_quality_check(gemini_api_key, generated_b64, garment_hint=hint,
                                          reference_image=reference_image, design_details=details,
-                                         check_missing=check_missing)
+                                         check_missing=check_missing, view_construction=view_construction,
+                                         removed_boxes=removed_boxes)
 
         auto_fix = icp.get_param('ugurlar_ai_studio.auto_tag_fix', 'True') == 'True'
         if visual_qc and auto_fix:
@@ -423,13 +425,16 @@ def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', anal
                 # Silme sonrası yeniden denetle: etiket hâlâ duruyorsa reviewer görsün
                 fixed_qc = visual_quality_check(gemini_api_key, fixed_b64, garment_hint=hint,
                                                 reference_image=reference_image, design_details=details,
-                                                check_missing=check_missing) or visual_qc
+                                                check_missing=check_missing,
+                                                view_construction=view_construction,
+                                                removed_boxes=removed_boxes) or visual_qc
                 # Pantolon düzeltmesi görseli referanssız yeniden çizer: ürünü bozduysa atılır.
-                # Uydurma detay silmesi kusuru azaltmadıysa (yanlış yer / gerçek detay) atılır
+                # Uydurma detay silmesi kusuru artırdıysa (gerçek detay silindi) atılır; aynı kalırsa
+                # silinmiş hâli tutulur — denetim izli referansta parçayı "üründe var" sanabiliyor
                 old_fid = visual_qc.get('fidelity') or 0
                 new_fid = fixed_qc.get('fidelity') or 0
                 if ('pants_under_dress' in fixed_codes and new_fid > old_fid) or \
-                        ('detail_added' in fixed_codes and new_fid >= old_fid):
+                        ('detail_added' in fixed_codes and new_fid > old_fid):
                     _logger.warning('Otomatik düzeltme ürün detayını bozdu, orijinal korunuyor (gen=%s)',
                                     gen.id if gen else '?')
                     vals['cost'] = (base_cost or 0.0) + fix_cost
@@ -1545,13 +1550,15 @@ class AiStudioSession(models.Model):
                 garment_b64 = processed_b64
 
         # Mağaza alarmı / fiyat etiketi: ürüne kırpılmış görselde bul, maskeli AI ile sil
+        erased = []
         garment_b64, erase_cost = self._remove_store_tags(session, garment_b64, security_tags,
-                                                          design_details=design_details)
+                                                          design_details=design_details, erased=erased)
 
         if cache_key:
             try:
                 with photo.env.cr.savepoint():
-                    photo.write({'garment_clean_image': garment_b64, 'garment_clean_key': cache_key})
+                    photo.write({'garment_clean_image': garment_b64, 'garment_clean_key': cache_key,
+                                 'garment_tag_boxes': json.dumps(erased)})
             except Exception as ce:
                 _logger.warning('Temizlenmiş ürün görseli saklanamadı (photo=%s): %s', photo.id, ce)
 
@@ -1559,8 +1566,12 @@ class AiStudioSession(models.Model):
         # garment_b64: try-on'a giden temizlenmiş ürün görseli (sonuç denetiminde referans)
         return garment_url, garment_b64, erase_cost
 
-    def _remove_store_tags(self, session, image_b64, tags=None, design_details=''):
-        """Görseldeki mağaza etiketlerini sil (Bria/FLUX; olmazsa OpenCV Telea).
+    def _remove_store_tags(self, session, image_b64, tags=None, design_details='', erased=None):
+        """Görseldeki mağaza etiketlerini sil (Bria/FLUX → iz denetimi → komşu kumaş dolgusu).
+
+        Silme izi (bulanık şerit, leke) try-on modelinde fermuar / dikiş / parçaya dönüşüyordu:
+        AI silmeden sonra bölge Gemini ile denetlenir; iz kalmışsa aynı satırlardaki komşu kumaş
+        kopyalanır. erased: liste verilirse silinen kutular (box_2d) eklenir.
 
         Returns:
             (base64 görsel, float cost) — etiket yoksa / silinemezse girdinin kendisi
@@ -1572,11 +1583,18 @@ class AiStudioSession(models.Model):
         if not tags:
             _logger.info('Ürün görselinde mağaza etiketi bulunamadı (session=%s)', session.id)
             return image_b64, 0.0
-        fal_key = session.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fal_api_key')
+        from ..services.garment_preprocessor import inpaint_tags_base64, texture_fill_tags_base64
+        boxes = [{'box_2d': [round(float(v)) for v in t['box_2d'][:4]]} for t in tags]
+        if erased is not None:
+            erased.extend(boxes)
+        icp = session.env['ir.config_parameter'].sudo()
+        fal_key = icp.get_param('ugurlar_ai_studio.fal_api_key')
+        gemini_key = icp.get_param('ugurlar_ai_studio.gemini_api_key', '')
+        result, total_cost = None, 0.0
         if fal_key:
             from ..services.fal_provider import FalProvider
             provider = FalProvider(fal_key)
-            current, total_cost = image_b64, 0.0
+            current = image_b64
             try:
                 # Sil → yeniden tara; kalıntı varsa daha geniş maskeyle ikinci geçiş
                 for attempt, pad in enumerate((0.25, 0.6), start=1):
@@ -1590,18 +1608,84 @@ class AiStudioSession(models.Model):
                     tags = self._detect_security_tags(session, current, design_details)
                     if not tags:
                         _logger.info('Mağaza etiketi silindi ve doğrulandı (geçiş %d)', attempt)
-                        return current, total_cost
+                        break
                     _logger.warning('Silme sonrası %d etiket hâlâ görünüyor (geçiş %d)', len(tags), attempt)
                 if current is not image_b64:
-                    return current, total_cost
+                    result = current
             except Exception as e:
-                _logger.warning('AI etiket silme başarısız, OpenCV kullanılacak: %s', e)
-        from ..services.garment_preprocessor import inpaint_tags_base64
+                _logger.warning('AI etiket silme başarısız, komşu kumaş dolgusu kullanılacak: %s', e)
+        if result is not None:
+            from ..services.garment_analyzer import erased_area_clean
+            if erased_area_clean(gemini_key, result, boxes) is not False:
+                return result, total_cost
+            _logger.warning('Silme izi kaldı (session=%s), komşu kumaş dolgusu deneniyor', session.id)
+            try:
+                filled = texture_fill_tags_base64(image_b64, boxes)
+            except Exception as e:
+                _logger.warning('Komşu kumaş dolgusu başarısız: %s', e)
+                filled = image_b64
+            if filled is not image_b64 and erased_area_clean(gemini_key, filled, boxes) is not False:
+                _logger.info('Etiket bölgesi komşu kumaşla dolduruldu ve doğrulandı (session=%s)', session.id)
+                return filled, total_cost
+            _logger.warning('Komşu kumaş dolgusu da temiz değil; AI silme sonucu kullanılıyor (session=%s)',
+                            session.id)
+            return result, total_cost
+        # AI silme yok: komşu kumaş dolgusu (Telea bulanık leke bırakır, son çare)
+        try:
+            filled = texture_fill_tags_base64(image_b64, boxes)
+            if filled is not image_b64:
+                return filled, 0.0
+        except Exception as e:
+            _logger.warning('Komşu kumaş dolgusu başarısız: %s', e)
         try:
             return inpaint_tags_base64(image_b64, tags), 0.0
         except Exception as e:
             _logger.warning('OpenCV etiket silme başarısız: %s', e)
             return image_b64, 0.0
+
+    def _garment_view_info(self, session, photo, garment_b64, photo_type, own_photo=True):
+        """Prompt ve denetim için: etiketin silindiği kutular + bu açının gerçek yapısı.
+
+        Yapı (arka/yan, yalnız açının kendi fotoğrafı varsa) temizlenmiş görselden bir kez çıkarılır,
+        temizleme anahtarıyla fotoğrafta saklanır.
+
+        Returns:
+            (list keep_boxes, dict veya None view_construction)
+        """
+        if not photo:
+            return [], None
+        try:
+            boxes = json.loads(photo.garment_tag_boxes or '[]')
+        except (TypeError, ValueError):
+            boxes = []
+        vc = None
+        key = photo.garment_clean_key or ''
+        if photo_type in ('back', 'side') and own_photo and garment_b64:
+            try:
+                cached = json.loads(photo.view_construction or '{}')
+            except (TypeError, ValueError):
+                cached = {}
+            if key and cached.get('key') == key:
+                vc = cached
+            else:
+                from ..services.garment_analyzer import analyze_view_construction
+                gemini_key = session.env['ir.config_parameter'].sudo().get_param(
+                    'ugurlar_ai_studio.gemini_api_key', '')
+                try:
+                    vc = analyze_view_construction(gemini_key, garment_b64, view=photo_type) if gemini_key else None
+                except Exception as e:
+                    _logger.warning('Görünüm yapısı analizi başarısız (photo=%s): %s', photo.id, e)
+                    vc = None
+                if vc and key:
+                    try:
+                        with photo.env.cr.savepoint():
+                            photo.write({'view_construction': json.dumps(dict(vc, key=key))})
+                    except Exception as we:
+                        _logger.warning('Görünüm yapısı saklanamadı (photo=%s): %s', photo.id, we)
+            if vc:
+                _logger.info('Görünüm yapısı (%s, photo=%s): %s', photo_type, photo.id,
+                             'düz' if vc.get('plain') else vc.get('partsEn') or '?')
+        return (boxes if isinstance(boxes, list) else []), vc
 
     def _process_detail_generation(self, gen, session, provider, source_image, auto_bg, provider_type, preset):
         """Detay görseli: try-on sonucundan kırp; ayakkabı/çanta/aksesuarda ürün fotoğrafından.
@@ -2301,6 +2385,10 @@ class AiStudioSession(models.Model):
                     )
                     # Hazırlık maliyeti (etiket silme + ilk kez türetilen manken) bu üretime yazılır
                     prep_cost = (erase_cost or 0.0) + (mannequin_cost or 0.0)
+                    # Yan görünüm kendi fotoğrafı yoksa ön fotoğraftan üretilir: o açının yapısı bilinmez
+                    own_photo = (gen.source_photo_id.photo_type or photo_type) == photo_type
+                    keep_boxes, view_construction = self._garment_view_info(
+                        session, gen.source_photo_id, processed_garment_b64, photo_type, own_photo=own_photo)
 
                     # fal: ayardaki Seedream modeli (v4 Edit seed'li / v5 Pro Edit)
                     tryon_model = _get_tryon_model(env) if provider_type == 'fal' else 'tryon-v1.6'
@@ -2368,6 +2456,9 @@ class AiStudioSession(models.Model):
                             provider_type=provider_type,
                             scene_prompt=scene_prompt,
                             has_front_ref=bool(front_output_url),
+                            view_construction=view_construction,
+                            keep_boxes=keep_boxes,
+                            bbox_grounding=provider_type == 'fal' and 'v5' in (tryon_model or ''),
                         )
                         prompt_text = built_prompt.get('positive', '')
                         negative_prompt_text = built_prompt.get('negative', '')
@@ -2462,15 +2553,14 @@ class AiStudioSession(models.Model):
                             _renew_session_lease(cr, session_id, lease_owner)
                             cr.commit()
                         try:
-                            # Yan görünüm kendi fotoğrafı yoksa ön fotoğraftan üretilir: kaybolan detay aranmaz
-                            own_photo = (gen.source_photo_id.photo_type or photo_type) == photo_type
-
+                            # Yan görünüm kendi fotoğrafı yoksa (own_photo) kaybolan detay aranmaz
                             def _qc(img_b64, base_cost):
                                 return _run_quality_check(
                                     env, source_image, img_b64, gemini_api_key,
                                     analysis=cached_analysis, category=category_to_send, gen=gen,
                                     base_cost=base_cost, reference_image=processed_garment_b64,
                                     photo_type=photo_type, check_missing=own_photo,
+                                    view_construction=view_construction, removed_boxes=keep_boxes,
                                 )
 
                             def _regenerate():
@@ -2812,8 +2902,12 @@ class AiStudioSession(models.Model):
                 # Etiketler _prepare_garment_for_tryon içinde ayrı taramayla bulunur
                 garment_url, processed_b64, erase_cost = self._prepare_garment_for_tryon(
                     source_image, provider, session, auto_bg=auto_bg, security_tags=None,
-                    photo=gen.source_photo_id, design_details=design_hint(analysis),
+                    photo=gen.source_photo_id,
+                    design_details=design_hint(analysis) if photo_type == 'front' else '',
                 )
+                own_photo = (gen.source_photo_id.photo_type or photo_type) == photo_type
+                keep_boxes, view_construction = self._garment_view_info(
+                    session, gen.source_photo_id, processed_b64, photo_type, own_photo=own_photo)
                 if isinstance(analysis, dict):
                     gemini_cat = analysis.get('clothingCategory', '')
                     if gemini_cat in ('dress', 'one_piece', 'one-piece', 'full-body') and not analysis.get('isSet'):
@@ -2913,6 +3007,9 @@ class AiStudioSession(models.Model):
                         provider_type=provider_type,
                         scene_prompt=(session.scene_id.prompt_additions or '') if session.scene_id else '',
                         has_front_ref=bool(front_output_url),
+                        view_construction=view_construction,
+                        keep_boxes=keep_boxes,
+                        bbox_grounding=provider_type == 'fal' and 'v5' in _get_tryon_model(env),
                     )
                     prompt_text = built_prompt.get('positive', '') if isinstance(built_prompt, dict) else ''
                     negative_prompt_text = built_prompt.get('negative', '') if isinstance(built_prompt, dict) else ''
@@ -2972,14 +3069,13 @@ class AiStudioSession(models.Model):
 
                     # Kalite kontrol (+ Gemini görsel denetim + etiket silme)
                     try:
-                        own_photo = (gen.source_photo_id.photo_type or photo_type) == photo_type
-
                         def _qc(img_b64, base_cost):
                             return _run_quality_check(
                                 env, source_image, img_b64, gemini_api_key,
                                 analysis=analysis, category=category_to_send, gen=gen,
                                 base_cost=base_cost, reference_image=processed_b64,
                                 photo_type=photo_type, check_missing=own_photo,
+                                view_construction=view_construction, removed_boxes=keep_boxes,
                             )
 
                         def _regenerate():

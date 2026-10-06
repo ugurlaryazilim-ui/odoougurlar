@@ -151,9 +151,10 @@ def tag_box_to_pixels(item, w, h, pad_ratio=0.25, min_pad=10):
         return None
     if (px2 - px1) * (py2 - py1) > MAX_TAG_AREA_RATIO * w * h:
         return None  # etiket değil (cep, logo, baskı...)
-    pad_x = max(min_pad, int((px2 - px1) * pad_ratio))
-    pad_y = max(min_pad, int((py2 - py1) * pad_ratio))
-    return (max(0, px1 - pad_x), max(0, py1 - pad_y), min(w, px2 + pad_x), min(h, py2 + pad_y))
+    # Dolgu kutunun geometrik ortalamasına göre ve iki yönde eşit: kalem tipi (ince uzun) alarmda
+    # uzun kenarın %60'ı bel ortasında dikey bir şerit maskesine dönüşüyor, model şeridi fermuar sanıyordu
+    pad = max(min_pad, int(((px2 - px1) * (py2 - py1)) ** 0.5 * pad_ratio))
+    return (max(0, px1 - pad), max(0, py1 - pad), min(w, px2 + pad), min(h, py2 + pad))
 
 
 def protect_box_pixels(item, w, h, pad=4):
@@ -198,6 +199,62 @@ def crop_to_content(image_base64, margin_ratio=0.04, threshold=245):
     except Exception as e:
         _logger.warning('Ürüne kırpma başarısız: %s', e)
         return image_base64
+
+
+def texture_fill_tags_base64(image_base64, tag_boxes, pad_ratio=0.25):
+    """Etiket bölgesini aynı satırlardaki komşu kumaşla doldur (AI silme izli kaldıysa).
+
+    Bel bandı ribi, örgü, dikiş çizgileri yatay komşuda aynı devam eder: soldaki (yoksa sağdaki)
+    eşit genişlikte şerit kopyalanır, kenarlar yumuşak geçişle harmanlanır. Telea'nın aksine
+    bulanık leke bırakmaz — model lekeyi fermuar / parça sanmaz.
+    """
+    if Image is None or not tag_boxes:
+        return image_base64
+    img = Image.open(io.BytesIO(base64.b64decode(image_base64))).convert('RGB')
+    arr = np.array(img).astype(np.float32)
+    h, w = arr.shape[:2]
+    filled = 0
+    for item in tag_boxes:
+        rect = tag_box_to_pixels(item, w, h, pad_ratio=pad_ratio)
+        if not rect:
+            continue
+        x1, y1, x2, y2 = rect
+        bw = x2 - x1
+        if x1 - bw >= 0:
+            src = arr[y1:y2, x1 - bw:x1].copy()
+        elif x2 + bw <= w:
+            src = arr[y1:y2, x2:x2 + bw].copy()
+        else:
+            continue
+        # Kenarlarda dolgudan dar (≤8 px) yumuşak geçiş: dikiş izi kalmasın, etiket hiç karışmasın
+        ramp = max(1, min(bw // 4, 8))
+        alpha = np.ones(bw, np.float32)
+        alpha[:ramp] = np.linspace(0.0, 1.0, ramp, endpoint=False)
+        alpha[-ramp:] = np.minimum(alpha[-ramp:], np.linspace(1.0, 0.0, ramp))
+        alpha = alpha[None, :, None]
+        arr[y1:y2, x1:x2] = src * alpha + arr[y1:y2, x1:x2] * (1 - alpha)
+        filled += 1
+    if not filled:
+        return image_base64
+    _logger.info('Doku dolgusu: %d etiket bölgesi komşu kumaşla dolduruldu', filled)
+    return to_jpeg_base64(Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8)), quality=95)
+
+
+def crop_around_boxes(image_base64, boxes, context=1.5, min_side=160):
+    """Kutuların birleşimini çevresiyle (her yönde kutu boyunun context katı) kırp → JPEG base64."""
+    if Image is None or not boxes:
+        return None
+    img = Image.open(io.BytesIO(base64.b64decode(image_base64))).convert('RGB')
+    w, h = img.size
+    rects = [r for r in (tag_box_to_pixels(b, w, h, pad_ratio=0, min_pad=0) for b in boxes) if r]
+    if not rects:
+        return None
+    x1, y1 = min(r[0] for r in rects), min(r[1] for r in rects)
+    x2, y2 = max(r[2] for r in rects), max(r[3] for r in rects)
+    mx = max(int((x2 - x1) * context), min_side // 2)
+    my = max(int((y2 - y1) * context), min_side // 2)
+    crop = img.crop((max(0, x1 - mx), max(0, y1 - my), min(w, x2 + mx), min(h, y2 + my)))
+    return to_jpeg_base64(crop, quality=95)
 
 
 def inpaint_tags_base64(image_base64, tag_boxes):
