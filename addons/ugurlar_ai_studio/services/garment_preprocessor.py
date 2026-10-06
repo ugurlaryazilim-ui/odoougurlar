@@ -156,6 +156,23 @@ def tag_box_to_pixels(item, w, h, pad_ratio=0.25, min_pad=10):
     return (max(0, px1 - pad_x), max(0, py1 - pad_y), min(w, px2 + pad_x), min(h, py2 + pad_y))
 
 
+def protect_box_pixels(item, w, h, pad=4):
+    """Etikete eklenmiş korunacak ürün detayı kutuları (fermuar, düğme, logo...) → piksel dikdörtgenleri."""
+    rects = []
+    for box in (item.get('protect') or []) if isinstance(item, dict) else []:
+        try:
+            ymin, xmin, ymax, xmax = (float(v) for v in box[:4])
+        except (TypeError, ValueError):
+            continue
+        if max(ymin, xmin, ymax, xmax) > 1.0:
+            ymin, xmin, ymax, xmax = ymin / 1000.0, xmin / 1000.0, ymax / 1000.0, xmax / 1000.0
+        x1, y1 = max(0, int(xmin * w) - pad), max(0, int(ymin * h) - pad)
+        x2, y2 = min(w, int(xmax * w) + pad), min(h, int(ymax * h) + pad)
+        if x2 > x1 and y2 > y1:
+            rects.append((x1, y1, x2, y2))
+    return rects
+
+
 def crop_to_content(image_base64, margin_ratio=0.04, threshold=245):
     """Beyaz zeminli (arka planı kaldırılmış) ürün görselini ürüne kırp.
 
@@ -263,6 +280,11 @@ def inpaint_security_tags(img_bgr, tag_boxes):
         # maskeyi tam kapsayıcı dikdörtgen olarak çiziyoruz.
         cv2.rectangle(mask, (x1, y1), (x2, y2), 255, -1)
         tags_found += 1
+
+    # Etiketin değdiği ürün detayları (fermuar ucu, düğme, logo) silinmez
+    for item in tag_boxes:
+        for x1, y1, x2, y2 in protect_box_pixels(item, w, h):
+            cv2.rectangle(mask, (x1, y1), (x2, y2), 0, -1)
 
     if tags_found > 0:
         _logger.info('OpenCV inpainting: %d adet guvenlik/alarm etiketi gorselden siliniyor...', tags_found)
