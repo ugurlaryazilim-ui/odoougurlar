@@ -75,6 +75,13 @@ class ResConfigSettings(models.TransientModel):
         help='AI görsel denetim sonuçta mağaza/alarm etiketi veya elbise altında pantolon görürse, '
              'görsel tek seferlik Seedream düzenlemesiyle düzeltilir (sadece hatalı görsellerde ~$0.07-0.135).',
     )
+    ai_studio_fidelity_retry = fields.Boolean(
+        string='Doğruluk Hatasında Yeniden Üret',
+        default=True,
+        help='Denetim sonuçta üründe olmayan bir detay (fermuar, halka, cep...) ya da kaybolan bir detay '
+             'bulursa görsel bir kez yeniden üretilir ve daha doğru olan seçilir '
+             '(sadece hatalı görsellerde ~$0.07-0.135).',
+    )
     ai_studio_auto_bg_remove = fields.Boolean(
         string='Otomatik Arka Plan Kaldırma',
         default=True,
@@ -107,6 +114,7 @@ class ResConfigSettings(models.TransientModel):
     _AIS_DEFAULT_ON_TOGGLES = {
         'ai_studio_visual_qc': 'ugurlar_ai_studio.visual_qc',
         'ai_studio_auto_tag_fix': 'ugurlar_ai_studio.auto_tag_fix',
+        'ai_studio_fidelity_retry': 'ugurlar_ai_studio.fidelity_retry',
         'ai_studio_auto_bg_remove': 'ugurlar_ai_studio.auto_bg_remove',
     }
 

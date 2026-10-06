@@ -197,7 +197,8 @@ class FalProvider(AIProviderBase):
             }
             if 'seedream/v4' in endpoint:
                 arguments['max_images'] = 1
-                arguments['enhance_prompt_mode'] = 'standard'
+                # enhance_prompt_mode gönderilmez: model promptu kendisi genişletince ürüne
+                # olmayan detaylar (fermuar, cep, halka) ekleyebiliyor
                 if kwargs.get('seed'):
                     arguments['seed'] = int(kwargs['seed'])
             else:
