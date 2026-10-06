@@ -354,7 +354,8 @@ def _get_mannequin_image(session, preset, photo_type, needs_bare_legs):
 
 
 def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', analysis=None,
-                       category='', gen=None, base_cost=0.0, reference_image=None):
+                       category='', gen=None, base_cost=0.0, reference_image=None,
+                       photo_type='front', check_missing=True):
     """Kalite skoru + (ayar açıksa) Gemini görsel denetimi + görünür etiketi otomatik silme.
 
     Returns:
@@ -369,12 +370,14 @@ def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', anal
     if enabled and gemini_api_key:
         from ..services.garment_analyzer import design_hint, visual_quality_check
         analysis = analysis if isinstance(analysis, dict) else {}
-        details = design_hint(analysis)
+        # Analiz ön fotoğraftandır: ön detaylar yalnız ön görünümde "ürüne ait" sayılır
+        details = design_hint(analysis) if photo_type == 'front' else ''
         hint = ' '.join(filter(None, [analysis.get('primaryColorEn') or analysis.get('primaryColor'),
                                       analysis.get('garmentTypeEn') or analysis.get('garmentType')]))
         hint = f"{hint} ({category})".strip()
         visual_qc = visual_quality_check(gemini_api_key, generated_b64, garment_hint=hint,
-                                         reference_image=reference_image, design_details=details)
+                                         reference_image=reference_image, design_details=details,
+                                         check_missing=check_missing)
 
         auto_fix = icp.get_param('ugurlar_ai_studio.auto_tag_fix', 'True') == 'True'
         if visual_qc and auto_fix:
@@ -384,19 +387,72 @@ def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', anal
                 design_details=details)
             if fixed_b64:
                 _logger.info('Otomatik düzeltildi %s (gen=%s)', fixed_codes, gen.id if gen else '?')
-                generated_b64 = fixed_b64
-                vals['generated_image'] = fixed_b64
-                vals['cost'] = (base_cost or 0.0) + fix_cost
                 # Silme sonrası yeniden denetle: etiket hâlâ duruyorsa reviewer görsün
-                visual_qc = visual_quality_check(gemini_api_key, generated_b64, garment_hint=hint,
-                                                 reference_image=reference_image,
-                                                 design_details=details) or visual_qc
+                fixed_qc = visual_quality_check(gemini_api_key, fixed_b64, garment_hint=hint,
+                                                reference_image=reference_image, design_details=details,
+                                                check_missing=check_missing) or visual_qc
+                # Pantolon düzeltmesi görseli referanssız yeniden çizer: ürünü bozduysa atılır
+                if 'pants_under_dress' in fixed_codes and \
+                        (fixed_qc.get('fidelity') or 0) > (visual_qc.get('fidelity') or 0):
+                    _logger.warning('Otomatik düzeltme ürün detayını bozdu, orijinal korunuyor (gen=%s)',
+                                    gen.id if gen else '?')
+                    vals['cost'] = (base_cost or 0.0) + fix_cost
+                else:
+                    generated_b64 = fixed_b64
+                    vals['generated_image'] = fixed_b64
+                    vals['cost'] = (base_cost or 0.0) + fix_cost
+                    visual_qc = fixed_qc
     # Renk karşılaştırması temizlenmiş ürün görseliyle (ham mağaza fotoğrafında duvar/zemin var)
     qc = compute_quality_score(reference_image or source_image, generated_b64, visual_qc=visual_qc)
     vals.update({'quality_score': qc['score'], 'quality_details': qc['details']})
     if 'generated_image' in vals:
         vals['quality_details'] = 'Otomatik düzeltildi | ' + vals['quality_details']
+    # Çağıran _fidelity_retry ile yeniden üretim kararı verir; gen.write'a gitmeden çıkarılır
+    vals['_fidelity'] = (visual_qc or {}).get('fidelity') or 0
     return vals
+
+
+def _fidelity_retry(env, gen, gen_b64, qc_vals, first_cost, regenerate, check):
+    """Sonuç ürünü değiştirdiyse (eklenen / kaybolan detay) bir kez yeniden üret, daha doğrusunu seç.
+
+    regenerate() -> (b64, seed, cost); check(b64, base_cost) -> _run_quality_check değerleri.
+    first_cost: ilk denemenin üretim + hazırlık maliyeti (qc_vals'ta 'cost' yoksa).
+
+    Returns:
+        (b64, vals) — vals gen.write'a hazır ('_fidelity' çıkarılmış)
+    """
+    bad = qc_vals.pop('_fidelity', 0) or 0
+    first_b64 = qc_vals.get('generated_image') or gen_b64
+    enabled = env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fidelity_retry', 'True') == 'True'
+    if not bad or not enabled:
+        return first_b64, qc_vals
+    gen_id = gen.id if gen else '?'
+    _logger.info('Doğruluk: %d ürün kusuru bulundu, bir kez yeniden üretiliyor (gen=%s)', bad, gen_id)
+    first_total = qc_vals.get('cost', first_cost) or 0.0
+    try:
+        new_b64, new_seed, new_cost = regenerate()
+        new_vals = check(new_b64, new_cost or 0.0) if new_b64 else None
+    except Exception as e:
+        _logger.warning('Doğruluk yeniden üretimi başarısız (gen=%s): %s', gen_id, e)
+        return first_b64, qc_vals
+    if new_vals is None:
+        return first_b64, qc_vals
+    new_bad = new_vals.pop('_fidelity', 0) or 0
+    new_total = new_vals.get('cost', new_cost) or 0.0
+    _logger.info('Doğruluk: 1. deneme %d, 2. deneme %d kusur (gen=%s)', bad, new_bad, gen_id)
+    if new_bad < bad:
+        chosen = new_vals.get('generated_image') or new_b64
+        new_vals.update({
+            'generated_image': chosen,
+            'cost': first_total + new_total,
+            'quality_details': 'Doğruluk: 2. deneme seçildi | ' + (new_vals.get('quality_details') or ''),
+        })
+        if new_seed:
+            new_vals['seed'] = new_seed
+        return chosen, new_vals
+    qc_vals['cost'] = first_total + new_total
+    qc_vals['quality_details'] = 'Doğruluk: 2. deneme daha iyi değildi | ' + (qc_vals.get('quality_details') or '')
+    return first_b64, qc_vals
 
 
 def _get_extra_prompt_en(session):
@@ -2204,7 +2260,8 @@ class AiStudioSession(models.Model):
                     # security_tags=None verildiğinde _prepare_garment_for_tryon o görseli kendisi tarar.
                     garment_url, processed_garment_b64, erase_cost = self._prepare_garment_for_tryon(
                         source_image, provider, session, auto_bg=auto_bg, security_tags=None,
-                        photo=gen.source_photo_id, design_details=design_hint(cached_analysis),
+                        photo=gen.source_photo_id,
+                        design_details=design_hint(cached_analysis) if photo_type == 'front' else '',
                     )
                     # Hazırlık maliyeti (etiket silme + ilk kez türetilen manken) bu üretime yazılır
                     prep_cost = (erase_cost or 0.0) + (mannequin_cost or 0.0)
@@ -2299,7 +2356,7 @@ class AiStudioSession(models.Model):
                                      call_seed or 'yok', tryon_model, session.name)
 
                     # TRY-ON API ÇAĞRISI
-                    tryon_result = provider.virtual_tryon(
+                    tryon_kwargs = dict(
                         model_image_url=model_url,
                         garment_image_url=garment_url,
                         category=category_to_send,
@@ -2319,6 +2376,7 @@ class AiStudioSession(models.Model):
                         garment_type=(analysis_data or {}).get('garmentType', '') if isinstance(analysis_data, dict) else '',
                         on_enqueue=_make_enqueue_recorder(self.pool, gen.id),
                     )
+                    tryon_result = provider.virtual_tryon(**tryon_kwargs)
                     # on_enqueue ayrı transaction'da bu satırı güncelledi; REPEATABLE READ
                     # snapshot'ını yenilemezsek sonraki write serileştirme hatası verir
                     cr.commit()
@@ -2368,18 +2426,39 @@ class AiStudioSession(models.Model):
                             _renew_session_lease(cr, session_id, lease_owner)
                             cr.commit()
                         try:
-                            qc_vals = _run_quality_check(
-                                env, source_image, gen_b64, gemini_api_key,
-                                analysis=cached_analysis, category=category_to_send, gen=gen,
-                                base_cost=tryon_result.get('cost', 0.0) + prep_cost,
-                                reference_image=processed_garment_b64,
-                            )
+                            # Yan görünüm kendi fotoğrafı yoksa ön fotoğraftan üretilir: kaybolan detay aranmaz
+                            own_photo = (gen.source_photo_id.photo_type or photo_type) == photo_type
+
+                            def _qc(img_b64, base_cost):
+                                return _run_quality_check(
+                                    env, source_image, img_b64, gemini_api_key,
+                                    analysis=cached_analysis, category=category_to_send, gen=gen,
+                                    base_cost=base_cost, reference_image=processed_garment_b64,
+                                    photo_type=photo_type, check_missing=own_photo,
+                                )
+
+                            def _regenerate():
+                                if lease_owner:
+                                    _renew_session_lease(cr, session_id, lease_owner)
+                                cr.commit()
+                                # Aynı seed aynı sonucu verir (v4); ikinci kayıt cron kurtarmasına karışmasın
+                                res = provider.virtual_tryon(**dict(tryon_kwargs, seed=False, on_enqueue=None,
+                                                                    num_samples=1))
+                                cr.commit()
+                                b64, seed = self._download_tryon_result(res or {})
+                                return b64, seed, (res or {}).get('cost', 0.05) + prep_cost
+
+                            first_cost = tryon_result.get('cost', 0.0) + prep_cost
+                            qc_vals = _qc(gen_b64, first_cost)
+                            final_b64, qc_vals = _fidelity_retry(
+                                env, gen, gen_b64, qc_vals, first_cost, _regenerate, _qc)
                             gen.write(qc_vals)
-                            if qc_vals.get('generated_image'):
-                                gen_b64 = qc_vals['generated_image']
+                            if final_b64 is not gen_b64:
+                                gen_b64 = final_b64
                                 if photo_type == 'front':
-                                    # Arka/yan görünümler temizlenmiş ön görseli referans alsın
+                                    # Arka/yan görünümler temizlenmiş / seçilmiş ön görseli referans alsın
                                     front_result_b64 = gen_b64
+                                    front_seed = qc_vals.get('seed') or front_seed
                         except Exception as qe:
                             _logger.warning('Kalite kontrol hatası (gen=%s): %s', gen.id, qe)
 
@@ -2818,7 +2897,7 @@ class AiStudioSession(models.Model):
                 if lease_owner:
                     _renew_session_lease(cr, session_id, lease_owner)
                 cr.commit()
-                tryon_result = provider.virtual_tryon(
+                tryon_kwargs = dict(
                     model_image_url=model_url,
                     garment_image_url=garment_url,
                     category=category_to_send,
@@ -2838,6 +2917,7 @@ class AiStudioSession(models.Model):
                     garment_type=(analysis or {}).get('garmentType', '') if isinstance(analysis, dict) else '',
                     on_enqueue=_make_enqueue_recorder(self.pool, gen.id),
                 )
+                tryon_result = provider.virtual_tryon(**tryon_kwargs)
                 cr.commit()  # on_enqueue sonrası snapshot'ı yenile (bkz. ana döngü)
 
                 # ═══ SONUCU İNDİR (DRY helper) ═══
@@ -2856,12 +2936,29 @@ class AiStudioSession(models.Model):
 
                     # Kalite kontrol (+ Gemini görsel denetim + etiket silme)
                     try:
-                        gen_vals.update(_run_quality_check(
-                            env, source_image, gen_b64, gemini_api_key,
-                            analysis=analysis, category=category_to_send, gen=gen,
-                            base_cost=gen_vals['cost'],
-                            reference_image=processed_b64,
-                        ))
+                        own_photo = (gen.source_photo_id.photo_type or photo_type) == photo_type
+
+                        def _qc(img_b64, base_cost):
+                            return _run_quality_check(
+                                env, source_image, img_b64, gemini_api_key,
+                                analysis=analysis, category=category_to_send, gen=gen,
+                                base_cost=base_cost, reference_image=processed_b64,
+                                photo_type=photo_type, check_missing=own_photo,
+                            )
+
+                        def _regenerate():
+                            if lease_owner:
+                                _renew_session_lease(cr, session_id, lease_owner)
+                            cr.commit()
+                            res = provider.virtual_tryon(**dict(tryon_kwargs, seed=False, on_enqueue=None))
+                            cr.commit()
+                            b64, seed = self._download_tryon_result(res or {})
+                            return b64, seed, (res or {}).get('cost', 0.05) + prep_cost
+
+                        qc_vals = _qc(gen_b64, gen_vals['cost'])
+                        _final_b64, qc_vals = _fidelity_retry(
+                            env, gen, gen_b64, qc_vals, gen_vals['cost'], _regenerate, _qc)
+                        gen_vals.update(qc_vals)
                     except Exception as qe:
                         _logger.warning('Retry kalite kontrol hatası (gen=%s): %s', gen.id, qe)
 

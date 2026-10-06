@@ -765,19 +765,12 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         extra_prompt=(extra_prompt or '').strip(),
         set_pieces=set_pieces,
     )
-    if details and photo_type in ('front', 'side'):
-        if photo_type == 'front':
-            base_prompt += (f" Keep every design detail of Image 2 exactly as it is, in the same place, size and "
-                            f"color: {details}. Do not remove, simplify or redraw any of them.")
-        else:
-            base_prompt += f" Design details visible from this angle stay exactly as in Image 2 ({details})."
-    if trims:
-        if photo_type == 'front':
-            base_prompt += (f" Copy every button, zipper and trim exactly from Image 2: {trims}. Keep their number, "
-                            "size, color, material and position identical; do not restyle, replace or remove them.")
-        else:
-            base_prompt += (f" Buttons and trims visible from this angle look exactly as in Image 2 ({trims}): "
-                            "same size, color and material.")
+    # Detay listesi YALNIZ ön görünüme: analiz ön fotoğraftan yapılır; arka/yan prompta yazılan
+    # ön detaylar (fermuar, düğme, perçin) o açıya da çiziliyordu. Arka/yan Image 2'den kopyalar.
+    if photo_type == 'front':
+        keep = '; '.join(x for x in (trims, details) if x)
+        if keep:
+            base_prompt += f" Keep these exactly as in Image 2, in the same place, size and color: {keep}."
 
     # Prompt kilitleri (fotorealizm). Sahne seçiliyse stüdyo tarifi içerenler
     # sahneyle çelişeceği için atlanır.
@@ -832,7 +825,12 @@ VISUAL_QC_ISSUES = {
     'extra_limbs_or_person': 'Fazla uzuv veya ikinci kişi var',
     'text_or_watermark': 'Görselde yazı veya filigran var',
     'garment_mismatch': 'Kıyafet ürünle uyuşmuyor',
+    'detail_added': 'Üründe olmayan detay eklenmiş',
+    'detail_missing': 'Üründeki detay kaybolmuş',
 }
+
+# Ürünün kendisini değiştiren kusurlar: yeniden üretimle düzeltilir (silme ile değil)
+FIDELITY_CODES = ('detail_added', 'detail_missing', 'garment_mismatch')
 
 
 def mannequin_legs_covered(gemini_api_key, image):
@@ -855,20 +853,34 @@ def mannequin_legs_covered(gemini_api_key, image):
     return bool(parsed['legsCovered'])
 
 
+_FIDELITY_RULES = """- "detail_added": compare the garment in Image 1 with the product in Image 2 part by part. Report any garment part in Image 1 that the product does not have: zippers, buttons, rivets, eyelets, rings, buckles, pockets, seams, darts, slits, belts, straps, logos, prints, brooches, lace or embroidery. List each in "addedDetails" as a short Turkish name with its place, e.g. "arka belde fermuar".
+- "detail_missing": report any such part of the product in Image 2 that is missing or clearly changed in Image 1 (different count, shape, type or place, e.g. a zipper turned into an open neckline). List each in "missingDetails" as a short Turkish name with its place.
+Only compare parts visible from the angle of Image 1; differences in pose, lighting, folds or styling items (shoes, trousers of a top) are not defects.
+"""
+
+
 def visual_quality_check(gemini_api_key, generated_image, garment_hint='', timeout=30,
-                         reference_image=None, design_details=''):
+                         reference_image=None, design_details='', check_missing=True):
     """AI çıktısını Gemini ile gerçek üretim hatalarına karşı denetle.
 
     reference_image (temizlenmiş ürün görseli) verilirse karşılaştırmalı denetim yapılır:
     üründe olmayan etiket/yama/rozet "added_label" olarak bulunur. Etiket türü hataların
     konumu (box_2d, 0-1000) da döner; düzeltme bu kutularla maskeli silme yapar.
 
+    Referanslı denetim ayrıca ürünün kendisini karşılaştırır: eklenen (fermuar, halka, cep...) ve
+    kaybolan detaylar detail_added / detail_missing olur. check_missing=False: referans bu açının
+    fotoğrafı değilse (yan görünüm ön fotoğraftan) yalnız eklenenler aranır.
+
     Returns:
-        dict: {'issues': [Türkçe], 'codes': [kod], 'boxes': [{'box_2d', 'code'}]} veya None
+        dict: {'issues': [Türkçe], 'codes': [kod], 'boxes': [{'box_2d', 'code'}], 'fidelity': int} veya None
+        fidelity: ürünü değiştiren kusur sayısı (eklenen + kaybolan detay + uyuşmazlık)
     """
     if not gemini_api_key or not generated_image:
         return None
-    codes_doc = '\n'.join(f'- "{code}"' for code in VISUAL_QC_ISSUES)
+    skip = set() if reference_image else {'detail_added', 'detail_missing'}
+    if not check_missing:
+        skip.add('detail_missing')
+    codes_doc = '\n'.join(f'- "{code}"' for code in VISUAL_QC_ISSUES if code not in skip)
     reference_note = (
         "Image 1 is the AI-generated photo. Image 2 is the real product (reference).\n"
         if reference_image else "Image 1 is the AI-generated photo.\n"
@@ -883,13 +895,20 @@ Rules:
 - "bad_hands": extra, missing, fused or malformed fingers, or deformed hands.
 - "store_tag_visible": a security alarm tag, price tag, hangtag or tag pin attached to the garment.
 - "added_label": {"a label, patch, badge, logo, tag or small object on the garment in Image 1 that does not exist on the product in Image 2 (check the waistband, back, hem and seams carefully)." if reference_image else "never report this code."}
-For every "store_tag_visible" and "added_label" finding, add its bounding box on Image 1 as box_2d [ymin, xmin, ymax, xmax] normalized to 0-1000.
-Return JSON: {{"defects": ["code", ...], "boxes": [{{"code": "added_label", "box_2d": [ymin, xmin, ymax, xmax]}}]}}.
-Return {{"defects": [], "boxes": []}} if the photo is clean."""
+- "garment_mismatch": the garment in Image 1 is a different item from the product (different type, cut, neckline, length or color).
+{_FIDELITY_RULES if reference_image else ''}For every "store_tag_visible" and "added_label" finding, add its bounding box on Image 1 as box_2d [ymin, xmin, ymax, xmax] normalized to 0-1000.
+Return JSON: {{"defects": ["code", ...], "boxes": [{{"code": "added_label", "box_2d": [ymin, xmin, ymax, xmax]}}], "addedDetails": ["..."], "missingDetails": ["..."]}}.
+Return {{"defects": [], "boxes": [], "addedDetails": [], "missingDetails": []}} if the photo is clean."""
+    if reference_image and not check_missing:
+        prompt += ("\nImage 2 shows the product from a different angle than Image 1: never report "
+                   "detail_missing, and report detail_added only for hardware or decoration that clearly "
+                   "cannot belong to this product.")
     schema = {
         "type": "OBJECT",
         "properties": {
             "defects": {"type": "ARRAY", "items": {"type": "STRING", "enum": list(VISUAL_QC_ISSUES)}},
+            "addedDetails": {"type": "ARRAY", "items": {"type": "STRING"}},
+            "missingDetails": {"type": "ARRAY", "items": {"type": "STRING"}},
             "boxes": {"type": "ARRAY", "items": {"type": "OBJECT", "properties": {
                 "code": {"type": "STRING"},
                 "box_2d": {"type": "ARRAY", "items": {"type": "INTEGER"}},
@@ -901,10 +920,30 @@ Return {{"defects": [], "boxes": []}} if the photo is clean."""
                           deterministic=True, extra_images=[reference_image] if reference_image else None)
     if parsed is None:
         return None
-    codes = [c for c in (parsed.get('defects') or []) if c in VISUAL_QC_ISSUES]
+    codes = [c for c in (parsed.get('defects') or []) if c in VISUAL_QC_ISSUES and c not in skip]
     boxes = [b for b in (parsed.get('boxes') or [])
              if isinstance(b, dict) and isinstance(b.get('box_2d'), list) and len(b['box_2d']) == 4]
-    return {'codes': codes, 'issues': [VISUAL_QC_ISSUES[c] for c in codes], 'boxes': boxes}
+
+    def _items(key, code):
+        # ';' inceleme ekranında kusur ayırıcısı: madde metninde kullanılmaz
+        items = [str(i).replace(';', ',').strip() for i in (parsed.get(key) or []) if str(i).strip()]
+        if code in skip:
+            return []
+        if items and code not in codes:
+            codes.append(code)
+        return items if code in codes else []
+
+    added = _items('addedDetails', 'detail_added')
+    missing = _items('missingDetails', 'detail_missing')
+    issues = []
+    for c in codes:
+        extra = added if c == 'detail_added' else missing if c == 'detail_missing' else []
+        issues.append(VISUAL_QC_ISSUES[c] + (': ' + ', '.join(extra) if extra else ''))
+    fidelity = len(added) + len(missing)
+    fidelity += sum(1 for c in codes if c in ('detail_added', 'detail_missing') and not (added if c == 'detail_added' else missing))
+    fidelity += 1 if 'garment_mismatch' in codes else 0
+    return {'codes': codes, 'issues': issues, 'boxes': boxes, 'fidelity': fidelity,
+            'added': added, 'missing': missing}
 
 
 def _default_analysis():

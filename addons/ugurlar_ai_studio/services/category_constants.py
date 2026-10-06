@@ -183,9 +183,11 @@ DEFAULT_TOPS_SHOES = 'simple dark leather shoes'
 # Temiz ürün: mağaza etiketleri Image 2'den zaten silinmiş olarak gelir. Cümle nesne
 # adı İÇERMEZ — "no tags/labels" gibi olumsuzlamalar modele o nesneleri hatırlatıp
 # bel bandına etiket/yama çizdiriyordu. Yalnızca Image 2'deki detaylar istenir.
+# Değişmezlik: ürün detayları nesne nesne SAYILMAZ (sayılan nesneyi model başka yere de
+# çiziyordu: kotun arkasına ön fermuar/perçin). Tek, genel ve olumlu bir cümle.
 CLEAN_PRODUCT = (
-    "Show the garment as a clean, finished retail product with exactly the details "
-    "visible in Image 2 and nothing added."
+    "The garment is exactly the item in Image 2: same construction, closures, hardware, trims, logos "
+    "and embellishments, with nothing added and nothing removed. A clean, finished retail product."
 )
 
 _FRONT_INTRO = (
@@ -197,7 +199,7 @@ _BACK_INTRO = (
     "Image 1 shows the model from behind. Image 2 shows the back of the {garment} product. "
     "Back view of the same model, facing away from the camera, "
     "wearing the {desc} from Image 2 with its exact back design. "
-    "Take the back design only from Image 2; do not copy prints or details from the front. {front_ref}{hand_pose} "
+    "{front_ref}{hand_pose} "
 )
 _SIDE_INTRO = (
     "Image 1 shows the model. Image 2 shows the {garment} product. "
@@ -246,7 +248,7 @@ SEEDREAM_TEMPLATES = {
         "Styled with " + DEFAULT_TOP + " tucked in and the same shoes as in Image 1. {hand_pose} "
     ) + _OUTRO,
     ('bottoms', 'back'): _BACK_INTRO + (
-        "The back waistband and pockets match Image 2 exactly. Styled with " + DEFAULT_TOP + ". "
+        "Styled with " + DEFAULT_TOP + ". "
     ) + _OUTRO,
     ('bottoms', 'side'): _SIDE_INTRO + (
         "Styled with " + DEFAULT_TOP + ". "
@@ -284,9 +286,12 @@ SEEDREAM_TEMPLATES = {
 }
 
 # Back/side görünümlerde ön görünüm referansı (Image 3) varsa eklenen cümle
+# Image 3 yalnız kimlik / kombin / renk tutarlılığı içindir: ürün detayı (fermuar, düğme,
+# perçin) Image 3'ten alınırsa ön yüzün detayları arka görünüme taşınıyordu
 FRONT_REF_SENTENCE = (
-    "Image 3 is the finished front view: keep the same model, hair, outfit styling and shoes as Image 3, "
-    "and the same garment color, shade and fabric texture as in Image 3. "
+    "Image 3 is the finished front view: keep the same model, hair, outfit styling, shoes, lighting "
+    "and garment color as Image 3. All garment details for this angle come only from Image 2, "
+    "never from Image 3. "
 )
 
 
