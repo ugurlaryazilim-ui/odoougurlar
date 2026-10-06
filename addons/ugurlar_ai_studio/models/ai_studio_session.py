@@ -214,6 +214,7 @@ def _get_tryon_model(env):
 AUTO_FIX_INSTRUCTIONS = {
     'added_label': None,
     'store_tag_visible': None,
+    'detail_added': None,  # uydurulan fermuar/halka: kutusu çevredeki kumaşla doldurulur
     'pants_under_dress': (
         "Below the hem of the dress or skirt the model has natural bare legs and wears "
         "simple nude high-heeled pumps."
@@ -221,18 +222,43 @@ AUTO_FIX_INSTRUCTIONS = {
 }
 
 
-def _auto_fix_defects(env, generated_b64, codes, boxes=None, garment_hint='', design_details=''):
+# Uydurma detay silmesinde kutu üst sınırı (görsel alanının oranı): büyük bölge silinmez, yeniden üretilir
+ADDED_DETAIL_MAX_AREA = 0.06
+
+
+def _added_detail_boxes(boxes):
+    """Denetimin 'detail_added' kutularından silinebilecek kadar küçük olanlar."""
+    out = []
+    for b in boxes or []:
+        if b.get('code') != 'detail_added':
+            continue
+        try:
+            y1, x1, y2, x2 = (float(v) for v in b['box_2d'][:4])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if y2 > y1 and x2 > x1 and (y2 - y1) * (x2 - x1) <= ADDED_DETAIL_MAX_AREA * 1e6:
+            out.append({'box_2d': [y1, x1, y2, x2], 'label': 'alarm_tag', 'confidence': 1.0})
+    return out
+
+
+def _auto_fix_defects(env, generated_b64, codes, boxes=None, garment_hint='', design_details='',
+                      erase_added=True):
     """Denetimin bulduğu düzeltilebilir hataları gider.
 
     - Elbise altı pantolon: Seedream düzenlemesi (bütünsel değişiklik)
     - Görünür etiket: sonuçta kutular tespit edilip maskeli FLUX Fill ile silinir
       (maskesiz düzenleme bel bandındaki alarmı çoğu zaman tasarım sanıp korur);
       kutu bulunamazsa Seedream düzenlemesi yedek olarak denenir.
+    - Üründe olmayan detay (silinmiş alarmın yerine çizilen fermuar gibi): denetimin kutusu
+      maskeli silinir (erase_added=False: referans başka açıdan, silme yapılmaz).
 
     Returns:
         (bytes base64, float cost, list fixed_codes) veya (None, 0.0, [])
     """
     fixable = [c for c in codes if c in AUTO_FIX_INSTRUCTIONS]  # None = maskeli silme
+    added_boxes = _added_detail_boxes(boxes) if erase_added and 'detail_added' in fixable else []
+    if not added_boxes and 'detail_added' in fixable:
+        fixable.remove('detail_added')
     icp = env['ir.config_parameter'].sudo()
     fal_key = icp.get_param('ugurlar_ai_studio.fal_api_key')
     if not fixable or not fal_key:
@@ -266,6 +292,13 @@ def _auto_fix_defects(env, generated_b64, codes, boxes=None, garment_hint='', de
             if data:
                 current = data
                 fixed.extend(tag_codes)
+        # Pantolon düzeltmesi görseli yeniden çizdiyse denetimin kutuları geçersizdir
+        if added_boxes and 'pants_under_dress' not in fixed:
+            data, cost = provider.erase_regions(current, added_boxes, pad_ratio=0.15)
+            if data:
+                current, total_cost = base64.b64encode(_convert_to_jpeg(data)), total_cost + cost
+                fixed.append('detail_added')
+                _logger.info('Üründe olmayan %d detay silindi', len(added_boxes))
     except Exception as e:
         _logger.warning('Otomatik düzeltme başarısız (%s): %s', fixable, e)
     if not fixed:
@@ -307,7 +340,7 @@ def _erase_result_tags(provider, image_b64, gemini_api_key, qc_boxes=None, passe
 
 
 # Ürün görseli temizleme (arka plan + etiket silme) mantığı değişince artırılır
-GARMENT_CLEAN_VERSION = 'v3'  # v3: etiketin altındaki fermuar/düğme/logo silinmiyor
+GARMENT_CLEAN_VERSION = 'v4'  # v4: kalem tipi (uzun beyaz) alarm fermuar ucu sanılmıyor
 
 
 _SET_RE = re.compile(r'(?<!\w)(?:takim\w*|set|setler|co-ord|coord)(?!\w)')
@@ -384,16 +417,19 @@ def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', anal
             fixed_b64, fix_cost, fixed_codes = _auto_fix_defects(
                 env, generated_b64, visual_qc.get('codes', []), visual_qc.get('boxes'),
                 garment_hint=(gen.session_id.product_id.display_name or '') if gen else '',
-                design_details=details)
+                design_details=details, erase_added=check_missing)
             if fixed_b64:
                 _logger.info('Otomatik düzeltildi %s (gen=%s)', fixed_codes, gen.id if gen else '?')
                 # Silme sonrası yeniden denetle: etiket hâlâ duruyorsa reviewer görsün
                 fixed_qc = visual_quality_check(gemini_api_key, fixed_b64, garment_hint=hint,
                                                 reference_image=reference_image, design_details=details,
                                                 check_missing=check_missing) or visual_qc
-                # Pantolon düzeltmesi görseli referanssız yeniden çizer: ürünü bozduysa atılır
-                if 'pants_under_dress' in fixed_codes and \
-                        (fixed_qc.get('fidelity') or 0) > (visual_qc.get('fidelity') or 0):
+                # Pantolon düzeltmesi görseli referanssız yeniden çizer: ürünü bozduysa atılır.
+                # Uydurma detay silmesi kusuru azaltmadıysa (yanlış yer / gerçek detay) atılır
+                old_fid = visual_qc.get('fidelity') or 0
+                new_fid = fixed_qc.get('fidelity') or 0
+                if ('pants_under_dress' in fixed_codes and new_fid > old_fid) or \
+                        ('detail_added' in fixed_codes and new_fid >= old_fid):
                     _logger.warning('Otomatik düzeltme ürün detayını bozdu, orijinal korunuyor (gen=%s)',
                                     gen.id if gen else '?')
                     vals['cost'] = (base_cost or 0.0) + fix_cost
