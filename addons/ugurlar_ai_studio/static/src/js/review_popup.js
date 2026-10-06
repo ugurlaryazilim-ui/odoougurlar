@@ -208,6 +208,8 @@ async function _openReviewPopup(initialSessionId) {
     let lockLostWarned = false;
     // Elle etiket/alarm silme: işaretlenen kutular (görsele oranla 0-1) hangi üretime ait
     let eraseItemId = null;
+    // Sol panel: ham fotoğraf yerine modele giden temizlenmiş ürün görseli
+    let showClean = false;
     let eraseBoxes = [];
     let erasing = false;
 
@@ -368,10 +370,16 @@ async function _openReviewPopup(initialSessionId) {
                         <!-- Yan yana görseller -->
                         <div class="ais-rp-comparison ${item.is_excluded ? 'ais-rp-comparison-excluded' : ''}">
                             <div class="ais-rp-panel">
-                                <div class="ais-rp-panel-label">ORİJİNAL</div>
-                                <div class="ais-rp-img-wrap ais-rp-zoomable" data-zoom-src="${item.original_url_full}">
-                                    <img src="${item.original_url}" class="ais-rp-img" alt="Orijinal"/>
+                                <div class="ais-rp-panel-label">${showClean && item.garment_clean_url ? 'MODELE GİDEN ÜRÜN' : 'ORİJİNAL'}</div>
+                                <div class="ais-rp-img-wrap ais-rp-zoomable" data-zoom-src="${showClean && item.garment_clean_url ? item.garment_clean_url : item.original_url_full}">
+                                    <img src="${showClean && item.garment_clean_url ? item.garment_clean_url : item.original_url}" class="ais-rp-img" alt="Orijinal"/>
                                 </div>
+                                ${item.garment_clean_url ? `
+                                    <button class="ais-rp-erase-start" id="ais-rp-clean-toggle"
+                                            title="Alarmı silinmiş, arka planı kaldırılmış ve AI'a gönderilen ürün görseli">
+                                        ${showClean ? '📷 Orijinal Fotoğraf' : '🧾 Modele Giden Ürün'}
+                                    </button>
+                                ` : ''}
                             </div>
                             <div class="ais-rp-vs">VS</div>
                             <div class="ais-rp-panel">
@@ -544,6 +552,7 @@ async function _openReviewPopup(initialSessionId) {
         document.getElementById('ais-rp-prev')?.addEventListener('click', () => { currentIndex--; render(); });
         document.getElementById('ais-rp-next')?.addEventListener('click', () => { currentIndex++; render(); });
         document.getElementById('ais-rp-complete')?.addEventListener('click', complete);
+        document.getElementById('ais-rp-clean-toggle')?.addEventListener('click', () => { showClean = !showClean; render(); });
         document.getElementById('ais-rp-modal-bg')?.addEventListener('click', () => { showRejectModal = false; render(); });
         document.getElementById('ais-rp-modal-close')?.addEventListener('click', () => { showRejectModal = false; render(); });
         document.getElementById('ais-rp-submit-reject')?.addEventListener('click', submitReject);

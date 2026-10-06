@@ -184,10 +184,11 @@ DEFAULT_TOPS_SHOES = 'simple dark leather shoes'
 # adı İÇERMEZ — "no tags/labels" gibi olumsuzlamalar modele o nesneleri hatırlatıp
 # bel bandına etiket/yama çizdiriyordu. Yalnızca Image 2'deki detaylar istenir.
 # Değişmezlik: ürün detayları nesne nesne SAYILMAZ (sayılan nesneyi model başka yere de
-# çiziyordu: kotun arkasına ön fermuar/perçin). Tek, genel ve olumlu bir cümle.
+# çiziyordu: kotun arkasına ön fermuar/perçin). "closures, hardware" gibi genel nesne adları
+# da kapaması olmayan ürünün arkasına fermuar çizdiriyordu: cümlede hiç parça adı yok.
 CLEAN_PRODUCT = (
-    "The garment is exactly the item in Image 2: same construction, closures, hardware, trims, logos "
-    "and embellishments, with nothing added and nothing removed. A clean, finished retail product."
+    "The garment is exactly the item in Image 2, part for part: nothing added, nothing removed. "
+    "A clean, finished retail product."
 )
 
 _FRONT_INTRO = (
@@ -198,7 +199,7 @@ _FRONT_INTRO = (
 _BACK_INTRO = (
     "Image 1 shows the model from behind. Image 2 shows the back of the {garment} product. "
     "Back view of the same model, facing away from the camera, "
-    "wearing the {desc} from Image 2 with its exact back design. "
+    "wearing the {desc} from Image 2. "
     "{front_ref}{hand_pose} "
 )
 _SIDE_INTRO = (
@@ -244,13 +245,16 @@ SEEDREAM_TEMPLATES = {
 
     # ── BOTTOMS (pantolon / jean) ──
     ('bottoms', 'front'): _FRONT_INTRO + (
+        "The model wears the {garment} from Image 2 in place of the bottoms in Image 1. "
         "The full trouser length is visible from waistband to hem. "
         "Styled with " + DEFAULT_TOP + " tucked in and the same shoes as in Image 1. {hand_pose} "
     ) + _OUTRO,
     ('bottoms', 'back'): _BACK_INTRO + (
+        "The model wears the {garment} from Image 2 in place of the bottoms in Image 1. "
         "Styled with " + DEFAULT_TOP + ". "
     ) + _OUTRO,
     ('bottoms', 'side'): _SIDE_INTRO + (
+        "The model wears the {garment} from Image 2 in place of the bottoms in Image 1. "
         "Styled with " + DEFAULT_TOP + ". "
     ) + _OUTRO,
 

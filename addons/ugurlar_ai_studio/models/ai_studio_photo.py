@@ -52,6 +52,10 @@ class AiStudioPhoto(models.Model):
     # "Tekrar Dene" aynı fotoğraf için birefnet + etiket taraması + Bria'yı yeniden ödemesin.
     garment_clean_image = fields.Binary(string='Temizlenmiş Ürün Görseli', attachment=True, copy=False)
     garment_clean_key = fields.Char(copy=False, help='Kaynak görsel özeti + ayarlar; değişirse önbellek geçersiz')
+    # Temizlenmiş görselde etiketin silindiği kutular (JSON, box_2d 0-1000): prompt bölge sabitleme + denetim
+    garment_tag_boxes = fields.Text(copy=False)
+    # Bu açının gerçek yapısı (JSON {"key", "plain", "partsEn"}): arka/yan prompta olumlu yapı cümlesi
+    view_construction = fields.Text(copy=False)
     quality_score = fields.Float(
         string='Kalite Puanı',
         digits=(5, 1),

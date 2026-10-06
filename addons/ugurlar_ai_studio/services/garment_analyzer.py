@@ -598,7 +598,8 @@ _OPEN_FRONT_WORDS = ['yelek', 'vest', 'waistcoat', 'hırka', 'hirka', 'cardigan'
 
 def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
                             photo_type='front', outfit_consistency=None, provider_type='fashn',
-                            scene_prompt='', has_front_ref=True):
+                            scene_prompt='', has_front_ref=True, view_construction=None,
+                            keep_boxes=None, bbox_grounding=False):
     """Analiz sonuclarina gore AI gorsel uretim promptu olustur.
 
     Seedream v5 Pro: pozitif dilde, yalnızca İngilizce, 60-90 kelimelik
@@ -615,6 +616,9 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         provider_type: 'fashn', 'fal', vb.
         scene_prompt: Sahne tarifi; verilirse beyaz stüdyo arka planının yerini alır
         has_front_ref: back/side çağrısında ön görünüm sonucu (Image 3) gönderiliyor mu
+        view_construction: back/side — bu açının fotoğrafından {'plain', 'partsEn'} (analyze_view_construction)
+        keep_boxes: Image 2'de etiketin silindiği kutular (box_2d, 0-1000) — orası düz kumaş kalmalı
+        bbox_grounding: model prompt içi <bbox> koordinatını anlıyor mu (Seedream 5 Pro)
 
     Returns:
         dict: {'positive': str, 'negative': str}
@@ -772,6 +776,10 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         keep = '; '.join(x for x in (trims, details) if x)
         if keep:
             base_prompt += f" Keep these exactly as in Image 2, in the same place, size and color: {keep}."
+    else:
+        base_prompt += view_construction_sentence(view_construction, sub_type)
+    if bbox_grounding:
+        base_prompt += keep_area_sentence(keep_boxes)
 
     # Prompt kilitleri (fotorealizm). Sahne seçiliyse stüdyo tarifi içerenler
     # sahneyle çelişeceği için atlanır.
@@ -817,6 +825,37 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
 
 
 
+def view_construction_sentence(view_construction, sub_type=''):
+    """Arka/yan: ürünün bu açıdaki gerçek yapısı olumlu dille (model boşluğu fermuar vb. ile doldurmasın)."""
+    vc = view_construction if isinstance(view_construction, dict) else {}
+    parts = str(vc.get('partsEn') or '').strip().rstrip('.')
+    if parts:
+        return f" From this angle the garment in Image 2 has exactly: {parts}."
+    if vc.get('plain'):
+        what = 'fabric and waistband' if sub_type in ('bottoms', 'skirt', 'shorts') else 'fabric'
+        return f" From this angle the garment in Image 2 is plain: smooth, continuous {what} with only its seams."
+    return ''
+
+
+def keep_area_sentence(boxes, limit=3):
+    """Seedream 5 Pro bölge sabitleme: etiketin silindiği yer (Image 2) düz kumaş kalır.
+
+    box_2d [ymin, xmin, ymax, xmax] 0-1000 → <bbox>x1 y1 x2 y2</bbox> 0-999 (ByteDance biçimi).
+    """
+    out = []
+    for b in (boxes or [])[:limit]:
+        box = b.get('box_2d') if isinstance(b, dict) else b
+        try:
+            y1, x1, y2, x2 = (min(999, max(0, int(round(float(v))))) for v in box[:4])
+        except (TypeError, ValueError):
+            continue
+        if x2 > x1 and y2 > y1:
+            out.append(f"<bbox>{x1} {y1} {x2} {y2}</bbox>")
+    if not out:
+        return ''
+    return f" The area Image 2 {' and '.join(out)} is plain fabric like its surroundings."
+
+
 # Görsel denetim hata kodları → reviewer'a gösterilecek Türkçe metin
 VISUAL_QC_ISSUES = {
     'pants_under_dress': 'Elbise/etek altında pantolon veya tayt var',
@@ -832,6 +871,71 @@ VISUAL_QC_ISSUES = {
 
 # Ürünün kendisini değiştiren kusurlar: yeniden üretimle düzeltilir (silme ile değil)
 FIDELITY_CODES = ('detail_added', 'detail_missing', 'garment_mismatch')
+
+
+def erased_area_clean(gemini_api_key, image, boxes):
+    """Silinen etiket bölgesi çevresiyle aynı düz kumaş mı? (silme izi modelde fermuar / parçaya dönüşür)
+
+    Returns:
+        True (temiz) / False (iz var) / None (kontrol yapılamadı)
+    """
+    from .garment_preprocessor import crop_around_boxes
+    try:
+        crop = crop_around_boxes(image, boxes)
+    except Exception as e:
+        _logger.warning('Silme izi kırpılamadı: %s', e)
+        return None
+    if not crop:
+        return None
+    parsed = _gemini_json(
+        gemini_api_key,
+        "This is a close crop of a garment. A store tag was digitally removed from the middle of it. "
+        "Is the middle the same fabric as its surroundings, continuing the same texture, ribs, knit, "
+        "pattern and color? Answer clean false if there is any blur, smudge, shading patch, vertical or "
+        "horizontal line, seam, slit, hole, leftover pin or object that the surrounding fabric does not have. "
+        "Return JSON: {\"clean\": true}",
+        crop,
+        schema={"type": "OBJECT", "properties": {"clean": {"type": "BOOLEAN"}}, "required": ["clean"]},
+        timeout=20, deterministic=True,
+    )
+    if not parsed or 'clean' not in parsed:
+        return None
+    return bool(parsed['clean'])
+
+
+_VIEW_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "plain": {"type": "BOOLEAN"},
+        "partsEn": {"type": "STRING"},
+    },
+    "required": ["plain"],
+}
+
+
+def analyze_view_construction(gemini_api_key, image, view='back'):
+    """Ürünün bu açıdan (arka / yan) GERÇEKTEN görünen parçaları: prompta olumlu yapı cümlesi olarak girer.
+
+    Returns:
+        {'plain': bool, 'partsEn': str} veya None
+    """
+    side = 'back' if view == 'back' else 'side'
+    parsed = _gemini_json(
+        gemini_api_key,
+        f"This product photo shows the {side} of a garment. List only the construction parts clearly visible "
+        "on it: zippers, buttons, pockets, belt loops, slits, yokes, darts, drawstrings, logos, prints, "
+        "patches, labels, embroidery or other decoration. Ordinary seams, hems, cuffs and a plain waistband "
+        "or neckline do not count. Ignore blur, smudges or retouching marks: they are not parts. "
+        "plain is true when there is none. partsEn: short English list with places, e.g. "
+        "\"two patch pockets on the seat, five belt loops\"; empty when plain. "
+        "Return JSON: {\"plain\": true, \"partsEn\": \"\"}",
+        image, schema=_VIEW_SCHEMA, timeout=25, deterministic=True,
+    )
+    if not parsed or 'plain' not in parsed:
+        return None
+    parts = str(parsed.get('partsEn') or '').strip().rstrip('.')
+    plain = bool(parsed['plain']) and not parts
+    return {'plain': plain, 'partsEn': '' if plain else parts}
 
 
 def mannequin_legs_covered(gemini_api_key, image):
@@ -861,7 +965,8 @@ Only compare parts visible from the angle of Image 1; differences in pose, light
 
 
 def visual_quality_check(gemini_api_key, generated_image, garment_hint='', timeout=30,
-                         reference_image=None, design_details='', check_missing=True):
+                         reference_image=None, design_details='', check_missing=True,
+                         view_construction=None, removed_boxes=None):
     """AI çıktısını Gemini ile gerçek üretim hatalarına karşı denetle.
 
     reference_image (temizlenmiş ürün görseli) verilirse karşılaştırmalı denetim yapılır:
@@ -871,6 +976,8 @@ def visual_quality_check(gemini_api_key, generated_image, garment_hint='', timeo
     Referanslı denetim ayrıca ürünün kendisini karşılaştırır: eklenen (fermuar, halka, cep...) ve
     kaybolan detaylar detail_added / detail_missing olur. check_missing=False: referans bu açının
     fotoğrafı değilse (yan görünüm ön fotoğraftan) yalnız eklenenler aranır.
+    view_construction: bu açının gerçek yapısı; removed_boxes: Image 2'de etiketin silindiği yerler
+    (silme izi referansta da görünebilir — denetim onu "ürünün parçası" sanmasın).
 
     Returns:
         dict: {'issues': [Türkçe], 'codes': [kod], 'boxes': [{'box_2d', 'code'}], 'fidelity': int} veya None
@@ -900,6 +1007,19 @@ Rules:
 {_FIDELITY_RULES if reference_image else ''}For every "store_tag_visible" and "added_label" finding{' and every added detail (each separately, code "detail_added")' if reference_image else ''}, add its bounding box on Image 1 as box_2d [ymin, xmin, ymax, xmax] normalized to 0-1000.
 Return JSON: {{"defects": ["code", ...], "boxes": [{{"code": "added_label", "box_2d": [ymin, xmin, ymax, xmax]}}], "addedDetails": ["..."], "missingDetails": ["..."]}}.
 Return {{"defects": [], "boxes": [], "addedDetails": [], "missingDetails": []}} if the photo is clean."""
+    if reference_image:
+        vc = view_construction if isinstance(view_construction, dict) else {}
+        if vc.get('partsEn'):
+            prompt += f"\nFrom this angle the product has only: {vc['partsEn']}."
+        elif vc.get('plain'):
+            prompt += ("\nFrom this angle the product is plain: no zipper, buttons, pockets or decoration, "
+                       "only its seams. Any such part on the garment in Image 1 is detail_added.")
+        spots = [b.get('box_2d') if isinstance(b, dict) else b for b in (removed_boxes or [])][:3]
+        spots = [list(map(int, s[:4])) for s in spots if isinstance(s, (list, tuple)) and len(s) >= 4]
+        if spots:
+            prompt += (f"\nIn Image 2 a store tag was removed at {spots} (box_2d); that spot of the product is "
+                       "plain fabric even if a faint mark remains. Anything drawn at the matching spot of the worn "
+                       "garment in Image 1 (zipper, pull, seam, slit, patch or object) is detail_added.")
     if reference_image and not check_missing:
         prompt += ("\nImage 2 shows the product from a different angle than Image 1: never report "
                    "detail_missing, and report detail_added only for hardware or decoration that clearly "
