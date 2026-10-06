@@ -194,6 +194,7 @@ _ANALYSIS_SCHEMA = {
         "sleeveType": {"type": "STRING"},
         "closureEn": {"type": "STRING"},
         "trimsEn": {"type": "STRING"},
+        "designDetailsEn": {"type": "STRING"},
         "isSet": {"type": "BOOLEAN"},
         "setTopEn": {"type": "STRING"},
         "setBottomEn": {"type": "STRING"},
@@ -233,8 +234,9 @@ OFFICIAL STORE PRODUCT INFORMATION (ground truth for the category):
 
     prompt = f"""You are a senior fashion merchandiser analyzing a product photo.
 Ignore hangers, clips, hands, mannequins and any store tags; describe only the garment's own design.
+A store hangtag may hang over the garment's zipper, buttons or logo: still describe those parts of the garment.
 {context_section}
-If the garment hangs on a hanger, the front neckline may reveal the inside of the back panel (lining, back label, keyhole). Ignore anything seen through the neck opening and assume a clean standard front neckline.
+If the garment hangs on a hanger, the front neckline may reveal the inside of the back panel (lining, back label, keyhole). Ignore anything seen through the neck opening and assume a clean standard front neckline, unless the garment itself has lace, mesh, net or sheer panels there: those are part of the design and go into designDetailsEn.
 
 Category rules:
 - Skirts, shorts, trousers, jeans → 'bottoms'.
@@ -261,6 +263,7 @@ Return JSON:
   "sleeveType": "sleeve type if visible (e.g. uzun kollu, kolsuz, askılı)",
   "closureEn": "the garment's own front fastening exactly as seen, e.g. 'single metal ring clasp at the front, no buttons', 'five-button front', 'two-button v placket', 'concealed zipper', 'open front, no fastening'; empty only when there is no fastening at all",
   "trimsEn": "every button, snap, toggle, buckle, zipper pull, metal ring or rivet visible on the garment with its count, color, material, size and position, e.g. 'two large dark brown horn buttons on the v placket, two small matching buttons on each cuff'; empty only if there are none",
+  "designDetailsEn": "every decorative design element of the garment with its position, color and size: logos, emblems, brooches, appliques, embroidery, stones, beads, studs, lace, mesh, net or sheer panels, cut-outs, contrast stripes or piping, pleats, ruffles, zips used as decoration, e.g. 'black diamond mesh panel across the shoulders and at both cuffs', 'silver jewelled brooch on the left chest', 'small embroidered logo on the left chest'; empty only if there are none",
   "isSet": true or false (a matching top and bottom sold together as one product),
   "setTopEn": "for a set: the top piece, e.g. 'cream crew-neck sweatshirt'; otherwise empty",
   "setBottomEn": "for a set: the bottom piece, e.g. 'cream wide-leg trousers'; otherwise empty",
@@ -294,7 +297,8 @@ _TAG_SCHEMA = {
                 "properties": {
                     "box_2d": {"type": "ARRAY", "items": {"type": "INTEGER"}},
                     "label": {"type": "STRING",
-                              "enum": ["alarm_tag", "price_tag", "hangtag", "tag_pin", "design_label"]},
+                              "enum": ["alarm_tag", "price_tag", "hangtag", "tag_pin", "design_label",
+                                       "garment_detail"]},
                     "confidence": {"type": "NUMBER"},
                 },
                 "required": ["box_2d", "label"],
@@ -310,7 +314,8 @@ _TAG_PROMPT = """This garment was photographed inside a clothing store. Find eve
 - hangtag: brand hangtag hanging on a string, plastic fastener or safety pin
 - tag_pin: the pin, plastic loop or string that attaches a tag
 Also report the garment's own sewn-flat design elements that look similar (woven brand patch, leather patch) as "design_label", but ONLY when you are sure they are stitched into the garment. If you are unsure whether a small rectangle on the waistband is a store alarm tag or a brand patch, report it as "alarm_tag".
-Never report buttons, rivets, zipper pulls, buckles, drawstrings, prints, or metal rings, hoops, clasps, hooks, brooches, chains and eyelets: store alarm tags are plastic, metal hardware is part of the garment design.
+Never report buttons, zippers, zipper pulls, rivets, buckles, drawstrings, prints, logos, embroidery, appliques, stones, beads, lace or mesh panels, or metal rings, hoops, clasps, hooks, brooches, chains and eyelets as tags: store alarm tags are plastic, metal hardware is part of the garment design.
+When a store tag or its string touches, covers or hangs over one of these garment parts (for example a hangtag hanging over the zipper pull), also report that garment part with its own tight box as "garment_detail" so it is kept.
 Include the whole object and its attachment in the box. Give each item a confidence from 0.0 to 1.0 and report anything at least 50% likely.
 box_2d is [ymin, xmin, ymax, xmax] normalized to 0-1000.
 Return JSON: {"securityTags": [{"box_2d": [ymin, xmin, ymax, xmax], "label": "alarm_tag", "confidence": 0.9}]}
@@ -324,22 +329,49 @@ _RESULT_TAG_PROMPT = """This is an AI-generated e-commerce photo of a model wear
 - hangtag: tag hanging on a string or fastener
 - tag_pin: a pin, plastic loop, string, clip or small dangling object attached to the fabric (very often at the waistband, belt loops, back pockets, hem or side seam)
 Report the garment's own stitched elements (brand patch, woven label) as "design_label" only when you are sure they are sewn flat into the garment.
-Never report buttons, rivets, zipper pulls, belt buckles, drawstrings, prints, or metal rings, hoops, clasps, hooks, brooches, chains and eyelets that belong to the garment design.
+Never report buttons, zippers, zipper pulls, rivets, belt buckles, drawstrings, prints, logos, embroidery, appliques, stones, beads, lace or mesh panels, or metal rings, hoops, clasps, hooks, brooches, chains and eyelets that belong to the garment design.
 Include the whole object and its attachment in the box. Give each item a confidence from 0.0 to 1.0 and report anything at least 50% likely.
 box_2d is [ymin, xmin, ymax, xmax] normalized to 0-1000.
 Return JSON: {"securityTags": [{"box_2d": [ymin, xmin, ymax, xmax], "label": "tag_pin", "confidence": 0.9}]}
 Return {"securityTags": []} if there is none."""
 
 
-def detect_image_tags(api_key, image_url, gemini_api_key=None, generated=False, garment_hint=''):
+def design_hint(analysis):
+    """Analizdeki ürünün kendi detayları (kapama, düğme, logo, broş, dantel...): silinmesin diye tespite verilir."""
+    if not isinstance(analysis, dict):
+        return ''
+    parts = [str(analysis.get(k) or '').strip().rstrip('.')
+             for k in ('closureEn', 'trimsEn', 'designDetailsEn', 'graphicDescriptionEn')]
+    return '; '.join(p for p in parts if p)
+
+
+def _overlap_ratio(inner, outer):
+    """inner kutusunun outer ile kesişen alanı / inner alanı (box_2d, 0-1000)."""
+    try:
+        iy1, ix1, iy2, ix2 = (float(v) for v in inner[:4])
+        oy1, ox1, oy2, ox2 = (float(v) for v in outer[:4])
+    except (TypeError, ValueError):
+        return 0.0
+    area = max(0.0, iy2 - iy1) * max(0.0, ix2 - ix1)
+    if not area:
+        return 0.0
+    inter = max(0.0, min(iy2, oy2) - max(iy1, oy1)) * max(0.0, min(ix2, ox2) - max(ix1, ox1))
+    return inter / area
+
+
+def detect_image_tags(api_key, image_url, gemini_api_key=None, generated=False, garment_hint='',
+                      design_details=''):
     """Kıyafet görselindeki mağaza alarmı / fiyat etiketlerini tespit eder.
 
     generated=True: AI sonucu (manken üzerinde) için ayrı istem — eklenen pim/klips/sarkan
     nesneleri de arar. garment_hint: ürün adı ("Halka Detaylı ..."): adında geçen tasarım
-    detayı alarm sanılıp silinmesin.
+    detayı alarm sanılıp silinmesin. design_details: analizdeki ürün detayları (fermuar, logo, broş...).
+
+    Etiketin değdiği ürün detayları (askı etiketi altındaki fermuar ucu gibi) etikete 'protect'
+    kutuları olarak eklenir; silme maskesi bu kutuları dışarıda bırakır.
 
     Returns:
-        list: [{'box_2d': [ymin, xmin, ymax, xmax], 'label': str, 'confidence': float}] veya []
+        list: [{'box_2d': [ymin, xmin, ymax, xmax], 'label': str, 'confidence': float, 'protect': [box_2d]}] veya []
     """
     if not image_url or not gemini_api_key:
         return []
@@ -347,6 +379,9 @@ def detect_image_tags(api_key, image_url, gemini_api_key=None, generated=False, 
     if garment_hint:
         prompt += (f'\nThe product is: "{garment_hint}". Design details named in the product name '
                    '(e.g. a ring, buckle, chain or brooch) belong to the garment: never report them.')
+    if design_details:
+        prompt += (f'\nThe garment\'s own design details: {design_details}. They belong to the garment: never '
+                   'report them as tags; if a store tag touches or hangs over one, report it as "garment_detail".')
     parsed = _gemini_json(gemini_api_key, prompt, image_url, schema=_TAG_SCHEMA,
                           timeout=25, deterministic=True)
     tags = (parsed or {}).get('securityTags') or []
@@ -354,12 +389,22 @@ def detect_image_tags(api_key, image_url, gemini_api_key=None, generated=False, 
             and len(t['box_2d']) == 4]
     # Ürünün kendi dikili etiketi silinmez; listede tutulursa "silme sonrası hâlâ görünüyor"
     # sanılıp boşuna yeniden taranıyordu (fitilli örgü onlarca design_label olarak dönebiliyor)
-    design = sum(1 for t in tags if t.get('label') == 'design_label')
-    tags = [t for t in tags if t.get('label') != 'design_label']
-    if tags or design:
-        _logger.info('detect_image_tags: %d etiket tespit edildi (%s)%s',
+    keep = [t for t in tags if t.get('label') in ('design_label', 'garment_detail')]
+    tags = [t for t in tags if t.get('label') not in ('design_label', 'garment_detail')]
+    # Ürün detayı etiketin altında / yanındaysa silme maskesinden çıkarılır (fermuar, düğme, logo...).
+    # Etiketin çoğunu kaplayan "detay" kutusu korunmaz: alarm yanlışlıkla detay sanılmış olabilir.
+    protected = 0
+    for t in tags:
+        guard = [k['box_2d'] for k in keep
+                 if _overlap_ratio(k['box_2d'], t['box_2d']) > 0 and _overlap_ratio(t['box_2d'], k['box_2d']) < 0.6]
+        if guard:
+            t['protect'] = guard
+            protected += len(guard)
+    if tags or keep:
+        _logger.info('detect_image_tags: %d etiket tespit edildi (%s)%s%s',
                      len(tags), ', '.join(str(t.get('label')) for t in tags),
-                     ' — %d tasarım etiketi yok sayıldı' % design if design else '')
+                     ' — %d ürün detayı yok sayıldı' % len(keep) if keep else '',
+                     ', %d detay silmeden korunuyor' % protected if protected else '')
     return tags
 
 
@@ -612,6 +657,8 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     set_pieces = f"{set_top} and {set_bottom}"
     # Düğme / kopça / fermuar: tarif edilmezse model rengini, malzemesini ve sayısını uyduruyor
     trims = str(analysis.get('trimsEn') or '').strip().rstrip('.')
+    # Logo, broş, dantel/file panel, nakış...: tarif edilmezse model sadeleştirip siliyordu
+    details = str(analysis.get('designDetailsEn') or '').strip().rstrip('.')
 
     # ═══ FASHN PROVIDER (minimal prompt, kendi try-on modeli) ═══
     if provider_type == 'fashn':
@@ -718,10 +765,16 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         extra_prompt=(extra_prompt or '').strip(),
         set_pieces=set_pieces,
     )
+    if details and photo_type in ('front', 'side'):
+        if photo_type == 'front':
+            base_prompt += (f" Keep every design detail of Image 2 exactly as it is, in the same place, size and "
+                            f"color: {details}. Do not remove, simplify or redraw any of them.")
+        else:
+            base_prompt += f" Design details visible from this angle stay exactly as in Image 2 ({details})."
     if trims:
         if photo_type == 'front':
-            base_prompt += (f" Copy every button and trim exactly from Image 2: {trims}. Keep their number, size, "
-                            "color, material and position identical; do not restyle or replace them.")
+            base_prompt += (f" Copy every button, zipper and trim exactly from Image 2: {trims}. Keep their number, "
+                            "size, color, material and position identical; do not restyle, replace or remove them.")
         else:
             base_prompt += (f" Buttons and trims visible from this angle look exactly as in Image 2 ({trims}): "
                             "same size, color and material.")
@@ -803,7 +856,7 @@ def mannequin_legs_covered(gemini_api_key, image):
 
 
 def visual_quality_check(gemini_api_key, generated_image, garment_hint='', timeout=30,
-                         reference_image=None):
+                         reference_image=None, design_details=''):
     """AI çıktısını Gemini ile gerçek üretim hatalarına karşı denetle.
 
     reference_image (temizlenmiş ürün görseli) verilirse karşılaştırmalı denetim yapılır:
@@ -822,6 +875,7 @@ def visual_quality_check(gemini_api_key, generated_image, garment_hint='', timeo
     )
     prompt = f"""You are a strict QA reviewer for AI-generated fashion e-commerce photos.
 {reference_note}The product being modeled: {garment_hint or 'a garment'}.
+{f"The product's own design details (never report them as added_label or store_tag_visible): {design_details}." if design_details else ''}
 Check Image 1 ONLY for these defects and report a code only when it is clearly present:
 {codes_doc}
 Rules:

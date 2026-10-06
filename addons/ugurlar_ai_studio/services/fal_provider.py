@@ -341,7 +341,7 @@ class FalProvider(AIProviderBase):
         import io
         import requests as req_lib
         from PIL import Image, ImageDraw
-        from .garment_preprocessor import tag_box_to_pixels
+        from .garment_preprocessor import protect_box_pixels, tag_box_to_pixels
 
         raw = image_base64.decode('ascii') if isinstance(image_base64, bytes) else image_base64
         original = Image.open(io.BytesIO(base64.b64decode(raw))).convert('RGB')
@@ -359,6 +359,10 @@ class FalProvider(AIProviderBase):
                 drawn += 1
         if not drawn:
             return None, 0.0
+        # Etiketin değdiği ürün detayları (fermuar ucu, düğme, logo) maskeden çıkarılır
+        for item in tag_boxes or []:
+            for rect in protect_box_pixels(item, w, h):
+                draw.rectangle(rect, fill=0)
 
         img_buf, mask_buf = io.BytesIO(), io.BytesIO()
         img.save(img_buf, format='JPEG', quality=95)
