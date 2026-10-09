@@ -238,6 +238,7 @@ OFFICIAL STORE PRODUCT INFORMATION (ground truth for the category):
     prompt = f"""You are a senior fashion merchandiser analyzing a product photo.
 Ignore hangers, hanger clips, hands, mannequins and any store tags; describe only the garment's own design.
 Store security tags (plastic discs, sticks, capsules or pencil-shaped ink tags pinned through the fabric), price tags and the clips of a trouser hanger are NOT part of the garment: never describe them as buttons, zippers, tabs or any other detail.
+A security tag is often pinned so that only its small round plastic pin head shows on the outside, very often at the center front of the waistband: a smooth, plain dot with no holes. That is not a button. Report a button only when you clearly see its holes, shank or thread, or it closes a buttonhole or tab; otherwise leave it out.
 Describe only what you can clearly see. Never guess what a tag or fold might hide; when unsure, leave the field empty.
 {context_section}
 If the garment hangs on a hanger, the front neckline may reveal the inside of the back panel (lining, back label, keyhole). Ignore anything seen through the neck opening and assume a clean standard front neckline, unless the garment itself has lace, mesh, net or sheer panels there: those are part of the design and go into designDetailsEn.
@@ -307,7 +308,7 @@ _TAG_SCHEMA = {
                     "box_2d": {"type": "ARRAY", "items": {"type": "INTEGER"}},
                     "label": {"type": "STRING",
                               "enum": ["alarm_tag", "price_tag", "hangtag", "tag_pin", "hanger", "hanger_clip",
-                                       "design_label", "garment_detail"]},
+                                       "button_like", "design_label", "garment_detail"]},
                     "confidence": {"type": "NUMBER"},
                 },
                 "required": ["box_2d", "label"],
@@ -325,8 +326,9 @@ _TAG_PROMPT = """This garment was photographed inside a clothing store. Find eve
 - hanger: the clothes hanger itself: its hook, bar or plastic/wooden body, wherever it is visible (above the garment, inside the neckline or across the waistband)
 - hanger_clip: each clip, clamp or peg of a trouser/skirt hanger gripping the garment, usually one on each side of the waistband or hem. Box each clip separately with the fabric it pinches.
 The hanger's hook and clips are never garment hardware, even when they are metal.
+- button_like: every small round object on the outside of the garment that looks like a button, real buttons included. A security tag pinned from the inside often shows only a small smooth plastic pin head (5-15 mm) on the outside, very often at the center front of the waistband, and looks just like a button. Box each one separately and tightly; it is checked up close later.
 Also report the garment's own sewn-flat design elements that look similar (woven brand patch, leather patch) as "design_label", but ONLY when you are sure they are stitched into the garment. If you are unsure whether a small rectangle on the waistband is a store alarm tag or a brand patch, report it as "alarm_tag".
-Never report buttons, zippers, zipper pulls, rivets, buckles, drawstrings, prints, logos, embroidery, appliques, stones, beads, lace or mesh panels, or metal rings, hoops, clasps, hooks, brooches, chains and eyelets as tags: store alarm tags are plastic, metal hardware is part of the garment design.
+Never report zippers, zipper pulls, rivets, buckles, drawstrings, prints, logos, embroidery, appliques, stones, beads, lace or mesh panels, or metal rings, hoops, clasps, hooks, brooches, chains and eyelets as tags: store alarm tags are plastic, metal hardware is part of the garment design. Report button-like objects only as "button_like".
 A zipper pull always sits at the end of a visible zipper track. A plastic stick, capsule or disc with no zipper track under it is an alarm_tag, even when it hangs like a zipper pull.
 When a store tag, a hanger clip or a string touches, covers or hangs over one of the garment's own parts (for example a hangtag over the zipper pull, or a hanger clip on a waistband tab, button or belt loop), also report that garment part with its own tight box as "garment_detail" so it is kept.
 Include the whole object and its attachment in the box. Give each item a confidence from 0.0 to 1.0 and report anything at least 50% likely.
@@ -410,7 +412,9 @@ def detect_image_tags(api_key, image_url, gemini_api_key=None, generated=False, 
                    '(e.g. a ring, buckle, chain or brooch) belong to the garment: never report them.')
     if design_details:
         prompt += (f'\nThe garment\'s own design details: {design_details}. They belong to the garment: never '
-                   'report them as tags; if a store tag touches or hangs over one, report it as "garment_detail".')
+                   'report them as tags; if a store tag touches or hangs over one, report it as "garment_detail". '
+                   'Button-like round objects are still reported as "button_like", even when buttons are listed '
+                   'above (the description may have mistaken a pin head for a button).')
     parsed = _gemini_json(gemini_api_key, prompt, image_url, schema=_TAG_SCHEMA,
                           timeout=25, deterministic=True)
     tags = (parsed or {}).get('securityTags') or []
@@ -435,6 +439,137 @@ def detect_image_tags(api_key, image_url, gemini_api_key=None, generated=False, 
                      ' — %d ürün detayı yok sayıldı' % len(keep) if keep else '',
                      ', %d detay silmeden korunuyor' % protected if protected else '')
     return tags
+
+
+_BUTTON_CHECK_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "items": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "index": {"type": "INTEGER"},
+                    "kind": {"type": "STRING",
+                             "enum": ["sewn_button", "tag_pin", "hanger_part", "rivet_snap", "unsure"]},
+                    "confidence": {"type": "NUMBER"},
+                },
+                "required": ["index", "kind"],
+            },
+        },
+    },
+    "required": ["items"],
+}
+
+# Yakın planda silinecek sınıflar ve eşik
+PIN_KINDS = ('tag_pin', 'hanger_part')
+PIN_MIN_CONFIDENCE = 0.7
+
+
+def verify_button_candidates(gemini_api_key, image_base64, tags):
+    """Düğme adaylarını (button_like) yakın planda sınıfla: alarm iğnesi başı silinir, düğme korunur.
+
+    Tam görselde iğne başı düğme sanılıyor, analiz "button" yazıyor, prompt düğmeyi istiyor ve
+    model belin ortasına iri bir düğme çiziyordu.
+
+    Returns:
+        (tags, info) — tags: iğne / askı parçası adayları alarm_tag olarak kalır, korunanlar çıkar;
+        info: {'pins': [box_2d], 'buttons': int, 'checked': bool}
+    """
+    tags = list(tags or [])
+    cands = [t for t in tags if isinstance(t, dict) and t.get('label') == 'button_like']
+    info = {'pins': [], 'buttons': 0, 'checked': False}
+    if not cands:
+        info['checked'] = True
+        return tags, info
+    from .garment_preprocessor import crop_boxes_for_zoom
+    crops = []
+    try:
+        crops = crop_boxes_for_zoom(image_base64, cands)
+    except Exception as e:
+        _logger.warning('Düğme adayı kırpılamadı: %s', e)
+    valid = [(i, c) for i, c in enumerate(crops) if c]
+    verdicts = {}
+    if gemini_api_key and valid:
+        parsed = _gemini_json(
+            gemini_api_key,
+            f"Each of the {len(valid)} images is a close-up of one small round object on a garment from a "
+            "store photo (image index 0 is the first). Classify the object in the center of each image:\n"
+            "- sewn_button: a real button sewn on the garment: you see its holes, a shank or thread, or it "
+            "closes a buttonhole, tab or fly.\n"
+            "- tag_pin: the head of a store security tag pin pushed through the fabric: a smooth, plain plastic "
+            "dot or dome with no holes and no thread, sitting on the fabric.\n"
+            "- hanger_part: part of a clothes hanger or its clip.\n"
+            "- rivet_snap: a metal rivet, stud or snap fastener of the garment.\n"
+            "- unsure: you cannot tell.\n"
+            "Give a confidence from 0.0 to 1.0. Return JSON: "
+            "{\"items\": [{\"index\": 0, \"kind\": \"tag_pin\", \"confidence\": 0.9}]}",
+            valid[0][1], schema=_BUTTON_CHECK_SCHEMA, timeout=25, deterministic=True,
+            extra_images=[c for _, c in valid[1:]],
+        )
+        for it in (parsed or {}).get('items') or []:
+            try:
+                idx = int(it.get('index'))
+            except (TypeError, ValueError):
+                continue
+            if 0 <= idx < len(valid):
+                verdicts[valid[idx][0]] = it
+        info['checked'] = bool(parsed)
+    for i, t in enumerate(cands):
+        v = verdicts.get(i) or {}
+        try:
+            conf = float(v.get('confidence', 0))
+        except (TypeError, ValueError):
+            conf = 0.0
+        if v.get('kind') in PIN_KINDS and conf >= PIN_MIN_CONFIDENCE:
+            t['label'], t['confidence'] = 'alarm_tag', conf
+            info['pins'].append(t['box_2d'])
+        else:
+            t['label'] = 'garment_detail'
+            if v.get('kind') == 'sewn_button':
+                info['buttons'] += 1
+        _logger.info('Düğme adayı %s: %s (%.2f) → %s', t.get('box_2d'), v.get('kind') or '?', conf,
+                     'silinecek' if t['label'] == 'alarm_tag' else 'korunuyor')
+    # Korunan adaylar etiket listesinden çıkar (silme / yeniden tarama döngüsüne girmez)
+    return [t for t in tags if not (isinstance(t, dict) and t.get('label') == 'garment_detail')], info
+
+
+_FASTENER_FIELDS = ('closureEn', 'waistEn', 'frontPanelEn', 'trimsEn', 'designDetailsEn')
+_BUTTON_WORD_RE = re.compile(r'\bbutton', re.IGNORECASE)
+
+
+def drop_fastener_mentions(gemini_api_key, analysis, image=None):
+    """Analizde düğme yazıyor ama yakın planda düğme doğrulanmadıysa düğme sözlerini çıkar.
+
+    Gemini metni yeniden yazar (gerisi aynen kalır); olmazsa düğme geçen alan tümden atılır —
+    yanlış tarif yerine tarif yok.
+
+    Returns:
+        list: değişen alan adları
+    """
+    if not isinstance(analysis, dict):
+        return []
+    fields = {k: str(analysis.get(k) or '') for k in _FASTENER_FIELDS
+              if _BUTTON_WORD_RE.search(str(analysis.get(k) or ''))}
+    if not fields:
+        return []
+    rewritten = None
+    if gemini_api_key and image:
+        rewritten = _gemini_json(
+            gemini_api_key,
+            "These product description fields wrongly mention buttons: the round dot on this garment is the "
+            "head of a store security tag pin, not a button. Rewrite each field without any button, keeping "
+            "every other word and part exactly as it is, in plain positive English. Use an empty string when "
+            "nothing else remains. Return JSON with the same keys: " + json.dumps(fields, ensure_ascii=False),
+            image, schema={"type": "OBJECT", "properties": {k: {"type": "STRING"} for k in fields}},
+            timeout=20, deterministic=True,
+        )
+    for key in fields:
+        value = str(rewritten.get(key) or '') if isinstance(rewritten, dict) else ''
+        if _BUTTON_WORD_RE.search(value):
+            value = ''
+        analysis[key] = value
+    return list(fields)
 
 
 def _analyze_via_fal(api_key, image_url, prompt):
@@ -1002,6 +1137,7 @@ def mannequin_legs_covered(gemini_api_key, image):
 
 _FIDELITY_RULES = """- "detail_added": compare the garment in Image 1 with the product in Image 2 part by part. Report any garment part in Image 1 that the product does not have: zippers, a zip or button fly, buttons, rivets, eyelets, rings, buckles, belt loops, waistband tabs, pockets, seams, a center seam or pressed crease, darts, slits, belts, straps, logos, prints, brooches, lace or embroidery. Check the waistband closely. List each in "addedDetails" as a short Turkish name with its place, e.g. "arka belde fermuar".
 - "detail_missing": report any such part of the product in Image 2 that is missing or clearly changed in Image 1 (different count, shape, type or place, e.g. a zipper turned into an open neckline). List each in "missingDetails" as a short Turkish name with its place.
+A button counts as a part only when Image 2 shows one; a button drawn on Image 1 where the product in Image 2 has none is detail_added.
 Only compare parts visible from the angle of Image 1; differences in pose, lighting, folds or styling items (shoes, trousers of a top) are not defects.
 - "fixEn": when you report detail_added or detail_missing, write one short plain English sentence that describes how those parts of the product in Image 2 really look, using only positive words and never naming the wrong part, e.g. "The waistband is a smooth, continuous elastic band all around." Empty otherwise.
 """
@@ -1042,7 +1178,8 @@ def visual_quality_check(gemini_api_key, generated_image, garment_hint='', timeo
         # olduğu ham fotoğraftan doğrulanır, gerçek pile/tırnak "eklenmiş" sayılmaz
         reference_note += ("Image 3 is the original store photo of the same product (it may show a hanger, "
                            "clips or store tags). Before reporting a detail as added or missing, check Image 3: "
-                           "a part the product has in Image 3 is not added.\n")
+                           "a part the product has in Image 3 is not added. The hanger, its clips, store tags and the "
+                           "small plain round head of a security tag pin in Image 3 are not parts of the product.\n")
     prompt = f"""You are a strict QA reviewer for AI-generated fashion e-commerce photos.
 {reference_note}The product being modeled: {garment_hint or 'a garment'}.
 {f"The product's own design details (never report them as added_label or store_tag_visible): {design_details}." if design_details else ''}

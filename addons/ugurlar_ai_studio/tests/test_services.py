@@ -15,7 +15,7 @@ from ..services.fal_provider import FalProvider
 from ..services import garment_analyzer as analyzer_module
 from ..services.garment_analyzer import build_generation_prompt, detect_image_tags
 from ..services.garment_preprocessor import (
-    apply_garment_mask, crop_to_content, inpaint_security_tags, preprocess_garment_image, tag_box_to_pixels,
+    apply_garment_mask, crop_boxes_for_zoom, crop_to_content, inpaint_security_tags, preprocess_garment_image, tag_box_to_pixels,
     texture_fill_tags_base64,
 )
 from ..services.quality_checker import compute_quality_score, delta_e_ciede2000
@@ -537,6 +537,68 @@ class TestTagErasing(BaseCase):
             analyzer_module.visual_quality_check('k', 'RESULT', reference_image='REF', original_image='ORIG')
         self.assertEqual(gj.call_args.kwargs['extra_images'], ['REF', 'ORIG'])
         self.assertIn('Image 3 is the original store photo', gj.call_args.args[1])
+
+    def test_button_like_box_never_erased(self):
+        item = {'box_2d': [100, 480, 120, 500], 'label': 'button_like', 'confidence': 0.9}
+        self.assertIsNone(tag_box_to_pixels(item, 1000, 1000))
+        self.assertIn('button_like', str(analyzer_module._TAG_SCHEMA))
+        self.assertIn('pin head', analyzer_module._TAG_PROMPT)
+
+    def test_crop_boxes_for_zoom(self):
+        img = Image.new('RGB', (1000, 1400), (180, 160, 130))
+        crops = crop_boxes_for_zoom(_jpeg_b64(img), [{'box_2d': [100, 490, 110, 500]}, {'box_2d': [5]}])
+        self.assertIsNone(crops[1])
+        res = Image.open(io.BytesIO(base64.b64decode(crops[0])))
+        self.assertEqual(res.size, (512, 512))
+
+    def _verify(self, kind, conf=0.9):
+        img = _jpeg_b64(Image.new('RGB', (800, 1000), (180, 160, 130)))
+        tags = [{'box_2d': [100, 490, 115, 505], 'label': 'button_like', 'confidence': 0.8},
+                {'box_2d': [300, 100, 340, 160], 'label': 'alarm_tag', 'confidence': 0.9}]
+        with patch.object(analyzer_module, '_gemini_json', return_value={'items': [
+                {'index': 0, 'kind': kind, 'confidence': conf}]}):
+            return analyzer_module.verify_button_candidates('k', img, tags)
+
+    def test_pin_head_becomes_alarm_tag(self):
+        tags, info = self._verify('tag_pin')
+        self.assertEqual([t['label'] for t in tags], ['alarm_tag', 'alarm_tag'])
+        self.assertEqual(info['pins'], [[100, 490, 115, 505]])
+        self.assertEqual(info['buttons'], 0)
+
+    def test_sewn_button_is_kept(self):
+        tags, info = self._verify('sewn_button')
+        self.assertEqual([t['label'] for t in tags], ['alarm_tag'])
+        self.assertEqual((info['pins'], info['buttons']), ([], 1))
+        # Düşük güvenli iğne kararı silmez
+        tags, info = self._verify('tag_pin', conf=0.5)
+        self.assertEqual(info['pins'], [])
+
+    def test_drop_fastener_mentions(self):
+        analysis = {'waistEn': 'flat waistband with a single button at center front and side tabs',
+                    'closureEn': 'one button and zip fly', 'frontPanelEn': 'two front pleats'}
+        with patch.object(analyzer_module, '_gemini_json', return_value={
+                'waistEn': 'flat waistband with side tabs', 'closureEn': 'button and zip fly'}):
+            changed = analyzer_module.drop_fastener_mentions('k', analysis, image='IMG')
+        self.assertEqual(set(changed), {'waistEn', 'closureEn'})
+        self.assertEqual(analysis['waistEn'], 'flat waistband with side tabs')
+        self.assertEqual(analysis['closureEn'], '', 'düğme kalan yeniden yazım atılır')
+        self.assertEqual(analysis['frontPanelEn'], 'two front pleats')
+        # Gemini yoksa düğme geçen alan tümden atılır
+        analysis = {'trimsEn': 'one white button'}
+        analyzer_module.drop_fastener_mentions('', analysis)
+        self.assertEqual(analysis['trimsEn'], '')
+        p = build_generation_prompt(dict(analysis, garmentTypeEn='pants', clothingCategory='bottoms'), {}, [], '',
+                                    photo_type='front', provider_type='fal')['positive']
+        self.assertNotIn('button', p.lower())
+
+    def test_analysis_and_qc_know_pin_heads(self):
+        with patch.object(analyzer_module, '_gemini_json', return_value={'garmentType': 'Pantolon'}) as gj:
+            analyzer_module.analyze_garment(None, 'IMG', gemini_api_key='k')
+        self.assertIn('pin head', gj.call_args.args[1])
+        with patch.object(analyzer_module, '_gemini_json', return_value={'defects': []}) as gj:
+            analyzer_module.visual_quality_check('k', 'RESULT', reference_image='REF', original_image='ORIG')
+        self.assertIn('security tag pin in Image 3 are not parts', gj.call_args.args[1])
+        self.assertIn('where the product in Image 2 has none is detail_added', gj.call_args.args[1])
 
     def test_tag_prompt_knows_hanger_clips(self):
         with patch.object(analyzer_module, '_gemini_json', return_value={'securityTags': [

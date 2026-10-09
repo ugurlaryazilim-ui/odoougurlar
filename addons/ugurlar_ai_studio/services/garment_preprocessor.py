@@ -123,6 +123,10 @@ MAX_TAG_AREA_RATIO = 0.15
 # maskesi bel bandını (düğme, yan tırnak, pile başları) tamamen yutuyordu. Ürün metinle segmente
 # edilip (apply_garment_mask) askı zemine bırakılır.
 HANGER_LABELS = ('hanger', 'hanger_clip')
+# Düğmeye benzeyen küçük yuvarlak nesne: gerçek düğme mi, alarm iğnesinin başı mı yakın planda
+# doğrulanana kadar silinmez (verify_button_candidates sonucu alarm_tag / garment_detail olur)
+CANDIDATE_LABELS = ('button_like',)
+NON_ERASE_LABELS = HANGER_LABELS + CANDIDATE_LABELS
 
 
 def tag_box_to_pixels(item, w, h, pad_ratio=0.25, min_pad=10):
@@ -137,8 +141,8 @@ def tag_box_to_pixels(item, w, h, pad_ratio=0.25, min_pad=10):
     if isinstance(item, dict):
         if item.get('label') == 'design_label':
             return None  # ürünün kendi tasarım etiketi — dokunma
-        if item.get('label') in HANGER_LABELS:
-            return None  # askı segmentasyonla ayrılır, kutuyla silinmez
+        if item.get('label') in NON_ERASE_LABELS:
+            return None  # askı segmentasyonla ayrılır; düğme adayı önce doğrulanır
         if item.get('confidence') is not None:
             try:
                 if float(item['confidence']) < MIN_TAG_CONFIDENCE:
@@ -163,6 +167,40 @@ def tag_box_to_pixels(item, w, h, pad_ratio=0.25, min_pad=10):
     # İnce uzun kutuda dolgu kısa kenarı aşmaz: maske yandaki ürün parçalarını yutmasın
     pad = min(pad, max(min_pad, min(px2 - px1, py2 - py1)))
     return (max(0, px1 - pad), max(0, py1 - pad), min(w, px2 + pad), min(h, py2 + pad))
+
+
+def crop_boxes_for_zoom(image_base64, boxes, context=3.0, min_side=160, out_side=512):
+    """Her kutuyu çevresiyle birlikte kare kırpıp out_side'a büyüt (yakın plan doğrulama için).
+
+    Küçültülmüş tam görselde alarm iğnesinin başı ile düğme ayırt edilemiyordu: delik / sap / iplik
+    ancak yakın planda görünür.
+
+    Returns:
+        list[base64 JPEG] — kutu sırasıyla; geçersiz kutu için None
+    """
+    img = Image.open(io.BytesIO(base64.b64decode(image_base64))).convert('RGB')
+    w, h = img.size
+    crops = []
+    for item in boxes or []:
+        box = item.get('box_2d') if isinstance(item, dict) else item
+        try:
+            ymin, xmin, ymax, xmax = (float(v) / 1000.0 for v in box[:4])
+        except (TypeError, ValueError):
+            crops.append(None)
+            continue
+        cx, cy = (xmin + xmax) / 2 * w, (ymin + ymax) / 2 * h
+        side = max(min_side, max((xmax - xmin) * w, (ymax - ymin) * h) * context)
+        side = min(side, w, h)
+        x1 = int(min(max(0, cx - side / 2), w - side))
+        y1 = int(min(max(0, cy - side / 2), h - side))
+        if side <= 0 or xmax <= xmin or ymax <= ymin:
+            crops.append(None)
+            continue
+        crop = img.crop((x1, y1, x1 + int(side), y1 + int(side))).resize((out_side, out_side), Image.LANCZOS)
+        buf = io.BytesIO()
+        crop.save(buf, format='JPEG', quality=95)
+        crops.append(base64.b64encode(buf.getvalue()).decode())
+    return crops
 
 
 def protect_box_pixels(item, w, h, pad=4):
@@ -356,7 +394,7 @@ def inpaint_security_tags(img_bgr, tag_boxes):
             continue
         # Görselin büyük bölümünü kaplayan kutu etiket değildir (ör. cep, logo);
         # inpaint geniş desenli alanı bulanık lekeye çevirir
-        if isinstance(item, dict) and item.get('label') in HANGER_LABELS:
+        if isinstance(item, dict) and item.get('label') in NON_ERASE_LABELS:
             continue
         if (px2 - px1) * (py2 - py1) > MAX_TAG_AREA_RATIO * w * h:
             _logger.info('Inpaint: aşırı büyük etiket kutusu atlandı (%dx%d)', px2 - px1, py2 - py1)
