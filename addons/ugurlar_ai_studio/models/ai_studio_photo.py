@@ -54,6 +54,9 @@ class AiStudioPhoto(models.Model):
     garment_clean_key = fields.Char(copy=False, help='Kaynak görsel özeti + ayarlar; değişirse önbellek geçersiz')
     # Temizlenmiş görselde etiketin silindiği kutular (JSON, box_2d 0-1000): prompt bölge sabitleme + denetim
     garment_tag_boxes = fields.Text(copy=False)
+    # Düğme adaylarının yakın plan doğrulaması (JSON {"pins": [box_2d], "buttons": int}): iğne başı
+    # silindiyse ve düğme doğrulanmadıysa analizdeki "button" sözleri prompta girmez
+    garment_fastener_check = fields.Text(copy=False)
     # Bu açının gerçek yapısı (JSON {"key", "plain", "partsEn"}): arka/yan prompta olumlu yapı cümlesi
     view_construction = fields.Text(copy=False)
     quality_score = fields.Float(

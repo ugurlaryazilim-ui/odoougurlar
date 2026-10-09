@@ -342,7 +342,7 @@ def _erase_result_tags(provider, image_b64, gemini_api_key, qc_boxes=None, passe
 
 
 # Ürün görseli temizleme (arka plan + etiket silme) mantığı değişince artırılır
-GARMENT_CLEAN_VERSION = 'v7'  # v7: askı segmentasyonla ayrılır (kutu silme beli yutuyordu)
+GARMENT_CLEAN_VERSION = 'v8'  # v8: düğme adayları yakın planda doğrulanır (alarm iğnesi başı silinir)
 
 
 _SET_RE = re.compile(r'(?<!\w)(?:takim\w*|set|setler|co-ord|coord)(?!\w)')
@@ -1490,6 +1490,10 @@ class AiStudioSession(models.Model):
             security_tags = self._detect_security_tags(session, garment_b64, design_details)
             garment_b64, security_tags, mask_cost = self._mask_out_hanger(
                 session, garment_b64, security_tags, garment_text, design_details)
+        # Düğmeye benzeyen nesne: alarm iğnesinin başı mı gerçek düğme mi, yakın planda karar verilir
+        fastener = None
+        if security_tags:
+            security_tags, fastener = self._verify_button_candidates(session, garment_b64, security_tags)
 
         # Mağaza alarmı / fiyat etiketi: ürüne kırpılmış görselde bul, maskeli AI ile sil
         erased = []
@@ -1501,13 +1505,56 @@ class AiStudioSession(models.Model):
             try:
                 with photo.env.cr.savepoint():
                     photo.write({'garment_clean_image': garment_b64, 'garment_clean_key': cache_key,
-                                 'garment_tag_boxes': json.dumps(erased)})
+                                 'garment_tag_boxes': json.dumps(erased),
+                                 'garment_fastener_check': json.dumps(fastener) if fastener else False})
             except Exception as ce:
                 _logger.warning('Temizlenmiş ürün görseli saklanamadı (photo=%s): %s', photo.id, ce)
 
         garment_url = provider.upload_image(garment_b64)
         # garment_b64: try-on'a giden temizlenmiş ürün görseli (sonuç denetiminde referans)
         return garment_url, garment_b64, erase_cost
+
+    def _verify_button_candidates(self, session, image_b64, tags):
+        """button_like adaylarını yakın planda sınıfla (iğne başı → alarm_tag, düğme → korunur).
+
+        Returns:
+            (etiket listesi, dict info veya None)
+        """
+        if not any(isinstance(t, dict) and t.get('label') == 'button_like' for t in tags or []):
+            return tags, None
+        gemini_key = session.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.gemini_api_key', '')
+        from ..services.garment_analyzer import verify_button_candidates
+        try:
+            tags, info = verify_button_candidates(gemini_key, image_b64, tags)
+        except Exception as e:
+            _logger.warning('Düğme adayı doğrulaması başarısız (session=%s): %s', session.id, e)
+            return [t for t in tags if not (isinstance(t, dict) and t.get('label') == 'button_like')], None
+        return tags, info
+
+    def _apply_fastener_check(self, session, analysis, photo, garment_b64=None):
+        """İğne başı silindiyse ve düğme doğrulanmadıysa analizdeki düğme sözlerini çıkar.
+
+        Analiz ham fotoğraftan yapılır: iğne başını düğme sanıyor, prompt ve denetim de düğmeyi
+        "ürünün parçası" diye taşıyordu.
+        """
+        if not isinstance(analysis, dict) or not photo:
+            return
+        try:
+            info = json.loads(photo.garment_fastener_check or '{}')
+        except (TypeError, ValueError):
+            info = {}
+        if not info.get('pins') or info.get('buttons'):
+            return
+        gemini_key = session.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.gemini_api_key', '')
+        from ..services.garment_analyzer import drop_fastener_mentions
+        try:
+            changed = drop_fastener_mentions(gemini_key, analysis, image=garment_b64)
+        except Exception as e:
+            _logger.warning('Analizden düğme sözü çıkarılamadı (session=%s): %s', session.id, e)
+            return
+        if changed:
+            _logger.info('Analizden düğme sözü çıkarıldı (session=%s, alanlar=%s): %s',
+                         session.id, ', '.join(changed), design_hint(analysis) or '-')
 
     def _mask_out_hanger(self, session, image_b64, tags, garment_text='', design_details=''):
         """Askı/mandal tespit edildiyse ürünü EVF-SAM ile segmente et, askıyı zemine bırak.
@@ -2374,6 +2421,9 @@ class AiStudioSession(models.Model):
                         design_details=design_hint(cached_analysis) if photo_type == 'front' else '',
                         garment_text=_garment_text(cached_analysis),
                     )
+                    if photo_type == 'front':
+                        self._apply_fastener_check(session, cached_analysis, gen.source_photo_id,
+                                                   processed_garment_b64)
                     # Hazırlık maliyeti (etiket silme + ilk kez türetilen manken) bu üretime yazılır
                     prep_cost = (erase_cost or 0.0) + (mannequin_cost or 0.0)
                     # Yan görünüm kendi fotoğrafı yoksa ön fotoğraftan üretilir: o açının yapısı bilinmez
@@ -2898,6 +2948,8 @@ class AiStudioSession(models.Model):
                     design_details=design_hint(analysis) if photo_type == 'front' else '',
                     garment_text=_garment_text(analysis),
                 )
+                if photo_type == 'front':
+                    self._apply_fastener_check(session, analysis, gen.source_photo_id, processed_b64)
                 own_photo = (gen.source_photo_id.photo_type or photo_type) == photo_type
                 keep_boxes, view_construction = self._garment_view_info(
                     session, gen.source_photo_id, processed_b64, photo_type, own_photo=own_photo)
