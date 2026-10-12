@@ -190,6 +190,7 @@ _ANALYSIS_SCHEMA = {
         "fabricType": {"type": "STRING"},
         "fabricTypeEn": {"type": "STRING"},
         "surfaceEn": {"type": "STRING"},
+        "isPlainFabric": {"type": "BOOLEAN"},
         "collarType": {"type": "STRING"},
         "collarTypeEn": {"type": "STRING"},
         "sleeveType": {"type": "STRING"},
@@ -262,7 +263,8 @@ Return JSON:
   "primaryColorEn": "e.g. 'black', 'navy', 'burgundy'",
   "fabricType": "Turkish fabric, e.g. Pamuk, Triko, Saten",
   "fabricTypeEn": "e.g. 'cotton', 'knit', 'satin', 'denim'",
-  "surfaceEn": "visible color/surface effect of the fabric in 1-3 plain English words, e.g. 'heathered melange', 'washed', 'ribbed', 'brushed', 'glossy', 'slub'; empty if plain and uniform",
+  "surfaceEn": "only when the fabric clearly shows a surface effect beyond one flat color (yarns of mixed colors, a faded wash, raised ribs, a nap or a shine): name what you see in 1-3 plain English words. Most fabrics are plain and even: then leave it empty",
+  "isPlainFabric": true or false (true when the whole fabric is one solid, even color with a smooth regular surface: no print, stripes, checks, pattern or mixed-color yarn),
   "collarType": "Turkish collar/neckline if visible",
   "collarTypeEn": "without the word 'neckline', e.g. 'V', 'crew', 'shirt collar', 'turtleneck'",
   "sleeveType": "sleeve type if visible (e.g. uzun kollu, kolsuz, askılı)",
@@ -755,6 +757,9 @@ def _detect_sub_type(category, garment_text):
     return 'tops'  # Safe fallback
 
 
+# Adı zaten örme olduğunu söyleyen türler
+_KNIT_GARMENT_WORDS = ('sweater', 'cardigan', 'pullover', 'jumper', 'knit')
+
 _OPEN_FRONT_WORDS = ['yelek', 'vest', 'waistcoat', 'hırka', 'hirka', 'cardigan', 'ceket',
                      'jacket', 'blazer', 'mont', 'kaban', 'coat', 'trençkot', 'trench']
 
@@ -789,7 +794,7 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     from .category_constants import (
         SEEDREAM_TEMPLATES, SEEDREAM_NEGATIVES,
         LEG_RULES, SHOE_RULES, HAND_POSES, DEFAULT_BACKGROUND, FRONT_REF_SENTENCE,
-        FASHN_VIEW_TEMPLATES, FASHN_NEGATIVE, CLEAN_PRODUCT,
+        FASHN_VIEW_TEMPLATES, FASHN_NEGATIVE, CLEAN_PRODUCT, FABRIC_PLAIN, FABRIC_AS_SHOWN,
     )
 
     if not isinstance(analysis, dict):
@@ -862,6 +867,10 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
     # Melanj / yıkanmış / fitilli gibi yüzey etkisi: yoksa model rengi düz ve doygun
     # bir tona çeviriyor (ör. gri-lacivert melanj sweatshirt → düz lacivert)
     surface = str(analysis.get('surfaceEn') or '').strip()
+    # "knit sweater" yazısı modele kendi bildiği kalın, kırçıllı örgüyü çizdiriyordu (düz ince örgü
+    # kazak → kaba melanj kazak): tür zaten örme ise kumaş kelimesi tekrar edilmez
+    if fabric.lower() in ('knit', 'knitted') and any(w in g_low for w in _KNIT_GARMENT_WORDS):
+        fabric = ''
     # "knit knit dress" / "denim denim trousers" tekrarlarını ele
     desc_words = []
     for w in f"{color} {surface} {fabric} {garment}".lower().split():
@@ -953,6 +962,9 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
         base_prompt += view_construction_sentence(view_construction, sub_type)
     if bbox_grounding:
         base_prompt += keep_area_sentence(keep_boxes)
+    # Doku ve ton metinden değil Image 2'den gelsin; düz kumaşta "tek renk" açıkça söylenir
+    plain_fabric = analysis.get('isPlainFabric') is True and not surface and not analysis.get('hasGraphic')
+    base_prompt += " " + (FABRIC_PLAIN if plain_fabric else FABRIC_AS_SHOWN)
 
     # Prompt kilitleri (fotorealizm). Sahne seçiliyse stüdyo tarifi içerenler
     # sahneyle çelişeceği için atlanır.
@@ -1043,10 +1055,11 @@ VISUAL_QC_ISSUES = {
     'garment_mismatch': 'Kıyafet ürünle uyuşmuyor',
     'detail_added': 'Üründe olmayan detay eklenmiş',
     'detail_missing': 'Üründeki detay kaybolmuş',
+    'fabric_mismatch': 'Kumaş dokusu / rengi ürünle uyuşmuyor',
 }
 
 # Ürünün kendisini değiştiren kusurlar: yeniden üretimle düzeltilir (silme ile değil)
-FIDELITY_CODES = ('detail_added', 'detail_missing', 'garment_mismatch')
+FIDELITY_CODES = ('detail_added', 'detail_missing', 'garment_mismatch', 'fabric_mismatch')
 
 
 def erased_area_clean(gemini_api_key, image, boxes):
@@ -1139,7 +1152,8 @@ _FIDELITY_RULES = """- "detail_added": compare the garment in Image 1 with the p
 - "detail_missing": report any such part of the product in Image 2 that is missing or clearly changed in Image 1 (different count, shape, type or place, e.g. a zipper turned into an open neckline). List each in "missingDetails" as a short Turkish name with its place.
 A button counts as a part only when Image 2 shows one; a button drawn on Image 1 where the product in Image 2 has none is detail_added.
 Only compare parts visible from the angle of Image 1; differences in pose, lighting, folds or styling items (shoes, trousers of a top) are not defects.
-- "fixEn": when you report detail_added or detail_missing, write one short plain English sentence that describes how those parts of the product in Image 2 really look, using only positive words and never naming the wrong part, e.g. "The waistband is a smooth, continuous elastic band all around." Empty otherwise.
+- "fabric_mismatch": compare the fabric itself. Report it when the fabric of the garment in Image 1 clearly differs from the product in Image 2: a plain single-color fabric drawn speckled, mixed-color, ribbed or patterned (or the reverse), a knit or weave that is clearly coarser or finer, or a clearly different shade (much darker, lighter or another hue). Differences caused only by lighting, shadows or folds are not defects.
+- "fixEn": when you report detail_added, detail_missing or fabric_mismatch, write one short plain English sentence that describes how those parts or the fabric of the product in Image 2 really look, using only positive words and never naming the wrong part, e.g. "The waistband is a smooth, continuous elastic band all around." Empty otherwise.
 """
 
 
@@ -1164,7 +1178,7 @@ def visual_quality_check(gemini_api_key, generated_image, garment_hint='', timeo
     """
     if not gemini_api_key or not generated_image:
         return None
-    skip = set() if reference_image else {'detail_added', 'detail_missing'}
+    skip = set() if reference_image else {'detail_added', 'detail_missing', 'fabric_mismatch'}
     if not check_missing:
         skip.add('detail_missing')
     codes_doc = '\n'.join(f'- "{code}"' for code in VISUAL_QC_ISSUES if code not in skip)
@@ -1252,7 +1266,8 @@ Return {{"defects": [], "boxes": [], "addedDetails": [], "missingDetails": []}} 
     fidelity = len(added) + len(missing)
     fidelity += sum(1 for c in codes if c in ('detail_added', 'detail_missing') and not (added if c == 'detail_added' else missing))
     fidelity += 1 if 'garment_mismatch' in codes else 0
-    fix = clean_field(parsed, 'fixEn') if (added or missing) else ''
+    fidelity += 1 if 'fabric_mismatch' in codes else 0
+    fix = clean_field(parsed, 'fixEn') if (added or missing or 'fabric_mismatch' in codes) else ''
     return {'codes': codes, 'issues': issues, 'boxes': boxes, 'fidelity': fidelity,
             'added': added, 'missing': missing, 'fix': fix}
 
