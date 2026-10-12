@@ -191,6 +191,12 @@ CLEAN_PRODUCT = (
     "A clean, finished retail product."
 )
 
+# Kumaş: doku ve ton Image 2'den okunur. Kumaş adı ("knit") tek başına modele kendi bildiği
+# dokuyu çizdirir; ölçek söylenmezse ince örgü kalın örgüye dönüyordu.
+# ("surface" kelimesi kullanılmaz: arka/yan istemde "face" geçmemeli)
+FABRIC_AS_SHOWN = "Fabric exactly as in Image 2, same texture at the same scale."
+FABRIC_PLAIN = "Fabric exactly as in Image 2: one even, uniform color, same texture at the same scale."
+
 _FRONT_INTRO = (
     "Image 1 shows the model. Image 2 shows the {garment} product. "
     "Photograph the same model from Image 1, with the same face, hair and body, "

@@ -94,7 +94,7 @@ class TestPromptBuilder(BaseCase):
         self.assertNotIn('Figure', p)
         self.assertLessEqual(p.lower().count('trousers'), 1, 'istenmeyen nesne tekrar edilmemeli')
         # şablon + duruş cümlesi + tek fotorealizm cümlesi; eski lock'lar ~1500 kelimeydi
-        self.assertLessEqual(len(p.split()), 140)
+        self.assertLessEqual(len(p.split()), 145)
 
     def test_jumpsuit_does_not_get_bare_legs(self):
         p = self._build({'garmentType': 'Tulum', 'clothingCategory': 'dress', 'garmentLength': 'maxi'})
@@ -129,6 +129,23 @@ class TestPromptBuilder(BaseCase):
         self.assertIn('navy cotton sweatshirt', self._build({
             'garmentTypeEn': 'sweatshirt', 'clothingCategory': 'tops', 'primaryColorEn': 'navy',
             'fabricTypeEn': 'cotton'}))
+
+    def test_plain_fabric_is_tied_to_image_not_to_fabric_words(self):
+        # Düz ince örgü kazak "knit sweater" yazısı yüzünden kalın, kırçıllı örgüye dönüyordu
+        analysis = {'garmentTypeEn': 'sweater', 'clothingCategory': 'tops', 'primaryColorEn': 'olive green',
+                    'fabricTypeEn': 'knit', 'isPlainFabric': True}
+        for view in ('front', 'back', 'side'):
+            p = self._build(analysis, view)
+            self.assertIn('wearing the olive green sweater from Image 2', p)
+            self.assertNotIn('knit', p.lower())
+            self.assertIn('one even, uniform color', p)
+        # Desenli / melanj / bilinmeyen kumaşta "tek renk" denmez
+        for extra in ({'isPlainFabric': False}, {}, {'isPlainFabric': True, 'surfaceEn': 'heathered melange'},
+                      {'isPlainFabric': True, 'hasGraphic': True}):
+            p = self._build(dict(analysis, **extra) if extra else
+                            {k: v for k, v in analysis.items() if k != 'isPlainFabric'})
+            self.assertNotIn('uniform color', p)
+            self.assertIn('same texture at the same scale', p)
 
     def test_every_view_asks_for_clean_product(self):
         # negative_prompt desteklenmiyor: etiket kuralı pozitif cümleyle HER şablonda olmalı
@@ -514,6 +531,31 @@ class TestTagErasing(BaseCase):
         with patch.object(analyzer_module, '_gemini_json', return_value=fake):
             res = analyzer_module.visual_quality_check('k', 'RESULT', reference_image='REF')
         self.assertEqual(res['fix'], '', 'olumsuz düzeltme cümlesi kullanılmaz')
+
+    def test_visual_qc_reports_fabric_mismatch(self):
+        fake = {'defects': ['fabric_mismatch'], 'fixEn': 'The fabric is a smooth fine knit in one even light olive color.'}
+        with patch.object(analyzer_module, '_gemini_json', return_value=fake) as gj:
+            res = analyzer_module.visual_quality_check('k', 'RESULT', reference_image='REF')
+        self.assertIn('fabric_mismatch', gj.call_args.args[1])
+        self.assertEqual(res['codes'], ['fabric_mismatch'])
+        self.assertEqual(res['fidelity'], 1, 'kumaş uyuşmazlığı yeniden üretimi tetikler')
+        self.assertIn('smooth fine knit', res['fix'])
+        # Referans yoksa kumaş karşılaştırılamaz
+        with patch.object(analyzer_module, '_gemini_json', return_value=fake) as gj:
+            res = analyzer_module.visual_quality_check('k', 'RESULT')
+        self.assertNotIn('fabric_mismatch', gj.call_args.args[1])
+        self.assertEqual(res['codes'], [])
+        self.assertEqual(res['fidelity'], 0)
+
+    def test_analysis_prompt_has_no_copyable_surface_words(self):
+        with patch.object(analyzer_module, '_gemini_json', return_value={'garmentType': 'Kazak'}) as gj:
+            analyzer_module.analyze_garment(None, 'IMG', gemini_api_key='k')
+        prompt = gj.call_args.args[1].lower()
+        # Örnek yüzey kelimeleri düz kumaşa da aynen yazılıp ürünü kırçıllı çizdiriyordu
+        for word in ('heathered', 'melange', 'slub', 'brushed', 'glossy'):
+            self.assertNotIn(word, prompt, word)
+        self.assertIn('isplainfabric', prompt)
+        self.assertIn('isPlainFabric', analyzer_module._ANALYSIS_SCHEMA['properties'])
 
     def test_analysis_prompt_names_no_example_parts(self):
         with patch.object(analyzer_module, '_gemini_json', return_value={'garmentType': 'Pantolon'}) as gj:
