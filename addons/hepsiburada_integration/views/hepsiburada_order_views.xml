@@ -51,6 +51,7 @@
                             <field name="cargo_provider"/>
                             <field name="cargo_tracking_number"/>
                             <field name="package_number"/>
+                            <field name="order_ref" invisible="not order_ref or order_ref == hb_order_number"/>
                             <field name="total_deci"/>
                         </group>
                         <group string="Ödeme">
