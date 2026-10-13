@@ -288,14 +288,19 @@ class HepsiburadaOrderSync(models.AbstractModel):
 
                 order_nos = item.get('OrderNumbers') or [
                     item.get('OrderNumber') or item.get('orderNumber')]
+                pkg_no = str(item.get('PackageNumber') or item.get('packageNumber') or '')
                 for order_no in filter(None, order_nos):
                     order_no = str(order_no)
                     hb_existing = HbOrder.search(
-                        [('hb_order_number', '=', order_no)] + self._store_domain(store), limit=1)
-                    if hb_existing and (hb_existing.sale_order_id
-                                        or not any(l.remaining_qty for l in hb_existing.line_ids)):
-                        if hb_existing.status != new_status and hb_existing.status not in HB_CANCEL_STATUSES:
-                            hb_existing.write({'status': new_status})
+                        [('hb_order_number', '=', order_no)] + self._store_domain(store))
+                    # Çok paketli sipariş: yalnızca bu paketin kaydı (eşleşmezse hepsi)
+                    if pkg_no and len(hb_existing) > 1:
+                        hb_existing = hb_existing.filtered(lambda o: o.package_number == pkg_no) or hb_existing
+                    if hb_existing and all(o.sale_order_id or not any(l.remaining_qty for l in o.line_ids)
+                                           for o in hb_existing):
+                        hb_existing.filtered(
+                            lambda o: o.status != new_status and o.status not in HB_CANCEL_STATUSES
+                        ).write({'status': new_status})
                         continue
                     if order_no not in missing_orders:
                         missing_orders.append(order_no)
@@ -375,16 +380,16 @@ class HepsiburadaOrderSync(models.AbstractModel):
         HbOrder = self.env['hepsiburada.order']
         count = 0
         for order_no, cancels in by_order.items():
-            hb_order = HbOrder.search([('hb_order_number', '=', order_no)] + self._store_domain(store), limit=1)
-            if not hb_order:
-                continue  # Odoo'ya hiç düşmemiş sipariş: iptal kalemleri zaten aktarılmaz
-            try:
-                with self.env.cr.savepoint():
-                    if self._apply_cancellations(hb_order, cancels, store):
-                        count += 1
-            except Exception as e:
-                self.env.invalidate_all(flush=False)
-                _logger.exception("HB iptal işlenemedi (%s): %s", order_no, e)
+            # Odoo'ya hiç düşmemiş siparişte kayıt yoktur. Çok paketli siparişte her paket ayrı
+            # kayıttır; iptal kalemi hangi kayıttaysa orada düşülür.
+            for hb_order in HbOrder.search([('hb_order_number', '=', order_no)] + self._store_domain(store)):
+                try:
+                    with self.env.cr.savepoint():
+                        if self._apply_cancellations(hb_order, cancels, store):
+                            count += 1
+                except Exception as e:
+                    self.env.invalidate_all(flush=False)
+                    _logger.exception("HB iptal işlenemedi (%s): %s", order_no, e)
         return count
 
     @api.private
@@ -517,6 +522,7 @@ class HepsiburadaOrderSync(models.AbstractModel):
 
         day_limit = store.order_day_range or 3
         cutoff_date = _tr_now() - timedelta(days=day_limit)
+        split = store.split_packages and store.order_ref_type != 'package_id'
         for order_no, line_items in orders_dict.items():
             # ── Client-side tarih filtresi (tekil çekimde devre dışı) ──
             if not skip_date_filter:
@@ -525,18 +531,38 @@ class HepsiburadaOrderSync(models.AbstractModel):
                     _logger.debug("Eski sipariş atlandı (orderDate=%s < %s): %s", order_dt, cutoff_date, order_no)
                     continue
 
-            try:
-                with self.env.cr.savepoint():
-                    self._create_or_update_order(order_no, line_items, store)
-                    success_count += 1
-            except Exception as e:
-                self.env.invalidate_all(flush=False)
-                err = f"Sipariş No {order_no} işlenirken hata: {str(e)}"
-                _logger.error(err)
-                log_msgs.append(err)
-                error_count += 1
+            # Aynı siparişin her paketi ayrı kargo barkoduyla çıkar → paket başına ayrı Odoo siparişi
+            groups = self._split_by_package(line_items) if split else [line_items]
+            for group in groups:
+                try:
+                    with self.env.cr.savepoint():
+                        self._create_or_update_order(order_no, group, store, split=split, multi=len(groups) > 1)
+                        success_count += 1
+                except Exception as e:
+                    self.env.invalidate_all(flush=False)
+                    err = f"Sipariş No {order_no} işlenirken hata: {str(e)}"
+                    _logger.error(err)
+                    log_msgs.append(err)
+                    error_count += 1
 
         return len(orders_dict), success_count, error_count, log_msgs
+
+    @api.model
+    def _split_by_package(self, packages):
+        """Paketleri paket numarasına göre gruplar. Detay formatında (tek kayıt, paket numarası
+        kalemde) kalemler paketlerine ayrılır."""
+        groups = {}
+        for pkg in packages:
+            root_no = str(pkg.get('packageNumber') or '')
+            parts = {}
+            for item in pkg.get('items') or []:
+                parts.setdefault(root_no or str(item.get('packageNumber') or ''), []).append(item)
+            if len(parts) <= 1:
+                groups.setdefault(next(iter(parts), root_no), []).append(pkg)
+            else:
+                for key, sub_items in parts.items():
+                    groups.setdefault(key, []).append(dict(pkg, items=sub_items))
+        return list(groups.values())
 
     @api.model
     def _order_date_str(self, pkg):
@@ -564,7 +590,7 @@ class HepsiburadaOrderSync(models.AbstractModel):
     # ═════════════════════════════════════════════════════════════
 
     @api.private
-    def _create_or_update_order(self, order_no, packages, store):
+    def _create_or_update_order(self, order_no, packages, store, split=False, multi=False):
         env = self.env
         HbOrder = env['hepsiburada.order']
 
@@ -574,9 +600,26 @@ class HepsiburadaOrderSync(models.AbstractModel):
         first_pkg = packages[0]
         first_item = all_items[0] if all_items else {}
 
-        existing = HbOrder.search([('hb_order_number', '=', order_no)] + self._store_domain(store), limit=1)
+        domain = [('hb_order_number', '=', order_no)] + self._store_domain(store)
+        package_no = str(first_item.get('packageNumber') or first_pkg.get('packageNumber') or '')
+        if split:
+            # Paket kaydı kalemlerinden tanınır (paket bozulup yeniden paketlenince numarası değişir)
+            siblings = HbOrder.search(domain, order='id')
+            item_ids = {self._item_line_id(i) for i in all_items} - {''}
+            existing = siblings.filtered(lambda o: item_ids & set(o.line_ids.mapped('line_item_id')))[:1]
+            if not existing and package_no:
+                existing = siblings.filtered(lambda o: o.package_number == package_no)[:1]
+            elif not existing:
+                existing = siblings[:1]
+        else:
+            siblings = existing = HbOrder.search(domain, limit=1)
         if existing:
-            return self._update_existing_order(existing, first_pkg, first_item, all_items, store)
+            return self._update_existing_order(existing, first_pkg, first_item, all_items, store, siblings)
+
+        # Odoo / Nebim sipariş referansı: çok paketli siparişte paket numarasıyla ayrışır
+        order_ref = order_no
+        if split and package_no and (multi or siblings):
+            order_ref = f"{order_no}-{package_no}"
 
         # ── Müşteri Adı ──
         customer_name = (
@@ -646,6 +689,7 @@ class HepsiburadaOrderSync(models.AbstractModel):
 
         hb_order = HbOrder.create({
             'hb_order_number': order_no,
+            'order_ref': order_ref,
             'merchant_id': store.merchant_id,
             'store_id': store.id,
             'order_date': order_date,
@@ -691,7 +735,7 @@ class HepsiburadaOrderSync(models.AbstractModel):
         return hb_order
 
     @api.private
-    def _update_existing_order(self, existing, first_pkg, first_item, all_items, store):
+    def _update_existing_order(self, existing, first_pkg, first_item, all_items, store, siblings=None):
         vals = {}
         new_status = first_item.get('status', '') or first_pkg.get('status', '') or ''
         if new_status and existing.status != new_status and existing.status not in _FINAL_STATUSES:
@@ -709,7 +753,8 @@ class HepsiburadaOrderSync(models.AbstractModel):
             existing.write(vals)
 
         # Sonradan gelen kalem (ayrı paketlenmiş vb.) — sipariş kalemleriyle yeniden kurulur
-        known = set(existing.line_ids.mapped('line_item_id'))
+        # Kardeş paket kaydındaki kalem bu kayda ikinci kez eklenmez
+        known = set((existing | (siblings or existing)).mapped('line_ids.line_item_id'))
         new_items = [it for it in all_items if self._item_line_id(it) and self._item_line_id(it) not in known]
         if new_items:
             self._create_lines(existing, new_items, store)
@@ -965,12 +1010,13 @@ class HepsiburadaOrderSync(models.AbstractModel):
         # ── Depo — Trendyol modeli: parametre varsa set et, yoksa Odoo default ──
         warehouse_id = int(ICP.get_param('hepsiburada_integration.warehouse_id', 0))
 
+        order_ref = hb_order.order_ref or hb_order.hb_order_number
         sale_vals = {
             'partner_id': partner.id,
-            'client_order_ref': hb_order.hb_order_number,
+            'client_order_ref': order_ref,
             'hb_order_id': hb_order.id,
             'hb_store_id': hb_order.merchant_id,
-            'origin': hb_order.hb_order_number,
+            'origin': order_ref,
             'order_line': order_lines,
         }
         if hb_order.order_date:
@@ -979,7 +1025,7 @@ class HepsiburadaOrderSync(models.AbstractModel):
             sale_vals['warehouse_id'] = warehouse_id
 
         # Dedup kontrolü — iptal edilmiş eski sipariş (kısmi iptal) yeniden kurulumu engellemez
-        ref_names = list(filter(None, [hb_order.hb_order_number, f"HB-{hb_order.hb_order_number}"]))
+        ref_names = list(filter(None, [order_ref, f"HB-{order_ref}"]))
         existing_so = self.env['sale.order'].search([
             ('state', '!=', 'cancel'),
             '|', '|',
@@ -989,7 +1035,7 @@ class HepsiburadaOrderSync(models.AbstractModel):
         ], limit=1)
         if existing_so:
             _logger.info("HB: Odoo'da %s sipariş referanslı kayıt (%s) zaten var.",
-                         hb_order.hb_order_number, existing_so.name)
+                         order_ref, existing_so.name)
             return existing_so
 
         sale_order = SaleOrder.create(sale_vals)

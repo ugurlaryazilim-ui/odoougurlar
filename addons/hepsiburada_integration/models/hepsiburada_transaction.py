@@ -198,16 +198,22 @@ class HepsiburadaTransaction(models.Model):
                     ('store_id', '=', store.id), ('hb_id', 'in', list(items))])
             }
             order_numbers = {i.get('orderNumber') for i in items.values() if i.get('orderNumber')}
-            orders = {
-                o.hb_order_number: o.id for o in self.env['hepsiburada.order'].sudo().search([
+            # Çok paketli siparişte her paket ayrı kayıttır → önce paket numarasıyla eşleş
+            orders, orders_by_package = {}, {}
+            if order_numbers:
+                for o in self.env['hepsiburada.order'].sudo().search([
                     ('hb_order_number', 'in', list(order_numbers)),
                     '|', ('store_id', '=', store.id), ('merchant_id', '=', store.merchant_id),
-                ])
-            } if order_numbers else {}
+                ], order='id'):
+                    orders.setdefault(o.hb_order_number, o.id)
+                    if o.package_number:
+                        orders_by_package[(o.hb_order_number, o.package_number)] = o.id
 
             for hb_id, item in items.items():
                 vals = self._prepare_vals(item, store)
-                vals['order_id'] = orders.get(vals['order_number'] or '', False)
+                vals['order_id'] = (
+                    orders_by_package.get((vals['order_number'], str(vals['package_number'] or '')))
+                    or orders.get(vals['order_number'] or '', False))
                 try:
                     with self.env.cr.savepoint():
                         tx = existing.get(hb_id)
@@ -257,5 +263,9 @@ class HepsiburadaTransaction(models.Model):
                 ('order_number', '=', hb_order.hb_order_number),
                 ('store_id', '=', hb_order.store_id.id),
             ])
+            # Çok paketli sipariş: başka paketin finans kaydı bu pakete bağlanmaz
+            if hb_order.package_number and len(set(filter(None, orphans.mapped('package_number')))) > 1:
+                orphans = orphans.filtered(
+                    lambda t: not t.package_number or t.package_number == hb_order.package_number)
             if orphans:
                 orphans.write({'order_id': hb_order.id})

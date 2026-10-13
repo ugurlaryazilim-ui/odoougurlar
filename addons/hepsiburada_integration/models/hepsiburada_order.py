@@ -11,6 +11,10 @@ class HepsiburadaOrder(models.Model):
     _order = 'order_date desc, id desc'
 
     hb_order_number = fields.Char(string='Sipariş Numarası', required=True, index=True)
+    order_ref = fields.Char(
+        string='Odoo Sipariş Referansı', readonly=True, copy=False,
+        help='Odoo ve Nebim siparişinde kullanılan referans. Çok paketli siparişte '
+             'her paket ayrı sipariştir: "sipariş no-paket no".')
     merchant_id = fields.Char(string='Merchant ID')
     store_id = fields.Many2one('hepsiburada.store', string='Mağaza', index=True, ondelete='set null')
     order_date = fields.Datetime(string='Sipariş Tarihi')

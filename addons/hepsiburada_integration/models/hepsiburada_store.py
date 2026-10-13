@@ -49,6 +49,12 @@ class HepsiburadaStore(models.Model):
         help='Odoo siparişinin referans formatı',
     )
 
+    split_packages = fields.Boolean(
+        string='Paketleri Ayrı Sipariş Aç', default=True,
+        help='Aynı sipariş numarası birden fazla pakete bölündüyse (her paketin kargo barkodu ayrıdır) '
+             'her paket için ayrı Odoo siparişi açılır. Referans: "sipariş no-paket no".',
+    )
+
     # ─── Tek Sipariş Çekme ───
     fetch_order_number = fields.Char(
         string='Sipariş No',

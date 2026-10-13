@@ -74,6 +74,7 @@
                                     <field name="auto_cancel"/>
                                     <field name="order_day_range"/>
                                     <field name="order_ref_type"/>
+                                    <field name="split_packages" invisible="order_ref_type == 'package_id'"/>
                                 </group>
                                 <group string="Komisyon">
                                     <field name="process_commission"/>
