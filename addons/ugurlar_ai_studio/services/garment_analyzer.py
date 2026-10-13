@@ -12,8 +12,81 @@ PROMPT KONFİGÜRASYONU:
 import json
 import logging
 import re
+import threading
+import time
 
 _logger = logging.getLogger(__name__)
+
+# Kullanım kaydı: thread'e özgü kaydedici (servis Odoo'dan bağımsız kalır).
+# Kaydedici kurulmamışsa kullanım yalnızca loglanır.
+_usage_local = threading.local()
+
+
+def set_usage_recorder(recorder, **context):
+    """Bu thread'deki ücretli AI çağrılarının kullanımını alan callback'i kurar.
+
+    recorder(vals): vals = context + provider, step, model, input_tokens, output_tokens,
+    image_count, duration, status, cost (None = token'lardan hesaplanır).
+    """
+    _usage_local.recorder = recorder
+    _usage_local.context = dict(context)
+
+
+def set_usage_context(**context):
+    """Kaydedicinin bağlamını günceller (ör. işlenen üretim değişince)."""
+    current = getattr(_usage_local, 'context', None)
+    if current is not None:
+        current.update(context)
+
+
+def clear_usage_recorder():
+    _usage_local.recorder = None
+    _usage_local.context = None
+
+
+def report_usage(provider, step, model='', input_tokens=0, output_tokens=0, image_count=0,
+                 duration=0.0, status='ok', cost=None):
+    """Bir ücretli AI çağrısının kullanımını loglar ve kaydediciye iletir."""
+    _logger.info('AI kullanım: %s/%s giriş=%s çıkış=%s token, görsel=%s, %.1f sn, %s',
+                 provider, step, input_tokens, output_tokens, image_count, duration, status)
+    recorder = getattr(_usage_local, 'recorder', None)
+    if not recorder:
+        return
+    try:
+        recorder(dict(
+            getattr(_usage_local, 'context', None) or {},
+            provider=provider, step=step, model=model, input_tokens=input_tokens,
+            output_tokens=output_tokens, image_count=image_count, duration=duration,
+            status=status, cost=cost,
+        ))
+    except Exception as e:
+        _logger.warning('AI kullanım kaydı iletilemedi (%s/%s): %s', provider, step, e)
+
+
+def report_gemini_usage(step, image_count, started, resp=None, error=None):
+    """Gemini yanıtındaki usageMetadata'yı okuyup kullanımı bildirir.
+
+    Çıkış token'ına "thinking" token'ları dahildir (aynı fiyattan faturalanır). Zaman aşımı /
+    hata durumunda token bilinmez: çağrı sayılır, maliyeti 0 kalır.
+    """
+    input_tokens = output_tokens = 0
+    status = 'ok'
+    try:
+        if error is not None:
+            status = 'timeout' if 'Timeout' in error.__class__.__name__ else 'error'
+        elif resp.status_code != 200:
+            status = 'error'
+        else:
+            usage = (resp.json() or {}).get('usageMetadata')
+            if isinstance(usage, dict):
+                input_tokens = int(usage.get('promptTokenCount') or 0)
+                output_tokens = (int(usage.get('candidatesTokenCount') or 0)
+                                 + int(usage.get('thoughtsTokenCount') or 0))
+    except Exception:
+        status = 'error'
+    report_usage('gemini', step, model=_GEMINI_MODEL, input_tokens=input_tokens,
+                 output_tokens=output_tokens, image_count=image_count,
+                 duration=time.monotonic() - started, status=status)
 
 # ═══ Türkçe Substring Tuzağı Koruması ═══
 # "tişört" içinde "şort", "tisort" içinde "sort" gibi false positive'leri önler.
@@ -114,11 +187,12 @@ def _prepare_gemini_image(image_url):
     return None, None
 
 
-_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+_GEMINI_MODEL = 'gemini-2.5-flash'
+_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/" + _GEMINI_MODEL + ":generateContent"
 
 
 def _gemini_json(gemini_api_key, prompt, image, schema=None, timeout=30, deterministic=False,
-                 extra_images=None):
+                 extra_images=None, step='other'):
     """Görsel + prompt ile Gemini'den JSON al.
 
     Args:
@@ -149,15 +223,23 @@ def _gemini_json(gemini_api_key, prompt, image, schema=None, timeout=30, determi
         if deterministic:
             config["temperature"] = 0
             config["thinkingConfig"] = {"thinkingBudget": 0}
-        return requests.post(
-            _GEMINI_URL,
-            json={
-                "contents": [{"parts": parts}],
-                "generationConfig": config,
-            },
-            headers={'Content-Type': 'application/json', 'x-goog-api-key': gemini_api_key},
-            timeout=timeout,
-        )
+        # Her POST ayrı faturalanır (şema reddinde ikinci POST dahil) → ayrı bildirilir
+        started = time.monotonic()
+        try:
+            resp = requests.post(
+                _GEMINI_URL,
+                json={
+                    "contents": [{"parts": parts}],
+                    "generationConfig": config,
+                },
+                headers={'Content-Type': 'application/json', 'x-goog-api-key': gemini_api_key},
+                timeout=timeout,
+            )
+        except Exception as e:
+            report_gemini_usage(step, len(parts) - 1, started, error=e)
+            raise
+        report_gemini_usage(step, len(parts) - 1, started, resp=resp)
+        return resp
 
     try:
         resp = _call(True)
@@ -287,6 +369,7 @@ Return ONLY valid JSON."""
         # Deterministik: aynı fotoğraf her seferinde aynı detay listesini versin (sıcaklık 1.0 her
         # çağrıda farklı, kimi zaman uydurulmuş düğme/fermuar üretiyordu)
         parsed = _gemini_json(gemini_api_key, prompt, image_url, schema=_ANALYSIS_SCHEMA, timeout=45,
+                              step='analysis',
                               deterministic=True)
         if parsed:
             return parsed
@@ -417,7 +500,7 @@ def detect_image_tags(api_key, image_url, gemini_api_key=None, generated=False, 
                    'report them as tags; if a store tag touches or hangs over one, report it as "garment_detail". '
                    'Button-like round objects are still reported as "button_like", even when buttons are listed '
                    'above (the description may have mistaken a pin head for a button).')
-    parsed = _gemini_json(gemini_api_key, prompt, image_url, schema=_TAG_SCHEMA,
+    parsed = _gemini_json(gemini_api_key, prompt, image_url, schema=_TAG_SCHEMA, step='tag_detect',
                           timeout=25, deterministic=True)
     tags = (parsed or {}).get('securityTags') or []
     tags = [t for t in tags if isinstance(t, dict) and isinstance(t.get('box_2d'), list)
@@ -506,7 +589,7 @@ def verify_button_candidates(gemini_api_key, image_base64, tags):
             "- unsure: you cannot tell.\n"
             "Give a confidence from 0.0 to 1.0. Return JSON: "
             "{\"items\": [{\"index\": 0, \"kind\": \"tag_pin\", \"confidence\": 0.9}]}",
-            valid[0][1], schema=_BUTTON_CHECK_SCHEMA, timeout=25, deterministic=True,
+            valid[0][1], schema=_BUTTON_CHECK_SCHEMA, timeout=25, deterministic=True, step='button_verify',
             extra_images=[c for _, c in valid[1:]],
         )
         for it in (parsed or {}).get('items') or []:
@@ -564,7 +647,7 @@ def drop_fastener_mentions(gemini_api_key, analysis, image=None):
             "every other word and part exactly as it is, in plain positive English. Use an empty string when "
             "nothing else remains. Return JSON with the same keys: " + json.dumps(fields, ensure_ascii=False),
             image, schema={"type": "OBJECT", "properties": {k: {"type": "STRING"} for k in fields}},
-            timeout=20, deterministic=True,
+            timeout=20, deterministic=True, step='fastener_rewrite',
         )
     for key in fields:
         value = str(rewritten.get(key) or '') if isinstance(rewritten, dict) else ''
@@ -590,6 +673,7 @@ def _analyze_via_fal(api_key, image_url, prompt):
         mime_type, b64 = _prepare_gemini_image(image_url)
         image_url = 'data:%s;base64,%s' % (mime_type or 'image/jpeg', b64)
 
+    started = time.monotonic()
     try:
         # any-llm yalnızca metin alır (görseli görmeden uydururdu); vision uç noktası şart
         result = fal_client.subscribe(
@@ -602,6 +686,9 @@ def _analyze_via_fal(api_key, image_url, prompt):
             },
             client_timeout=60,
         )
+        # fal üzerinden Gemini: token bilgisi dönmez, liste fiyatı (fal-ai/any-llm) yazılır
+        report_usage('fal', 'analysis_fallback', model='fal-ai/any-llm/vision', image_count=1,
+                     duration=time.monotonic() - started, cost=0.001)
 
         output = result.get('output', '') if isinstance(result, dict) else ''
         if not output and hasattr(result, 'data'):
@@ -660,7 +747,8 @@ def analyze_outfit_consistency(image_data, api_key=None, gemini_api_key=None, ca
     )
     parsed = None
     if gemini_api_key:
-        parsed = _gemini_json(gemini_api_key, prompt, image_data, schema=_OUTFIT_SCHEMA, timeout=30)
+        parsed = _gemini_json(gemini_api_key, prompt, image_data, schema=_OUTFIT_SCHEMA, timeout=30,
+                              step='outfit')
     elif api_key:
         result = _analyze_via_fal(api_key, image_data, prompt)
         parsed = result if result != _default_analysis() else None
@@ -1085,7 +1173,7 @@ def erased_area_clean(gemini_api_key, image, boxes):
         "Return JSON: {\"clean\": true}",
         crop,
         schema={"type": "OBJECT", "properties": {"clean": {"type": "BOOLEAN"}}, "required": ["clean"]},
-        timeout=20, deterministic=True,
+        timeout=20, deterministic=True, step='erase_check',
     )
     if not parsed or 'clean' not in parsed:
         return None
@@ -1119,7 +1207,7 @@ def analyze_view_construction(gemini_api_key, image, view='back'):
         "plain is true when there is none. partsEn: short English list of what you actually see, with "
         "places, e.g. \"two patch pockets on the seat\"; empty when plain. "
         "Return JSON: {\"plain\": true, \"partsEn\": \"\"}",
-        image, schema=_VIEW_SCHEMA, timeout=25, deterministic=True,
+        image, schema=_VIEW_SCHEMA, timeout=25, deterministic=True, step='view_construction',
     )
     if not parsed or 'plain' not in parsed:
         return None
@@ -1141,7 +1229,7 @@ def mannequin_legs_covered(gemini_api_key, image):
         image,
         schema={"type": "OBJECT", "properties": {"legsCovered": {"type": "BOOLEAN"}},
                 "required": ["legsCovered"]},
-        timeout=20, deterministic=True,
+        timeout=20, deterministic=True, step='mannequin_check',
     )
     if not parsed or 'legsCovered' not in parsed:
         return None
@@ -1240,7 +1328,7 @@ Return {{"defects": [], "boxes": [], "addedDetails": [], "missingDetails": []}} 
         "required": ["defects"],
     }
     parsed = _gemini_json(gemini_api_key, prompt, generated_image, schema=schema, timeout=timeout,
-                          deterministic=True,
+                          deterministic=True, step='quality_check',
                           extra_images=[i for i in (reference_image, original_image) if i] or None)
     if parsed is None:
         return None

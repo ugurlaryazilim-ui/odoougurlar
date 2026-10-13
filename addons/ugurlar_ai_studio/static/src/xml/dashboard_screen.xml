@@ -102,6 +102,9 @@
                                 <div class="text-danger fw-bold" style="font-size: 1.5rem;">
                                     Toplam Maliyet: <t t-esc="state.cost_data.total_cost"/> <t t-esc="state.cost_data.currency"/>
                                 </div>
+                                <div>fal.ai: <t t-esc="state.cost_data.fal_cost"/> <t t-esc="state.cost_data.currency"/></div>
+                                <div>Gemini: <t t-esc="state.cost_data.gemini_cost"/> <t t-esc="state.cost_data.currency"/></div>
+                                <div>Oturum başına ortalama: <t t-esc="state.cost_data.avg_session_cost"/> <t t-esc="state.cost_data.currency"/></div>
                             </div>
                         </div>
                     </div>

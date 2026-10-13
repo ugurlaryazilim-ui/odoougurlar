@@ -710,3 +710,68 @@ class TestFalErrors(BaseCase):
         self.assertIn('is_retryable', parsed)
         self.assertIn('error_type', parsed)
         self.assertTrue(parsed['message'])
+
+
+@tagged('post_install', '-at_install', 'ugurlar_ai_studio')
+class TestUsageReporting(BaseCase):
+    """Gemini çağrılarının token kullanımı kaydediciye bildirilir."""
+
+    class Resp:
+        def __init__(self, code, payload=None):
+            self.status_code, self._payload = code, payload
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise Exception('HTTP %s' % self.status_code)
+
+        def json(self):
+            return self._payload
+
+    def setUp(self):
+        super().setUp()
+        self.rows = []
+        analyzer_module.set_usage_recorder(self.rows.append, session_id=7, generation_id=None)
+        self.addCleanup(analyzer_module.clear_usage_recorder)
+        self.ok = self.Resp(200, {
+            'candidates': [{'content': {'parts': [{'text': '{"a": 1}'}]}}],
+            'usageMetadata': {'promptTokenCount': 5200, 'candidatesTokenCount': 180, 'thoughtsTokenCount': 320},
+        })
+
+    def _call(self, side_effect, **kwargs):
+        with patch.object(analyzer_module, '_prepare_gemini_image', return_value=('image/jpeg', 'AAAA')),                 patch.object(analyzer_module.requests, 'post', side_effect=side_effect):
+            return analyzer_module._gemini_json('k', 'p', 'IMG', **kwargs)
+
+    def test_tokens_and_images_are_reported(self):
+        result = self._call(lambda *a, **k: self.ok, extra_images=['A', 'B'], step='quality_check')
+        self.assertEqual(result, {'a': 1})
+        self.assertEqual(len(self.rows), 1)
+        row = self.rows[0]
+        self.assertEqual((row['provider'], row['step'], row['status']), ('gemini', 'quality_check', 'ok'))
+        self.assertEqual(row['input_tokens'], 5200)
+        self.assertEqual(row['output_tokens'], 500, 'thinking token çıkışa dahil')
+        self.assertEqual(row['image_count'], 3)
+        self.assertEqual(row['session_id'], 7)
+
+    def test_schema_retry_counts_both_posts(self):
+        responses = iter([self.Resp(400), self.ok])
+        analyzer_module.set_usage_context(generation_id=42)
+        self._call(lambda *a, **k: next(responses), schema={'type': 'OBJECT'}, step='tag_detect')
+        self.assertEqual([r['status'] for r in self.rows], ['error', 'ok'])
+        self.assertEqual(self.rows[1]['generation_id'], 42)
+
+    def test_timeout_is_counted_without_tokens(self):
+        class ReadTimeout(Exception):
+            pass
+
+        def boom(*a, **k):
+            raise ReadTimeout()
+
+        self.assertIsNone(self._call(boom, step='analysis'))
+        self.assertEqual(len(self.rows), 1)
+        self.assertEqual(self.rows[0]['status'], 'timeout')
+        self.assertEqual(self.rows[0]['input_tokens'], 0)
+
+    def test_no_recorder_does_not_break_the_call(self):
+        analyzer_module.clear_usage_recorder()
+        self.assertEqual(self._call(lambda *a, **k: self.ok, step='outfit'), {'a': 1})
+        self.assertEqual(self.rows, [])

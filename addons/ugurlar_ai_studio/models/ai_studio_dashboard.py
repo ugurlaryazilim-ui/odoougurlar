@@ -205,6 +205,16 @@ class AiStudioLeaderboard(models.Model):
         cost_groups = Generation._read_group(all_gens_domain, aggregates=['cost:sum'])
         total_cost = (cost_groups[0][0] if cost_groups else 0.0) or 0.0
         
+        # Net maliyet = üretimlerin fal maliyeti + kullanım kayıtları (Gemini, fal yedeği, silinen üretimler)
+        usage_domain = [d for d in all_gens_domain if d[0] == 'create_date']
+        usage_cost = dict(self.env['ai.studio.usage'].sudo()._read_group(
+            usage_domain, groupby=['provider'], aggregates=['cost:sum']))
+        gemini_cost = usage_cost.get('gemini') or 0.0
+        fal_cost = total_cost + (usage_cost.get('fal') or 0.0)
+        cost_sessions = Generation._read_group(all_gens_domain, aggregates=['session_id:count_distinct'])
+        cost_session_count = (cost_sessions[0][0] if cost_sessions else 0) or 0
+        net_cost = fal_cost + gemini_cost
+
         is_manager = self.env.user.has_group('ugurlar_ai_studio.group_ai_studio_manager')
 
         return {
@@ -219,7 +229,10 @@ class AiStudioLeaderboard(models.Model):
             'reject_reasons': reject_reasons,
             'cost_data': {
                 'show': is_manager,
-                'total_cost': round(total_cost, 2),
+                'total_cost': round(net_cost, 2),
+                'fal_cost': round(fal_cost, 2),
+                'gemini_cost': round(gemini_cost, 2),
+                'avg_session_cost': round(net_cost / cost_session_count, 3) if cost_session_count else 0.0,
                 'currency': '$',  # AI maliyetleri USD tutulur
             },
             'my_stats': {

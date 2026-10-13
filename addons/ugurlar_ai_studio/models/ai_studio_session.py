@@ -16,7 +16,10 @@ from PIL import Image, ImageDraw, Image as PILImage
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
 
-from ..services.garment_analyzer import design_hint
+from ..services.garment_analyzer import (
+    clear_usage_recorder, design_hint, set_usage_context, set_usage_recorder,
+)
+from .ai_studio_usage import GEMINI_INPUT_PRICE, GEMINI_OUTPUT_PRICE
 
 _logger = logging.getLogger(__name__)
 
@@ -96,6 +99,58 @@ def _make_enqueue_recorder(pool, gen_id):
         except Exception as e:
             _logger.warning('fal request_id kaydedilemedi (gen=%s): %s', gen_id, e)
     return _on_enqueue
+
+
+def _make_usage_recorder(pool, uid, input_price, output_price):
+    """AI çağrısının kullanımını ayrı transaction'da ai_studio_usage'a yazan callback.
+
+    Ayrı cursor: ana işlem geri alınsa da harcama kaydı kalır. Yalnızca INSERT olduğundan
+    ana cursor'ın güncellediği satırlarla çakışmaz. Fiyatlar USD / 1M token.
+    """
+    def _record(vals):
+        cost = vals.get('cost')
+        if cost is None:
+            cost = ((vals.get('input_tokens') or 0) * input_price
+                    + (vals.get('output_tokens') or 0) * output_price) / 1e6
+        try:
+            with pool.cursor() as rcr:
+                rcr.execute("SET LOCAL lock_timeout = '5s'")
+                rcr.execute(
+                    "INSERT INTO ai_studio_usage (session_id, generation_id, product_id, user_id, provider, "
+                    "step, model, input_tokens, output_tokens, image_count, duration, status, cost, "
+                    "create_uid, write_uid, create_date, write_date) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                    + _UTC_NOW_SQL + ", " + _UTC_NOW_SQL + ")",
+                    (vals.get('session_id') or None, vals.get('generation_id') or None,
+                     vals.get('product_id') or None, vals.get('user_id') or None,
+                     vals.get('provider'), vals.get('step') or 'other', vals.get('model') or '',
+                     vals.get('input_tokens') or 0, vals.get('output_tokens') or 0,
+                     vals.get('image_count') or 0, vals.get('duration') or 0.0,
+                     vals.get('status') or 'ok', cost, uid, uid),
+                )
+                rcr.commit()
+        except Exception as e:
+            _logger.warning('AI kullanım kaydı yazılamadı (%s/%s): %s', vals.get('provider'), vals.get('step'), e)
+    return _record
+
+
+def _start_usage_recording(env, session, generation=None):
+    """Bu thread'deki Gemini / fal çağrılarını oturuma (ve üretime) yazan kaydediciyi kurar."""
+    get_param = env['ir.config_parameter'].sudo().get_param
+
+    def _price(key, default):
+        try:
+            return float(get_param('ugurlar_ai_studio.' + key) or default)
+        except (TypeError, ValueError):
+            return default
+
+    set_usage_recorder(
+        _make_usage_recorder(env.registry, env.uid,
+                             _price('gemini_input_price', GEMINI_INPUT_PRICE),
+                             _price('gemini_output_price', GEMINI_OUTPUT_PRICE)),
+        session_id=session.id, generation_id=generation.id if generation else None,
+        product_id=session.product_id.id, user_id=session.user_id.id or env.uid,
+    )
 
 
 # Yeni bir deneme başlarken önceki fal isteğinin izi silinir; aksi halde cron bu
@@ -915,6 +970,23 @@ class AiStudioSession(models.Model):
         string='Üretim Sayısı',
         compute='_compute_photo_count',
     )
+    # --- AI kullanımı (Gemini token'ları + fal) ---
+    usage_ids = fields.One2many('ai.studio.usage', 'session_id', string='AI Kullanımı')
+    gemini_cost = fields.Float(
+        string='Gemini Maliyeti (USD)',
+        compute='_compute_usage_stats',
+        digits=(16, 4),
+    )
+    gemini_call_count = fields.Integer(
+        string='Gemini Çağrı Sayısı',
+        compute='_compute_usage_stats',
+    )
+    net_cost = fields.Float(
+        string='Net Maliyet (USD)',
+        compute='_compute_usage_stats',
+        digits=(16, 4),
+        help='Üretimlerin fal maliyeti + Gemini + silinen üretimlerin maliyeti',
+    )
     currency_id = fields.Many2one(
         'res.currency',
         string='Para Birimi',
@@ -960,6 +1032,15 @@ class AiStudioSession(models.Model):
                 session.sibling_product_ids = valid_siblings
             else:
                 session.sibling_product_ids = False
+
+    @api.depends('usage_ids.cost', 'generation_ids.cost')
+    def _compute_usage_stats(self):
+        for session in self:
+            usage = session.sudo().usage_ids
+            gemini = usage.filtered(lambda u: u.provider == 'gemini')
+            session.gemini_cost = sum(gemini.mapped('cost'))
+            session.gemini_call_count = len(gemini)
+            session.net_cost = sum(session.generation_ids.mapped('cost')) + sum(usage.mapped('cost'))
 
     @api.depends('generation_ids.cost', 'generation_ids.is_approved',
                  'generation_ids.revision_number', 'generation_ids.state')
@@ -2134,6 +2215,7 @@ class AiStudioSession(models.Model):
                     except Exception:
                         pass
             finally:
+                clear_usage_recorder()
                 _release_session_lease(self.pool, session_id, owner)
 
     def _process_batch_ai_thread(self, session_ids, api_key, uid):
@@ -2171,6 +2253,7 @@ class AiStudioSession(models.Model):
                         except Exception:
                             pass
                 finally:
+                    clear_usage_recorder()
                     _release_session_lease(self.pool, session_id, owner)
             time.sleep(2)  # Oturumlar arası API baskısını azaltmak için 2s bekleme
 
@@ -2186,6 +2269,7 @@ class AiStudioSession(models.Model):
                 _logger.info('AI Thread: oturum %s artık işlenecek durumda değil (%s), atlandı.',
                              session_id, session.exists() and session.state)
                 return
+            _start_usage_recording(env, session)
             provider_type = env['ir.config_parameter'].sudo().get_param(
                 'ugurlar_ai_studio.default_provider', 'fashn'
             )
@@ -2322,6 +2406,7 @@ class AiStudioSession(models.Model):
             front_failed = False
             for gen in ordered_gens:
                 photo_type = gen.photo_type or 'front'
+                set_usage_context(generation_id=gen.id)
                 # Her iterasyonda sıfırla: çakışma kurtarması önceki görünümün
                 # sonucunu (ör. ön yüz görselini) bu generation'a yazmamalı.
                 gen_b64 = tryon_result = None
@@ -2780,6 +2865,7 @@ class AiStudioSession(models.Model):
                     except Exception:
                         pass
             finally:
+                clear_usage_recorder()
                 _release_session_lease(self.pool, session_id, owner)
 
     def _retry_generation_thread_body(self, session_id, gen_id, api_key, uid, lease_owner=None):
@@ -2809,6 +2895,7 @@ class AiStudioSession(models.Model):
 
             session = env['ai.studio.session'].browse(session_id)
             gen = env['ai.studio.generation'].browse(gen_id)
+            _start_usage_recording(env, session, gen)
             # Semaphore beklenirken üretim başka yerde tamamlanmış/iptal edilmiş olabilir:
             # yeniden çalıştırmak mükerrer ücret ve onaylı görselin üzerine yazma demek
             if not gen.exists() or gen.state != 'pending':
@@ -3508,6 +3595,7 @@ class AiStudioSession(models.Model):
         gemini_key = self.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.gemini_api_key', '')
         if gemini_key and photo and photo.garment_clean_image:
             try:
+                _start_usage_recording(self.env, gen.session_id, gen)
                 qc_vals = _run_quality_check(
                     self.env, photo.image_original, gen_b64, gemini_key, category=gen.session_id.category or '',
                     gen=gen, base_cost=cost, reference_image=photo.garment_clean_image,
@@ -3519,6 +3607,8 @@ class AiStudioSession(models.Model):
                 vals.update(qc_vals)
             except Exception as qe:
                 _logger.warning('Kurtarılan sonucun denetimi başarısız (gen=%s): %s', gen.id, qe)
+            finally:
+                clear_usage_recorder()
         gen.write(vals)
         _logger.info('Cron: fal sonucu kurtarıldı (gen=%s, request_id=%s)', gen.id, request_id)
         return 'done'
