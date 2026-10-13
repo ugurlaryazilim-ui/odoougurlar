@@ -1,6 +1,6 @@
 {
     'name': 'AI Fotoğraf Stüdyosu',
-    'version': '19.0.1.0.42',
+    'version': '19.0.1.0.43',
     'category': 'Inventory/Products',
     'summary': 'AI destekli ürün fotoğraf stüdyosu - Barkod tara, fotoğraf çek, AI ile manken üzerine giydir',
     'description': """
@@ -42,6 +42,7 @@
         'views/ai_studio_settings_views.xml',
         'views/ai_studio_library_views.xml',
         'views/ai_studio_imageless_views.xml',
+        'views/ai_studio_usage_views.xml',
         'views/menu.xml',
     ],
     'assets': {

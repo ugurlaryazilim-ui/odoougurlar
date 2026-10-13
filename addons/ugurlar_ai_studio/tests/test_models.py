@@ -1,5 +1,6 @@
 """Model / veritabanı testleri: kira, yetki, renk kapsamlı kaydetme, cron."""
 import base64
+from contextlib import contextmanager
 import io
 from datetime import timedelta
 
@@ -9,7 +10,9 @@ from odoo.tests import TransactionCase, new_test_user, tagged
 
 from unittest.mock import patch
 
-from ..models.ai_studio_session import _get_extra_prompt_en, _needs_bare_legs, _try_acquire_lease
+from ..models.ai_studio_session import (
+    _get_extra_prompt_en, _make_usage_recorder, _needs_bare_legs, _try_acquire_lease,
+)
 
 try:
     from PIL import Image
@@ -267,3 +270,50 @@ class TestAiStudioModels(TransactionCase):
         prompt = type(self.env['ai.studio.model.preset']).BARE_LEGS_EDIT_PROMPT.lower()
         for word in ('remove', 'bare', 'trousers', 'naked', 'undress'):
             self.assertNotIn(word, prompt)
+
+    # ── AI kullanım kaydı / net maliyet ──────────────────────────────
+    def _usage_recorder(self):
+        cr = self.env.cr
+
+        class _Cursor:
+            def execute(self, *args):
+                return cr.execute(*args)
+
+            def commit(self):
+                pass
+
+        class _Pool:
+            @contextmanager
+            def cursor(self):
+                yield _Cursor()
+
+        return _make_usage_recorder(_Pool(), self.env.uid, 0.30, 2.50)
+
+    def test_usage_recorder_writes_row_with_token_cost(self):
+        session = self._session(self.red)
+        self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'done', 'cost': 0.03})
+        self._usage_recorder()({
+            'session_id': session.id, 'product_id': self.red.id, 'provider': 'gemini', 'step': 'quality_check',
+            'model': 'gemini-2.5-flash', 'input_tokens': 5200, 'output_tokens': 500, 'image_count': 3,
+            'duration': 4.2, 'status': 'ok', 'cost': None,
+        })
+        self.env.invalidate_all()
+        usage = session.usage_ids
+        self.assertEqual(len(usage), 1)
+        self.assertEqual(usage.product_id, self.red)
+        self.assertAlmostEqual(usage.cost, 0.00281, places=6)
+        self.assertEqual(session.gemini_call_count, 1)
+        self.assertAlmostEqual(session.gemini_cost, 0.00281, places=6)
+        self.assertAlmostEqual(session.net_cost, 0.03281, places=5)
+
+    def test_deleted_generation_cost_stays_in_net_cost(self):
+        session = self._session(self.red)
+        gen = self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'done', 'cost': 5.0})
+        gen.unlink()
+        self.env.invalidate_all()
+        kept = session.usage_ids
+        self.assertEqual((kept.provider, kept.step), ('fal', 'deleted_generation'))
+        self.assertAlmostEqual(kept.cost, 5.0)
+        self.assertAlmostEqual(session.net_cost, 5.0)
+        report = self.env['ai.studio.cost.report'].search([('session_id', '=', session.id)])
+        self.assertAlmostEqual(sum(report.mapped('cost')), 5.0)

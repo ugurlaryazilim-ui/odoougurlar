@@ -100,6 +100,19 @@
                                 </div>
                             </div>
                         </setting>
+                        <setting string="Gemini Token Fiyatları (USD / 1M token)"
+                                 help="AI kullanım kayıtlarındaki Gemini maliyeti bu fiyatlarla hesaplanır. Google fiyat değiştirirse buradan güncelleyin.">
+                            <div class="content-group">
+                                <div class="row mt16">
+                                    <label for="ai_studio_gemini_input_price" string="Giriş" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="ai_studio_gemini_input_price" class="col-3"/>
+                                </div>
+                                <div class="row">
+                                    <label for="ai_studio_gemini_output_price" string="Çıkış" class="col-3 col-lg-3 o_light_label"/>
+                                    <field name="ai_studio_gemini_output_price" class="col-3"/>
+                                </div>
+                            </div>
+                        </setting>
                         <setting string="Maksimum Revizyon Sayısı"
                                  help="Süpervizör onayı gerektirmeden yapılabilecek revize sayısı">
                             <div class="content-group">

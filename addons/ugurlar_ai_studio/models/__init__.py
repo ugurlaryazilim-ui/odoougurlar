@@ -7,6 +7,7 @@ from . import ai_studio_photo
 from . import ai_studio_generation
 from . import ai_studio_candidate
 from . import ai_studio_set_line
+from . import ai_studio_usage
 from . import ai_studio_session
 from . import ai_studio_imageless
 from . import ai_studio_dashboard

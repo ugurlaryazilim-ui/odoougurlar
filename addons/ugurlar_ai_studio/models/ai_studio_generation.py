@@ -1,8 +1,11 @@
 import logging
+import time
 from collections import OrderedDict
 
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
+
+from ..services.garment_analyzer import report_gemini_usage
 
 _logger = logging.getLogger(__name__)
 
@@ -35,10 +38,12 @@ def translate_tr_en(text, gemini_key=''):
                 "Return ONLY the English translation, nothing else.\n\n"
                 f"Turkish instruction: {text}"
             )
+            started = time.monotonic()
             resp = requests.post(_TRANSLATE_URL, json={
                 'contents': [{'parts': [{'text': prompt}]}],
                 'generationConfig': {'temperature': 0, 'thinkingConfig': {'thinkingBudget': 0}},
             }, headers={'Content-Type': 'application/json', 'x-goog-api-key': gemini_key}, timeout=8)
+            report_gemini_usage('translate', 0, started, resp=resp)
             if resp.status_code == 200:
                 candidates = resp.json().get('candidates') or []
                 if candidates:
@@ -781,3 +786,8 @@ class AiStudioGeneration(models.Model):
             old_rejected.write({
                 'generated_image': False,
             })
+
+    def unlink(self):
+        # Silinen üretimin harcaması maliyet raporundan kaybolmasın ("Yeniden AI Gönder" üretimleri siler)
+        self.env['ai.studio.usage']._keep_deleted_generation_costs(self)
+        return super().unlink()

@@ -165,6 +165,21 @@
               action="action_ai_studio_session_reports"
               sequence="2"/>
 
+    <!-- Maliyet Analizi (ürün başına net maliyet) -->
+    <menuitem id="menu_ai_studio_cost_report"
+              name="Maliyet Analizi"
+              parent="menu_ai_studio_reporting"
+              action="action_ai_studio_cost_report"
+              groups="ugurlar_ai_studio.group_ai_studio_manager"
+              sequence="3"/>
+
+    <menuitem id="menu_ai_studio_usage"
+              name="AI Kullanım Kayıtları"
+              parent="menu_ai_studio_reporting"
+              action="action_ai_studio_usage"
+              groups="ugurlar_ai_studio.group_ai_studio_manager"
+              sequence="4"/>
+
     <!-- ======================================================= -->
     <!-- 2. Seviye: Yapilandirma Alt Menusu                      -->
     <!-- ======================================================= -->

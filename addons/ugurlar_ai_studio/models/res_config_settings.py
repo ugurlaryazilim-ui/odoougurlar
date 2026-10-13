@@ -1,5 +1,7 @@
 from odoo import api, fields, models
 
+from .ai_studio_usage import GEMINI_INPUT_PRICE, GEMINI_OUTPUT_PRICE
+
 
 class ResConfigSettings(models.TransientModel):
     _inherit = 'res.config.settings'
@@ -57,6 +59,20 @@ class ResConfigSettings(models.TransientModel):
         default=0.0,
         config_parameter='ugurlar_ai_studio.monthly_budget',
         help='Bu ay kaydedilen toplam AI maliyeti bu tutara ulaşınca yeni işlem başlatılamaz. 0 = limitsiz.',
+    )
+    ai_studio_gemini_input_price = fields.Float(
+        string='Gemini Giriş Fiyatı (USD / 1M token)',
+        default=GEMINI_INPUT_PRICE,
+        digits=(16, 4),
+        config_parameter='ugurlar_ai_studio.gemini_input_price',
+        help='gemini-2.5-flash giriş (metin + görsel) token fiyatı. Kullanım kayıtlarının maliyeti bununla hesaplanır.',
+    )
+    ai_studio_gemini_output_price = fields.Float(
+        string='Gemini Çıkış Fiyatı (USD / 1M token)',
+        default=GEMINI_OUTPUT_PRICE,
+        digits=(16, 4),
+        config_parameter='ugurlar_ai_studio.gemini_output_price',
+        help='gemini-2.5-flash çıkış token fiyatı ("thinking" token\'ları dahil).',
     )
     ai_studio_candidate_count = fields.Integer(
         string='Ön Görünüm Aday Sayısı',

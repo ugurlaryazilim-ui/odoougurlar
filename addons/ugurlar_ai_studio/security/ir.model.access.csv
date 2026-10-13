@@ -28,3 +28,7 @@ access_ai_studio_set_line_reviewer,ai.studio.set.line reviewer,model_ai_studio_s
 access_ai_studio_set_line_manager,ai.studio.set.line manager,model_ai_studio_set_line,ugurlar_ai_studio.group_ai_studio_manager,1,1,1,1
 access_ai_studio_candidate_operator,ai.studio.generation.candidate operator,model_ai_studio_generation_candidate,ugurlar_ai_studio.group_ai_studio_operator,1,0,1,0
 access_ai_studio_candidate_reviewer,ai.studio.generation.candidate reviewer,model_ai_studio_generation_candidate,ugurlar_ai_studio.group_ai_studio_reviewer,1,1,1,1
+access_ai_studio_usage_reviewer,ai.studio.usage reviewer,model_ai_studio_usage,ugurlar_ai_studio.group_ai_studio_reviewer,1,0,0,0
+access_ai_studio_usage_manager,ai.studio.usage manager,model_ai_studio_usage,ugurlar_ai_studio.group_ai_studio_manager,1,0,0,0
+access_ai_studio_cost_report_reviewer,ai.studio.cost.report reviewer,model_ai_studio_cost_report,ugurlar_ai_studio.group_ai_studio_reviewer,1,0,0,0
+access_ai_studio_cost_report_manager,ai.studio.cost.report manager,model_ai_studio_cost_report,ugurlar_ai_studio.group_ai_studio_manager,1,0,0,0
