@@ -31,6 +31,17 @@ _HISTORY_ENDPOINTS = (
 _FINAL_STATUSES = HB_CANCEL_STATUSES | {'Shipped', 'InTransit', 'Delivered', 'UnDelivered'}
 # Sonradan gelen kalem bu sebeplerle oluştuysa sipariş yeniden kurulmaz (değişim, transfer vb.)
 _REBUILD_CREATION_REASONS = {False, None, '', 'OrderCreated', 'DeliveryCreated'}
+# Entegratörün satıcı stok koduna eklediği ön ekler: ENTV-HB4587101321686 → 4587101321686
+_SKU_PREFIXES = ('ENTV-HB',)
+
+
+def _strip_sku_prefix(code):
+    """Ön ekli stok kodunun kalan (barkod) kısmı; ön ek yoksa boş döner."""
+    code = (code or '').strip()
+    for prefix in _SKU_PREFIXES:
+        if code.upper().startswith(prefix) and len(code) > len(prefix):
+            return code[len(prefix):].strip()
+    return ''
 
 
 def _escape_like(value):
@@ -895,6 +906,14 @@ class HepsiburadaOrderSync(models.AbstractModel):
                 product = Product.find_by_marketplace_barcode(line.merchant_sku)
             if not product and line.sku:
                 product = Product.find_by_marketplace_barcode(line.sku)
+            # Tam kod eşleşmediyse ön eki at, kalan barkodla dene
+            if not product:
+                bare_code = _strip_sku_prefix(line.merchant_sku)
+                if bare_code:
+                    product = Product.find_by_marketplace_barcode(bare_code)
+                    if product:
+                        _logger.info("HB ön eksiz eşleşme: %s → %s (%s)",
+                                     line.merchant_sku, bare_code, product.display_name)
 
             if not product:
                 _logger.warning("HB Ürün bulunamadı: merchant_sku=%s, sku=%s, ürün adı=%s",
