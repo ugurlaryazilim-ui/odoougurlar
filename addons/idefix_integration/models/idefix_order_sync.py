@@ -21,8 +21,12 @@ _MAX_PAGES = 100
 _STALE_CHECK_AFTER = timedelta(minutes=30)  # açık sevkiyatlar en geç bu aralıkla yoklanır
 _STALE_CHECK_LIMIT = 200                    # her turda yoklanacak en fazla sevkiyat
 _STALE_BATCH = 50                           # 'ids' parametresiyle tek istekte sorgulanan sevkiyat
-_STALE_LOOKBACK = timedelta(days=30)        # bundan eski açık sevkiyatlar otomatik yoklanmaz
-_AUTO_CANCEL_LOOKBACK = timedelta(days=30)  # bundan eski siparişler otomatik iptal edilmez
+_STALE_RECENT = timedelta(days=30)          # bundan yeni açık sevkiyatlar her 30 dk yoklanır
+_STALE_OLD_CHECK_AFTER = timedelta(hours=6)  # daha eski açık sevkiyatlar 6 saatte bir yoklanır
+_STALE_LOOKBACK = timedelta(days=120)       # bundan eski açık sevkiyatlar otomatik yoklanmaz
+# Bundan eski siparişler otomatik iptal edilmez — Idefix'te statüsü yakın zamanda değişmediyse
+# (geç gelen iptal: haftalarca "Sevke Hazır" bekleyip sonradan iptal edilen sipariş yine düşer)
+_AUTO_CANCEL_LOOKBACK = timedelta(days=30)
 _PICKING_RETRY_AFTER = timedelta(minutes=30)
 
 
@@ -199,7 +203,11 @@ class IdefixOrderSync(models.Model):
             ('order_status', 'not in', list(IDEFIX_FINAL_STATUSES)),
             ('order_date', '<', window_start),
             ('order_date', '>=', now - _STALE_LOOKBACK),
-            '|', ('last_checked', '=', False), ('last_checked', '<', now - _STALE_CHECK_AFTER),
+            # 30 günden eski açık sevkiyatlar da yoklanır (önceden hiç yoklanmıyordu: geç iptal
+            # Odoo'ya düşmüyordu), ancak 6 saatte bir
+            '|', ('last_checked', '=', False),
+            '|', '&', ('last_checked', '<', now - _STALE_CHECK_AFTER), ('order_date', '>=', now - _STALE_RECENT),
+            ('last_checked', '<', now - _STALE_OLD_CHECK_AFTER),
         ], limit=_STALE_CHECK_LIMIT, order='last_checked asc nulls first, id')
         for start in range(0, len(orders), _STALE_BATCH):
             batch = orders[start:start + _STALE_BATCH]
@@ -730,7 +738,8 @@ class IdefixOrderSync(models.Model):
             ('order_status', 'in', list(IDEFIX_CANCEL_STATUSES)),
             ('sale_order_id', '!=', False),
             ('sale_order_id.state', 'not in', ['cancel', 'done']),
-            ('order_date', '>=', fields.Datetime.now() - _AUTO_CANCEL_LOOKBACK),
+            '|', ('order_date', '>=', fields.Datetime.now() - _AUTO_CANCEL_LOOKBACK),
+            ('status_updated_at', '>=', fields.Datetime.now() - _AUTO_CANCEL_LOOKBACK),
         ])
         count = 0
         for ix_order in cancelled_orders:
