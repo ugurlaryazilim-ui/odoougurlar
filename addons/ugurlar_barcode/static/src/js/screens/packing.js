@@ -954,10 +954,11 @@ export class PackingScreen extends Component {
             setTimeout(autoCloseAndFocus, 300);
         });
 
+        const deadline = Date.now() + 5000;  // görsel yüklenemezse en geç 5 sn sonra yazdır
         const tryPrint = () => {
             const imgs = win.document.querySelectorAll('img');
-            const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
-            if (allLoaded || imgs.length === 0) {
+            const allLoaded = Array.from(imgs).every(img => img.complete);
+            if (allLoaded || imgs.length === 0 || Date.now() > deadline) {
                 win.focus();
                 win.print();
                 // Fallback: afterprint desteklenmeyen tarayıcılar için
@@ -996,10 +997,11 @@ export class PackingScreen extends Component {
             setTimeout(autoCleanup, 300);
         });
 
+        const deadline = Date.now() + 5000;  // görsel yüklenemezse en geç 5 sn sonra yazdır
         const tryPrint = () => {
             const imgs = doc.querySelectorAll('img');
-            const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
-            if (allLoaded || imgs.length === 0) {
+            const allLoaded = Array.from(imgs).every(img => img.complete);
+            if (allLoaded || imgs.length === 0 || Date.now() > deadline) {
                 iframe.contentWindow.focus();
                 iframe.contentWindow.print();
                 setTimeout(autoCleanup, 500);

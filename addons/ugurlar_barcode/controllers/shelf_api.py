@@ -194,7 +194,7 @@ class ShelfApiController(BarcodeApiBase):
                 'barcode': op.barcode,
                 'quantity': int(op.quantity),
                 'location': op.location_id.complete_name if op.location_id else '',
-                'date': op.create_date.strftime('%d.%m.%Y %H:%M') if op.create_date else '',
+                'date': self._local_dt(op.create_date).strftime('%d.%m.%Y %H:%M') if op.create_date else '',
                 'user': op.create_uid.name if op.create_uid else '',
             })
 

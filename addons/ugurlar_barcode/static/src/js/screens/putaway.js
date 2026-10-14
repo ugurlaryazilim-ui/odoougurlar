@@ -402,6 +402,12 @@ export class PutawayScreen extends Component {
     }
 
     // ─── BARKOD İŞLEME (parametre ile) ───────────
+    // "Rafla / Raftan Kaldır" butonu ve kamera: kutudaki barkodu işle
+    onExecute() {
+        const bc = (this.state.productBarcode || '').trim();
+        if (bc) this._executeScan(bc);
+    }
+
     async _executeScan(barcode) {
         if (!barcode) return;
 
@@ -623,6 +629,7 @@ export class PutawayScreen extends Component {
             navigator.mediaDevices.getUserMedia({
                 video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
             }).then(s => {
+                if (!scanning) { s.getTracks().forEach(t => t.stop()); return; }
                 stream = s;
                 video.srcObject = stream;
                 statusEl.textContent = `${target === 'shelf' ? 'Raf' : 'Ürün'} barkodunu kameraya gösterin...`;
@@ -632,7 +639,8 @@ export class PutawayScreen extends Component {
                 });
 
                 const scanFrame = async () => {
-                    if (!scanning || video.readyState < 2) {
+                    if (!scanning) return;
+                    if (video.readyState < 2) {
                         animFrame = requestAnimationFrame(scanFrame);
                         return;
                     }

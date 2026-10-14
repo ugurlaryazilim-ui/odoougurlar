@@ -22,7 +22,7 @@ export class BatchPickingScreen extends Component {
                 <t t-if="state.loading">
                     <div class="ub-loading"><i class="fa fa-spinner fa-spin fa-2x"></i><p>Yükleniyor...</p></div>
                 </t>
-                <div class="bp-list-container" t-if="!state.loading">
+                <div class="bp-list-container">
                     <!-- ─── FİLTRE BARI ─── -->
                     <div class="bp-filter-bar">
                         <!-- Satır 1: Durum pilleri + Arama -->
@@ -569,6 +569,7 @@ export class BatchPickingScreen extends Component {
     // ═══ LİSTE ═══
     async loadBatches() {
         this.state.loading = true;
+        this.state.error = null;
         try {
             const res = await BarcodeService.call('/ugurlar_barcode/api/batch_list', {
                 filter_state: this.state.filterState,

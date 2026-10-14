@@ -131,8 +131,7 @@ export class ShelfTransferScreen extends Component {
 
                     <div class="ub-search-field">
                         <label class="ub-field-label">Taşıma Nedeni</label>
-                        <select class="form-control ub-reason-select"
-                                t-on-change="(ev) => this.state.reason = ev.target.value">
+                        <select class="form-control ub-reason-select" t-model="state.reason">
                             <option value="">Yok</option>
                             <option value="reorganize">Reorganizasyon</option>
                             <option value="demand">Talep Değişimi</option>
@@ -333,7 +332,7 @@ export class ShelfTransferScreen extends Component {
                 speak('transfer_error');
                 vibrateError();
             } else {
-                this.state.targetShelfInfo = res;
+                this.state.targetShelfInfo = res.location || res;
                 this.state.step = 3;
                 speak('transfer_target_found');
                 vibrate();
@@ -487,6 +486,7 @@ export class ShelfTransferScreen extends Component {
             navigator.mediaDevices.getUserMedia({
                 video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
             }).then(s => {
+                if (!scanning) { s.getTracks().forEach(t => t.stop()); return; }
                 stream = s;
                 video.srcObject = stream;
                 statusEl.textContent = 'Barkodu kameraya gösterin...';
@@ -494,7 +494,8 @@ export class ShelfTransferScreen extends Component {
                     formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'itf', 'qr_code']
                 });
                 const scanFrame = async () => {
-                    if (!scanning || video.readyState < 2) { animFrame = requestAnimationFrame(scanFrame); return; }
+                    if (!scanning) return;
+                    if (video.readyState < 2) { animFrame = requestAnimationFrame(scanFrame); return; }
                     try {
                         const barcodes = await detector.detect(video);
                         if (barcodes.length > 0) { onScanSuccess(barcodes[0].rawValue); return; }

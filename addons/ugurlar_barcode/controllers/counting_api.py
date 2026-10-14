@@ -190,7 +190,7 @@ class CountingApiController(BarcodeApiBase):
         for op in operations:
             loc_id = op.location_id.id if op.location_id else 0
             # Aynı dakika dilimindeki sayımları birleştir
-            op_time = str(op.create_date)[:16]  # YYYY-MM-DD HH:MM
+            op_time = str(self._local_dt(op.create_date))[:16]  # YYYY-MM-DD HH:MM (yerel)
             key = f'{loc_id}_{op_time}'
 
             if key not in counts:
@@ -201,7 +201,7 @@ class CountingApiController(BarcodeApiBase):
                     'location_barcode': op.location_id.barcode if op.location_id else '',
                     'warehouse': op.location_id.warehouse_id.name if op.location_id and op.location_id.warehouse_id else '',
                     'user_name': op.user_id.name or 'Bilinmeyen',
-                    'create_date': str(op.create_date)[:19],
+                    'create_date': str(self._local_dt(op.create_date))[:19],
                     'product_count': 0,
                     'total_quantity': 0,
                     'items': [],

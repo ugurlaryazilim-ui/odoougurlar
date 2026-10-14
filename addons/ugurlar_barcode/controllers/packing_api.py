@@ -4,7 +4,6 @@ import logging
 import os
 import subprocess
 import tempfile
-from datetime import date
 from urllib.parse import quote
 
 import re
@@ -945,7 +944,7 @@ class PackingApiController(BarcodeApiBase):
                         if nebim_no:
                             data['nebim_invoice_no'] = nebim_no
                             if nebim_date:
-                                data['nebim_invoice_date'] = nebim_date.strftime('%d.%m.%Y %H:%M')
+                                data['nebim_invoice_date'] = self._local_dt(nebim_date).strftime('%d.%m.%Y %H:%M')
                             nebim_invoice_found = True
                             break
 
@@ -965,7 +964,7 @@ class PackingApiController(BarcodeApiBase):
                                 if nebim_no:
                                     data['nebim_invoice_no'] = nebim_no
                                     if nebim_date:
-                                        data['nebim_invoice_date'] = nebim_date.strftime('%d.%m.%Y %H:%M')
+                                        data['nebim_invoice_date'] = self._local_dt(nebim_date).strftime('%d.%m.%Y %H:%M')
                                     nebim_invoice_found = True
                                     _logger.info(
                                         "LABEL DATA: %s Nebim fatura oluştu: %s",
@@ -1085,7 +1084,7 @@ class PackingApiController(BarcodeApiBase):
             'cargo_provider': data.get('cargo_provider', ''),
             'total_qty': f"{data.get('total_qty', 0)} adet",
             'total_items': f"{data.get('total_items', 0)} çeşit",
-            'date_today': date.today().strftime('%d.%m.%Y'),
+            'date_today': self._local_today().strftime('%d.%m.%Y'),
             'custom_text': content or '',
             'sender_name': content or '',
             'nebim_invoice_no': data.get('nebim_invoice_no', ''),

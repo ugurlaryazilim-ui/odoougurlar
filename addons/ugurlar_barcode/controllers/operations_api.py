@@ -76,7 +76,7 @@ class OperationsApiController(BarcodeApiBase):
                 'product_code': m.product_id.product_tmpl_id.nebim_code or m.product_id.default_code or '',
                 'quantity': m.quantity,
                 'uom': m.product_uom.name if m.product_uom else 'Adet',
-                'date': str(m.date)[:16],
+                'date': str(self._local_dt(m.date))[:16],
                 'source': m.location_id.complete_name,
                 'destination': m.location_dest_id.complete_name,
                 'reference': m.reference or '',
@@ -231,7 +231,7 @@ class OperationsApiController(BarcodeApiBase):
             # Toplam tip istatistikleri (tek döngüde)
             type_totals[type_label] = type_totals.get(type_label, 0) + 1
 
-            op_date = str(op.create_date)[:16]
+            op_date = str(self._local_dt(op.create_date))[:16]
             if op_date > user_stats[uid]['last_activity']:
                 user_stats[uid]['last_activity'] = op_date
 

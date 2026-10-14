@@ -163,8 +163,14 @@ export class BulkPutawayScreen extends Component {
         });
 
         // Barkod okuyucu callback — okutulunca otomatik işlem yapar
+        // İşlem sürerken gelen okutmalar sıraya alınır (önceden sessizce atılıyordu:
+        // 5 ürün hızlı okutulunca 3'ü raflanıyordu)
+        this._scanQueue = [];
         this._scanHandler = (barcode) => {
-            if (this.state.processing || this.state.loading) return;
+            if (this.state.processing || this.state.loading) {
+                if (this.state.shelfInfo) this._scanQueue.push(barcode);
+                return;
+            }
             if (!this.state.shelfInfo) {
                 // Raf henüz seçilmedi → raf barkodu olarak işle
                 this.state.shelfBarcode = barcode;
@@ -274,8 +280,15 @@ export class BulkPutawayScreen extends Component {
 
         this.state.productBarcode = '';
         this.state.loading = false;
-        // Kilidi kısa gecikme ile kaldır (scanner debounce)
-        setTimeout(() => { this.state.processing = false; }, 500);
+        // Kilidi kısa gecikme ile kaldır (scanner debounce); sırada okutma varsa hemen işle
+        setTimeout(() => {
+            this.state.processing = false;
+            const next = this._scanQueue.shift();
+            if (next && this.state.shelfInfo) {
+                this.state.productBarcode = next;
+                this.doPutaway();
+            }
+        }, this._scanQueue.length ? 50 : 500);
         // İşlem sonrası ürün inputuna tekrar focus
         this._focusCurrentInput();
     }

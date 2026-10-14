@@ -505,11 +505,12 @@ export class LabelScreen extends Component {
             URL.revokeObjectURL(url);
             return;
         }
+        const deadline = Date.now() + 5000;  // görsel yüklenemezse en geç 5 sn sonra yazdır
         const tryPrint = () => {
             try {
                 const imgs = printWindow.document.querySelectorAll('img');
-                const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
-                if (allLoaded || imgs.length === 0) {
+                const allLoaded = Array.from(imgs).every(img => img.complete);
+                if (allLoaded || imgs.length === 0 || Date.now() > deadline) {
                     printWindow.focus();
                     printWindow.print();
                     setTimeout(() => URL.revokeObjectURL(url), 5000);

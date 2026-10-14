@@ -1,6 +1,7 @@
 """Ortak yardımcı fonksiyonlar — tüm controller'lar bu mixin'i kullanır."""
 import json
 import logging
+from datetime import datetime
 import time
 import hashlib
 
@@ -113,7 +114,7 @@ class BarcodeApiBase(http.Controller):
         result = picking.with_context(**ctx).button_validate()
 
         # Sihirbaz döndüyse otomatik işle (en fazla 3 — zincirleme sihirbazlar)
-        for _ in range(3):
+        for _attempt in range(3):
             if not isinstance(result, dict) or not result.get('res_model'):
                 break
             wiz_model = result['res_model']
@@ -151,6 +152,21 @@ class BarcodeApiBase(http.Controller):
         if qty != qty or qty > self.MAX_QTY or qty < 0 or (qty == 0 and not allow_zero):
             return None
         return qty
+
+    # ─── Yerel saat ─────────────────────────────────────
+    def _local_dt(self, dt):
+        """UTC (naive) datetime → kullanıcının saat dilimi (yoksa İstanbul), naive döner.
+
+        Ekranlara / etikete yazılan saatler 3 saat geri görünüyordu.
+        """
+        if not dt:
+            return dt
+        import pytz
+        tz = pytz.timezone(request.env.user.tz or 'Europe/Istanbul')
+        return pytz.utc.localize(dt).astimezone(tz).replace(tzinfo=None)
+
+    def _local_today(self):
+        return self._local_dt(datetime.utcnow()).date()
 
     def _is_stock_manager(self):
         user = request.env.user

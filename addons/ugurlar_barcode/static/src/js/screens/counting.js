@@ -1,6 +1,7 @@
 /** @odoo-module **/
 
 import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
+import { ConfirmationDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
 import { useService } from "@web/core/utils/hooks";
 import { BarcodeService, AudioFeedback } from "../barcode_service";
 import { vibrate, vibrateError } from "../sound_utils";
@@ -238,6 +239,7 @@ export class CountingScreen extends Component {
     static props = { navigate: Function, scanner: Object };
 
     setup() {
+        this.dialog = useService("dialog");
         this.shelfInputRef = useRef('shelfInput');
         this.productInputRef = useRef('productInput');
         this.actionService = useService("action");
@@ -416,7 +418,23 @@ export class CountingScreen extends Component {
     }
 
     // ─── KAYDET ───────────────────────────────────
-    async onSave() {
+    // Okutulmayan ürünler 0 olarak gönderilir (raf senkronu): sessizce sıfırlanmasın
+    onSave() {
+        const items = this.state.items;
+        if (!items.length) return;
+        const zeroCount = items.filter(i => !i.quantity).length;
+        if (!zeroCount) return this._onSave();
+        this.dialog.add(ConfirmationDialog, {
+            title: "Sayımı Kaydet",
+            body: `${zeroCount} ürün okutulmadı; bu ürünlerin raf stoğu 0'a çekilecek. Devam edilsin mi?`,
+            confirmLabel: "Evet, kaydet",
+            cancelLabel: "Vazgeç",
+            confirm: () => this._onSave(),
+            cancel: () => {},
+        });
+    }
+
+    async _onSave() {
         // Rafı sıfırlayabilmek için, okutulmayanları (quantity: 0) da gönderiyoruz.
         const items = this.state.items;
         if (!items.length) return;
@@ -501,13 +519,15 @@ export class CountingScreen extends Component {
         navigator.mediaDevices.getUserMedia({
             video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
         }).then(s => {
+            if (!scanning) { s.getTracks().forEach(t => t.stop()); return; }
             stream = s; video.srcObject = stream;
             statusEl.textContent = `${target === 'shelf' ? 'Raf' : 'Ürün'} barkodunu gösterin...`;
             const detector = new BarcodeDetector({
                 formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'itf', 'qr_code']
             });
             const scanFrame = async () => {
-                if (!scanning || video.readyState < 2) { animFrame = requestAnimationFrame(scanFrame); return; }
+                if (!scanning) return;
+                if (video.readyState < 2) { animFrame = requestAnimationFrame(scanFrame); return; }
                 try {
                     const barcodes = await detector.detect(video);
                     if (barcodes.length > 0) {

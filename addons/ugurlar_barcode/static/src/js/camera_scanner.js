@@ -190,6 +190,12 @@ export async function openCameraScanner(onSuccess, options = {}) {
     // 3. Kamerayı aç
     statusEl.textContent = 'Kamera açılıyor...';
     stream = await getCamera();
+    if (!scanning) {
+        // Kamera açılırken kapatıldı: geç gelen akışı durdur
+        if (stream) stream.getTracks().forEach(t => t.stop());
+        stream = null;
+        return;
+    }
     
     if (!stream) {
         statusEl.textContent = 'Kamera açılamadı.';
@@ -271,6 +277,12 @@ export async function openContinuousCameraScanner(onSuccess, options = {}) {
 
     statusEl.textContent = 'Kamera açılıyor...';
     stream = await getCamera();
+    if (!scanning) {
+        // Kamera açılırken kapatıldı: geç gelen akışı durdur
+        if (stream) stream.getTracks().forEach(t => t.stop());
+        stream = null;
+        return;
+    }
 
     if (!stream) {
         if (isIOS() && isStandalonePWA()) {
@@ -322,6 +334,7 @@ function _scanWithDetector(video, statusEl, onResult, isScanning) {
             const barcodes = await detector.detect(video);
             if (barcodes.length > 0) {
                 onResult(barcodes[0].rawValue);
+                if (isScanning()) setTimeout(scanFrame, 600);
                 return;
             }
         } catch (e) {
@@ -385,9 +398,13 @@ function _scanWithCanvasDecode(video, statusEl, onResult, isScanning) {
                 try {
                     const result = await decoder.scanFile(file, false);
                     if (result) {
-                        if (hiddenReader.parentNode) hiddenReader.parentNode.removeChild(hiddenReader);
                         onResult(result);
                         decoding = false;
+                        if (isScanning()) {
+                            setTimeout(scanFrame, 600);
+                        } else if (hiddenReader.parentNode) {
+                            hiddenReader.parentNode.removeChild(hiddenReader);
+                        }
                         return;
                     }
                 } catch(e) {}
