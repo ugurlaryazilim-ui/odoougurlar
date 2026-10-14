@@ -133,60 +133,6 @@ def _extract_marketplace_info(sale_order):
 class PackingApiController(BarcodeApiBase):
     """Paketleme & Faturalama API'leri."""
 
-    def _safe_validate_picking(self, picking):
-        """Picking'i güvenli şekilde validate et.
-        
-        Odoo wizard'larını (SMS onay, backorder, immediate transfer) otomatik
-        işler. 0 talepli move'ları önceden iptal eder.
-        
-        Returns:
-            bool: True → picking done oldu, False → başarısız
-        """
-        if picking.state in ('done', 'cancel'):
-            return picking.state == 'done'
-
-        # 0 talepli move'ları iptal et (validation'ı engelliyor)
-        for move in picking.move_ids:
-            if move.product_uom_qty == 0 and move.state != 'cancel':
-                move._action_cancel()
-
-        ctx = {
-            'skip_backorder': True,
-            'skip_immediate': True,
-            'picking_ids_not_to_backorder': picking.ids,
-            'button_validate_picking_ids': picking.ids,
-        }
-        result = picking.with_context(**ctx).button_validate()
-
-        # Wizard döndüyse otomatik işle (max 3 iterasyon — zincirleme wizard'lar için)
-        for _ in range(3):
-            if not isinstance(result, dict) or not result.get('res_model'):
-                break
-            try:
-                wiz_model = result['res_model']
-                wiz_ctx = {**ctx, **result.get('context', {})}
-                if result.get('res_id'):
-                    wizard = request.env[wiz_model].sudo().with_context(**wiz_ctx).browse(result['res_id'])
-                else:
-                    wizard = request.env[wiz_model].sudo().with_context(**wiz_ctx).create({})
-
-                # Wizard metodunu bul ve çağır
-                if hasattr(wizard, 'dont_send_sms'):
-                    result = wizard.dont_send_sms() or True
-                elif hasattr(wizard, 'process'):
-                    result = wizard.process() or True
-                elif hasattr(wizard, 'action_done'):
-                    result = wizard.action_done() or True
-                else:
-                    _logger.warning("Bilinmeyen wizard: %s — atlanıyor", wiz_model)
-                    break
-            except Exception as e:
-                _logger.warning("Wizard %s hatası: %s", wiz_model, e)
-                break
-
-        picking.invalidate_recordset(['state'])
-        return picking.state == 'done'
-
     @http.route('/ugurlar_barcode/api/packing_batch_detail', type='jsonrpc', auth='user')
     def packing_batch_detail(self, batch_name='', batch_id=0, **kw):
         """Rota numarası veya ID ile batch detayı getir."""
@@ -196,11 +142,11 @@ class PackingApiController(BarcodeApiBase):
         if batch_id:
             batch = Batch.browse(int(batch_id))
         elif batch_name:
-            batch = Batch.search([
-                '|',
-                ('name', '=', batch_name.strip()),
-                ('name', 'ilike', batch_name.strip()),
-            ], limit=1)
+            # Önce tam ad ("R12" yazınca "R123" açılmasın); yoksa tek kısmi eşleşme
+            batch = Batch.search([('name', '=', batch_name.strip())], limit=1)
+            if not batch:
+                matches = Batch.search([('name', 'ilike', batch_name.strip())], limit=2)
+                batch = matches if len(matches) == 1 else Batch
         else:
             return {'error': 'Rota numarası gerekli'}
 
@@ -577,6 +523,13 @@ class PackingApiController(BarcodeApiBase):
                         f'Önce Rota Toplama ekranından toplayınız.',
                 'not_collected': True,
             }
+        # Rotada eksik toplanan ürün paketlemede toplanandan fazla okutulamaz
+        if target_move.packing_scanned_qty >= wave_qty:
+            return {
+                'error': f'⚠️ {product.display_name}: rotada yalnız {int(wave_qty)} adet toplandı, '
+                         f'hepsi zaten okutuldu.',
+                'not_collected': True,
+            }
 
         # Barkod eşleşti → qty artır (eşleştirme sayacı, stok hareketi değil)
         new_qty = target_move.packing_scanned_qty + 1
@@ -775,13 +728,10 @@ class PackingApiController(BarcodeApiBase):
 
         try:
             picking.packing_done = True
-            # Button validate dönerse backorder wizard açılmasını ister. Odoo bunu dict olarak döner.
-            res = picking.button_validate()
-            if isinstance(res, dict) and res.get('res_model') == 'stock.backorder.confirmation':
-                wiz = request.env['stock.backorder.confirmation'].sudo().with_context(res.get('context')).create(
-                    {'pick_ids': [(4, p.id) for p in picking]}
-                )
-                wiz.process()
+            # Önceden rezerve miktar doğrulanıyordu: okutulmayan ürünler de sevk ediliyordu.
+            # Sevk = paketlemede okutulan; kalan için bekleyen sevkiyat açılır
+            self._apply_collected_quantities(picking, 'packing_scanned_qty')
+            self._safe_validate_picking(picking, backorder=True)
             
             # Log kaydı
             user = request.env.user
@@ -833,6 +783,12 @@ class PackingApiController(BarcodeApiBase):
             filtered_pickings |= picking
         all_pickings = filtered_pickings
 
+        # Toplanmayan / eksik işaretlenmeyen ürün varsa hiçbir şey doğrulanmaz
+        missing = self._missing_moves(all_pickings.filtered(
+            lambda p: any((m.wave_collected_qty or 0) > 0 for m in p.move_ids)))
+        if missing:
+            return self._missing_error(missing, 'paketlemesi tamamlanamaz')
+
         for picking in all_pickings:
             try:
                 # Güvenlik: Hiç toplanmamış picking'i paketleme/faturala
@@ -854,7 +810,8 @@ class PackingApiController(BarcodeApiBase):
                     continue
 
                 picking.packing_done = True
-                if self._safe_validate_picking(picking):
+                _total, partial = self._apply_collected_quantities(picking)
+                if self._safe_validate_picking(picking, backorder=partial):
                     self._trigger_nebim_sync(picking)
                     validated += 1
                 else:
@@ -1482,19 +1439,31 @@ class PackingApiController(BarcodeApiBase):
             _logger.info("Nebim Sipariş toggle kapalı: %s", sale_order.name)
             
         # ═══ Aşama C: Fatura Oluşturma ve Aktarımı ═══
+        # Aynı sipariş için iki istek (iki operatör, okutma + etiket) aynı anda fatura kesmesin:
+        # sipariş satırı kilitlenir, kilitliyse bu istek faturalamayı diğerine bırakır
+        if invoice_enabled:
+            try:
+                with picking.env.cr.savepoint():
+                    picking.env.cr.execute(
+                        "SELECT id FROM sale_order WHERE id = %s FOR UPDATE NOWAIT", [sale_order.id])
+            except Exception:
+                _logger.info("Nebim Fatura: %s başka bir işlemde faturalanıyor, atlandı", sale_order.name)
+                invoice_enabled = False
         if invoice_enabled:
             try:
                 # Fatura oluştur — iptal edilmiş faturaları yok say
+                sale_order.invalidate_recordset(['invoice_ids', 'invoice_status'])
                 active_invoices = sale_order.invoice_ids.filtered(
                     lambda i: i.state in ('draft', 'posted')
                 )
                 invoices_to_post = active_invoices.filtered(lambda i: i.state == 'draft')
-                if not active_invoices and sale_order.invoice_status in ['to invoice', 'invoiced']:
-                    invoices_to_post = sale_order._create_invoices()
-                    
-                for invoice in invoices_to_post:
-                    invoice.action_post()
-                
+                with picking.env.cr.savepoint():
+                    if not active_invoices and sale_order.invoice_status in ['to invoice', 'invoiced']:
+                        invoices_to_post = sale_order._create_invoices()
+
+                    for invoice in invoices_to_post:
+                        invoice.action_post()
+
                 # Nebim'e gönder
                 unposted_nebim = sale_order.invoice_ids.filtered(
                     lambda i: i.state == 'posted' and not getattr(i, 'nebim_sent', False)
@@ -1559,7 +1528,11 @@ class PackingApiController(BarcodeApiBase):
                     })
                     if nebim_inv_no:
                         check_invoice.write({'nebim_invoice_number': nebim_inv_no})
-                    
+                    # Nebim kabul etti: hemen kalıcı yap. İstek sonradan hata alıp geri alınırsa
+                    # (serileştirme hatası / yeniden deneme) fatura Nebim'e ikinci kez gitmesin
+                    # (cron'daki invoice_processor ile aynı desen)
+                    picking.env.cr.commit()
+
                     _logger.info("Nebim Fatura başarılı: %s", check_invoice.name)
             except Exception as e:
                 nebim_errors.append(f"[Fatura] {str(e)}")

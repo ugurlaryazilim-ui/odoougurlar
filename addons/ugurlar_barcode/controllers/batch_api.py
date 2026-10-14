@@ -148,18 +148,11 @@ class BatchApiController(BarcodeApiBase):
             else:
                 barcode_batch_ids = set()  # ürün bulunamadı → boş sonuç
 
-        if date_from:
-            try:
-                dt_from = datetime.strptime(date_from, '%Y-%m-%d')
-                domain.append(('schedule_time', '>=', dt_from))
-            except Exception:
-                pass
-        if date_to:
-            try:
-                dt_to = datetime.strptime(date_to, '%Y-%m-%d') + timedelta(days=1)
-                domain.append(('schedule_time', '<', dt_to))
-            except Exception:
-                pass
+        # Tarih / metin / depo / barkod filtreleri sorguya: önceden 50 kayıt çekilip sonra
+        # Python'da süzülüyordu, eşleşen eski rotalar hiç görünmüyordu
+        filter_domain = self._batch_filter_domain(
+            date_from, date_to, search_text, warehouse_filter, barcode_batch_ids)
+        domain += filter_domain
 
         if filter_state and filter_state != 'all':
             domain.append(('state', '=', filter_state))
@@ -230,26 +223,14 @@ class BatchApiController(BarcodeApiBase):
             '|',
             ('time_window', '!=', False),
             ('name', 'like', 'T%'),
-        ]
-        if date_from:
-            try:
-                dt_from = datetime.strptime(date_from, '%Y-%m-%d')
-                count_domain_base.append(('schedule_time', '>=', dt_from))
-            except Exception:
-                pass
-        if date_to:
-            try:
-                dt_to = datetime.strptime(date_to, '%Y-%m-%d') + timedelta(days=1)
-                count_domain_base.append(('schedule_time', '<', dt_to))
-            except Exception:
-                pass
+        ] + self._batch_filter_domain(date_from, date_to, '', '', None)
 
         # Filtreli batch'leri çek (sayaç + warehouse listesi için)
         count_batches = request.env['stock.picking.batch'].sudo().search(
             count_domain_base, limit=500,
         )
 
-        # Warehouse ve arama filtresi uygula (Python tarafında)
+        # Depo listesi (filtre seçenekleri)
         state_counts = {'draft': 0, 'in_progress': 0, 'done': 0}
         warehouse_set = set()
         for ab in count_batches:
@@ -263,22 +244,11 @@ class BatchApiController(BarcodeApiBase):
             if ab_wh:
                 warehouse_set.add(ab_wh)
 
-            # Warehouse filtresi uygula
-            if warehouse_filter and warehouse_filter.lower() not in ab_wh.lower():
-                continue
-
-            # Arama filtresi uygula
-            if search_text:
-                hay = (ab.name + ' ' + ab_wh).lower()
-                if search_text not in hay:
-                    continue
-
-            # Barkod filtresi uygula
-            if barcode_batch_ids is not None and ab.id not in barcode_batch_ids:
-                continue
-
-            if ab.state in state_counts:
-                state_counts[ab.state] += 1
+        # Durum sayaçları tüm filtrelerle (500 kayıt sınırı olmadan)
+        Batch = request.env['stock.picking.batch'].sudo()
+        for st in state_counts:
+            state_counts[st] = Batch.search_count(
+                count_domain_base + filter_domain + [('state', '=', st)])
 
         return {
             'batches': result,
@@ -287,6 +257,28 @@ class BatchApiController(BarcodeApiBase):
             'warehouses': sorted(warehouse_set),
             'can_delete': request.env.user.has_group('stock.group_stock_manager') or request.env.user.has_group('base.group_system')
         }
+
+    def _batch_filter_domain(self, date_from, date_to, search_text, warehouse_filter, barcode_batch_ids):
+        """Rota listesi filtreleri. Tarihler kullanıcının yerel günüdür (schedule_time UTC)."""
+        domain = []
+        tz = pytz.timezone(request.env.user.tz or 'Europe/Istanbul')
+        for value, op, shift in ((date_from, '>=', 0), (date_to, '<', 1)):
+            if not value:
+                continue
+            try:
+                local = datetime.strptime(value, '%Y-%m-%d') + timedelta(days=shift)
+            except ValueError:
+                continue
+            utc = tz.localize(local).astimezone(pytz.utc).replace(tzinfo=None)
+            domain.append(('schedule_time', op, utc))
+        if search_text:
+            domain += ['|', ('name', 'ilike', search_text), ('source_info', 'ilike', search_text)]
+        if warehouse_filter:
+            domain += ['|', ('source_info', 'ilike', warehouse_filter),
+                       ('picking_type_id.warehouse_id.name', 'ilike', warehouse_filter)]
+        if barcode_batch_ids is not None:
+            domain.append(('id', 'in', list(barcode_batch_ids)))
+        return domain
 
     @http.route('/ugurlar_barcode/api/batch_detail', type='jsonrpc', auth='user')
     def batch_detail(self, batch_id=0, **kw):
@@ -587,6 +579,7 @@ class BatchApiController(BarcodeApiBase):
                         'size': size_name,
                         'demand_qty': move.product_uom_qty,
                         'collected_qty': move.wave_collected_qty or 0,
+                        'skipped': bool(move.wave_skipped),
                         'location': location_name,
                         'location_parts': location_parts,
                         'image_url': f'/web/image/product.product/{product.id}/image_256',
@@ -737,6 +730,21 @@ class BatchApiController(BarcodeApiBase):
             'image_url': f'/web/image/product.product/{product.id}/image_256',
         }
 
+    @http.route('/ugurlar_barcode/api/batch_skip_item', type='jsonrpc', auth='user')
+    def batch_skip_item(self, move_id=0, skipped=True, **kw):
+        """Rota toplamada ürünü "Eksik" işaretle / işareti kaldır.
+
+        Önceden yalnız arayüzde "toplandı" gösteriliyordu; tamamlama eksik ürünü tam sevk ediyordu.
+        """
+        self._check_internal_user()
+        move = request.env['stock.move'].sudo().browse(int(move_id or 0))
+        if not move.exists() or move.picking_id.picking_type_code != 'outgoing':
+            return {'error': 'İşlem satırı bulunamadı'}
+        if move.state in ('done', 'cancel'):
+            return {'error': 'Sevkiyatı tamamlanmış ürün değiştirilemez'}
+        move.write({'wave_skipped': bool(skipped)})
+        return {'success': True, 'skipped': bool(skipped)}
+
     @http.route('/ugurlar_barcode/api/batch_undo', type='jsonrpc', auth='user')
     def batch_undo(self, move_id=0, **kw):
         """Rota toplamada alınan bir ürünü sepetteki sayısından düşmek (Undo/Geri al)."""
@@ -781,93 +789,55 @@ class BatchApiController(BarcodeApiBase):
 
         all_pickings = self._get_all_pickings(batch)
 
-        # ─── 1. Toplanan miktarları move_line'lara yaz ───
+        # ─── 0. Eksik kontrolü: toplanmamış ve "Eksik" işaretlenmemiş ürün varsa durdur ───
+        missing = self._missing_moves(all_pickings)
+        if missing:
+            return self._missing_error(missing)
+
         for picking in all_pickings:
-            if picking.state == 'done':
-                # Zaten toplama sırasında validate edilmiş — atla
-                total_moves += len(picking.move_ids)
-                collected_moves += len(picking.move_ids)
-                continue
             for move in picking.move_ids:
+                if move.state == 'cancel':
+                    continue
                 total_moves += 1
                 collected = move.wave_collected_qty or 0
-                if collected >= move.product_uom_qty:
+                if picking.state == 'done' or collected >= move.product_uom_qty:
                     collected_moves += 1
                 elif collected == 0:
                     skipped_moves += 1
 
-                # Move line'lara miktarı yaz
-                if collected > 0:
-                    remaining = collected
-                    for ml in move.move_line_ids:
-                        try:
-                            ml.quantity = min(remaining, ml.reserved_uom_qty or move.product_uom_qty)
-                            remaining -= ml.quantity
-                        except Exception:
-                            ml.quantity = move.product_uom_qty
-
-        # ─── 2. Picking'leri doğrula (stok aktarımı) ───
+        # ─── 1-2. Sevk = toplanan; kısmi picking'de kalan için bekleyen sevkiyat ───
         failed_pickings = []
         skipped_pickings = []
+        backorder_pickings = []
         for picking in all_pickings:
-            if picking.state in ('assigned', 'confirmed'):
-                # Güvenlik: Hiç toplanmamış picking'i validate etme
-                has_collected = any(
-                    (m.wave_collected_qty or 0) > 0 for m in picking.move_ids
-                )
-                if not has_collected:
-                    skipped_pickings.append(picking.name)
-                    _logger.info(
-                        "Picking %s (origin: %s) atlandı — hiçbir ürün toplanmadı "
-                        "(wave_collected_qty=0)", picking.name, picking.origin)
-                    continue
-
+            if picking.state not in ('assigned', 'confirmed'):
+                continue
+            if not any((m.wave_collected_qty or 0) > 0 for m in picking.move_ids):
+                # Hiçbir ürünü toplanamadı (tümü "Eksik"): rotadan çıkar, sonraki rotaya kalsın
+                skipped_pickings.append(picking.name)
                 try:
-                    # 0 talepli move'ları iptal et (validation'ı engelliyor)
-                    for move in picking.move_ids:
-                        if move.product_uom_qty == 0 and move.state != 'cancel':
-                            move._action_cancel()
-
-                    ctx = {
-                        'skip_backorder': True,
-                        'skip_immediate': True,
-                        'picking_ids_not_to_backorder': picking.ids,
-                        'button_validate_picking_ids': picking.ids,
-                    }
-                    result = picking.with_context(**ctx).button_validate()
-                    # Wizard döndüyse otomatik işle (max 3 — zincirleme wizard'lar)
-                    for _ in range(3):
-                        if not isinstance(result, dict) or not result.get('res_model'):
-                            break
-                        try:
-                            wiz_model = result['res_model']
-                            wiz_ctx = {**ctx, **result.get('context', {})}
-                            if result.get('res_id'):
-                                wizard = request.env[wiz_model].sudo().with_context(**wiz_ctx).browse(result['res_id'])
-                            else:
-                                wizard = request.env[wiz_model].sudo().with_context(**wiz_ctx).create({})
-                            if hasattr(wizard, 'dont_send_sms'):
-                                result = wizard.dont_send_sms() or True
-                            elif hasattr(wizard, 'process'):
-                                result = wizard.process() or True
-                            elif hasattr(wizard, 'action_done'):
-                                result = wizard.action_done() or True
-                            else:
-                                _logger.warning("Bilinmeyen wizard: %s", wiz_model)
-                                break
-                        except Exception as e2:
-                            _logger.warning("Wizard %s hatası: %s", wiz_model, e2)
-                            break
-                    # Doğrulama sonrası kontrol
-                    picking.invalidate_recordset(['state'])
-                    if picking.state != 'done':
-                        failed_pickings.append(picking.name)
-                        _logger.warning(
-                            "Picking %s (origin: %s) button_validate sonrası state=%s",
-                            picking.name, picking.origin, picking.state)
+                    with request.env.cr.savepoint():
+                        picking.write({'batch_id': False})
+                        batch.write({'all_picking_ids': [(3, picking.id)]})
                 except Exception as e:
+                    _logger.warning("Picking %s rotadan çıkarılamadı: %s", picking.name, e)
+                _logger.info("Picking %s (origin: %s) rotadan çıkarıldı — hiçbir ürün toplanmadı",
+                             picking.name, picking.origin)
+                continue
+            try:
+                with request.env.cr.savepoint():
+                    _total, partial = self._apply_collected_quantities(picking)
+                    done = self._safe_validate_picking(picking, backorder=partial)
+                if not done:
                     failed_pickings.append(picking.name)
-                    _logger.warning("Picking %s doğrulama hatası: %s", picking.name, e)
+                    _logger.warning("Picking %s (origin: %s) doğrulama sonrası state=%s",
+                                    picking.name, picking.origin, picking.state)
+                elif partial:
+                    backorder_pickings.append(picking.name)
+            except Exception as e:
+                failed_pickings.append(picking.name)
+                _logger.warning("Picking %s doğrulama hatası: %s", picking.name, e)
+        all_pickings = self._get_all_pickings(batch)
 
         # ─── 3. Batch'i tamamla (sadece tüm picking'ler done ise) ───
         try:
@@ -913,6 +883,10 @@ class BatchApiController(BarcodeApiBase):
             result_msg += f' ⚠️ ({len(failed_pickings)} picking done olmadı: {", ".join(failed_pickings)})'
         else:
             result_msg += ' ✅'
+        if backorder_pickings:
+            result_msg += f' — {len(backorder_pickings)} siparişin eksikleri bekleyen sevkiyata alındı'
+        if skipped_pickings:
+            result_msg += f' — {len(skipped_pickings)} sipariş hiç toplanamadığı için sonraki rotaya bırakıldı'
 
         return {
             'success': True,
@@ -923,5 +897,7 @@ class BatchApiController(BarcodeApiBase):
             'skipped_moves': skipped_moves,
             'partial_moves': total_moves - collected_moves - skipped_moves,
             'failed_pickings': failed_pickings,
+            'backorder_pickings': backorder_pickings,
+            'skipped_pickings': skipped_pickings,
             'message': result_msg,
         }

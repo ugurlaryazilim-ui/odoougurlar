@@ -9,20 +9,31 @@ _logger = logging.getLogger(__name__)
 class StockMoveExt(models.Model):
     _inherit = 'stock.move'
 
+    # copy=False: iade / backorder / kopya hareketler toplama-paketleme durumunu devralmasın
     wave_collected_qty = fields.Float(
         string='Toplanan Miktar',
         default=0,
+        copy=False,
         help='Rota toplama sırasında barkod okutarak toplanan miktar. '
              'Paketleme aşamasında done_qty olarak aktarılır.',
     )
     source_warehouse_id = fields.Many2one(
         'stock.warehouse', string='Toplama Deposu',
         help='Bu ürünün toplanacağı depo. Batch oluşturulurken otomatik atanır.',
+        copy=False,
     )
     packing_scanned_qty = fields.Integer(
         string='Paketleme Okutma',
         default=0,
+        copy=False,
         help='Paketleme ekranında barkod okutarak eşleştirilen miktar.',
+    )
+    wave_skipped = fields.Boolean(
+        string='Eksik İşaretli',
+        default=False,
+        copy=False,
+        help='Rota toplamada operatör "Eksik" dedi: toplanan kadar sevk edilir, '
+             'kalan için bekleyen sevkiyat (backorder) açılır.',
     )
 
 AVAILABILITY_STATUS = [
@@ -42,31 +53,37 @@ class StockPickingExt(models.Model):
         string='Stok Durumu',
         readonly=True,
         tracking=True,
+        copy=False,
     )
     source_warehouse_info = fields.Char(
         string='Kaynak Depo Bilgisi',
         readonly=True,
+        copy=False,
         help='Ürün başka depoda mevcutsa hangi depoda olduğunu gösterir',
     )
     batch_schedule_time = fields.Datetime(
         string='Toplama Zamanı',
         readonly=True,
+        copy=False,
     )
-    packing_done = fields.Boolean(string='Paketlendi', default=False)
-    invoice_done = fields.Boolean(string='Faturalandı', default=False)
+    packing_done = fields.Boolean(string='Paketlendi', default=False, copy=False)
+    invoice_done = fields.Boolean(string='Faturalandı', default=False, copy=False)
     label_printed = fields.Boolean(
         string='Etiket Basıldı',
         default=False,
+        copy=False,
         help='Kargo etiketi basıldıysa True.',
     )
     label_printed_at = fields.Datetime(
         string='Etiket Basım Zamanı',
         readonly=True,
+        copy=False,
     )
     label_printed_by = fields.Many2one(
         'res.users',
         string='Etiketi Basan',
         readonly=True,
+        copy=False,
     )
 
     def _check_availability_status(self, primary_warehouse, fallback_warehouse=None, return_warehouse=None):

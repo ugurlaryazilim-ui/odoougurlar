@@ -114,7 +114,10 @@ class OperationsApiController(BarcodeApiBase):
 
         for item in items:
             bc = (item.get('barcode') or '').strip()
-            qty = float(item.get('quantity', 1))
+            qty = self._parse_qty(item.get('quantity', 1))
+            if qty is None:
+                results.append({'barcode': bc, 'status': 'error', 'message': 'Geçersiz miktar'})
+                continue
             product = self._find_product(bc)
 
             if not product:

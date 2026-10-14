@@ -35,6 +35,123 @@ class BarcodeApiBase(http.Controller):
             text = _('Beklenmeyen bir hata oluştu, işlem kaydedilmedi. Lütfen tekrar deneyin.')
         return f'{prefix}{text}' if prefix else text
 
+    # ─── Toplanan miktarla sevkiyat ─────────────────────
+    def _missing_moves(self, pickings, qty_field='wave_collected_qty'):
+        """Toplanan < talep olan ve "Eksik" işaretlenmemiş hareketler (tamamlamayı engeller)."""
+        missing = []
+        for picking in pickings:
+            if picking.state in ('done', 'cancel'):
+                continue
+            for move in picking.move_ids:
+                if move.state == 'cancel' or move.product_uom_qty <= 0:
+                    continue
+                qty = getattr(move, qty_field) or 0
+                if qty < move.product_uom_qty and not move.wave_skipped:
+                    missing.append({
+                        'move_id': move.id,
+                        'picking_name': picking.name,
+                        'product_name': move.product_id.display_name,
+                        'demand_qty': move.product_uom_qty,
+                        'collected_qty': qty,
+                    })
+        return missing
+
+    def _missing_error(self, missing, action='tamamlanamaz'):
+        names = ', '.join(f"{m['product_name']} ({int(m['collected_qty'])}/{int(m['demand_qty'])})"
+                          for m in missing[:5])
+        more = f' ve {len(missing) - 5} ürün daha' if len(missing) > 5 else ''
+        return {
+            'error': f'{len(missing)} üründe eksik var, rota {action}: {names}{more}. '
+                     f'Ürünü toplayın veya "Eksik" olarak işaretleyin.',
+            'missing': missing,
+        }
+
+    def _apply_collected_quantities(self, picking, qty_field='wave_collected_qty'):
+        """Sevk miktarı = toplanan (talebi aşmaz). Önceden ml.reserved_uom_qty (Odoo 17+'da yok)
+        hata verip her move line'a tüm talep yazılıyordu: eksik ürün tam / iki katı sevk ediliyordu.
+
+        Returns: (toplanan toplam, kısmi var mı)
+        """
+        total = 0.0
+        partial = False
+        for move in picking.move_ids:
+            if move.state == 'cancel':
+                continue
+            if move.product_uom_qty == 0:
+                move._action_cancel()  # 0 talepli move doğrulamayı engelliyor
+                continue
+            qty = min(getattr(move, qty_field) or 0, move.product_uom_qty)
+            if qty < move.product_uom_qty:
+                partial = True
+            move.quantity = qty
+            move.picked = True
+            total += qty
+        return total, partial
+
+    def _safe_validate_picking(self, picking, backorder=False):
+        """Picking'i doğrular; Odoo sihirbazlarını (SMS, backorder, anında transfer) otomatik işler.
+
+        backorder=True: kısmi sevkte kalan miktar için bekleyen sevkiyat açılır
+        (False: kalan iptal — tam toplanmış / tam okutulmuş picking'ler için).
+
+        Returns: bool — picking done oldu mu
+        """
+        if picking.state in ('done', 'cancel'):
+            return picking.state == 'done'
+
+        for move in picking.move_ids:
+            if move.product_uom_qty == 0 and move.state != 'cancel':
+                move._action_cancel()
+
+        ctx = {
+            'skip_backorder': True,
+            'skip_immediate': True,
+            'button_validate_picking_ids': picking.ids,
+        }
+        if not backorder:
+            ctx['picking_ids_not_to_backorder'] = picking.ids
+        result = picking.with_context(**ctx).button_validate()
+
+        # Sihirbaz döndüyse otomatik işle (en fazla 3 — zincirleme sihirbazlar)
+        for _ in range(3):
+            if not isinstance(result, dict) or not result.get('res_model'):
+                break
+            wiz_model = result['res_model']
+            try:
+                wiz_ctx = {**ctx, **result.get('context', {})}
+                if result.get('res_id'):
+                    wizard = request.env[wiz_model].sudo().with_context(**wiz_ctx).browse(result['res_id'])
+                else:
+                    wizard = request.env[wiz_model].sudo().with_context(**wiz_ctx).create({})
+                if hasattr(wizard, 'dont_send_sms'):
+                    result = wizard.dont_send_sms() or True
+                elif hasattr(wizard, 'process'):
+                    result = wizard.process() or True
+                elif hasattr(wizard, 'action_done'):
+                    result = wizard.action_done() or True
+                else:
+                    _logger.warning("Bilinmeyen sihirbaz: %s — atlanıyor", wiz_model)
+                    break
+            except Exception as e:
+                _logger.warning("Sihirbaz %s hatası: %s", wiz_model, e)
+                break
+
+        picking.invalidate_recordset(['state'])
+        return picking.state == 'done'
+
+    # El terminalinde miktar kutusuna düşen barkod (8690123456789) gibi değerler stok yazmasın
+    MAX_QTY = 100000
+
+    def _parse_qty(self, value, default=1, allow_zero=False):
+        """İstemciden gelen miktar: sayı değilse, negatifse veya makul üst sınırı aşıyorsa None."""
+        try:
+            qty = float(value if value not in (None, '') else default)
+        except (TypeError, ValueError):
+            return None
+        if qty != qty or qty > self.MAX_QTY or qty < 0 or (qty == 0 and not allow_zero):
+            return None
+        return qty
+
     def _is_stock_manager(self):
         user = request.env.user
         return user.has_group('stock.group_stock_manager') or user.has_group('base.group_system')
@@ -177,8 +294,16 @@ class BarcodeApiBase(http.Controller):
         ], limit=1)
         if not location:
             location = Location.search([
-                ('name', 'ilike', barcode), ('usage', '=', 'internal'),
+                '|', ('name', '=', barcode), ('complete_name', '=', barcode),
+                ('usage', '=', 'internal'),
             ], limit=1)
+        if not location:
+            # "A-1" yazınca "A-10" gelmesin: kısmi aramada yalnız tek eşleşme kabul edilir
+            matches = Location.search([
+                ('name', 'ilike', barcode), ('usage', '=', 'internal'),
+            ], limit=2)
+            if len(matches) == 1:
+                location = matches
         return location
 
     def _get_marka(self, tmpl, cache=None):
@@ -206,7 +331,7 @@ class BarcodeApiBase(http.Controller):
         Returns:
             (quant_id, quantity) veya None
         """
-        sql = ("SELECT id, quantity FROM stock_quant "
+        sql = ("SELECT id, quantity, reserved_quantity FROM stock_quant "
                "WHERE product_id=%s AND location_id=%s")
         params = [product_id, location_id]
         if positive_only:
@@ -269,7 +394,11 @@ class BarcodeApiBase(http.Controller):
             return False, f'{product.name} kaynak rafta bulunamadı'
 
         source_qty = source_row[1]
-        if source_qty < quantity:
+        available = source_qty - (source_row[2] or 0)
+        if available < quantity:
+            if available < source_qty:
+                return False, (f'Yetersiz stok! Kaynak: {source_qty} ({source_qty - available} adedi '
+                               f'siparişe ayrılmış), İstenen: {quantity}')
             return False, f'Yetersiz stok! Kaynak: {source_qty}, İstenen: {quantity}'
 
         source_quant = StockQuant.browse(source_row[0])

@@ -82,9 +82,14 @@ class PickingApiController(BarcodeApiBase):
         picking = request.env['stock.picking'].sudo().browse(int(picking_id))
         if not picking.exists():
             return {'error': 'Sipariş bulunamadı'}
+        # Tamamlanmış sevkiyatta miktar değişirse gerçek stok değişir
+        if picking.state in ('done', 'cancel'):
+            return {'error': 'Bu sipariş tamamlanmış veya iptal edilmiş'}
 
         barcode = barcode.strip()
-        quantity = float(quantity or 1)
+        quantity = self._parse_qty(quantity)
+        if quantity is None:
+            return {'error': 'Geçersiz miktar'}
 
         product = self._find_product(barcode)
         if not product:

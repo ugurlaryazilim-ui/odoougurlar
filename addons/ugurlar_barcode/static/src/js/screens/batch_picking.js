@@ -270,7 +270,7 @@ export class BatchPickingScreen extends Component {
                             <span class="bp-sortable" t-on-click="() => this.onSort('collected_qty')">Top.<i t-attf-class="fa ms-1 {{state.sortField === 'collected_qty' ? (state.sortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort bp-sort-idle'}}"/></span>
                         </div>
                         <t t-foreach="state.filteredItems" t-as="item" t-key="item.move_id">
-                            <div t-attf-class="bp-route-table-row {{item.move_id === state.currentItem?.move_id ? 'bp-row-active' : ''}} {{item.collected_qty >= item.demand_qty ? 'bp-row-done' : ''}}"
+                            <div t-attf-class="bp-route-table-row {{item.move_id === state.currentItem?.move_id ? 'bp-row-active' : ''}} {{item.collected_qty >= item.demand_qty ? 'bp-row-done' : (item.skipped ? 'bp-row-skipped' : '')}}"
                                  t-on-click="() => this.selectItem(item)">
                                 <span class="bp-cell-barcode bp-barcode-copy" t-att-data-barcode="item.barcode || ''" t-on-click.stop="(ev) => this.copyBarcode(ev)" t-esc="item.barcode || ''"/>
                                 <span class="bp-cell-brand" t-esc="item.brand || '-'"/>
@@ -628,7 +628,7 @@ export class BatchPickingScreen extends Component {
     _goToNextItem() {
         const items = this.state.filteredItems;
         // İlk tamamlanmamış ürünü bul
-        let nextIdx = items.findIndex(i => i.collected_qty < i.demand_qty);
+        let nextIdx = items.findIndex(i => !this._isHandled(i));
         if (nextIdx >= 0) {
             this.state.currentIndex = nextIdx;
             this.state.currentItem = items[nextIdx];
@@ -668,9 +668,14 @@ export class BatchPickingScreen extends Component {
         }
     }
 
+    // Toplandı veya "Eksik" işaretlendi: tamamlamayı engellemez
+    _isHandled(item) {
+        return item.collected_qty >= item.demand_qty || !!item.skipped;
+    }
+
     _updateProgress() {
         const items = this.state.filteredItems;
-        const collected = items.filter(i => i.collected_qty >= i.demand_qty).length;
+        const collected = items.filter(i => this._isHandled(i)).length;
         this.state.collectedCount = collected;
         this.state.progressPct = items.length ? Math.round((collected / items.length) * 100) : 0;
     }
@@ -875,17 +880,27 @@ export class BatchPickingScreen extends Component {
     }
 
     // ═══ EKSİK / ATLA ═══
-    onSkip() {
-        if (!this.state.currentItem) return;
-        // Mevcut ürünün collected_qty'sini demand_qty'ye eşitle ama "eksik" olarak işaretle
-        // Basitçe sonraki ürüne geçiyor
+    async onSkip() {
+        if (!this.state.currentItem || this.state.loading) return;
+        // Sunucuda "Eksik" işaretlenir: tamamlamada toplanan kadar sevk edilir,
+        // kalan için bekleyen sevkiyat açılır (önceden yalnız arayüzde "toplandı" görünüyordu)
         const item = this.state.currentItem;
-        this.state.scanMsg = `⏭ ${item.display_name || item.product_name} atlandı (eksik)`;
+        try {
+            const res = await BarcodeService.batchSkipItem(item.move_id, true);
+            if (res.error) {
+                this.state.scanMsg = res.error;
+                this.state.scanOk = false;
+                speak('batch_error');
+                return;
+            }
+        } catch (e) {
+            this.state.scanMsg = 'Bağlantı hatası — eksik işaretlenemedi';
+            this.state.scanOk = false;
+            return;
+        }
+        item.skipped = true;
+        this.state.scanMsg = `⏭ ${item.display_name || item.product_name} eksik işaretlendi`;
         this.state.scanOk = false;
-
-        // Atla: demand_qty'yi collected_qty'ye set et ki sıralama karışmasın
-        // Ama bunu yaparsak stok hatalı olur, sadece UI'da geç
-        item.collected_qty = item.demand_qty; // UI'da tamamlanmış göster
         this._applyDepotFilter();
         this._updateProgress();
         setTimeout(() => this._goToNextItem(), 400);
@@ -896,7 +911,16 @@ export class BatchPickingScreen extends Component {
         this.state.loading = true;
         try {
             const res = await BarcodeService.batchCollectComplete(this.state.batch.id);
-            if (res.error) {
+            if (res.error && res.missing) {
+                // Toplanmamış ürün var: rota tamamlanmadı, ilk eksik ürüne odaklan
+                this.state.scanMsg = res.error;
+                this.state.scanOk = false;
+                speak('batch_error');
+                const first = this.state.items.find(i => i.move_id === res.missing[0].move_id);
+                if (first) {
+                    this.state.currentItem = first;
+                }
+            } else if (res.error) {
                 this.state.error = res.error;
             } else {
                 this.state.summary = res;

@@ -38,7 +38,10 @@ class CountingApiController(BarcodeApiBase):
 
         for item in items:
             bc = item.get('barcode', '').strip()
-            new_qty = float(item.get('quantity', 0))
+            new_qty = self._parse_qty(item.get('quantity', 0), default=0, allow_zero=True)
+            if new_qty is None:
+                results.append({'barcode': bc, 'status': 'error', 'message': 'Geçersiz miktar'})
+                continue
 
             product = self._find_product(bc)
             if not product:

@@ -214,7 +214,9 @@ class ShelfApiController(BarcodeApiBase):
 
         product_barcode = product_barcode.strip()
         shelf_barcode = shelf_barcode.strip()
-        quantity = float(quantity or 1)
+        quantity = self._parse_qty(quantity)
+        if quantity is None:
+            return {'error': 'Geçersiz miktar'}
 
         # Duplicate request koruması kaldırıldı — peş peşe aynı ürünü raflamak kasıtlı işlem
         # Frontend zaten processing kilidi ile çift tetiklemeyi engelliyor
@@ -266,7 +268,9 @@ class ShelfApiController(BarcodeApiBase):
 
         product_barcode = product_barcode.strip()
         shelf_barcode = shelf_barcode.strip()
-        quantity = float(quantity or 1)
+        quantity = self._parse_qty(quantity)
+        if quantity is None:
+            return {'error': 'Geçersiz miktar'}
 
         # Duplicate request koruması (500ms)
         # Duplicate request koruması kaldırıldı — frontend processing kilidi yeterli
@@ -283,6 +287,12 @@ class ShelfApiController(BarcodeApiBase):
         row = self._lock_quant(product.id, location.id, positive_only=True)
         if not row:
             return {'error': 'Bu üründe rafta stok yok'}
+        # Raftakinden fazlası (veya siparişe ayrılmış kısım) kaldırılamaz
+        available = row[1] - (row[2] or 0)
+        if available < quantity:
+            return {'error': f'Rafta yeterli stok yok: {row[1]:g} adet'
+                             + (f' ({row[2]:g} adedi siparişe ayrılmış)' if row[2] else '')
+                             + f', istenen {quantity:g}'}
 
         # Güvenli stok güncelleme (negatif delta = çıkarma)
         self._safe_update_quant(product, location, -quantity)
@@ -322,7 +332,9 @@ class ShelfApiController(BarcodeApiBase):
         product_barcode = product_barcode.strip()
         source_shelf_barcode = source_shelf_barcode.strip()
         target_shelf_barcode = target_shelf_barcode.strip()
-        quantity = float(quantity or 1)
+        quantity = self._parse_qty(quantity)
+        if quantity is None:
+            return {'error': 'Geçersiz miktar'}
 
         if source_shelf_barcode == target_shelf_barcode:
             return {'error': 'Kaynak ve hedef raf aynı olamaz'}
