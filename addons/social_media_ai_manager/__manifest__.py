@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Sosyal Medya & Yapay Zeka Yöneticisi',
-    'version': '19.0.1.0.1',
+    'version': '19.0.1.1.0',
     'summary': 'Sosyal Medya (WhatsApp, Instagram, Facebook, TikTok, YouTube) ve Yapay Zeka Desteği Yönetimi',
     'sequence': 10,
     'description': """
@@ -31,6 +31,7 @@ Kapsamlı omnichannel gelen kutusu ve sosyal medya gönderi planlama aracı.
         'views/social_media_conversation_views.xml',
         'views/social_media_inbox_action.xml',
         'views/legal_pages.xml',
+        'views/social_media_ai_usage_views.xml',
     ],
     'assets': {
         'web.assets_backend': [

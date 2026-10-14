@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_social_media_ai_usage_list" model="ir.ui.view">
+        <field name="name">social.media.ai.usage.list</field>
+        <field name="model">social.media.ai.usage</field>
+        <field name="arch" type="xml">
+            <list create="false" edit="false">
+                <field name="create_date" string="Tarih"/>
+                <field name="provider"/>
+                <field name="model"/>
+                <field name="input_tokens" sum="Toplam"/>
+                <field name="output_tokens" sum="Toplam"/>
+                <field name="duration"/>
+                <field name="status" decoration-danger="status != 'ok'"/>
+                <field name="cost" sum="Toplam"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_social_media_ai_usage_pivot" model="ir.ui.view">
+        <field name="name">social.media.ai.usage.pivot</field>
+        <field name="model">social.media.ai.usage</field>
+        <field name="arch" type="xml">
+            <pivot string="AI Maliyeti">
+                <field name="create_date" interval="day" type="row"/>
+                <field name="provider" type="col"/>
+                <field name="cost" type="measure"/>
+                <field name="input_tokens" type="measure"/>
+                <field name="output_tokens" type="measure"/>
+            </pivot>
+        </field>
+    </record>
+
+    <record id="view_social_media_ai_usage_search" model="ir.ui.view">
+        <field name="name">social.media.ai.usage.search</field>
+        <field name="model">social.media.ai.usage</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="model"/>
+                <filter name="failed" string="Hatalı" domain="[('status', '!=', 'ok')]"/>
+                <filter name="today" string="Bugün"
+                        domain="[('create_date', '&gt;=', context_today().strftime('%Y-%m-%d'))]"/>
+                <group>
+                    <filter name="group_provider" string="Sağlayıcı" context="{'group_by': 'provider'}"/>
+                    <filter name="group_status" string="Durum" context="{'group_by': 'status'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_social_media_ai_usage" model="ir.actions.act_window">
+        <field name="name">AI Maliyeti</field>
+        <field name="res_model">social.media.ai.usage</field>
+        <field name="view_mode">pivot,list</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Henüz AI çağrısı kaydedilmedi.</p>
+            <p>Her otomatik yanıt çağrısı burada token ve maliyetiyle görünür.</p>
+        </field>
+    </record>
+
+    <menuitem id="menu_social_media_ai_usage" name="AI Maliyeti" parent="menu_social_media_config"
+              action="action_social_media_ai_usage" sequence="95"/>
+</odoo>
