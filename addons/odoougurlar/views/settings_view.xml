@@ -38,13 +38,13 @@
                                     <field name="nebim_password" password="True"/>
                                 </div>
                             </setting>
-                            <setting string="Model Type" help="Nebim bağlantı ModelType değeri">
+                            <setting string="Bağlantı Model Tipi" help="Nebim bağlantı ModelType değeri">
                                 <div class="content-group">
                                     <field name="nebim_model_type"/>
                                 </div>
                             </setting>
                         </block>
-                        <block title="Stored Procedure İsimleri" name="nebim_procedures">
+                        <block title="Saklı Yordam (SP) Adları — geliştirici modu" name="nebim_procedures" groups="base.group_no_one">
                             <setting string="Ürün Detay SP" help="Ürün detaylarını getiren prosedür">
                                 <div class="content-group">
                                     <field name="nebim_sp_item_details" placeholder="sp_GetItemDetails_Hamurlabs"/>
@@ -101,7 +101,7 @@
                                 </div>
                             </setting>
                         </block>
-                        <block title="Fatura Arşivleme &amp; e-Dönüşüm Entegrasyon Ayarları" name="nebim_invoice_collector_settings">
+                        <block title="Fatura Arşivleme &amp; e-Dönüşüm Entegrasyon Ayarları — geliştirici modu" name="nebim_invoice_collector_settings" groups="base.group_no_one">
                             <setting string="Toptan Alış Fatura SP" help="Toptan Alış faturalarını ve ürün-belge eşleşmelerini getiren prosedür">
                                 <div class="content-group">
                                     <field name="nebim_sp_purchase_invoices" placeholder="usp_GetPurchaseInvoices_Ugurlar"/>

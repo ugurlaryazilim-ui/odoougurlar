@@ -40,7 +40,7 @@ class ResConfigSettings(models.TransientModel):
         groups='base.group_system',
     )
     nebim_model_type = fields.Integer(
-        string='Nebim Model Type',
+        string='Nebim Bağlantı Model Tipi',
         config_parameter='odoougurlar.nebim_model_type',
         default=1,
         help='Nebim bağlantı için ModelType değeri',

@@ -19,7 +19,7 @@ class SaleOrder(models.Model):
     nebim_order_sent = fields.Boolean(string='Nebim Sipariş Aktarıldı', default=False, readonly=True, copy=False)
     nebim_order_response = fields.Text(string='Nebim Sipariş Cevabı', readonly=True, copy=False)
     nebim_order_request = fields.Text(string='Nebim Sipariş İstek', readonly=True, copy=False)
-    nebim_export_file_number = fields.Char(string='Nebim ExportFileNumber', readonly=True, copy=False)
+    nebim_export_file_number = fields.Char(string='Nebim İhracat Dosya No', readonly=True, copy=False)
     nebim_header_id = fields.Char(string='Nebim HeaderID', readonly=True, copy=False,
                                   help='Nebim sipariş yanıtından alınan benzersiz HeaderID (GUID). Silme işleminde kullanılır.')
 
@@ -37,7 +37,7 @@ class SaleOrder(models.Model):
         readonly=True,
     )
     marketplace_seller_id = fields.Char(
-        string='Seller ID', compute='_compute_marketplace_info',
+        string='Satıcı ID', compute='_compute_marketplace_info',
         readonly=True,
     )
     marketplace_status_display = fields.Char(
@@ -57,6 +57,76 @@ class SaleOrder(models.Model):
         help='Picking batch ataması sırasında otomatik yazılır. '
              'Kalıcı alan — faturalama sonrası silinmez.',
     )
+    # Listede rozet + "Nebim Hatalı / Bekleyen" filtreleri (saklanmaz: mevcut alanlardan türetilir)
+    nebim_state = fields.Selection([
+        ('pending', 'Bekliyor'),
+        ('customer', 'Cari Açıldı'),
+        ('sent', 'Aktarıldı'),
+        ('error', 'Hatalı'),
+    ], string='Nebim Durumu', compute='_compute_nebim_state', search='_search_nebim_state')
+
+    # Yanıt alanlarında hata olduğunu gösteren ifadeler (auto-sync / paketleme yazar)
+    _NEBIM_ERROR_MARKERS = ('hata', 'gönderilemedi', 'ertelendi')
+
+    @api.depends('nebim_order_sent', 'nebim_customer_sent', 'nebim_order_response', 'nebim_customer_response')
+    def _compute_nebim_state(self):
+        for order in self:
+            text = ' '.join(filter(None, [order.nebim_order_response, order.nebim_customer_response])).lower()
+            if order.nebim_order_sent:
+                order.nebim_state = 'sent'
+            elif any(m in text for m in self._NEBIM_ERROR_MARKERS):
+                order.nebim_state = 'error'
+            elif order.nebim_customer_sent:
+                order.nebim_state = 'customer'
+            else:
+                order.nebim_state = 'pending'
+
+    def _nebim_error_domain(self):
+        domain = []
+        for marker in self._NEBIM_ERROR_MARKERS:
+            for fname in ('nebim_order_response', 'nebim_customer_response'):
+                domain = ['|'] + domain + [(fname, 'ilike', marker)] if domain else [(fname, 'ilike', marker)]
+        return domain
+
+    def _search_nebim_state(self, operator, value):
+        if operator not in ('=', '!=', 'in', 'not in'):
+            raise UserError(_('Nebim Durumu için desteklenmeyen arama.'))
+        values = [value] if isinstance(value, str) else list(value or [])
+        not_sent = [('nebim_order_sent', '=', False)]
+        error = self._nebim_error_domain()
+        domains = {
+            'sent': [('nebim_order_sent', '=', True)],
+            'error': not_sent + error,
+            'customer': not_sent + [('nebim_customer_sent', '=', True)] + ['!'] + error,
+            'pending': not_sent + [('nebim_customer_sent', '=', False)] + ['!'] + error,
+        }
+        parts = [self._nebim_single_term(domains[v]) for v in values if v in domains]
+        if not parts:
+            result = [('id', '=', 0)]
+        else:
+            result = parts[0]
+            for extra in parts[1:]:
+                result = ['|'] + result + extra
+        if operator in ('!=', 'not in'):
+            result = ['!'] + result
+        return result
+
+    @staticmethod
+    def _nebim_single_term(domain):
+        """Örtük AND'li prefix domain'i tek terime çevirir ('|' / '!' ile birleştirilebilsin)."""
+        def end_of_term(i):
+            token = domain[i]
+            if token == '!':
+                return end_of_term(i + 1)
+            if token in ('|', '&'):
+                return end_of_term(end_of_term(i + 1))
+            return i + 1
+
+        count, i = 0, 0
+        while i < len(domain):
+            i = end_of_term(i)
+            count += 1
+        return ['&'] * (count - 1) + list(domain)
 
     _MP_FIELDS = [
         ('trendyol_order_id', 'Trendyol'),
@@ -335,6 +405,37 @@ class SaleOrder(models.Model):
                     'params': {'title': 'Hata',
                                'message': f'E-arşiv fatura sorgulanırken hata: {str(e)}',
                                'type': 'danger'}}
+
+    def action_send_nebim(self):
+        """Onaylı ama Nebim'e hiç gitmemiş (veya hata almış) siparişi şimdi gönder.
+
+        Onaydaki otomatik akışın aynısı (_auto_nebim_sync): ayarlardaki cari / sipariş
+        anahtarları ve mükerrer korumaları geçerlidir.
+        """
+        self.ensure_one()
+        if self.state != 'sale':
+            raise UserError(_('Yalnız onaylı siparişler Nebim\'e gönderilir.'))
+        if self.nebim_order_sent:
+            raise UserError(_('Bu sipariş zaten Nebim\'e aktarılmış.'))
+        try:
+            with self.env.cr.savepoint():
+                self._auto_nebim_sync(self)
+        except Exception as e:
+            _logger.warning("Manuel Nebim gönderim hatası (%s): %s", self.name, e)
+        self.invalidate_recordset()
+        if self.nebim_order_sent:
+            title, kind = _('Nebim\'e aktarıldı'), 'success'
+            message = self.nebim_order_response or _('Sipariş Nebim\'e gönderildi.')
+        else:
+            title, kind = _('Nebim\'e aktarılamadı'), 'warning'
+            message = (self.nebim_order_response or self.nebim_customer_response
+                       or _('Gönderim yapılmadı: Ayarlar > Nebim\'de sipariş aktarımı kapalı olabilir.'))
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {'title': title, 'message': message[:500], 'type': kind, 'sticky': kind != 'success',
+                       'next': {'type': 'ir.actions.client', 'tag': 'soft_reload'}},
+        }
 
     def action_reset_nebim(self):
         """Nebim senkronizasyon bayraklarını sıfırla.

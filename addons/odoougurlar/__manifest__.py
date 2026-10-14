@@ -1,6 +1,6 @@
 {
     'name': 'Odoo Uğurlar - Nebim Entegrasyonu',
-    'version': '19.0.1.0.0',
+    'version': '19.0.1.1.0',
     'category': 'Sales',
     'summary': 'Nebim V3 ERP entegrasyonu - Ürün, Stok, Fiyat ve Fatura senkronizasyonu',
     'description': """
@@ -23,6 +23,9 @@
         'stock',
         'account',
         'sale',
+        # Teslimat (origin ile picking) ve transfer sihirbazındaki toplama listesi bunları kullanır
+        'sale_stock',
+        'stock_picking_batch',
     ],
     'data': [
         'security/nebim_security.xml',
@@ -37,6 +40,7 @@
         'views/product_views.xml',
         'views/invoice_views.xml',
         'views/transfer_wizard_view.xml',
+        'views/nebim_monitor_views.xml',
     ],
     'installable': True,
     'application': True,
