@@ -102,15 +102,19 @@ class ProductProcessor(models.AbstractModel):
         _CACHE['prevent_desc'] = str(p_desc).lower() in ('true', '1')
         _CACHE['prevent_price'] = str(p_price).lower() in ('true', '1')
         _CACHE['prevent_categ'] = str(p_categ).lower() in ('true', '1')
+        # Maliyet: Nebim Price2 (KDV dahil) varyantın standard_price alanına aynen yazılır
+        _CACHE['update_cost'] = str(
+            ICP.get_param('odoougurlar.nebim_sync_cost_enabled', 'False')).lower() in ('true', '1')
 
         _CACHE['loaded'] = True
 
         _logger.info(
-            "Cache yüklendi: %d attr, %d val, %d categ, %d tax, %d barcode | Koruma: name=%s, desc=%s, price=%s, categ=%s",
+            "Cache yüklendi: %d attr, %d val, %d categ, %d tax, %d barcode | Koruma: name=%s, desc=%s, price=%s, categ=%s | Maliyet: %s",
             len(_CACHE['attrs']), len(_CACHE['vals']),
             len(_CACHE['categs']), len(_CACHE['taxes']),
             len(_CACHE['barcodes']),
-            _CACHE['prevent_name'], _CACHE['prevent_desc'], _CACHE['prevent_price'], _CACHE['prevent_categ']
+            _CACHE['prevent_name'], _CACHE['prevent_desc'], _CACHE['prevent_price'], _CACHE['prevent_categ'],
+            _CACHE['update_cost'],
         )
 
     @api.private
@@ -375,6 +379,12 @@ class ProductProcessor(models.AbstractModel):
             elif color_code:
                 update_vals['nebim_variant_code'] = color_code
 
+            # Maliyet (Price2, KDV dahil): 0/boş gelirse mevcut maliyet ezilmez
+            if _CACHE.get('update_cost'):
+                cost = self._nebim_cost(var)
+                if cost and round(variant.standard_price, 2) != cost:
+                    update_vals['standard_price'] = cost
+
             if update_vals:
                 try:
                     variant.write(update_vals)
@@ -385,6 +395,15 @@ class ProductProcessor(models.AbstractModel):
                             variant.write(update_vals)
                     else:
                         raise
+
+    @api.model
+    def _nebim_cost(self, row):
+        """Nebim satırındaki Price2 (KDV dahil maliyet); geçersiz / 0 ise None."""
+        try:
+            cost = round(float(row.get('Price2') or 0), 2)
+        except (TypeError, ValueError):
+            return None
+        return cost if cost > 0 else None
 
     @api.private
     def _find_variant(self, template, color_name, size_name):
