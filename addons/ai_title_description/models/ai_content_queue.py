@@ -311,6 +311,10 @@ class AIContentQueue(models.Model):
 
             except Exception as e:
                 self.env.cr.execute('ROLLBACK TO SAVEPOINT ai_queue_sp')
+                # Google ücretlendirdi ama içerik kullanılamadı: harcama loglansın (bütçeye girsin)
+                self.env['ai.content.log']._log_failed_calls(
+                    record.product_tmpl_id, provider_type, model_name, record.mode,
+                    getattr(provider, 'failed_calls', None))
                 record.attempts += 1
                 err_msg = f"{str(e)}\n{traceback.format_exc()}"
                 _logger.error("Kuyruk [%s] ürün [%s] hata: %s", record.id, record.product_tmpl_id.name, e)
