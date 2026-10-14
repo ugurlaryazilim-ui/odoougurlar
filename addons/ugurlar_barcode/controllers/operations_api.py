@@ -150,7 +150,7 @@ class OperationsApiController(BarcodeApiBase):
                     continue
 
                 # Güvenli stok güncelleme
-                self._safe_update_quant(product, location, qty)
+                self._safe_update_quant(product, location, qty, 'Mobil: Toplu Raflama')
 
                 request.env['ugurlar.barcode.operation'].sudo().create({
                     'operation_type': 'putaway',

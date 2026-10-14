@@ -163,3 +163,144 @@ class TestBatchFlows(TransactionCase):
         b2.write({'state': 'in_progress'})
         Batch._cron_cleanup_route_batches()
         self.assertEqual(b2.state, 'done')
+
+
+@tagged('post_install', '-at_install')
+class TestShelfStockMoves(TransactionCase):
+    """Raf işlemleri: doğrudan quant yazımı yerine tamamlanmış stok hareketi."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.wh = cls.env['stock.warehouse'].search([('company_id', '=', cls.env.company.id)], limit=1)
+        Loc = cls.env['stock.location']
+        cls.shelf_a = Loc.create({'name': 'S-A', 'location_id': cls.wh.lot_stock_id.id, 'usage': 'internal'})
+        cls.shelf_b = Loc.create({'name': 'S-B', 'location_id': cls.wh.lot_stock_id.id, 'usage': 'internal'})
+        cls.product = cls.env['product.product'].create({
+            'name': 'Raf Ürünü', 'type': 'consu', 'is_storable': True, 'barcode': 'RAF-1'})
+        cls.api = BarcodeApiBase()
+
+    def setUp(self):
+        super().setUp()
+        patcher = patch.object(base_api, 'request', SimpleNamespace(env=self.env))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _qty(self, location):
+        return sum(self.env['stock.quant'].search([
+            ('product_id', '=', self.product.id), ('location_id', '=', location.id)]).mapped('quantity'))
+
+    def _moves(self, origin):
+        return self.env['stock.move'].search([
+            ('product_id', '=', self.product.id), ('origin', '=', origin), ('state', '=', 'done')])
+
+    def test_putaway_and_remove_create_moves(self):
+        self.assertEqual(self.api._safe_update_quant(self.product, self.shelf_a, 3, 'Mobil: Raflama'), 3)
+        self.assertEqual(self._qty(self.shelf_a), 3)
+        move = self._moves('Mobil: Raflama')
+        self.assertEqual(len(move), 1)
+        self.assertTrue(move.is_inventory)
+        self.assertEqual(move.location_dest_id, self.shelf_a)
+
+        self.assertEqual(self.api._safe_update_quant(self.product, self.shelf_a, -2, 'Mobil: Raftan Kaldırma'), 1)
+        self.assertEqual(self._qty(self.shelf_a), 1)
+        self.assertEqual(self._moves('Mobil: Raftan Kaldırma').location_id, self.shelf_a)
+
+    def test_remove_more_than_shelf_clamps_to_zero(self):
+        self.api._safe_update_quant(self.product, self.shelf_a, 2)
+        self.assertEqual(self.api._safe_update_quant(self.product, self.shelf_a, -5), 0)
+        self.assertEqual(self._qty(self.shelf_a), 0)
+
+    def test_transfer_between_shelves(self):
+        self.api._safe_update_quant(self.product, self.shelf_a, 4)
+        ok, err = self.api._safe_move_quant(self.product, self.shelf_a, self.shelf_b, 3, 'Mobil: Raf Transferi')
+        self.assertTrue(ok, err)
+        self.assertEqual(self._qty(self.shelf_a), 1)
+        self.assertEqual(self._qty(self.shelf_b), 3)
+        move = self._moves('Mobil: Raf Transferi')
+        self.assertFalse(move.is_inventory)
+        self.assertEqual((move.location_id, move.location_dest_id), (self.shelf_a, self.shelf_b))
+        # depo toplamı değişmez
+        self.assertEqual(self.product.with_context(warehouse_id=self.wh.id).qty_available, 4)
+
+    def test_transfer_insufficient_and_reserved(self):
+        self.api._safe_update_quant(self.product, self.shelf_a, 2)
+        ok, err = self.api._safe_move_quant(self.product, self.shelf_a, self.shelf_b, 5)
+        self.assertFalse(ok)
+        self.assertIn('Yetersiz', err)
+        # 1 adedi siparişe ayrılmış: yalnız 1 taşınabilir
+        out = self.env['stock.picking'].create({
+            'picking_type_id': self.wh.out_type_id.id,
+            'location_id': self.shelf_a.id,
+            'location_dest_id': self.env.ref('stock.stock_location_customers').id,
+            'move_ids': [(0, 0, {
+                'product_id': self.product.id, 'product_uom_qty': 1,
+                'product_uom': self.product.uom_id.id, 'location_id': self.shelf_a.id,
+                'location_dest_id': self.env.ref('stock.stock_location_customers').id})],
+        })
+        out.action_confirm()
+        out.action_assign()
+        ok, err = self.api._safe_move_quant(self.product, self.shelf_a, self.shelf_b, 2)
+        self.assertFalse(ok)
+        self.assertIn('siparişe ayrılmış', err)
+        ok, _err = self.api._safe_move_quant(self.product, self.shelf_a, self.shelf_b, 1)
+        self.assertTrue(ok)
+        self.assertEqual(self._qty(self.shelf_a), 1)
+
+    def test_missing_source_shelf(self):
+        ok, err = self.api._safe_move_quant(self.product, self.shelf_a, self.shelf_b, 1)
+        self.assertFalse(ok)
+        self.assertIn('bulunamadı', err)
+
+
+@tagged('post_install', '-at_install')
+class TestShelfEndpoints(TransactionCase):
+    """Mobil raf uç noktaları (istek katmanı dahil)."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        wh = cls.env['stock.warehouse'].search([('company_id', '=', cls.env.company.id)], limit=1)
+        Loc = cls.env['stock.location']
+        cls.shelf_a = Loc.create({'name': 'E-A', 'barcode': 'RAF-EA', 'location_id': wh.lot_stock_id.id,
+                                  'usage': 'internal'})
+        cls.shelf_b = Loc.create({'name': 'E-B', 'barcode': 'RAF-EB', 'location_id': wh.lot_stock_id.id,
+                                  'usage': 'internal'})
+        cls.product = cls.env['product.product'].create({
+            'name': 'Uç Ürün', 'type': 'consu', 'is_storable': True, 'barcode': 'UC-1'})
+
+    def setUp(self):
+        super().setUp()
+        from odoo.addons.ugurlar_barcode.controllers import shelf_api
+        fake = SimpleNamespace(env=self.env)
+        for mod in (base_api, shelf_api):
+            p = patch.object(mod, 'request', fake)
+            p.start()
+            self.addCleanup(p.stop)
+        self.ctl = shelf_api.ShelfApiController()
+
+    def _qty(self, location):
+        return sum(self.env['stock.quant'].search([
+            ('product_id', '=', self.product.id), ('location_id', '=', location.id)]).mapped('quantity'))
+
+    def test_putaway_remove_transfer(self):
+        res = self.ctl.putaway(product_barcode='UC-1', shelf_barcode='RAF-EA', quantity=5)
+        self.assertTrue(res.get('success'), res)
+        self.assertEqual(self._qty(self.shelf_a), 5)
+
+        res = self.ctl.remove_from_shelf(product_barcode='UC-1', shelf_barcode='RAF-EA', quantity=9)
+        self.assertIn('yeterli stok', res.get('error', ''))
+        res = self.ctl.remove_from_shelf(product_barcode='UC-1', shelf_barcode='RAF-EA', quantity=1)
+        self.assertTrue(res.get('success'), res)
+        self.assertEqual(self._qty(self.shelf_a), 4)
+
+        res = self.ctl.shelf_transfer(product_barcode='UC-1', source_shelf_barcode='RAF-EA',
+                                      target_shelf_barcode='RAF-EB', quantity=3)
+        self.assertTrue(res.get('success'), res)
+        self.assertEqual((self._qty(self.shelf_a), self._qty(self.shelf_b)), (1, 3))
+
+        res = self.ctl.putaway(product_barcode='UC-1', shelf_barcode='RAF-EA', quantity=-2)
+        self.assertEqual(res.get('error'), 'Geçersiz miktar')
+        moves = self.env['stock.move'].search([('product_id', '=', self.product.id), ('state', '=', 'done')])
+        self.assertEqual(sorted(moves.mapped('origin')),
+                         ['Mobil: Raf Transferi', 'Mobil: Raflama', 'Mobil: Raftan Kaldırma'])
