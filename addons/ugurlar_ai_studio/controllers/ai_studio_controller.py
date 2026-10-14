@@ -960,6 +960,7 @@ class AiStudioController(http.Controller):
                     'generated_url_full': '%s?unique=%d' % (gen_url, uniq),
                     'error_message': gen.error_message or '',
                     'quality_score': gen.quality_score,
+                    'fidelity_failed': gen.fidelity_failed,
                     # Görsel denetimin bulduğu hatalar ("⚠ a; b" biçiminde saklanır)
                     'qc_issues': [
                         i.strip() for i in (gen.quality_details or '').split('⚠', 1)[-1].split(';')

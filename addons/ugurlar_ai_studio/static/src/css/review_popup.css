@@ -324,6 +324,15 @@
 }
 
 /* AI görsel denetimin bulduğu hatalar */
+.ais-rp-fidelity-failed {
+    padding: 6px 10px;
+    font-size: 13px;
+    font-weight: 700;
+    text-align: center;
+    color: #fff;
+    background: #dc2626;
+}
+
 .ais-rp-qc-warning {
     padding: 6px 10px;
     font-size: 12px;

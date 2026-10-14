@@ -317,3 +317,97 @@ class TestAiStudioModels(TransactionCase):
         self.assertAlmostEqual(session.net_cost, 5.0)
         report = self.env['ai.studio.cost.report'].search([('session_id', '=', session.id)])
         self.assertAlmostEqual(sum(report.mapped('cost')), 5.0)
+
+    def test_deleted_session_keeps_generation_cost(self):
+        # Üretimler cascade ile silinir: oturum silinse de harcama raporda kalır
+        session = self._session(self.red)
+        self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'done', 'cost': 0.2})
+        session.unlink()
+        kept = self.env['ai.studio.usage'].search([('product_id', '=', self.red.id),
+                                                   ('step', '=', 'deleted_generation')])
+        self.assertAlmostEqual(sum(kept.mapped('cost')), 0.2)
+
+    def test_month_cost_counts_usage_rows(self):
+        before = self.Session._get_month_ai_cost()
+        self.env['ai.studio.usage'].create({'provider': 'gemini', 'step': 'analysis', 'cost': 0.5})
+        self.assertAlmostEqual(self.Session._get_month_ai_cost() - before, 0.5)
+
+    # ── Doğruluk: yeniden deneme zinciri (aynı model → FASHN), işaretleme ──
+    def _retry(self, scores, fallback=True):
+        """scores: [ilk, 2. deneme, FASHN] kusur sayıları."""
+        from ..models.ai_studio_session import _fidelity_retry
+        calls = []
+
+        def _attempt(label, cost):
+            def fn(fix=''):
+                calls.append((label, fix))
+                return label.encode(), False, cost
+            return fn
+
+        def _check(b64, base_cost):
+            return {'quality_details': 'qc', '_fidelity': scores[len(calls)], 'cost': base_cost}
+
+        qc_vals = {'quality_details': 'qc', '_fidelity': scores[0], '_fix': 'The front is closed.', 'cost': 0.2}
+        b64, vals = _fidelity_retry(self.env, None, b'FIRST', qc_vals, 0.2, _attempt('seedream', 0.135), _check,
+                                    fallback=_attempt('fashn', 0.075) if fallback else None)
+        return b64, vals, calls
+
+    def test_fidelity_retry_falls_back_to_fashn(self):
+        b64, vals, calls = self._retry([2, 2, 0])
+        self.assertEqual([c[0] for c in calls], ['seedream', 'fashn'])
+        self.assertEqual(calls[0][1], 'The front is closed.')
+        self.assertEqual(b64, b'fashn')
+        self.assertFalse(vals['fidelity_failed'])
+        self.assertIn('FASHN seçildi', vals['quality_details'])
+        self.assertAlmostEqual(vals['cost'], 0.2 + 0.135 + 0.075, places=4)
+
+    def test_fidelity_retry_stops_when_second_attempt_is_clean(self):
+        b64, vals, calls = self._retry([1, 0, 0])
+        self.assertEqual([c[0] for c in calls], ['seedream'])
+        self.assertEqual(b64, b'seedream')
+        self.assertAlmostEqual(vals['cost'], 0.2 + 0.135, places=4)
+
+    def test_fidelity_retry_flags_when_all_attempts_fail(self):
+        b64, vals, calls = self._retry([1, 2, 3])
+        self.assertEqual(b64, b'FIRST', 'en az kusurlu görsel tutulur')
+        self.assertTrue(vals['fidelity_failed'])
+        self.assertTrue(vals['quality_details'].startswith('⛔'))
+        self.assertNotIn('generated_image', vals)
+
+    def test_fidelity_retry_respects_fashn_setting(self):
+        self.env['ir.config_parameter'].sudo().set_param('ugurlar_ai_studio.fashn_fallback', 'False')
+        _b64, vals, calls = self._retry([2, 2, 0])
+        self.assertEqual([c[0] for c in calls], ['seedream'])
+        self.assertTrue(vals['fidelity_failed'])
+
+    def test_fashn_fallback_only_for_seedream_front_back(self):
+        from ..models.ai_studio_session import _make_regenerators
+        kw = {'model_name': 'seedream/v5/pro/edit', 'prompt': 'p'}
+        noop = lambda *a: None  # noqa: E731
+        self.assertIsNotNone(_make_regenerators(None, kw, noop, noop, 'fal', 'front')[1])
+        self.assertIsNone(_make_regenerators(None, kw, noop, noop, 'fal', 'side')[1])
+        self.assertIsNone(_make_regenerators(None, kw, noop, noop, 'fashn', 'front')[1])
+        self.assertIsNone(_make_regenerators(None, dict(kw, model_name='fashn/tryon/v1.6'),
+                                             noop, noop, 'fal', 'front')[1])
+
+    def test_regenerate_cost_excludes_prep(self):
+        # Hazırlık maliyeti ilk denemede bir kez sayılır; yeniden üretim yalnız kendi ücretini döndürür
+        from ..models.ai_studio_session import _make_regenerators
+
+        class _Provider:
+            def __init__(self):
+                self.kwargs = []
+
+            def virtual_tryon(self, **kw):
+                self.kwargs.append(kw)
+                return {'cost': 0.135}
+
+        provider = _Provider()
+        regen, fallback = _make_regenerators(
+            provider, {'model_name': 'seedream/v5/pro/edit', 'prompt': 'p'},
+            lambda res: (b'IMG', None), lambda: None, 'fal', 'front')
+        self.assertEqual(regen('Fix.')[2], 0.135)
+        self.assertIn('Fix.', provider.kwargs[-1]['prompt'])
+        fallback('Fix.')
+        self.assertEqual(provider.kwargs[-1]['model_name'], 'fashn/tryon/v1.6')
+        self.assertEqual(provider.kwargs[-1]['prompt'], '')

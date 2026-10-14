@@ -135,7 +135,10 @@ def _make_usage_recorder(pool, uid, input_price, output_price):
 
 
 def _start_usage_recording(env, session, generation=None):
-    """Bu thread'deki Gemini / fal çağrılarını oturuma (ve üretime) yazan kaydediciyi kurar."""
+    """Bu thread'deki Gemini / fal çağrılarını oturuma (ve üretime) yazan kaydediciyi kurar.
+
+    session boş olabilir (manken üretimi, oturumsuz çeviri): kayıt oturumsuz yazılır.
+    """
     get_param = env['ir.config_parameter'].sudo().get_param
 
     def _price(key, default):
@@ -148,8 +151,10 @@ def _start_usage_recording(env, session, generation=None):
         _make_usage_recorder(env.registry, env.uid,
                              _price('gemini_input_price', GEMINI_INPUT_PRICE),
                              _price('gemini_output_price', GEMINI_OUTPUT_PRICE)),
-        session_id=session.id, generation_id=generation.id if generation else None,
-        product_id=session.product_id.id, user_id=session.user_id.id or env.uid,
+        session_id=session.id if session else None,
+        generation_id=generation.id if generation else None,
+        product_id=session.product_id.id if session else None,
+        user_id=(session.user_id.id if session else None) or env.uid,
     )
 
 
@@ -486,24 +491,30 @@ def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', anal
     visual_qc = None
     enabled = icp.get_param('ugurlar_ai_studio.visual_qc', 'True') == 'True'
     if enabled and gemini_api_key:
-        from ..services.garment_analyzer import design_hint, visual_quality_check
+        from ..services.garment_analyzer import closure_state_hint, design_hint, visual_quality_check
         analysis = analysis if isinstance(analysis, dict) else {}
-        # Analiz ön fotoğraftandır: ön detaylar yalnız ön görünümde "ürüne ait" sayılır
-        details = design_hint(analysis) if photo_type == 'front' else ''
+        # Analiz ön fotoğraftandır: ön detaylar yalnız ön görünümde "ürüne ait" sayılır.
+        # Kapama durumu biliniyorsa denetime ayrıca verilir ve "hiç raporlama" listesinden çıkar:
+        # açığa çıkan gizli fermuar / açılan ön "ürünün kendi detayı" sayılıp kaçıyordu
+        closure_state = closure_state_hint(analysis) if photo_type == 'front' else ''
+        details = design_hint(analysis, include_closure=not closure_state) if photo_type == 'front' else ''
+        # Silme tespiti gerçek kapamayı (fermuar, düğme) silmesin: ona tam liste gider
+        fix_details = design_hint(analysis) if photo_type == 'front' else ''
         hint = ' '.join(filter(None, [analysis.get('primaryColorEn') or analysis.get('primaryColor'),
                                       analysis.get('garmentTypeEn') or analysis.get('garmentType')]))
         hint = f"{hint} ({category})".strip()
         visual_qc = visual_quality_check(gemini_api_key, generated_b64, garment_hint=hint,
                                          reference_image=reference_image, design_details=details,
                                          check_missing=check_missing, view_construction=view_construction,
-                                         removed_boxes=removed_boxes, original_image=source_image)
+                                         removed_boxes=removed_boxes, original_image=source_image,
+                                         closure_state=closure_state)
 
         auto_fix = icp.get_param('ugurlar_ai_studio.auto_tag_fix', 'True') == 'True'
         if visual_qc and auto_fix:
             fixed_b64, fix_cost, fixed_codes = _auto_fix_defects(
                 env, generated_b64, visual_qc.get('codes', []), visual_qc.get('boxes'),
                 garment_hint=(gen.session_id.product_id.display_name or '') if gen else '',
-                design_details=details, erase_added=check_missing)
+                design_details=fix_details, erase_added=check_missing)
             if fixed_b64:
                 _logger.info('Otomatik düzeltildi %s (gen=%s)', fixed_codes, gen.id if gen else '?')
                 # Silme sonrası yeniden denetle: etiket hâlâ duruyorsa reviewer görsün
@@ -512,7 +523,8 @@ def _run_quality_check(env, source_image, generated_b64, gemini_api_key='', anal
                                                 check_missing=check_missing,
                                                 view_construction=view_construction,
                                                 removed_boxes=removed_boxes,
-                                                original_image=source_image) or visual_qc
+                                                original_image=source_image,
+                                                closure_state=closure_state) or visual_qc
                 # Pantolon düzeltmesi görseli referanssız yeniden çizer: ürünü bozduysa atılır.
                 # Uydurma detay silmesi kusuru artırdıysa (gerçek detay silindi) atılır; aynı kalırsa
                 # silinmiş hâli tutulur — denetim izli referansta parçayı "üründe var" sanabiliyor
@@ -547,12 +559,21 @@ def _with_fix(prompt, fix):
     return f"{prompt} {fix if fix.endswith('.') else fix + '.'}"
 
 
-def _fidelity_retry(env, gen, gen_b64, qc_vals, first_cost, regenerate, check):
-    """Sonuç ürünü değiştirdiyse (eklenen / kaybolan detay) bir kez yeniden üret, daha doğrusunu seç.
+FASHN_FALLBACK_MODEL = 'fashn/tryon/v1.6'
+FIDELITY_FAILED_PREFIX = '⛔ Ürün değişmiş — dikkatle inceleyin | '
 
-    regenerate(fix) -> (b64, seed, cost); fix: denetimin ürünün gerçek hâlini anlatan olumlu cümlesi
-    (aynı istemle yeniden üretim aynı detayı yine uyduruyordu). check(b64, base_cost) ->
-    _run_quality_check değerleri. first_cost: ilk denemenin üretim + hazırlık maliyeti.
+
+def _fidelity_retry(env, gen, gen_b64, qc_vals, first_cost, regenerate, check, fallback=None):
+    """Sonuç ürünü değiştirdiyse yeniden üret, en doğru sonucu seç.
+
+    Sıra: aynı modelle, denetimin düzeltme cümlesiyle bir deneme daha; o da ürünü değiştirdiyse
+    (ayar açıksa) FASHN v1.6 — metin istemi kullanmaz, ürün piksellerini taşır. Hepsi kusurluysa en
+    az kusurlu görsel tutulur ve fidelity_failed işaretlenir (incelemede ve Toplu Onay listesinde
+    kırmızı rozet).
+
+    regenerate(fix) / fallback(fix) -> (b64, seed, cost); cost yalnız o denemenin üretim maliyeti
+    (hazırlık maliyeti first_cost'ta bir kez sayılır). check(b64, base_cost) -> _run_quality_check
+    değerleri.
 
     Returns:
         (b64, vals) — vals gen.write'a hazır ('_fidelity' çıkarılmış)
@@ -560,38 +581,92 @@ def _fidelity_retry(env, gen, gen_b64, qc_vals, first_cost, regenerate, check):
     bad = qc_vals.pop('_fidelity', 0) or 0
     fix = qc_vals.pop('_fix', '') or ''
     first_b64 = qc_vals.get('generated_image') or gen_b64
-    enabled = env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fidelity_retry', 'True') == 'True'
-    if not bad or not enabled:
+    icp = env['ir.config_parameter'].sudo()
+    if not bad:
+        qc_vals['fidelity_failed'] = False
+        return first_b64, qc_vals
+    if icp.get_param('ugurlar_ai_studio.fidelity_retry', 'True') != 'True':
+        qc_vals['fidelity_failed'] = True
+        qc_vals['quality_details'] = FIDELITY_FAILED_PREFIX + (qc_vals.get('quality_details') or '')
         return first_b64, qc_vals
     gen_id = gen.id if gen else '?'
-    _logger.info('Doğruluk: %d ürün kusuru bulundu, bir kez yeniden üretiliyor (gen=%s, düzeltme=%s)',
-                 bad, gen_id, fix or '-')
-    first_total = qc_vals.get('cost', first_cost) or 0.0
-    try:
-        new_b64, new_seed, new_cost = regenerate(fix)
-        new_vals = check(new_b64, new_cost or 0.0) if new_b64 else None
-    except Exception as e:
-        _logger.warning('Doğruluk yeniden üretimi başarısız (gen=%s): %s', gen_id, e)
-        return first_b64, qc_vals
-    if new_vals is None:
-        return first_b64, qc_vals
-    new_bad = new_vals.pop('_fidelity', 0) or 0
-    new_vals.pop('_fix', None)
-    new_total = new_vals.get('cost', new_cost) or 0.0
-    _logger.info('Doğruluk: 1. deneme %d, 2. deneme %d kusur (gen=%s)', bad, new_bad, gen_id)
-    if new_bad < bad:
-        chosen = new_vals.get('generated_image') or new_b64
-        new_vals.update({
-            'generated_image': chosen,
-            'cost': first_total + new_total,
-            'quality_details': 'Doğruluk: 2. deneme seçildi | ' + (new_vals.get('quality_details') or ''),
-        })
-        if new_seed:
-            new_vals['seed'] = new_seed
-        return chosen, new_vals
-    qc_vals['cost'] = first_total + new_total
-    qc_vals['quality_details'] = 'Doğruluk: 2. deneme daha iyi değildi | ' + (qc_vals.get('quality_details') or '')
-    return first_b64, qc_vals
+    attempts = [('2. deneme', regenerate)]
+    if fallback and icp.get_param('ugurlar_ai_studio.fashn_fallback', 'True') == 'True':
+        attempts.append(('FASHN', fallback))
+    total = qc_vals.get('cost', first_cost) or 0.0
+    best_bad, best_b64, best_vals, best_label, best_seed = bad, first_b64, qc_vals, '', False
+    scores = [str(bad)]
+    for label, fn in attempts:
+        if not best_bad:
+            break
+        _logger.info('Doğruluk: %d ürün kusuru, %s üretiliyor (gen=%s, düzeltme=%s)',
+                     best_bad, label, gen_id, fix or '-')
+        new_cost = 0.0
+        try:
+            new_b64, new_seed, new_cost = fn(fix)
+            new_vals = check(new_b64, new_cost or 0.0) if new_b64 else None
+        except Exception as e:
+            _logger.warning('Doğruluk %s başarısız (gen=%s): %s', label, gen_id, e)
+            total += new_cost or 0.0
+            continue
+        if new_vals is None:
+            total += new_cost or 0.0
+            continue
+        new_bad = new_vals.pop('_fidelity', 0) or 0
+        new_vals.pop('_fix', None)
+        total += new_vals.get('cost', new_cost) or 0.0
+        scores.append(str(new_bad))
+        _logger.info('Doğruluk: %s %d kusur (gen=%s)', label, new_bad, gen_id)
+        if new_bad < best_bad:
+            best_bad, best_vals, best_label, best_seed = new_bad, new_vals, label, new_seed
+            best_b64 = new_vals.get('generated_image') or new_b64
+    vals = best_vals
+    vals['cost'] = total
+    if best_label:
+        vals['generated_image'] = best_b64
+        if best_seed:
+            vals['seed'] = best_seed
+        note = 'Doğruluk: %s seçildi (kusur %s)' % (best_label, '→'.join(scores))
+    else:
+        note = 'Doğruluk: yeniden denemeler daha iyi değildi (kusur %s)' % '→'.join(scores)
+    vals['quality_details'] = note + ' | ' + (vals.get('quality_details') or '')
+    vals['fidelity_failed'] = bool(best_bad)
+    if best_bad:
+        vals['quality_details'] = FIDELITY_FAILED_PREFIX + vals['quality_details']
+    return best_b64, vals
+
+
+def _make_regenerators(provider, tryon_kwargs, download, refresh, provider_type, photo_type):
+    """Doğruluk yeniden üretimi için (regenerate, fallback) döndürür.
+
+    regenerate: aynı model, denetimin düzeltme cümlesiyle. fallback: fal'de Seedream ön/arka
+    görünümü için FASHN v1.6 (istem almaz, ürün görselini olduğu gibi giydirir); yoksa None.
+    refresh(): kira yenileme + commit (uzun çağrı öncesi/sonrası).
+    """
+    def regenerate(fix=''):
+        refresh()
+        # Aynı seed aynı sonucu verir (v4); ikinci kayıt cron kurtarmasına karışmasın
+        res = provider.virtual_tryon(**dict(
+            tryon_kwargs, seed=False, on_enqueue=None, num_samples=1,
+            prompt=_with_fix(tryon_kwargs.get('prompt'), fix)))
+        refresh()
+        b64, seed = download(res or {})
+        return b64, seed, (res or {}).get('cost', 0.05)
+
+    model = tryon_kwargs.get('model_name') or ''
+    if provider_type != 'fal' or photo_type not in ('front', 'back') or 'fashn' in model:
+        return regenerate, None
+
+    def fallback(fix=''):
+        refresh()
+        res = provider.virtual_tryon(**dict(
+            tryon_kwargs, model_name=FASHN_FALLBACK_MODEL, endpoint=None, seed=False, on_enqueue=None,
+            num_samples=1, garment_photo_type='flat-lay', prompt='', negative_prompt=''))
+        refresh()
+        b64, _seed = download(res or {})
+        return b64, False, (res or {}).get('cost', 0.075)
+
+    return regenerate, fallback
 
 
 def _get_extra_prompt_en(session):
@@ -1549,9 +1624,13 @@ class AiStudioSession(models.Model):
         processed_b64 = preprocessed['image_base64']
         garment_b64 = processed_b64
 
+        bg_cost = 0.0
         if auto_bg and processed_b64:
             try:
                 bg_removed_b64 = provider.remove_background(processed_b64)
+                # BiRefNet ücreti (önceden hiç sayılmıyordu)
+                from ..services.fal_provider import FalProvider
+                bg_cost = FalProvider.get_estimated_cost(FalProvider.ENDPOINTS['bg_remove'])
                 try:
                     bg_removed_data = base64.b64decode(bg_removed_b64)
                     rgb_data = convert_birefnet_output_to_rgb(bg_removed_data)
@@ -1580,7 +1659,7 @@ class AiStudioSession(models.Model):
         erased = []
         garment_b64, erase_cost = self._remove_store_tags(session, garment_b64, security_tags,
                                                           design_details=design_details, erased=erased)
-        erase_cost = (erase_cost or 0.0) + mask_cost
+        erase_cost = (erase_cost or 0.0) + mask_cost + bg_cost
 
         if cache_key:
             try:
@@ -1899,6 +1978,13 @@ class AiStudioSession(models.Model):
             ('state', '=', 'review'),
             ('generation_ids', 'any', [('state', 'in', ('pending', 'processing'))]),
         ])
+        # Ürünü değişmiş görsel içeren oturumlar listede işaretlenir
+        flagged = set(self.env['ai.studio.generation'].search([
+            ('session_id', 'in', [s['id'] for s in sessions]),
+            ('fidelity_failed', '=', True), ('is_excluded', '=', False),
+        ]).mapped('session_id').ids)
+        for s in sessions:
+            s['fidelity_failed'] = s['id'] in flagged
         return {'sessions': sessions, 'in_revision_count': in_revision}
 
     def action_start_processing(self):
@@ -2520,7 +2606,7 @@ class AiStudioSession(models.Model):
                     tryon_model = _get_tryon_model(env) if provider_type == 'fal' else 'tryon-v1.6'
                     tryon_resolution = '2K'  # Detay korumasi icin 2K zorunlu
                     if provider_type == 'fashn':
-                        tryon_model = getattr(preset, f'fashn_model_{photo_type}', False) or preset.fashn_model_front or 'tryon-v1.6'
+                        tryon_model = getattr(preset, f'fashn_model_{photo_type}', False) or getattr(preset, 'fashn_model_front', False) or 'tryon-v1.6'
                         tryon_resolution = '2K' if 'max' in tryon_model else '1K'
 
                     detected_cat = session._detect_garment_type()
@@ -2597,6 +2683,12 @@ class AiStudioSession(models.Model):
                     except Exception as pe:
                         _logger.warning('Prompt oluşturma başarısız: %s', pe)
 
+                    # Hazırlık maliyeti try-on'dan önce yazılır: try-on başarısız olsa da harcanan
+                    # silme / segment / manken ücreti kaybolmasın (temiz görsel önbellekte, tekrar
+                    # denemede yeniden ödenmez)
+                    spent_before = gen.cost or 0.0
+                    if prep_cost:
+                        gen.write({'cost': spent_before + prep_cost})
                     # Çeviri / manken önbelleği yazımları try-on boyunca satır kilidi tutmasın
                     cr.commit()
 
@@ -2647,7 +2739,7 @@ class AiStudioSession(models.Model):
                             'state': 'done',
                             'fal_endpoint': '%s/%s' % (provider_type, tryon_model),
                             'generation_time_seconds': elapsed,
-                            'cost': tryon_result.get('cost', 0.05) + prep_cost,
+                            'cost': spent_before + tryon_result.get('cost', 0.05) + prep_cost,
                             'seed': saved_seed,
                         })
                         extra_urls = (tryon_result.get('image_urls') or [])[1:]
@@ -2689,22 +2781,19 @@ class AiStudioSession(models.Model):
                                     view_construction=view_construction, removed_boxes=keep_boxes,
                                 )
 
-                            def _regenerate(fix=''):
+                            def _refresh():
                                 if lease_owner:
                                     _renew_session_lease(cr, session_id, lease_owner)
                                 cr.commit()
-                                # Aynı seed aynı sonucu verir (v4); ikinci kayıt cron kurtarmasına karışmasın
-                                res = provider.virtual_tryon(**dict(
-                                    tryon_kwargs, seed=False, on_enqueue=None, num_samples=1,
-                                    prompt=_with_fix(tryon_kwargs.get('prompt'), fix)))
-                                cr.commit()
-                                b64, seed = self._download_tryon_result(res or {})
-                                return b64, seed, (res or {}).get('cost', 0.05) + prep_cost
 
-                            first_cost = tryon_result.get('cost', 0.0) + prep_cost
+                            _regenerate, _fallback = _make_regenerators(
+                                provider, tryon_kwargs, self._download_tryon_result, _refresh,
+                                provider_type, photo_type)
+                            first_cost = spent_before + tryon_result.get('cost', 0.0) + prep_cost
                             qc_vals = _qc(gen_b64, first_cost)
                             final_b64, qc_vals = _fidelity_retry(
-                                env, gen, gen_b64, qc_vals, first_cost, _regenerate, _qc)
+                                env, gen, gen_b64, qc_vals, first_cost, _regenerate, _qc,
+                                fallback=_fallback)
                             gen.write(qc_vals)
                             if final_b64 is not gen_b64:
                                 gen_b64 = final_b64
@@ -2746,7 +2835,7 @@ class AiStudioSession(models.Model):
                                         'state': 'done',
                                         'fal_endpoint': '%s/%s' % (provider_type, tryon_model),
                                         'generation_time_seconds': elapsed,
-                                        'cost': (tryon_result or {}).get('cost', 0.05),
+                                        'cost': spent_before + (tryon_result or {}).get('cost', 0.05) + prep_cost,
                                     })
                                     retry_cr.commit()
                                     _logger.info('Veritabanı çakışması sonrası AI sonucu başarıyla kaydedildi (gen=%s)', gen.id)
@@ -2903,6 +2992,8 @@ class AiStudioSession(models.Model):
                              gen_id, gen.exists() and gen.state)
                 return
             photo_type = gen.photo_type or 'front'
+            # Önceki denemelerde harcanan (başarısız denemenin hazırlığı dahil) üzerine eklenir
+            spent_before = gen.cost or 0.0
 
             try:
                 provider = self._create_provider(api_key, provider_type)
@@ -2954,6 +3045,9 @@ class AiStudioSession(models.Model):
                             timeout=180,
                         )
                         cr.commit()  # on_enqueue sonrası snapshot'ı yenile
+                        # Düzenleme ücretlendi: görsel indirilemese de (sıfırdan üretime düşülür) sayılır
+                        spent_before += FalProvider.ESTIMATED_COSTS.get(edit_app, 0.135)
+                        _safe_write_and_commit(cr, gen, {'cost': spent_before})
 
                         edit_images = edit_result.get('images', []) if isinstance(edit_result, dict) else []
                         img_url = ''
@@ -2972,7 +3066,7 @@ class AiStudioSession(models.Model):
                                     'state': 'done',
                                     'error_message': '',
                                     'fal_endpoint': edit_app,
-                                    'cost': FalProvider.ESTIMATED_COSTS.get(edit_app, 0.135),
+                                    'cost': spent_before,
                                 })
                                 _logger.info('Seedream EDIT revizyonu basarili (gen=%s)', gen_id)
                                 return  # Seedream edit başarılı
@@ -3152,13 +3246,15 @@ class AiStudioSession(models.Model):
                     # Ayardaki Seedream modeli (v4 Edit seed'li / v5 Pro Edit)
                     tryon_model = _get_tryon_model(env)
                 elif provider_type == 'fashn':
-                    tryon_model = getattr(preset, f'fashn_model_{photo_type}', False) or preset.fashn_model_front or 'tryon-v1.6'
+                    tryon_model = getattr(preset, f'fashn_model_{photo_type}', False) or getattr(preset, 'fashn_model_front', False) or 'tryon-v1.6'
 
                 if photo_type in ('back', 'side'):
                     _logger.info('%s yeniden üretimi: ön görsel %s, seed %s iletiliyor (model=%s, session=%s)',
                                  photo_type, 'Image 3 olarak' if front_output_url else 'YOK',
                                  front_seed or 'yok', tryon_model, session.name)
 
+                if prep_cost:
+                    gen.write({'cost': spent_before + prep_cost})
                 if lease_owner:
                     _renew_session_lease(cr, session_id, lease_owner)
                 cr.commit()
@@ -3195,7 +3291,7 @@ class AiStudioSession(models.Model):
                         'error_message': False,
                         'seed': gen_seed or (front_seed if photo_type in ('back', 'side') else False) or False,
                         # Yeniden üretimin maliyeti de kaydedilmeli (önceden yazılmıyordu)
-                        'cost': (tryon_result or {}).get('cost', 0.0) + prep_cost,
+                        'cost': spent_before + (tryon_result or {}).get('cost', 0.0) + prep_cost,
                         'fal_endpoint': '%s/%s' % (provider_type, tryon_model),
                     }
 
@@ -3210,20 +3306,18 @@ class AiStudioSession(models.Model):
                                 view_construction=view_construction, removed_boxes=keep_boxes,
                             )
 
-                        def _regenerate(fix=''):
+                        def _refresh():
                             if lease_owner:
                                 _renew_session_lease(cr, session_id, lease_owner)
                             cr.commit()
-                            res = provider.virtual_tryon(**dict(
-                                tryon_kwargs, seed=False, on_enqueue=None,
-                                prompt=_with_fix(tryon_kwargs.get('prompt'), fix)))
-                            cr.commit()
-                            b64, seed = self._download_tryon_result(res or {})
-                            return b64, seed, (res or {}).get('cost', 0.05) + prep_cost
 
+                        _regenerate, _fallback = _make_regenerators(
+                            provider, tryon_kwargs, self._download_tryon_result, _refresh,
+                            provider_type, photo_type)
                         qc_vals = _qc(gen_b64, gen_vals['cost'])
                         _final_b64, qc_vals = _fidelity_retry(
-                            env, gen, gen_b64, qc_vals, gen_vals['cost'], _regenerate, _qc)
+                            env, gen, gen_b64, qc_vals, gen_vals['cost'], _regenerate, _qc,
+                            fallback=_fallback)
                         gen_vals.update(qc_vals)
                     except Exception as qe:
                         _logger.warning('Retry kalite kontrol hatası (gen=%s): %s', gen.id, qe)
@@ -3257,12 +3351,21 @@ class AiStudioSession(models.Model):
             except Exception as se:
                 _logger.warning("Retry sonrasi session state guncellenirken hata: %s", se)
 
+    def unlink(self):
+        # Üretimler veritabanında cascade ile silinir (generation.unlink çağrılmaz): taslak
+        # temizliği / oturum silme harcamayı maliyet raporundan düşürmesin
+        self.env['ai.studio.usage']._keep_deleted_generation_costs(self.generation_ids)
+        return super().unlink()
+
     def _get_month_ai_cost(self):
-        """Bu ay oluşturulan üretimlerin kaydedilen toplam maliyeti (USD)."""
+        """Bu ayki toplam AI harcaması (USD): üretimler + Gemini, manken, silinen üretim kayıtları."""
         month_start = fields.Datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        groups = self.env['ai.studio.generation'].sudo()._read_group(
-            [('create_date', '>=', month_start)], aggregates=['cost:sum'])
-        return (groups[0][0] if groups else 0.0) or 0.0
+        total = 0.0
+        for model in ('ai.studio.generation', 'ai.studio.usage'):
+            groups = self.env[model].sudo()._read_group(
+                [('create_date', '>=', month_start)], aggregates=['cost:sum'])
+            total += (groups[0][0] if groups else 0.0) or 0.0
+        return total
 
     def _budget_status(self):
         """(aşıldı mı, harcanan, bütçe) — bütçe 0 ise limitsiz."""
@@ -3582,7 +3685,10 @@ class AiStudioSession(models.Model):
             return 'failed'
         if len(urls) > 1:
             _store_candidates(gen, urls[1:])
-        cost = FalProvider.ESTIMATED_COSTS.get(app, gen.cost or 0.0)
+        # gen.cost try-on öncesi yazılan hazırlık maliyetini içerir; üzerine bu işin ücreti eklenir
+        n_refs = 3 if gen.photo_type in ('back', 'side') else 2
+        cost = (gen.cost or 0.0) + FalProvider.compute_cost(
+            app, len(urls), n_refs, {'image_size': _get_seedream_image_size(self.env)})
         vals = {
             'generated_image': gen_b64,
             'state': 'done',
@@ -3601,9 +3707,11 @@ class AiStudioSession(models.Model):
                     gen=gen, base_cost=cost, reference_image=photo.garment_clean_image,
                     photo_type=gen.photo_type, check_missing=photo.photo_type == gen.photo_type,
                     removed_boxes=json.loads(photo.garment_tag_boxes or '[]'))
-                qc_vals.pop('_fidelity', None)
+                # Kurtarmada yeniden üretim yapılmaz: ürün değiştiyse yalnız işaretlenir
+                fidelity = qc_vals.pop('_fidelity', 0) or 0
                 qc_vals.pop('_fix', None)
-                qc_vals['quality_details'] = _('fal kuyruğundan kurtarıldı') + ' | ' + (qc_vals.get('quality_details') or '')
+                qc_vals['fidelity_failed'] = bool(fidelity)
+                qc_vals['quality_details'] = (FIDELITY_FAILED_PREFIX if fidelity else '') + _('fal kuyruğundan kurtarıldı') + ' | ' + (qc_vals.get('quality_details') or '')
                 vals.update(qc_vals)
             except Exception as qe:
                 _logger.warning('Kurtarılan sonucun denetimi başarısız (gen=%s): %s', gen.id, qe)

@@ -384,6 +384,11 @@ async function _openReviewPopup(initialSessionId) {
                             <div class="ais-rp-vs">VS</div>
                             <div class="ais-rp-panel">
                                 <div class="ais-rp-panel-label ais-rp-ai-label">AI SONUÇ</div>
+                                ${item.fidelity_failed ? `
+                                    <div class="ais-rp-fidelity-failed" title="Yeniden denemeler sonrası da ürün değişmiş görünüyor">
+                                        ⛔ Ürün değişmiş olabilir — orijinalle karşılaştırın
+                                    </div>
+                                ` : ''}
                                 ${(item.qc_issues || []).length ? `
                                     <div class="ais-rp-qc-warning" title="AI görsel denetim sonucu — lütfen kontrol edin">
                                         ⚠ ${item.qc_issues.map(escapeHtml).join(' · ')}

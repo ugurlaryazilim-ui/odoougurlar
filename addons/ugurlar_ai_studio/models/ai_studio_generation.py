@@ -39,10 +39,15 @@ def translate_tr_en(text, gemini_key=''):
                 f"Turkish instruction: {text}"
             )
             started = time.monotonic()
-            resp = requests.post(_TRANSLATE_URL, json={
-                'contents': [{'parts': [{'text': prompt}]}],
-                'generationConfig': {'temperature': 0, 'thinkingConfig': {'thinkingBudget': 0}},
-            }, headers={'Content-Type': 'application/json', 'x-goog-api-key': gemini_key}, timeout=8)
+            try:
+                resp = requests.post(_TRANSLATE_URL, json={
+                    'contents': [{'parts': [{'text': prompt}]}],
+                    'generationConfig': {'temperature': 0, 'thinkingConfig': {'thinkingBudget': 0}},
+                }, headers={'Content-Type': 'application/json', 'x-goog-api-key': gemini_key}, timeout=8)
+            except Exception as post_err:
+                # Zaman aşımında da istek gitmiş olabilir: çağrı sayılır
+                report_gemini_usage('translate', 0, started, error=post_err)
+                raise
             report_gemini_usage('translate', 0, started, resp=resp)
             if resp.status_code == 200:
                 candidates = resp.json().get('candidates') or []
@@ -258,6 +263,12 @@ class AiStudioGeneration(models.Model):
         string='Kalite Detayları',
         help='Renk doğruluğu, çözünürlük vb. detaylı kalite bilgileri',
     )
+    fidelity_failed = fields.Boolean(
+        string='Ürün Değişmiş',
+        copy=False,
+        help='Yeniden denemeler (aynı model + FASHN) sonrası da denetim ürünün değiştiğini buldu: '
+             'görsel en az kusurlu deneme, dikkatle incelenmeli.',
+    )
 
     def _check_ai_studio_group(self, level):
         """Model seviyesinde yetki kontrolü (RPC ile doğrudan çağrılara karşı)."""
@@ -397,7 +408,19 @@ class AiStudioGeneration(models.Model):
         if not text:
             return ''
         gemini_key = self.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.gemini_api_key', '')
-        translated = translate_tr_en(text, gemini_key)
+        # HTTP isteğinden (onchange, inceleme popup'ı) gelen çeviri de kaydedilsin; işlem
+        # thread'inde kurulu kaydedici varsa ona yazılır (ezilmez)
+        from ..services.garment_analyzer import clear_usage_recorder, has_usage_recorder
+        own_recorder = bool(gemini_key) and not has_usage_recorder()
+        if own_recorder:
+            from .ai_studio_session import _start_usage_recording
+            gen = self[:1]._origin
+            _start_usage_recording(self.env, gen.session_id or None, gen if gen.id else None)
+        try:
+            translated = translate_tr_en(text, gemini_key)
+        finally:
+            if own_recorder:
+                clear_usage_recorder()
         if translated:
             return translated
         return prompt_text if keep_source_on_failure else ''

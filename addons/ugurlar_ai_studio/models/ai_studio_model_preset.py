@@ -6,6 +6,8 @@ import time
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
 
+from ..services.garment_analyzer import clear_usage_recorder
+
 _logger = logging.getLogger(__name__)
 
 
@@ -465,11 +467,18 @@ class AiStudioModelPreset(models.Model):
             raise Exception('fal-client paketi kurulu değil. pip install fal-client')
 
         _logger.info('fal.ai API çağrısı (SDK): %s', endpoint)
+        from ..services.fal_provider import FalProvider
+        from ..services.garment_analyzer import report_usage
+        started = time.monotonic()
         result = fal_client.subscribe(
             endpoint,
             arguments=payload,
             client_timeout=timeout,
         )
+        # Manken üretimi oturumsuz kaydedilir (raporda "Manken üretimi")
+        report_usage('fal', 'mannequin', model=endpoint, image_count=1,
+                     duration=time.monotonic() - started,
+                     cost=FalProvider.ESTIMATED_COSTS.get(endpoint, 0.05))
         return result
 
     @staticmethod
@@ -524,6 +533,13 @@ class AiStudioModelPreset(models.Model):
                                     gender, body_type, bg_type, provider_type, uid):
         """Thread içinde AI manken oluştur — SaaS tarzı consistency ile."""
         _logger.info("Mannequin Thread starting for preset %s with uid %s", preset_id, uid)
+        # Manken görselleri + çeviri maliyeti oturumsuz kaydedilir (Maliyet Analizi'nde "Manken üretimi")
+        try:
+            from .ai_studio_session import _start_usage_recording
+            with self.pool.cursor() as rec_cr:
+                _start_usage_recording(api.Environment(rec_cr, uid, {}), None)
+        except Exception as rec_err:
+            _logger.warning('Manken maliyet kaydı kurulamadı: %s', rec_err)
         try:
             # Gender/body hints
             gender_hints = {
@@ -704,6 +720,8 @@ class AiStudioModelPreset(models.Model):
                     cr.commit()
             except Exception:
                 _logger.error('Durum güncelleme de başarısız oldu')
+        finally:
+            clear_usage_recorder()
 
     # ─── Kıyafet Giydirme (seedream/v5/pro/edit) ────────────────────
 
