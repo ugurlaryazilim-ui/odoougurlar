@@ -85,22 +85,14 @@ class MarketplaceMapping(models.Model):
         help='OrdersViaInternetInfo SalesURL alanı'
     )
 
-    # Basit in-process cache (worker restart'ta temizlenir)
-    _mapping_cache = {}
-    
     @api.model
     def find_mapping(self, marketplace_name, country_id=False):
-        """Pazaryeri ve ülkeye göre en uygun kuralı bulur (cache destekli)."""
-        cache_key = (marketplace_name, country_id)
-        if cache_key in self._mapping_cache:
-            cached_id = self._mapping_cache[cache_key]
-            if cached_id:
-                cached_record = self.browse(cached_id)
-                if cached_record.exists():
-                    return cached_record
-            elif cached_id is False:
-                return False
-        
+        """Pazaryeri ve ülkeye göre en uygun kuralı bulur.
+
+        Önbellek kaldırıldı: worker başına tutuluyordu, diğer worker'lar yeni eklenen /
+        arşivlenen kuralı görmüyordu (eklenen "Pazarama" kuralına rağmen "mapping yok").
+        Tablo küçük; arama ucuz.
+        """
         domain = [('marketplace', 'ilike', marketplace_name)]
         mappings = self.search(domain)
         
@@ -113,14 +105,12 @@ class MarketplaceMapping(models.Model):
             if not m.country_id:
                 global_match = m
                 
-        result = exact_match or global_match or (mappings[0] if mappings else False)
-        self._mapping_cache[cache_key] = result.id if result else False
-        return result
+        return exact_match or global_match or (mappings[0] if mappings else False)
 
     @api.model
     def clear_mapping_cache(self):
-        """Cache'i temizle — mapping değiştiğinde çağrılır."""
-        self._mapping_cache.clear()
+        """Geriye uyum: önbellek artık yok."""
+        return True
 
     def write(self, vals):
         """Mapping değiştiğinde cache temizle."""

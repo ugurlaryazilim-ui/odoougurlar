@@ -142,7 +142,7 @@ class NebimDistrictMapping(models.Model):
                 "Ayarlar > Nebim > 'İlçe Senkronizasyonu' çalıştırın. "
                 "İl/İlçe kodları gönderilemeyecek."
             )
-            self._district_cache[cache_key] = empty
+            # Boş sonuç önbelleğe alınmaz: senkronizasyondan sonra diğer worker'lar da görsün
             return empty
 
         # Normalize alanları boşsa otomatik doldur (ilk kez veya güncelleme sonrası)
@@ -174,7 +174,9 @@ class NebimDistrictMapping(models.Model):
                 odoo_state_name, odoo_city_name, total
             )
 
-        self._district_cache[cache_key] = result
+        # Yalnız eşleşme önbelleğe alınır (eşleşmeyen il/ilçe tablo güncellenince bulunabilsin)
+        if match:
+            self._district_cache[cache_key] = result
         return result
 
     def _search_district_match(self, state_name, city_name):

@@ -5,6 +5,9 @@ from odoo import models, fields, api
 
 _logger = logging.getLogger(__name__)
 
+# Stok senkronizasyonu tek seferde bir tane (pg advisory lock anahtarı)
+NEBIM_STOCK_SYNC_LOCK = 812345001
+
 # Batch boyutu — her seferde kaç ürün grubu (template) işlenecek
 BATCH_SIZE = 50
 
@@ -37,6 +40,10 @@ class NebimService(models.AbstractModel):
         """
         _logger.warning("sync_products() deprecated. Kuyruk sistemi kullanılıyor.")
         queue = self.env['odoougurlar.product.queue']
+        # Çalışan batch'i silip veriyi ikinci kez çekmesin (otomatik sync cron'u ile çakışıyordu)
+        if queue.sudo().search_count([('state', 'in', ['pending', 'processing'])]):
+            _logger.info("sync_products atlandı: kuyrukta işlenen kayıt var.")
+            return {'processed': 0, 'created': 0, 'updated': 0, 'failed': 0}
         result = queue.enqueue_products(mode='daily')
         return {
             'processed': result.get('total_groups', 0),
@@ -61,6 +68,24 @@ class NebimService(models.AbstractModel):
         day_value = day_map.get(mode, '1')
         log_name = 'Stok Güncelleme' if mode == 'incremental' else 'Stok İlk Kurulum'
 
+        # Cron ile "Stok Güncelle" / "Tüm Stokları Çek" aynı anda çalışmasın (processor ara
+        # commit yaptığından transaction kilidi yetmez: oturum kilidi)
+        self.env.cr.execute("SELECT pg_try_advisory_lock(%s)", [NEBIM_STOCK_SYNC_LOCK])
+        if not self.env.cr.fetchone()[0]:
+            _logger.info("Stok güncelleme atlandı: başka bir stok senkronizasyonu çalışıyor.")
+            return
+        try:
+            self._sync_stock_prices_locked(mode, day_value, log_name)
+        finally:
+            # Oturum kilidi bağlantıda kalır: transaction bozulmuş olsa bile mutlaka bırakılmalı
+            try:
+                self.env.cr.execute("SELECT pg_advisory_unlock(%s)", [NEBIM_STOCK_SYNC_LOCK])
+            except Exception:
+                self.env.cr.rollback()
+                self.env.cr.execute("SELECT pg_advisory_unlock(%s)", [NEBIM_STOCK_SYNC_LOCK])
+
+    @api.private
+    def _sync_stock_prices_locked(self, mode, day_value, log_name):
         log = self._create_log(f'{log_name} (Day={day_value})', 'stock')
         try:
             connector = self.env['odoougurlar.nebim.connector']
@@ -166,16 +191,7 @@ class NebimService(models.AbstractModel):
             log.sudo().write(vals)
         except Exception:
             _logger.warning("Sync log güncelleme hatası: %s", log.id)
-    # -----------------------------------------------------------------
-    #  Maliyet Güncelleme (Birim Maliyet)
-    # -----------------------------------------------------------------
-    def sync_product_costs(self):
-        """
-        Nebim'den ürün maliyetlerini (NetMaliyet) çekip Odoo'da standard_price günceller.
-        vw_UrunBirimMaliyetleri tablosuna dayalı SP'yi kullanır.
-        """
-        ICP = self.env['ir.config_parameter'].sudo()
-        enabled = ICP.get_param('odoougurlar.nebim_sync_cost_enabled', 'False') == 'True'
+
     # -----------------------------------------------------------------
     #  Maliyet Güncelleme (Birim Maliyet)
     # -----------------------------------------------------------------
@@ -192,7 +208,8 @@ class NebimService(models.AbstractModel):
 
         sp_name = ICP.get_param('odoougurlar.nebim_sp_product_cost', 'usp_UrunEkstresi_BirimMaliyetHesapla')
         
-        log_id = self._create_sync_log('cost')
+        # Olmayan _create_sync_log / _update_sync_log çağrılıyordu: cron her çalışmada AttributeError
+        log_id = self._create_log('Maliyet Senkronizasyonu', 'price')
         stats = {'processed': 0, 'updated': 0, 'failed': 0}
         connector = self.env['odoougurlar.nebim.connector']
         
@@ -201,7 +218,7 @@ class NebimService(models.AbstractModel):
             _logger.info(f"Maliyet SP çağrılıyor: {sp_name}")
             results = connector.run_proc(sp_name)
             if not results or not isinstance(results, list):
-                self._update_sync_log(log_id, 'completed', stats, note="Nebim'den maliyet verisi dönmedi.")
+                self._finish_log(log_id, 'done', stats=stats, note="Nebim'den maliyet verisi dönmedi.")
                 return stats
             
             stats['processed'] = len(results)
@@ -221,7 +238,7 @@ class NebimService(models.AbstractModel):
                     cost_by_code[product_code] = float(net_maliyet)
             
             if not cost_by_code:
-                self._update_sync_log(log_id, 'completed', stats, note="İşlenecek geçerli ürün kodu/barkod bulunamadı.")
+                self._finish_log(log_id, 'done', stats=stats, note="İşlenecek geçerli ürün kodu/barkod bulunamadı.")
                 return stats
                 
             # Odoo'daki ürünleri bul
@@ -251,9 +268,9 @@ class NebimService(models.AbstractModel):
                         stats['failed'] += 1
                         _logger.error("Ürün maliyet güncelleme hatası: %s - %s", product.display_name, e)
             
-            self._update_sync_log(log_id, 'completed', stats)
+            self._finish_log(log_id, 'done', stats=stats)
             
         except Exception as e:
-            self._update_sync_log(log_id, 'failed', error=str(e))
+            self._finish_log(log_id, 'error', error=str(e))
             
         return stats

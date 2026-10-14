@@ -10,6 +10,10 @@ _logger = logging.getLogger(__name__)
 # Sipariş karşılanınca Odoo düşer, fatura Nebim'e gider.
 SKIP_STOCK_SYNC_WAREHOUSES = {'002'}  # X Depo (İnternet Mağaza Depo)
 
+# Bu satır sayısına kadar cache yalnız Nebim'den gelen ürünler için yüklenir (dakikalık
+# artımlı sync genelde birkaç bin satır). Üstünde (ilk kurulum) tüm ürünler yüklenir.
+RESTRICTED_CACHE_MAX_ROWS = 20000
+
 # ─── Module-Level Cache ───────────────────────────────────────────────
 _STOCK_CACHE = {
     'loaded': False,
@@ -35,30 +39,66 @@ class StockProcessor(models.AbstractModel):
     #  Cache
     # =================================================================
     @api.private
-    def _init_stock_cache(self, force=False):
-        """Tüm eşleme verilerini belleğe yükler."""
+    def _init_stock_cache(self, force=False, stock_data=None):
+        """Eşleme verilerini belleğe yükler.
+
+        stock_data verilirse (ve RESTRICTED_CACHE_MAX_ROWS'u aşmıyorsa) yalnız bu satırlardaki
+        barkod / SKU / ürün kodlarına ait ürünler yüklenir: önceden dakikalık sync her
+        çalışmada ~230 bin ürünü üç kez tarıyordu. Eşleme kuralları (öncelik sırası) aynıdır.
+        """
         global _STOCK_CACHE
         if _STOCK_CACHE['loaded'] and not force:
             _logger.debug("Stok cache zaten yüklü, atlanıyor.")
             return
-        _logger.info("Stok cache yükleniyor...")
+        restricted = stock_data is not None and len(stock_data) <= RESTRICTED_CACHE_MAX_ROWS
+        barcodes = skus = item_codes = None
+        if restricted:
+            barcodes, skus, item_codes = set(), set(), set()
+            for item in stock_data:
+                for key in ('Barcode1', 'Barcode2'):
+                    value = (item.get(key) or '').strip()
+                    if value:
+                        barcodes.add(value)
+                sku = (item.get('ItemSku') or '').strip()
+                if sku:
+                    skus.add(sku)
+                code = (item.get('ItemCode') or '').strip()
+                if code:
+                    item_codes.add(code)
+            barcodes, skus, item_codes = list(barcodes), list(skus), list(item_codes)
+            _logger.info("Stok cache yükleniyor (yalnız gelen %d satırın ürünleri)...", len(stock_data))
+        else:
+            _logger.info("Stok cache yükleniyor...")
 
         # 1. Barcode → product_id  (iki adımlı: barcode öncelikli)
         _STOCK_CACHE['barcode_map'] = {}
 
         # Adım 1: barcode alanı — her zaman öncelikli
-        self.env.cr.execute("""
-            SELECT barcode, id FROM product_product
-            WHERE active = true AND barcode IS NOT NULL AND barcode != ''
-        """)
+        if restricted:
+            self.env.cr.execute("""
+                SELECT barcode, id FROM product_product
+                WHERE active = true AND barcode = ANY(%s)
+            """, [barcodes])
+        else:
+            self.env.cr.execute("""
+                SELECT barcode, id FROM product_product
+                WHERE active = true AND barcode IS NOT NULL AND barcode != ''
+            """)
         for barcode, pid in self.env.cr.fetchall():
             _STOCK_CACHE['barcode_map'][barcode] = pid
 
         # Adım 2: nebim_barcode — sadece barcode map'te yoksa ekle (üzerine yazmaz)
-        self.env.cr.execute("""
-            SELECT id, nebim_barcode FROM product_product
-            WHERE active = true AND nebim_barcode IS NOT NULL AND nebim_barcode != ''
-        """)
+        if restricted:
+            self.env.cr.execute("""
+                SELECT id, nebim_barcode FROM product_product
+                WHERE active = true AND nebim_barcode IS NOT NULL AND nebim_barcode != ''
+                  AND string_to_array(REPLACE(nebim_barcode, ' ', ''), ',') && %s::varchar[]
+            """, [barcodes])
+        else:
+            self.env.cr.execute("""
+                SELECT id, nebim_barcode FROM product_product
+                WHERE active = true AND nebim_barcode IS NOT NULL AND nebim_barcode != ''
+            """)
         for pid, nebim_barcode in self.env.cr.fetchall():
             for bc in nebim_barcode.split(','):
                 bc = bc.strip()
@@ -67,24 +107,40 @@ class StockProcessor(models.AbstractModel):
 
         # 2. default_code (ItemSku) → product_id
         _STOCK_CACHE['sku_map'] = {}
-        self.env.cr.execute("""
-            SELECT id, default_code
-            FROM product_product
-            WHERE active = true AND default_code IS NOT NULL
-        """)
+        if restricted:
+            self.env.cr.execute("""
+                SELECT id, default_code
+                FROM product_product
+                WHERE active = true AND default_code = ANY(%s)
+            """, [skus])
+        else:
+            self.env.cr.execute("""
+                SELECT id, default_code
+                FROM product_product
+                WHERE active = true AND default_code IS NOT NULL
+            """)
         for pid, default_code in self.env.cr.fetchall():
             _STOCK_CACHE['sku_map'][default_code] = pid
 
         # 3. (nebim_code, variant_code) → product_id + template_map
         _STOCK_CACHE['variant_map'] = {}
         _STOCK_CACHE['template_map'] = {}
-        self.env.cr.execute("""
-            SELECT pp.id, pt.nebim_code, pp.nebim_variant_code
-            FROM product_product pp
-            JOIN product_template pt ON pp.product_tmpl_id = pt.id
-            WHERE pt.nebim_code IS NOT NULL
-              AND pp.active = true
-        """)
+        if restricted:
+            self.env.cr.execute("""
+                SELECT pp.id, pt.nebim_code, pp.nebim_variant_code
+                FROM product_product pp
+                JOIN product_template pt ON pp.product_tmpl_id = pt.id
+                WHERE pt.nebim_code = ANY(%s)
+                  AND pp.active = true
+            """, [item_codes])
+        else:
+            self.env.cr.execute("""
+                SELECT pp.id, pt.nebim_code, pp.nebim_variant_code
+                FROM product_product pp
+                JOIN product_template pt ON pp.product_tmpl_id = pt.id
+                WHERE pt.nebim_code IS NOT NULL
+                  AND pp.active = true
+            """)
         for pid, nebim_code, variant_code in self.env.cr.fetchall():
             if variant_code:
                 _STOCK_CACHE['variant_map'][(nebim_code, variant_code)] = pid
@@ -112,7 +168,8 @@ class StockProcessor(models.AbstractModel):
         default_wh = self.env['stock.warehouse'].sudo().search([], limit=1)
         _STOCK_CACHE['default_location_id'] = default_wh.lot_stock_id.id if default_wh else None
 
-        _STOCK_CACHE['loaded'] = True
+        # Kısmi cache "yüklü" sayılmaz (başka bir çağrı tüm ürünleri bekleyebilir)
+        _STOCK_CACHE['loaded'] = not restricted
 
         _logger.info(
             "Stok cache yüklendi: %d barcode, %d sku, %d variant, %d template, %d warehouse, default_loc=%s",
@@ -132,7 +189,7 @@ class StockProcessor(models.AbstractModel):
         Nebim stok verisini toplu işler.
         Cache üzerinden varyant eşleme — ~0 sorgu/satır.
         """
-        self._init_stock_cache(force=True)  # Her sync'te taze cache
+        self._init_stock_cache(force=True, stock_data=stock_data)  # Her sync'te taze cache
 
         stats = {'processed': 0, 'updated': 0, 'skipped': 0, 'not_found': 0, 'failed': 0}
 
@@ -143,12 +200,17 @@ class StockProcessor(models.AbstractModel):
             location_ids.append(_STOCK_CACHE['default_location_id'])
         location_ids = list(set(lid for lid in location_ids if lid))
 
+        # Yalnız bu turda eşleşen ürünlerin quant'ları (önceden depolardaki tüm quant'lar)
+        matched_ids = {self._find_product_id(item) for item in stock_data}
+        matched_ids.discard(None)
+        matched_ids = list(matched_ids) or [0]
+
         if location_ids:
             self.env.cr.execute("""
                 SELECT id, product_id, location_id, COALESCE(quantity, 0)
                 FROM stock_quant
-                WHERE location_id IN %s
-            """, (tuple(location_ids),))
+                WHERE location_id IN %s AND product_id = ANY(%s)
+            """, (tuple(location_ids), matched_ids))
             for qid, prod_id, loc_id, qty in self.env.cr.fetchall():
                 quant_map[(prod_id, loc_id)] = (qid, float(qty or 0))
 
@@ -168,7 +230,8 @@ class StockProcessor(models.AbstractModel):
                 WHERE pl.id IN %s
                   AND cl.usage = 'internal'
                   AND sq.quantity > 0
-            """, (tuple(parent_loc_ids),))
+                  AND sq.product_id = ANY(%s)
+            """, (tuple(parent_loc_ids), matched_ids))
             for prod_id, ploc_id, qid, cloc_id in self.env.cr.fetchall():
                 shelf_product_map[(prod_id, ploc_id)] = (qid, cloc_id)
 

@@ -83,6 +83,9 @@ class NebimProductQueue(models.Model):
 
         # Eski bekleyen kayıtları temizle
         self.sudo().search([('state', 'in', ['pending', 'processing'])]).unlink()
+        # Önceki batch'lerin biten satırları (tam JSON ile) hiç silinmiyordu: tablo sınırsız
+        # büyüyor ve ilerleme sayaçları tüm geçmişi sayıyordu. Özet sync log'da kalır.
+        self.env.cr.execute("DELETE FROM odoougurlar_product_queue WHERE state IN ('done', 'error')")
 
         # Benzersiz batch ID oluştur
         batch_id = str(uuid.uuid4())[:8]
