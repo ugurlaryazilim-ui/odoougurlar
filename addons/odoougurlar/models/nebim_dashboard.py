@@ -1,7 +1,8 @@
 import logging
 from datetime import datetime
 
-from odoo import models, fields, api
+from odoo import _, api, fields, models
+from odoo.exceptions import AccessError
 
 _logger = logging.getLogger(__name__)
 
@@ -51,6 +52,16 @@ class NebimDashboard(models.TransientModel):
         string='Ürün Kodu',
         help='Nebim ürün kodu girin (ör: 0/1015E)',
     )
+
+    def _check_nebim_manager(self):
+        """Nebim'e yazan / stok değiştiren bakım işlemleri yalnız Nebim Yöneticisi'ne açık.
+
+        Buton view'de gizli olsa da metot RPC ile çağrılabiliyordu. Zamanlanmış görevler
+        (süper kullanıcı) etkilenmez.
+        """
+        if self.env.is_superuser() or self.env.user.has_group('odoougurlar.group_nebim_manager'):
+            return
+        raise AccessError(_('Bu işlem için "Nebim Yöneticisi" yetkisi gerekir.'))
 
     @api.depends_context('uid')
     def _compute_last_syncs(self):

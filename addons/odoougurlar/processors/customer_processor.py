@@ -5,6 +5,15 @@ from odoo import models, api
 _logger = logging.getLogger(__name__)
 
 
+def _mask_contact(value):
+    """KVKK: log'da e-posta / telefon / vergi no açık yazılmaz (ör. a***@x.com, ***4567)."""
+    value = str(value or '')
+    if '@' in value:
+        name, _sep, domain = value.partition('@')
+        return (name[:1] + '***@' + domain) if name else '***@' + domain
+    return ('***' + value[-4:]) if len(value) > 4 else '***'
+
+
 class NebimCustomerError(Exception):
     """Nebim cari hatası — request JSON'u taşır, savepoint rollback sonrası kaydedilir."""
     def __init__(self, message, request_json=''):
@@ -138,7 +147,7 @@ class CustomerProcessor(models.AbstractModel):
                             nebim_verified_addr = found_addr
                             _logger.info(
                                 "NEBİM CANLI: Cari bulundu (%s): %s -> %s (AddrID=%s)",
-                                email, partner.name, found_code, found_addr
+                                _mask_contact(email), partner.name, found_code, found_addr
                             )
             except Exception as e:
                 _logger.warning("Nebim SP (sp_GetCustomer_Hamurlabs) sorgu hatası: %s", e)
@@ -160,7 +169,7 @@ class CustomerProcessor(models.AbstractModel):
                                 nebim_verified_code = found_code2
                                 _logger.info(
                                     "NEBİM CANLI (yedek SP): Cari bulundu (%s): %s -> %s",
-                                    email, partner.name, found_code2
+                                    _mask_contact(email), partner.name, found_code2
                                 )
                 except Exception as e:
                     _logger.warning("Nebim SP (usp_GetCustomer_ent) sorgu hatası: %s", e)
@@ -209,7 +218,7 @@ class CustomerProcessor(models.AbstractModel):
                             nebim_verified_addr = found_addr
                             _logger.info(
                                 "NEBİM CANLI (Telefon): Cari bulundu (%s): %s -> %s (AddrID=%s)",
-                                cust_phone, partner.name, found_code, found_addr
+                                _mask_contact(cust_phone), partner.name, found_code, found_addr
                             )
             except Exception as e:
                 _logger.warning("Nebim SP telefon sorgu hatası: %s", e)
@@ -266,7 +275,7 @@ class CustomerProcessor(models.AbstractModel):
         # Buraya sadece Nebim SP'nin email ile bulamadığı durumlarda gelinir.
 
         # ─── Hiçbir katmanda bulunamadı → Nebim V3 API ile yeni cari POST et ───
-        _logger.info("Cari Nebim'de bulunamadı (%s / %s), yeni cari POST edilecek.", partner.name, email)
+        _logger.info("Cari Nebim'de bulunamadı (%s / %s), yeni cari POST edilecek.", partner.name, _mask_contact(email))
 
 
         # ─── İl/İlçe/Bölge Kodu Çözümleme ───
@@ -361,7 +370,7 @@ class CustomerProcessor(models.AbstractModel):
                 if tax_office_code:
                     payload['TaxOfficeCode'] = tax_office_code
                 _logger.info("KURUMSAL (TÜZEL KİŞİ): %s | TaxNumber=%s, TaxOfficeCode=%s",
-                             partner.name, vat_clean, tax_office_code)
+                             partner.name, _mask_contact(vat_clean), tax_office_code)
 
             # E-fatura bayrağı — SADECE tüzel kişi (10h VKN) için
             # Şahıs firmalarında (11h TCKN) e-fatura ayrımı FATURA seviyesinde yapılır

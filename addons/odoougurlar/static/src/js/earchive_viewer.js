@@ -44,7 +44,9 @@ class EArchiveViewer extends Component {
         const action = this.props.action || {};
         const params = action.params || {};
 
-        this.invoiceUrl = params.invoice_url || '';
+        // Yalnız http(s): "javascript:" gibi bir değer aynı origin'de çalışırdı
+        const rawUrl = params.invoice_url || '';
+        this.invoiceUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl : '';
 
         this.state = useState({
             einvoiceNumber: params.einvoice_number || '',
@@ -72,11 +74,13 @@ class EArchiveViewer extends Component {
         );
 
         if (this._popup) {
+            // Açılan portal sayfası Odoo sekmesini yönlendiremesin (tabnabbing)
+            try { this._popup.opener = null; } catch (e) { /* farklı origin */ }
             this._popup.focus();
             this.state.opened = true;
         } else {
             // Popup blocker aktif — yeni sekmede aç
-            window.open(this.invoiceUrl, '_blank');
+            window.open(this.invoiceUrl, '_blank', 'noopener');
             this.state.opened = true;
         }
     }

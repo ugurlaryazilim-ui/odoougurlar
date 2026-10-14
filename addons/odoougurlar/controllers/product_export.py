@@ -15,6 +15,12 @@ class ProductListExportController(http.Controller):
     @http.route('/odoougurlar/product_list_export', type='http', auth='user')
     def product_list_export(self, domain=None, **kw):
         """Raflardaki ürünleri Excel olarak indir. domain ile filtreleme."""
+        # Yalnız stok kullanıcıları (auth='user' portal kullanıcılarını da içerir)
+        if not request.env.user.has_group('stock.group_stock_user'):
+            return request.make_response(
+                "Bu dosyayı indirmek için stok yetkisi gerekir.",
+                headers=[('Content-Type', 'text/plain; charset=utf-8')], status=403,
+            )
         try:
             import openpyxl
             from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -33,7 +39,7 @@ class ProductListExportController(http.Controller):
         except Exception as e:
             _logger.exception("Ürün export hatası: %s", str(e))
             return request.make_response(
-                f"Ürün export hatası: {e}",
+                "Ürün export hatası; ayrıntı sunucu logunda.",
                 headers=[('Content-Type', 'text/plain')],
             )
 
@@ -44,20 +50,21 @@ class ProductListExportController(http.Controller):
         cr = env.cr
 
         # ─── 0. Domain parse: filtreli lokasyon ID'leri ───
-        loc_filter_sql = ""
-        loc_filter_params = ()
+        # sudo yok, şirket filtresi var; eşleşmeyen / bozuk filtre "hepsini indir"e dönmez
+        loc_filter_sql = " AND (sl.company_id IS NULL OR sl.company_id IN %s)"
+        loc_filter_params = (tuple(env.companies.ids) or (0,),)
         if domain_str:
             try:
                 domain = json.loads(domain_str)
                 if domain:
-                    loc_records = env['stock.location'].sudo().search(domain)
-                    if loc_records:
-                        loc_filter_sql = " AND sq.location_id IN %s"
-                        loc_filter_params = (tuple(loc_records.ids),)
-                        _logger.info("Ürün export: filtre uygulandı, %d lokasyon",
-                                     len(loc_records))
+                    loc_records = env['stock.location'].search(domain)
+                    loc_filter_sql += " AND sq.location_id IN %s"
+                    loc_filter_params += (tuple(loc_records.ids) or (0,),)
+                    _logger.info("Ürün export: filtre uygulandı, %d lokasyon",
+                                 len(loc_records))
             except Exception as e:
-                _logger.warning("Domain parse hatası: %s, tümü indirilecek", e)
+                _logger.warning("Ürün export: domain parse hatası (%s), boş dosya", e)
+                loc_filter_sql += " AND FALSE"
 
         # ─── 1. Quant + Product + Location verileri ───
         cr.execute(f"""

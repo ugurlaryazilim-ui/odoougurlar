@@ -28,7 +28,8 @@
                                     type="object"
                                     class="btn-warning"
                                     invisible="not nebim_order_sent"
-                                    confirm="Nebim sipariş ve fatura bayrakları sıfırlanacak. Nebim'deki eski siparişi sildiğinizden emin olun. Devam edilsin mi?"/>
+                                    groups="odoougurlar.group_nebim_manager"
+                                    confirm="Nebim sipariş ve fatura bayrakları sıfırlanacak, bu siparişin KESİLMİŞ FATURALARI İPTAL EDİLECEK. Nebim'deki eski siparişi sildiğinizden emin olun. Devam edilsin mi?"/>
                         </group>
                         <group>
                             <field name="nebim_order_response"/>

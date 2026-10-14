@@ -25,6 +25,7 @@
         'sale',
     ],
     'data': [
+        'security/nebim_security.xml',
         'security/ir.model.access.csv',
         'data/cron_data.xml',
         'data/ugo_sequence.xml',

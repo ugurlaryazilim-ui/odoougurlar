@@ -1,4 +1,5 @@
-from odoo import models, fields, api
+from odoo import _, api, fields, models
+from odoo.exceptions import UserError
 import logging
 
 _logger = logging.getLogger(__name__)
@@ -12,7 +13,8 @@ class SaleOrder(models.Model):
     nebim_address_id = fields.Char(string='Nebim Adres ID', readonly=True)
     nebim_customer_request = fields.Text(string='Nebim Cari İstek', readonly=True)
     nebim_customer_response = fields.Text(string='Nebim Cari Cevabı', readonly=True)
-    nebim_order_sent = fields.Boolean(string='Nebim Sipariş Aktarıldı', default=False)
+    # Elle işaretlenirse sipariş hiç gönderilmiyordu: yalnız kod yazar
+    nebim_order_sent = fields.Boolean(string='Nebim Sipariş Aktarıldı', default=False, readonly=True)
     nebim_order_response = fields.Text(string='Nebim Sipariş Cevabı', readonly=True)
     nebim_order_request = fields.Text(string='Nebim Sipariş İstek', readonly=True)
     nebim_export_file_number = fields.Char(string='Nebim ExportFileNumber', readonly=True)
@@ -341,6 +343,9 @@ class SaleOrder(models.Model):
         güncel ürünlerle sipariş + fatura tekrar gönderilir.
         """
         self.ensure_one()
+        # Kesilmiş faturaları iptal eder: yalnız Nebim Yöneticisi (RPC ile de)
+        if not (self.env.is_superuser() or self.env.user.has_group('odoougurlar.group_nebim_manager')):
+            raise UserError(_('Nebim Sıfırla için "Nebim Yöneticisi" yetkisi gerekir.'))
         
         # Sipariş bayraklarını sıfırla
         self.write({
