@@ -206,7 +206,8 @@ class NebimService(models.AbstractModel):
         (KDV dahil maliyet) varyantların standard_price alanına aynen yazar.
 
         Ürün senkronu da aynı alanı yazar; bu cron Nebim'de yalnız maliyeti değişen
-        (ürün senkronuna düşmeyen) ürünleri yakalar. Eşleme: Barcode1 → Barcode2 → ItemSku.
+        (ürün senkronuna düşmeyen) ürünleri yakalar. Eşleme: Barcode1 → Barcode2 (Odoo barkodu,
+        sonra nebim_barcode) → ItemSku.
         """
         ICP = self.env['ir.config_parameter'].sudo()
         if ICP.get_param('odoougurlar.nebim_sync_cost_enabled', 'False') not in ('True', 'true', '1'):
@@ -256,12 +257,18 @@ class NebimService(models.AbstractModel):
 
             barcodes = list(set(by_b1) | set(by_b2))
             self.env.cr.execute("""
-                SELECT id, barcode, default_code FROM product_product
-                WHERE active AND (barcode = ANY(%s::text[]) OR default_code = ANY(%s::text[]))
-            """, [barcodes, list(by_sku)])
+                SELECT id, barcode, default_code, nebim_barcode FROM product_product
+                WHERE active AND (barcode = ANY(%s::text[])
+                                  OR default_code = ANY(%s::text[])
+                                  OR string_to_array(nebim_barcode, ',') && %s::text[])
+            """, [barcodes, list(by_sku), barcodes])
             cost_by_product = {}
-            for pid, barcode, code in self.env.cr.fetchall():
-                cost = by_b1.get(barcode) or by_b2.get(barcode) or by_sku.get(code)
+            for pid, barcode, code, nebim_barcode in self.env.cr.fetchall():
+                # Odoo barkodu Nebim'dekinden farklı olabilir: virgülle birleşik Nebim barkodları da denenir
+                extra = [b.strip() for b in (nebim_barcode or '').split(',') if b.strip()]
+                cost = (by_b1.get(barcode) or by_b2.get(barcode)
+                        or next((by_b1.get(b) or by_b2.get(b) for b in extra if by_b1.get(b) or by_b2.get(b)), None)
+                        or by_sku.get(code))
                 if cost:
                     cost_by_product[pid] = cost
 
