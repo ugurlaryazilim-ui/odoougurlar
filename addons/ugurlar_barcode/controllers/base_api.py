@@ -276,7 +276,8 @@ class BarcodeApiBase(http.Controller):
             # nebim_barcode: virgülle ayrılmış çoklu barkod alanı
             product = Product.search([('nebim_barcode', '=', barcode)], limit=1)
             if not product:
-                products = Product.search([('nebim_barcode', 'ilike', barcode)])
+                # nebim_barcode virgülle birleşik: kısmi aday listesi sınırlı, tam eşleşme Python'da
+                products = Product.search([('nebim_barcode', 'ilike', barcode)], limit=50)
                 for p in products:
                     if barcode in (p.nebim_barcode or '').split(','):
                         return p

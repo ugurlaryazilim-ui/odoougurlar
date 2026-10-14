@@ -1,6 +1,6 @@
 {
     'name': 'Mobil',
-    'version': '19.0.1.1.0',
+    'version': '19.0.1.2.0',
     'category': 'Inventory/Barcode',
     'summary': 'Mobil uyumlu barkod tarama ve depo yönetim modülü',
     'description': """
@@ -16,11 +16,10 @@
         * Operatör performans takibi
     """,
     'author': 'Uğurlar',
-    'depends': ['stock', 'barcodes', 'odoougurlar', 'stock_picking_batch'],
+    'depends': ['stock', 'barcodes', 'odoougurlar', 'stock_picking_batch', 'sale_stock'],
     'data': [
         'security/ir.model.access.csv',
-        'views/barcode_templates.xml',
-        'views/barcode_menu.xml',
+'views/barcode_menu.xml',
         'views/picking_schedule_views.xml',
         'views/picking_batch_views.xml',
         'views/stock_picking_ext_views.xml',

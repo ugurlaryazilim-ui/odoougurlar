@@ -86,6 +86,26 @@ class StockPickingExt(models.Model):
         copy=False,
     )
 
+    def write(self, vals):
+        """Rota (batch_id) değişince kalıcı rota listesini (all_picking_ids) eşitle.
+
+        Önceden yalnız batch.picking_ids yazılınca ekleniyordu, çıkarılan sipariş eski
+        rotada kalıyordu: aynı sipariş iki rotada görünüp toplamlar iki kez sayılıyordu.
+        Tamamlanmış sevkiyat eski rotasının geçmişinde kalır.
+        """
+        if 'batch_id' not in vals:
+            return super().write(vals)
+        old_batches = {p.id: p.batch_id for p in self}
+        res = super().write(vals)
+        new_batch = self.env['stock.picking.batch'].browse(vals['batch_id'] or [])
+        for picking in self:
+            old = old_batches.get(picking.id)
+            if old and old != new_batch and picking.state not in ('done', 'cancel'):
+                old.sudo().write({'all_picking_ids': [(3, picking.id)]})
+            if new_batch and picking not in new_batch.all_picking_ids:
+                new_batch.sudo().write({'all_picking_ids': [(4, picking.id)]})
+        return res
+
     def _check_availability_status(self, primary_warehouse, fallback_warehouse=None, return_warehouse=None):
         """Ürün stoğunu kontrol et ve durumu ata.
 

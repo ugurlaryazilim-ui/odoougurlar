@@ -58,7 +58,11 @@ class OperationsApiController(BarcodeApiBase):
                     'stats': {'in_count': 0, 'out_count': 0, 'internal_count': 0},
                 }
 
-        moves = request.env['stock.move'].sudo().search(domain, limit=int(limit), order='date desc')
+        try:
+            limit = max(1, min(int(limit), 1000))
+        except (TypeError, ValueError):
+            limit = 200
+        moves = request.env['stock.move'].sudo().search(domain, limit=limit, order='date desc')
 
         type_labels = {
             'incoming': 'Giriş',

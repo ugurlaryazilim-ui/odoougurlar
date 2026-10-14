@@ -9,6 +9,7 @@ class BarcodeOperation(models.Model):
     _name = 'ugurlar.barcode.operation'
     _description = 'Barkod Operasyon Kaydı'
     _order = 'create_date desc'
+    _create_date_idx = models.Index('(create_date)')
 
     user_id = fields.Many2one('res.users', string='Operatör',
                               default=lambda self: self.env.uid, index=True)
@@ -26,8 +27,8 @@ class BarcodeOperation(models.Model):
         ('label', 'Etiket Yazdırma'),
     ], string='İşlem Türü', required=True, index=True)
     barcode = fields.Char('Taranan Barkod')
-    product_id = fields.Many2one('product.product', string='Ürün')
-    location_id = fields.Many2one('stock.location', string='Konum')
+    product_id = fields.Many2one('product.product', string='Ürün', index='btree_not_null')
+    location_id = fields.Many2one('stock.location', string='Konum', index='btree_not_null')
     quantity = fields.Float('Miktar', default=0)
     notes = fields.Text('Notlar')
     state = fields.Selection([
@@ -55,20 +56,24 @@ class BarcodeOperation(models.Model):
         cutoff = fields.Datetime.now() - timedelta(days=days)
 
         # Read-only operasyonlar: güvenle silinebilir
+        # Tek seferde sınırsız unlink uzun kilit + bellek: parça parça (her turda en fazla 10.000)
         readonly_ops = self.search([
             ('create_date', '<', cutoff),
             ('operation_type', 'in', ['search', 'shelf_search', 'shelf_control', 'label']),
-        ])
+        ], limit=10000)
         count_ro = len(readonly_ops)
         if readonly_ops:
             readonly_ops.unlink()
 
         # Yazma operasyonları: 180 günden eskiler
         cutoff_write = fields.Datetime.now() - timedelta(days=180)
+        # Sayım fişlerinin satırları silinmez (eski sayım fişleri boş kalıyordu)
         write_ops = self.search([
             ('create_date', '<', cutoff_write),
-            ('operation_type', 'not in', ['search', 'shelf_search', 'shelf_control', 'label']),
-        ])
+            ('operation_type', 'not in', ['search', 'shelf_search', 'shelf_control', 'label',
+                                          'counting', 'count_adjustment']),
+            ('count_session_id', '=', False),
+        ], limit=10000)
         count_wr = len(write_ops)
         if write_ops:
             write_ops.unlink()
