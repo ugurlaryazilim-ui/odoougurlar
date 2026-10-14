@@ -27,6 +27,10 @@ class SocialMediaMessage(models.Model):
     is_read = fields.Boolean(string="Read", default=False)
     author_id = fields.Many2one('res.users', string="Sent By (Agent)", help="If empty and outgoing, sent by AI")
     ai_processed = fields.Boolean(string="AI Processed", default=False, help="True if AI has answered this incoming message")
+    ai_attempts = fields.Integer(string="AI Denemesi", default=0, copy=False,
+                                 help="Başarısız AI yanıt denemesi sayısı; sınıra ulaşınca mesaj kuyruktan çıkar")
+    ai_failed = fields.Boolean(string="AI Yanıt Veremedi", default=False, copy=False,
+                               help="AI art arda yanıt üretemedi; mesaj temsilci tarafından yanıtlanmalı")
 
     @api.depends('attachment')
     def _compute_has_attachment(self):
@@ -302,6 +306,9 @@ class SocialMediaMessage(models.Model):
                     
                     if not reply_text or str(reply_text).startswith("[ERROR]"):
                         _logger.error(f"AI Provider error or empty reply for conversation {conversation.id}: {reply_text}")
+                        # Deneme sayılır: aynı mesaj 24 saat boyunca her dakika yeniden ücretli çağrı yapmasın
+                        self._count_ai_failure(batch)
+                        self.env.cr.commit()
                         consecutive_429s += 1
                         if consecutive_429s >= MAX_CONSECUTIVE_429S:
                             _logger.warning(
@@ -332,6 +339,11 @@ class SocialMediaMessage(models.Model):
                         'content': reply_text,
                         'is_read': True
                     })
+                    # Gönderimden ÖNCE işlendi say: gönderim hata verirse rollback mesajı yeniden
+                    # kuyruğa almasın (her dakika yeni ücretli çağrı + müşteriye mükerrer yanıt)
+                    for m in batch:
+                        m.ai_processed = True
+                    self.env.cr.commit()
                     
                     # Send back to platform
                     if account.platform == 'youtube':
@@ -362,3 +374,20 @@ class SocialMediaMessage(models.Model):
             except Exception as e:
                 _logger.error(f"Failed to process AI queue for conversation {conversation.id}: {e}")
                 self.env.cr.rollback()
+                try:
+                    self._count_ai_failure(messages.filtered(
+                        lambda m: m.conversation_id.id == conversation.id and not m.ai_processed))
+                    self.env.cr.commit()
+                except Exception:
+                    self.env.cr.rollback()
+
+    MAX_AI_ATTEMPTS = 3
+
+    def _count_ai_failure(self, msgs):
+        """Başarısız denemeyi say; sınıra ulaşan mesajı kuyruktan çıkar (temsilci yanıtlar)."""
+        for m in msgs:
+            attempts = (m.ai_attempts or 0) + 1
+            vals = {'ai_attempts': attempts}
+            if attempts >= self.MAX_AI_ATTEMPTS:
+                vals.update({'ai_processed': True, 'ai_failed': True})
+            m.write(vals)

@@ -594,10 +594,12 @@ class SocialMediaAccount(models.Model):
             return
             
         self._refresh_youtube_token()
+        # Her kayıt bir ücretli AI çağrısı: tek tıklamada sınırlı sayıda düzeltilir
         error_msgs = self.env['social.media.message'].search([
             ('message_type', '=', 'outgoing'),
+            ('conversation_id.account_id', '=', self.id),
             ('content', 'ilike', 'An error occurred with the Gemini service.')
-        ])
+        ], limit=50)
         
         import requests
         ai_provider = self.env['social.media.ai.provider'].sudo()
@@ -636,7 +638,7 @@ class SocialMediaAccount(models.Model):
             
             # Fetch replies from YouTube
             url = f"https://www.googleapis.com/youtube/v3/comments?parentId={parent_id}&part=snippet&access_token={self.api_token}"
-            res = requests.get(url).json()
+            res = requests.get(url, timeout=20).json()
             reply_id_to_update = None
             
             for item in res.get('items', []):
@@ -657,6 +659,6 @@ class SocialMediaAccount(models.Model):
                         "textOriginal": new_reply
                     }
                 }
-                update_res = requests.put(put_url, headers=headers, json=payload)
+                update_res = requests.put(put_url, headers=headers, json=payload, timeout=20)
                 if update_res.ok:
                     msg.content = new_reply

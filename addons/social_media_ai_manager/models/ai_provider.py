@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import json
+import time
 import requests
 import logging
 from odoo import models, api
@@ -25,12 +26,13 @@ class SocialAIProvider(models.AbstractModel):
         elif provider == 'ollama':
             return self._call_ollama(message_text, full_system_prompt)
         
-        return "I am unable to process your request at the moment."
+        # [ERROR] öneki: kuyruk bunu müşteriye yanıt diye göndermez
+        return "[ERROR] Unknown AI provider: %s" % provider
 
     def _call_openai(self, message_text, system_prompt):
         api_key = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.openai_key')
         if not api_key:
-            return "OpenAI API Key is not configured."
+            return "[ERROR] OpenAI API Key is not configured."
         
         headers = {
             'Authorization': f'Bearer {api_key}',
@@ -43,11 +45,26 @@ class SocialAIProvider(models.AbstractModel):
                 {'role': 'user', 'content': message_text}
             ]
         }
+        started = time.monotonic()
         try:
-            response = requests.post('https://api.openai.com/v1/chat/completions', headers=headers, json=data, timeout=15)
+            response = requests.post('https://api.openai.com/v1/chat/completions', headers=headers, json=data, timeout=30)
+            usage = {}
+            try:
+                usage = (response.json() or {}).get('usage') or {}
+            except Exception:
+                pass
+            self.env['social.media.ai.usage']._record(
+                'openai', 'gpt-4o-mini', int(usage.get('prompt_tokens') or 0),
+                int(usage.get('completion_tokens') or 0), time.monotonic() - started,
+                'ok' if response.ok else 'error')
             response.raise_for_status()
             res_data = response.json()
             return res_data['choices'][0]['message']['content']
+        except requests.exceptions.Timeout as e:
+            self.env['social.media.ai.usage']._record('openai', 'gpt-4o-mini', duration=time.monotonic() - started,
+                                                      status='timeout')
+            _logger.error(f"OpenAI API Timeout: {e}")
+            return "[ERROR] OpenAI timeout."
         except Exception as e:
             _logger.error(f"OpenAI API Error: {e}")
             return "[ERROR] An error occurred with the OpenAI service."
@@ -55,7 +72,7 @@ class SocialAIProvider(models.AbstractModel):
     def _call_gemini(self, message_text, system_prompt):
         api_key = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.gemini_key')
         if not api_key:
-            return "Gemini API Key is not configured."
+            return "[ERROR] Gemini API Key is not configured."
         
         url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
         headers = {
@@ -68,10 +85,31 @@ class SocialAIProvider(models.AbstractModel):
             },
             "contents": [{
                 "parts": [{"text": message_text}]
-            }]
+            }],
+            # Kısa müşteri yanıtı için "thinking" gereksiz: çıkış fiyatından faturalanıyor ve
+            # 15 sn'lik sınırı aşıp zaman aşımına (ve her dakika yeniden denemeye) yol açıyordu
+            "generationConfig": {
+                "thinkingConfig": {"thinkingBudget": 0},
+                "maxOutputTokens": 2048,
+            },
         }
+        started = time.monotonic()
         try:
-            response = requests.post(url, headers=headers, json=data, timeout=15)
+            try:
+                response = requests.post(url, headers=headers, json=data, timeout=30)
+            except requests.exceptions.Timeout:
+                self.env['social.media.ai.usage']._record('gemini', 'gemini-2.5-flash',
+                                                          duration=time.monotonic() - started, status='timeout')
+                raise
+            usage = {}
+            try:
+                usage = (response.json() or {}).get('usageMetadata') or {}
+            except Exception:
+                pass
+            self.env['social.media.ai.usage']._record(
+                'gemini', 'gemini-2.5-flash', int(usage.get('promptTokenCount') or 0),
+                int(usage.get('candidatesTokenCount') or 0) + int(usage.get('thoughtsTokenCount') or 0),
+                time.monotonic() - started, 'ok' if response.ok else 'error')
             response.raise_for_status()
             res_data = response.json()
             return res_data['candidates'][0]['content']['parts'][0]['text']
