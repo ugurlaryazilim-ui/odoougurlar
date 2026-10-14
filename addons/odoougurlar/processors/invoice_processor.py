@@ -38,6 +38,9 @@ class InvoiceProcessor(models.AbstractModel):
         connector = self.env['odoougurlar.nebim.connector']
 
         for invoice in invoices:
+            # Başka bir işlem (paketleme, buton) bu faturayı gönderiyorsa / gönderdiyse atla
+            if not invoice._nebim_try_lock():
+                continue
             stats['processed'] += 1
             raw_result = None
             try:
@@ -70,6 +73,9 @@ class InvoiceProcessor(models.AbstractModel):
                     })
                     stats['updated'] += 1
                     _logger.info("Fatura Nebim'e gönderildi: %s → %s", invoice.name, nebim_invoice_number)
+                # Nebim kabul etti: hemen kalıcı yap. Sonraki faturada zaman aşımı / hata
+                # olursa önceki başarılar geri alınıp bir sonraki turda tekrar gönderiliyordu.
+                self.env.cr.commit()
 
             except Exception as e:
                 stats['failed'] += 1

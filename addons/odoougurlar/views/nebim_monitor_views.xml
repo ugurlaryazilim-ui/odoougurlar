@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Senkronizasyon logu: arama / filtre (önceden yoktu) -->
+    <record id="view_sync_log_search" model="ir.ui.view">
+        <field name="name">odoougurlar.sync.log.search</field>
+        <field name="model">odoougurlar.sync.log</field>
+        <field name="arch" type="xml">
+            <search string="Senkronizasyon Logları">
+                <field name="name"/>
+                <filter name="filter_errors" string="Hatalı" domain="[('state', 'in', ('error', 'partial'))]"/>
+                <filter name="filter_running" string="Çalışıyor" domain="[('state', '=', 'running')]"/>
+                <separator/>
+                <filter name="filter_today" string="Bugün"
+                        domain="[('create_date', '&gt;=', context_today().strftime('%Y-%m-%d'))]"/>
+                <group>
+                    <filter name="group_type" string="Tür" context="{'group_by': 'sync_type'}"/>
+                    <filter name="group_state" string="Durum" context="{'group_by': 'state'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Ürün kuyruğu: izleme + hatalıları yeniden dene -->
+    <record id="view_product_queue_list" model="ir.ui.view">
+        <field name="name">odoougurlar.product.queue.list</field>
+        <field name="model">odoougurlar.product.queue</field>
+        <field name="arch" type="xml">
+            <list string="Ürün Kuyruğu" create="false" edit="false"
+                  decoration-danger="state == 'error'" decoration-success="state == 'done'"
+                  decoration-info="state == 'processing'">
+                <header>
+                    <button name="action_retry" type="object" string="🔁 Tekrar Dene"
+                            groups="odoougurlar.group_nebim_manager"/>
+                </header>
+                <field name="item_code"/>
+                <field name="state" widget="badge"
+                       decoration-danger="state == 'error'" decoration-success="state == 'done'"/>
+                <field name="result"/>
+                <field name="error_message"/>
+                <field name="batch_id" optional="hide"/>
+                <field name="create_date" string="Eklenme"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_product_queue_form" model="ir.ui.view">
+        <field name="name">odoougurlar.product.queue.form</field>
+        <field name="model">odoougurlar.product.queue</field>
+        <field name="arch" type="xml">
+            <form string="Kuyruk Kaydı" create="false" edit="false">
+                <sheet>
+                    <group>
+                        <field name="item_code"/>
+                        <field name="state"/>
+                        <field name="result"/>
+                        <field name="batch_id"/>
+                        <field name="error_message"/>
+                    </group>
+                    <group string="Ham JSON (geliştirici)" groups="base.group_no_one">
+                        <field name="raw_data" widget="ace" options="{'mode': 'json'}" nolabel="1" colspan="2"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_product_queue_search" model="ir.ui.view">
+        <field name="name">odoougurlar.product.queue.search</field>
+        <field name="model">odoougurlar.product.queue</field>
+        <field name="arch" type="xml">
+            <search string="Ürün Kuyruğu">
+                <field name="item_code"/>
+                <field name="batch_id"/>
+                <filter name="filter_error" string="Hatalılar" domain="[('state', '=', 'error')]"/>
+                <filter name="filter_pending" string="Bekleyen" domain="[('state', 'in', ('pending', 'processing'))]"/>
+                <group>
+                    <filter name="group_state" string="Durum" context="{'group_by': 'state'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_product_queue" model="ir.actions.act_window">
+        <field name="name">Ürün Kuyruğu</field>
+        <field name="res_model">odoougurlar.product.queue</field>
+        <field name="view_mode">list,form</field>
+        <field name="context">{'search_default_group_state': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Kuyruk boş.</p>
+            <p>Nebim ürün senkronizasyonu başlayınca ürün grupları burada işlenir.</p>
+        </field>
+    </record>
+
+    <menuitem id="menu_nebim_product_queue"
+              name="Ürün Kuyruğu"
+              parent="menu_nebim_sync"
+              action="action_product_queue"
+              sequence="3"/>
+</odoo>

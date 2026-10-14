@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Nebim'e yazan / stok silen bakım işlemleri (Kontrol Paneli butonları, Nebim Sıfırla) -->
+    <record id="group_nebim_manager" model="res.groups">
+        <field name="name">Nebim Yöneticisi</field>
+        <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
+        <field name="comment">Nebim Kontrol Paneli bakım işlemleri, raf import ve "Nebim Sıfırla" yetkisi.</field>
+    </record>
+
+    <!-- Sistem yöneticileri otomatik olarak Nebim Yöneticisi -->
+    <record id="base.group_system" model="res.groups">
+        <field name="implied_ids" eval="[(4, ref('odoougurlar.group_nebim_manager'))]"/>
+    </record>
+</odoo>

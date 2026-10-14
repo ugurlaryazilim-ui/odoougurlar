@@ -97,4 +97,8 @@
             <field name="active" eval="True"/>
         </record>
     </data>
+
+    <!-- Her upgrade'de: yukarıdaki noupdate="0" kayıtlar cron'ları varsayılana döndürür;
+         kullanıcının Ayarlar'daki seçimleri yeniden uygulanır -->
+    <function model="res.config.settings" name="nebim_apply_configured_crons"/>
 </odoo>

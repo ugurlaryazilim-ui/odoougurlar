@@ -1,4 +1,5 @@
-from odoo import models, fields, api
+from odoo import _, api, fields, models
+from odoo.exceptions import UserError
 import logging
 
 _logger = logging.getLogger(__name__)
@@ -7,16 +8,19 @@ _logger = logging.getLogger(__name__)
 class SaleOrder(models.Model):
     _inherit = 'sale.order'
 
-    nebim_customer_sent = fields.Boolean(string='Nebim Cari Açıldı', default=False, readonly=True)
-    nebim_customer_code = fields.Char(string='Nebim Cari Kodu', readonly=True)
-    nebim_address_id = fields.Char(string='Nebim Adres ID', readonly=True)
-    nebim_customer_request = fields.Text(string='Nebim Cari İstek', readonly=True)
-    nebim_customer_response = fields.Text(string='Nebim Cari Cevabı', readonly=True)
-    nebim_order_sent = fields.Boolean(string='Nebim Sipariş Aktarıldı', default=False)
-    nebim_order_response = fields.Text(string='Nebim Sipariş Cevabı', readonly=True)
-    nebim_order_request = fields.Text(string='Nebim Sipariş İstek', readonly=True)
-    nebim_export_file_number = fields.Char(string='Nebim ExportFileNumber', readonly=True)
-    nebim_header_id = fields.Char(string='Nebim HeaderID', readonly=True,
+    # copy=False: kopyalanan sipariş "gönderildi" sayılıp hiç gönderilmiyor, kopyası iptal edilince
+    # aynı referansla ORİJİNAL Nebim siparişi siliniyordu
+    nebim_customer_sent = fields.Boolean(string='Nebim Cari Açıldı', default=False, readonly=True, copy=False)
+    nebim_customer_code = fields.Char(string='Nebim Cari Kodu', readonly=True, copy=False)
+    nebim_address_id = fields.Char(string='Nebim Adres ID', readonly=True, copy=False)
+    nebim_customer_request = fields.Text(string='Nebim Cari İstek', readonly=True, copy=False)
+    nebim_customer_response = fields.Text(string='Nebim Cari Cevabı', readonly=True, copy=False)
+    # Elle işaretlenirse sipariş hiç gönderilmiyordu: yalnız kod yazar
+    nebim_order_sent = fields.Boolean(string='Nebim Sipariş Aktarıldı', default=False, readonly=True, copy=False)
+    nebim_order_response = fields.Text(string='Nebim Sipariş Cevabı', readonly=True, copy=False)
+    nebim_order_request = fields.Text(string='Nebim Sipariş İstek', readonly=True, copy=False)
+    nebim_export_file_number = fields.Char(string='Nebim İhracat Dosya No', readonly=True, copy=False)
+    nebim_header_id = fields.Char(string='Nebim HeaderID', readonly=True, copy=False,
                                   help='Nebim sipariş yanıtından alınan benzersiz HeaderID (GUID). Silme işleminde kullanılır.')
 
     # ─── Pazaryeri Bilgileri (Computed) ────────────────────
@@ -33,7 +37,7 @@ class SaleOrder(models.Model):
         readonly=True,
     )
     marketplace_seller_id = fields.Char(
-        string='Seller ID', compute='_compute_marketplace_info',
+        string='Satıcı ID', compute='_compute_marketplace_info',
         readonly=True,
     )
     marketplace_status_display = fields.Char(
@@ -53,6 +57,76 @@ class SaleOrder(models.Model):
         help='Picking batch ataması sırasında otomatik yazılır. '
              'Kalıcı alan — faturalama sonrası silinmez.',
     )
+    # Listede rozet + "Nebim Hatalı / Bekleyen" filtreleri (saklanmaz: mevcut alanlardan türetilir)
+    nebim_state = fields.Selection([
+        ('pending', 'Bekliyor'),
+        ('customer', 'Cari Açıldı'),
+        ('sent', 'Aktarıldı'),
+        ('error', 'Hatalı'),
+    ], string='Nebim Durumu', compute='_compute_nebim_state', search='_search_nebim_state')
+
+    # Yanıt alanlarında hata olduğunu gösteren ifadeler (auto-sync / paketleme yazar)
+    _NEBIM_ERROR_MARKERS = ('hata', 'gönderilemedi', 'ertelendi')
+
+    @api.depends('nebim_order_sent', 'nebim_customer_sent', 'nebim_order_response', 'nebim_customer_response')
+    def _compute_nebim_state(self):
+        for order in self:
+            text = ' '.join(filter(None, [order.nebim_order_response, order.nebim_customer_response])).lower()
+            if order.nebim_order_sent:
+                order.nebim_state = 'sent'
+            elif any(m in text for m in self._NEBIM_ERROR_MARKERS):
+                order.nebim_state = 'error'
+            elif order.nebim_customer_sent:
+                order.nebim_state = 'customer'
+            else:
+                order.nebim_state = 'pending'
+
+    def _nebim_error_domain(self):
+        domain = []
+        for marker in self._NEBIM_ERROR_MARKERS:
+            for fname in ('nebim_order_response', 'nebim_customer_response'):
+                domain = ['|'] + domain + [(fname, 'ilike', marker)] if domain else [(fname, 'ilike', marker)]
+        return domain
+
+    def _search_nebim_state(self, operator, value):
+        if operator not in ('=', '!=', 'in', 'not in'):
+            raise UserError(_('Nebim Durumu için desteklenmeyen arama.'))
+        values = [value] if isinstance(value, str) else list(value or [])
+        not_sent = [('nebim_order_sent', '=', False)]
+        error = self._nebim_error_domain()
+        domains = {
+            'sent': [('nebim_order_sent', '=', True)],
+            'error': not_sent + error,
+            'customer': not_sent + [('nebim_customer_sent', '=', True)] + ['!'] + error,
+            'pending': not_sent + [('nebim_customer_sent', '=', False)] + ['!'] + error,
+        }
+        parts = [self._nebim_single_term(domains[v]) for v in values if v in domains]
+        if not parts:
+            result = [('id', '=', 0)]
+        else:
+            result = parts[0]
+            for extra in parts[1:]:
+                result = ['|'] + result + extra
+        if operator in ('!=', 'not in'):
+            result = ['!'] + result
+        return result
+
+    @staticmethod
+    def _nebim_single_term(domain):
+        """Örtük AND'li prefix domain'i tek terime çevirir ('|' / '!' ile birleştirilebilsin)."""
+        def end_of_term(i):
+            token = domain[i]
+            if token == '!':
+                return end_of_term(i + 1)
+            if token in ('|', '&'):
+                return end_of_term(end_of_term(i + 1))
+            return i + 1
+
+        count, i = 0, 0
+        while i < len(domain):
+            i = end_of_term(i)
+            count += 1
+        return ['&'] * (count - 1) + list(domain)
 
     _MP_FIELDS = [
         ('trendyol_order_id', 'Trendyol'),
@@ -332,6 +406,37 @@ class SaleOrder(models.Model):
                                'message': f'E-arşiv fatura sorgulanırken hata: {str(e)}',
                                'type': 'danger'}}
 
+    def action_send_nebim(self):
+        """Onaylı ama Nebim'e hiç gitmemiş (veya hata almış) siparişi şimdi gönder.
+
+        Onaydaki otomatik akışın aynısı (_auto_nebim_sync): ayarlardaki cari / sipariş
+        anahtarları ve mükerrer korumaları geçerlidir.
+        """
+        self.ensure_one()
+        if self.state != 'sale':
+            raise UserError(_('Yalnız onaylı siparişler Nebim\'e gönderilir.'))
+        if self.nebim_order_sent:
+            raise UserError(_('Bu sipariş zaten Nebim\'e aktarılmış.'))
+        try:
+            with self.env.cr.savepoint():
+                self._auto_nebim_sync(self)
+        except Exception as e:
+            _logger.warning("Manuel Nebim gönderim hatası (%s): %s", self.name, e)
+        self.invalidate_recordset()
+        if self.nebim_order_sent:
+            title, kind = _('Nebim\'e aktarıldı'), 'success'
+            message = self.nebim_order_response or _('Sipariş Nebim\'e gönderildi.')
+        else:
+            title, kind = _('Nebim\'e aktarılamadı'), 'warning'
+            message = (self.nebim_order_response or self.nebim_customer_response
+                       or _('Gönderim yapılmadı: Ayarlar > Nebim\'de sipariş aktarımı kapalı olabilir.'))
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {'title': title, 'message': message[:500], 'type': kind, 'sticky': kind != 'success',
+                       'next': {'type': 'ir.actions.client', 'tag': 'soft_reload'}},
+        }
+
     def action_reset_nebim(self):
         """Nebim senkronizasyon bayraklarını sıfırla.
         
@@ -341,6 +446,9 @@ class SaleOrder(models.Model):
         güncel ürünlerle sipariş + fatura tekrar gönderilir.
         """
         self.ensure_one()
+        # Kesilmiş faturaları iptal eder: yalnız Nebim Yöneticisi (RPC ile de)
+        if not (self.env.is_superuser() or self.env.user.has_group('odoougurlar.group_nebim_manager')):
+            raise UserError(_('Nebim Sıfırla için "Nebim Yöneticisi" yetkisi gerekir.'))
         
         # Sipariş bayraklarını sıfırla
         self.write({
@@ -510,8 +618,10 @@ class SaleOrder(models.Model):
             sp_message = row.get('Message', str(result))
 
             if sp_result == 'NOT_FOUND':
-                _logger.warning("Nebim sipariş bulunamadı: %s (DocNum: %s)", order.name, doc_number)
-                raise Exception(f"Nebim'de sipariş bulunamadı: {doc_number}")
+                # Nebim'de zaten yok (elle silinmiş): silinmiş say. Önceden hata verilip bayrak
+                # kalıyor, temizlik cron'u bu siparişi her 10 dakikada sonsuza dek yeniden deniyordu
+                _logger.warning("Nebim sipariş bulunamadı (zaten silinmiş sayıldı): %s (DocNum: %s)",
+                                order.name, doc_number)
 
             if sp_result == 'ERROR':
                 error_msg = row.get('Message', 'Bilinmeyen hata')
@@ -763,7 +873,20 @@ class SaleOrder(models.Model):
                                     pass
                                 return
                 except Exception as e:
-                    _logger.warning("Erken Nebim sipariş kontrol hatası (%s): %s", order.name, e)
+                    # Kontrol yapılamadıysa göndermek mükerrer sipariş riski: bu turda gönderme.
+                    # Sipariş "Paketle ve Faturala"da (ya da sonraki onayda) yeniden denenir.
+                    _logger.warning("Erken Nebim sipariş kontrol hatası (%s): %s — gönderim ertelendi",
+                                    order.name, e)
+                    try:
+                        order.write({'nebim_order_response': f'[Auto-Sync] Nebim kontrolü yapılamadı, '
+                                                             f'gönderim ertelendi: {e}'})
+                    except Exception:
+                        pass
+                    return
+                # Bu değerler az önce Nebim'de yok çıktı: sync_order aynı kontrolleri tekrarlamasın
+                nebim_checked_refs = tuple(early_ref_checks)
+            else:
+                nebim_checked_refs = ()
 
             # ═══════════════════════════════════════════════════════════════════
             # CARİ + SİPARİŞ — TEK AKIŞ, DOĞRUDAN DEĞİŞKEN AKTARIMI
@@ -797,19 +920,24 @@ class SaleOrder(models.Model):
                     })
                     _logger.info("Auto-sync Cari başarılı: %s → %s (AddrID=%s)", order.name, cust_code, addr_id)
 
-                    # ═══ KATMAN 3: Bağımsız cursor ile kalıcı kayıt ═══
-                    # Ana transaction rollback olsa bile bu bilgi korunur
+                    # ═══ KATMAN 3: committed state için doğrudan SQL ═══
+                    # (aynı transaction: rollback'te bu da geri alınır). Kod, cari kimin için
+                    # açıldıysa ona yazılır: fatura partneri farklıysa teslimat partnerine
+                    # başkasının kodu yazılıyordu. Savepoint: SQL hatası transaction'ı bozmasın.
                     try:
-                        self.env.cr.execute(
-                            "UPDATE sale_order SET nebim_customer_sent = true, "
-                            "nebim_customer_code = %s, nebim_address_id = %s "
-                            "WHERE id = %s",
-                            [cust_code or '', addr_id or '', order_id])
-                        self.env.cr.execute(
-                            "UPDATE res_partner SET nebim_customer_sent = true, "
-                            "nebim_customer_code = %s, nebim_address_id = %s "
-                            "WHERE id = %s",
-                            [cust_code or '', addr_id or '', partner_id])
+                        with self.env.cr.savepoint():
+                            self.env.cr.execute(
+                                "UPDATE sale_order SET nebim_customer_sent = true, "
+                                "nebim_customer_code = %s, nebim_address_id = %s "
+                                "WHERE id = %s",
+                                [cust_code or '', addr_id or '', order_id])
+                            self.env.cr.execute(
+                                "UPDATE res_partner SET nebim_customer_sent = true, "
+                                "nebim_customer_code = %s, nebim_address_id = %s "
+                                "WHERE id = %s",
+                                [cust_code or '', addr_id or '', nebim_partner.id])
+                            nebim_partner.invalidate_recordset(
+                                ['nebim_customer_sent', 'nebim_customer_code', 'nebim_address_id'])
                     except Exception:
                         pass
 
@@ -854,7 +982,8 @@ class SaleOrder(models.Model):
                     else:
                         _logger.info("Auto-sync Sipariş başlatılıyor: %s — CurrAccCode=%s, AddrID=%s (direkt değişken)", order.name, resolved_cust_code, resolved_addr_id)
                         with self.env.cr.savepoint():
-                            order_proc = self.env['odoougurlar.order.processor'].sudo()
+                            order_proc = self.env['odoougurlar.order.processor'].sudo().with_context(
+                                nebim_checked_refs=nebim_checked_refs)
                             # customer_code VE addr_id'yi DOĞRUDAN geçir — ORM cache bypass!
                             order_proc.sync_order(order, mapping, customer_code=resolved_cust_code, address_id=resolved_addr_id)
                         
@@ -928,6 +1057,6 @@ class SaleOrder(models.Model):
 class SaleOrderLine(models.Model):
     _inherit = 'sale.order.line'
 
-    nebim_order_line_id = fields.Char(string='Nebim OrderLineID', readonly=True)
+    nebim_order_line_id = fields.Char(string='Nebim OrderLineID', readonly=True, copy=False)
 
 

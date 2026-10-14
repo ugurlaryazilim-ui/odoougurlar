@@ -1,5 +1,6 @@
 import logging
-from odoo import models, fields, api
+from odoo import api, fields, models
+from odoo.tools.sql import table_exists
 
 _logger = logging.getLogger(__name__)
 
@@ -18,15 +19,15 @@ class TaxMapping(models.Model):
     )
 
     def _auto_init(self):
-        # Mevcut yinelenen kayıtları temizle (böylece unique constraint hatasız oluşturulur)
-        try:
+        # Mevcut yinelenen kayıtları temizle (böylece unique constraint hatasız oluşturulur).
+        # Tablo yoksa (temiz kurulum) atlanır: önceki try/except SQL hatasını yakalasa da
+        # transaction bozuluyor, modül yeni veritabanına kurulamıyordu.
+        if table_exists(self.env.cr, self._table):
             self.env.cr.execute("""
                 DELETE FROM odoougurlar_tax_mapping a
                 USING odoougurlar_tax_mapping b
                 WHERE a.id < b.id AND a.name = b.name;
             """)
-        except Exception:
-            pass
         return super()._auto_init()
 
     @api.model
@@ -75,11 +76,14 @@ class TaxMapping(models.Model):
                     updated += 1
                 else:
                     try:
-                        self.create({
-                            'name': short_name or name.lower(),
-                            'nebim_tax_office_code': code,
-                            'nebim_tax_office_name': name,
-                        })
+                        # Savepoint: aynı kısa ad (ör. "merkez") unique hatası transaction'ı bozup
+                        # döngünün kalanını düşürmesin
+                        with self.env.cr.savepoint():
+                            self.create({
+                                'name': short_name or name.lower(),
+                                'nebim_tax_office_code': code,
+                                'nebim_tax_office_name': name,
+                            })
                         created += 1
                     except Exception as e:
                         _logger.warning("Vergi dairesi oluşturma hatası (%s - %s): %s", code, name, e)

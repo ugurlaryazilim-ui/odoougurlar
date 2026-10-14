@@ -29,16 +29,24 @@ class StockLocationQty(models.Model):
     )
 
     def _compute_total_quant_qty(self):
+        # Tek sorgu: konum listesinde satır başına bir SQL çalışıyordu (N+1)
+        self.env['stock.quant'].flush_model(['quantity', 'location_id'])
+        with_path = self.filtered('parent_path')
+        totals = {}
+        if with_path.ids:
+            # parent_path ile tüm alt konumlar dahil (ör: "1/5/12/" → LIKE "1/5/12/%")
+            self.env.cr.execute("""
+                SELECT pl.id, COALESCE(SUM(sq.quantity), 0)
+                FROM stock_location pl
+                JOIN stock_location sl ON sl.parent_path LIKE pl.parent_path || '%%'
+                JOIN stock_quant sq ON sq.location_id = sl.id
+                WHERE pl.id = ANY(%s)
+                GROUP BY pl.id
+            """, [with_path.ids])
+            totals = dict(self.env.cr.fetchall())
         for loc in self:
-            # parent_path ile tüm alt konumları dahil et (ör: "1/5/12/" → LIKE "1/5/12/%")
-            if loc.parent_path:
-                self.env.cr.execute("""
-                    SELECT COALESCE(SUM(sq.quantity), 0)
-                    FROM stock_quant sq
-                    JOIN stock_location sl ON sl.id = sq.location_id
-                    WHERE sl.parent_path LIKE %s
-                """, [loc.parent_path + '%'])
-                loc.total_quant_qty = self.env.cr.fetchone()[0]
+            if loc.parent_path and loc.id in with_path.ids:
+                loc.total_quant_qty = totals.get(loc.id, 0.0)
             else:
                 loc.total_quant_qty = sum(loc.quant_ids.mapped('quantity'))
 

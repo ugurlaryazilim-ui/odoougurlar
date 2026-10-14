@@ -2,7 +2,8 @@ import logging
 import json
 from collections import defaultdict
 
-from odoo import models, fields, api
+from odoo import _, api, fields, models
+from odoo.exceptions import AccessError
 
 _logger = logging.getLogger(__name__)
 
@@ -39,6 +40,23 @@ class NebimProductQueue(models.Model):
     error_message = fields.Text('Hata Mesajı')
     batch_id = fields.Char('Batch ID', index=True)
     result = fields.Char('Sonuç')  # 'created' veya 'updated'
+
+    def action_retry(self):
+        """Seçili hatalı kayıtları yeniden kuyruğa al ve işleyiciyi tetikle."""
+        if not (self.env.is_superuser() or self.env.user.has_group('odoougurlar.group_nebim_manager')):
+            raise AccessError(_('Bu işlem için "Nebim Yöneticisi" yetkisi gerekir.'))
+        failed = self.filtered(lambda r: r.state == 'error')
+        failed.sudo().write({'state': 'pending', 'error_message': False})
+        cron = self.env.ref('odoougurlar.cron_process_product_queue', raise_if_not_found=False)
+        if cron and failed:
+            cron.sudo()._trigger()
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {'title': _('Ürün Kuyruğu'), 'type': 'info',
+                       'message': _('%s kayıt yeniden kuyruğa alındı.') % len(failed),
+                       'next': {'type': 'ir.actions.client', 'tag': 'soft_reload'}},
+        }
 
     # -----------------------------------------------------------------
     #  Kuyruğa Ekleme (Kullanıcı Butonu Çağırır)
@@ -83,6 +101,9 @@ class NebimProductQueue(models.Model):
 
         # Eski bekleyen kayıtları temizle
         self.sudo().search([('state', 'in', ['pending', 'processing'])]).unlink()
+        # Önceki batch'lerin biten satırları (tam JSON ile) hiç silinmiyordu: tablo sınırsız
+        # büyüyor ve ilerleme sayaçları tüm geçmişi sayıyordu. Özet sync log'da kalır.
+        self.env.cr.execute("DELETE FROM odoougurlar_product_queue WHERE state IN ('done', 'error')")
 
         # Benzersiz batch ID oluştur
         batch_id = str(uuid.uuid4())[:8]

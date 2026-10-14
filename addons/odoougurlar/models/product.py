@@ -68,7 +68,7 @@ class ProductProduct(models.Model):
 
         Arama sırası:
             1. barcode (tam eşleşme)
-            2. nebim_barcode (tam → ilike)
+            2. nebim_barcode (tam → virgüllü listede tam eşleşme)
             3. default_code (tam eşleşme)
 
         Bulunan üründe ``substitute_product_id`` varsa ikame ürünü döndürür.
@@ -84,7 +84,17 @@ class ProductProduct(models.Model):
         if not product and 'nebim_barcode' in self._fields:
             product = self.search([('nebim_barcode', '=', code)], limit=1)
             if not product:
-                product = self.search([('nebim_barcode', 'ilike', code)], limit=1)
+                # nebim_barcode virgülle birleşik liste ("8691...,8692..."): listedeki bir barkodla
+                # TAM eşleşme. Önceki ilike, kısa bir kodun başka ürünün barkodunun içinde
+                # geçmesiyle yanlış ürünü siparişe yazabiliyordu.
+                self.env.cr.execute("""
+                    SELECT id FROM product_product
+                    WHERE active AND nebim_barcode LIKE %s
+                      AND %s = ANY(string_to_array(REPLACE(nebim_barcode, ' ', ''), ','))
+                    LIMIT 1
+                """, ['%' + code + '%', code])
+                row = self.env.cr.fetchone()
+                product = self.browse(row[0]) if row else self.browse()
         # 3. default_code
         if not product:
             product = self.search([('default_code', '=', code)], limit=1)

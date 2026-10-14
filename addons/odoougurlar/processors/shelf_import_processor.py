@@ -41,6 +41,17 @@ class ShelfImportProcessor(models.AbstractModel):
             'errors': 0,
         }
 
+        # ─── Ön kontrol: dosyalar okunamıyorsa hiçbir stok silinmez ───
+        # (önceden silme commit'lenip dosya sonra okunuyordu; eksik dosyada depo sıfırda kalıyordu)
+        for filename in ('x depo raflar.xls', 'heykel depo raf.xls',
+                         'x depo ürünler.xlsx', 'heykel depo ürünler.xlsx'):
+            filepath = os.path.join(DATA_DIR, filename)
+            try:
+                pd.read_excel(filepath, engine='openpyxl', nrows=1)
+            except Exception as e:
+                _logger.error("Raf import iptal: %s okunamadı (%s)", filename, e)
+                return {'error': f'{filename} okunamadı; hiçbir stok silinmedi. ({e})'}
+
         # ─── 0. RAF STOKLARINı SIFIRLA ───────────────────────
         # İlgili depolardaki tüm quant kayıtlarını sil
         # Raf lokasyonları korunuyor, sadece ürün miktarları temizleniyor

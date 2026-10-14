@@ -14,6 +14,12 @@ class ShelfExportController(http.Controller):
     @http.route('/odoougurlar/shelf_detail_export', type='http', auth='user')
     def shelf_detail_export(self, domain=None, **kw):
         """Stok konumlarını Excel olarak indir. domain parametresi ile filtreleme."""
+        # Yalnız stok kullanıcıları (auth='user' portal kullanıcılarını da içerir)
+        if not request.env.user.has_group('stock.group_stock_user'):
+            return request.make_response(
+                "Bu dosyayı indirmek için stok yetkisi gerekir.",
+                headers=[('Content-Type', 'text/plain; charset=utf-8')], status=403,
+            )
         try:
             import openpyxl
             from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -31,7 +37,7 @@ class ShelfExportController(http.Controller):
         except Exception as e:
             _logger.exception("Raf export hatası: %s", str(e))
             return request.make_response(
-                f"Raf export hatası: {e}",
+                "Raf export hatası; ayrıntı sunucu logunda.",
                 headers=[('Content-Type', 'text/plain')],
             )
 
@@ -43,16 +49,19 @@ class ShelfExportController(http.Controller):
         cr = env.cr
 
         # ─── 0. Domain parse: filtreli lokasyon ID'leri ───
+        # sudo yok: kullanıcının erişemediği (başka şirket) konumlar filtreye giremez.
+        # Bozuk filtre "hepsini indir"e dönmez, boş dosya verir.
         loc_ids = None
         if domain_str:
             try:
                 domain = json.loads(domain_str)
                 if domain:
-                    loc_records = env['stock.location'].sudo().search(domain)
-                    loc_ids = loc_records.ids
+                    loc_ids = env['stock.location'].search(domain).ids
                     _logger.info("Raf export: filtre uygulandı, %d lokasyon", len(loc_ids))
             except Exception as e:
-                _logger.warning("Domain parse hatası: %s, tümü indirilecek", e)
+                _logger.warning("Raf export: domain parse hatası (%s), boş dosya", e)
+                loc_ids = []
+        company_ids = tuple(env.companies.ids) or (0,)
 
         # ─── 1. Warehouse map: lot_stock_id → warehouse_name ───
         cr.execute("""
@@ -78,8 +87,9 @@ class ShelfExportController(http.Controller):
                        parent_path, location_id
                 FROM stock_location
                 WHERE usage = 'internal'
+                  AND (company_id IS NULL OR company_id IN %s)
                 ORDER BY complete_name
-            """)
+            """, (company_ids,))
         locations = cr.fetchall()
         _logger.info("Raf export: %d lokasyon bulundu", len(locations))
 

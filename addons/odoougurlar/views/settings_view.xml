@@ -38,13 +38,13 @@
                                     <field name="nebim_password" password="True"/>
                                 </div>
                             </setting>
-                            <setting string="Model Type" help="Nebim bağlantı ModelType değeri">
+                            <setting string="Bağlantı Model Tipi" help="Nebim bağlantı ModelType değeri">
                                 <div class="content-group">
                                     <field name="nebim_model_type"/>
                                 </div>
                             </setting>
                         </block>
-                        <block title="Stored Procedure İsimleri" name="nebim_procedures">
+                        <block title="Saklı Yordam (SP) Adları — geliştirici modu" name="nebim_procedures" groups="base.group_no_one">
                             <setting string="Ürün Detay SP" help="Ürün detaylarını getiren prosedür">
                                 <div class="content-group">
                                     <field name="nebim_sp_item_details" placeholder="sp_GetItemDetails_Hamurlabs"/>
@@ -101,7 +101,7 @@
                                 </div>
                             </setting>
                         </block>
-                        <block title="Fatura Arşivleme &amp; e-Dönüşüm Entegrasyon Ayarları" name="nebim_invoice_collector_settings">
+                        <block title="Fatura Arşivleme &amp; e-Dönüşüm Entegrasyon Ayarları — geliştirici modu" name="nebim_invoice_collector_settings" groups="base.group_no_one">
                             <setting string="Toptan Alış Fatura SP" help="Toptan Alış faturalarını ve ürün-belge eşleşmelerini getiren prosedür">
                                 <div class="content-group">
                                     <field name="nebim_sp_purchase_invoices" placeholder="usp_GetPurchaseInvoices_Ugurlar"/>
@@ -243,17 +243,16 @@
             <field name="arch" type="xml">
                 <form string="Nebim Kontrol Paneli" create="false" edit="true" delete="false">
                     <header>
-                        <button name="action_test_product" type="object" string="Test Ürün Çek" class="btn-warning"/>
-                        <button name="action_fetch_warehouses" type="object" string="Depoları Çek" class="btn-info"/>
-                        <button name="action_sync_products" type="object" string="Ürün Senkronizasyonu" class="btn-primary" confirm="Ürün senkronizasyonu başlatılsın mı?"/>
-                        <button name="action_sync_stock_full" type="object" string="Tüm Stokları Çek" class="btn-success" confirm="Nebim'den TÜM ürün stokları çekilsin mi? (İlk Kurulum)"/>
-                        <button name="action_sync_stock" type="object" string="Stok Güncelle" class="btn-primary" confirm="Son değişen stoklar güncellensin mi?"/>
-                        <button name="action_sync_invoices" type="object" string="Faturaları Gönder" class="btn-primary" confirm="Bekleyen faturalar gönderilsin mi?"/>
-                        <button name="action_test_connection" type="object" string="Bağlantı Testi" class="btn-secondary"/>
-                        <button name="action_import_shelves" type="object" string="📦 Rafları Import Et" class="btn-warning" confirm="HamurLabs Excel dosyalarından raf lokasyonları ve ürün yerleşimleri import edilsin mi?"/>
-                        <button name="action_sync_districts" type="object" string="🏘️ İlçe Senkronizasyonu" class="btn-info" confirm="Nebim'den tüm il/ilçe/bölge kodları çekilsin mi?"/>
-                        <button name="action_nebim_cancel_cleanup" type="object" string="🗑️ İptal Siparişleri Temizle" class="btn-danger" confirm="Nebim'de hâlâ duran iptal siparişler silinecek. Devam edilsin mi?"/>
-                        <button name="action_nebim_delete_debug" type="object" string="🔍 Delete Debug Test" class="btn-secondary"/>
+                        <button name="action_test_product" type="object" groups="odoougurlar.group_nebim_manager" string="Test Ürün Çek" class="btn-warning"/>
+                        <button name="action_fetch_warehouses" type="object" groups="odoougurlar.group_nebim_manager" string="Depoları Çek" class="btn-info"/>
+                        <button name="action_sync_products" type="object" groups="odoougurlar.group_nebim_manager" string="Ürün Senkronizasyonu" class="btn-primary" confirm="Ürün senkronizasyonu başlatılsın mı?"/>
+                        <button name="action_sync_stock_full" type="object" groups="odoougurlar.group_nebim_manager" string="Tüm Stokları Çek" class="btn-success" confirm="Nebim'den TÜM ürün stokları çekilsin mi? (İlk Kurulum)"/>
+                        <button name="action_sync_stock" type="object" groups="odoougurlar.group_nebim_manager" string="Stok Güncelle" class="btn-primary" confirm="Son değişen stoklar güncellensin mi?"/>
+                        <button name="action_sync_invoices" type="object" groups="odoougurlar.group_nebim_manager" string="Faturaları Gönder" class="btn-primary" confirm="Bekleyen faturalar gönderilsin mi?"/>
+                        <button name="action_test_connection" type="object" groups="odoougurlar.group_nebim_manager" string="Bağlantı Testi" class="btn-secondary"/>
+                        <button name="action_import_shelves" type="object" groups="odoougurlar.group_nebim_manager" string="📦 Rafları Import Et" class="btn-warning" confirm="DİKKAT: İNTERNET MAĞAZA (002) ve HEYKEL (D001) depolarındaki TÜM stok miktarları silinip modüldeki HamurLabs Excel dosyalarından yeniden yüklenecek. Bu işlem geri alınamaz. Devam edilsin mi?"/>
+                        <button name="action_sync_districts" type="object" groups="odoougurlar.group_nebim_manager" string="🏘️ İlçe Senkronizasyonu" class="btn-info" confirm="Nebim'den tüm il/ilçe/bölge kodları çekilsin mi?"/>
+                        <button name="action_nebim_cancel_cleanup" type="object" groups="odoougurlar.group_nebim_manager" string="🗑️ İptal Siparişleri Temizle" class="btn-danger" confirm="Nebim'de hâlâ duran iptal siparişler silinecek. Devam edilsin mi?"/>
                     </header>
                     <sheet>
                         <div class="oe_title">
@@ -276,7 +275,7 @@
                                 <field name="nebim_fetch_code" placeholder="Ürün kodu girin (ör: 0/1015E veya virgülle ayrılmış)"/>
                             </group>
                             <group>
-                                <button name="action_fetch_by_code" type="object" string="🔍 Ürün Kodu İle Çek" class="btn-success"/>
+                                <button name="action_fetch_by_code" type="object" groups="odoougurlar.group_nebim_manager" string="🔍 Ürün Kodu İle Çek" class="btn-success"/>
                             </group>
                         </group>
                         <notebook>
@@ -445,6 +444,7 @@
                   sequence="1"/>
 
         <menuitem id="menu_nebim_cron"
+                  groups="base.group_system"
                   name="Zamanlanmış Görevler"
                   parent="menu_nebim_sync"
                   action="action_nebim_cron_jobs"
@@ -481,6 +481,7 @@
                   sequence="90"/>
 
         <menuitem id="menu_nebim_settings"
+                  groups="base.group_system"
                   name="Nebim Bağlantı Ayarları"
                   parent="menu_nebim_config"
                   action="action_nebim_settings"

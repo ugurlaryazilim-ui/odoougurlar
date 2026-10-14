@@ -40,7 +40,7 @@ class ResConfigSettings(models.TransientModel):
         groups='base.group_system',
     )
     nebim_model_type = fields.Integer(
-        string='Nebim Model Type',
+        string='Nebim Bağlantı Model Tipi',
         config_parameter='odoougurlar.nebim_model_type',
         default=1,
         help='Nebim bağlantı için ModelType değeri',
@@ -251,9 +251,8 @@ class ResConfigSettings(models.TransientModel):
         default=False,
         help='Aktifleştirildiğinde, belirli aralıklarla Nebim\'den stok değişimleri otomatik çekilir.',
     )
+    # 30/45 sn kaldırıldı: ir.cron 'seconds' aralığını desteklemez, Ayarlar kaydı tümden çöküyordu
     nebim_stock_sync_interval = fields.Selection([
-        ('30', '30 Saniye'),
-        ('45', '45 Saniye'),
         ('60', '1 Dakika'),
         ('120', '2 Dakika'),
         ('300', '5 Dakika'),
@@ -298,74 +297,63 @@ class ResConfigSettings(models.TransientModel):
         help='Açık olduğunda, mevcut ürünler Nebim senkronizasyonu ile güncellenirken Odoo\'daki ürün kategorisi korunur ve Nebim ürün grubu ile ezilmez.',
     )
 
+    def _nebim_apply_cron(self, xmlid, active, interval_number, interval_type):
+        """Cron'u ayara uygular; yalnız değişen alanlar yazılır.
+
+        nextcall=now yalnız cron yeni açılıyorsa veya aralığı değiştiyse: önceden her Ayarlar
+        kaydında açık tüm cron'lar hemen çalıştırılıyordu.
+        """
+        cron = self.env.ref(xmlid, raise_if_not_found=False)
+        if not cron:
+            return
+        cron = cron.sudo()
+        vals = {}
+        if cron.active != bool(active):
+            vals['active'] = bool(active)
+        if cron.interval_number != interval_number:
+            vals['interval_number'] = interval_number
+        if cron.interval_type != interval_type:
+            vals['interval_type'] = interval_type
+        if active and vals:
+            vals['nextcall'] = fields.Datetime.now()
+        if vals:
+            cron.write(vals)
+
     def set_values(self):
         """Ayarlar kaydedildiğinde cron'ları aktif/pasif yap ve aralığı güncelle."""
         super().set_values()
+        self.nebim_apply_configured_crons()
 
-        # Stok cron'u aktifleştir/pasifleştir + aralık güncelle
-        stock_cron = self.env.ref('odoougurlar.cron_stock_sync', raise_if_not_found=False)
-        if stock_cron:
-            interval_seconds = int(self.nebim_stock_sync_interval or '60')
-            cron_vals = {'active': self.nebim_stock_auto_sync}
-            if interval_seconds < 60:
-                cron_vals['interval_number'] = interval_seconds
-                cron_vals['interval_type'] = 'seconds'
-            else:
-                cron_vals['interval_number'] = interval_seconds // 60
-                cron_vals['interval_type'] = 'minutes'
-            if self.nebim_stock_auto_sync:
-                cron_vals['nextcall'] = fields.Datetime.now()
-            stock_cron.sudo().write(cron_vals)
-            _logger.info(
-                "Stok cron %s, aralık: %ds",
-                'aktif' if self.nebim_stock_auto_sync else 'pasif',
-                interval_seconds
-            )
+    @api.model
+    def nebim_apply_configured_crons(self):
+        """Kayıtlı Nebim ayarlarını cron'lara uygular (Ayarlar kaydı ve modül upgrade'i sonrası).
 
-        # Ürün auto sync cron'u aktifleştir/pasifleştir + sync moduna göre aralık güncelle
-        product_cron = self.env.ref('odoougurlar.cron_auto_product_sync', raise_if_not_found=False)
-        daily_cron = self.env.ref('odoougurlar.cron_product_sync', raise_if_not_found=False)
+        Upgrade'de XML <function> ile çağrıldığından public; yalnız yönetici / süper kullanıcı.
+        """
+        if not (self.env.is_superuser() or self.env.user.has_group('base.group_system')):
+            return
+        ICP = self.env['ir.config_parameter'].sudo()
 
-        sync_mode = self.nebim_sync_mode or 'daily'
-        if sync_mode == 'hourly':
-            interval_number = 1
-            interval_type = 'hours'
-        else:  # daily veya full
-            interval_number = 1
-            interval_type = 'days'
+        def flag(key, default='False'):
+            return ICP.get_param(key, default) in ('True', 'true', '1')
 
-        cron_vals = {
-            'active': self.nebim_auto_sync,
-            'interval_number': interval_number,
-            'interval_type': interval_type,
-        }
-        if self.nebim_auto_sync:
-            cron_vals['nextcall'] = fields.Datetime.now()
+        # Stok cron'u
+        stock_on = flag('odoougurlar.nebim_stock_auto_sync')
+        minutes = max(1, int(ICP.get_param('odoougurlar.nebim_stock_sync_interval', '60') or 60) // 60)
+        self._nebim_apply_cron('odoougurlar.cron_stock_sync', stock_on, minutes, 'minutes')
+        _logger.info("Stok cron %s, aralık: %d dk", 'aktif' if stock_on else 'pasif', minutes)
 
-        if product_cron:
-            product_cron.sudo().write(cron_vals)
-        if daily_cron:
-            daily_cron.sudo().write(cron_vals)
-        _logger.info(
-            "Ürün sync cron %s, mod: %s, aralık: %d %s",
-            'aktif' if self.nebim_auto_sync else 'pasif',
-            sync_mode, interval_number, interval_type
-        )
+        # Ürün otomatik sync: tek cron. Eski "Günlük" cron (sync_products) aynı kuyruğu
+        # silip veriyi ikinci kez çekiyordu: her zaman kapalı tutulur.
+        auto_on = flag('odoougurlar.nebim_auto_sync')
+        sync_mode = ICP.get_param('odoougurlar.nebim_sync_mode', 'daily') or 'daily'
+        interval_type = 'hours' if sync_mode == 'hourly' else 'days'
+        self._nebim_apply_cron('odoougurlar.cron_auto_product_sync', auto_on, 1, interval_type)
+        self._nebim_apply_cron('odoougurlar.cron_product_sync', False, 1, 'days')
+        _logger.info("Ürün sync cron %s, mod: %s", 'aktif' if auto_on else 'pasif', sync_mode)
 
-        # İptal temizliği cron'u aktifleştir/pasifleştir + aralık güncelle
-        cancel_cron = self.env.ref('odoougurlar.cron_nebim_cancel_cleanup', raise_if_not_found=False)
-        if cancel_cron:
-            interval_minutes = int(self.nebim_cancel_cleanup_interval or '10')
-            cron_vals = {
-                'active': self.nebim_cancel_cleanup_auto,
-                'interval_number': interval_minutes,
-                'interval_type': 'minutes',
-            }
-            if self.nebim_cancel_cleanup_auto:
-                cron_vals['nextcall'] = fields.Datetime.now()
-            cancel_cron.sudo().write(cron_vals)
-            _logger.info(
-                "İptal temizliği cron %s, aralık: %d dk",
-                'aktif' if self.nebim_cancel_cleanup_auto else 'pasif',
-                interval_minutes
-            )
+        # İptal temizliği cron'u
+        cancel_on = flag('odoougurlar.nebim_cancel_cleanup_auto')
+        cancel_minutes = int(ICP.get_param('odoougurlar.nebim_cancel_cleanup_interval', '10') or 10)
+        self._nebim_apply_cron('odoougurlar.cron_nebim_cancel_cleanup', cancel_on, cancel_minutes, 'minutes')
+        _logger.info("İptal temizliği cron %s, aralık: %d dk", 'aktif' if cancel_on else 'pasif', cancel_minutes)

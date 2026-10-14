@@ -13,32 +13,58 @@ class AccountMove(models.Model):
         string='Nebim\'e Gönderildi',
         default=False,
         readonly=True,
+        copy=False,
         help='Bu fatura Nebim\'e başarıyla iletildi mi?',
     )
     nebim_sent_date = fields.Datetime(
         string='Nebim Gönderim Tarihi',
         readonly=True,
+        copy=False,
     )
     nebim_response = fields.Text(
         string='Nebim Yanıtı',
         readonly=True,
+        copy=False,
         help='Nebim API\'sinden dönen yanıt',
     )
     nebim_error = fields.Text(
         string='Nebim Hata',
         readonly=True,
+        copy=False,
         help='Gönderim sırasında oluşan hata mesajı',
     )
     nebim_request = fields.Text(
         string='Nebim İstek',
         readonly=True,
+        copy=False,
         help='Nebim API\'sine gönderilen JSON payload',
     )
     nebim_invoice_number = fields.Char(
         string='Nebim Fatura No',
         readonly=True,
+        copy=False,
         help='Nebim tarafında oluşan fatura numarası (UGE/UGI serisi)',
     )
+
+    def _nebim_try_lock(self):
+        """Faturayı Nebim gönderimi için kilitler; başka işlem gönderiyorsa veya gönderilmişse False.
+
+        Cron, "Faturaları Gönder", fatura butonu ve paketleme aynı faturayı aynı anda
+        gönderebiliyordu (Nebim'de iki e-fatura). Kilit transaction sonuna kadar tutulur.
+        """
+        self.ensure_one()
+        try:
+            with self.env.cr.savepoint():
+                self.env.cr.execute(
+                    "SELECT id FROM account_move WHERE id = %s AND nebim_sent IS NOT TRUE "
+                    "FOR UPDATE NOWAIT", (self.id,))
+                locked = bool(self.env.cr.fetchone())
+        except Exception:
+            # Satır başka bir işlemde kilitli: o işlem gönderiyor
+            return False
+        if locked:
+            self.invalidate_recordset(['nebim_sent'])
+        return locked
 
     def action_post(self):
         """
@@ -62,9 +88,12 @@ class AccountMove(models.Model):
     def action_retry_nebim_send(self):
         """Hata almış faturayı Nebim'e tekrar gönder."""
         self.ensure_one()
-        if self.nebim_sent:
+        if self.state != 'posted':
             return {'type': 'ir.actions.client', 'tag': 'display_notification',
-                    'params': {'title': 'Bilgi', 'message': 'Bu fatura zaten Nebim\'e gönderilmiş.', 'type': 'info'}}
+                    'params': {'title': 'Bilgi', 'message': 'Yalnız onaylı faturalar Nebim\'e gönderilir.', 'type': 'warning'}}
+        if self.nebim_sent or not self._nebim_try_lock():
+            return {'type': 'ir.actions.client', 'tag': 'display_notification',
+                    'params': {'title': 'Bilgi', 'message': 'Bu fatura Nebim\'e gönderilmiş veya şu an gönderiliyor.', 'type': 'info'}}
         try:
             import json
             invoice_proc = self.env['odoougurlar.invoice.processor'].sudo()

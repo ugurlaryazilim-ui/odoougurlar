@@ -33,13 +33,13 @@
     </record>
 
     <record id="action_tax_mapping" model="ir.actions.act_window">
-        <field name="name">Vergi No Map'lemeleri</field>
+        <field name="name">Vergi Dairesi Eşleştirmeleri</field>
         <field name="res_model">odoougurlar.tax.mapping</field>
         <field name="view_mode">list,form</field>
     </record>
 
     <menuitem id="menu_tax_mapping"
-              name="Vergi No Map'lemeleri"
+              name="Vergi Dairesi Eşleştirmeleri"
               parent="odoougurlar.menu_nebim_settings"
               action="action_tax_mapping"
               sequence="30"/>

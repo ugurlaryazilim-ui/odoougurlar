@@ -4,6 +4,17 @@ import { Component, xml, useState, onMounted } from "@odoo/owl";
 import { registry } from "@web/core/registry";
 import { rpc } from "@web/core/network/rpc";
 
+// Müşteri adı, adres, ürün adı pazaryerinden gelir (alıcı kontrol eder): etiket HTML'i
+// Odoo origin'inde açılan pencereye yazıldığından kaçışsız değer oturum ele geçirmeye açıktı
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
 /**
  * Kargo Etiketi Yeniden Yazdırma — Client Action
  *
@@ -124,7 +135,7 @@ class CargoLabelReprint extends Component {
             nebim_invoice_no:  data.nebim_invoice_no || '',
             nebim_invoice_date: data.nebim_invoice_date || '',
         };
-        return map[type] !== undefined ? map[type] : '';
+        return map[type] !== undefined ? escapeHtml(map[type]) : '';
     }
 
     // ─── packing.js _renderCargoTemplate birebir kopyası ───
@@ -168,7 +179,7 @@ class CargoLabelReprint extends Component {
             if (el.type === 'item_list') {
                 const items = data.items || [];
                 let tbl = '<table style="width:100%;border-collapse:collapse;font-size:inherit;"><thead><tr style="border-bottom:0.3mm solid #333;"><th style="text-align:left;padding:0 0.5mm;">#</th><th style="text-align:left;padding:0 0.5mm;">Ürün</th><th style="text-align:right;padding:0 0.5mm;">Adet</th><th style="text-align:left;padding:0 0.5mm;">Barkod</th></tr></thead><tbody>';
-                items.forEach((item, idx) => { tbl += `<tr><td style="padding:0 0.5mm;">${idx+1}</td><td style="padding:0 0.5mm;">${item.product_name}</td><td style="text-align:right;padding:0 0.5mm;">${item.qty}</td><td style="padding:0 0.5mm;">${item.barcode}</td></tr>`; });
+                items.forEach((item, idx) => { tbl += `<tr><td style="padding:0 0.5mm;">${idx+1}</td><td style="padding:0 0.5mm;">${escapeHtml(item.product_name)}</td><td style="text-align:right;padding:0 0.5mm;">${escapeHtml(item.qty)}</td><td style="padding:0 0.5mm;">${escapeHtml(item.barcode)}</td></tr>`; });
                 tbl += '</tbody></table>';
                 elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; font-size:${fs}pt; font-weight:${fw}; overflow:hidden; color:${color}; background:${bgColor}; transform:rotate(${rotation}deg);">${tbl}</div>`;
                 continue;
@@ -222,12 +233,12 @@ class CargoLabelReprint extends Component {
             : '';
 
         const itemsHtml = (data.items || []).map(i =>
-            `<tr><td>${i.product_name}</td><td style="text-align:center;">${i.qty}</td><td style="text-align:center;">${i.barcode}</td></tr>`
+            `<tr><td>${escapeHtml(i.product_name)}</td><td style="text-align:center;">${escapeHtml(i.qty)}</td><td style="text-align:center;">${escapeHtml(i.barcode)}</td></tr>`
         ).join('');
 
         return `<!DOCTYPE html><html><head>
             <meta charset="utf-8">
-            <title>Kargo Etiketi — ${data.picking_name || ''}</title>
+            <title>Kargo Etiketi — ${escapeHtml(data.picking_name)}</title>
             <style>
                 @page { size: 100mm 150mm; margin: 3mm; }
                 * { margin:0; padding:0; box-sizing:border-box; }
@@ -249,17 +260,17 @@ class CargoLabelReprint extends Component {
             </style>
         </head><body>
         <div class="label">
-            <div class="header"><h2>${data.cargo_provider || 'KARGO'}</h2><span>${data.picking_name || ''}</span></div>
+            <div class="header"><h2>${escapeHtml(data.cargo_provider || 'KARGO')}</h2><span>${escapeHtml(data.picking_name)}</span></div>
             <div class="info-grid">
-                <div><div class="info-label">Sipariş No</div><div class="info-value">${data.order_number || data.origin || ''}</div></div>
-                <div><div class="info-label">Müşteri</div><div class="info-value">${data.customer_name || data.partner_name || ''}</div></div>
-                <div><div class="info-label">Tel</div><div class="info-value">${data.partner_phone || '-'}</div></div>
-                <div><div class="info-label">Adet</div><div class="info-value">${data.total_qty || 0} ürün</div></div>
+                <div><div class="info-label">Sipariş No</div><div class="info-value">${escapeHtml(data.order_number || data.origin)}</div></div>
+                <div><div class="info-label">Müşteri</div><div class="info-value">${escapeHtml(data.customer_name || data.partner_name)}</div></div>
+                <div><div class="info-label">Tel</div><div class="info-value">${escapeHtml(data.partner_phone || '-')}</div></div>
+                <div><div class="info-label">Adet</div><div class="info-value">${escapeHtml(data.total_qty || 0)} ürün</div></div>
             </div>
-            <div><div class="info-label">Adres</div><div class="info-value" style="font-size:10px;">${data.shipping_address || data.partner_address || ''}</div></div>
+            <div><div class="info-label">Adres</div><div class="info-value" style="font-size:10px;">${escapeHtml(data.shipping_address || data.partner_address)}</div></div>
             <div class="cargo-section">
                 ${barcodeHtml}
-                <div class="tracking">${cargoBarcode}</div>
+                <div class="tracking">${escapeHtml(cargoBarcode)}</div>
             </div>
             <table>
                 <thead><tr><th>Ürün</th><th>Adet</th><th>Barkod</th></tr></thead>

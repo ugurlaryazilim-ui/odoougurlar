@@ -20,6 +20,7 @@ class NebimDashboardProducts(models.TransientModel):
         Nebim'den veriyi çekip kuyruğa ekler.
         Cron görevi batch batch işler.
         """
+        self._check_nebim_manager()
         try:
             ICP = self.env['ir.config_parameter'].sudo()
             mode = ICP.get_param('odoougurlar.nebim_sync_mode', 'daily')
@@ -76,6 +77,7 @@ class NebimDashboardProducts(models.TransientModel):
         Girilen ürün koduna göre Nebim'den çekip Odoo'ya kaydeder.
         Tek ürün için inline işler (kuyruğa gerek yok).
         """
+        self._check_nebim_manager()
 
         product_code = (self.nebim_fetch_code or '').strip()
         if not product_code:
@@ -205,6 +207,7 @@ class NebimDashboardProducts(models.TransientModel):
         """
         Nebim'den test amaçlı sınırlı sayıda ürün çeker ve Odoo'ya kaydeder.
         """
+        self._check_nebim_manager()
 
         try:
             ICP = self.env['ir.config_parameter'].sudo()
