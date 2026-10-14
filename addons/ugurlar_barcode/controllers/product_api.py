@@ -19,6 +19,7 @@ class ProductApiController(BarcodeApiBase):
                      'code'    → ana ürün kodu ile TÜM varyantlar
                      'name'    → isim eşleşen TÜM ürünlerin varyantları
         """
+        self._check_internal_user()
         if not barcode:
             return {'error': 'Arama terimi giriniz'}
 
@@ -221,6 +222,7 @@ class ProductApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/inventory_matrix', type='jsonrpc', auth='user')
     def inventory_matrix(self, barcode=''):
         """Ürün Stok Matrisi (Depo, Renk, Beden bazında) - Nebim'den Çeker."""
+        self._check_internal_user()
         if not barcode:
             return {'error': 'Barkod giriniz'}
             
@@ -284,4 +286,4 @@ class ProductApiController(BarcodeApiBase):
             
         except Exception as e:
             _logger.error('Nebim V3 Ürün Envanter Matrisi Hatası: %s', str(e))
-            return {'error': f'Matris sorgulanırken hata oluştu: {str(e)}'}
+            return {'error': self._error_text(e, 'Matris sorgulanırken hata oluştu: ')}

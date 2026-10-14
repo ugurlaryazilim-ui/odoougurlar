@@ -96,6 +96,7 @@ class BatchApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/batch_list', type='jsonrpc', auth='user')
     def batch_list(self, **kw):
         """Batch'leri listele — opsiyonel filtre desteği."""
+        self._check_internal_user()
         filter_state = kw.get('filter_state', '')   # draft | in_progress | done | ''
         search_text = (kw.get('search', '') or '').strip().lower()
         warehouse_filter = (kw.get('warehouse', '') or '').strip()
@@ -290,6 +291,7 @@ class BatchApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/batch_detail', type='jsonrpc', auth='user')
     def batch_detail(self, batch_id=0, **kw):
         """Batch detayı — picking'ler ve ürün satırları."""
+        self._check_internal_user()
         batch = request.env['stock.picking.batch'].sudo().browse(int(batch_id))
         if not batch.exists():
             return {'error': 'Batch bulunamadı'}
@@ -367,6 +369,9 @@ class BatchApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/batch_create_now', type='jsonrpc', auth='user')
     def batch_create_now(self, **kw):
         """Manuel batch oluştur — şu anki zaman penceresi."""
+        self._check_internal_user()
+        if not self._is_stock_manager():
+            return {'error': 'Toplama listesi oluşturma yetkiniz yok (Stok Yöneticisi gerekli).'}
         Schedule = request.env['ugurlar.picking.schedule'].sudo()
         schedules = Schedule.search([('active', '=', True)], limit=1)
         if not schedules:
@@ -383,11 +388,15 @@ class BatchApiController(BarcodeApiBase):
                 }
             return {'error': 'Bu zaman diliminde bekleyen sipariş yok'}
         except Exception as e:
-            return {'error': str(e)}
+            return {'error': self._error_text(e)}
 
     @http.route('/ugurlar_barcode/api/batch_delete', type='jsonrpc', auth='user')
     def batch_delete(self, batch_id=0, **kw):
         """Test rotalarını vs. silmek için."""
+        self._check_internal_user()
+        # Sil butonu arayüzde yalnız yöneticiye görünüyordu; istek doğrudan da atılabiliyordu
+        if not self._is_stock_manager():
+            return {'error': 'Rota silme yetkiniz yok (Stok Yöneticisi gerekli).'}
         batch = request.env['stock.picking.batch'].sudo().browse(int(batch_id))
         if not batch.exists():
             return {'error': 'Rota bulunamadı'}
@@ -404,7 +413,7 @@ class BatchApiController(BarcodeApiBase):
             batch.unlink()
             return {'success': True}
         except Exception as e:
-            return {'error': str(e)}
+            return {'error': self._error_text(e)}
 
     # ═══════════════════════════════════════════════════════
     # ROTA TOPLAMA (WAVE PICKING) API'LERİ
@@ -413,6 +422,7 @@ class BatchApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/batch_route_items', type='jsonrpc', auth='user')
     def batch_route_items(self, batch_id=0, **kw):
         """Rota ürünlerini raf lokasyonuna göre sıralı döndür."""
+        self._check_internal_user()
         try:
             batch = request.env['stock.picking.batch'].sudo().browse(int(batch_id))
             if not batch.exists():
@@ -608,7 +618,7 @@ class BatchApiController(BarcodeApiBase):
             }
         except Exception as e:
             _logger.exception("batch_route_items hatası: %s", e)
-            return {'error': f'Rota yükleme hatası: {str(e)}'}
+            return {'error': self._error_text(e, 'Rota yükleme hatası: ')}
 
     @http.route('/ugurlar_barcode/api/batch_collect_scan', type='jsonrpc', auth='user')
     def batch_collect_scan(self, batch_id=0, barcode='', **kw):
@@ -617,6 +627,7 @@ class BatchApiController(BarcodeApiBase):
         Toplama aşaması: sadece 'raftan aldım' demek.
         Gerçek done_qty paketleme aşamasında artırılır.
         """
+        self._check_internal_user()
         # Duplicate guard
         if self._check_duplicate_request('batch_collect_scan', batch_id, barcode):
             return {'warning': True, 'message': 'Çift okutma algılandı'}
@@ -729,9 +740,12 @@ class BatchApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/batch_undo', type='jsonrpc', auth='user')
     def batch_undo(self, move_id=0, **kw):
         """Rota toplamada alınan bir ürünü sepetteki sayısından düşmek (Undo/Geri al)."""
+        self._check_internal_user()
         move = request.env['stock.move'].sudo().browse(int(move_id))
-        if not move.exists():
+        if not move.exists() or move.picking_id.picking_type_code != 'outgoing':
             return {'error': 'İşlem satırı bulunamadı'}
+        if move.state in ('done', 'cancel'):
+            return {'error': 'Sevkiyatı tamamlanmış ürün geri alınamaz'}
 
         if not move.wave_collected_qty or move.wave_collected_qty <= 0:
             return {'error': 'Düşülecek miktar yok'}
@@ -756,6 +770,7 @@ class BatchApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/batch_collect_complete', type='jsonrpc', auth='user')
     def batch_collect_complete(self, batch_id=0, **kw):
         """Rota toplama tamamla — picking'leri doğrula ve stok aktar."""
+        self._check_internal_user()
         batch = request.env['stock.picking.batch'].sudo().browse(int(batch_id))
         if not batch.exists():
             return {'error': 'Rota bulunamadı'}

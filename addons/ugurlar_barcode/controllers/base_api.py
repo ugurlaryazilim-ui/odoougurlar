@@ -4,7 +4,8 @@ import logging
 import time
 import hashlib
 
-from odoo import http
+from odoo import _, http
+from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.http import request, Response
 
 _logger = logging.getLogger(__name__)
@@ -16,6 +17,37 @@ _DEBOUNCE_SECONDS = 0.5  # 500ms içinde aynı istek tekrarlanırsa atla
 
 class BarcodeApiBase(http.Controller):
     """Ortak yardımcı fonksiyonlar."""
+
+    # ─── Yetki ───────────────────────────────────────────
+    def _check_internal_user(self):
+        """auth='user' portal / e-ticaret müşterisini de kabul eder; tüm API'ler sudo ile
+        stok ve müşteri verisine eriştiğinden yalnız iç kullanıcılar çağırabilir."""
+        if not request.env.user._is_internal():
+            raise AccessError(_('Bu işlem için yetkiniz yok.'))
+
+    def _error_text(self, exc, prefix=''):
+        """İstemciye dönen hata: UserError/ValidationError mesajı operatöre gösterilir;
+        beklenmeyen hatalar (SQL, iç yol, traceback ayrıntısı) yalnız log'a yazılır."""
+        if isinstance(exc, (UserError, ValidationError, AccessError)):
+            text = exc.args[0] if exc.args else str(exc)
+        else:
+            _logger.exception("Mobil API hatası")
+            text = _('Beklenmeyen bir hata oluştu, işlem kaydedilmedi. Lütfen tekrar deneyin.')
+        return f'{prefix}{text}' if prefix else text
+
+    def _is_stock_manager(self):
+        user = request.env.user
+        return user.has_group('stock.group_stock_manager') or user.has_group('base.group_system')
+
+    def _get_outgoing_picking(self, picking_id):
+        """İstemciden gelen id yalnız giden sevkiyat ise döner (başka belgeye yazılmasın)."""
+        try:
+            picking = request.env['stock.picking'].sudo().browse(int(picking_id or 0))
+        except (TypeError, ValueError):
+            return request.env['stock.picking'].browse()
+        if not picking.exists() or picking.picking_type_code != 'outgoing':
+            return request.env['stock.picking'].browse()
+        return picking
 
     def _get_all_pickings(self, batch):
         """Batch'e ait tüm picking'leri döndür (done dahil).
@@ -278,6 +310,7 @@ class BarcodeApiBase(http.Controller):
     @http.route('/ugurlar_barcode/api/tts_config', type='jsonrpc', auth='user')
     def tts_config(self, **kw):
         """Tüm aktif TTS mesajlarını key→message dict olarak döndür."""
+        self._check_internal_user()
         try:
             messages = request.env['ugurlar.tts.message'].sudo().search([
                 ('active', '=', True),

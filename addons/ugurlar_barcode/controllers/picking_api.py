@@ -17,6 +17,7 @@ class PickingApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/picking_list', type='jsonrpc', auth='user')
     def picking_list(self, **kw):
         """Bekleyen toplama siparişlerini listele."""
+        self._check_internal_user()
         pickings = request.env['stock.picking'].sudo().search([
             ('state', 'in', ['assigned', 'confirmed']),
             ('picking_type_code', '=', 'outgoing'),
@@ -40,6 +41,7 @@ class PickingApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/picking_detail', type='jsonrpc', auth='user')
     def picking_detail(self, picking_id=0, **kw):
         """Toplama siparişi detayı — ürün satırları."""
+        self._check_internal_user()
         picking = request.env['stock.picking'].sudo().browse(int(picking_id))
         if not picking.exists():
             return {'error': 'Sipariş bulunamadı'}
@@ -73,6 +75,7 @@ class PickingApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/picking_scan', type='jsonrpc', auth='user')
     def picking_scan(self, picking_id=0, barcode='', quantity=1, **kw):
         """Toplama sırasında ürün barkodu tara → qty artır."""
+        self._check_internal_user()
         # Duplicate guard: aynı barkod 500ms içinde tekrar taranırsa atla
         if self._check_duplicate_request('picking_scan', picking_id, barcode):
             return {'warning': True, 'message': 'Çift okutma algılandı'}
@@ -131,6 +134,7 @@ class PickingApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/picking_validate', type='jsonrpc', auth='user')
     def picking_validate(self, picking_id=0, **kw):
         """Toplama tamamlandı → siparişi doğrula."""
+        self._check_internal_user()
         picking = request.env['stock.picking'].sudo().browse(int(picking_id))
         if not picking.exists():
             return {'error': 'Sipariş bulunamadı'}
@@ -138,4 +142,4 @@ class PickingApiController(BarcodeApiBase):
             picking.button_validate()
             return {'success': True, 'message': f'{picking.name} doğrulandı'}
         except Exception as e:
-            return {'error': f'Doğrulama hatası: {str(e)}'}
+            return {'error': self._error_text(e, 'Doğrulama hatası: ')}

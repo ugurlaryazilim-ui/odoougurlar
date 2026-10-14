@@ -7,7 +7,9 @@ import tempfile
 from datetime import date
 from urllib.parse import quote
 
-from markupsafe import Markup
+import re
+
+from markupsafe import Markup, escape
 
 from odoo import fields, http
 from odoo.http import request
@@ -15,6 +17,39 @@ from odoo.http import request
 from .base_api import BarcodeApiBase
 
 _logger = logging.getLogger(__name__)
+
+
+# ── PDF etiket HTML'i: pazaryeri / şablon değerleri kaçışsız yazılırsa wkhtmltopdf
+#    (JavaScript ve ağ erişimi açık) HTML/iframe ile iç adreslere istek atabiliyordu ──
+def _esc(value):
+    return str(escape('' if value is None else value))
+
+
+def _num(value, default=0):
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return default
+    return n if n == n and abs(n) != float('inf') else default
+
+
+_COLOR_RE = re.compile(r'^(#[0-9a-fA-F]{3,8}|transparent|[a-zA-Z]{3,20}|rgba?\(\s*[\d.,\s%]+\))$')
+_WEIGHTS = {'normal', 'bold', 'bolder', 'lighter', '100', '200', '300', '400', '500', '600', '700', '800', '900'}
+
+
+def _color(value, default='#000000'):
+    v = str(value or '').strip()
+    return v if _COLOR_RE.match(v) else default
+
+
+def _weight(value):
+    v = str(value or 'normal').strip()
+    return v if v in _WEIGHTS else 'normal'
+
+
+def _align(value):
+    v = str(value or 'left').strip()
+    return v if v in ('left', 'center', 'right', 'justify') else 'left'
 
 
 # Marketplace order field registry — yeni pazaryeri eklendiğinde sadece buraya ekle
@@ -155,6 +190,7 @@ class PackingApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/packing_batch_detail', type='jsonrpc', auth='user')
     def packing_batch_detail(self, batch_name='', batch_id=0, **kw):
         """Rota numarası veya ID ile batch detayı getir."""
+        self._check_internal_user()
         Batch = request.env['stock.picking.batch'].sudo()
 
         if batch_id:
@@ -324,11 +360,12 @@ class PackingApiController(BarcodeApiBase):
         Stok düşürme YAPILMAZ — stok rota toplama sırasında düşer.
         Burada sadece eşleştirme + etiket basma kontrolü yapılır.
         """
+        self._check_internal_user()
         try:
             return self._packing_scan_impl(batch_id, barcode, **kw)
         except Exception as e:
             _logger.error("packing_scan exception (batch=%s, barcode=%s): %s", batch_id, barcode, e, exc_info=True)
-            return {'error': f'Sunucu hatası: {str(e)}'}
+            return {'error': self._error_text(e, 'Sunucu hatası: ')}
 
     def _packing_scan_impl(self, batch_id, barcode, **kw):
         """packing_scan asıl implementasyonu."""
@@ -685,8 +722,9 @@ class PackingApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/packing_undo', type='jsonrpc', auth='user')
     def packing_undo(self, picking_id=0, barcode='', **kw):
         """Paketlemede yanlış okutulan ürünü geri alır (Miktar -1)."""
-        picking = request.env['stock.picking'].sudo().browse(int(picking_id))
-        if not picking.exists():
+        self._check_internal_user()
+        picking = self._get_outgoing_picking(picking_id)
+        if not picking:
             return {'error': 'Sipariş bulunamadı'}
 
         product = self._find_product(barcode.strip())
@@ -730,8 +768,9 @@ class PackingApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/packing_backorder', type='jsonrpc', auth='user')
     def packing_backorder(self, picking_id=0, **kw):
         """Kısmi olarak tamamlanmış siparişi kapatır ve geriye kalanları backorder (eksik) yapar."""
-        picking = request.env['stock.picking'].sudo().browse(int(picking_id))
-        if not picking.exists() or picking.state == 'done':
+        self._check_internal_user()
+        picking = self._get_outgoing_picking(picking_id)
+        if not picking or picking.state == 'done':
             return {'error': 'Geçerli bir sipariş bulunamadı veya zaten tamamlanmış'}
 
         try:
@@ -760,6 +799,7 @@ class PackingApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/packing_complete', type='jsonrpc', auth='user')
     def packing_complete(self, batch_id=0, **kw):
         """Paketleme tamamla — picking'leri doğrula."""
+        self._check_internal_user()
         batch = request.env['stock.picking.batch'].sudo().browse(int(batch_id))
         if not batch.exists():
             return {'error': 'Rota bulunamadı'}
@@ -823,7 +863,7 @@ class PackingApiController(BarcodeApiBase):
                 
             except Exception as e:
                 _logger.exception("Sipariş Onay/Senkronizasyon Hatası %s:", picking.name)
-                errors.append(f"{picking.name}: {str(e)}")
+                errors.append(f"{picking.name}: {self._error_text(e)}")
 
         # Batch state güncelle — tüm picking'ler done ise batch'i tamamla
         try:
@@ -846,10 +886,14 @@ class PackingApiController(BarcodeApiBase):
         }
 
     @http.route('/ugurlar_barcode/api/packing_label_data', type='jsonrpc', auth='user')
-    def packing_label_data(self, picking_id=0, **kw):
-        """Kargo etiketi için sipariş verilerini döndür."""
-        picking = request.env['stock.picking'].sudo().browse(int(picking_id))
-        if not picking.exists():
+    def packing_label_data(self, picking_id=0, trigger_sync=True, **kw):
+        """Kargo etiketi için sipariş verilerini döndür.
+
+        trigger_sync=False: yalnız okur (fatura yoksa Nebim senkronu tetiklenmez).
+        """
+        self._check_internal_user()
+        picking = self._get_outgoing_picking(picking_id)
+        if not picking:
             return {'error': 'Sipariş bulunamadı'}
 
         # Sipariş bilgilerini topla
@@ -949,7 +993,7 @@ class PackingApiController(BarcodeApiBase):
                             break
 
                 # Fatura yoksa → Nebim sync tetikle ve tekrar kontrol et
-                if not nebim_invoice_found:
+                if not nebim_invoice_found and trigger_sync:
                     _logger.info(
                         "LABEL DATA: %s için fatura bulunamadı, Nebim sync tetikleniyor...",
                         picking.name)
@@ -1014,18 +1058,20 @@ class PackingApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/cargo_label_pdf', type='http', auth='user', methods=['GET'])
     def cargo_label_pdf(self, picking_id=0, **kw):
         """Kargo etiketi PDF olarak üret — wkhtmltopdf ile tam ölçülerde."""
+        self._check_internal_user()
         picking_id = int(picking_id or 0)
         if not picking_id:
             return request.make_response(
                 'Picking ID gerekli', headers=[('Content-Type', 'text/plain; charset=utf-8')])
 
-        picking = request.env['stock.picking'].sudo().browse(picking_id)
-        if not picking.exists():
+        picking = self._get_outgoing_picking(picking_id)
+        if not picking:
             return request.make_response(
                 'Sipariş bulunamadı', headers=[('Content-Type', 'text/plain; charset=utf-8')])
 
-        # 1. Sipariş verisini topla (mevcut mantığı yeniden kullan)
-        data = self.packing_label_data(picking_id=picking_id)
+        # 1. Sipariş verisini topla (mevcut mantığı yeniden kullan). GET isteği (ön yükleme,
+        # sayfa yenileme, dış bağlantı) fatura kesip Nebim'e göndermesin: yalnız okunur
+        data = self.packing_label_data(picking_id=picking_id, trigger_sync=False)
         if isinstance(data, dict) and data.get('error'):
             return request.make_response(
                 data['error'], headers=[('Content-Type', 'text/plain; charset=utf-8')])
@@ -1096,16 +1142,16 @@ class PackingApiController(BarcodeApiBase):
 
         elements_html = ''
         for el in elements:
-            x = el.get('x', 0)
-            y = el.get('y', 0)
-            w = el.get('width', 10)
-            h = el.get('height', 5)
-            fs = el.get('fontSize', 9)
-            fw = el.get('fontWeight', 'normal')
-            ta = el.get('textAlign', 'left')
-            color = el.get('color', '#000000')
-            bg_color = el.get('bgColor', 'transparent')
-            rotation = el.get('rotation', 0)
+            x = _num(el.get('x', 0))
+            y = _num(el.get('y', 0))
+            w = _num(el.get('width', 10), 10)
+            h = _num(el.get('height', 5), 5)
+            fs = _num(el.get('fontSize', 9), 9)
+            fw = _weight(el.get('fontWeight'))
+            ta = _align(el.get('textAlign'))
+            color = _color(el.get('color'), '#000000')
+            bg_color = _color(el.get('bgColor'), 'transparent')
+            rotation = _num(el.get('rotation', 0))
             el_type = el.get('type', '')
             content = el.get('content', '')
 
@@ -1121,7 +1167,7 @@ class PackingApiController(BarcodeApiBase):
 
             # ── Kutu ──
             if el_type == 'box':
-                bw = el.get('borderWidth', 1)
+                bw = _num(el.get('borderWidth', 1), 1)
                 elements_html += (
                     f'<div style="position:absolute; left:{x}mm; top:{y}mm; '
                     f'width:{w}mm; height:{h}mm; border:{bw}px solid {color}; '
@@ -1169,9 +1215,9 @@ class PackingApiController(BarcodeApiBase):
                 for idx, item in enumerate(items, 1):
                     rows += (
                         f'<tr><td style="padding:0 0.5mm;">{idx}</td>'
-                        f'<td style="padding:0 0.5mm;">{item["product_name"]}</td>'
+                        f'<td style="padding:0 0.5mm;">{_esc(item["product_name"])}</td>'
                         f'<td style="text-align:right;padding:0 0.5mm;">{int(item["qty"])}</td>'
-                        f'<td style="padding:0 0.5mm;">{item["barcode"]}</td></tr>'
+                        f'<td style="padding:0 0.5mm;">{_esc(item["barcode"])}</td></tr>'
                     )
                 table_html = (
                     '<table style="width:100%;border-collapse:collapse;font-size:inherit;">'
@@ -1191,7 +1237,7 @@ class PackingApiController(BarcodeApiBase):
                 continue
 
             # ── Metin Alanları ──
-            text = self._get_field_text(el_type, content, data)
+            text = _esc(self._get_field_text(el_type, content, data))
             justify = ''
             if ta == 'center':
                 justify = 'justify-content:center;'
@@ -1242,9 +1288,9 @@ class PackingApiController(BarcodeApiBase):
         items_html = ''
         for item in data.get('items', []):
             items_html += (
-                f'<tr><td>{item["product_name"]}</td>'
+                f'<tr><td>{_esc(item["product_name"])}</td>'
                 f'<td>{int(item["qty"])}</td>'
-                f'<td>{item["barcode"]}</td></tr>'
+                f'<td>{_esc(item["barcode"])}</td></tr>'
             )
 
         return f'''<!DOCTYPE html><html><head>
@@ -1266,16 +1312,16 @@ class PackingApiController(BarcodeApiBase):
     th {{ background:#f0f0f0; }}
 </style>
 </head><body>
-<div class="header"><h2>{data.get('cargo_provider', 'KARGO')}</h2><span>{data.get('picking_name', '')}</span></div>
+<div class="header"><h2>{_esc(data.get('cargo_provider', 'KARGO'))}</h2><span>{_esc(data.get('picking_name', ''))}</span></div>
 <div class="info-grid">
-    <div><div class="info-label">Sipariş No</div><div class="info-value">{data.get('order_number') or data.get('origin', '')}</div></div>
-    <div><div class="info-label">Müşteri</div><div class="info-value">{data.get('customer_name') or data.get('partner_name', '')}</div></div>
-    <div><div class="info-label">Tel</div><div class="info-value">{data.get('partner_phone', '-')}</div></div>
-    <div><div class="info-label">Adet</div><div class="info-value">{data.get('total_qty', 0)} ürün</div></div>
+    <div><div class="info-label">Sipariş No</div><div class="info-value">{_esc(data.get('order_number') or data.get('origin', ''))}</div></div>
+    <div><div class="info-label">Müşteri</div><div class="info-value">{_esc(data.get('customer_name') or data.get('partner_name', ''))}</div></div>
+    <div><div class="info-label">Tel</div><div class="info-value">{_esc(data.get('partner_phone', '-'))}</div></div>
+    <div><div class="info-label">Adet</div><div class="info-value">{_esc(data.get('total_qty', 0))} ürün</div></div>
 </div>
-<div><div class="info-label">Adres</div><div class="info-value" style="font-size:10px;">{data.get('shipping_address') or data.get('partner_address', '')}</div>
-<div class="info-value">{' / '.join(filter(None, [data.get('shipping_district', ''), data.get('shipping_city', '')]))}</div></div>
-<div class="cargo-section"><div class="info-label">Kargo Takip No</div><div class="tracking">{cargo_barcode}</div>{barcode_html}</div>
+<div><div class="info-label">Adres</div><div class="info-value" style="font-size:10px;">{_esc(data.get('shipping_address') or data.get('partner_address', ''))}</div>
+<div class="info-value">{_esc(' / '.join(filter(None, [data.get('shipping_district', ''), data.get('shipping_city', '')])))}</div></div>
+<div class="cargo-section"><div class="info-label">Kargo Takip No</div><div class="tracking">{_esc(cargo_barcode)}</div>{barcode_html}</div>
 <table><thead><tr><th>Ürün</th><th>Adet</th><th>Barkod</th></tr></thead><tbody>{items_html}</tbody></table>
 </body></html>'''
 
@@ -1318,6 +1364,7 @@ class PackingApiController(BarcodeApiBase):
                 '--no-outline',
                 '--dpi', '96',
                 '--disable-smart-shrinking',          # Otomatik küçültmeyi kapat
+                '--disable-javascript',               # etikette betik yok; enjeksiyona karşı
                 '--print-media-type',
                 html_path,
                 pdf_path,

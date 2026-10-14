@@ -17,6 +17,7 @@ class ShelfApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/shelf_search', type='jsonrpc', auth='user')
     def shelf_search(self, barcode='', **kw):
         """Ürün barkodu ile ürünün bulunduğu rafları bul (HamurLabs uyumlu)."""
+        self._check_internal_user()
         if not barcode:
             return {'error': 'Barkod giriniz'}
 
@@ -86,6 +87,7 @@ class ShelfApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/shelf_control', type='jsonrpc', auth='user')
     def shelf_control(self, barcode='', **kw):
         """Raf barkodu/adı ile o raftaki ürünleri listele (performans optimizeli)."""
+        self._check_internal_user()
         if not barcode:
             return {'error': 'Raf barkodu giriniz'}
 
@@ -165,6 +167,7 @@ class ShelfApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/product_shelf_history', type='jsonrpc', auth='user')
     def product_shelf_history(self, product_id=0, location_id=0, **kw):
         """Belirli ürün + raf kombinasyonunun son işlem geçmişini döndür."""
+        self._check_internal_user()
         product_id = int(product_id or 0)
         if not product_id:
             return {'error': 'Ürün ID gerekli'}
@@ -205,6 +208,7 @@ class ShelfApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/putaway', type='jsonrpc', auth='user')
     def putaway(self, product_barcode='', shelf_barcode='', quantity=1, **kw):
         """Ürünü rafa yerleştir (concurrency-safe, debounce korumalı)."""
+        self._check_internal_user()
         if not product_barcode or not shelf_barcode:
             return {'error': 'Ürün ve raf barkodu gerekli'}
 
@@ -256,6 +260,7 @@ class ShelfApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/remove_from_shelf', type='jsonrpc', auth='user')
     def remove_from_shelf(self, product_barcode='', shelf_barcode='', quantity=1, **kw):
         """Ürünü raftan kaldır (concurrency-safe, debounce korumalı)."""
+        self._check_internal_user()
         if not product_barcode or not shelf_barcode:
             return {'error': 'Ürün ve raf barkodu gerekli'}
 
@@ -310,6 +315,7 @@ class ShelfApiController(BarcodeApiBase):
     def shelf_transfer(self, product_barcode='', source_shelf_barcode='',
                        target_shelf_barcode='', quantity=1, reason='', **kw):
         """Ürünü bir raftan başka bir rafa taşı (concurrency-safe)."""
+        self._check_internal_user()
         if not product_barcode or not source_shelf_barcode or not target_shelf_barcode:
             return {'error': 'Ürün, kaynak raf ve hedef raf barkodu gerekli'}
 
@@ -378,6 +384,7 @@ class ShelfApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/shelf_move_all', type='jsonrpc', auth='user')
     def shelf_move_all(self, source_barcode='', target_barcode='', reason='', **kw):
         """Kaynak raftaki TÜM ürünleri hedef rafa taşı (concurrency-safe)."""
+        self._check_internal_user()
         source_barcode = (source_barcode or '').strip()
         target_barcode = (target_barcode or '').strip()
 
@@ -462,6 +469,7 @@ class ShelfApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/shelf_clear_all', type='jsonrpc', auth='user')
     def shelf_clear_all(self, shelf_barcode='', **kw):
         """Raftaki TÜM ürünleri kaldır (concurrency-safe)."""
+        self._check_internal_user()
         shelf_barcode = (shelf_barcode or '').strip()
         if not shelf_barcode:
             return {'error': 'Raf barkodu gerekli'}

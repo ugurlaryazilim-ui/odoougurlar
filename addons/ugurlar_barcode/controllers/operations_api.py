@@ -18,6 +18,7 @@ class OperationsApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/stock_movements', type='jsonrpc', auth='user')
     def stock_movements(self, days=7, product_barcode='', move_type='all', limit=200, **kw):
         """Stok hareketlerini listele (HamurLabs uyumlu gelişmiş yapı)."""
+        self._check_internal_user()
         days = int(days)
 
         domain = [
@@ -104,6 +105,7 @@ class OperationsApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/bulk_scan', type='jsonrpc', auth='user')
     def bulk_scan(self, items=None, operation='info', shelf_barcode='', **kw):
         """Toplu barkod işlemi."""
+        self._check_internal_user()
         if not items:
             return {'error': 'Ürün listesi gerekli'}
 
@@ -184,6 +186,7 @@ class OperationsApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/operator_performance', type='jsonrpc', auth='user')
     def operator_performance(self, days=7, **kw):
         """Operatör performans istatistikleri."""
+        self._check_internal_user()
         date_from = datetime.now() - timedelta(days=int(days))
 
         operations = request.env['ugurlar.barcode.operation'].sudo().search([

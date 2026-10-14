@@ -19,6 +19,7 @@ class DiscountApiController(BarcodeApiBase):
         :param basket: list of dict, [{"barcode": "...", "quantity": 1}]
         :param customer_code: str, opsiyonel müşteri kartı veya kodu
         """
+        self._check_internal_user()
         if not basket:
             return {'error': 'Sepet boş.'}
 
@@ -58,7 +59,7 @@ class DiscountApiController(BarcodeApiBase):
 
         except Exception as e:
             _logger.error('Nebim V3 İndirim Hesaplama Hatası: %s', str(e))
-            return {'error': f'İndirim hesaplanırken hata oluştu: {str(e)}'}
+            return {'error': self._error_text(e, 'İndirim hesaplanırken hata oluştu: ')}
 
         # 3. Odoo'dan Ürün Resimlerini (image_url) ve Ek Bilgileri Ekle
         # Nebim'den dönen Barcode'ları toplayıp Odoo'da arıyoruz.
@@ -150,6 +151,7 @@ class DiscountApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/search_customer', type='jsonrpc', auth='user')
     def search_customer(self, query):
         """Müşteri arama endpoint'i. Doğrudan Nebim (SQL) üzerinden arar."""
+        self._check_internal_user()
         if not query or len(query) < 3:
             return {'customers': []}
             

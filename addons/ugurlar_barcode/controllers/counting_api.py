@@ -18,6 +18,7 @@ class CountingApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/count_save', type='jsonrpc', auth='user')
     def count_save(self, shelf_barcode='', items=None, **kw):
         """Sayım kaydet: raf barkodu + [{barcode, quantity}]."""
+        self._check_internal_user()
         if not shelf_barcode or not items:
             return {'error': 'Raf ve ürün listesi gerekli'}
 
@@ -98,7 +99,7 @@ class CountingApiController(BarcodeApiBase):
                     'barcode': bc,
                     'product_name': product.name,
                     'status': 'error',
-                    'message': str(e),
+                    'message': self._error_text(e),
                 })
         # ═══ AKILLI SAYIM DÜZELTMESİ ═══
         # Sayılan ürünlerde başka konumlarda negatif bakiye varsa temizle
@@ -172,6 +173,7 @@ class CountingApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/count_list', type='jsonrpc', auth='user')
     def count_list(self, days=30, **kw):
         """Geçmiş sayımları listele — raf bazında gruplu."""
+        self._check_internal_user()
         date_from = datetime.now() - timedelta(days=int(days))
 
         operations = request.env['ugurlar.barcode.operation'].sudo().search([

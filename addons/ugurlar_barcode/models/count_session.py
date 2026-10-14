@@ -1,4 +1,5 @@
-from odoo import models, fields, api
+from odoo import models, fields, api, _
+from odoo.exceptions import AccessError
 import base64
 import io
 import logging
@@ -42,11 +43,17 @@ class CountSession(models.Model):
                 vals['name'] = self.env['ir.sequence'].next_by_code('ugurlar.barcode.count.session') or 'Yeni'
         return super().create(vals_list)
 
+    def _check_count_manager(self):
+        if not self.env.user.has_group('stock.group_stock_manager'):
+            raise AccessError(_('Sayım onaylama / taslağa alma yalnız Stok Yöneticisi yetkisiyle yapılır.'))
+
     def action_validate(self):
+        self._check_count_manager()
         for rec in self:
             rec.state = 'validated'
             
     def action_draft(self):
+        self._check_count_manager()
         for rec in self:
             rec.state = 'draft'
 

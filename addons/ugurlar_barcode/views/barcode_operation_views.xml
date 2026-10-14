@@ -53,8 +53,8 @@
         <field name="arch" type="xml">
             <form string="Sayım Fişi">
                 <header>
-                    <button name="action_validate" type="object" string="Onayla" class="oe_highlight" invisible="state != 'done'"/>
-                    <button name="action_draft" type="object" string="Taslağa Al" invisible="state == 'draft'"/>
+                    <button name="action_validate" type="object" string="Onayla" class="oe_highlight" invisible="state != 'done'" groups="stock.group_stock_manager"/>
+                    <button name="action_draft" type="object" string="Taslağa Al" invisible="state == 'draft'" groups="stock.group_stock_manager"/>
                     <field name="state" widget="statusbar" statusbar_visible="draft,done,validated"/>
                 </header>
                 <sheet>
