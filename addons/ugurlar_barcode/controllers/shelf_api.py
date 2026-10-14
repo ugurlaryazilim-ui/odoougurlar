@@ -230,7 +230,7 @@ class ShelfApiController(BarcodeApiBase):
             return {'error': f'Raf bulunamadı: {shelf_barcode}'}
 
         # Güvenli stok güncelleme
-        self._safe_update_quant(product, dest_location, quantity)
+        self._safe_update_quant(product, dest_location, quantity, 'Mobil: Raflama')
 
         request.env['ugurlar.barcode.operation'].sudo().create({
             'operation_type': 'putaway',
@@ -295,7 +295,7 @@ class ShelfApiController(BarcodeApiBase):
                              + f', istenen {quantity:g}'}
 
         # Güvenli stok güncelleme (negatif delta = çıkarma)
-        self._safe_update_quant(product, location, -quantity)
+        self._safe_update_quant(product, location, -quantity, 'Mobil: Raftan Kaldırma')
 
         request.env['ugurlar.barcode.operation'].sudo().create({
             'operation_type': 'remove',
@@ -440,7 +440,8 @@ class ShelfApiController(BarcodeApiBase):
             qty = quant.quantity
 
             # Güvenli taşıma (lock ile)
-            success, _ = self._safe_move_quant(product, source_loc, target_loc, qty)
+            success, _ = self._safe_move_quant(product, source_loc, target_loc, qty,
+                                               'Mobil: Tüm Rafı Taşı')
             if not success:
                 continue
 
@@ -527,7 +528,7 @@ class ShelfApiController(BarcodeApiBase):
             self._log_chatter(product, msg)
 
             # Güvenli kaldırma (lock ile)
-            self._safe_update_quant(product, location, -qty)
+            self._safe_update_quant(product, location, -qty, 'Mobil: Rafı Boşalt')
 
             cleared_count += 1
             total_quantity += qty

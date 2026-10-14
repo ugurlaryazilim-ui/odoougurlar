@@ -61,7 +61,7 @@ class CountingApiController(BarcodeApiBase):
 
                     # Güvenli stok güncelleme (delta farkını uygula)
                     if delta != 0:
-                        self._safe_update_quant(product, location, delta)
+                        self._safe_update_quant(product, location, delta, 'Mobil: Sayım Farkı')
 
                     request.env['ugurlar.barcode.operation'].sudo().create({
                         'operation_type': 'counting',

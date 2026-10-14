@@ -348,6 +348,7 @@ class BarcodeApiBase(http.Controller):
         Returns:
             (quant_id, quantity) veya None
         """
+        request.env['stock.quant'].flush_model(['quantity', 'reserved_quantity'])
         sql = ("SELECT id, quantity, reserved_quantity FROM stock_quant "
                "WHERE product_id=%s AND location_id=%s")
         params = [product_id, location_id]
@@ -357,89 +358,90 @@ class BarcodeApiBase(http.Controller):
         request.env.cr.execute(sql, params)
         return request.env.cr.fetchone()
 
-    def _safe_update_quant(self, product, location, qty_delta):
-        """Stok miktarını güvenli şekilde güncelle (concurrency-safe, ORM tabanlı).
+    # ─── Raf stoğu: Odoo stok hareketi ile ──────────────
+    # Önceden quant miktarı doğrudan yazılıyor / siliniyordu: stok hareketi, iz ve rezervasyon
+    # koruması yoktu. Artık her raf işlemi tamamlanmış bir stok hareketi oluşturur
+    # (raflama / kaldırma / sayım farkı = envanter düzeltmesi, taşıma = raflar arası iç hareket).
+    # Nebim stok cron'u bu depoyu (İnternet, 002) atlar; çakışma yok.
 
-        Args:
-            product: product.product recordset
-            location: stock.location recordset
-            qty_delta: + ekle, - çıkar
+    def _shelf_qty(self, product, location):
+        """Raftaki (alt konumlar hariç) toplam ve rezerve miktar — satırlar kilitlenir."""
+        # Aynı istekte ORM'de bekleyen değişiklikler (rezervasyon vb.) SQL'den önce yazılsın
+        request.env['stock.quant'].flush_model(['quantity', 'reserved_quantity'])
+        request.env.cr.execute(
+            "SELECT id FROM stock_quant WHERE product_id=%s AND location_id=%s FOR UPDATE",
+            [product.id, location.id])
+        request.env.cr.execute(
+            "SELECT COALESCE(SUM(quantity), 0), COALESCE(SUM(reserved_quantity), 0) "
+            "FROM stock_quant WHERE product_id=%s AND location_id=%s",
+            [product.id, location.id])
+        qty, reserved = request.env.cr.fetchone()
+        return float(qty or 0), float(reserved or 0)
+
+    def _mobile_stock_move(self, product, source, dest, quantity, reason, is_inventory=False):
+        """Tamamlanmış stok hareketi oluşturur (kaynaktan hedefe, verilen miktar)."""
+        company = (dest if dest.usage == 'internal' else source).company_id or request.env.company
+        move = request.env['stock.move'].sudo().create({
+            'product_id': product.id,
+            'product_uom': product.uom_id.id,
+            'product_uom_qty': quantity,
+            'location_id': source.id,
+            'location_dest_id': dest.id,
+            'company_id': company.id,
+            'origin': reason,
+            'is_inventory': is_inventory,
+        })
+        move._action_confirm()
+        move.move_line_ids.unlink()
+        move.write({'move_line_ids': [(0, 0, {
+            'product_id': product.id,
+            'product_uom_id': product.uom_id.id,
+            'quantity': quantity,
+            'location_id': source.id,
+            'location_dest_id': dest.id,
+            'company_id': company.id,
+        })]})
+        move.picked = True
+        move._action_done()
+        return move
+
+    def _inventory_location(self, product, location):
+        company = location.company_id or request.env.company
+        return product.with_company(company).property_stock_inventory
+
+    def _safe_update_quant(self, product, location, qty_delta, reason='Mobil: Raf Düzeltme'):
+        """Raf stoğunu envanter düzeltmesi hareketiyle değiştirir (+ ekle, - çıkar; 0'ın altına inmez).
 
         Returns:
-            Güncellenmiş toplam miktar
+            Güncellenmiş raf miktarı
         """
-        StockQuant = request.env['stock.quant'].sudo()
+        current, _reserved = self._shelf_qty(product, location)
+        if qty_delta > 0:
+            self._mobile_stock_move(product, self._inventory_location(product, location), location,
+                                    qty_delta, reason, is_inventory=True)
+            return current + qty_delta
+        out_qty = min(-qty_delta, current)
+        if out_qty > 0:
+            self._mobile_stock_move(product, location, self._inventory_location(product, location),
+                                    out_qty, reason, is_inventory=True)
+        return max(current - out_qty, 0.0)
 
-        row = self._lock_quant(product.id, location.id)
-
-        if row:
-            existing = StockQuant.browse(row[0])
-            new_qty = existing.quantity + qty_delta
-            if new_qty <= 0:
-                existing.unlink()
-                return 0
-            else:
-                existing.write({'quantity': new_qty})
-                return new_qty
-        elif qty_delta > 0:
-            StockQuant.create({
-                'product_id': product.id,
-                'location_id': location.id,
-                'quantity': qty_delta,
-            })
-            return qty_delta
-        return 0
-
-    def _safe_move_quant(self, product, source_loc, target_loc, quantity):
-        """Ürünü bir raftan diğerine güvenli şekilde taşı (concurrency-safe, ORM tabanlı).
-
-        Args:
-            product: product.product
-            source_loc: kaynak stock.location
-            target_loc: hedef stock.location
-            quantity: taşınacak miktar
+    def _safe_move_quant(self, product, source_loc, target_loc, quantity, reason='Mobil: Raf Transferi'):
+        """Ürünü bir raftan diğerine iç stok hareketiyle taşır.
 
         Returns:
             (success: bool, error_msg: str or None)
         """
-        StockQuant = request.env['stock.quant'].sudo()
-
-        # Kaynak kontrol ve lock
-        source_row = self._lock_quant(product.id, source_loc.id, positive_only=True)
-
-        if not source_row:
+        source_qty, reserved = self._shelf_qty(product, source_loc)
+        if source_qty <= 0:
             return False, f'{product.name} kaynak rafta bulunamadı'
-
-        source_qty = source_row[1]
-        available = source_qty - (source_row[2] or 0)
+        available = source_qty - reserved
         if available < quantity:
-            if available < source_qty:
-                return False, (f'Yetersiz stok! Kaynak: {source_qty} ({source_qty - available} adedi '
-                               f'siparişe ayrılmış), İstenen: {quantity}')
-            return False, f'Yetersiz stok! Kaynak: {source_qty}, İstenen: {quantity}'
-
-        source_quant = StockQuant.browse(source_row[0])
-
-        # Kaynaktan düş
-        new_source = source_qty - quantity
-        if new_source <= 0:
-            source_quant.unlink()
-        else:
-            source_quant.write({'quantity': new_source})
-
-        # Hedefe ekle (lock ile)
-        target_row = self._lock_quant(product.id, target_loc.id)
-
-        if target_row:
-            target_quant = StockQuant.browse(target_row[0])
-            target_quant.write({'quantity': target_quant.quantity + quantity})
-        else:
-            StockQuant.create({
-                'product_id': product.id,
-                'location_id': target_loc.id,
-                'quantity': quantity,
-            })
-
+            if reserved:
+                return False, (f'Yetersiz stok! Kaynak: {source_qty:g} ({reserved:g} adedi '
+                               f'siparişe ayrılmış), İstenen: {quantity:g}')
+            return False, f'Yetersiz stok! Kaynak: {source_qty:g}, İstenen: {quantity:g}'
+        self._mobile_stock_move(product, source_loc, target_loc, quantity, reason)
         return True, None
 
     def _log_chatter(self, record, body, subtype='mail.mt_note'):
