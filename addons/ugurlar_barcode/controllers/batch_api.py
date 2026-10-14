@@ -1,6 +1,8 @@
 """Batch Toplama Listesi API — batch_list, batch_detail, batch_create."""
 import logging
 from datetime import datetime, timedelta
+
+import pytz
 from markupsafe import Markup
 
 from odoo import http
@@ -185,8 +187,11 @@ class BatchApiController(BarcodeApiBase):
             # Tarih formatlama
             date_str = ''
             if b.schedule_time:
-                dt = b.schedule_time
-                date_str = dt.strftime('%d %b %H:%M')
+                # schedule_time UTC saklanır: kullanıcının saat dilimine (yoksa İstanbul) çevrilir,
+                # İngilizce ay adı yerine gg.aa.yyyy SS:DD
+                tz = pytz.timezone(request.env.user.tz or 'Europe/Istanbul')
+                dt = pytz.utc.localize(b.schedule_time).astimezone(tz)
+                date_str = dt.strftime('%d.%m.%Y %H:%M')
 
             item = {
                 'id': b.id,
