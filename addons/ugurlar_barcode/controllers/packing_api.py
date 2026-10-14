@@ -1453,6 +1453,10 @@ class PackingApiController(BarcodeApiBase):
                     lambda i: i.state == 'posted' and not getattr(i, 'nebim_sent', False)
                 )
                 for check_invoice in unposted_nebim:
+                    # Cron / buton aynı faturayı şu an gönderiyorsa ikinci kez gönderme
+                    if not check_invoice._nebim_try_lock():
+                        _logger.info("Nebim Fatura başka işlemde gönderiliyor, atlandı: %s", check_invoice.name)
+                        continue
                     invoice_proc = picking.env['odoougurlar.invoice.processor'].sudo()
                     connector = picking.env['odoougurlar.nebim.connector'].sudo()
                     payload = invoice_proc._build_invoice_payload(check_invoice)

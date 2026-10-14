@@ -89,10 +89,13 @@ class OrderProcessor(models.AbstractModel):
                 return True
 
             # 3. Nebim SQL Server'da bu sipariş belgesi zaten var mı? (Tüm ref varyasyonları ile canlı kontrol)
+            # Onay anındaki erken kontrolde Nebim'de olmadığı görülen değerler tekrar sorulmaz
+            # (önceden sipariş başına ~22 sıralı SP çağrısı yapılıyordu)
+            already_checked = set(self.env.context.get('nebim_checked_refs') or ())
             try:
                 connector_check = self.env['odoougurlar.nebim.connector']
                 for check_val in ref_search:
-                    if not check_val:
+                    if not check_val or check_val in already_checked:
                         continue
                     sp_res = connector_check.run_proc('usp_CheckOrderExists_ent', [{'Name': 'InternalDescription', 'Value': check_val}])
                     if sp_res and isinstance(sp_res, list) and len(sp_res) > 0:
@@ -105,7 +108,9 @@ class OrderProcessor(models.AbstractModel):
                             })
                             return True
             except Exception as e:
-                _logger.warning("Nebim sipariş canlı kontrol SP çalıştırılamadı (dedup atlandı): %s", e)
+                # Kontrol yapılamadan göndermek mükerrer sipariş riski: gönderme, hata ver
+                _logger.warning("Nebim sipariş canlı kontrol SP çalıştırılamadı, gönderilmedi: %s", e)
+                raise Exception(f"Nebim'de mükerrer kontrolü yapılamadı, sipariş gönderilmedi: {e}")
 
         connector = self.env['odoougurlar.nebim.connector']
         

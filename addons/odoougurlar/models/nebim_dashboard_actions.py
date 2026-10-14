@@ -412,10 +412,11 @@ class NebimDashboardWarehouse(models.TransientModel):
             return
 
         SaleOrder = self.env['sale.order'].sudo()
+        # Her turda en çok 50: kalanlar sonraki turda (her biri bir Nebim çağrısı)
         orders = SaleOrder.search([
             ('state', '=', 'cancel'),
             ('nebim_order_sent', '=', True),
-        ])
+        ], limit=50, order='id')
 
         if not orders:
             _logger.info("Nebim iptal temizliği: Silinecek sipariş yok.")
