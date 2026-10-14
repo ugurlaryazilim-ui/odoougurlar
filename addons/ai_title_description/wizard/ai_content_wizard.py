@@ -148,6 +148,7 @@ class AIContentWizard(models.TransientModel):
         )
 
         # 4. AI Provider Çağrısı
+        provider = None
         try:
             provider = get_ai_provider(provider_type, gemini_key, openai_key, model_name=model_name)
             result = provider.generate(
@@ -157,8 +158,12 @@ class AIContentWizard(models.TransientModel):
                 use_search_grounding=use_grounding if provider_type == 'gemini' else False,
             )
         except ValueError as e:
+            self.env['ai.content.log']._log_failed_calls(
+                product, provider_type, model_name, self.mode, getattr(provider, 'failed_calls', None))
             raise UserError(str(e))
         except Exception as e:
+            self.env['ai.content.log']._log_failed_calls(
+                product, provider_type, model_name, self.mode, getattr(provider, 'failed_calls', None))
             _logger.error("AI API çağrısı başarısız (%s / %s): %s", provider_type, model_name, e)
             raise UserError(_("AI içerik üretimi başarısız oldu: %s") % str(e))
 

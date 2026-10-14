@@ -43,6 +43,9 @@ class GeminiContentProvider:
     def __init__(self, api_key, model_name='gemini-2.5-flash'):
         self.api_key = api_key
         self.model_name = model_name or 'gemini-2.5-flash'
+        # Google'ın yanıt verip ücretlendirdiği ama içerik üretemeyen çağrılar (kesik yanıt, boş
+        # yanıt, bozuk JSON, zaman aşımı): çağıran bunları hata kaydı olarak loglar
+        self.failed_calls = []
         if not self.api_key:
             raise ValueError("Gemini API key yapılandırılmamış. Lütfen Ayarlar > AI Başlık & Açıklama bölümünden Gemini API anahtarını girin.")
 
@@ -96,6 +99,12 @@ class GeminiContentProvider:
                 "maxOutputTokens": 8192,
             }
         }
+        # 2.5 Flash'ta "thinking" kapatılır: şemayı doldurmak için gereksiz, çıkış fiyatından
+        # faturalanıyor ve 8192'lik sınırı paylaşıp MAX_TOKENS kesilmesine (yeniden denemeye) yol
+        # açıyordu. 2.5 Pro'da kapatılamaz; 2.0 Flash'ta yoktur.
+        if '2.5-flash' in self.model_name:
+            payload["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 0}
+        self.failed_calls = []
 
         # Note: Gemini API does NOT support tools + responseMimeType:'application/json' together.
         # When grounding is active, we rely on prompt instructions + robust JSON parser.
@@ -135,11 +144,19 @@ class GeminiContentProvider:
 
                 response.raise_for_status()
                 result = response.json()
+                usage = result.get('usageMetadata', {}) or {}
+                call_usage = {
+                    'status': 'error',
+                    'prompt_tokens': usage.get('promptTokenCount', 0) or 0,
+                    'completion_tokens': ((usage.get('candidatesTokenCount', 0) or 0)
+                                          + (usage.get('thoughtsTokenCount', 0) or 0)),
+                }
 
                 # Extract text from response
                 candidates = result.get('candidates', [])
                 if not candidates:
                     _logger.error("Gemini API boş yanıt: %s", json.dumps(result)[:500])
+                    self.failed_calls.append(dict(call_usage, error='Boş yanıt'))
                     raise ValueError("Gemini API boş yanıt döndürdü.")
 
                 # Kesik yanıt: "tamir edilen" yarım açıklama ürüne yazılmasın; hata say,
@@ -147,13 +164,18 @@ class GeminiContentProvider:
                 finish_reason = candidates[0].get('finishReason', '')
                 if finish_reason == 'MAX_TOKENS':
                     _logger.warning("Gemini yanıtı MAX_TOKENS nedeniyle kesildi!")
+                    self.failed_calls.append(dict(call_usage, error='Yanıt token sınırında kesildi'))
                     raise ValueError("Gemini yanıtı token sınırında kesildi, içerik eksik. Lütfen tekrar deneyin.")
 
-                text = candidates[0]['content']['parts'][0]['text']
-                parsed = self._parse_json_response(text)
+                text = ''
+                try:
+                    text = candidates[0]['content']['parts'][0]['text']
+                    parsed = self._parse_json_response(text)
+                except (KeyError, IndexError, TypeError, json.JSONDecodeError):
+                    self.failed_calls.append(dict(call_usage, error='Yanıt ayrıştırılamadı'))
+                    raise
 
                 # Extract token usage for cost tracking
-                usage = result.get('usageMetadata', {})
                 parsed['_token_count'] = usage.get('totalTokenCount', 0)
                 parsed['_prompt_tokens'] = usage.get('promptTokenCount', 0)
                 # Gemini 2.5 "düşünme" token'ları çıktı fiyatından ücretlendirilir
@@ -165,12 +187,12 @@ class GeminiContentProvider:
                 return parsed
 
             except requests.exceptions.Timeout:
-                _logger.error("Gemini API timeout (60s) - deneme %d", attempt + 1)
-                last_error = "Gemini API zaman aşımına uğradı. Lütfen tekrar deneyin."
-                if attempt < self.MAX_RETRIES:
-                    time.sleep(self.RETRY_DELAYS[attempt])
-                    continue
-                raise ValueError(last_error)
+                # Zaman aşımında istek Google'da işlenip ücretlenmiş olabilir: burada yeniden
+                # gönderilmez (kuyruk kendi deneme sınırıyla tekrar dener; ürün başına en çok 5 çağrı)
+                _logger.error("Gemini API timeout (90s) - deneme %d", attempt + 1)
+                self.failed_calls.append({'status': 'timeout', 'prompt_tokens': 0, 'completion_tokens': 0,
+                                          'error': 'Zaman aşımı'})
+                raise ValueError("Gemini API zaman aşımına uğradı. Lütfen tekrar deneyin.")
             except requests.exceptions.HTTPError as e:
                 error_body = ''
                 status_code = 0
@@ -182,6 +204,9 @@ class GeminiContentProvider:
                         error_body = 'Yanıt okunamadı'
                 _logger.error("Gemini API HTTP error: %s - %s", status_code, error_body)
                 raise ValueError(f"Gemini API hatası: {status_code}")
+            except (KeyError, IndexError, TypeError) as e:
+                _logger.error("Gemini API yanıtı beklenen yapıda değil: %s", e)
+                raise ValueError("Gemini API beklenmeyen yanıt yapısı döndürdü.")
             except json.JSONDecodeError:
                 _logger.error("Gemini API yanıtı JSON olarak ayrıştırılamadı: %s", text[:500])
                 raise ValueError("Gemini API geçersiz JSON yanıtı döndürdü.")

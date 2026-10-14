@@ -33,6 +33,41 @@ class AIContentLog(models.Model):
     cost_estimate = fields.Float("Maliyet ($)", digits=(10, 6))
     prompt_used = fields.Text("Kullanılan Prompt")
     raw_response = fields.Text("Ham AI Yanıtı")
+    call_status = fields.Selection([
+        ('ok', 'Başarılı'),
+        ('error', 'Hata (ücretlendi)'),
+        ('timeout', 'Zaman aşımı'),
+    ], string="Çağrı Durumu", default='ok',
+        help="Hata: Google yanıt verdi ve ücretlendirdi ama içerik kullanılamadı (kesik / boş / bozuk). "
+             "Zaman aşımı: istek ücretlenmiş olabilir, token bilinmiyor.")
+
+    @api.model
+    def _log_failed_calls(self, product, provider, model_name, mode, calls):
+        """Ücretlenmiş başarısız çağrıları ayrı transaction'da loglar: çağıranın rollback'i
+        (kuyruk savepoint'i, sihirbazdaki UserError) harcama kaydını silmesin."""
+        if not calls or not product:
+            return
+        from ..services.cost_calculator import calculate_ai_cost
+        try:
+            with self.env.registry.cursor() as cr:
+                env = self.env(cr=cr)
+                env['ai.content.log'].sudo().create([{
+                    'product_tmpl_id': product.id,
+                    'provider': provider,
+                    'model_name': model_name,
+                    'mode': mode,
+                    'applied': False,
+                    'call_status': c.get('status') or 'error',
+                    'prompt_tokens': c.get('prompt_tokens', 0),
+                    'completion_tokens': c.get('completion_tokens', 0),
+                    'token_count': c.get('prompt_tokens', 0) + c.get('completion_tokens', 0),
+                    'cost_estimate': calculate_ai_cost(provider, model_name,
+                                                       prompt_tokens=c.get('prompt_tokens', 0),
+                                                       completion_tokens=c.get('completion_tokens', 0)),
+                    'raw_response': c.get('error') or '',
+                } for c in calls])
+        except Exception as e:
+            _logger.warning("Başarısız AI çağrısı loglanamadı: %s", e)
 
     @api.model_create_multi
     def create(self, vals_list):

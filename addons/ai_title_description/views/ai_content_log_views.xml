@@ -51,6 +51,7 @@
                     <field name="generated_title"/>
                     <field name="title_score" widget="progressbar"/>
                     <field name="applied"/>
+                    <field name="call_status" decoration-danger="call_status != 'ok'" optional="show"/>
                     <field name="token_count"/>
                     <field name="cost_estimate" widget="monetary" options="{'currency_field': 'usd_currency'}"/>
                 </list>
@@ -68,6 +69,7 @@
                                 <field name="product_tmpl_id"/>
                                 <field name="mode"/>
                                 <field name="applied"/>
+                                <field name="call_status"/>
                                 <field name="create_date"/>
                             </group>
                             <group>
