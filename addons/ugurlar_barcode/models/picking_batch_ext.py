@@ -10,8 +10,8 @@ _logger = logging.getLogger(__name__)
 class StockPickingBatchExt(models.Model):
     _inherit = 'stock.picking.batch'
 
-    schedule_time = fields.Datetime(string='Toplama Zamani', readonly=True)
-    time_window = fields.Char(string='Zaman Dilimi', readonly=True)
+    schedule_time = fields.Datetime(string='Toplama Zamanı', readonly=True, index=True, copy=False)
+    time_window = fields.Char(string='Zaman Dilimi', readonly=True, index='btree_not_null')
     source_info = fields.Char(string='Depo / Aciklama', readonly=True)
 
     # Kalıcı picking ilişkisi — Odoo picking done olunca batch_id'yi temizliyor,

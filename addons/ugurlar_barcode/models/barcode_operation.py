@@ -9,6 +9,7 @@ class BarcodeOperation(models.Model):
     _name = 'ugurlar.barcode.operation'
     _description = 'Barkod Operasyon Kaydı'
     _order = 'create_date desc'
+    _create_date_idx = models.Index('(create_date)')
 
     user_id = fields.Many2one('res.users', string='Operatör',
                               default=lambda self: self.env.uid, index=True)
@@ -26,8 +27,8 @@ class BarcodeOperation(models.Model):
         ('label', 'Etiket Yazdırma'),
     ], string='İşlem Türü', required=True, index=True)
     barcode = fields.Char('Taranan Barkod')
-    product_id = fields.Many2one('product.product', string='Ürün')
-    location_id = fields.Many2one('stock.location', string='Konum')
+    product_id = fields.Many2one('product.product', string='Ürün', index='btree_not_null')
+    location_id = fields.Many2one('stock.location', string='Konum', index='btree_not_null')
     quantity = fields.Float('Miktar', default=0)
     notes = fields.Text('Notlar')
     state = fields.Selection([
