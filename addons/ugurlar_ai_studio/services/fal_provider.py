@@ -113,23 +113,27 @@ class FalProvider(AIProviderBase):
                 raise FalQueueTimeout(handle.request_id, timeout)
             time.sleep(poll_interval)
 
-    def get_estimated_cost(self, endpoint):
+    @classmethod
+    def get_estimated_cost(cls, endpoint):
         # Endpoint icin tahmini maliyeti dondur (USD).
-        return self.ESTIMATED_COSTS.get(endpoint, 0.01)
+        return cls.ESTIMATED_COSTS.get(endpoint, 0.01)
 
-    def _compute_cost(self, endpoint, n_outputs, n_refs, arguments):
-        """Gerçek fal fiyatına göre maliyet (USD)."""
+    @classmethod
+    def compute_cost(cls, endpoint, n_outputs, n_refs, arguments):
+        """Gerçek fal fiyatına göre maliyet (USD). Cron kurtarması da kullanır (örneksiz)."""
         n_outputs = max(1, n_outputs)
         if 'seedream/v4' in endpoint:
-            return round(self.get_estimated_cost(endpoint) * n_outputs, 4)
+            return round(cls.get_estimated_cost(endpoint) * n_outputs, 4)
         if 'seedream' in endpoint:
             size = arguments.get('image_size') or {}
             pixels = (size.get('width', 2048) * size.get('height', 2048)) if isinstance(size, dict) else 2048 * 2048
             per_image = 0.0675 if pixels <= 1536 * 1536 else 0.135
             return round(per_image * n_outputs + 0.0045 * max(0, n_refs - 1), 4)
         if 'nano-banana' in endpoint:
-            return self.get_estimated_cost(endpoint) * n_outputs
-        return self.get_estimated_cost(endpoint)
+            return cls.get_estimated_cost(endpoint) * n_outputs
+        return cls.get_estimated_cost(endpoint)
+
+    _compute_cost = compute_cost
 
     def virtual_tryon(self, model_image_url, garment_image_url,
                       category='tops', mode='balanced', **kwargs):

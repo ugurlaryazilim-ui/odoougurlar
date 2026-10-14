@@ -44,6 +44,11 @@ def clear_usage_recorder():
     _usage_local.context = None
 
 
+def has_usage_recorder():
+    """Bu thread'de kaydedici kurulu mu? (iç içe kurulumda dıştakini ezmemek için)"""
+    return bool(getattr(_usage_local, 'recorder', None))
+
+
 def report_usage(provider, step, model='', input_tokens=0, output_tokens=0, image_count=0,
                  duration=0.0, status='ok', cost=None):
     """Bir ücretli AI çağrısının kullanımını loglar ve kaydediciye iletir."""
@@ -277,6 +282,8 @@ _ANALYSIS_SCHEMA = {
         "collarTypeEn": {"type": "STRING"},
         "sleeveType": {"type": "STRING"},
         "closureEn": {"type": "STRING"},
+        "closureVisibility": {"type": "STRING", "enum": ["exposed", "concealed", "none"]},
+        "wornClosed": {"type": "BOOLEAN"},
         "waistEn": {"type": "STRING"},
         "frontPanelEn": {"type": "STRING"},
         "trimsEn": {"type": "STRING"},
@@ -316,6 +323,7 @@ OFFICIAL STORE PRODUCT INFORMATION (ground truth for the category):
 - Etek, Şort, Pantolon, Jean, Tayt → 'bottoms'.
 - Elbise, Abiye, Tulum → 'dress'.
 - Takım, Set, Eşofman Takımı, Pijama Takımı → a matching two-piece set (top + bottom sold together): isSet true, clothingCategory 'tops', never 'dress'.
+- Feature words in the name (Fermuarlı = zippered, Düğmeli = buttoned, Çıtçıtlı = snaps, Kapüşonlu = hooded) only say the item HAS that part. They never say how it looks: describe the closure only as it is visible in the photo. A zipper hidden under a fabric placket or flap is 'concealed', not a visible zipper.
 """
 
     prompt = f"""You are a senior fashion merchandiser analyzing a product photo.
@@ -350,7 +358,9 @@ Return JSON:
   "collarType": "Turkish collar/neckline if visible",
   "collarTypeEn": "without the word 'neckline', e.g. 'V', 'crew', 'shirt collar', 'turtleneck'",
   "sleeveType": "sleeve type if visible (e.g. uzun kollu, kolsuz, askılı)",
-  "closureEn": "the garment's own front fastening exactly as seen: its type, count and position; empty when it has none",
+  "closureEn": "the garment's own front fastening exactly as seen: its type, count and position; empty when it has none. When the fastening sits under a fabric placket or flap, say so (e.g. 'concealed center-front placket') and do not name zipper teeth or buttons you cannot see",
+  "closureVisibility": "exposed (zipper teeth or buttons visible on the outside) | concealed (fastening hidden under a placket or flap) | none (no front fastening, e.g. pullover, open-front cardigan)",
+  "wornClosed": true or false (true when the front is closed in the photo; false when it hangs open),
   "waistEn": "trousers, skirts, shorts and jumpsuits only: the waistband exactly as you see it, in positive words: its width, whether it is elastic or flat, and each part sewn on it with count and position. Describe only what is clearly visible; empty for other garments",
   "frontPanelEn": "trousers, skirts and shorts only: how the front panel below the waistband looks, in positive words, with each part you clearly see and its position; empty for other garments",
   "trimsEn": "buttons, snaps, toggles, buckles, zipper pulls, metal rings or rivets that are clearly sewn on the garment, with count, color, size and position; empty if there are none",
@@ -454,10 +464,14 @@ def clean_field(analysis, key):
     return value
 
 
-def design_hint(analysis):
-    """Analizdeki ürünün kendi detayları (kapama, düğme, logo, broş, dantel...): silinmesin diye tespite verilir."""
-    parts = [clean_field(analysis, k) for k in ('closureEn', 'waistEn', 'frontPanelEn', 'trimsEn',
-                                                 'designDetailsEn', 'graphicDescriptionEn')]
+def design_hint(analysis, include_closure=True):
+    """Analizdeki ürünün kendi detayları (kapama, düğme, logo, broş, dantel...): silinmesin diye tespite verilir.
+
+    include_closure=False: denetim kapamayı ayrıca (görünürlük + kapalılık) kontrol ediyorsa çıkarılır.
+    """
+    keys = ('closureEn',) if include_closure else ()
+    parts = [clean_field(analysis, k) for k in keys + ('waistEn', 'frontPanelEn', 'trimsEn',
+                                                       'designDetailsEn', 'graphicDescriptionEn')]
     return '; '.join(p for p in parts if p)
 
 
@@ -850,6 +864,55 @@ _KNIT_GARMENT_WORDS = ('sweater', 'cardigan', 'pullover', 'jumper', 'knit')
 
 _OPEN_FRONT_WORDS = ['yelek', 'vest', 'waistcoat', 'hırka', 'hirka', 'cardigan', 'ceket',
                      'jacket', 'blazer', 'mont', 'kaban', 'coat', 'trençkot', 'trench']
+# Genelde açık giyilen türler: kapalı/açık bilgisi yoksa iç katman bunlarda varsayılır.
+# Mont/kaban/ceket için varsayılmaz: iç katman cümlesi modeli fermuarı açmaya itiyordu.
+_OPEN_STYLE_WORDS = ('yelek', 'vest', 'waistcoat', 'hırka', 'hirka', 'cardigan', 'blazer')
+
+
+def _worn_closed(analysis):
+    """Analizdeki wornClosed: True / False / None (bilinmiyor)."""
+    value = (analysis or {}).get('wornClosed')
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in ('true', 'false'):
+        return value.strip().lower() == 'true'
+    return None
+
+
+def closure_sentence(analysis):
+    """Ön kapamanın görünürlüğünü ve kapalı/açık durumunu olumlu cümleyle anlatır ('' = bilgi yok)."""
+    visibility = str((analysis or {}).get('closureVisibility') or '').strip().lower()
+    closed = _worn_closed(analysis)
+    closure = clean_field(analysis, 'closureEn')
+    if visibility == 'concealed':
+        return ("The front is fully closed to the top; the fastening stays hidden under a smooth fabric "
+                "placket, with no zipper teeth, zipper pull or buttons visible. ")
+    if visibility == 'exposed':
+        what = closure or 'front fastening'
+        if closed is False:
+            return f"Front fastening exactly as in Image 2: {what}, worn open the same way. "
+        return f"Front fastening exactly as in Image 2: {what}, fully done up and closed to the top. "
+    if closure:
+        return f"Front fastening exactly as in Image 2: {closure}. "
+    return ''
+
+
+def closure_state_hint(analysis):
+    """QC için beklenen kapama durumu (kısa İngilizce)."""
+    visibility = str((analysis or {}).get('closureVisibility') or '').strip().lower()
+    closed = _worn_closed(analysis)
+    parts = []
+    if visibility == 'concealed':
+        parts.append('fastening concealed under a fabric placket (no visible zipper teeth or buttons)')
+    elif visibility == 'exposed':
+        parts.append('fastening visible: ' + (clean_field(analysis, 'closureEn') or 'front fastening'))
+    elif visibility == 'none':
+        parts.append('no front fastening')
+    if closed is True:
+        parts.append('front worn fully closed')
+    elif closed is False:
+        parts.append('front worn open')
+    return '; '.join(parts)
 
 
 def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
@@ -991,10 +1054,9 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
             collar_note += "Thin spaghetti straps. "
         elif any(k in sleeve_lower for k in ['sleeveless', 'kolsuz']):
             collar_note += "Sleeveless. "
-        # Kapama tarif edilmezse model (özellikle silinen etiketin yanında) fermuar/düğme uyduruyor
-        closure = clean_field(analysis, 'closureEn')
-        if closure:
-            collar_note += f"Front fastening exactly as in Image 2: {closure}. "
+        # Kapama tarif edilmezse model (özellikle silinen etiketin yanında) fermuar/düğme uyduruyor;
+        # görünürlük/kapalılık söylenmezse gizli fermuarı açığa çıkarıp önü açıyor
+        collar_note += closure_sentence(analysis)
 
     # Grafik / baskı notu
     graphic_note = ''
@@ -1005,7 +1067,13 @@ def build_generation_prompt(analysis, preset, prompt_locks, extra_prompt='',
 
     # Açık önlü üst giyim (yelek, hırka, ceket...) için iç katman
     inner_top_note = ''
-    if sub_type == 'tops' and any(w in g_low or w in garment_type_raw.lower() for w in _OPEN_FRONT_WORDS):
+    type_text = g_low + ' ' + garment_type_raw.lower()
+    worn_closed = _worn_closed(analysis)
+    if worn_closed is None:
+        wants_inner = any(w in type_text for w in _OPEN_STYLE_WORDS)
+    else:
+        wants_inner = not worn_closed and any(w in type_text for w in _OPEN_FRONT_WORDS)
+    if sub_type == 'tops' and wants_inner:
         inner_top_note = (
             f"A plain fitted neutral inner top is worn underneath the {garment}, "
             f"giving clean catalog coverage. "
@@ -1144,10 +1212,11 @@ VISUAL_QC_ISSUES = {
     'detail_added': 'Üründe olmayan detay eklenmiş',
     'detail_missing': 'Üründeki detay kaybolmuş',
     'fabric_mismatch': 'Kumaş dokusu / rengi ürünle uyuşmuyor',
+    'closure_changed': 'Ön kapama değişmiş (açılmış / gizli fermuar açığa çıkmış / iç katman eklenmiş)',
 }
 
 # Ürünün kendisini değiştiren kusurlar: yeniden üretimle düzeltilir (silme ile değil)
-FIDELITY_CODES = ('detail_added', 'detail_missing', 'garment_mismatch', 'fabric_mismatch')
+FIDELITY_CODES = ('detail_added', 'detail_missing', 'garment_mismatch', 'fabric_mismatch', 'closure_changed')
 
 
 def erased_area_clean(gemini_api_key, image, boxes):
@@ -1241,13 +1310,21 @@ _FIDELITY_RULES = """- "detail_added": compare the garment in Image 1 with the p
 A button counts as a part only when Image 2 shows one; a button drawn on Image 1 where the product in Image 2 has none is detail_added.
 Only compare parts visible from the angle of Image 1; differences in pose, lighting, folds or styling items (shoes, trousers of a top) are not defects.
 - "fabric_mismatch": compare the fabric itself. Report it when the fabric of the garment in Image 1 clearly differs from the product in Image 2: a plain single-color fabric drawn speckled, mixed-color, ribbed or patterned (or the reverse), a knit or weave that is clearly coarser or finer, or a clearly different shade (much darker, lighter or another hue). Differences caused only by lighting, shadows or folds are not defects.
-- "fixEn": when you report detail_added, detail_missing or fabric_mismatch, write one short plain English sentence that describes how those parts or the fabric of the product in Image 2 really look, using only positive words and never naming the wrong part, e.g. "The waistband is a smooth, continuous elastic band all around." Empty otherwise.
+- "fixEn": when you report detail_added, detail_missing, fabric_mismatch or closure_changed, write one short plain English sentence that describes how those parts or the fabric of the product in Image 2 really look, using only positive words and never naming the wrong part, e.g. "The waistband is a smooth, continuous elastic band all around." Empty otherwise.
 """
+
+
+def _closure_rule(closure_state):
+    return (f'- "closure_changed": the front closure of the product is: {closure_state}. Report it when the garment in '
+            'Image 1 differs: the front is opened or unzipped while the product is closed, a concealed fastening is '
+            'drawn as visible zipper teeth or buttons, or an inner top, shirt or skin shows through an opened front '
+            'that the product keeps closed. This is a defect even though it looks like styling.\n')
 
 
 def visual_quality_check(gemini_api_key, generated_image, garment_hint='', timeout=30,
                          reference_image=None, design_details='', check_missing=True,
-                         view_construction=None, removed_boxes=None, original_image=None):
+                         view_construction=None, removed_boxes=None, original_image=None,
+                         closure_state=''):
     """AI çıktısını Gemini ile gerçek üretim hatalarına karşı denetle.
 
     reference_image (temizlenmiş ürün görseli) verilirse karşılaştırmalı denetim yapılır:
@@ -1259,6 +1336,8 @@ def visual_quality_check(gemini_api_key, generated_image, garment_hint='', timeo
     fotoğrafı değilse (yan görünüm ön fotoğraftan) yalnız eklenenler aranır.
     view_construction: bu açının gerçek yapısı; removed_boxes: Image 2'de etiketin silindiği yerler
     (silme izi referansta da görünebilir — denetim onu "ürünün parçası" sanmasın).
+    closure_state: ön görünümde beklenen kapama durumu (closure_state_hint); verilirse açılmış ön,
+    açığa çıkmış gizli fermuar veya eklenen iç katman "closure_changed" olur.
 
     Returns:
         dict: {'issues': [Türkçe], 'codes': [kod], 'boxes': [{'box_2d', 'code'}], 'fidelity': int} veya None
@@ -1269,6 +1348,8 @@ def visual_quality_check(gemini_api_key, generated_image, garment_hint='', timeo
     skip = set() if reference_image else {'detail_added', 'detail_missing', 'fabric_mismatch'}
     if not check_missing:
         skip.add('detail_missing')
+    if not (reference_image and closure_state):
+        skip.add('closure_changed')
     codes_doc = '\n'.join(f'- "{code}"' for code in VISUAL_QC_ISSUES if code not in skip)
     reference_note = (
         "Image 1 is the AI-generated photo. Image 2 is the real product (reference).\n"
@@ -1293,7 +1374,7 @@ Rules:
 - "store_tag_visible": a security alarm tag, price tag, hangtag or tag pin attached to the garment.
 - "added_label": {"a label, patch, badge, logo, tag or small object on the garment in Image 1 that does not exist on the product in Image 2 (check the waistband, back, hem and seams carefully)." if reference_image else "never report this code."}
 - "garment_mismatch": the garment in Image 1 is a different item from the product (different type, cut, neckline, length or color).
-{_FIDELITY_RULES if reference_image else ''}For every "store_tag_visible" and "added_label" finding{' and every added detail (each separately, code "detail_added")' if reference_image else ''}, add its bounding box on Image 1 as box_2d [ymin, xmin, ymax, xmax] normalized to 0-1000.
+{_FIDELITY_RULES if reference_image else ''}{_closure_rule(closure_state) if 'closure_changed' not in skip else ''}For every "store_tag_visible" and "added_label" finding{' and every added detail (each separately, code "detail_added")' if reference_image else ''}, add its bounding box on Image 1 as box_2d [ymin, xmin, ymax, xmax] normalized to 0-1000.
 Return JSON: {{"defects": ["code", ...], "boxes": [{{"code": "added_label", "box_2d": [ymin, xmin, ymax, xmax]}}], "addedDetails": ["..."], "missingDetails": ["..."], "fixEn": ""}}.
 Return {{"defects": [], "boxes": [], "addedDetails": [], "missingDetails": []}} if the photo is clean."""
     if reference_image:
@@ -1355,7 +1436,9 @@ Return {{"defects": [], "boxes": [], "addedDetails": [], "missingDetails": []}} 
     fidelity += sum(1 for c in codes if c in ('detail_added', 'detail_missing') and not (added if c == 'detail_added' else missing))
     fidelity += 1 if 'garment_mismatch' in codes else 0
     fidelity += 1 if 'fabric_mismatch' in codes else 0
-    fix = clean_field(parsed, 'fixEn') if (added or missing or 'fabric_mismatch' in codes) else ''
+    fidelity += 1 if 'closure_changed' in codes else 0
+    fix = clean_field(parsed, 'fixEn') if (added or missing or 'fabric_mismatch' in codes
+                                           or 'closure_changed' in codes) else ''
     return {'codes': codes, 'issues': issues, 'boxes': boxes, 'fidelity': fidelity,
             'added': added, 'missing': missing, 'fix': fix}
 

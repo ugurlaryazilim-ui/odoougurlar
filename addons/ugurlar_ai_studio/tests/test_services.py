@@ -122,6 +122,25 @@ class TestPromptBuilder(BaseCase):
             self.assertIn('Relaxed, natural stance', p)
             self.assertNotIn('face', p.lower(), 'arka/yan çekimde yüz istemi başı çevirtebilir')
 
+    def test_closed_coat_gets_no_inner_top_and_concealed_closure(self):
+        # Gizli fermuarlı kapalı mont: iç katman cümlesi modeli fermuarı açıp tişört göstermeye itiyordu
+        coat = {'garmentType': 'Mont', 'garmentTypeEn': 'hooded jacket', 'clothingCategory': 'outerwear',
+                'closureEn': 'concealed center-front placket', 'closureVisibility': 'concealed', 'wornClosed': True}
+        p = self._build(coat)
+        self.assertNotIn('inner top', p)
+        self.assertIn('fully closed to the top', p)
+        self.assertIn('hidden under a smooth fabric placket', p)
+        # Görünür fermuar kapalı: kapalı tarif edilir
+        p = self._build(dict(coat, closureEn='silver metal center-front zipper', closureVisibility='exposed'))
+        self.assertIn('silver metal center-front zipper, fully done up', p)
+        self.assertNotIn('inner top', p)
+        # Askıda açık duran ceket ve kapalı/açık bilgisi olmayan mont
+        self.assertIn('inner top', self._build(dict(coat, closureVisibility='exposed', wornClosed=False)))
+        self.assertNotIn('inner top', self._build({'garmentType': 'Mont', 'clothingCategory': 'outerwear'}))
+        # Hırka (genelde açık giyilir) bilgi yokken iç katmanı korur
+        self.assertIn('inner top', self._build({'garmentType': 'Hırka', 'garmentTypeEn': 'cardigan',
+                                                'clothingCategory': 'tops'}))
+
     def test_surface_effect_goes_into_garment_description(self):
         p = self._build({'garmentTypeEn': 'sweatshirt', 'clothingCategory': 'tops', 'primaryColorEn': 'navy',
                          'fabricTypeEn': 'cotton', 'surfaceEn': 'heathered melange'})
@@ -531,6 +550,44 @@ class TestTagErasing(BaseCase):
         with patch.object(analyzer_module, '_gemini_json', return_value=fake):
             res = analyzer_module.visual_quality_check('k', 'RESULT', reference_image='REF')
         self.assertEqual(res['fix'], '', 'olumsuz düzeltme cümlesi kullanılmaz')
+
+    def test_visual_qc_reports_closure_change(self):
+        state = analyzer_module.closure_state_hint({'closureVisibility': 'concealed', 'wornClosed': True})
+        self.assertIn('concealed', state)
+        self.assertIn('fully closed', state)
+        fake = {'defects': ['closure_changed'], 'fixEn': 'The front is fully closed with a hidden placket.'}
+        with patch.object(analyzer_module, '_gemini_json', return_value=fake) as gj:
+            res = analyzer_module.visual_quality_check('k', 'RESULT', reference_image='REF', closure_state=state)
+        prompt = gj.call_args.args[1]
+        self.assertIn('closure_changed', prompt)
+        self.assertIn(state, prompt)
+        self.assertEqual(res['codes'], ['closure_changed'])
+        self.assertEqual(res['fidelity'], 1, 'açılan ön / açığa çıkan fermuar yeniden üretimi tetikler')
+        self.assertIn('hidden placket', res['fix'])
+        self.assertIn('closure_changed', analyzer_module.FIDELITY_CODES)
+        # Kapama durumu verilmezse (arka görünüm) kod sorulmaz ve sayılmaz
+        with patch.object(analyzer_module, '_gemini_json', return_value=fake) as gj:
+            res = analyzer_module.visual_quality_check('k', 'RESULT', reference_image='REF')
+        self.assertNotIn('- "closure_changed"', gj.call_args.args[1])
+        self.assertEqual(res['fidelity'], 0)
+
+    def test_design_hint_can_leave_out_closure(self):
+        analysis = {'closureEn': 'concealed placket', 'trimsEn': 'two silver snaps'}
+        self.assertIn('concealed placket', analyzer_module.design_hint(analysis))
+        hint = analyzer_module.design_hint(analysis, include_closure=False)
+        self.assertNotIn('concealed placket', hint)
+        self.assertIn('two silver snaps', hint)
+
+    def test_analysis_asks_closure_visibility(self):
+        with patch.object(analyzer_module, '_gemini_json', return_value={'garmentType': 'Mont'}) as gj:
+            analyzer_module.analyze_garment(None, 'IMG', gemini_api_key='k',
+                                            product_context='Product Name: Kapüşonlu Fermuarlı Mont')
+        prompt = gj.call_args.args[1]
+        self.assertIn('closureVisibility', prompt)
+        self.assertIn('wornClosed', prompt)
+        self.assertIn('only say the item HAS that part', prompt)
+        props = analyzer_module._ANALYSIS_SCHEMA['properties']
+        self.assertEqual(props['closureVisibility']['enum'], ['exposed', 'concealed', 'none'])
 
     def test_visual_qc_reports_fabric_mismatch(self):
         fake = {'defects': ['fabric_mismatch'], 'fixEn': 'The fabric is a smooth fine knit in one even light olive color.'}

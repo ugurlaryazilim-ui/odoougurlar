@@ -101,6 +101,13 @@ class ResConfigSettings(models.TransientModel):
              'bulursa görsel bir kez yeniden üretilir ve daha doğru olan seçilir '
              '(sadece hatalı görsellerde ~$0.07-0.135).',
     )
+    ai_studio_fashn_fallback = fields.Boolean(
+        string='Olmazsa FASHN ile Dene',
+        default=True,
+        help='Yeniden üretim de ürünü değiştirdiyse ön/arka görünüm bir kez FASHN v1.6 ile giydirilir '
+             '(metin istemi kullanmaz, ürün görselini olduğu gibi taşır; ~$0.075). En az kusurlu sonuç seçilir; '
+             'hepsi kusurluysa görsel incelemede "Ürün değişmiş" rozetiyle gösterilir.',
+    )
     ai_studio_auto_bg_remove = fields.Boolean(
         string='Otomatik Arka Plan Kaldırma',
         default=True,
@@ -134,6 +141,7 @@ class ResConfigSettings(models.TransientModel):
         'ai_studio_visual_qc': 'ugurlar_ai_studio.visual_qc',
         'ai_studio_auto_tag_fix': 'ugurlar_ai_studio.auto_tag_fix',
         'ai_studio_fidelity_retry': 'ugurlar_ai_studio.fidelity_retry',
+        'ai_studio_fashn_fallback': 'ugurlar_ai_studio.fashn_fallback',
         'ai_studio_auto_bg_remove': 'ugurlar_ai_studio.auto_bg_remove',
     }
 

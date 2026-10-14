@@ -14,7 +14,11 @@
             <div class="ais-batch-grid">
                 <t t-foreach="state.sessions" t-as="session" t-key="session.id">
                     <div class="ais-batch-card" t-on-click="() => this.openSession(session.id)">
-                        <div class="ais-batch-name" t-out="session.name"/>
+                        <div class="ais-batch-name">
+                            <t t-out="session.name"/>
+                            <span t-if="session.fidelity_failed" class="badge text-bg-danger ms-1"
+                                  title="Ürünü değişmiş görsel var">⛔ Ürün değişmiş</span>
+                        </div>
                         <div class="ais-batch-product" t-out="session.product_id[1]"/>
                         <div class="ais-batch-meta">
                             🤖 <t t-out="session.generation_count"/>

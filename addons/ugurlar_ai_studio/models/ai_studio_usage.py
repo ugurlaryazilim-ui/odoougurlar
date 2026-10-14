@@ -8,6 +8,7 @@ GEMINI_OUTPUT_PRICE = 2.50
 USAGE_PROVIDERS = [
     ('gemini', 'Gemini'),
     ('fal', 'fal.ai'),
+    ('fashn', 'FASHN'),
 ]
 USAGE_STEPS = [
     ('analysis', 'Kıyafet analizi'),
@@ -20,6 +21,7 @@ USAGE_STEPS = [
     ('quality_check', 'Doğruluk kontrolü'),
     ('mannequin_check', 'Manken bacak kontrolü'),
     ('translate', 'Çeviri'),
+    ('mannequin', 'Manken üretimi'),
     ('analysis_fallback', 'Kıyafet analizi (fal yedeği)'),
     ('deleted_generation', 'Silinen üretim'),
     ('generation', 'Görsel üretimi'),
@@ -82,7 +84,9 @@ class AiStudioCostReport(models.Model):
     user_id = fields.Many2one('res.users', string='Kullanıcı', readonly=True)
     provider = fields.Selection(USAGE_PROVIDERS, string='Sağlayıcı', readonly=True)
     step = fields.Selection(USAGE_STEPS, string='Adım', readonly=True)
-    calls = fields.Integer(string='Çağrı Sayısı', readonly=True)
+    calls = fields.Integer(string='Kayıt Sayısı', readonly=True,
+                           help='Gemini: API çağrısı sayısı. fal: üretim kaydı sayısı (bir üretim kendi içinde '
+                                'arka plan silme, etiket silme, giydirme ve yeniden denemeleri toplar).')
     input_tokens = fields.Integer(string='Giriş Token', readonly=True)
     output_tokens = fields.Integer(string='Çıkış Token', readonly=True)
     cost = fields.Float(string='Maliyet (USD)', digits=(16, 4), readonly=True)
@@ -96,7 +100,8 @@ class AiStudioCostReport(models.Model):
                   FROM ai_studio_usage u
                 UNION ALL
                 SELECT g.id * 2 + 1, g.create_date, g.product_id, g.session_id, s.user_id,
-                       'fal', 'generation', 1, 0, 0, g.cost
+                       CASE WHEN g.fal_endpoint LIKE 'fashn/%%' THEN 'fashn' ELSE 'fal' END,
+                       'generation', 1, 0, 0, g.cost
                   FROM ai_studio_generation g
                   LEFT JOIN ai_studio_session s ON s.id = g.session_id
                  WHERE COALESCE(g.cost, 0) > 0
