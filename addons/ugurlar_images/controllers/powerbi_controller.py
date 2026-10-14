@@ -3,11 +3,33 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 
 from odoo import http
 from odoo.http import request, Response
 
 _logger = logging.getLogger(__name__)
+
+# Power BI URL'lerindeki ?token= değeri her istekte werkzeug erişim log'una yazılıyordu.
+# URL ve anahtar değişmesin diye (Power BI raporları bunlara bağlı) yalnız log satırı maskelenir.
+_TOKEN_RE = re.compile(r'([?&]token=)[^&\s"]+')
+
+
+class _MaskTokenFilter(logging.Filter):
+    def filter(self, record):
+        try:
+            message = record.getMessage()
+        except Exception:
+            return True
+        if 'token=' in message:
+            record.msg = _TOKEN_RE.sub(r'\1***', message)
+            record.args = ()
+        return True
+
+
+_werkzeug_logger = logging.getLogger('werkzeug')
+if not any(type(f).__name__ == '_MaskTokenFilter' for f in _werkzeug_logger.filters):
+    _werkzeug_logger.addFilter(_MaskTokenFilter())
 
 # Desteklenen görsel boyutları — Odoo'nun standart image field'ları
 VALID_SIZES = {
@@ -175,7 +197,7 @@ class PowerBIController(http.Controller):
 
         except Exception as e:
             _logger.exception("Power BI urun listesi hatasi")
-            return self._json_error('Sunucu hatasi: %s' % str(e), 500)
+            return self._json_error('Sunucu hatasi.', 500)
 
     # =================================================================
     #  Endpoint 2: Tek Görsel (Barkod ile)
@@ -216,7 +238,7 @@ class PowerBIController(http.Controller):
 
         except Exception as e:
             _logger.exception("Power BI gorsel hatasi (barkod: %s)", barcode)
-            return self._json_error('Hata: %s' % str(e), 500)
+            return self._json_error('Sunucu hatasi.', 500)
 
     # =================================================================
     #  Endpoint 3: Tek Görsel (ID ile)
@@ -253,7 +275,7 @@ class PowerBIController(http.Controller):
 
         except Exception as e:
             _logger.exception("Power BI gorsel hatasi (ID: %s)", product_id)
-            return self._json_error('Hata: %s' % str(e), 500)
+            return self._json_error('Sunucu hatasi.', 500)
 
     # =================================================================
     #  Yardımcı: Görseli HTTP Response olarak döndür
