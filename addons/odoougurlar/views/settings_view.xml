@@ -165,12 +165,8 @@
                                     <field name="nebim_stock_sync_interval"/>
                                 </div>
                             </setting>
-                            <setting string="Otomatik Maliyet Güncelleme" help="Belirli aralıklarla Nebim'den ürün maliyet fiyatları (alış fiyatı) otomatik çekilir">
+                            <setting string="Maliyet Güncelleme (Nebim Price2)" help="Ürün Bilgileri SP'sindeki Price2 (KDV dahil maliyet) ürün senkronunda ve günde bir tam taramada varyantların Maliyet alanına aynen yazılır. 0 / boş gelen maliyet mevcut değeri ezmez.">
                                 <field name="nebim_sync_cost_enabled"/>
-                                <div class="content-group mt-2" invisible="not nebim_sync_cost_enabled">
-                                    <label for="nebim_sp_product_cost"/>
-                                    <field name="nebim_sp_product_cost"/>
-                                </div>
                             </setting>
                             <setting string="Senkronizasyon Modu" help="Ürün Senkronizasyonu çalışma modu">
                                 <div class="content-group">

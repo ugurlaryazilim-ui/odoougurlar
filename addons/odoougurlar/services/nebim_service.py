@@ -1,12 +1,17 @@
 import logging
+from collections import defaultdict
 from datetime import datetime
 
 from odoo import models, fields, api
 
 _logger = logging.getLogger(__name__)
 
-# Stok senkronizasyonu tek seferde bir tane (pg advisory lock anahtarı)
+# Stok / maliyet senkronizasyonu tek seferde bir tane (pg advisory lock anahtarları)
 NEBIM_STOCK_SYNC_LOCK = 812345001
+NEBIM_COST_SYNC_LOCK = 812345002
+
+# Maliyet tam taramasında her commit'te işlenen varyant sayısı
+COST_BATCH_SIZE = 500
 
 # Batch boyutu — her seferde kaç ürün grubu (template) işlenecek
 BATCH_SIZE = 50
@@ -197,80 +202,98 @@ class NebimService(models.AbstractModel):
     # -----------------------------------------------------------------
     def sync_product_costs(self):
         """
-        Nebim'den ürün maliyetlerini (NetMaliyet) çekip Odoo'da standard_price günceller.
-        vw_UrunBirimMaliyetleri tablosuna dayalı SP'yi kullanır.
+        Günlük tam tarama: Nebim Ürün Bilgileri SP'sindeki (sp_GetItemDetails) Price2'yi
+        (KDV dahil maliyet) varyantların standard_price alanına aynen yazar.
+
+        Ürün senkronu da aynı alanı yazar; bu cron Nebim'de yalnız maliyeti değişen
+        (ürün senkronuna düşmeyen) ürünleri yakalar. Eşleme: Barcode1 → Barcode2 → ItemSku.
         """
         ICP = self.env['ir.config_parameter'].sudo()
-        enabled = ICP.get_param('odoougurlar.nebim_sync_cost_enabled', 'False') == 'True'
-        if not enabled:
+        if ICP.get_param('odoougurlar.nebim_sync_cost_enabled', 'False') not in ('True', 'true', '1'):
             _logger.info("Maliyet senkronizasyonu kapalı.")
             return
 
-        sp_name = ICP.get_param('odoougurlar.nebim_sp_product_cost', 'usp_UrunEkstresi_BirimMaliyetHesapla')
-        
-        # Olmayan _create_sync_log / _update_sync_log çağrılıyordu: cron her çalışmada AttributeError
-        log_id = self._create_log('Maliyet Senkronizasyonu', 'price')
-        stats = {'processed': 0, 'updated': 0, 'failed': 0}
-        connector = self.env['odoougurlar.nebim.connector']
-        
+        # Partiler arası commit var: transaction kilidi yetmez, oturum kilidi
+        self.env.cr.execute("SELECT pg_try_advisory_lock(%s)", [NEBIM_COST_SYNC_LOCK])
+        if not self.env.cr.fetchone()[0]:
+            _logger.info("Maliyet senkronizasyonu atlandı: başka bir maliyet senkronizasyonu çalışıyor.")
+            return
         try:
-            # SP çağır
-            _logger.info(f"Maliyet SP çağrılıyor: {sp_name}")
-            results = connector.run_proc(sp_name)
-            if not results or not isinstance(results, list):
-                self._finish_log(log_id, 'done', stats=stats, note="Nebim'den maliyet verisi dönmedi.")
+            return self._sync_product_costs_locked()
+        finally:
+            try:
+                self.env.cr.execute("SELECT pg_advisory_unlock(%s)", [NEBIM_COST_SYNC_LOCK])
+            except Exception:
+                self.env.cr.rollback()
+                self.env.cr.execute("SELECT pg_advisory_unlock(%s)", [NEBIM_COST_SYNC_LOCK])
+
+    @api.private
+    def _sync_product_costs_locked(self):
+        log = self._create_log('Maliyet Senkronizasyonu (Price2)', 'price')
+        self.env.cr.commit()
+        stats = {'processed': 0, 'updated': 0, 'failed': 0}
+        try:
+            connector = self.env['odoougurlar.nebim.connector']
+            sp_name = connector._get_sp_name('item_details')
+            _logger.info("Maliyet SP çağrılıyor: %s Day=36500", sp_name)
+            results = connector.run_proc(sp_name, [{'Name': 'Day', 'Value': '36500'}])
+            rows = results if isinstance(results, list) else ([results] if results else [])
+            if not rows:
+                self._finish_log(log, 'done', stats=stats, note="Nebim'den ürün verisi dönmedi.")
                 return stats
-            
-            stats['processed'] = len(results)
-            
-            # Verileri belleğe al: barkod veya productcode'a göre NetMaliyet veya Price2 eşlemesi
-            cost_by_code = {}
-            for row in results:
-                product_code = str(row.get('ProductCode', '')).strip()
-                barcode = str(row.get('Barcode', '')).strip()
-                net_maliyet = row.get('NetMaliyet')
-                if net_maliyet is None:
-                    net_maliyet = row.get('Price2', 0.0)
-                
-                if barcode:
-                    cost_by_code[barcode] = float(net_maliyet)
-                if product_code:
-                    cost_by_code[product_code] = float(net_maliyet)
-            
-            if not cost_by_code:
-                self._finish_log(log_id, 'done', stats=stats, note="İşlenecek geçerli ürün kodu/barkod bulunamadı.")
-                return stats
-                
-            # Odoo'daki ürünleri bul
-            keys = list(cost_by_code.keys())
-            
-            # Limit IN query size
-            BATCH_SIZE = 1000
-            for i in range(0, len(keys), BATCH_SIZE):
-                batch_keys = keys[i:i+BATCH_SIZE]
-                products = self.env['product.product'].search([
-                    '|',
-                    ('default_code', 'in', batch_keys),
-                    ('barcode', 'in', batch_keys)
-                ])
-                
-                # Güncelle
-                for product in products:
+
+            processor = self.env['odoougurlar.product.processor']
+            by_b1, by_b2, by_sku = {}, {}, {}
+            for row in rows:
+                cost = processor._nebim_cost(row)
+                if not cost:
+                    continue
+                stats['processed'] += 1
+                for key, target in (('Barcode1', by_b1), ('Barcode2', by_b2), ('ItemSku', by_sku)):
+                    value = str(row.get(key) or '').strip()
+                    if value:
+                        target[value] = cost
+
+            barcodes = list(set(by_b1) | set(by_b2))
+            self.env.cr.execute("""
+                SELECT id, barcode, default_code FROM product_product
+                WHERE active AND (barcode = ANY(%s::text[]) OR default_code = ANY(%s::text[]))
+            """, [barcodes, list(by_sku)])
+            cost_by_product = {}
+            for pid, barcode, code in self.env.cr.fetchall():
+                cost = by_b1.get(barcode) or by_b2.get(barcode) or by_sku.get(code)
+                if cost:
+                    cost_by_product[pid] = cost
+
+            Product = self.env['product.product'].sudo()
+            ids = list(cost_by_product)
+            for i in range(0, len(ids), COST_BATCH_SIZE):
+                batch = Product.browse(ids[i:i + COST_BATCH_SIZE])
+                to_write = defaultdict(list)
+                for product in batch:
+                    cost = cost_by_product[product.id]
+                    if round(product.standard_price, 2) != cost:
+                        to_write[cost].append(product.id)
+                for cost, pids in to_write.items():
                     try:
-                        new_cost = cost_by_code.get(product.barcode)
-                        if new_cost is None:
-                            new_cost = cost_by_code.get(product.default_code)
-                            
-                        if new_cost is not None and round(product.standard_price, 2) != round(new_cost, 2):
-                            product.standard_price = new_cost
-                            stats['updated'] += 1
+                        with self.env.cr.savepoint():
+                            Product.browse(pids).write({'standard_price': cost})
+                        stats['updated'] += len(pids)
                     except Exception as e:
-                        stats['failed'] += 1
-                        _logger.error("Ürün maliyet güncelleme hatası: %s - %s", product.display_name, e)
-            
-            self._finish_log(log_id, 'done', stats=stats)
-            
+                        stats['failed'] += len(pids)
+                        _logger.error("Maliyet yazılamadı (%s ürün, %.2f): %s", len(pids), cost, e)
+                self.env.cr.commit()
+                self.env.invalidate_all()
+
+            unmatched = stats['processed'] - len(cost_by_product)
+            note = (f"Nebim: {len(rows)} satır, {stats['processed']} maliyetli | "
+                    f"Eşleşen ürün: {len(cost_by_product)} | Güncellenen: {stats['updated']}")
+            if unmatched > 0:
+                note += f" | Odoo'da bulunamayan (yaklaşık): {unmatched}"
+            self._finish_log(log, 'done', stats=stats, note=note)
+            _logger.info("Maliyet senkronizasyonu: %s", note)
         except Exception as e:
-            self._finish_log(log_id, 'error', error=str(e))
-            
+            self.env.cr.rollback()
+            _logger.exception("Maliyet senkronizasyonu başarısız")
+            self._finish_log(log, 'error', stats=stats, error=str(e))
         return stats

@@ -122,10 +122,11 @@ class ResConfigSettings(models.TransientModel):
         help='Ürün maliyetlerini (Birim Maliyet) getiren stored procedure adı',
     )
     nebim_sync_cost_enabled = fields.Boolean(
-        string='Maliyet Senkronizasyonu Aktif',
+        string='Maliyet Güncelleme Aktif',
         config_parameter='odoougurlar.nebim_sync_cost_enabled',
         default=False,
-        help='Aktif olduğunda ürünlerin maliyet fiyatları düzenli olarak Nebim\'den çekilerek güncellenir.',
+        help='Aktif olduğunda Nebim Price2 (KDV dahil maliyet) ürün senkronunda ve günlük tam '
+             'taramada varyantların Maliyet alanına yazılır.',
     )
 
     # -----------------------------------------------------------------
@@ -357,3 +358,8 @@ class ResConfigSettings(models.TransientModel):
         cancel_minutes = int(ICP.get_param('odoougurlar.nebim_cancel_cleanup_interval', '10') or 10)
         self._nebim_apply_cron('odoougurlar.cron_nebim_cancel_cleanup', cancel_on, cancel_minutes, 'minutes')
         _logger.info("İptal temizliği cron %s, aralık: %d dk", 'aktif' if cancel_on else 'pasif', cancel_minutes)
+
+        # Maliyet (Price2) günlük tam tarama: ayar açılsa da cron hiç aktifleşmiyordu
+        cost_on = flag('odoougurlar.nebim_sync_cost_enabled')
+        self._nebim_apply_cron('odoougurlar.cron_cost_sync', cost_on, 1, 'days')
+        _logger.info("Maliyet cron %s", 'aktif' if cost_on else 'pasif')
