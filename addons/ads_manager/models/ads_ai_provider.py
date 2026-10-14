@@ -93,8 +93,10 @@ class AdsAiProvider(models.Model):
         if not api_key:
             raise UserError(_("Gemini API key is not configured."))
         
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={api_key}"
-        headers = {'Content-Type': 'application/json'}
+        # Anahtar URL'de değil başlıkta: istek hatası metni (log, kullanıcıya gösterilen uyarı)
+        # URL'yi içerdiğinden anahtar sızıyordu
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent"
+        headers = {'Content-Type': 'application/json', 'x-goog-api-key': api_key.strip()}
         payload = {
             "system_instruction": {
                 "parts": [{"text": "Sen bir dijital reklam analiz uzmanısın. Türkçe yanıt ver. Somut, veri odaklı öneriler sun."}]
@@ -107,17 +109,26 @@ class AdsAiProvider(models.Model):
                 "maxOutputTokens": self.max_tokens,
             }
         }
-        
+        # 2.5 Flash varsayılan olarak "düşünür": token'lar çıkış fiyatından faturalanır ve
+        # maxOutputTokens'ı paylaşır; analiz metni için kapatılır (Pro'da kapatılamaz)
+        if '2.5-flash' in (self.model_name or ''):
+            payload["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 0}
+
         try:
             response = requests.post(url, headers=headers, json=payload, timeout=30)
             response.raise_for_status()
             data = response.json()
+            usage = data.get('usageMetadata') or {}
+            # Recordset'e öznitelik yazılamaz (__slots__): token sayacı burada güncellenir
+            if usage.get('totalTokenCount'):
+                self.write({'total_tokens_used': self.total_tokens_used + int(usage['totalTokenCount'])})
             if 'candidates' in data and data['candidates']:
                 return data['candidates'][0]['content']['parts'][0]['text']
             return ""
         except requests.exceptions.RequestException as e:
-            _logger.error("Error calling Gemini API: %s", str(e))
-            raise UserError(_("Failed to communicate with Gemini API: %s") % str(e))
+            status = e.response.status_code if getattr(e, 'response', None) is not None else None
+            _logger.error("Error calling Gemini API (status=%s): %s", status, e.__class__.__name__)
+            raise UserError(_("Failed to communicate with Gemini API (%s).") % (status or e.__class__.__name__))
 
     @api.private
     def _call_openai(self, prompt, context):

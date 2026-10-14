@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Ads Manager',
-    'version': '19.0.1.0.0',
+    'version': '19.0.1.0.1',
     'category': 'Marketing',
     'summary': 'Meta & Google Ads Yönetimi, Analitik ve AI Optimizasyon',
     'description': """
