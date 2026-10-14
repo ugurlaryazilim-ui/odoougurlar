@@ -9,8 +9,18 @@
             <field name="interval_number">5</field>
             <field name="interval_type">minutes</field>
             <field name="active">True</field>
-            <field name="numbercall">-1</field>
             <field name="priority">5</field>
+        </record>
+        <!-- Biten / boş rotaları kapatır (açık siparişli rotalara dokunmaz) -->
+        <record id="cron_route_batch_cleanup" model="ir.cron">
+            <field name="name">Toplama Listesi: Biten Rotaları Kapat</field>
+            <field name="model_id" ref="stock_picking_batch.model_stock_picking_batch"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_cleanup_route_batches()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="active">True</field>
+            <field name="priority">20</field>
         </record>
         <!-- _gc_old_operations artık @api.autovacuum ile otomatik çalışır,
              ayrı cron kaydına gerek yoktur. -->

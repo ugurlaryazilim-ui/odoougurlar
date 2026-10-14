@@ -9,6 +9,10 @@ from odoo.exceptions import AccessError, UserError, ValidationError
 
 IST = pytz.timezone('Europe/Istanbul')
 
+# Bundan eski rotasız siparişler yeni rotaya otomatik eklenmez (stoksuz / sevk edilemeyen
+# siparişler her pencerede tekrar tekrar rotaya giriyordu)
+ORPHAN_MAX_AGE = timedelta(days=7)
+
 _logger = logging.getLogger(__name__)
 
 
@@ -183,7 +187,8 @@ class PickingSchedule(models.Model):
 
         for schedule in schedules:
             try:
-                schedule._check_and_create_batch()
+                with self.env.cr.savepoint():
+                    schedule._check_and_create_batch()
             except Exception as e:
                 _logger.exception("Toplama zamanlayıcı hatası [%s]: %s",
                                   schedule.name, e)
@@ -304,21 +309,21 @@ class PickingSchedule(models.Model):
             today, dt_time(target_line.hour, target_line.minute))
 
         # Pencere başı = bir önceki saat (veya önceki günün son saati)
+        # Pencere (başlangıç, bitiş] — başlangıç önceki saat dilimi (dahil değil).
+        # Önceden başlangıç +1 dk idi: 08:30:00-08:30:59 arası oluşan sipariş hiçbir pencereye girmiyordu
         if target_idx == 0:
-            # İlk saat → pencere başı = önceki günün son saati + 1 dk
+            # İlk saat → pencere başı = önceki günün son saati
             last_line = sorted_lines[-1]
-            prev_dt = datetime.combine(
+            window_start = datetime.combine(
                 today - timedelta(days=1),
                 dt_time(last_line.hour, last_line.minute))
-            window_start = prev_dt + timedelta(minutes=1)
         else:
             prev_line = sorted_lines[target_idx - 1]
             window_start = datetime.combine(
-                today,
-                dt_time(prev_line.hour, prev_line.minute)) + timedelta(minutes=1)
+                today, dt_time(prev_line.hour, prev_line.minute))
 
-        # Pencere etiketi
-        start_str = window_start.strftime('%H:%M')
+        # Pencere etiketi (görünüm aynı: "08:31-11:00")
+        start_str = (window_start + timedelta(minutes=1)).strftime('%H:%M')
         end_str = window_end.strftime('%H:%M')
         window_label = f"{start_str}-{end_str}"
 
@@ -341,7 +346,8 @@ class PickingSchedule(models.Model):
                 target_line = line
 
         if not target_line:
-            target_line = sorted_lines[-1] if sorted_lines else None
+            # Günün ilk saatinden önce: dünün son saatinden bu yana gelenler (ilk pencere)
+            target_line = sorted_lines[0] if sorted_lines else None
 
         if target_line:
             return self._create_batch_for_window(target_line, now.date(), now)
@@ -390,7 +396,7 @@ class PickingSchedule(models.Model):
             ('picking_type_id', '=', picking_type.id),
             ('state', 'in', ['confirmed', 'waiting', 'assigned']),
             ('batch_id', '=', False),
-            ('create_date', '>=', window_start_utc),
+            ('create_date', '>', window_start_utc),
             ('create_date', '<=', window_end_utc),
         ]
         pickings = Picking.search(domain)
@@ -403,31 +409,17 @@ class PickingSchedule(models.Model):
             ('picking_type_id', '=', picking_type.id),
             ('state', 'in', ['confirmed', 'waiting', 'assigned']),
             ('batch_id', '=', False),
-            ('create_date', '<', window_start_utc),
+            ('create_date', '<=', window_start_utc),
+            ('create_date', '>=', window_start_utc - ORPHAN_MAX_AGE),
         ]
         orphan_pickings = Picking.search(orphan_domain)
         if orphan_pickings:
             _logger.info(
                 "Toplama [%s] %s — %d orphan picking dahil ediliyor "
-                "(önceki pencerelerden kalan, batch'siz)",
-                self.name, window_label, len(orphan_pickings))
-            # Detaylı kaynak bilgisi logla — hangi pazaryerinden geldiği
-            for p in orphan_pickings:
-                source = 'Bilinmeyen'
-                so = p.sale_id
-                if not so and p.origin:
-                    so = self.env['sale.order'].sudo().search(
-                        [('name', '=', p.origin)], limit=1)
-                if so:
-                    if hasattr(so, 'amazon_store_id') and so.amazon_store_id:
-                        source = f'Amazon ({so.amazon_store_id.name})'
-                    elif hasattr(so, 'trendyol_store_id') and so.trendyol_store_id:
-                        source = f'Trendyol ({so.trendyol_store_id.name})'
-                    else:
-                        source = f'Odoo ({so.name})'
-                _logger.info(
-                    "  Orphan: %s | kaynak=%s | state=%s | create=%s",
-                    p.name, source, p.state, p.create_date)
+                "(son %d günde kalan, batch'siz): %s%s",
+                self.name, window_label, len(orphan_pickings), ORPHAN_MAX_AGE.days,
+                ', '.join(orphan_pickings[:20].mapped('name')),
+                ' …' if len(orphan_pickings) > 20 else '')
             pickings |= orphan_pickings
 
         # ─── OTOMATİK BATCH SORUNU: Odoo'nun auto_batch'i picking'lere
@@ -440,18 +432,20 @@ class PickingSchedule(models.Model):
             ('picking_type_id', '=', picking_type.id),
             ('state', 'in', ['confirmed', 'waiting', 'assigned']),
             ('batch_id', '!=', False),
-            ('create_date', '>=', window_start_utc),
+            ('create_date', '>', window_start_utc),
             ('create_date', '<=', window_end_utc),
         ])
         for p in auto_batched:
             batch = p.batch_id
-            # Auto-batch (time_window boş = Odoo oto-batch) VEYA
-            # Manuel batch (time_window "Manuel" içeren = bizim cron'un tekli batch'i)
-            # Gruplu rota batch'leri (time_window "08:30-11:00" gibi) dokunulmaz
-            is_auto_batch = not batch.time_window  # Odoo auto-batch → time_window boş
+            # Odoo oto-batch'in açtığı tekli rotalar birleştirilir. Elle kurulmuş (birden çok
+            # siparişli), birine atanmış veya toplanmaya başlanmış rotalara dokunulmaz:
+            # önceden "Manuel (Ara Ek)" etiketli her rota dağıtılıp siliniyordu
+            is_auto_batch = not batch.time_window
             is_manuel_batch = batch.time_window and 'Manuel' in batch.time_window
             if ((is_auto_batch or is_manuel_batch)
-                    and batch.state in ('draft', 'in_progress')):
+                    and batch.state == 'draft'
+                    and not batch.user_id
+                    and len(batch.picking_ids) == 1):
                 solo_batch_pickings |= p
                 solo_batches_to_delete |= batch
 
@@ -474,16 +468,13 @@ class PickingSchedule(models.Model):
             picking_type.id, len(pickings), len(solo_batch_pickings))
 
         if not pickings:
-            # Detaylı teşhis logu
-            all_pickings = Picking.search([
-                ('picking_type_id', '=', picking_type.id)])
-            state_summary = {}
-            for p in all_pickings:
-                key = f"{p.state}{'(batch)' if p.batch_id else ''}"
-                state_summary[key] = state_summary.get(key, 0) + 1
-            _logger.info(
-                "Toplama [%s] TEŞHİS — Tüm outgoing picking dağılımı: %s",
-                self.name, state_summary)
+            # Teşhis: açık sevkiyat dağılımı (önceden her 5 dk tüm sevkiyat geçmişi okunuyordu)
+            groups = Picking._read_group(
+                [('picking_type_id', '=', picking_type.id),
+                 ('state', 'in', ['draft', 'confirmed', 'waiting', 'assigned'])],
+                ['state'], ['__count'])
+            _logger.info("Toplama [%s] TEŞHİS — açık sevkiyatlar: %s",
+                         self.name, {state: count for state, count in groups})
             return None
 
         # ═══ MOVE SEVİYESİNDE DEPO ATAMASI ═══
@@ -529,33 +520,38 @@ class PickingSchedule(models.Model):
         count_unavailable = 0
 
         # ═══ FAZ 1: İlk stok kontrolü ═══
-        for picking in pickings:
-            try:
-                picking.action_assign()
-            except Exception:
-                pass
+        self._safe_assign(pickings)
 
         # ═══ FAZ 2: Transfer ihtiyaçlarını topla ═══
         transfer_from_fallback = {}  # {product_id: total_qty}
         transfer_from_return = {}
+        # Etiket hareket bazında: önceden ürün bazındaydı, aynı ürünün ana depoda rezerve
+        # edilmiş siparişi de "yedek depodan topla" diye etiketleniyordu
+        moves_from_fallback = set()
+        moves_from_return = set()
         # Kalan stok takibi (aynı üründen birden fazla sipariş varsa aşırı tahsis önleme)
         fb_remaining = dict(fallback_qty_map)
         ret_remaining = dict(return_qty_map)
 
         for picking in pickings:
             for move in picking.move_ids:
-                if move.state != 'assigned':
-                    demand = move.product_uom_qty
+                if move.state not in ('assigned', 'done', 'cancel'):
+                    # Kısmi rezervde yalnız eksik kısım transfer edilir
+                    demand = max(0.0, move.product_uom_qty - (move.quantity or 0))
+                    if not demand:
+                        continue
                     pid = move.product_id.id
                     fb_avail = max(0, fb_remaining.get(pid, 0))
                     if fb_avail >= demand and fallback_wh:
                         transfer_from_fallback[pid] = transfer_from_fallback.get(pid, 0) + demand
                         fb_remaining[pid] = fb_remaining.get(pid, 0) - demand
+                        moves_from_fallback.add(move.id)
                     else:
                         ret_avail = max(0, ret_remaining.get(pid, 0))
                         if ret_avail >= demand and return_wh:
                             transfer_from_return[pid] = transfer_from_return.get(pid, 0) + demand
                             ret_remaining[pid] = ret_remaining.get(pid, 0) - demand
+                            moves_from_return.add(move.id)
 
         # ═══ FAZ 3: Otomatik iç transferleri oluştur ve onayla ═══
         transfers_created = []
@@ -577,11 +573,7 @@ class PickingSchedule(models.Model):
                 "Toplama [%s] %s — %d otomatik iç transfer tamamlandı, "
                 "pickings tekrar assign ediliyor...",
                 self.name, window_label, len(transfers_created))
-            for picking in pickings:
-                try:
-                    picking.action_assign()
-                except Exception:
-                    pass
+            self._safe_assign(pickings)
 
         # ═══ FAZ 5: Source warehouse etiketleme ═══
         # NOT: FAZ 2'de toplanan transfer_from_fallback / transfer_from_return
@@ -593,11 +585,11 @@ class PickingSchedule(models.Model):
                 pid = move.product_id.id
                 demand = move.product_uom_qty
 
-                if pid in transfer_from_fallback and fallback_wh:
+                if move.id in moves_from_fallback and fallback_wh:
                     # Bu ürün HEYKEL'den transfer edildi — kaynak: HEYKEL
                     move.sudo().write({'source_warehouse_id': fallback_wh.id})
                     count_fallback += 1
-                elif pid in transfer_from_return and return_wh:
+                elif move.id in moves_from_return and return_wh:
                     # Bu ürün İADE deposundan transfer edildi — kaynak: İADE
                     move.sudo().write({'source_warehouse_id': return_wh.id})
                     count_return += 1
@@ -679,7 +671,36 @@ class PickingSchedule(models.Model):
     # OTOMATİK İÇ TRANSFER
     # ═══════════════════════════════════════════════════════
 
+    def _safe_assign(self, pickings):
+        """Rezervasyon: her picking kendi savepoint'inde (SQL hatası tüm turu bozmasın)."""
+        for picking in pickings:
+            try:
+                with self.env.cr.savepoint():
+                    picking.action_assign()
+            except Exception as e:
+                _logger.warning("Toplama: %s rezerve edilemedi: %s", picking.name, e)
+
     def _create_auto_internal_transfer(self, product_qty_map, source_wh, dest_wh, label):
+        """Otomatik iç transfer: başarısız olursa (done olmazsa) iptal edilir.
+
+        Önceden yarım kalan transfer yedek depodaki stoğu rezerve ederek kalıyor,
+        her pencerede yenisi ekleniyordu.
+        """
+        try:
+            with self.env.cr.savepoint():
+                picking = self._create_auto_internal_transfer_raw(
+                    product_qty_map, source_wh, dest_wh, label)
+                if picking and picking.state != 'done':
+                    _logger.warning("Otomatik transfer %s done olmadı (state=%s) — iptal ediliyor",
+                                    picking.name, picking.state)
+                    picking.action_cancel()
+                    return None
+                return picking
+        except Exception as e:
+            _logger.exception("Otomatik transfer (%s) başarısız, geri alındı: %s", label, e)
+            return None
+
+    def _create_auto_internal_transfer_raw(self, product_qty_map, source_wh, dest_wh, label):
         """Otomatik iç transfer oluştur ve onayla.
 
         Stok başka depoda tespit edildiğinde, ürünleri ana depoya taşır.
@@ -774,7 +795,7 @@ class PickingSchedule(models.Model):
             _logger.exception(
                 "Otomatik transfer ADIM 3 HATA (confirm): %s — %s",
                 picking.name, e)
-            return None
+            return picking
 
         # ─── ADIM 4: Stok rezervasyonu (Assign) ───
         try:
@@ -806,7 +827,7 @@ class PickingSchedule(models.Model):
             result = picking.with_context(**ctx).button_validate()
 
             # Wizard döndüyse otomatik işle
-            for _ in range(3):
+            for _attempt in range(3):
                 if not isinstance(result, dict) or not result.get('res_model'):
                     break
                 try:
@@ -842,13 +863,13 @@ class PickingSchedule(models.Model):
                 _logger.warning(
                     "⚠️ Otomatik transfer validate sonrası state=%s (beklenen: done) — %s",
                     picking.state, picking.name)
-                return None
+                return picking
 
         except Exception as e:
             _logger.exception(
                 "Otomatik transfer ADIM 6 HATA (validate): %s — %s",
                 picking.name, e)
-            return None
+            return picking
 
     def _update_sale_order_batch_names(self, pickings, batch_name):
         """Picking'lere ait sale order'ların 'Rota' alanını güncelle.
