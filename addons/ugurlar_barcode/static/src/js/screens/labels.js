@@ -3,6 +3,7 @@
 import { Component, useState, xml, markup, onWillUnmount } from "@odoo/owl";
 import { BarcodeService } from "../barcode_service";
 import { openContinuousCameraScanner } from "../camera_scanner";
+import { escapeHtml, safeNum, safeWeight, safeAlign } from "../utils/html";
 
 export class LabelScreen extends Component {
     static template = xml`
@@ -470,15 +471,15 @@ export class LabelScreen extends Component {
         const html = tpl.elements.map(el => {
             if (el.type === 'barcode_visual') {
                 const img = `<img src="/report/barcode/Code128/${encodeURIComponent(label.barcode || '123456')}?width=800&amp;height=200" style="width:100%; height:100%; object-fit:fill;" />`;
-                return `<div style="position:absolute; left:${el.x * scale}px; top:${el.y * scale}px; width:${el.width * scale}px; height:${el.height * scale}px; overflow:hidden;">${img}</div>`;
+                return `<div style="position:absolute; left:${safeNum(el.x) * scale}px; top:${safeNum(el.y) * scale}px; width:${safeNum(el.width) * scale}px; height:${safeNum(el.height) * scale}px; overflow:hidden;">${img}</div>`;
             }
             if (el.type === 'line') {
-                return `<div style="position:absolute; left:${el.x * scale}px; top:${el.y * scale}px; width:${el.width * scale}px; border-top:${Math.max(1, el.height * scale)}px solid #333;"></div>`;
+                return `<div style="position:absolute; left:${safeNum(el.x) * scale}px; top:${safeNum(el.y) * scale}px; width:${safeNum(el.width) * scale}px; border-top:${Math.max(1, safeNum(el.height) * scale)}px solid #333;"></div>`;
             }
             const val = this._getFieldValue(el, label);
             if (!val) return '';
-            const fs = Math.max(6, el.fontSize * scale * 0.28);
-            return `<div style="position:absolute; left:${el.x * scale}px; top:${el.y * scale}px; width:${el.width * scale}px; height:${el.height * scale}px; font-size:${fs}px; font-weight:${el.fontWeight}; text-align:${el.textAlign}; overflow:hidden; line-height:1.2; white-space:pre-wrap; word-break:break-word; text-overflow:ellipsis;">${val}</div>`;
+            const fs = Math.max(6, safeNum(el.fontSize, 9) * scale * 0.28);
+            return `<div style="position:absolute; left:${safeNum(el.x) * scale}px; top:${safeNum(el.y) * scale}px; width:${safeNum(el.width) * scale}px; height:${safeNum(el.height) * scale}px; font-size:${fs}px; font-weight:${safeWeight(el.fontWeight)}; text-align:${safeAlign(el.textAlign)}; overflow:hidden; line-height:1.2; white-space:pre-wrap; word-break:break-word; text-overflow:ellipsis;">${escapeHtml(val)}</div>`;
         }).join('');
         return markup(html);
     }
@@ -504,11 +505,12 @@ export class LabelScreen extends Component {
             URL.revokeObjectURL(url);
             return;
         }
+        const deadline = Date.now() + 5000;  // görsel yüklenemezse en geç 5 sn sonra yazdır
         const tryPrint = () => {
             try {
                 const imgs = printWindow.document.querySelectorAll('img');
-                const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
-                if (allLoaded || imgs.length === 0) {
+                const allLoaded = Array.from(imgs).every(img => img.complete);
+                if (allLoaded || imgs.length === 0 || Date.now() > deadline) {
                     printWindow.focus();
                     printWindow.print();
                     setTimeout(() => URL.revokeObjectURL(url), 5000);
@@ -573,11 +575,11 @@ export class LabelScreen extends Component {
         const labelHtml = labels.map(l => {
             const contents = elems.map(el => {
                 // Yüzdesel konumlandırma — yazıcı @page size'ı görmezden gelse bile çalışır
-                const xPct = (el.x / w * 100).toFixed(3);
-                const yPct = (el.y / h * 100).toFixed(3);
-                const wPct = (el.width / w * 100).toFixed(3);
-                const hPct = (el.height / h * 100).toFixed(3);
-                const fsMm = (el.fontSize || 9) * 0.353;
+                const xPct = (safeNum(el.x) / w * 100).toFixed(3);
+                const yPct = (safeNum(el.y) / h * 100).toFixed(3);
+                const wPct = (safeNum(el.width) / w * 100).toFixed(3);
+                const hPct = (safeNum(el.height) / h * 100).toFixed(3);
+                const fsMm = (safeNum(el.fontSize, 9) || 9) * 0.353;
                 const fsVw = (fsMm / w * 100).toFixed(3);
 
                 if (el.type === 'barcode_visual') {
@@ -585,11 +587,11 @@ export class LabelScreen extends Component {
                     return `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:${hPct}%; overflow:visible;">${img}</div>`;
                 }
                 if (el.type === 'line') {
-                    return `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:0; border-top:${Math.max(0.3, el.height)}mm solid #000;"></div>`;
+                    return `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:0; border-top:${Math.max(0.3, safeNum(el.height))}mm solid #000;"></div>`;
                 }
                 const val = this._getFieldValue(el, l);
                 if (!val) return '';
-                return `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:${hPct}%; font-size:${fsVw}vw; font-weight:${el.fontWeight}; text-align:${el.textAlign || 'left'}; overflow:hidden; line-height:1.2; white-space:pre-wrap; word-break:break-word;">${val}</div>`;
+                return `<div style="position:absolute; left:${xPct}%; top:${yPct}%; width:${wPct}%; height:${hPct}%; font-size:${fsVw}vw; font-weight:${safeWeight(el.fontWeight)}; text-align:${safeAlign(el.textAlign)}; overflow:hidden; line-height:1.2; white-space:pre-wrap; word-break:break-word;">${escapeHtml(val)}</div>`;
             }).join('');
             return `<div class="label">${contents}</div>`;
         }).join('');
@@ -644,10 +646,10 @@ export class LabelScreen extends Component {
             @media print { @page { size: auto; margin: 0 !important; } html, body { margin:0!important; padding:0!important; } }
         </style></head><body>${labels.map(l => `
             <div class="label">
-                <div class="label-name">${l.name}</div>
-                <div class="label-code">${l.default_code || l.nebim_code || ''}</div>
+                <div class="label-name">${escapeHtml(l.name)}</div>
+                <div class="label-code">${escapeHtml(l.default_code || l.nebim_code || '')}</div>
                 <div class="label-barcode-wrap">${this._generateBarcodeImg(l.barcode, 46, 14)}</div>
-                <div class="label-price">₺${l.list_price}</div>
+                <div class="label-price">₺${escapeHtml(l.list_price)}</div>
             </div>
         `).join('')}</body></html>`;
     }

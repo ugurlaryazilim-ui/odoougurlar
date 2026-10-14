@@ -1,6 +1,8 @@
 /** @odoo-module **/
 
 import { Component, useState, xml, onMounted, onWillUnmount, useRef } from "@odoo/owl";
+import { ConfirmationDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
+import { useService } from "@web/core/utils/hooks";
 import { BarcodeService } from "../barcode_service";
 import { vibrate, vibrateError, speak } from "../sound_utils";
 
@@ -156,6 +158,7 @@ export class ShelfClearAllScreen extends Component {
     `;
 
     setup() {
+        this.dialog = useService("dialog");
         this.shelfInputRef = useRef('shelfInput');
 
         this.state = useState({
@@ -216,7 +219,19 @@ export class ShelfClearAllScreen extends Component {
         }
     }
 
-    async doClearAll() {
+    // Geri alınamaz işlem: onay al
+    doClearAll() {
+        this.dialog.add(ConfirmationDialog, {
+            title: "Rafı Boşalt",
+            body: `${this.state.shelfBarcode} rafındaki tüm ürünlerin stoğu raftan kaldırılacak. Devam edilsin mi?`,
+            confirmLabel: "Evet, devam et",
+            cancelLabel: "Vazgeç",
+            confirm: () => this._doClearAll(),
+            cancel: () => {},
+        });
+    }
+
+    async _doClearAll() {
         this.state.error = null;
         this.state.loading = true;
 

@@ -474,6 +474,7 @@ export class MovementsScreen extends Component {
             navigator.mediaDevices.getUserMedia({
                 video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
             }).then(s => {
+                if (!scanning) { s.getTracks().forEach(t => t.stop()); return; }
                 stream = s;
                 video.srcObject = stream;
                 statusEl.textContent = 'Ürün barkodunu gösterin...';
@@ -483,7 +484,8 @@ export class MovementsScreen extends Component {
                 });
 
                 const scanFrame = async () => {
-                    if (!scanning || video.readyState < 2) {
+                    if (!scanning) return;
+                    if (video.readyState < 2) {
                         animFrame = requestAnimationFrame(scanFrame);
                         return;
                     }

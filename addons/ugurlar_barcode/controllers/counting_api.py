@@ -18,6 +18,7 @@ class CountingApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/count_save', type='jsonrpc', auth='user')
     def count_save(self, shelf_barcode='', items=None, **kw):
         """Sayım kaydet: raf barkodu + [{barcode, quantity}]."""
+        self._check_internal_user()
         if not shelf_barcode or not items:
             return {'error': 'Raf ve ürün listesi gerekli'}
 
@@ -37,7 +38,10 @@ class CountingApiController(BarcodeApiBase):
 
         for item in items:
             bc = item.get('barcode', '').strip()
-            new_qty = float(item.get('quantity', 0))
+            new_qty = self._parse_qty(item.get('quantity', 0), default=0, allow_zero=True)
+            if new_qty is None:
+                results.append({'barcode': bc, 'status': 'error', 'message': 'Geçersiz miktar'})
+                continue
 
             product = self._find_product(bc)
             if not product:
@@ -98,7 +102,7 @@ class CountingApiController(BarcodeApiBase):
                     'barcode': bc,
                     'product_name': product.name,
                     'status': 'error',
-                    'message': str(e),
+                    'message': self._error_text(e),
                 })
         # ═══ AKILLI SAYIM DÜZELTMESİ ═══
         # Sayılan ürünlerde başka konumlarda negatif bakiye varsa temizle
@@ -172,6 +176,7 @@ class CountingApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/count_list', type='jsonrpc', auth='user')
     def count_list(self, days=30, **kw):
         """Geçmiş sayımları listele — raf bazında gruplu."""
+        self._check_internal_user()
         date_from = datetime.now() - timedelta(days=int(days))
 
         operations = request.env['ugurlar.barcode.operation'].sudo().search([
@@ -185,7 +190,7 @@ class CountingApiController(BarcodeApiBase):
         for op in operations:
             loc_id = op.location_id.id if op.location_id else 0
             # Aynı dakika dilimindeki sayımları birleştir
-            op_time = str(op.create_date)[:16]  # YYYY-MM-DD HH:MM
+            op_time = str(self._local_dt(op.create_date))[:16]  # YYYY-MM-DD HH:MM (yerel)
             key = f'{loc_id}_{op_time}'
 
             if key not in counts:
@@ -196,7 +201,7 @@ class CountingApiController(BarcodeApiBase):
                     'location_barcode': op.location_id.barcode if op.location_id else '',
                     'warehouse': op.location_id.warehouse_id.name if op.location_id and op.location_id.warehouse_id else '',
                     'user_name': op.user_id.name or 'Bilinmeyen',
-                    'create_date': str(op.create_date)[:19],
+                    'create_date': str(self._local_dt(op.create_date))[:19],
                     'product_count': 0,
                     'total_quantity': 0,
                     'items': [],

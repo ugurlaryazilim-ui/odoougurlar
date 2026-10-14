@@ -1,10 +1,12 @@
 """Ortak yardımcı fonksiyonlar — tüm controller'lar bu mixin'i kullanır."""
 import json
 import logging
+from datetime import datetime
 import time
 import hashlib
 
-from odoo import http
+from odoo import _, http
+from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.http import request, Response
 
 _logger = logging.getLogger(__name__)
@@ -16,6 +18,169 @@ _DEBOUNCE_SECONDS = 0.5  # 500ms içinde aynı istek tekrarlanırsa atla
 
 class BarcodeApiBase(http.Controller):
     """Ortak yardımcı fonksiyonlar."""
+
+    # ─── Yetki ───────────────────────────────────────────
+    def _check_internal_user(self):
+        """auth='user' portal / e-ticaret müşterisini de kabul eder; tüm API'ler sudo ile
+        stok ve müşteri verisine eriştiğinden yalnız iç kullanıcılar çağırabilir."""
+        if not request.env.user._is_internal():
+            raise AccessError(_('Bu işlem için yetkiniz yok.'))
+
+    def _error_text(self, exc, prefix=''):
+        """İstemciye dönen hata: UserError/ValidationError mesajı operatöre gösterilir;
+        beklenmeyen hatalar (SQL, iç yol, traceback ayrıntısı) yalnız log'a yazılır."""
+        if isinstance(exc, (UserError, ValidationError, AccessError)):
+            text = exc.args[0] if exc.args else str(exc)
+        else:
+            _logger.exception("Mobil API hatası")
+            text = _('Beklenmeyen bir hata oluştu, işlem kaydedilmedi. Lütfen tekrar deneyin.')
+        return f'{prefix}{text}' if prefix else text
+
+    # ─── Toplanan miktarla sevkiyat ─────────────────────
+    def _missing_moves(self, pickings, qty_field='wave_collected_qty'):
+        """Toplanan < talep olan ve "Eksik" işaretlenmemiş hareketler (tamamlamayı engeller)."""
+        missing = []
+        for picking in pickings:
+            if picking.state in ('done', 'cancel'):
+                continue
+            for move in picking.move_ids:
+                if move.state == 'cancel' or move.product_uom_qty <= 0:
+                    continue
+                qty = getattr(move, qty_field) or 0
+                if qty < move.product_uom_qty and not move.wave_skipped:
+                    missing.append({
+                        'move_id': move.id,
+                        'picking_name': picking.name,
+                        'product_name': move.product_id.display_name,
+                        'demand_qty': move.product_uom_qty,
+                        'collected_qty': qty,
+                    })
+        return missing
+
+    def _missing_error(self, missing, action='tamamlanamaz'):
+        names = ', '.join(f"{m['product_name']} ({int(m['collected_qty'])}/{int(m['demand_qty'])})"
+                          for m in missing[:5])
+        more = f' ve {len(missing) - 5} ürün daha' if len(missing) > 5 else ''
+        return {
+            'error': f'{len(missing)} üründe eksik var, rota {action}: {names}{more}. '
+                     f'Ürünü toplayın veya "Eksik" olarak işaretleyin.',
+            'missing': missing,
+        }
+
+    def _apply_collected_quantities(self, picking, qty_field='wave_collected_qty'):
+        """Sevk miktarı = toplanan (talebi aşmaz). Önceden ml.reserved_uom_qty (Odoo 17+'da yok)
+        hata verip her move line'a tüm talep yazılıyordu: eksik ürün tam / iki katı sevk ediliyordu.
+
+        Returns: (toplanan toplam, kısmi var mı)
+        """
+        total = 0.0
+        partial = False
+        for move in picking.move_ids:
+            if move.state == 'cancel':
+                continue
+            if move.product_uom_qty == 0:
+                move._action_cancel()  # 0 talepli move doğrulamayı engelliyor
+                continue
+            qty = min(getattr(move, qty_field) or 0, move.product_uom_qty)
+            if qty < move.product_uom_qty:
+                partial = True
+            move.quantity = qty
+            move.picked = True
+            total += qty
+        return total, partial
+
+    def _safe_validate_picking(self, picking, backorder=False):
+        """Picking'i doğrular; Odoo sihirbazlarını (SMS, backorder, anında transfer) otomatik işler.
+
+        backorder=True: kısmi sevkte kalan miktar için bekleyen sevkiyat açılır
+        (False: kalan iptal — tam toplanmış / tam okutulmuş picking'ler için).
+
+        Returns: bool — picking done oldu mu
+        """
+        if picking.state in ('done', 'cancel'):
+            return picking.state == 'done'
+
+        for move in picking.move_ids:
+            if move.product_uom_qty == 0 and move.state != 'cancel':
+                move._action_cancel()
+
+        ctx = {
+            'skip_backorder': True,
+            'skip_immediate': True,
+            'button_validate_picking_ids': picking.ids,
+        }
+        if not backorder:
+            ctx['picking_ids_not_to_backorder'] = picking.ids
+        result = picking.with_context(**ctx).button_validate()
+
+        # Sihirbaz döndüyse otomatik işle (en fazla 3 — zincirleme sihirbazlar)
+        for _attempt in range(3):
+            if not isinstance(result, dict) or not result.get('res_model'):
+                break
+            wiz_model = result['res_model']
+            try:
+                wiz_ctx = {**ctx, **result.get('context', {})}
+                if result.get('res_id'):
+                    wizard = request.env[wiz_model].sudo().with_context(**wiz_ctx).browse(result['res_id'])
+                else:
+                    wizard = request.env[wiz_model].sudo().with_context(**wiz_ctx).create({})
+                if hasattr(wizard, 'dont_send_sms'):
+                    result = wizard.dont_send_sms() or True
+                elif hasattr(wizard, 'process'):
+                    result = wizard.process() or True
+                elif hasattr(wizard, 'action_done'):
+                    result = wizard.action_done() or True
+                else:
+                    _logger.warning("Bilinmeyen sihirbaz: %s — atlanıyor", wiz_model)
+                    break
+            except Exception as e:
+                _logger.warning("Sihirbaz %s hatası: %s", wiz_model, e)
+                break
+
+        picking.invalidate_recordset(['state'])
+        return picking.state == 'done'
+
+    # El terminalinde miktar kutusuna düşen barkod (8690123456789) gibi değerler stok yazmasın
+    MAX_QTY = 100000
+
+    def _parse_qty(self, value, default=1, allow_zero=False):
+        """İstemciden gelen miktar: sayı değilse, negatifse veya makul üst sınırı aşıyorsa None."""
+        try:
+            qty = float(value if value not in (None, '') else default)
+        except (TypeError, ValueError):
+            return None
+        if qty != qty or qty > self.MAX_QTY or qty < 0 or (qty == 0 and not allow_zero):
+            return None
+        return qty
+
+    # ─── Yerel saat ─────────────────────────────────────
+    def _local_dt(self, dt):
+        """UTC (naive) datetime → kullanıcının saat dilimi (yoksa İstanbul), naive döner.
+
+        Ekranlara / etikete yazılan saatler 3 saat geri görünüyordu.
+        """
+        if not dt:
+            return dt
+        import pytz
+        tz = pytz.timezone(request.env.user.tz or 'Europe/Istanbul')
+        return pytz.utc.localize(dt).astimezone(tz).replace(tzinfo=None)
+
+    def _local_today(self):
+        return self._local_dt(datetime.utcnow()).date()
+
+    def _is_stock_manager(self):
+        user = request.env.user
+        return user.has_group('stock.group_stock_manager') or user.has_group('base.group_system')
+
+    def _get_outgoing_picking(self, picking_id):
+        """İstemciden gelen id yalnız giden sevkiyat ise döner (başka belgeye yazılmasın)."""
+        try:
+            picking = request.env['stock.picking'].sudo().browse(int(picking_id or 0))
+        except (TypeError, ValueError):
+            return request.env['stock.picking'].browse()
+        if not picking.exists() or picking.picking_type_code != 'outgoing':
+            return request.env['stock.picking'].browse()
+        return picking
 
     def _get_all_pickings(self, batch):
         """Batch'e ait tüm picking'leri döndür (done dahil).
@@ -145,8 +310,16 @@ class BarcodeApiBase(http.Controller):
         ], limit=1)
         if not location:
             location = Location.search([
-                ('name', 'ilike', barcode), ('usage', '=', 'internal'),
+                '|', ('name', '=', barcode), ('complete_name', '=', barcode),
+                ('usage', '=', 'internal'),
             ], limit=1)
+        if not location:
+            # "A-1" yazınca "A-10" gelmesin: kısmi aramada yalnız tek eşleşme kabul edilir
+            matches = Location.search([
+                ('name', 'ilike', barcode), ('usage', '=', 'internal'),
+            ], limit=2)
+            if len(matches) == 1:
+                location = matches
         return location
 
     def _get_marka(self, tmpl, cache=None):
@@ -174,7 +347,7 @@ class BarcodeApiBase(http.Controller):
         Returns:
             (quant_id, quantity) veya None
         """
-        sql = ("SELECT id, quantity FROM stock_quant "
+        sql = ("SELECT id, quantity, reserved_quantity FROM stock_quant "
                "WHERE product_id=%s AND location_id=%s")
         params = [product_id, location_id]
         if positive_only:
@@ -237,7 +410,11 @@ class BarcodeApiBase(http.Controller):
             return False, f'{product.name} kaynak rafta bulunamadı'
 
         source_qty = source_row[1]
-        if source_qty < quantity:
+        available = source_qty - (source_row[2] or 0)
+        if available < quantity:
+            if available < source_qty:
+                return False, (f'Yetersiz stok! Kaynak: {source_qty} ({source_qty - available} adedi '
+                               f'siparişe ayrılmış), İstenen: {quantity}')
             return False, f'Yetersiz stok! Kaynak: {source_qty}, İstenen: {quantity}'
 
         source_quant = StockQuant.browse(source_row[0])
@@ -278,6 +455,7 @@ class BarcodeApiBase(http.Controller):
     @http.route('/ugurlar_barcode/api/tts_config', type='jsonrpc', auth='user')
     def tts_config(self, **kw):
         """Tüm aktif TTS mesajlarını key→message dict olarak döndür."""
+        self._check_internal_user()
         try:
             messages = request.env['ugurlar.tts.message'].sudo().search([
                 ('active', '=', True),

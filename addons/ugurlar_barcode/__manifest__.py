@@ -1,6 +1,6 @@
 {
     'name': 'Mobil',
-    'version': '19.0.1.0.0',
+    'version': '19.0.1.1.0',
     'category': 'Inventory/Barcode',
     'summary': 'Mobil uyumlu barkod tarama ve depo yönetim modülü',
     'description': """
@@ -46,6 +46,7 @@
             'ugurlar_barcode/static/src/js/barcode_service.js',
             'ugurlar_barcode/static/src/js/camera_scanner.js',
             'ugurlar_barcode/static/src/js/sound_utils.js',
+            'ugurlar_barcode/static/src/js/utils/html.js',
             'ugurlar_barcode/static/src/js/screens/main_menu.js',
             'ugurlar_barcode/static/src/js/screens/stock_search.js',
             'ugurlar_barcode/static/src/js/screens/shelf_search.js',

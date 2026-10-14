@@ -11,7 +11,8 @@
                     <button name="action_create_batch_now"
                             string="📦 Şimdi Toplama Listesi Oluştur"
                             type="object"
-                            class="btn-primary"/>
+                            class="btn-primary"
+                            groups="stock.group_stock_manager"/>
                 </header>
                 <sheet>
                     <div class="oe_title">

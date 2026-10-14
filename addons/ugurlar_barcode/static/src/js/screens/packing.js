@@ -1,6 +1,7 @@
 /** @odoo-module **/
 
 import { Component, useState, xml, onMounted, onWillUnmount, useRef, onPatched } from "@odoo/owl";
+import { escapeHtml, safeNum, safeColor, safeWeight, safeAlign } from "../utils/html";
 import { BarcodeService } from "../barcode_service";
 import { speak, vibrate, vibrateError } from "../sound_utils";
 import { generateBarcodeSVG } from "./label_designer";
@@ -797,10 +798,10 @@ export class PackingScreen extends Component {
 
         let elementsHtml = '';
         for (const el of template.elements) {
-            const x = el.x, y = el.y, w = el.width, h = el.height;
-            const fs = el.fontSize || 9, fw = el.fontWeight || 'normal';
-            const ta = el.textAlign || 'left', color = el.color || '#000000';
-            const bgColor = el.bgColor || 'transparent', rotation = el.rotation || 0;
+            const x = safeNum(el.x), y = safeNum(el.y), w = safeNum(el.width), h = safeNum(el.height);
+            const fs = safeNum(el.fontSize, 9) || 9, fw = safeWeight(el.fontWeight);
+            const ta = safeAlign(el.textAlign), color = safeColor(el.color, '#000000');
+            const bgColor = safeColor(el.bgColor, 'transparent'), rotation = safeNum(el.rotation);
             let content = '';
 
             if (el.type === 'line') {
@@ -809,7 +810,7 @@ export class PackingScreen extends Component {
                 continue;
             }
             if (el.type === 'box') {
-                const bw = el.borderWidth || 1;
+                const bw = safeNum(el.borderWidth, 1) || 1;
                 elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; border:${bw}px solid ${color}; background:${bgColor}; transform:rotate(${rotation}deg);"></div>`;
                 continue;
             }
@@ -831,15 +832,15 @@ export class PackingScreen extends Component {
             if (el.type === 'item_list') {
                 const items = data.items || [];
                 let tbl = '<table style="width:100%;border-collapse:collapse;font-size:inherit;"><thead><tr style="border-bottom:0.3mm solid #333;"><th style="text-align:left;padding:0 0.5mm;">#</th><th style="text-align:left;padding:0 0.5mm;">Ürün</th><th style="text-align:right;padding:0 0.5mm;">Adet</th><th style="text-align:left;padding:0 0.5mm;">Barkod</th></tr></thead><tbody>';
-                items.forEach((item, idx) => { tbl += `<tr><td style="padding:0 0.5mm;">${idx+1}</td><td style="padding:0 0.5mm;">${item.product_name}</td><td style="text-align:right;padding:0 0.5mm;">${item.qty}</td><td style="padding:0 0.5mm;">${item.barcode}</td></tr>`; });
+                items.forEach((item, idx) => { tbl += `<tr><td style="padding:0 0.5mm;">${idx+1}</td><td style="padding:0 0.5mm;">${escapeHtml(item.product_name)}</td><td style="text-align:right;padding:0 0.5mm;">${escapeHtml(item.qty)}</td><td style="padding:0 0.5mm;">${escapeHtml(item.barcode)}</td></tr>`; });
                 tbl += '</tbody></table>';
                 elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; font-size:${fs}pt; font-weight:${fw}; overflow:hidden; color:${color}; background:${bgColor}; transform:rotate(${rotation}deg);">${tbl}</div>`;
                 continue;
             }
             if (el.type === 'custom_text' || el.type === 'sender_name') {
-                content = el.content || '';
+                content = escapeHtml(el.content || '');
             } else {
-                content = this._getFieldValue(el.type, data);
+                content = escapeHtml(this._getFieldValue(el.type, data));
             }
             elementsHtml += `<div style="position:absolute; left:${x}mm; top:${y}mm; width:${w}mm; height:${h}mm; font-size:${fs}pt; font-weight:${fw}; text-align:${ta}; color:${color}; background:${bgColor}; transform:rotate(${rotation}deg); overflow:hidden; line-height:1.3; display:flex; align-items:center; ${ta === 'center' ? 'justify-content:center;' : ta === 'right' ? 'justify-content:flex-end;' : ''}">${content}</div>`;
         }
@@ -886,12 +887,12 @@ export class PackingScreen extends Component {
             : '';
 
         const itemsHtml = data.items.map(i =>
-            `<tr><td>${i.product_name}</td><td style="text-align:center;">${i.qty}</td><td style="text-align:center;">${i.barcode}</td></tr>`
+            `<tr><td>${escapeHtml(i.product_name)}</td><td style="text-align:center;">${escapeHtml(i.qty)}</td><td style="text-align:center;">${escapeHtml(i.barcode)}</td></tr>`
         ).join('');
 
         const html = `<!DOCTYPE html><html><head>
             <meta charset="utf-8">
-            <title>Kargo Etiketi — ${data.picking_name}</title>
+            <title>Kargo Etiketi — ${escapeHtml(data.picking_name)}</title>
             <style>
                 @page { size: 100mm 150mm; margin: 3mm; }
                 * { margin:0; padding:0; box-sizing:border-box; }
@@ -911,17 +912,17 @@ export class PackingScreen extends Component {
         </head><body>
             <div class="label">
                 <div class="header">
-                    <h2>${data.cargo_provider || 'KARGO'}</h2>
-                    <span>${data.picking_name}</span>
+                    <h2>${escapeHtml(data.cargo_provider || 'KARGO')}</h2>
+                    <span>${escapeHtml(data.picking_name)}</span>
                 </div>
                 <div class="info-grid">
-                    <div><div class="info-label">Sipariş No</div><div class="info-value">${data.order_number || data.origin}</div></div>
-                    <div><div class="info-label">Müşteri</div><div class="info-value">${data.customer_name || data.partner_name}</div></div>
-                    <div><div class="info-label">Tel</div><div class="info-value">${data.partner_phone || '-'}</div></div>
-                    <div><div class="info-label">Adet</div><div class="info-value">${data.total_qty} ürün</div></div>
+                    <div><div class="info-label">Sipariş No</div><div class="info-value">${escapeHtml(data.order_number || data.origin)}</div></div>
+                    <div><div class="info-label">Müşteri</div><div class="info-value">${escapeHtml(data.customer_name || data.partner_name)}</div></div>
+                    <div><div class="info-label">Tel</div><div class="info-value">${escapeHtml(data.partner_phone || '-')}</div></div>
+                    <div><div class="info-label">Adet</div><div class="info-value">${escapeHtml(data.total_qty)} ürün</div></div>
                 </div>
-                <div><div class="info-label">Adres</div><div class="info-value" style="font-size:10px;">${data.shipping_address || data.partner_address}</div><div class="info-value">${[data.shipping_district, data.shipping_city].filter(x=>x).join(' / ')}</div></div>
-                <div class="cargo-section"><div class="info-label">Kargo Takip No</div><div class="tracking">${cargoBarcode}</div>${barcodeHtml}</div>
+                <div><div class="info-label">Adres</div><div class="info-value" style="font-size:10px;">${escapeHtml(data.shipping_address || data.partner_address)}</div><div class="info-value">${escapeHtml([data.shipping_district, data.shipping_city].filter(x=>x).join(' / '))}</div></div>
+                <div class="cargo-section"><div class="info-label">Kargo Takip No</div><div class="tracking">${escapeHtml(cargoBarcode)}</div>${barcodeHtml}</div>
                 <table><thead><tr><th>Ürün</th><th>Adet</th><th>Barkod</th></tr></thead><tbody>${itemsHtml}</tbody></table>
             </div>
         </body></html>`;
@@ -953,10 +954,11 @@ export class PackingScreen extends Component {
             setTimeout(autoCloseAndFocus, 300);
         });
 
+        const deadline = Date.now() + 5000;  // görsel yüklenemezse en geç 5 sn sonra yazdır
         const tryPrint = () => {
             const imgs = win.document.querySelectorAll('img');
-            const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
-            if (allLoaded || imgs.length === 0) {
+            const allLoaded = Array.from(imgs).every(img => img.complete);
+            if (allLoaded || imgs.length === 0 || Date.now() > deadline) {
                 win.focus();
                 win.print();
                 // Fallback: afterprint desteklenmeyen tarayıcılar için
@@ -995,10 +997,11 @@ export class PackingScreen extends Component {
             setTimeout(autoCleanup, 300);
         });
 
+        const deadline = Date.now() + 5000;  // görsel yüklenemezse en geç 5 sn sonra yazdır
         const tryPrint = () => {
             const imgs = doc.querySelectorAll('img');
-            const allLoaded = Array.from(imgs).every(img => img.complete && img.naturalHeight > 0);
-            if (allLoaded || imgs.length === 0) {
+            const allLoaded = Array.from(imgs).every(img => img.complete);
+            if (allLoaded || imgs.length === 0 || Date.now() > deadline) {
                 iframe.contentWindow.focus();
                 iframe.contentWindow.print();
                 setTimeout(autoCleanup, 500);

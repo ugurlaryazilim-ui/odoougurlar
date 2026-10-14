@@ -18,6 +18,7 @@ class OperationsApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/stock_movements', type='jsonrpc', auth='user')
     def stock_movements(self, days=7, product_barcode='', move_type='all', limit=200, **kw):
         """Stok hareketlerini listele (HamurLabs uyumlu gelişmiş yapı)."""
+        self._check_internal_user()
         days = int(days)
 
         domain = [
@@ -75,7 +76,7 @@ class OperationsApiController(BarcodeApiBase):
                 'product_code': m.product_id.product_tmpl_id.nebim_code or m.product_id.default_code or '',
                 'quantity': m.quantity,
                 'uom': m.product_uom.name if m.product_uom else 'Adet',
-                'date': str(m.date)[:16],
+                'date': str(self._local_dt(m.date))[:16],
                 'source': m.location_id.complete_name,
                 'destination': m.location_dest_id.complete_name,
                 'reference': m.reference or '',
@@ -104,6 +105,7 @@ class OperationsApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/bulk_scan', type='jsonrpc', auth='user')
     def bulk_scan(self, items=None, operation='info', shelf_barcode='', **kw):
         """Toplu barkod işlemi."""
+        self._check_internal_user()
         if not items:
             return {'error': 'Ürün listesi gerekli'}
 
@@ -112,7 +114,10 @@ class OperationsApiController(BarcodeApiBase):
 
         for item in items:
             bc = (item.get('barcode') or '').strip()
-            qty = float(item.get('quantity', 1))
+            qty = self._parse_qty(item.get('quantity', 1))
+            if qty is None:
+                results.append({'barcode': bc, 'status': 'error', 'message': 'Geçersiz miktar'})
+                continue
             product = self._find_product(bc)
 
             if not product:
@@ -184,6 +189,7 @@ class OperationsApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/operator_performance', type='jsonrpc', auth='user')
     def operator_performance(self, days=7, **kw):
         """Operatör performans istatistikleri."""
+        self._check_internal_user()
         date_from = datetime.now() - timedelta(days=int(days))
 
         operations = request.env['ugurlar.barcode.operation'].sudo().search([
@@ -225,7 +231,7 @@ class OperationsApiController(BarcodeApiBase):
             # Toplam tip istatistikleri (tek döngüde)
             type_totals[type_label] = type_totals.get(type_label, 0) + 1
 
-            op_date = str(op.create_date)[:16]
+            op_date = str(self._local_dt(op.create_date))[:16]
             if op_date > user_stats[uid]['last_activity']:
                 user_stats[uid]['last_activity'] = op_date
 

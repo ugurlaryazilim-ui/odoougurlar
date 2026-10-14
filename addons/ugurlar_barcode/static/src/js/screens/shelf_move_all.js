@@ -1,6 +1,8 @@
 /** @odoo-module **/
 
 import { Component, useState, xml, onMounted, onWillUnmount, useRef } from "@odoo/owl";
+import { ConfirmationDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
+import { useService } from "@web/core/utils/hooks";
 import { BarcodeService } from "../barcode_service";
 import { vibrate, vibrateError, speak } from "../sound_utils";
 
@@ -91,9 +93,9 @@ export class ShelfMoveAll extends Component {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <t t-foreach="state.sourceProducts" t-as="p" t-key="p.product_id">
+                                    <t t-foreach="state.sourceProducts" t-as="p" t-key="p.id">
                                         <tr>
-                                            <td class="ub-shelf-move-product" t-att-title="p.product_name"><t t-esc="p.product_name"/></td>
+                                            <td class="ub-shelf-move-product" t-att-title="p.name"><t t-esc="p.name"/></td>
                                             <td><t t-esc="p.barcode || '-'"/></td>
                                             <td class="ub-shelf-move-qty"><t t-esc="p.quantity"/></td>
                                         </tr>
@@ -220,6 +222,7 @@ export class ShelfMoveAll extends Component {
     `;
 
     setup() {
+        this.dialog = useService("dialog");
         this.sourceInputRef = useRef('sourceInput');
         this.targetInputRef = useRef('targetInput');
 
@@ -282,7 +285,7 @@ export class ShelfMoveAll extends Component {
                 vibrateError();
                 return;
             }
-            this.state.sourceInfo = res;
+            this.state.sourceInfo = res.location || res;
             const products = (res.products || []).filter(p => p.quantity > 0);
             this.state.sourceProducts = products;
             this.state.totalQty = products.reduce((s, p) => s + p.quantity, 0);
@@ -315,7 +318,7 @@ export class ShelfMoveAll extends Component {
                 vibrateError();
                 return;
             }
-            this.state.targetInfo = res;
+            this.state.targetInfo = res.location || res;
             speak('move_all_target_found');
             vibrate();
         } catch (e) {
@@ -324,7 +327,19 @@ export class ShelfMoveAll extends Component {
         }
     }
 
-    async doMoveAll() {
+    // Geri alınamaz işlem: onay al
+    doMoveAll() {
+        this.dialog.add(ConfirmationDialog, {
+            title: "Tüm Rafı Taşı",
+            body: `${this.state.sourceBarcode} rafındaki tüm ürünler ${this.state.targetBarcode} rafına taşınacak. Devam edilsin mi?`,
+            confirmLabel: "Evet, devam et",
+            cancelLabel: "Vazgeç",
+            confirm: () => this._doMoveAll(),
+            cancel: () => {},
+        });
+    }
+
+    async _doMoveAll() {
         this.state.error = null;
         this.state.loading = true;
 

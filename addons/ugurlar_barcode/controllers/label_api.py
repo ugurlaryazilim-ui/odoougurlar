@@ -17,6 +17,7 @@ class LabelApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/label_data', type='jsonrpc', auth='user')
     def label_data(self, barcodes=None, **kw):
         """Barkodlardan ürün bilgilerini çek (tüm alanlar)."""
+        self._check_internal_user()
         if not barcodes:
             return {'error': 'Barkod listesi gerekli'}
 
@@ -88,6 +89,7 @@ class LabelApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/label_template_list', type='jsonrpc', auth='user')
     def label_template_list(self, **kw):
         """Kayıtlı etiket şablonlarını listele."""
+        self._check_internal_user()
         templates = request.env['ugurlar.label.template'].sudo().search([])
         result = []
         for t in templates:
@@ -102,11 +104,17 @@ class LabelApiController(BarcodeApiBase):
             })
         return {'templates': result, 'total': len(result)}
 
+    def _can_edit_template(self, tmpl):
+        """Ortak şablonlar (kargo etiketi dahil) herkesçe ezilip silinmesin."""
+        return (not tmpl.user_id or tmpl.user_id == request.env.user
+                or self._is_stock_manager())
+
     # ─── ŞABLON KAYDET ────────────────────────────────
     @http.route('/ugurlar_barcode/api/label_template_save', type='jsonrpc', auth='user')
     def label_template_save(self, template_id=0, name='', width_mm=60, height_mm=40,
                             elements=None, is_default=False, **kw):
         """Şablon kaydet veya güncelle."""
+        self._check_internal_user()
         if not name:
             return {'error': 'Şablon adı gerekli'}
 
@@ -119,6 +127,8 @@ class LabelApiController(BarcodeApiBase):
         if template_id:
             tmpl = Template.browse(int(template_id))
             if tmpl.exists():
+                if not self._can_edit_template(tmpl):
+                    return {'error': 'Bu şablonu yalnız oluşturan kişi veya stok yöneticisi değiştirebilir.'}
                 tmpl.write({
                     'name': name,
                     'width_mm': float(width_mm),
@@ -141,11 +151,14 @@ class LabelApiController(BarcodeApiBase):
     @http.route('/ugurlar_barcode/api/label_template_delete', type='jsonrpc', auth='user')
     def label_template_delete(self, template_id=0, **kw):
         """Şablon sil."""
+        self._check_internal_user()
         if not template_id:
             return {'error': 'Şablon ID gerekli'}
         Template = request.env['ugurlar.label.template'].sudo()
         tmpl = Template.browse(int(template_id))
         if tmpl.exists():
+            if not self._can_edit_template(tmpl):
+                return {'error': 'Bu şablonu yalnız oluşturan kişi veya stok yöneticisi silebilir.'}
             tmpl.unlink()
             return {'success': True}
         return {'error': 'Şablon bulunamadı'}

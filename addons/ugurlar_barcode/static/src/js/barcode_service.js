@@ -88,6 +88,9 @@ export const BarcodeService = {
     async batchCollectComplete(batch_id) {
         return await rpc('/ugurlar_barcode/api/batch_collect_complete', { batch_id });
     },
+    async batchSkipItem(move_id, skipped = true) {
+        return await rpc('/ugurlar_barcode/api/batch_skip_item', { move_id, skipped });
+    },
     // Satış İndirimleri
     async calculateDiscounts(basket, customer_code) {
         return await rpc('/ugurlar_barcode/api/calculate_discounts', { basket, customer_code });

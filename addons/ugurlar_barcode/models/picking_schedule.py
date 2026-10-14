@@ -5,7 +5,7 @@ import pytz
 from datetime import datetime, timedelta, time as dt_time
 
 from odoo import api, fields, models, _
-from odoo.exceptions import UserError, ValidationError
+from odoo.exceptions import AccessError, UserError, ValidationError
 
 IST = pytz.timezone('Europe/Istanbul')
 
@@ -59,6 +59,9 @@ class PickingSchedule(models.Model):
     def action_create_batch_now(self):
         """Manuel buton: Şimdi toplama listesi oluştur."""
         self.ensure_one()
+        # Yedek/iade deposundan sudo ile transfer doğrular: yalnız ayarı yönetebilen çalıştırır
+        if not self.env.user.has_group('stock.group_stock_manager'):
+            raise AccessError(_('Toplama listesini elle oluşturmak için Stok Yöneticisi yetkisi gerekir.'))
 
         # Önce teşhis bilgisi topla
         diag = self._diagnose_picking_status()
