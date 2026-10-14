@@ -92,7 +92,7 @@ class StockProcessor(models.AbstractModel):
             self.env.cr.execute("""
                 SELECT id, nebim_barcode FROM product_product
                 WHERE active = true AND nebim_barcode IS NOT NULL AND nebim_barcode != ''
-                  AND string_to_array(REPLACE(nebim_barcode, ' ', ''), ',') && %s::varchar[]
+                  AND string_to_array(REPLACE(nebim_barcode, ' ', ''), ',') && %s::text[]
             """, [barcodes])
         else:
             self.env.cr.execute("""
