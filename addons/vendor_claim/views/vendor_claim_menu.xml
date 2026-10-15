@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <record id="action_vendor_claim_mobile" model="ir.actions.client">
+        <field name="name">İnceleme Mobil</field>
+        <field name="tag">vendor_claim.VendorClaimAction</field>
+    </record>
+
+    <menuitem id="menu_vendor_claim_root"
+              name="Tedarikçi İnceleme"
+              web_icon="vendor_claim,static/description/icon.png"
+              sequence="96"/>
+
+    <menuitem id="menu_vendor_claim_mobile"
+              name="İnceleme Mobil"
+              parent="menu_vendor_claim_root"
+              action="action_vendor_claim_mobile"
+              sequence="5"/>
+
+    <menuitem id="menu_vendor_claim_records"
+              name="İnceleme Kayıtları"
+              parent="menu_vendor_claim_root"
+              action="action_vendor_claim"
+              sequence="10"/>
+
+    <menuitem id="menu_vendor_claim_analysis"
+              name="Analiz"
+              parent="menu_vendor_claim_root"
+              action="action_vendor_claim_analysis"
+              sequence="40"/>
+
+    <menuitem id="menu_vendor_claim_config"
+              name="Ayarlar"
+              parent="menu_vendor_claim_root"
+              action="action_vendor_claim_settings"
+              groups="base.group_system"
+              sequence="90"/>
+</odoo>

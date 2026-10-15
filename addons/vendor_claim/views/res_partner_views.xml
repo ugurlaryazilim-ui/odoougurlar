@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <record id="view_partner_form_vendor_claim" model="ir.ui.view">
+        <field name="name">res.partner.form.vendor.claim</field>
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_form"/>
+        <field name="arch" type="xml">
+            <div name="button_box" position="inside">
+                <button name="action_view_vendor_claims" type="object" class="oe_stat_button" icon="fa-search"
+                        invisible="not vendor_claim_count">
+                    <field name="vendor_claim_count" widget="statinfo" string="İnceleme"/>
+                </button>
+            </div>
+        </field>
+    </record>
+</odoo>
