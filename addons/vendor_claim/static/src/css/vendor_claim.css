@@ -1,0 +1,388 @@
+/* Tedarikçi İnceleme — mobil ekran */
+
+.o_action_manager:has(.vc-app) {
+    overflow: auto !important;
+    -webkit-overflow-scrolling: touch;
+}
+
+.vc-app {
+    --vc-primary: #1769aa;
+    --vc-success: #10b981;
+    --vc-warning: #f59e0b;
+    --vc-danger: #ef4444;
+    --vc-bg: #f4f6f9;
+    --vc-card: #ffffff;
+    --vc-text: #1e293b;
+    --vc-muted: #64748b;
+    --vc-border: #e2e8f0;
+    background: var(--vc-bg);
+    color: var(--vc-text);
+    min-height: 100%;
+    padding-bottom: 96px;
+}
+
+.vc-app .vc-screen {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 16px;
+}
+
+.vc-app .vc-header {
+    text-align: center;
+    padding: 20px 8px 12px;
+}
+.vc-app .vc-header h1 {
+    color: var(--vc-primary);
+    font-size: 26px;
+    font-weight: 700;
+    margin: 0 0 6px;
+}
+.vc-app .vc-header p,
+.vc-app .vc-muted {
+    color: var(--vc-muted);
+    font-size: 13px;
+}
+
+/* Sayaçlar */
+.vc-app .vc-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+}
+.vc-app .vc-stat {
+    background: var(--vc-card);
+    border-radius: 12px;
+    padding: 12px 4px;
+    text-align: center;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+}
+.vc-app .vc-stat b {
+    display: block;
+    font-size: 22px;
+    color: var(--vc-primary);
+}
+.vc-app .vc-stat span {
+    font-size: 11px;
+    color: var(--vc-muted);
+}
+.vc-app .vc-stat-danger b {
+    color: var(--vc-danger);
+}
+
+/* Menü kartları */
+.vc-app .vc-menu-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+.vc-app .vc-menu-card {
+    background: var(--vc-card);
+    border-radius: 14px;
+    padding: 20px 14px;
+    text-align: center;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+    min-height: 140px;
+}
+.vc-app .vc-menu-card.vc-card-primary {
+    background: var(--vc-primary);
+    color: #fff;
+}
+.vc-app .vc-menu-card.vc-card-primary .vc-card-desc {
+    color: rgba(255, 255, 255, .85);
+}
+.vc-app .vc-card-icon {
+    font-size: 30px;
+    margin-bottom: 8px;
+}
+.vc-app .vc-card-title {
+    font-weight: 700;
+    font-size: 16px;
+}
+.vc-app .vc-card-desc {
+    font-size: 12px;
+    color: var(--vc-muted);
+    margin-top: 4px;
+}
+
+/* Araç çubuğu */
+.vc-app .vc-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+.vc-app .vc-toolbar h2 {
+    font-size: 19px;
+    margin: 0;
+}
+
+/* Butonlar / girişler */
+.vc-app .vc-btn {
+    border: 0;
+    border-radius: 10px;
+    padding: 10px 14px;
+    min-height: 44px;
+    font-weight: 600;
+    background: var(--vc-primary);
+    color: #fff;
+}
+.vc-app .vc-btn:disabled {
+    opacity: .6;
+}
+.vc-app .vc-btn-light {
+    background: #fff;
+    color: var(--vc-text);
+    border: 1px solid var(--vc-border);
+}
+.vc-app .vc-btn-success {
+    background: var(--vc-success);
+}
+.vc-app .vc-btn-danger {
+    background: var(--vc-danger);
+}
+.vc-app .vc-btn-icon {
+    background: #334155;
+    min-width: 48px;
+}
+.vc-app .vc-btn-sm {
+    min-height: 32px;
+    padding: 4px 10px;
+    font-size: 13px;
+}
+.vc-app .vc-btn-block {
+    display: block;
+    width: 100%;
+    margin-top: 10px;
+}
+.vc-app .vc-input {
+    width: 100%;
+    border: 1px solid var(--vc-border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 16px; /* iOS yakınlaştırmasın */
+    background: #fff;
+    margin-bottom: 8px;
+}
+.vc-app .vc-input-sm {
+    padding: 6px 10px;
+    margin-bottom: 0;
+}
+.vc-app .vc-label {
+    display: block;
+    font-weight: 600;
+    font-size: 13px;
+    margin: 10px 0 4px;
+}
+.vc-app .vc-search,
+.vc-app .vc-inline {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+}
+.vc-app .vc-search .vc-input,
+.vc-app .vc-inline .vc-input {
+    flex: 1;
+}
+
+/* Kartlar */
+.vc-app .vc-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 8px 0;
+}
+.vc-app .vc-card {
+    background: var(--vc-card);
+    border-radius: 12px;
+    padding: 12px 14px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+    border-left: 4px solid transparent;
+    margin-bottom: 8px;
+}
+.vc-app .vc-card h3 {
+    font-size: 15px;
+    font-weight: 700;
+    margin: 0 0 8px;
+}
+.vc-app .vc-clickable {
+    cursor: pointer;
+}
+.vc-app .vc-selected {
+    border-left-color: var(--vc-success);
+    background: #ecfdf5;
+}
+.vc-app .vc-card-head,
+.vc-app .vc-card-foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+.vc-app .vc-card-foot {
+    font-size: 12px;
+    color: var(--vc-muted);
+    margin-top: 4px;
+    flex-wrap: wrap;
+}
+.vc-app .vc-state-received { border-left-color: #60a5fa; }
+.vc-app .vc-state-sent { border-left-color: var(--vc-primary); }
+.vc-app .vc-state-returned { border-left-color: var(--vc-warning); }
+.vc-app .vc-state-delivered { border-left-color: var(--vc-success); }
+.vc-app .vc-state-cancelled { border-left-color: #94a3b8; opacity: .75; }
+.vc-app .vc-overdue { border-left-color: var(--vc-danger); }
+
+.vc-app .vc-badge {
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 999px;
+    padding: 3px 9px;
+    background: #e2e8f0;
+}
+.vc-app .vc-badge-received { background: #dbeafe; color: #1d4ed8; }
+.vc-app .vc-badge-sent { background: #e0e7ff; color: #3730a3; }
+.vc-app .vc-badge-returned { background: #fef3c7; color: #92400e; }
+.vc-app .vc-badge-delivered { background: #d1fae5; color: #065f46; }
+.vc-app .vc-badge-danger { background: #fee2e2; color: #b91c1c; }
+
+.vc-app .vc-kv {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 5px 0;
+    border-bottom: 1px dashed var(--vc-border);
+    font-size: 14px;
+}
+.vc-app .vc-kv span {
+    color: var(--vc-muted);
+    white-space: nowrap;
+}
+.vc-app .vc-kv b {
+    text-align: right;
+    font-weight: 600;
+}
+.vc-app .vc-defect {
+    margin-top: 8px;
+    white-space: pre-line;
+    background: #fff7ed;
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+.vc-app .vc-warn {
+    margin-top: 6px;
+    background: #fef3c7;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 13px;
+}
+.vc-app .vc-note {
+    border-top: 1px solid var(--vc-border);
+    padding: 8px 0;
+    white-space: pre-line;
+    font-size: 14px;
+}
+
+/* Seçim çipleri */
+.vc-app .vc-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 6px 0 10px;
+}
+.vc-app .vc-chip {
+    border: 1px solid var(--vc-border);
+    background: #fff;
+    border-radius: 999px;
+    padding: 8px 14px;
+    min-height: 40px;
+    font-size: 14px;
+}
+.vc-app .vc-chip.active {
+    background: var(--vc-primary);
+    border-color: var(--vc-primary);
+    color: #fff;
+}
+
+/* Fotoğraflar */
+.vc-app .vc-photos {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.vc-app .vc-photo {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #e2e8f0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.vc-app .vc-photo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.vc-app .vc-photo span {
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    color: #fff;
+    background: rgba(0, 0, 0, .55);
+    border-radius: 50%;
+    width: 22px;
+    height: 22px;
+    line-height: 22px;
+    text-align: center;
+    cursor: pointer;
+}
+.vc-app .vc-photo-add {
+    cursor: pointer;
+    font-size: 26px;
+    color: var(--vc-muted);
+    border: 2px dashed #cbd5e1;
+    background: #fff;
+}
+.vc-app .vc-photo-add input {
+    display: none;
+}
+
+.vc-app .vc-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0 12px;
+}
+.vc-app .vc-empty {
+    text-align: center;
+    color: var(--vc-muted);
+    padding: 24px 0;
+}
+.vc-app .vc-done {
+    text-align: center;
+    padding-top: 24px;
+}
+.vc-app .vc-done > .fa {
+    font-size: 64px;
+    color: var(--vc-success);
+}
+.vc-app .vc-submit-bar {
+    position: sticky;
+    bottom: 0;
+    padding: 10px 0;
+    background: linear-gradient(to top, var(--vc-bg) 70%, transparent);
+}
+
+@media (max-width: 480px) {
+    .vc-app .vc-screen {
+        padding: 12px;
+    }
+    .vc-app .vc-stat b {
+        font-size: 18px;
+    }
+}

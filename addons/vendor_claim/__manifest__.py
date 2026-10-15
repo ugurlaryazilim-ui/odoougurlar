@@ -1,6 +1,6 @@
 {
     'name': 'Tedarikçi İnceleme Takibi',
-    'version': '19.0.1.0.0',
+    'version': '19.0.1.1.0',
     'category': 'Inventory',
     'summary': 'Müşteriden gelen ayıplı ürünün tedarikçiye inceleme gönderimi ve dönüş takibi',
     'description': """
@@ -13,9 +13,10 @@
         * Durum değişiminde müşteriye otomatik SMS (sms_system / Turatel)
         * Tedarikçide geciken kayıtlar için uyarı
         * İnceleme talep formu ve müşteri teslim fişi çıktısı
+        * Mobil ekran: fatura arama, kamera ile okutma, fotoğraf, toplu durum
     """,
     'author': 'Uğurlar',
-    'depends': ['mail', 'product', 'account', 'sms_system', 'ugurlar_tailor'],
+    'depends': ['mail', 'product', 'account', 'sms_system', 'ugurlar_barcode', 'ugurlar_tailor'],
     'data': [
         'security/vendor_claim_security.xml',
         'security/ir.model.access.csv',
@@ -28,6 +29,17 @@
         'report/vendor_claim_reports.xml',
         'report/vendor_claim_templates.xml',
     ],
+    'assets': {
+        'web.assets_backend': [
+            'vendor_claim/static/src/css/vendor_claim.css',
+            'vendor_claim/static/src/xml/vendor_claim_templates.xml',
+            'vendor_claim/static/src/js/screens/main_menu.js',
+            'vendor_claim/static/src/js/screens/claim_list.js',
+            'vendor_claim/static/src/js/screens/new_claim.js',
+            'vendor_claim/static/src/js/screens/bulk.js',
+            'vendor_claim/static/src/js/vendor_claim_action.js',
+        ],
+    },
     'installable': True,
     'application': True,
     'license': 'LGPL-3',

@@ -1,0 +1,338 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <!-- Kök -->
+    <t t-name="vendor_claim.VendorClaimAction">
+        <div class="vc-app">
+            <VcMainMenu t-if="state.screen === 'main_menu'" onNavigate.bind="switchScreen"/>
+            <VcNewClaim t-if="state.screen === 'new_claim'" onNavigate.bind="switchScreen" scanner="scanner"/>
+            <VcClaimList t-if="state.screen === 'claim_list'" onNavigate.bind="switchScreen" scanner="scanner"
+                         initialStatus="state.listStatus" openId="state.openId"/>
+            <VcBulk t-if="state.screen === 'bulk'" onNavigate.bind="switchScreen" scanner="scanner"/>
+        </div>
+    </t>
+
+    <!-- Ana menü -->
+    <t t-name="vendor_claim.VcMainMenu">
+        <div class="vc-screen">
+            <div class="vc-header">
+                <h1>Tedarikçi İnceleme</h1>
+                <p>Müşteriden gelen ürünün tedarikçi inceleme takibi</p>
+            </div>
+            <div class="vc-stats">
+                <div class="vc-stat" t-on-click="() =&gt; this.go('claim_list', { status: 'received' })"><b t-esc="stats.received"/><span>Teslim Alındı</span></div>
+                <div class="vc-stat" t-on-click="() =&gt; this.go('claim_list', { status: 'sent' })"><b t-esc="stats.sent"/><span>Tedarikçide</span></div>
+                <div class="vc-stat" t-on-click="() =&gt; this.go('claim_list', { status: 'returned' })"><b t-esc="stats.returned"/><span>Geldi</span></div>
+                <div t-att-class="'vc-stat' + (stats.overdue ? ' vc-stat-danger' : '')" t-on-click="() =&gt; this.go('claim_list', { status: 'overdue' })"><b t-esc="stats.overdue"/><span>Geciken</span></div>
+            </div>
+            <div class="vc-menu-grid">
+                <div class="vc-menu-card vc-card-primary" t-on-click="() =&gt; this.go('new_claim')">
+                    <div class="vc-card-icon"><i class="fa fa-plus-circle"/></div>
+                    <div class="vc-card-title">Yeni Kayıt</div>
+                    <div class="vc-card-desc">Fatura ile müşterinin getirdiği ürünü kaydedin</div>
+                </div>
+                <div class="vc-menu-card" t-on-click="() =&gt; this.go('claim_list', { status: 'open' })">
+                    <div class="vc-card-icon"><i class="fa fa-list"/></div>
+                    <div class="vc-card-title">Kayıtlar</div>
+                    <div class="vc-card-desc">Arayın, durum değiştirin, not ve fotoğraf ekleyin</div>
+                </div>
+                <div class="vc-menu-card" t-on-click="() =&gt; this.go('bulk')">
+                    <div class="vc-card-icon"><i class="fa fa-exchange"/></div>
+                    <div class="vc-card-title">Toplu İşlem</div>
+                    <div class="vc-card-desc">Okutarak tedarikçiye gönder / geldi / teslim</div>
+                </div>
+            </div>
+        </div>
+    </t>
+
+    <!-- Yeni kayıt -->
+    <t t-name="vendor_claim.VcNewClaim">
+        <div class="vc-screen">
+            <div class="vc-toolbar">
+                <button class="vc-btn vc-btn-light" t-on-click="goBack">&#8592; Geri</button>
+                <h2 t-if="state.step === 1">Fatura Ara</h2>
+                <h2 t-if="state.step === 2">Ürün ve Şikayet</h2>
+                <h2 t-if="state.step === 3">Kaydedildi</h2>
+            </div>
+
+            <!-- 1: fatura -->
+            <div t-if="state.step === 1">
+                <div class="vc-search">
+                    <input type="text" class="vc-input tailor-barcode-input" t-ref="searchInput"
+                           placeholder="Fatura no yazın veya okutun" t-model="state.query"
+                           t-on-keydown="(ev) =&gt; ev.key === 'Enter' and this.searchInvoice()"/>
+                    <button class="vc-btn vc-btn-icon" t-on-click="scanCamera" title="Kamera ile okut"><i class="fa fa-barcode"/></button>
+                    <button class="vc-btn vc-btn-primary" t-on-click="searchInvoice" t-att-disabled="state.searching">
+                        <t t-if="state.searching">...</t><t t-else="">Ara</t>
+                    </button>
+                </div>
+                <div class="vc-list">
+                    <t t-foreach="state.invoices" t-as="inv" t-key="inv.invoice_no">
+                        <div class="vc-card vc-clickable" t-on-click="() =&gt; this.selectInvoice(inv.invoice_no)">
+                            <div class="vc-card-head"><strong t-esc="inv.invoice_no"/><span class="vc-muted" t-esc="(inv.invoice_date || '').slice(0, 10)"/></div>
+                            <div t-esc="inv.customer_name"/>
+                        </div>
+                    </t>
+                </div>
+                <button class="vc-btn vc-btn-light vc-btn-block" t-on-click="startNoInvoice">
+                    <i class="fa fa-file-o"/> Faturasız kayıt
+                </button>
+            </div>
+
+            <!-- 2: ürün + şikayet -->
+            <div t-if="state.step === 2">
+                <div class="vc-card" t-if="state.invoice">
+                    <div class="vc-card-head"><strong t-esc="state.invoice.invoice_no"/><span class="vc-muted" t-esc="(state.invoice.invoice_date || '').slice(0, 10)"/></div>
+                    <div class="vc-muted">Satış: <t t-esc="state.invoice.sales_person or '-'"/></div>
+                    <div class="vc-warn" t-if="state.invoice.existing and state.invoice.existing.length">
+                        Bu faturada kayıt var:
+                        <t t-foreach="state.invoice.existing" t-as="ex" t-key="ex.id"><b t-esc="ex.name"/> (<t t-esc="ex.state_label"/>) </t>
+                    </div>
+                </div>
+
+                <label class="vc-label">Müşteri</label>
+                <input type="text" class="vc-input" t-model="state.customerName" placeholder="Ad Soyad"/>
+                <label class="vc-label">Cep Telefonu (SMS için)</label>
+                <input type="tel" class="vc-input" t-model="state.customerMobile" placeholder="05xx xxx xx xx"/>
+
+                <label class="vc-label">Ürün</label>
+                <div class="vc-search">
+                    <input type="text" class="vc-input tailor-barcode-input" t-model="state.barcode"
+                           placeholder="Ürün barkodunu okutun" t-on-keydown="onBarcodeKey"/>
+                    <button class="vc-btn vc-btn-icon" t-on-click="scanCamera"><i class="fa fa-barcode"/></button>
+                </div>
+                <div class="vc-list" t-if="state.invoice">
+                    <t t-foreach="state.invoice.items" t-as="it" t-key="it_index">
+                        <div t-att-class="'vc-card vc-clickable' + (state.item and state.item.barcode === it.barcode ? ' vc-selected' : '')" t-on-click="() =&gt; this.selectItem(it)">
+                            <div class="vc-card-head"><strong t-esc="it.product_name or it.product_code"/><span>x<t t-esc="it.quantity"/></span></div>
+                            <div class="vc-muted"><t t-esc="it.barcode"/> · <t t-esc="it.vendor or 'Tedarikçi yok'"/></div>
+                        </div>
+                    </t>
+                </div>
+                <div class="vc-card vc-selected" t-if="!state.invoice and state.item">
+                    <div class="vc-card-head"><strong t-esc="state.item.product_name"/></div>
+                    <div class="vc-muted"><t t-esc="state.item.barcode"/> · <t t-esc="state.item.vendor or 'Tedarikçi yok'"/></div>
+                </div>
+
+                <label class="vc-label">Ayıp / Şikayet *</label>
+                <textarea class="vc-input" rows="3" t-model="state.defect" placeholder="Müşterinin bildirdiği sorun, ürünün durumu..."/>
+                <label class="vc-label">Müşteri Talebi</label>
+                <div class="vc-chips">
+                    <t t-foreach="requestOptions" t-as="opt" t-key="opt[0]">
+                        <button t-att-class="'vc-chip' + (state.request === opt[0] ? ' active' : '')"
+                                t-on-click="() =&gt; this.state.request = opt[0]" t-esc="opt[1]"/>
+                    </t>
+                </div>
+                <label class="vc-label">Fotoğraflar</label>
+                <div class="vc-photos">
+                    <t t-foreach="state.photos" t-as="ph" t-key="ph_index">
+                        <div class="vc-photo"><img t-att-src="ph"/><span t-on-click="() =&gt; this.removePhoto(ph_index)">&#215;</span></div>
+                    </t>
+                    <label class="vc-photo vc-photo-add">
+                        <i class="fa fa-camera"/>
+                        <input type="file" accept="image/*" capture="environment" multiple="multiple" t-on-change="onPhoto"/>
+                    </label>
+                </div>
+                <label class="vc-label">Not</label>
+                <textarea class="vc-input" rows="2" t-model="state.notes" placeholder="İç not (isteğe bağlı)"/>
+                <div class="vc-submit-bar">
+                    <button class="vc-btn vc-btn-success vc-btn-block" t-on-click="submit" t-att-disabled="state.submitting">
+                        <t t-if="state.submitting">Kaydediliyor...</t><t t-else="">Kaydet</t>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 3: tamam -->
+            <div t-if="state.step === 3" class="vc-done">
+                <i class="fa fa-check-circle"/>
+                <h2 t-esc="state.created.name"/>
+                <p t-if="state.created.vendor">Tedarikçi: <t t-esc="state.created.vendor"/></p>
+                <button class="vc-btn vc-btn-primary vc-btn-block" t-on-click="printSlip"><i class="fa fa-print"/> Müşteri Fişi Yazdır</button>
+                <button class="vc-btn vc-btn-light vc-btn-block" t-on-click="openCreated">Kaydı Aç</button>
+                <button class="vc-btn vc-btn-light vc-btn-block" t-on-click="restart">Yeni Kayıt</button>
+            </div>
+        </div>
+    </t>
+
+    <!-- Liste + detay -->
+    <t t-name="vendor_claim.VcClaimList">
+        <div class="vc-screen">
+            <div class="vc-toolbar">
+                <button class="vc-btn vc-btn-light" t-on-click="goBack">&#8592; Geri</button>
+                <h2 t-if="!state.detail">Kayıtlar <small class="vc-muted" t-esc="state.total"/></h2>
+                <h2 t-else="" t-esc="state.detail.name"/>
+            </div>
+
+            <t t-if="!state.detail">
+                <div class="vc-search">
+                    <input type="text" class="vc-input tailor-barcode-input" t-model="state.search"
+                           placeholder="Takip no, müşteri, telefon, barkod, tedarikçi" t-on-keydown="onSearchKey"/>
+                    <button class="vc-btn vc-btn-icon" t-on-click="scanCamera"><i class="fa fa-barcode"/></button>
+                    <button class="vc-btn vc-btn-primary" t-on-click="() =&gt; this.load()">Ara</button>
+                </div>
+                <div class="vc-chips">
+                    <t t-foreach="filters" t-as="f" t-key="f[0]">
+                        <button t-att-class="'vc-chip' + (state.status === f[0] ? ' active' : '')"
+                                t-on-click="() =&gt; this.setStatus(f[0])" t-esc="f[1]"/>
+                    </t>
+                </div>
+                <div class="vc-empty" t-if="state.loading">Yükleniyor...</div>
+                <div class="vc-empty" t-elif="!state.items.length">Kayıt yok.</div>
+                <div class="vc-list">
+                    <t t-foreach="state.items" t-as="c" t-key="c.id">
+                        <div t-att-class="'vc-card vc-clickable vc-state-' + c.state + (c.is_overdue ? ' vc-overdue' : '')"
+                             t-on-click="() =&gt; this.open(c.id)">
+                            <div class="vc-card-head">
+                                <strong t-esc="c.name"/>
+                                <span t-att-class="'vc-badge vc-badge-' + c.state" t-esc="c.state_label"/>
+                            </div>
+                            <div><t t-esc="c.customer_name"/> <span class="vc-muted" t-esc="c.date"/></div>
+                            <div class="vc-muted"><t t-esc="c.product_name"/></div>
+                            <div class="vc-card-foot">
+                                <span><i class="fa fa-truck"/> <t t-esc="c.vendor or '-'"/></span>
+                                <span t-if="c.days_at_vendor" t-att-class="c.is_overdue ? 'text-danger fw-bold' : ''"><t t-esc="c.days_at_vendor"/> gün</span>
+                                <span t-if="c.result_label" t-esc="c.result_label"/>
+                            </div>
+                        </div>
+                    </t>
+                </div>
+            </t>
+
+            <t t-else="">
+                <t t-set="d" t-value="state.detail"/>
+                <div t-att-class="'vc-card vc-state-' + d.state + (d.is_overdue ? ' vc-overdue' : '')">
+                    <div class="vc-card-head">
+                        <span t-att-class="'vc-badge vc-badge-' + d.state" t-esc="d.state_label"/>
+                        <span t-if="d.is_overdue" class="vc-badge vc-badge-danger">Gecikti (<t t-esc="d.days_at_vendor"/> gün)</span>
+                    </div>
+                    <div class="vc-kv"><span>Müşteri</span><b t-esc="d.customer_name"/></div>
+                    <div class="vc-kv"><span>Telefon</span>
+                        <div class="vc-inline">
+                            <input type="tel" class="vc-input vc-input-sm" t-model="state.mobile"/>
+                            <button class="vc-btn vc-btn-light vc-btn-sm" t-if="state.mobile !== d.customer_mobile" t-on-click="saveMobile">Kaydet</button>
+                        </div>
+                    </div>
+                    <div class="vc-kv" t-if="d.invoice_no"><span>Fatura</span><b><t t-esc="d.invoice_no"/> <small class="vc-muted" t-esc="d.invoice_date"/></b></div>
+                    <div class="vc-kv"><span>Ürün</span><b t-esc="d.product_name"/></div>
+                    <div class="vc-kv"><span>Barkod</span><b t-esc="d.product_barcode"/></div>
+                    <div class="vc-kv"><span>Tedarikçi</span><b t-esc="d.vendor or '-'"/></div>
+                    <div class="vc-kv"><span>Talep</span><b t-esc="d.customer_request_label"/></div>
+                    <div class="vc-kv" t-if="d.sent_at"><span>Gönderim</span><b><t t-esc="d.sent_at"/> <t t-esc="d.out_carrier"/> <t t-esc="d.out_tracking"/></b></div>
+                    <div class="vc-kv" t-if="d.returned_at"><span>Dönüş</span><b><t t-esc="d.returned_at"/> <t t-esc="d.in_carrier"/> <t t-esc="d.in_tracking"/></b></div>
+                    <div class="vc-kv" t-if="d.result_label"><span>Sonuç</span><b t-esc="d.result_label"/></div>
+                    <div class="vc-defect" t-esc="d.defect_description"/>
+                </div>
+
+                <!-- Durum işlemleri -->
+                <div class="vc-card" t-if="d.state === 'received'">
+                    <h3>Tedarikçiye Gönder</h3>
+                    <input type="text" class="vc-input" t-model="state.form.out_carrier" placeholder="Kargo firması"/>
+                    <input type="text" class="vc-input" t-model="state.form.out_tracking" placeholder="Kargo takip no"/>
+                    <button class="vc-btn vc-btn-primary vc-btn-block" t-on-click="sendToVendor" t-att-disabled="state.busy">Tedarikçiye Gönderildi</button>
+                </div>
+                <div class="vc-card" t-if="d.state === 'sent'">
+                    <h3>Tedarikçiden Geldi</h3>
+                    <div class="vc-chips">
+                        <t t-foreach="resultOptions" t-as="opt" t-key="opt[0]">
+                            <button t-att-class="'vc-chip' + (state.form.result === opt[0] ? ' active' : '')"
+                                    t-on-click="() =&gt; this.state.form.result = opt[0]" t-esc="opt[1]"/>
+                        </t>
+                    </div>
+                    <textarea class="vc-input" rows="2" t-model="state.form.result_note" placeholder="Tedarikçi açıklaması"/>
+                    <input type="text" class="vc-input" t-model="state.form.in_carrier" placeholder="Dönüş kargo firması"/>
+                    <input type="text" class="vc-input" t-model="state.form.in_tracking" placeholder="Dönüş takip no"/>
+                    <button class="vc-btn vc-btn-primary vc-btn-block" t-on-click="markReturned" t-att-disabled="state.busy">İncelemeden Geldi</button>
+                </div>
+                <div class="vc-card" t-if="d.state === 'returned'">
+                    <button class="vc-btn vc-btn-success vc-btn-block" t-on-click="markDelivered" t-att-disabled="state.busy">Müşteriye Teslim Edildi</button>
+                </div>
+
+                <div class="vc-actions">
+                    <button class="vc-btn vc-btn-light" t-if="d.customer_mobile and d.state !== 'cancelled'" t-on-click="sendSms"><i class="fa fa-comment"/> SMS</button>
+                    <button class="vc-btn vc-btn-light" t-on-click="() =&gt; this.print('report_vendor_claim_slip')"><i class="fa fa-print"/> Müşteri Fişi</button>
+                    <button class="vc-btn vc-btn-light" t-on-click="() =&gt; this.print('report_vendor_claim_form')"><i class="fa fa-print"/> İnceleme Formu</button>
+                    <button class="vc-btn vc-btn-light" t-on-click="openInBackend"><i class="fa fa-external-link"/> Formda Aç</button>
+                    <button class="vc-btn vc-btn-danger" t-if="['received', 'sent'].includes(d.state)" t-on-click="cancelClaim">İptal</button>
+                </div>
+
+                <div class="vc-card">
+                    <h3>Fotoğraflar</h3>
+                    <div class="vc-photos">
+                        <t t-foreach="d.photo_ids" t-as="pid" t-key="pid">
+                            <a class="vc-photo" t-att-href="'/web/image/' + pid" target="_blank"><img t-att-src="'/web/image/' + pid + '/160x160'"/></a>
+                        </t>
+                        <label class="vc-photo vc-photo-add">
+                            <i class="fa fa-camera"/>
+                            <input type="file" accept="image/*" capture="environment" multiple="multiple" t-on-change="onPhoto"/>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="vc-card">
+                    <h3>Notlar</h3>
+                    <div class="vc-inline">
+                        <input type="text" class="vc-input" t-model="state.note" placeholder="Not ekle (ör. tedarikçi arandı)"
+                               t-on-keydown="(ev) =&gt; ev.key === 'Enter' and this.addNote()"/>
+                        <button class="vc-btn vc-btn-primary" t-on-click="addNote" t-att-disabled="state.busy or !state.note">Ekle</button>
+                    </div>
+                    <div class="vc-note" t-if="d.notes"><b>İç not:</b> <t t-esc="d.notes"/></div>
+                    <t t-foreach="d.notes_log" t-as="n" t-key="n_index">
+                        <div class="vc-note"><div class="vc-muted"><t t-esc="n.author"/> · <t t-esc="n.date"/></div><t t-esc="n.body"/></div>
+                    </t>
+                </div>
+            </t>
+        </div>
+    </t>
+
+    <!-- Toplu işlem -->
+    <t t-name="vendor_claim.VcBulk">
+        <div class="vc-screen">
+            <div class="vc-toolbar">
+                <button class="vc-btn vc-btn-light" t-on-click="goBack">&#8592; Geri</button>
+                <h2>Toplu İşlem</h2>
+            </div>
+            <div class="vc-chips">
+                <t t-foreach="targets" t-as="tg" t-key="tg[0]">
+                    <button t-att-class="'vc-chip' + (state.target === tg[0] ? ' active' : '')"
+                            t-on-click="() =&gt; { this.state.target = tg[0]; this.state.results = null; }" t-esc="tg[1]"/>
+                </t>
+            </div>
+            <div class="vc-card" t-if="state.target !== 'deliver'">
+                <div class="vc-chips" t-if="state.target === 'return'">
+                    <t t-foreach="resultOptions" t-as="opt" t-key="opt[0]">
+                        <button t-att-class="'vc-chip' + (state.result === opt[0] ? ' active' : '')"
+                                t-on-click="() =&gt; this.state.result = opt[0]" t-esc="opt[1]"/>
+                    </t>
+                </div>
+                <input type="text" class="vc-input" t-model="state.carrier" placeholder="Kargo firması (hepsi için)"/>
+                <input type="text" class="vc-input" t-model="state.tracking" placeholder="Kargo takip no (hepsi için)"/>
+            </div>
+            <div class="vc-search">
+                <input type="text" class="vc-input tailor-barcode-input" t-ref="bulkInput"
+                       placeholder="Takip no (INC-...) veya ürün barkodu okutun" t-model="state.code" t-on-keydown="onKeydown"/>
+                <button class="vc-btn vc-btn-icon" t-on-click="scanCamera"><i class="fa fa-barcode"/></button>
+            </div>
+            <div class="vc-empty" t-if="!state.items.length">Okutulan kayıt yok.</div>
+            <div class="vc-list">
+                <t t-foreach="state.items" t-as="it" t-key="it.id">
+                    <div class="vc-card">
+                        <div class="vc-card-head">
+                            <strong t-esc="it.name"/>
+                            <button class="vc-btn vc-btn-danger vc-btn-sm" t-on-click="() =&gt; this.remove(it.id)">Çıkar</button>
+                        </div>
+                        <div><t t-esc="it.product_name"/> — <t t-esc="it.customer_name"/></div>
+                        <div class="vc-muted"><t t-esc="it.state_label"/> · <t t-esc="it.vendor or '-'"/></div>
+                        <div t-if="resultFor(it.id) and !resultFor(it.id).ok" class="text-danger" t-esc="resultFor(it.id).error"/>
+                    </div>
+                </t>
+            </div>
+            <div class="vc-submit-bar" t-if="state.items.length">
+                <button class="vc-btn vc-btn-success vc-btn-block" t-on-click="apply" t-att-disabled="state.busy">
+                    <t t-if="state.busy">İşleniyor...</t>
+                    <t t-else=""><t t-esc="state.items.length"/> kaydı uygula</t>
+                </button>
+            </div>
+        </div>
+    </t>
+
+</templates>
