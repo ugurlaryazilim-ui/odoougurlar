@@ -103,6 +103,8 @@
             <search string="Ara">
                 <field name="order_number"/>
                 <field name="barcode"/>
+                <field name="receipt_id"/>
+                <field name="payment_order_id"/>
                 <filter string="Satış" name="filter_sale" domain="[('transaction_type', '=', 'sale')]"/>
                 <filter string="İade" name="filter_return" domain="[('transaction_type', '=', 'return')]"/>
                 <filter string="Platform" name="filter_platform" domain="[('transaction_type', '=', 'platform_fee')]"/>
