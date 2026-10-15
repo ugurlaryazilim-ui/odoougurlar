@@ -1,0 +1,262 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- ═══════════════ Liste ═══════════════ -->
+    <record id="view_vendor_claim_list" model="ir.ui.view">
+        <field name="name">vendor.claim.list</field>
+        <field name="model">vendor.claim</field>
+        <field name="arch" type="xml">
+            <list decoration-danger="is_overdue" decoration-info="state == 'received'"
+                  decoration-warning="state == 'returned'" decoration-muted="state in ('delivered', 'cancelled')">
+                <field name="name"/>
+                <field name="create_date" string="Tarih" widget="date"/>
+                <field name="customer_name"/>
+                <field name="customer_mobile" optional="hide"/>
+                <field name="invoice_no" optional="show"/>
+                <field name="product_name"/>
+                <field name="vendor_id"/>
+                <field name="sent_at" optional="show" widget="date"/>
+                <field name="days_at_vendor" string="Gün" optional="show"/>
+                <field name="result" optional="show"/>
+                <field name="user_id" optional="hide" widget="many2one_avatar_user"/>
+                <field name="is_overdue" column_invisible="True"/>
+                <field name="state" widget="badge" decoration-info="state == 'received'" decoration-primary="state == 'sent'"
+                       decoration-warning="state == 'returned'" decoration-success="state == 'delivered'"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- ═══════════════ Form ═══════════════ -->
+    <record id="view_vendor_claim_form" model="ir.ui.view">
+        <field name="name">vendor.claim.form</field>
+        <field name="model">vendor.claim</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="action_send_to_vendor" string="Tedarikçiye Gönderildi" type="object" class="btn-primary"
+                            invisible="state != 'received'"/>
+                    <button name="action_mark_returned" string="İncelemeden Geldi" type="object" class="btn-primary"
+                            invisible="state != 'sent'"/>
+                    <button name="action_mark_delivered" string="Müşteriye Teslim Edildi" type="object" class="btn-success"
+                            invisible="state != 'returned'"/>
+                    <button name="action_send_to_vendor" string="Tekrar Tedarikçiye Gönder" type="object"
+                            invisible="state != 'returned'"/>
+                    <button name="action_print_vendor_form" string="İnceleme Formu" type="object" icon="fa-print"
+                            invisible="state == 'cancelled'"/>
+                    <button name="action_print_customer_slip" string="Müşteri Fişi" type="object" icon="fa-print"
+                            invisible="state == 'cancelled'"/>
+                    <button name="action_send_sms" string="SMS Gönder" type="object" icon="fa-comment"
+                            invisible="state == 'cancelled' or not customer_mobile"/>
+                    <button name="action_cancel" string="İptal Et" type="object" class="btn-danger"
+                            invisible="state in ('delivered', 'cancelled')" confirm="Kayıt iptal edilecek. Emin misiniz?"/>
+                    <button name="action_reset_to_received" string="Teslim Alındıya Döndür" type="object"
+                            invisible="state not in ('sent', 'cancelled')"/>
+                    <button name="action_reset_to_received" string="Teslim Alındıya Döndür" type="object"
+                            invisible="state not in ('returned', 'delivered')" groups="vendor_claim.group_vendor_claim_manager"/>
+                    <field name="state" widget="statusbar" statusbar_visible="received,sent,returned,delivered"/>
+                </header>
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_view_customer_claims" type="object" class="oe_stat_button" icon="fa-history"
+                                invisible="not customer_claim_count">
+                            <field name="customer_claim_count" widget="statinfo" string="Müşteri Geçmişi"/>
+                        </button>
+                    </div>
+                    <widget name="web_ribbon" title="Gecikti" bg_color="text-bg-danger" invisible="not is_overdue"/>
+                    <widget name="web_ribbon" title="İptal" bg_color="text-bg-secondary" invisible="state != 'cancelled'"/>
+                    <div class="oe_title">
+                        <h1><field name="name" readonly="1"/></h1>
+                    </div>
+                    <group>
+                        <group string="Fatura / Müşteri">
+                            <field name="no_invoice"/>
+                            <label for="invoice_no" invisible="no_invoice"/>
+                            <div class="o_row" invisible="no_invoice">
+                                <field name="invoice_no" placeholder="Fatura numarasını yazın veya okutun"/>
+                                <button name="action_fetch_invoice" type="object" string="Faturadan Getir" icon="fa-refresh"
+                                        class="btn-link" invisible="not invoice_no or not id"/>
+                            </div>
+                            <field name="invoice_date" invisible="no_invoice"/>
+                            <field name="customer_name"/>
+                            <field name="customer_mobile" widget="phone"/>
+                            <field name="customer_code" invisible="no_invoice"/>
+                            <field name="sales_person"/>
+                        </group>
+                        <group string="Ürün / Tedarikçi">
+                            <field name="product_barcode" placeholder="Barkodu okutun"/>
+                            <field name="product_id" options="{'no_create': True}"/>
+                            <field name="product_code"/>
+                            <field name="quantity"/>
+                            <field name="vendor_name" invisible="not vendor_name"/>
+                            <field name="vendor_id" required="state != 'received'"
+                                   context="{'default_is_company': True, 'res_partner_search_mode': 'supplier'}"/>
+                            <field name="customer_request"/>
+                            <field name="user_id" widget="many2one_avatar_user"/>
+                        </group>
+                    </group>
+                    <field name="invoice_items_html" nolabel="1" readonly="1" invisible="not invoice_items_html or no_invoice"/>
+                    <group string="Ayıp / Şikayet">
+                        <field name="defect_description" nolabel="1" colspan="2"
+                               placeholder="Müşterinin bildirdiği sorun, ürünün durumu..."/>
+                    </group>
+                    <notebook>
+                        <page string="Fotoğraflar" name="photos">
+                            <field name="photo_ids" widget="many2many_binary" string="Fotoğraf ekle"/>
+                        </page>
+                        <page string="Kargo / Takvim" name="shipping">
+                            <group>
+                                <group string="Tedarikçiye Gönderim">
+                                    <field name="out_carrier"/>
+                                    <field name="out_tracking"/>
+                                    <field name="sent_at"/>
+                                    <field name="days_at_vendor" invisible="not sent_at"/>
+                                    <field name="is_overdue" invisible="not is_overdue"/>
+                                </group>
+                                <group string="Tedarikçiden Dönüş">
+                                    <field name="in_carrier"/>
+                                    <field name="in_tracking"/>
+                                    <field name="returned_at"/>
+                                    <field name="delivered_at"/>
+                                    <field name="cancelled_at" invisible="state != 'cancelled'"/>
+                                </group>
+                            </group>
+                        </page>
+                        <page string="Tedarikçi Yanıtı" name="result">
+                            <group>
+                                <group>
+                                    <field name="result" required="state in ('returned', 'delivered')"/>
+                                </group>
+                            </group>
+                            <field name="result_note" placeholder="Tedarikçinin inceleme sonucu / açıklaması..."/>
+                            <separator string="Servis raporu / yanıt belgeleri"/>
+                            <field name="vendor_report_ids" widget="many2many_binary" string="Belge ekle"/>
+                        </page>
+                        <page string="Notlar" name="notes">
+                            <field name="notes" placeholder="İç notlar..."/>
+                        </page>
+                        <page string="SMS" name="sms" invisible="not customer_mobile">
+                            <group>
+                                <group>
+                                    <field name="sms_received_sent"/>
+                                    <field name="sms_sent_sent"/>
+                                    <field name="sms_returned_sent"/>
+                                    <field name="sms_delivered_sent"/>
+                                </group>
+                                <group>
+                                    <field name="reminder_count"/>
+                                    <field name="last_reminder_at"/>
+                                </group>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <!-- ═══════════════ Kanban ═══════════════ -->
+    <record id="view_vendor_claim_kanban" model="ir.ui.view">
+        <field name="name">vendor.claim.kanban</field>
+        <field name="model">vendor.claim</field>
+        <field name="arch" type="xml">
+            <kanban default_group_by="state" records_draggable="false" group_create="false">
+                <field name="is_overdue"/>
+                <templates>
+                    <t t-name="card">
+                        <div class="d-flex justify-content-between">
+                            <field name="name" class="fw-bold"/>
+                            <span t-if="record.is_overdue.raw_value" class="badge text-bg-danger">Gecikti</span>
+                        </div>
+                        <field name="customer_name"/>
+                        <field name="product_name" class="text-muted small"/>
+                        <div class="d-flex justify-content-between small">
+                            <field name="vendor_id"/>
+                            <span t-if="record.days_at_vendor.raw_value"><field name="days_at_vendor"/> gün</span>
+                        </div>
+                        <field name="result" class="small"/>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <!-- ═══════════════ Arama ═══════════════ -->
+    <record id="view_vendor_claim_search" model="ir.ui.view">
+        <field name="name">vendor.claim.search</field>
+        <field name="model">vendor.claim</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name"/>
+                <field name="customer_name"/>
+                <field name="customer_mobile"/>
+                <field name="invoice_no"/>
+                <field name="product_barcode"/>
+                <field name="product_id"/>
+                <field name="vendor_id"/>
+                <filter name="open" string="Açık" domain="[('state', 'in', ('received', 'sent', 'returned'))]"/>
+                <filter name="overdue" string="Geciken" domain="[('is_overdue', '=', True)]"/>
+                <separator/>
+                <filter name="received" string="Teslim Alındı" domain="[('state', '=', 'received')]"/>
+                <filter name="sent" string="Tedarikçide" domain="[('state', '=', 'sent')]"/>
+                <filter name="returned" string="İncelemeden Geldi" domain="[('state', '=', 'returned')]"/>
+                <filter name="delivered" string="Teslim Edildi" domain="[('state', '=', 'delivered')]"/>
+                <filter name="cancelled" string="İptal" domain="[('state', '=', 'cancelled')]"/>
+                <separator/>
+                <filter name="mine" string="Benim Kayıtlarım" domain="[('user_id', '=', uid)]"/>
+                <filter name="no_invoice" string="Faturasız" domain="[('no_invoice', '=', True)]"/>
+                <separator/>
+                <filter name="create_date" string="Kayıt Tarihi" date="create_date"/>
+                <group>
+                    <filter name="group_state" string="Durum" context="{'group_by': 'state'}"/>
+                    <filter name="group_vendor" string="Tedarikçi" context="{'group_by': 'vendor_id'}"/>
+                    <filter name="group_result" string="Sonuç" context="{'group_by': 'result'}"/>
+                    <filter name="group_user" string="Sorumlu" context="{'group_by': 'user_id'}"/>
+                    <filter name="group_month" string="Ay" context="{'group_by': 'create_date:month'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- ═══════════════ Analiz ═══════════════ -->
+    <record id="view_vendor_claim_pivot" model="ir.ui.view">
+        <field name="name">vendor.claim.pivot</field>
+        <field name="model">vendor.claim</field>
+        <field name="arch" type="xml">
+            <pivot string="İnceleme Analizi">
+                <field name="vendor_id" type="row"/>
+                <field name="result" type="col"/>
+                <field name="vendor_days" type="measure"/>
+            </pivot>
+        </field>
+    </record>
+
+    <record id="view_vendor_claim_graph" model="ir.ui.view">
+        <field name="name">vendor.claim.graph</field>
+        <field name="model">vendor.claim</field>
+        <field name="arch" type="xml">
+            <graph string="İnceleme Analizi" type="bar">
+                <field name="vendor_id"/>
+                <field name="result"/>
+            </graph>
+        </field>
+    </record>
+
+    <!-- ═══════════════ Aksiyonlar ═══════════════ -->
+    <record id="action_vendor_claim" model="ir.actions.act_window">
+        <field name="name">İnceleme Kayıtları</field>
+        <field name="res_model">vendor.claim</field>
+        <field name="view_mode">list,kanban,form,pivot,graph</field>
+        <field name="context">{'search_default_open': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">İlk inceleme kaydını oluşturun</p>
+            <p>Müşterinin getirdiği ürünü fatura numarasıyla kaydedin, tedarikçiye gönderip dönüşünü takip edin.</p>
+        </field>
+    </record>
+
+    <record id="action_vendor_claim_analysis" model="ir.actions.act_window">
+        <field name="name">İnceleme Analizi</field>
+        <field name="res_model">vendor.claim</field>
+        <field name="view_mode">pivot,graph,list</field>
+        <field name="context">{'search_default_group_vendor': 1}</field>
+    </record>
+</odoo>

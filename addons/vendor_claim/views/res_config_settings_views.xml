@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <record id="view_vendor_claim_settings" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.vendor.claim</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app data-string="Tedarikçi İnceleme" string="Tedarikçi İnceleme" name="vendor_claim" groups="base.group_system">
+                    <block title="Takip" name="vendor_claim_tracking">
+                        <setting string="Gecikme Süresi" help="Tedarikçide bu kadar günden uzun kalan kayıtlar 'Geciken' olur ve sorumluya aktivite düşer">
+                            <div class="content-group">
+                                <field name="vendor_claim_overdue_days" class="oe_inline"/> gün
+                            </div>
+                        </setting>
+                        <setting string="Nebim Fatura Bağlantısı" help="Fatura sorgusu Terzi Takip ayarlarındaki Nebim MSSQL bağlantısını kullanır">
+                            <div class="text-muted">Ayarlar &gt; Terzi Takip &gt; Nebim MSSQL Bağlantı Ayarları</div>
+                        </setting>
+                    </block>
+                    <block title="Müşteriye Otomatik SMS" name="vendor_claim_sms">
+                        <setting help="Kayıt açılınca (metin: SMS &gt; Şablonlar &gt; İnceleme - Teslim Alındı)">
+                            <field name="vendor_claim_sms_received"/>
+                        </setting>
+                        <setting help="Tedarikçiye gönderilince (İnceleme - Tedarikçiye Gönderildi)">
+                            <field name="vendor_claim_sms_sent"/>
+                        </setting>
+                        <setting help="İncelemeden gelince (İnceleme - İncelemeden Geldi)">
+                            <field name="vendor_claim_sms_returned"/>
+                        </setting>
+                        <setting help="Müşteriye teslim edilince (İnceleme - Teslim Edildi)">
+                            <field name="vendor_claim_sms_delivered"/>
+                        </setting>
+                        <setting help="İncelemeden gelip teslim alınmayan ürünlere hatırlatma (İnceleme - Hatırlatma)">
+                            <field name="vendor_claim_sms_reminder"/>
+                            <div class="content-group" invisible="not vendor_claim_sms_reminder">
+                                <div><field name="vendor_claim_sms_reminder_days" class="oe_inline"/> gün sonra, en fazla
+                                    <field name="vendor_claim_sms_reminder_max" class="oe_inline"/> kez</div>
+                            </div>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="action_vendor_claim_settings" model="ir.actions.act_window">
+        <field name="name">Ayarlar</field>
+        <field name="res_model">res.config.settings</field>
+        <field name="view_mode">form</field>
+        <field name="context">{'module': 'vendor_claim', 'bin_size': False}</field>
+    </record>
+</odoo>

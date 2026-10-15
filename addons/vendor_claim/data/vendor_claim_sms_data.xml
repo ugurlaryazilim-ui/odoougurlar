@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- Metinler SMS > Şablonlar ekranından değiştirilebilir (upgrade'de ezilmez) -->
+    <data noupdate="1">
+        <record id="sms_template_vendor_claim_received" model="sms.system.template">
+            <field name="name">İnceleme - Teslim Alındı</field>
+            <field name="code">vendor_claim_received</field>
+            <field name="model">vendor.claim</field>
+            <field name="body">Sayın {musteri}, ürününüz incelenmek üzere teslim alınmıştır. Takip no: {takip}. {magaza}</field>
+        </record>
+        <record id="sms_template_vendor_claim_sent" model="sms.system.template">
+            <field name="name">İnceleme - Tedarikçiye Gönderildi</field>
+            <field name="code">vendor_claim_sent</field>
+            <field name="model">vendor.claim</field>
+            <field name="body">Sayın {musteri}, {takip} numaralı ürününüz inceleme için üretici firmaya gönderilmiştir. Sonuçlandığında bilgi verilecektir. {magaza}</field>
+        </record>
+        <record id="sms_template_vendor_claim_returned" model="sms.system.template">
+            <field name="name">İnceleme - İncelemeden Geldi</field>
+            <field name="code">vendor_claim_returned</field>
+            <field name="model">vendor.claim</field>
+            <field name="body">Sayın {musteri}, {takip} numaralı ürününüz incelemeden gelmiştir. Mağazamızdan teslim alabilirsiniz. {magaza}</field>
+        </record>
+        <record id="sms_template_vendor_claim_reminder" model="sms.system.template">
+            <field name="name">İnceleme - Hatırlatma</field>
+            <field name="code">vendor_claim_reminder</field>
+            <field name="model">vendor.claim</field>
+            <field name="body">Sayın {musteri}, {takip} numaralı ürününüz incelemeden gelmiş olup mağazamızda sizi bekliyor. {magaza}</field>
+        </record>
+        <record id="sms_template_vendor_claim_delivered" model="sms.system.template">
+            <field name="name">İnceleme - Teslim Edildi</field>
+            <field name="code">vendor_claim_delivered</field>
+            <field name="model">vendor.claim</field>
+            <field name="body">Sayın {musteri}, {takip} numaralı ürününüz tarafınıza teslim edilmiştir. Bizi tercih ettiğiniz için teşekkür ederiz. {magaza}</field>
+        </record>
+    </data>
+</odoo>

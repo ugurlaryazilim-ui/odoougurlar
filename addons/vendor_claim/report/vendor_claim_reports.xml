@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <record id="paperformat_vendor_claim_slip" model="report.paperformat">
+        <field name="name">İnceleme Müşteri Fişi (80mm Termal)</field>
+        <field name="default" eval="False"/>
+        <field name="format">custom</field>
+        <field name="page_width">80</field>
+        <field name="page_height">160</field>
+        <field name="orientation">Portrait</field>
+        <field name="margin_top">2</field>
+        <field name="margin_bottom">2</field>
+        <field name="margin_left">2</field>
+        <field name="margin_right">2</field>
+        <field name="header_line" eval="False"/>
+        <field name="header_spacing">0</field>
+        <field name="dpi">90</field>
+    </record>
+
+    <record id="action_report_vendor_claim_form" model="ir.actions.report">
+        <field name="name">Tedarikçi İnceleme Talep Formu</field>
+        <field name="model">vendor.claim</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">vendor_claim.report_vendor_claim_form</field>
+        <field name="report_file">vendor_claim.report_vendor_claim_form</field>
+        <field name="print_report_name">'Inceleme_Formu_%s' % (object.name)</field>
+        <field name="binding_model_id" ref="model_vendor_claim"/>
+        <field name="binding_type">report</field>
+    </record>
+
+    <record id="action_report_vendor_claim_slip" model="ir.actions.report">
+        <field name="name">İnceleme Müşteri Fişi</field>
+        <field name="model">vendor.claim</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">vendor_claim.report_vendor_claim_slip</field>
+        <field name="report_file">vendor_claim.report_vendor_claim_slip</field>
+        <field name="print_report_name">'Musteri_Fisi_%s' % (object.name)</field>
+        <field name="binding_model_id" ref="model_vendor_claim"/>
+        <field name="binding_type">report</field>
+        <field name="paperformat_id" ref="paperformat_vendor_claim_slip"/>
+    </record>
+</odoo>
