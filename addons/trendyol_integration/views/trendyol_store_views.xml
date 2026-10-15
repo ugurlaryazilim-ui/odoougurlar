@@ -108,12 +108,29 @@
                                     <field name="sync_financials"/>
                                     <field name="financial_day_range"
                                            invisible="not sync_financials"/>
+                                    <field name="financial_cron_active" invisible="1"/>
+                                    <div class="alert alert-danger" role="alert" colspan="2"
+                                         invisible="not sync_financials or financial_cron_active">
+                                        Otomatik finansal senkron (saatlik cron) kapalı; veriler yalnız elle
+                                        senkronda güncellenir.
+                                        <button name="action_activate_financial_cron" type="object"
+                                                string="Yeniden Aç" class="btn-link" groups="base.group_system"/>
+                                    </div>
+                                    <field name="financial_deep_scan_days" invisible="not sync_financials"/>
                                     <field name="last_financial_sync"/>
+                                    <field name="last_financial_sync_status" widget="badge"
+                                           decoration-success="last_financial_sync_status == 'ok'"
+                                           decoration-danger="last_financial_sync_status == 'error'"
+                                           invisible="not last_financial_sync_status"/>
+                                    <field name="last_financial_sync_message"
+                                           invisible="not last_financial_sync_message"/>
                                     <button name="action_open_financial_backfill" type="object"
                                             string="Geçmişi Tamamla" class="btn-secondary" icon="fa-history" groups="sales_team.group_sale_manager"
                                             invisible="not sync_financials or backfill_next" colspan="2"/>
                                     <div class="alert alert-info" role="status" colspan="2" invisible="not backfill_next">
+                                        <span invisible="not backfill_auto">Gece taraması:</span>
                                         Finans geçmişi arka planda çekiliyor:
+                                        <field name="backfill_auto" invisible="1"/>
                                         <field name="backfill_from" readonly="1" class="oe_inline"/> →
                                         <field name="backfill_to" readonly="1" class="oe_inline"/>,
                                         sıradaki parça <field name="backfill_next" readonly="1" class="oe_inline"/>,

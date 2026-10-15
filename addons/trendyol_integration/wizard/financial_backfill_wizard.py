@@ -51,6 +51,8 @@ class TrendyolFinancialBackfillWizard(models.TransientModel):
             'backfill_to': end,
             'backfill_next': start,
             'backfill_created': 0,
+            'backfill_auto': False,
+            'backfill_started_at': fields.Datetime.now(),
         })
         cron = self.env.ref('trendyol_integration.cron_trendyol_financial_backfill', raise_if_not_found=False)
         if cron:

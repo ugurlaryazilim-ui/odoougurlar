@@ -29,8 +29,20 @@
             <field name="model_id" ref="model_trendyol_settlement"/>
             <field name="state">code</field>
             <field name="code">model.cron_sync_financials()</field>
-            <field name="interval_number">6</field>
+            <field name="interval_number">1</field>
             <field name="interval_type">hours</field>
+            <field name="active" eval="True"/>
+        </record>
+
+        <!-- Gece taraması: son N gün (mağaza ayarı) geçmiş tamamlama altyapısıyla yeniden çekilir -->
+        <record id="cron_trendyol_financial_deep_scan" model="ir.cron">
+            <field name="name">Trendyol: Finans Gece Taraması</field>
+            <field name="model_id" ref="model_trendyol_settlement"/>
+            <field name="state">code</field>
+            <field name="code">model.cron_financial_deep_scan()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="nextcall" eval="(DateTime.now() + timedelta(days=1)).strftime('%Y-%m-%d 00:30:00')"/>
             <field name="active" eval="True"/>
         </record>
 
