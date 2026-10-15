@@ -27,6 +27,7 @@
                 <field name="seller_revenue" optional="hide"/>
                 <field name="payment_order_id" optional="hide"/>
                 <field name="receipt_id" optional="hide"/>
+                <field name="commission_invoice_no" optional="hide"/>
                 <field name="source" optional="hide"/>
                 <field name="affiliate" optional="hide"/>
                 <field name="allocation_state" optional="hide" widget="badge"
@@ -83,6 +84,7 @@
                         </group>
                         <group string="Ödeme">
                             <field name="receipt_id"/>
+                            <field name="commission_invoice_no"/>
                             <field name="payment_order_id"/>
                             <field name="payment_date"/>
                             <field name="payment_period"/>
@@ -103,7 +105,9 @@
             <search string="Ara">
                 <field name="order_number"/>
                 <field name="barcode"/>
-                <field name="receipt_id"/>
+                <field name="receipt_id"
+                       filter_domain="['|', ('receipt_id', 'ilike', self), ('commission_invoice_no', 'ilike', self)]"/>
+                <field name="commission_invoice_no"/>
                 <field name="payment_order_id"/>
                 <filter string="Satış" name="filter_sale" domain="[('transaction_type', '=', 'sale')]"/>
                 <filter string="İade" name="filter_return" domain="[('transaction_type', '=', 'return')]"/>
@@ -118,6 +122,11 @@
                 <separator/>
                 <filter string="Ödendi" name="filter_paid" domain="[('payment_order_id', '!=', False)]"/>
                 <filter string="Ödenmedi" name="filter_not_paid" domain="[('payment_order_id', '=', False)]"/>
+                <separator/>
+                <filter string="Komisyon Faturası Kesilmiş" name="filter_commission_invoiced"
+                        domain="[('commission_invoice_no', '!=', False)]"/>
+                <filter string="Komisyon Faturasına Göre" name="group_commission_invoice"
+                        context="{'group_by': 'commission_invoice_no'}"/>
             </search>
         </field>
     </record>

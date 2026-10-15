@@ -154,6 +154,15 @@ class TrendyolStore(models.Model):
         help='Platform kargoda 1 desi kargo birim fiyatı (TL). Trendyol panelinden kontrol edin.',
     )
     last_financial_sync = fields.Datetime(string='Son Finansal Senkron', readonly=True)
+    last_financial_sync_status = fields.Selection(
+        [('ok', 'Başarılı'), ('error', 'Hatalı')], string='Son Senkron Durumu', readonly=True, copy=False)
+    last_financial_sync_message = fields.Text(string='Son Senkron Sonucu', readonly=True, copy=False)
+    financial_deep_scan_days = fields.Integer(
+        string='Gece Taraması (gün)', default=60,
+        help='Her gece son kaç günün finans kayıtları yeniden taransın (15 günlük parçalarla). Saatlik '
+             'senkron yalnız son 15 günü görür; sonradan değişen kayıtlar (komisyon fatura no, geç gelen '
+             'düzeltmeler) bu taramayla tamamlanır. 0 = kapalı.')
+    financial_cron_active = fields.Boolean(compute='_compute_financial_cron_active')
     # ─── Finans geçmişini tamamlama (arka plan işi) ───
     backfill_from = fields.Date(string='Tamamlama Başlangıcı', readonly=True, copy=False)
     backfill_to = fields.Date(string='Tamamlama Bitişi', readonly=True, copy=False)
@@ -161,6 +170,9 @@ class TrendyolStore(models.Model):
                                 help='Doluysa geçmiş tamamlama arka planda sürüyor')
     backfill_created = fields.Integer(string='Tamamlamada Eklenen', readonly=True, copy=False)
     backfill_last_result = fields.Char(string='Son Tamamlama', readonly=True, copy=False)
+    backfill_auto = fields.Boolean(string='Gece Taraması', readonly=True, copy=False,
+                                   help='Süren tamamlama gece taraması tarafından başlatıldı')
+    backfill_started_at = fields.Datetime(readonly=True, copy=False)
     processed_payment_orders = fields.Text(
         string='İşlenen Ödeme Emirleri', readonly=True, copy=False,
         help='Kayıtlarına ödeme bilgisi işlenmiş Trendyol ödeme emri ID\'leri')
@@ -343,6 +355,23 @@ class TrendyolStore(models.Model):
                 'sticky': bool(res['errors'] or res['warnings'] or res['unmatched']),
             },
         }
+
+    def _compute_financial_cron_active(self):
+        cron = self.env.ref('trendyol_integration.cron_trendyol_sync_financials', raise_if_not_found=False)
+        active = bool(cron and cron.sudo().active)
+        for store in self:
+            store.financial_cron_active = active
+
+    def action_activate_financial_cron(self):
+        """Pasife düşmüş saatlik finansal senkron cron'unu yeniden aç (Odoo üst üste hata veren
+        cron'u bir hafta sonra kendiliğinden kapatır)."""
+        if not self.env.user.has_group('base.group_system'):
+            raise UserError(_('Bu işlem için yönetici yetkisi gerekir.'))
+        cron = self.env.ref('trendyol_integration.cron_trendyol_sync_financials', raise_if_not_found=False)
+        if not cron:
+            raise UserError(_('Finansal senkron cron kaydı bulunamadı; modülü yükseltin.'))
+        cron.sudo().write({'active': True, 'nextcall': fields.Datetime.now()})
+        return True
 
     def action_open_financial_backfill(self):
         self.ensure_one()

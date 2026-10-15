@@ -37,6 +37,9 @@ SETTLEMENT_TYPES = [
     ('ty_discount_cancel', 'Kurumsal Fatura - TY İndirim/Kupon İptal'),
     ('revenue_adjustment', 'Hakediş Düzeltme'),
     ('stoppage', 'E-Ticaret Stopajı'),
+    ('commission_agreement', 'Komisyon Mutabakat Faturası'),
+    ('return_invoice', 'İade Faturası (Satıcıdan Trendyol\'a)'),
+    ('financial_item', 'Trendyol Düzeltme Kaydı'),
     ('other', 'Diğer'),
 ]
 
@@ -50,7 +53,14 @@ SETTLEMENT_API_TYPES = [
     'CommissionPositiveCancel', 'CommissionNegativeCancel',
     'DeliveryFee', 'DeliveryFeeCancel', 'PayByLink',
 ]
-OTHER_FINANCIAL_API_TYPES = ['DeductionInvoices', 'PaymentOrder', 'Stoppage']
+OTHER_FINANCIAL_API_TYPES = ['DeductionInvoices', 'PaymentOrder', 'Stoppage',
+                             'CommissionAgreementInvoice', 'ReturnInvoice', 'FinancialItem']
+# Türkçe işlem adı bilinmeyen tipler: tarih aralığıyla tip tip çekilirken sınıf doğrudan verilir
+_OTHER_TYPE_HINT = {
+    'CommissionAgreementInvoice': 'commission_agreement',
+    'ReturnInvoice': 'return_invoice',
+    'FinancialItem': 'financial_item',
+}
 
 # Ödeme emri bazında toplu faturalanan, sipariş paketlerine dağıtılan hizmet bedelleri
 FEE_ALLOCATION_TYPES = ('platform_fee', 'international_fee')
@@ -129,6 +139,10 @@ class TrendyolSettlement(models.Model):
     shipment_package_id = fields.Char(string='Paket ID', index=True, readonly=True)
     barcode = fields.Char(string='Barkod', readonly=True)
     receipt_id = fields.Char(string='Dekont No', readonly=True)
+    commission_invoice_no = fields.Char(
+        string='Komisyon Fatura No', readonly=True, index='btree_not_null',
+        help="Satışın komisyonunun kesildiği Trendyol komisyon faturası (DCF...). Fatura dönem sonunda "
+             "kesildiği için satıştan sonra dolar; senkron ve gece taraması günceller.")
     payment_order_id = fields.Char(string='Ödeme No', readonly=True)
     payment_date = fields.Datetime(string='Ödeme Tarihi', readonly=True)
     payment_period = fields.Integer(string='Vade (Gün)', readonly=True)
@@ -197,6 +211,9 @@ class TrendyolSettlement(models.Model):
         'tydiscount': 'ty_discount', 'tycoupon': 'ty_discount',
         'tydiscountcancel': 'ty_discount_cancel', 'tycouponcancel': 'ty_discount_cancel',
         'stoppage': 'stoppage',
+        'commissionagreementinvoice': 'commission_agreement',
+        'returninvoice': 'return_invoice',
+        'financialitem': 'financial_item',
     }
 
     _TX_KEYWORD_MAP = [
@@ -212,6 +229,8 @@ class TrendyolSettlement(models.Model):
         (['ty kupon'], 'ty_discount'),
         (['hakedis', 'duzeltme'], 'revenue_adjustment'),
         (['sellerrevenue'], 'revenue_adjustment'),
+        (['komisyon', 'mutabakat'], 'commission_agreement'),
+        (['iade fatura'], 'return_invoice'),
         (['komisyon', 'duzeltme'], 'commission_adjustment'),
         (['commissionpositive'], 'commission_adjustment'),
         (['commissionnegative'], 'commission_adjustment'),
@@ -288,55 +307,92 @@ class TrendyolSettlement(models.Model):
     # ═══════════════════════════════════════════════════════
 
     @api.model
-    def sync_financials_for_store(self, store):
-        """Tek bir mağazanın finansal verilerini senkronize et."""
+    def sync_financials_for_store(self, store, commit=False):
+        """Tek bir mağazanın finansal verilerini senkronize et.
+
+        Her adım ayrı çalışır: biri hata verirse diğerleri yine yapılır. commit=True (cron) iken her
+        adımdan sonra kaydedilir; sonraki bir adım zaman aşımına uğrasa ya da çakışsa bile önceki
+        adımların kayıtları kaybolmaz (eskiden tek işlemdi, en sondaki bir hata her şeyi geri alıyordu).
+        """
+        started = fields.Datetime.now()
         try:
             api = store.get_api()
         except Exception as e:
-            return {'error': str(e), 'created': 0}
+            self._write_sync_status(store, started, 'error', str(e))
+            return {'error': str(e), 'created': 0, 'errors': 1, 'error_details': str(e)}
 
         day_range = min(store.financial_day_range or 15, 15)
         end_date = datetime.now()
         start_date = end_date - timedelta(days=day_range)
-
-        created, errors = self._sync_window(api, store, start_date, end_date)
-
-        # 2b) Ödeme emirleri: ödenen kayıtlara ödeme no / tarihi işlenir
-        try:
-            self._sync_payment_orders(api, store)
-        except Exception as e:
-            errors.append(f"PaymentOrder: {e}")
-            _logger.exception("Ödeme emri sync hatası [%s]", store.name)
-
-        # 3) Kargo / platform faturası kalem detayları
-        created += self._process_invoice_details(api, store)
-
-        # 4) Bağsız settlement'ları siparişlere bağla
-        self._relink_unlinked_settlements(store)
-
-        # (Hizmet bedeli dağıtımı ayrı cron'da: trendyol.fee.payment.cron_allocate_fees)
-
-        # 5) Sipariş bazlı finansal özet — yalnız son senkrondan beri değişen siparişler
         since = (store.last_financial_sync or start_date) - timedelta(hours=1)
-        self._update_order_financial_summary(store, since=since)
+        errors = []
 
-        # last_financial_sync — ayrı cursor ile güncelle (serialization çakışmasını önler)
-        try:
-            with self.pool.cursor() as new_cr:
-                new_cr.execute(
-                    "UPDATE trendyol_store SET last_financial_sync = %s, write_date = %s WHERE id = %s",
-                    (fields.Datetime.now(), fields.Datetime.now(), store.id)
-                )
-        except Exception as e:
-            _logger.warning("last_financial_sync güncelleme atlandı (%s): %s", store.name, e)
+        def window():
+            created, window_errors = self._sync_window(api, store, start_date, end_date)
+            errors.extend(window_errors)
+            return created
+
+        steps = [
+            ('Finansal kayıtlar', window),
+            # Ödeme emirleri: ödenen kayıtlara ödeme no / tarihi işlenir
+            ('Ödeme emirleri', lambda: self._sync_payment_orders(api, store)),
+            # Kargo / platform faturası kalem detayları
+            ('Fatura kalemleri', lambda: self._process_invoice_details(api, store)),
+            # Bağsız kayıtları siparişlere bağla
+            ('Sipariş eşleştirme', lambda: self._relink_unlinked_settlements(store)),
+            # Sipariş bazlı finansal özet — yalnız son senkrondan beri değişen siparişler
+            # (Hizmet bedeli dağıtımı ayrı cron'da: trendyol.fee.payment.cron_allocate_fees)
+            ('Sipariş özeti', lambda: self._update_order_financial_summary(store, since=since)),
+        ]
+        created = 0
+        for label, step in steps:
+            res = self._run_sync_step(store, label, step, errors, commit)
+            if label != 'Sipariş eşleştirme' and isinstance(res, int):
+                created += res
+
+        message = f"{created} yeni kayıt"
+        if errors:
+            message += f", {len(errors)} hata:\n" + '\n'.join(errors)
+        self._write_sync_status(store, started, 'error' if errors else 'ok', message)
         _logger.info("Finansal senkronizasyon [%s]: %s yeni kayıt, %s hata",
-                      store.name, created, len(errors))
+                     store.name, created, len(errors))
 
         return {
             'created': created,
             'errors': len(errors),
             'error_details': '\n'.join(errors),
         }
+
+    @api.private
+    def _run_sync_step(self, store, label, step, errors, commit):
+        """Senkron adımını çalıştır; hata diğer adımları durdurmaz."""
+        try:
+            if commit:
+                res = step()
+                self.env.cr.commit()
+            else:
+                with self.env.cr.savepoint():
+                    res = step()
+            return res
+        except Exception as e:
+            if commit:
+                self.env.cr.rollback()
+                self.env.invalidate_all()
+            errors.append(f"{label}: {e}")
+            _logger.exception("Finansal senkron adımı başarısız [%s] %s", store.name, label)
+            return None
+
+    @api.private
+    def _write_sync_status(self, store, started, status, message):
+        """Son senkron zamanı / sonucu — ayrı cursor (mağaza satırında serialization çakışmasını önler)."""
+        try:
+            with self.pool.cursor() as new_cr:
+                new_cr.execute(
+                    "UPDATE trendyol_store SET last_financial_sync = %s, last_financial_sync_status = %s, "
+                    "last_financial_sync_message = %s, write_date = %s WHERE id = %s",
+                    (started, status, (message or '')[:2000], fields.Datetime.now(), store.id))
+        except Exception as e:
+            _logger.warning("Son finansal senkron bilgisi yazılamadı (%s): %s", store.name, e)
 
     @api.private
     def _sync_window(self, api, store, start_date, end_date):
@@ -440,15 +496,23 @@ class TrendyolSettlement(models.Model):
 
         state = self._backfill_state(store_id)
         if state and state['next'] and state['next'] > state['to']:
-            # Son adım: fatura kalemleri, eşleştirme ve tüm siparişlerin özeti
-            self._process_invoice_details(api, store, recent_only=False)
-            self._relink_unlinked_settlements(store)
-            self._update_order_financial_summary(store)
+            if state['auto']:
+                # Gece taraması: yalnız bu taramada değişen siparişler (her gece tüm geçmiş taranmaz)
+                self._process_invoice_details(api, store, recent_only=True)
+                self._relink_unlinked_settlements(store)
+                since = (state['started_at'] or fields.Datetime.now()) - timedelta(minutes=5)
+                self._update_order_financial_summary(store, since=since)
+            else:
+                # Son adım: fatura kalemleri, eşleştirme ve tüm siparişlerin özeti
+                self._process_invoice_details(api, store, recent_only=False)
+                self._relink_unlinked_settlements(store)
+                self._update_order_financial_summary(store)
             self.env.cr.commit()
-            result = (f"{state['from']} → {state['to']}: {state['created']} yeni kayıt "
-                      f"({fields.Datetime.now():%d.%m.%Y %H:%M} UTC)")
+            result = (f"{'Gece taraması ' if state['auto'] else ''}{state['from']} → {state['to']}: "
+                      f"{state['created']} yeni kayıt ({fields.Datetime.now():%d.%m.%Y %H:%M} UTC)")
             self._backfill_write(
-                "UPDATE trendyol_store SET backfill_next = NULL, backfill_last_result = %s WHERE id = %s",
+                "UPDATE trendyol_store SET backfill_next = NULL, backfill_auto = FALSE, "
+                "backfill_last_result = %s WHERE id = %s",
                 (result, store_id))
             _logger.info("Finans geçmişi tamamlandı [%s]: %s", store.name, result)
 
@@ -456,12 +520,14 @@ class TrendyolSettlement(models.Model):
     def _backfill_state(self, store_id):
         """Mağazanın güncel tamamlama durumu (ayrı cursor: ana işlemin eski görüntüsünden bağımsız)."""
         with self.pool.cursor() as cr2:
-            cr2.execute("SELECT backfill_from, backfill_to, backfill_next, COALESCE(backfill_created, 0) "
+            cr2.execute("SELECT backfill_from, backfill_to, backfill_next, COALESCE(backfill_created, 0), "
+                        "COALESCE(backfill_auto, FALSE), backfill_started_at "
                         "FROM trendyol_store WHERE id = %s", (store_id,))
             row = cr2.fetchone()
         if not row:
             return None
-        return {'from': row[0], 'to': row[1], 'next': row[2], 'created': row[3]}
+        return {'from': row[0], 'to': row[1], 'next': row[2], 'created': row[3],
+                'auto': row[4], 'started_at': row[5]}
 
     @api.private
     def _backfill_write(self, query, params):
@@ -626,9 +692,10 @@ class TrendyolSettlement(models.Model):
                             tx_type, result.get('error'))
             return 0
 
+        hint = _OTHER_TYPE_HINT.get(tx_type)
         data = result.get('data', {})
         for item in data.get('content', []):
-            if self._process_settlement_item(item, store, 'otherfinancials'):
+            if self._process_settlement_item(item, store, 'otherfinancials', type_hint=hint):
                 created += 1
 
         total_pages = data.get('totalPages', 1)
@@ -638,7 +705,7 @@ class TrendyolSettlement(models.Model):
                 page=page, size=1000)
             if page_result.get('success'):
                 for item in page_result.get('data', {}).get('content', []):
-                    if self._process_settlement_item(item, store, 'otherfinancials'):
+                    if self._process_settlement_item(item, store, 'otherfinancials', type_hint=hint):
                         created += 1
         return created
 
@@ -858,8 +925,11 @@ class TrendyolSettlement(models.Model):
                           store.name, linked_count)
 
     @api.private
-    def _process_settlement_item(self, data, store, source):
-        """Tek bir finansal kayıt işle. Dönüş: True=oluşturuldu, False=zaten var."""
+    def _process_settlement_item(self, data, store, source, type_hint=None):
+        """Tek bir finansal kayıt işle. Dönüş: True=oluşturuldu, False=zaten var.
+
+        type_hint: istekteki işlem tipinden bilinen sınıf (Türkçe adı belirsiz tipler için).
+        """
         tid = str(data.get('id', ''))
         if not tid:
             return False
@@ -877,7 +947,7 @@ class TrendyolSettlement(models.Model):
 
         raw_type = data.get('transactionType', '')
         description = data.get('description', '')
-        classified_type = self._classify_transaction_type(raw_type, description)
+        classified_type = type_hint or self._classify_transaction_type(raw_type, description)
 
         order_number = str(data.get('orderNumber', '') or '')
         package_id = str(data.get('shipmentPackageId', '') or '')
@@ -901,6 +971,7 @@ class TrendyolSettlement(models.Model):
             'shipment_package_id': package_id,
             'barcode': data.get('barcode', ''),
             'receipt_id': str(data.get('receiptId', '') or ''),
+            'commission_invoice_no': str(data.get('commissionInvoiceSerialNumber') or '') or False,
             'payment_order_id': str(data.get('paymentOrderId', '') or ''),
             'payment_date': pay_date,
             'payment_period': data.get('paymentPeriod', 0) or 0,
@@ -927,7 +998,8 @@ class TrendyolSettlement(models.Model):
             return False
 
     _UPDATABLE_FIELDS = ('transaction_type', 'debt', 'credit', 'commission_rate', 'commission_amount',
-                         'seller_revenue', 'payment_order_id', 'payment_date', 'payment_period', 'affiliate')
+                         'seller_revenue', 'payment_order_id', 'payment_date', 'payment_period', 'affiliate',
+                         'commission_invoice_no')
 
     @api.private
     def _update_existing(self, record, vals):
@@ -941,8 +1013,10 @@ class TrendyolSettlement(models.Model):
             elif (old or False) != (new or False):
                 if key == 'payment_order_id' and not new:
                     continue  # boş gelen değer dolu ödeme bilgisini silmesin
-                if key in ('payment_date', 'affiliate') and not new:
+                if key in ('payment_date', 'affiliate', 'commission_invoice_no') and not new:
                     continue
+                if key == 'transaction_type' and new == 'other':
+                    continue  # tipsiz (ödeme no ile) çekim, bilinen sınıfı 'Diğer'e düşürmesin
                 changed[key] = new
         if not record.order_id and vals.get('order_id'):
             changed['order_id'] = vals['order_id']
@@ -1430,7 +1504,7 @@ class TrendyolSettlement(models.Model):
         return True
 
     @api.model
-    def sync_all_financials(self):
+    def sync_all_financials(self, commit=False):
         """Tüm aktif mağazalardan finansal verileri senkronize et."""
         stores = self.env['trendyol.store'].search([
             ('active', '=', True),
@@ -1439,19 +1513,57 @@ class TrendyolSettlement(models.Model):
         total_created = 0
         for store in stores:
             try:
-                result = self.sync_financials_for_store(store)
+                result = self.sync_financials_for_store(store, commit=commit)
                 total_created += result.get('created', 0)
             except Exception as e:
+                if commit:
+                    self.env.cr.rollback()
+                    self.env.invalidate_all()
                 _logger.exception("Finansal sync hatası [%s]: %s", store.name, e)
         return {'created': total_created}
 
     @api.model
     def cron_sync_financials(self):
-        """Cron ile finansal senkronizasyon."""
+        """Cron ile finansal senkronizasyon (saatlik, son 15 gün; her adımdan sonra kaydedilir).
+
+        Hatalar burada yakalanır: Odoo üst üste hata veren cron'u bir hafta sonra kendiliğinden
+        pasife alır (bu cron Ağustos 2026'da öyle kapanmıştı).
+        """
         try:
-            self.sync_all_financials()
+            self.sync_all_financials(commit=True)
         except Exception as e:
+            self.env.cr.rollback()
             _logger.exception("Finansal cron hatası: %s", e)
+
+    @api.model
+    def cron_financial_deep_scan(self):
+        """Gece taraması: son N günü (mağaza ayarı) 15'er günlük parçalarla yeniden çeker.
+
+        Saatlik senkron yalnız son 15 günü görür; sonradan değişen kayıtlar (komisyon fatura no,
+        geç gelen düzeltmeler, ödeme bilgisi) bu taramayla tamamlanır. Mevcut "geçmişi tamamla"
+        altyapısı kullanılır; elle başlatılmış bir tamamlama sürüyorsa o mağaza atlanır.
+        """
+        stores = self.env['trendyol.store'].search([
+            ('active', '=', True), ('sync_financials', '=', True),
+            ('financial_deep_scan_days', '>', 0), ('backfill_next', '=', False),
+        ])
+        if not stores:
+            return
+        today = fields.Date.context_today(self)
+        now = fields.Datetime.now()
+        for store in stores:
+            start = today - timedelta(days=min(store.financial_deep_scan_days, 365))
+            store.write({
+                'backfill_from': start,
+                'backfill_to': today,
+                'backfill_next': start,
+                'backfill_created': 0,
+                'backfill_auto': True,
+                'backfill_started_at': now,
+            })
+        _logger.info("Trendyol finans gece taraması planlandı: %s", ', '.join(stores.mapped('name')))
+        # Bu işlem kaydedildikten sonra başlasın
+        self._schedule_backfill(60)
 
     @api.autovacuum
     def _gc_old_sync_logs(self):
