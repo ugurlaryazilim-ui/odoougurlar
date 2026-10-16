@@ -3,7 +3,7 @@
 import { Component, useState, xml, onMounted, onWillUnmount, useRef } from "@odoo/owl";
 import { ConfirmationDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
 import { useService } from "@web/core/utils/hooks";
-import { BarcodeService } from "../barcode_service";
+import { BarcodeService, AudioFeedback } from "../barcode_service";
 import { vibrate, vibrateError, speak } from "../sound_utils";
 
 export class ShelfMoveAll extends Component {
@@ -272,6 +272,13 @@ export class ShelfMoveAll extends Component {
             } else if (!this.state.targetInfo) {
                 this.state.targetBarcode = barcode;
                 this.loadTargetShelf();
+            } else {
+                // İki raf da kilitli: okutma sessizce yok sayılmaz, kullanıcı ne yapacağını bilir
+                this.state.error = `Raflar kilitli, ${barcode} okutması işlenmedi. `
+                    + "Rafı değiştirmek için Değiştir'e basın.";
+                AudioFeedback.playError();
+                speak('move_all_error');
+                vibrateError();
             }
         };
 
