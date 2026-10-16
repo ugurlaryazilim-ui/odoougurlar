@@ -160,8 +160,10 @@ class LabelApiController(BarcodeApiBase):
                     'is_default': bool(is_default),
                 }
                 if existing:
-                    if not is_manager:
-                        vals.pop('is_default')   # yönetici dışı varsayılan bayrağını değiştiremez
+                    if not makes_default:
+                        # Tasarımcılar is_default'u hep False gönderir; kaydetme bayrağı düşürmez
+                        # (yönetici dahil). Bayrak yalnız açık "varsayılan yap" isteğiyle yazılır.
+                        vals.pop('is_default', None)
                     tmpl.write(vals)
                     return {'success': True, 'id': tmpl.id, 'message': 'Şablon güncellendi'}
                 tmpl = Template.create(vals)

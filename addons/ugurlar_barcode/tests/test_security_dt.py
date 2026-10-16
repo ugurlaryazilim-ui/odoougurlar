@@ -217,3 +217,27 @@ class TestDtR5DeleteErrorShown(SecurityCase):
             body = self._on_delete_body(path)
             self.assertIn('alert(res.error)', body, path)
             self.assertLess(body.index('res.error'), body.index('editingId = 0'), path)
+
+
+# ==== R6 ====
+@tagged('post_install', '-at_install')
+class TestDtR6ManagerKeepsDefault(DtLabelCase):
+    """ÖNEMLİ-D3: mevcut şablonun kaydı varsayılan bayrağını düşürmez (yönetici dahil)."""
+
+    def test_r6_manager_save_existing_default_keeps_flag(self):
+        res = self._ctl_as(self.manager).label_template_save(
+            template_id=self.default_tpl.id, name='DT Varsayılan', width_mm=70, height_mm=40,
+            elements=[{'type': 'x'}], is_default=False)
+        self.assertTrue(res.get('success'), res)
+        self._assert_default_untouched()
+        self.assertEqual(self.default_tpl.width_mm, 70)
+
+    def test_r6_protect_manager_can_make_existing_template_default(self):
+        tpl = self.Template.create({'name': 'DT R6 Yeni', 'user_id': self.manager.id})
+        res = self._ctl_as(self.manager).label_template_save(
+            template_id=tpl.id, name='DT R6 Yeni', elements=[], is_default=True)
+        self.assertTrue(res.get('success'), res)
+        self.default_tpl.invalidate_recordset()
+        tpl.invalidate_recordset()
+        self.assertTrue(tpl.is_default)
+        self.assertFalse(self.default_tpl.is_default)
