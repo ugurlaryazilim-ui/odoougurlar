@@ -280,9 +280,10 @@ class PickingSchedule(models.Model):
     # BATCH OLUŞTURMA
     # ═══════════════════════════════════════════════════════
 
-    def _get_time_window(self, target_line):
+    def _get_time_window(self, target_line, now=None):
         """Verilen saat satırı için zaman penceresini hesapla.
 
+        `now` (İstanbul saatinde) verilmezse şu an kullanılır.
         Döndürür: (window_start_dt, window_end_dt, window_label)
         """
         self.ensure_one()
@@ -301,7 +302,8 @@ class PickingSchedule(models.Model):
         if target_idx is None:
             return None, None, ''
 
-        now = datetime.now(pytz.UTC).astimezone(IST)
+        if now is None:
+            now = datetime.now(pytz.UTC).astimezone(IST)
         today = now.date()
 
         # Pencere sonu = bu saat
@@ -329,32 +331,47 @@ class PickingSchedule(models.Model):
 
         return window_start, window_end, window_label
 
-    def _create_batch_for_current_window(self):
-        """Manuel buton için — şu anki zaman penceresindeki batch."""
+    def _create_batch_for_current_window(self, now_tz=None):
+        """Manuel buton için — şu anı içeren zaman penceresindeki batch.
+
+        Pencere (önceki saat, saat] olduğundan "şimdi"yi içeren pencere, zamanı şimdiden
+        büyük veya eşit olan ilk saat satırıdır. Son saatten sonraysa (son saat, şimdi]
+        penceresi kurulur. `now_tz`: İstanbul saatinde şimdi (test için; varsayılan gerçek saat).
+        """
         self.ensure_one()
-        now = datetime.now(pytz.UTC).astimezone(IST)
+        if now_tz is None:
+            now = datetime.now(pytz.UTC).astimezone(IST)
+        elif now_tz.tzinfo is not None:
+            now = now_tz.astimezone(IST)
+        else:
+            now = IST.localize(now_tz)
         current_time = now.time()
 
         sorted_lines = self.schedule_line_ids.sorted(
             key=lambda l: l.hour * 60 + l.minute)
+        if not sorted_lines:
+            return None
 
-        # Şu anki saate en yakın henüz geçmemiş veya yeni geçmiş pencereyi bul
-        target_line = None
         for line in sorted_lines:
-            schedule_time = dt_time(line.hour, line.minute)
-            if current_time >= schedule_time:
-                target_line = line
+            if dt_time(line.hour, line.minute) >= current_time:
+                # İlk satırdan önceyse (dünün son saati, ilk saat] penceresi de buradan gelir
+                return self._create_batch_for_window(line, now.date(), now)
 
-        if not target_line:
-            # Günün ilk saatinden önce: dünün son saatinden bu yana gelenler (ilk pencere)
-            target_line = sorted_lines[0] if sorted_lines else None
+        # Son saatten sonra: (son saat, şimdi] — bu aralıktaki siparişler hiçbir saat
+        # satırının penceresine girmiyordu
+        last = sorted_lines[-1]
+        window_start = datetime.combine(now.date(), dt_time(last.hour, last.minute))
+        window_end = now.replace(tzinfo=None)
+        label = '%s-%s' % ((window_start + timedelta(minutes=1)).strftime('%H:%M'),
+                           window_end.strftime('%H:%M'))
+        return self._create_batch_for_window(
+            last, now.date(), now, window=(window_start, window_end, label))
 
-        if target_line:
-            return self._create_batch_for_window(target_line, now.date(), now)
-        return None
-
-    def _create_batch_for_window(self, schedule_line, today, now_tz):
+    def _create_batch_for_window(self, schedule_line, today, now_tz, window=None):
         """Belirli bir zaman penceresi icin batch olustur.
+
+        `window`: (baslangic, bitis, etiket) verilirse saat satirindan hesaplanan pencere yerine
+        kullanilir (son saatten sonraki "simdi" penceresi).
 
         Tek batch olusturulur. Her move'a source_warehouse_id atanir:
         1) Ana depoda (INTERNET) stoku olanlar
@@ -363,8 +380,8 @@ class PickingSchedule(models.Model):
         """
         self.ensure_one()
 
-        window_start, window_end, window_label = self._get_time_window(
-            schedule_line)
+        window_start, window_end, window_label = window or self._get_time_window(
+            schedule_line, now_tz)
         if not window_start:
             return None
 
