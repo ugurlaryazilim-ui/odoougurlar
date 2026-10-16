@@ -6,3 +6,4 @@ from . import test_schedule_reservation
 from . import test_packing_invoice
 from . import test_packing_flows
 from . import test_schedule_window
+from . import test_security
