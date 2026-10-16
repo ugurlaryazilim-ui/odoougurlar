@@ -147,13 +147,18 @@ class PackingApiController(BarcodeApiBase):
         remaining_items = [
             f"{m.product_id.display_name} ({m.product_uom_qty - m.packing_scanned_qty} adet)"
             for m in moves if m.packing_scanned_qty < m.product_uom_qty]
+        # Kardeş picking'ler picking_completed ile aynı kuralla sayılır: iptal move'u
+        # tamamlanmayı beklemez (yalnız bilgi olarak kalanlarda listelenir). Önceden iptal
+        # satırı sayılıyordu; son okutma soft match olunca sipariş etiketi hiç basılmıyordu
         siblings_complete = True
+        order_has_active = any(m.state != 'cancel' for m in moves)
         if picking.origin:
             for sp in all_pickings.filtered(
                     lambda p: p.origin == picking.origin and p.id != picking.id):
                 for m in sp.move_ids:
+                    order_has_active = order_has_active or m.state != 'cancel'
                     if m.packing_scanned_qty < m.product_uom_qty:
-                        siblings_complete = False
+                        siblings_complete = siblings_complete and m.state == 'cancel'
                         remaining_items.append(
                             f"{m.product_id.display_name} ({m.product_uom_qty - m.packing_scanned_qty} adet)")
         return {
@@ -162,6 +167,8 @@ class PackingApiController(BarcodeApiBase):
             'picking_completed': all(
                 m.packing_scanned_qty >= m.product_uom_qty for m in moves if m.state != 'cancel'),
             'siblings_complete': siblings_complete,
+            # Siparişte iptal olmayan satır var mı: varsa etiketi normal okutma yolu basar
+            'order_has_active': order_has_active,
             'remaining_items': remaining_items,
         }
 
@@ -560,13 +567,15 @@ class PackingApiController(BarcodeApiBase):
                     _logger.error("Soft match Nebim hatası: %s", e)
 
                 # Gerçek tamamlanma (önceden sabit True: diğer ürün okutulmadan ve her
-                # okutmada etiket basılıyordu). Sipariş, iptal satırları dahil tüm sayaçlar
-                # dolu, picking doğrulanmış ve etiketi henüz basılmamışsa tamamlanır.
+                # okutmada etiket basılıyordu). Siparişte aktif satır varsa etiketi son aktif
+                # okutmada normal yol basar (tek etiket); soft match yalnız tamamı iptal
+                # satırlardan oluşan siparişi, tüm sayaçlar dolunca tamamlar. label_printed
+                # burada okunmaz: normal yol onu "picking paketlendi" anlamında yazar
                 progress = self._packing_progress(soft_picking, all_pickings)
                 order_completed = (
-                    not progress['remaining_items']
-                    and soft_picking.state in ('done', 'cancel')
-                    and not soft_picking.label_printed)
+                    not progress['order_has_active']
+                    and not progress['remaining_items']
+                    and soft_picking.state in ('done', 'cancel'))
                 if order_completed:
                     soft_picking.write({
                         'label_printed': True,

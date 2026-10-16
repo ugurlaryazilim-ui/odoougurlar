@@ -591,3 +591,47 @@ class TestPackingCompleteSkipped(PackingFlowCase):
         self.assertEqual(res['validated'], 1, res)
         self.assertEqual(res.get('skipped_picking_ids'), [q.id], res)
         self.assertNotEqual(q.state, 'done')
+
+
+# ── Dal B düzeltme 2 R1 (ÖB-2a) ───────────────────────────
+@tagged('post_install', '-at_install')
+class TestPackingSoftMatchSplitOrder(PackingFlowCase):
+    """ÖB-2a: aynı siparişin birden çok picking'i varken her okutma sırasında tam bir
+    otomatik etiket (picking_completed=True yanıtı)."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.prod_c = cls._new_product('Paket Ürünü C', 'PK-C')
+
+    def _labels(self, batch, order):
+        results = [self.pack_ctl.packing_scan(batch_id=batch.id, barcode=code)
+                   for code in order]
+        self.assertTrue(all(r.get('success') for r in results), results)
+        return [bool(r.get('picking_completed')) for r in results].count(True), results
+
+    def test_rb7_split_order_every_scan_order_single_label(self):
+        """P1: A iptal (yedeksiz) + B, P2: C. B, C, A sırası dahil tüm sıralar."""
+        orders = (('PK-B', 'PK-C', 'PK-A'), ('PK-C', 'PK-B', 'PK-A'), ('PK-A', 'PK-B', 'PK-C'),
+                  ('PK-A', 'PK-C', 'PK-B'), ('PK-B', 'PK-A', 'PK-C'), ('PK-C', 'PK-A', 'PK-B'))
+        for n, order in enumerate(orders):
+            origin = 'SO-RB7-%s' % n
+            p1, _move_a = self._with_cancelled(self.prod_a, origin=origin)
+            p2 = self._routed(self.prod_c, 1, wave=1, origin=origin)
+            batch = self._route(p1 | p2)
+            count, results = self._labels(batch, order)
+            self.assertEqual(count, 1, '%s: siparişe tek etiket basılmalı: %s' % (order, results))
+
+    def test_rb7_cancelled_only_picking_single_label(self):
+        """P1 yalnız iptal A (picking iptal), P2: C. Normal yol P1'in bayrağını hiç yazmaz;
+        iki sırada da tek etiket."""
+        for n, order in enumerate((('PK-C', 'PK-A'), ('PK-A', 'PK-C'))):
+            origin = 'SO-RB7-C%s' % n
+            p1 = self._picking(self.prod_a, 1, origin=origin, assign=False)
+            p2 = self._routed(self.prod_c, 1, wave=1, origin=origin)
+            batch = self._route(p1 | p2)
+            # Rotaya girdikten sonra satır iptal edilir (iptal picking rotaya eklenemez)
+            p1.move_ids._action_cancel()
+            self.assertEqual(p1.state, 'cancel')
+            count, results = self._labels(batch, order)
+            self.assertEqual(count, 1, '%s: siparişe tek etiket basılmalı: %s' % (order, results))
