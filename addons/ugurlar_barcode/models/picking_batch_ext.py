@@ -55,8 +55,10 @@ class StockPickingBatchExt(models.Model):
                 len(p.move_ids) for p in pickings)
             batch.available_count = len(
                 pickings.filtered(lambda p: p.availability_status == 'available'))
-            batch.other_warehouse_count = len(
-                pickings.filtered(lambda p: p.availability_status == 'other_warehouse'))
+            # "Başka Depoda": yedek, ana+başka depo karışımı ve iade deposu (teşhis gruplamasıyla
+            # aynı); böylece Stokta + Başka Depoda + Stoksuz toplamı total_orders'a eşit olur
+            batch.other_warehouse_count = len(pickings.filtered(
+                lambda p: p.availability_status in ('other_warehouse', 'partial', 'return_warehouse')))
             batch.unavailable_count = len(
                 pickings.filtered(lambda p: p.availability_status == 'unavailable'))
 

@@ -341,6 +341,37 @@ class TestAvailabilityStatus(ScheduleCase):
         self.assertEqual(picking.availability_status, 'available')
         self.assertEqual((batch.available_count, batch.unavailable_count), (1, 0))
 
+    def test_c3_mixed_labels_status_mapping(self):
+        """Karışık move etiketlerinin sipariş durumu."""
+        f = self.schedule._status_from_move_labels
+        self.assertEqual(f({'primary'}), 'available')
+        self.assertEqual(f({'primary', 'fallback'}), 'partial')
+        self.assertEqual(f({'primary', 'return'}), 'partial')
+        self.assertEqual(f({'primary', 'unavailable'}), 'unavailable')
+        self.assertEqual(f({'fallback', 'unavailable'}), 'unavailable')
+        self.assertEqual(f({'fallback', 'return'}), 'other_warehouse')
+        self.assertEqual(f({'return'}), 'return_warehouse')
+
+    def test_c3_counters_cover_partial_and_return_and_sum_to_total(self):
+        """Rota sayaçları 5 durumun hepsini sayar: toplam total_orders'a eşit olur."""
+        statuses = ['available', 'other_warehouse', 'partial', 'return_warehouse', 'unavailable']
+        self._add_stock(self.prod1, self.stock, 10)
+        pickings = self.env['stock.picking']
+        for _status in statuses:
+            pickings |= self._picking(self.prod1, 1)
+        for picking, status in zip(pickings, statuses):
+            picking.availability_status = status
+        batch = self._route(pickings)
+        batch.invalidate_recordset()
+
+        self.assertEqual(batch.total_orders, 5)
+        self.assertEqual(batch.available_count, 1)
+        self.assertEqual(batch.other_warehouse_count, 3, 'other_warehouse + partial + return_warehouse')
+        self.assertEqual(batch.unavailable_count, 1)
+        self.assertEqual(
+            batch.available_count + batch.other_warehouse_count + batch.unavailable_count,
+            batch.total_orders)
+
     def test_c3_only_return_warehouse_stock(self):
         self._add_stock(self.prod4, self.ret_shelf, 2)
         picking = self._pri_picking(self.prod4, 1)
