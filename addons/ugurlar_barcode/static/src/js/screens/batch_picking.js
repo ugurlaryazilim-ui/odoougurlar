@@ -459,6 +459,7 @@ export class BatchPickingScreen extends Component {
         this._loadSeq = 0;      // en son rota seçiminin (selectBatch) numarası
         this._refreshSeq = 0;   // en son miktar yenilemesinin (_refreshItems) numarası
         this._burstErrors = 0;  // kuyruk boşalana kadarki seride hatalı işlem sayısı
+        this._timers = new Set();   // kuyruk zaman aşımı zamanlayıcıları (ekrandan çıkışta temizlenir)
         this._orphans = new Set();  // zaman aşımına uğramış, yanıtı beklenen kısa istekler
         this._alive = true;
 
@@ -494,6 +495,9 @@ export class BatchPickingScreen extends Component {
 
         onWillUnmount(() => {
             this._alive = false;
+            // Bekleyen zaman aşımı zamanlayıcıları ekrandan sonra çalışmasın
+            for (const t of this._timers) clearTimeout(t);
+            this._timers.clear();
             if (this._unsub) this._unsub();
             window.removeEventListener('popstate', this._onPopState);
         });
@@ -867,12 +871,18 @@ export class BatchPickingScreen extends Component {
         let timer;
         const expired = new Promise((resolve) => {
             timer = setTimeout(() => {
+                this._timers.delete(timer);
                 ctx.timedOut = true;
                 resolve(true);
             }, timeoutMs);
+            this._timers.add(timer);
         });
-        return Promise.race([work.then(() => false), expired]).then((isTimeout) => {
+        const stopTimer = () => {
             clearTimeout(timer);
+            this._timers.delete(timer);
+        };
+        return Promise.race([work.then(() => false), expired]).then((isTimeout) => {
+            stopTimer();
             if (!isTimeout) {
                 releaseLong();
                 return;
@@ -890,7 +900,7 @@ export class BatchPickingScreen extends Component {
                 }
             }).finally(releaseLong);
         }, (e) => {
-            clearTimeout(timer);
+            stopTimer();
             releaseLong();
             throw e;
         });

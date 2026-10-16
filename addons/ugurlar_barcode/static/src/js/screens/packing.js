@@ -391,6 +391,7 @@ export class PackingScreen extends Component {
         this._listSeq = 0;      // en son istenen liste yenilemesinin numarası
         this._burstErrors = 0;  // kuyruk boşalana kadarki seride hatalı işlem sayısı
         this._labelRequested = new Set();  // bu rotada otomatik etiket istenen picking'ler
+        this._timers = new Set();   // kuyruk zaman aşımı zamanlayıcıları (ekrandan çıkışta temizlenir)
         this._orphans = new Set();  // zaman aşımına uğramış, yanıtı beklenen kısa istekler
         this._alive = true;
 
@@ -431,6 +432,9 @@ export class PackingScreen extends Component {
 
         onWillUnmount(() => {
             this._alive = false;
+            // Bekleyen zaman aşımı zamanlayıcıları ekrandan sonra çalışmasın
+            for (const t of this._timers) clearTimeout(t);
+            this._timers.clear();
             if (this._unsub) this._unsub();
             window.removeEventListener('keydown', this._onKeydown, true);
             clearTimeout(this._orderTimer);
@@ -484,6 +488,7 @@ export class PackingScreen extends Component {
     }
 
     _activateOrder(pickingId, barcode) {
+        if (!this._alive) return;
         const items = this.state.items || [];
         const inPicking = items.filter(i => i.picking_id === pickingId);
         const item = inPicking.find(i => i.barcode === barcode) || inPicking[0];
@@ -734,12 +739,18 @@ export class PackingScreen extends Component {
         let timer;
         const expired = new Promise((resolve) => {
             timer = setTimeout(() => {
+                this._timers.delete(timer);
                 ctx.timedOut = true;
                 resolve(true);
             }, timeoutMs);
+            this._timers.add(timer);
         });
-        return Promise.race([work.then(() => false), expired]).then((isTimeout) => {
+        const stopTimer = () => {
             clearTimeout(timer);
+            this._timers.delete(timer);
+        };
+        return Promise.race([work.then(() => false), expired]).then((isTimeout) => {
+            stopTimer();
             if (!isTimeout) {
                 releaseLong();
                 return;
@@ -757,7 +768,7 @@ export class PackingScreen extends Component {
                 }
             }).finally(releaseLong);
         }, (e) => {
-            clearTimeout(timer);
+            stopTimer();
             releaseLong();
             throw e;
         });
@@ -795,8 +806,9 @@ export class PackingScreen extends Component {
         const fresh = await BarcodeService.call('/ugurlar_barcode/api/packing_batch_detail', {
             batch_id: batchId,
         });
-        if (ctx && ctx.timedOut) throw new StaleResponse();
-        if (seq !== this._listSeq || !this._alive || fresh.error
+        // Zaman aşımı veya ekrandan çıkış: çağıran devam etmez (etiket / panel zamanlayıcısı açılmaz)
+        if ((ctx && ctx.timedOut) || !this._alive) throw new StaleResponse();
+        if (seq !== this._listSeq || fresh.error
             || !this.state.batch || this.state.batch.id !== batchId) {
             return false;
         }
@@ -808,6 +820,7 @@ export class PackingScreen extends Component {
 
     // Aynı rotada bir picking için otomatik etiket bir kez istenir; tekrarında "Tekrar Yazdır" sunulur
     _autoPrintLabel(pickingId) {
+        if (!this._alive) return false;  // ekrandan çıkıldıktan sonra etiket penceresi açılmaz
         if (this._labelRequested.has(pickingId)) {
             this.state.reprintPickingId = pickingId;
             return false;
@@ -1073,7 +1086,7 @@ export class PackingScreen extends Component {
                 this._addCompletedPicking(pickingId);
                 this._labelRequested.add(pickingId);
                 setTimeout(() => {
-                    this.printLabel(pickingId);
+                    if (this._alive) this.printLabel(pickingId);
                 }, 100);
             }
         } catch (e) {
