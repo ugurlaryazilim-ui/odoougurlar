@@ -536,9 +536,12 @@ class PickingSchedule(models.Model):
         for picking in pickings:
             for move in picking.move_ids:
                 if move.state not in ('assigned', 'done', 'cancel'):
-                    # Kısmi rezervde yalnız eksik kısım transfer edilir
-                    demand = max(0.0, move.product_uom_qty - (move.quantity or 0))
-                    if not demand:
+                    # Kısmi rezervde yalnız eksik kısım transfer edilir. Stok haritaları ve
+                    # transfer ürün UoM'sinde: talep de ürün UoM'sine çevrilir (1 düzine = 12 adet)
+                    uom = move.product_id.uom_id
+                    reserved = move.product_uom._compute_quantity(move.quantity or 0, uom)
+                    demand = max(0.0, move.product_qty - reserved)
+                    if uom.is_zero(demand):
                         continue
                     pid = move.product_id.id
                     fb_avail = max(0, fb_remaining.get(pid, 0))
@@ -554,18 +557,24 @@ class PickingSchedule(models.Model):
                             moves_from_return.add(move.id)
 
         # ═══ FAZ 3: Otomatik iç transferleri oluştur ve onayla ═══
+        # Transfer olmadıysa (None) move'lar o depodan etiketlenmez; FAZ 5'te gerçek
+        # rezerv durumuna göre (ana depo / stoksuz) etiketlenir
         transfers_created = []
         if transfer_from_fallback and fallback_wh:
             t = self._create_auto_internal_transfer(
                 transfer_from_fallback, fallback_wh, primary_wh, 'Yedek Depo')
             if t:
                 transfers_created.append(t)
+            else:
+                moves_from_fallback = set()
 
         if transfer_from_return and return_wh:
             t = self._create_auto_internal_transfer(
                 transfer_from_return, return_wh, primary_wh, 'İade Deposu')
             if t:
                 transfers_created.append(t)
+            else:
+                moves_from_return = set()
 
         # ═══ FAZ 4: Transfer sonrası tekrar stok rezervasyonu ═══
         if transfers_created:
@@ -605,9 +614,10 @@ class PickingSchedule(models.Model):
                         move.sudo().write({'source_warehouse_id': primary_wh.id})
                     count_unavailable += 1
 
-                # move.quantity sıfırla — personel barkod okutarak dolduracak
-                if move.quantity > 0 and move.state != 'done':
-                    move.quantity = 0
+                # Rezerv korunur (K-1): sıfırlanırsa stok başka siparişe gider, doğrulamada
+                # yeniden rezerve edilirken yetmezse WH/Stock kökünde satır açılırdı.
+                # Toplanan / okutulan miktar kendi sayaçlarında (wave_collected_qty,
+                # packing_scanned_qty); sevk her yolda _apply_collected_quantities ile yazılır.
 
         _logger.info(
             "Toplama [%s] %s — depo dağılımı: ana=%d, yedek=%d, iade=%d, stoksuz=%d",
@@ -807,16 +817,24 @@ class PickingSchedule(models.Model):
             _logger.warning(
                 "Otomatik transfer ADIM 4 UYARI (assign): %s — %s",
                 picking.name, e)
-            # Assign başarısız olsa bile devam et — force transfer yapacağız
 
-        # ─── ADIM 5: Miktarları doldur ───
-        for move in picking.move_ids:
-            move.quantity = move.product_uom_qty
+        # ─── ADIM 5: Yalnız rezerve edilen miktar taşınır ───
+        # Önceden quantity = talep zorlanıyordu: rezerv yetmezse çekirdek yedek deponun
+        # kökünde satır açıp stoğu negatife düşürüyordu. quantity'ye dokunulmaz.
+        reserved_moves = picking.move_ids.filtered(lambda m: m.state != 'cancel' and m.quantity > 0)
+        if not reserved_moves:
+            _logger.warning(
+                "Otomatik transfer ADIM 5: %s — kaynak depoda rezerve edilebilen stok yok, "
+                "doğrulanmıyor", picking.name)
+            return picking
+        reserved_moves.picked = True
         _logger.info(
-            "Otomatik transfer ADIM 5: Miktarlar dolduruldu — %s (%d move)",
-            picking.name, len(picking.move_ids))
+            "Otomatik transfer ADIM 5: %d/%d move rezerve miktarıyla işaretlendi — %s",
+            len(reserved_moves), len(picking.move_ids), picking.name)
 
         # ─── ADIM 6: Validate ───
+        # Rezervsiz kalan kısım (picked olmayan / kısmi move'un kalanı) backorder açılmadan
+        # iptal edilir: yedek depoda yarım transfer kalmaz
         try:
             ctx = {
                 'skip_backorder': True,

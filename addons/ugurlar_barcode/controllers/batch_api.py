@@ -309,7 +309,8 @@ class BatchApiController(BarcodeApiBase):
                     'product_name': product.display_name,
                     'barcode': barcode,
                     'demand_qty': move.product_uom_qty,
-                    'done_qty': move.quantity,
+                    # Toplanan = rota sayacı; quantity rota rezervidir (K-1)
+                    'done_qty': move.wave_collected_qty,
                     'location': location,
                     'image_url': f'/web/image/product.product/{product.id}/image_128',
                 }
@@ -327,7 +328,7 @@ class BatchApiController(BarcodeApiBase):
                         'collected_qty': 0,
                     }
                 all_products[key]['total_qty'] += move.product_uom_qty
-                all_products[key]['collected_qty'] += move.quantity
+                all_products[key]['collected_qty'] += move.wave_collected_qty
 
             pickings.append({
                 'id': p.id,

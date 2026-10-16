@@ -132,6 +132,12 @@ def _extract_marketplace_info(sale_order):
 class PackingApiController(BarcodeApiBase):
     """Paketleme & Faturalama API'leri."""
 
+    @staticmethod
+    def _packing_done_qty(move):
+        """Paketleme listesindeki "okutulan" değeri: doğrulanmış move'da sevk edilen miktar,
+        bitmemiş move'da okutma sayacı. Rota rezervi (quantity) okutulmuş sayılmaz (K-1)."""
+        return move.quantity if move.state == 'done' else move.packing_scanned_qty
+
     @http.route('/ugurlar_barcode/api/packing_batch_detail', type='jsonrpc', auth='user')
     def packing_batch_detail(self, batch_name='', batch_id=0, **kw):
         """Rota numarası veya ID ile batch detayı getir."""
@@ -226,7 +232,7 @@ class PackingApiController(BarcodeApiBase):
                                         'product_name': product.display_name,
                                         'barcode': self._get_physical_barcode(product),
                                         'demand_qty': rm.product_uom_qty,
-                                        'done_qty': rm.quantity,
+                                        'done_qty': self._packing_done_qty(rm),
                                         'matched': rm.packing_scanned_qty >= rm.product_uom_qty,
                                         'scanned_qty': rm.packing_scanned_qty,
                                         'origin': rp.origin or '',
@@ -276,7 +282,7 @@ class PackingApiController(BarcodeApiBase):
                     'product_name': product.display_name,
                     'barcode': self._get_physical_barcode(product),
                     'demand_qty': move.product_uom_qty,
-                    'done_qty': move.quantity,
+                    'done_qty': self._packing_done_qty(move),
                     'matched': move.packing_scanned_qty >= move.product_uom_qty,
                     'scanned_qty': move.packing_scanned_qty,
                     'origin': picking.origin or '',
@@ -423,9 +429,9 @@ class PackingApiController(BarcodeApiBase):
                         except Exception as e:
                             _logger.error("Nebim sync hatası (replacement): %s", e)
 
-                        # Tüm batch kontrolü
+                        # Tüm batch kontrolü (paketleme sayacı; rezerv okutulmuş sayılmaz)
                         all_matched = all(
-                            m.quantity >= m.product_uom_qty
+                            m.packing_scanned_qty >= m.product_uom_qty
                             for p in all_pickings
                             for m in p.move_ids
                             if m.state != 'cancel'
@@ -481,7 +487,7 @@ class PackingApiController(BarcodeApiBase):
                     'remaining_items': [],
                     'complete': True,
                     'all_matched': all(
-                        m.quantity >= m.product_uom_qty
+                        m.packing_scanned_qty >= m.product_uom_qty
                         for p in all_pickings
                         for m in p.move_ids
                         if m.state != 'cancel'
@@ -617,10 +623,9 @@ class PackingApiController(BarcodeApiBase):
             # Picking done değilse validate et
             if target_picking.state not in ('done', 'cancel'):
                 try:
-                    # Odoo validate için move.quantity gerekli → packing_scanned_qty'den aktar
-                    for m in target_picking.move_ids:
-                        if m.state != 'cancel' and m.quantity < m.product_uom_qty:
-                            m.write({'quantity': m.packing_scanned_qty})
+                    # Sevk miktarı okutma sayacından yazılır (quantity rota rezervidir,
+                    # ilerleme göstergesi değil): tüm doğrulama yollarıyla aynı kalıp
+                    self._apply_collected_quantities(target_picking, 'packing_scanned_qty')
                     self._safe_validate_picking(target_picking)
                 except Exception as e:
                     _logger.error("Picking %s validate hatası: %s", target_picking.name, e)
