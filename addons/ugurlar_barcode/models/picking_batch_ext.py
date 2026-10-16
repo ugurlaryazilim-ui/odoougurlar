@@ -117,6 +117,11 @@ class StockPickingBatchExt(models.Model):
                     _logger.warning("Rota %s kapatılamadı: %s", batch.name, e)
             if len(batches) < batch_size:
                 break
+        else:
+            # Tüm sayfalar dolu çıktı: sonraki rotalar bu çalışmada işlenmedi
+            _logger.warning(
+                "Rota temizliği sayfa tavanına ulaştı (%d sayfa x %d rota); kalan rotalar "
+                "sonraki çalışmaya kaldı", max_pages, batch_size)
         if done or cancelled:
             _logger.info("Rota temizliği: %d rota tamamlandı, %d boş/iptal rota kapatıldı",
                          done, cancelled)

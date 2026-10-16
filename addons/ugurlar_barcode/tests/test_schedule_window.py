@@ -270,6 +270,16 @@ class TestRouteCleanup(BarcodeCase):
         self.assertEqual(empty.state, 'cancel')
         self.assertEqual(shipped.state, 'done')
 
+    def test_c2_page_ceiling_logs_warning(self):
+        """Sayfa tavanına ulaşılırsa (işlenmemiş rota kalabilir) uyarı loglanır."""
+        open_p = self._picking(self.prod, 1)
+        self._batch(open_picking=open_p)
+        self._batch(open_picking=open_p)
+        self._batch(open_picking=open_p)
+        with self.assertLogs('odoo.addons.ugurlar_barcode', level='WARNING') as logs:
+            self.Batch._cron_cleanup_route_batches(batch_size=1, max_pages=2)
+        self.assertTrue(any('sayfa' in line for line in logs.output), logs.output)
+
     # ─── Normal yol (koruma) ───────────────────────────
     def test_c2_normal_path_closes_finished_keeps_open(self):
         open_batch = self._batch(open_picking=self._picking(self.prod, 1))
