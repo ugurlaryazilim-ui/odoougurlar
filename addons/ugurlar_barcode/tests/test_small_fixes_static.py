@@ -199,3 +199,46 @@ class TestSmallFixesStatic(TransactionCase):
         block = src[start:end]
         self.assertIn('Toplamayı Tamamla', block)
         self._has(block, r'(?s)<t t-if="state\.scanMsg">.*?t-esc="state\.scanMsg"', 'scanMsg bu görünümde render edilmiyor')
+
+    # ─── R-F6: küçük ön yüz düzeltmeleri ───────────────
+    def test_rf6_sales_discount_failure_drops_pending_placeholder_rows(self):
+        """Nebim/sunucu/bağlantı hatasında 'Hesaplanıyor...' (₺0,00) satırı sepette kalmamalı."""
+        src = _src('screens/sales_discount.js')
+        self._has(src, r"name:\s*'Hesaplanıyor\.\.\.',\s*pending:\s*true", 'yer tutucu satır pending işaretli değil')
+        self.assertIn('_dropPendingItems()', src)
+        body = _method_body(src, r'\n    _dropPendingItems\(\)')
+        self.assertTrue(body, '_dropPendingItems bulunamadı')
+        self._has(body, r'filter\(\s*\w+\s*=>\s*!\w+\.pending\s*\)', 'pending satırlar filtrelenmiyor')
+        calc = _method_body(src, r'async calculateDiscounts\(\)')
+        self.assertTrue(calc)
+        self.assertGreaterEqual(calc.count('_dropPendingItems()'), 3,
+                                'nebim_error, error ve catch yollarının üçünde de temizlenmeli')
+        self._has(src, r'basket:\s*this\.state\.basket\.filter\(\s*\w+\s*=>\s*!\w+\.pending\s*\)',
+                  'yer tutucu satırlar localStorage\'a yazılmamalı')
+
+    def test_rf6_movements_validates_saved_days_and_type(self):
+        """sessionStorage'daki bozuk `days`/`moveType` varsayılana düşmeli (boş gün alanı/0 kayıt olmasın)."""
+        body = _method_body(_src('screens/movements.js'), r'\n    _loadFilters\(\)')
+        self.assertTrue(body, '_loadFilters bulunamadı')
+        self._has(body, r'MOVEMENT_DAYS\.includes\(', 'days geçerli değer listesine karşı doğrulanmıyor')
+        self._has(body, r'MOVEMENT_TYPES\.includes\(', 'moveType doğrulanmıyor')
+        src = _src('screens/movements.js')
+        for v in ('1', '7', '30', '90', '365'):
+            self.assertRegex(re.search(r'const MOVEMENT_DAYS = \[(.*?)\]', src).group(1), r'\b%s\b' % v)
+
+    def test_rf6_packing_batch_list_error_is_turkish_constant_text(self):
+        """Rota listesi hata metni sürücünün İngilizce ağ mesajını içermez."""
+        body = _method_body(_src('screens/packing.js'), r'async loadBatchList\(\)')
+        self.assertTrue(body)
+        catch = _catch_bodies(body)[0]
+        self._has(catch, r"Rota listesi yüklenemedi", 'hata metni yok')
+        self._hasnt(catch, r'_batchListError\s*=[^;]*e\.message', 'hata metni e.message içeriyor')
+
+    def test_rf6_label_template_list_error_response_is_visible(self):
+        """label_template_list `{error}` döndürürse (yetki vb.) ekranda görünür mesaj olmalı."""
+        for fname in ('labels.js', 'label_designer.js'):
+            body = _method_body(_src('screens/' + fname), r'async loadTemplates\(\)')
+            self.assertTrue(body, '%s loadTemplates bulunamadı' % fname)
+            m = re.search(r'if\s*\(\s*res\s*&&\s*res\.error\s*\)\s*\{(.*?)return', body, re.S)
+            self.assertTrue(m, '%s: res.error dalı yok' % fname)
+            self._has(m.group(1), VISIBLE, '%s: res.error görünür mesaj vermiyor' % fname)

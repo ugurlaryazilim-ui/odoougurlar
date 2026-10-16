@@ -4,6 +4,10 @@ import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odo
 import { BarcodeService } from "../barcode_service";
 import { vibrate, vibrateError, speak } from "../sound_utils";
 
+// Filtre seçicisindeki geçerli değerler (sessionStorage'dan okunan değer bunlarla doğrulanır)
+const MOVEMENT_DAYS = [1, 3, 7, 14, 30, 90, 365];
+const MOVEMENT_TYPES = ['all', 'in', 'out', 'internal'];
+
 export class MovementsScreen extends Component {
     static template = xml`
         <div class="ub-screen">
@@ -392,9 +396,11 @@ export class MovementsScreen extends Component {
         try {
             const raw = sessionStorage.getItem('ub_movements_filters');
             const f = raw ? JSON.parse(raw) : {};
+            // Bozuk/kurcalanmış değerler varsayılana düşer (seçicideki geçerli değerler dışı kabul edilmez)
+            const days = Number(f.days);
             return {
-                days: f.days != null ? f.days : undefined,
-                moveType: typeof f.moveType === 'string' ? f.moveType : undefined,
+                days: f.days != null && MOVEMENT_DAYS.includes(days) ? days : undefined,
+                moveType: MOVEMENT_TYPES.includes(f.moveType) ? f.moveType : undefined,
                 productBarcode: typeof f.productBarcode === 'string' ? f.productBarcode : undefined,
             };
         } catch (e) {

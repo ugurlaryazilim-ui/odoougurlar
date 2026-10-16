@@ -588,7 +588,9 @@ export class PackingScreen extends Component {
             this._batchListError = null;
         } catch (e) {
             // Sessiz kalmaz: boş liste "rota yok" gibi görünmesin
-            this._batchListError = 'Rota listesi yüklenemedi: ' + (e.message || e);
+            // Sürücü/ağ hata metni İngilizce olabilir: kullanıcıya sabit Türkçe metin, ayrıntı konsola
+            console.warn('Rota listesi yüklenemedi', e);
+            this._batchListError = 'Rota listesi yüklenemedi. Bağlantıyı kontrol edip tekrar deneyin.';
             this.state.error = this._batchListError;
         }
     }

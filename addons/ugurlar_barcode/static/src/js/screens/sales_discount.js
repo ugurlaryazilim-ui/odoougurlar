@@ -308,7 +308,7 @@ export class SalesDiscount extends Component {
 
     saveState() {
         localStorage.setItem('ub_discount_state', JSON.stringify({
-            basket: this.state.basket,
+            basket: this.state.basket.filter(i => !i.pending),
             summary: this.state.summary,
             customerCode: this.state.customerCode
         }));
@@ -397,6 +397,7 @@ export class SalesDiscount extends Component {
                 barcode: barcode,
                 quantity: 1,
                 name: 'Hesaplanıyor...',
+                pending: true,
                 image_url: '',
                 retail_price: 0,
                 installment_price: 0,
@@ -443,6 +444,15 @@ export class SalesDiscount extends Component {
         if (this.barcodeInputRef.el) this.barcodeInputRef.el.focus();
     }
 
+    // Hesaplama başarısız olunca "Hesaplanıyor..." yer tutucu satırları (₺0,00 görünürdü) sepetten kalkar;
+    // daha önce fiyatlanmış satırlar korunur
+    _dropPendingItems() {
+        if (this.state.basket.some(i => i.pending)) {
+            this.state.basket = this.state.basket.filter(i => !i.pending);
+            this.saveState();
+        }
+    }
+
     async calculateDiscounts() {
         if (this.state.basket.length === 0) return;
 
@@ -461,9 +471,11 @@ export class SalesDiscount extends Component {
             if (result.nebim_error) {
                 // Nebim'e ulaşılamadı: genel hata değil, ayrı mesaj; fiyatlar güncellenmedi
                 this.state.error = result.nebim_error || NEBIM_UNREACHABLE_MSG;
+                this._dropPendingItems();
                 AudioFeedback.playError();
             } else if (result.error) {
                 this.state.error = result.error;
+                this._dropPendingItems();
                 AudioFeedback.playError();
             } else if (result.success) {
                 const newBasket = [];
@@ -507,6 +519,7 @@ export class SalesDiscount extends Component {
         } catch (e) {
             if (seq !== this._discountSeq) return;
             this.state.error = 'Bağlantı Hatası: ' + (e.message || e);
+            this._dropPendingItems();
             AudioFeedback.playError();
         } finally {
             // Eski isteğin bitişi, uçuştaki yeni isteğin yükleniyor göstergesini kapatmasın

@@ -665,6 +665,10 @@ export class LabelDesigner extends Component {
     async loadTemplates() {
         try {
             const res = await BarcodeService.labelTemplateList();
+            if (res && res.error) {
+                alert('Şablonlar yüklenemedi: ' + res.error);
+                return;
+            }
             this.state.templates = res.templates || [];
         } catch (e) {
             alert('Şablonlar yüklenemedi: ' + (e.message || e));

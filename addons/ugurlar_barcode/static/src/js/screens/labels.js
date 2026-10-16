@@ -201,6 +201,11 @@ export class LabelScreen extends Component {
     async loadTemplates() {
         try {
             const res = await BarcodeService.labelTemplateList();
+            if (res && res.error) {
+                // Sunucu {error} döndürdü (yetki vb.): boş şablon listesi "şablon yok" gibi görünmesin
+                this.state.error = 'Şablonlar yüklenemedi: ' + res.error;
+                return;
+            }
             this.state.templates = res.templates || [];
             const def = this.state.templates.find(t => t.is_default);
             if (def) {
