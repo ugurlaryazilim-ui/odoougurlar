@@ -329,7 +329,7 @@ export class BatchPickingScreen extends Component {
                         <p t-esc="state.collectedCount + '/' + state.items.length + ' ürün'"/>
                         <button class="btn btn-success btn-lg" t-on-click="onComplete"
                                 t-att-disabled="state.loading or state.longOpPending"
-                                t-if="state.batch and state.batch.state !== 'done'">
+                                t-if="state.batch and state.batch.state !== 'done' and !state.completeDone">
                             <i class="fa fa-flag-checkered"></i> Toplamayı Tamamla
                         </button>
                         <!-- Zaman aşımı / "önceki işlem sürüyor" mesajları bu görünümde de görünür
@@ -461,6 +461,8 @@ export class BatchPickingScreen extends Component {
             scanPending: 0,
             // yanıtı beklenen Tamamla sayısı (düğme kapalı)
             longOpPending: 0,
+            // Tamamla'nın geç yanıtı rotanın bittiğini bildirdi (düğme yeniden etkinleşmez)
+            completeDone: false,
         });
         // Okutma kuyruğu ve sıra numaraları
         this._chain = Promise.resolve();
@@ -659,6 +661,7 @@ export class BatchPickingScreen extends Component {
                 return;
             }
             this.state.batch = res.batch;
+            this.state.completeDone = false;
             this.state.items = res.items || [];
             this.state.depotFilter = '';
             this._buildDepotList();
@@ -1136,7 +1139,16 @@ export class BatchPickingScreen extends Component {
 
     async _doComplete(ctx, batchId) {
         try {
-            const res = await this._guard(ctx, batchId, BarcodeService.batchCollectComplete(batchId));
+            const call = BarcodeService.batchCollectComplete(batchId);
+            // Zaman aşımından SONRA gelen yanıt _guard'da atılır; ama sunucu işi bitirmiş olabilir.
+            // Aynı rotadaysak sonucu (zaman aşımı mesajını temizleyerek) yine uygula.
+            call.then((late) => {
+                if (ctx.timedOut && this._alive && this.state.batch
+                    && this.state.batch.id === batchId && late) {
+                    this._applyLateCompleteResult(late);
+                }
+            }, () => {});
+            const res = await this._guard(ctx, batchId, call);
             if (res.error && res.missing) {
                 // Toplanmamış ürün var: rota tamamlanmadı, ilk eksik ürüne odaklan
                 this.state.scanMsg = res.error;
@@ -1161,6 +1173,23 @@ export class BatchPickingScreen extends Component {
             this.state.error = 'Tamamlama hatası';
         }
         this.state.loading = false;
+    }
+
+    // Zaman aşımı sonrası gelen batch_collect_complete yanıtı: "Lütfen bekleyin" mesajı kalkar.
+    // Yalnız hatasız tam başarıda Tamamla kilitlenir (rota done); hata/kısmi başarıda yeniden deneme açık kalır.
+    _applyLateCompleteResult(res) {
+        if (res.error) {
+            this.state.scanMsg = res.error;
+            this.state.scanOk = false;
+            return;
+        }
+        const failed = (res.failed_pickings && res.failed_pickings.length) > 0;
+        this.state.scanMsg = res.message || '';
+        this.state.scanOk = !failed;
+        if (res.success && res.batch_done && !failed) {
+            this.state.completeDone = true;
+            this.state.batch.state = 'done';
+        }
     }
 
 

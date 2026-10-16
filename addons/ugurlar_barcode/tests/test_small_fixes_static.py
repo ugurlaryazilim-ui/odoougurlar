@@ -213,6 +213,30 @@ class TestSmallFixesStatic(TransactionCase):
         self.assertNotIn('Tamamla butonuna basın', m.group(2))
         self._has(m.group(2), r"scanMsg\s*=\s*''", 'done rotada mesaj temizlenmiyor')
 
+    # ─── R-F9: Tamamla geç yanıtı ──────────────────────
+    def test_rf9_batch_complete_late_response_clears_wait_msg_and_locks_button_when_done(self):
+        """Zaman aşımından sonra gelen batch_collect_complete yanıtı 'Lütfen bekleyin' mesajını
+        temizler; hatasız tam başarıda (rota done) Tamamla yeniden etkinleşmez; hata/kısmi başarıda
+        yeniden deneme açık kalır (packing.js completeDone kalıbı)."""
+        src = _src('screens/batch_picking.js')
+        body = _method_body(src, r'async _doComplete\(ctx, batchId\)')
+        self.assertTrue(body, '_doComplete bulunamadı')
+        self._has(body, r'ctx\.timedOut', 'geç yanıt kolu (ctx.timedOut) yok')
+        self._has(body, r'_applyLateCompleteResult\(', 'geç yanıt uygulanmıyor')
+        late = _method_body(src, r'\n    _applyLateCompleteResult\(')
+        self.assertTrue(late, '_applyLateCompleteResult bulunamadı')
+        self._has(late, r'scanMsg\s*=', 'zaman aşımı mesajı üzerine yazılmıyor/temizlenmiyor')
+        m = re.search(r'completeDone\s*=\s*true', late)
+        self.assertTrue(m, 'başarıda completeDone işaretlenmiyor')
+        # completeDone yalnız hatasız başarıda: res.error dalı önce döner, failed_pickings koşulu var
+        self.assertLess(late.find('res.error'), m.start(), 'res.error dalı başarı mantığından önce olmalı')
+        self.assertIn('failed_pickings', late)
+        self.assertNotRegex(late[:m.start()].split('res.error', 1)[1].split('return;', 1)[0], r'completeDone\s*=\s*true')
+        # Düğme done / completeDone iken görünmez; yeni rota seçilince sıfırlanır
+        self._has(src, r"state\.batch\.state !== 'done' and !state\.completeDone", 'düğme completeDone ile gizlenmiyor')
+        sel = _method_body(src, r'async selectBatch\(batchId\)')
+        self._has(sel, r'completeDone\s*=\s*false', 'rota seçiminde completeDone sıfırlanmıyor')
+
     # ─── R-F6: küçük ön yüz düzeltmeleri ───────────────
     def test_rf6_sales_discount_failure_drops_pending_placeholder_rows(self):
         """Nebim/sunucu/bağlantı hatasında 'Hesaplanıyor...' (₺0,00) satırı sepette kalmamalı."""
