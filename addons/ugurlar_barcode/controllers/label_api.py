@@ -3,6 +3,7 @@ import json
 import logging
 
 from odoo import http
+from odoo.exceptions import AccessError
 from odoo.http import request
 
 from .base_api import BarcodeApiBase
@@ -121,31 +122,32 @@ class LabelApiController(BarcodeApiBase):
         Template = request.env['ugurlar.label.template'].sudo()
         elements_json = json.dumps(elements or [], ensure_ascii=False)
 
-        if is_default:
-            Template.search([('is_default', '=', True)]).write({'is_default': False})
+        # Yetki, varsayılan bayrağı temizlemeden ÖNCE denetlenir (model kuralı da ayrıca korur)
+        if is_default and not self._is_stock_manager():
+            return {'error': 'Varsayılan etiket şablonunu yalnız stok yöneticisi belirleyebilir.'}
 
-        if template_id:
-            tmpl = Template.browse(int(template_id))
-            if tmpl.exists():
-                if not self._can_edit_template(tmpl):
-                    return {'error': 'Bu şablonu yalnız oluşturan kişi veya stok yöneticisi değiştirebilir.'}
-                tmpl.write({
+        tmpl = Template.browse(int(template_id)) if template_id else Template
+        if tmpl and tmpl.exists() and not self._can_edit_template(tmpl):
+            return {'error': 'Bu şablonu yalnız oluşturan kişi veya stok yöneticisi değiştirebilir.'}
+
+        try:
+            with request.env.cr.savepoint():
+                if is_default:
+                    Template.search([('is_default', '=', True)]).write({'is_default': False})
+                vals = {
                     'name': name,
                     'width_mm': float(width_mm),
                     'height_mm': float(height_mm),
                     'elements_json': elements_json,
-                    'is_default': is_default,
-                })
-                return {'success': True, 'id': tmpl.id, 'message': 'Şablon güncellendi'}
-
-        tmpl = Template.create({
-            'name': name,
-            'width_mm': float(width_mm),
-            'height_mm': float(height_mm),
-            'elements_json': elements_json,
-            'is_default': is_default,
-        })
-        return {'success': True, 'id': tmpl.id, 'message': 'Şablon oluşturuldu'}
+                    'is_default': bool(is_default),
+                }
+                if tmpl and tmpl.exists():
+                    tmpl.write(vals)
+                    return {'success': True, 'id': tmpl.id, 'message': 'Şablon güncellendi'}
+                tmpl = Template.create(vals)
+                return {'success': True, 'id': tmpl.id, 'message': 'Şablon oluşturuldu'}
+        except AccessError as e:
+            return {'error': str(e.args[0] if e.args else e)}
 
     # ─── ŞABLON SİL ──────────────────────────────────
     @http.route('/ugurlar_barcode/api/label_template_delete', type='jsonrpc', auth='user')
@@ -159,6 +161,9 @@ class LabelApiController(BarcodeApiBase):
         if tmpl.exists():
             if not self._can_edit_template(tmpl):
                 return {'error': 'Bu şablonu yalnız oluşturan kişi veya stok yöneticisi silebilir.'}
-            tmpl.unlink()
+            try:
+                tmpl.unlink()
+            except AccessError as e:
+                return {'error': str(e.args[0] if e.args else e)}
             return {'success': True}
         return {'error': 'Şablon bulunamadı'}
