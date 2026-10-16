@@ -12,6 +12,9 @@ const QUEUE_TIMEOUT_MS = 20000;
 const QUEUE_LONG_TIMEOUT_MS = 90000;
 // Zaman aşımına uğramış (veya başka rotaya geçilmiş) görevin geç yanıtı ekrana yazılmaz
 class StaleResponse extends Error {}
+// Zaman aşımına uğrayıp yanıtı hâlâ beklenen kısa istek üst sınırı: dolunca kuyruk yanıtı bekler
+// (uzun iş zaten tektir: yanıtı gelene kadar Tamamla / Eksik Onayla kapalı)
+const MAX_ORPHAN_REQUESTS = 2;
 
 export class PackingScreen extends Component {
     static template = xml`
@@ -149,6 +152,11 @@ export class PackingScreen extends Component {
                             <i class="fa fa-hourglass-half me-1"></i>Sırada: <t t-esc="state.scanPending"/> işlem
                         </div>
                     </t>
+                    <t t-if="state.longOpPending > 0">
+                        <div class="small text-warning fw-bold mb-1" data-long-op-pending="1">
+                            <i class="fa fa-spinner fa-spin me-1"></i>İşlem sunucuda sürüyor, yanıt bekleniyor. Lütfen bekleyin.
+                        </div>
+                    </t>
                     <div class="ub-input-group">
                         <input type="text" class="form-control ub-barcode-input"
                                placeholder="Ürün barkodunu okutun..."
@@ -169,7 +177,8 @@ export class PackingScreen extends Component {
                             <span t-esc="state.scanMsg"/>
                         </div>
                         <t t-if="state.inc_picking_id">
-                            <button class="btn btn-warning w-100 fw-bold" t-on-click="() => this.onBackorder(state.inc_picking_id)">
+                            <button class="btn btn-warning w-100 fw-bold" t-on-click="() => this.onBackorder(state.inc_picking_id)"
+                                    t-att-disabled="state.loading or state.longOpPending">
                                 <i class="fa fa-exclamation-triangle"></i> Eksik Onayla (Backorder Yap): <t t-esc="incOrderLabel"/>
                             </button>
                         </t>
@@ -265,7 +274,7 @@ export class PackingScreen extends Component {
                 <div class="ub-action-bar" t-if="state.all_matched">
                     <button class="btn btn-lg w-100 ub-packing-complete-btn"
                             t-on-click="onComplete"
-                            t-att-disabled="state.loading">
+                            t-att-disabled="state.loading or state.longOpPending">
                         <i class="fa fa-check-circle"></i> Paketle &amp; Tamamla
                     </button>
                 </div>
@@ -372,6 +381,8 @@ export class PackingScreen extends Component {
             inc_picking_name: '',
             // kuyrukta bekleyen + işlenen işlem sayısı
             scanPending: 0,
+            // yanıtı beklenen Tamamla / Eksik Onayla sayısı (düğmeler kapalı)
+            longOpPending: 0,
         });
         this._orderTimer = null;
         // Okutma kuyruğu ve sıra numaraları
@@ -380,6 +391,7 @@ export class PackingScreen extends Component {
         this._listSeq = 0;      // en son istenen liste yenilemesinin numarası
         this._burstErrors = 0;  // kuyruk boşalana kadarki seride hatalı işlem sayısı
         this._labelRequested = new Set();  // bu rotada otomatik etiket istenen picking'ler
+        this._orphans = new Set();  // zaman aşımına uğramış, yanıtı beklenen kısa istekler
         this._alive = true;
 
         this._onKeydown = (ev) => {
@@ -677,13 +689,17 @@ export class PackingScreen extends Component {
     // ─── OKUTMA KUYRUĞU ─────────────────────────
     // Okutma ve sayaç değiştiren eylemler tek zincirde sırayla çalışır (aynı anda tek istek).
     // Bir öğenin hatası veya zaman aşımı sıradakileri durdurmaz.
-    _enqueue(task, timeoutMs = QUEUE_TIMEOUT_MS, refreshOnLate = true) {
+    _enqueue(task, { timeoutMs = QUEUE_TIMEOUT_MS, refreshOnLate = true, long = false, ownsLoading = false } = {}) {
         if (this.state.scanPending === 0) this._burstErrors = 0;
         this.state.scanPending++;
+        // Uzun iş: kuyruğa girdiği andan sunucu yanıtı (zaman aşımı olsa da geç yanıt) gelene kadar sayılır
+        if (long) this.state.longOpPending++;
+        const opts = { timeoutMs, refreshOnLate, long, ownsLoading };
         this._chain = this._chain
-            .then(() => this._runWithTimeout(task, timeoutMs, refreshOnLate))
+            .then(() => this._waitForOrphans())
+            .then(() => this._runWithTimeout(task, opts))
             .catch((e) => {
-                console.error('Paketleme kuyruğu hatası:', e);
+                if (!(e instanceof StaleResponse)) console.error('Paketleme kuyruğu hatası:', e);
             })
             .finally(() => {
                 this.state.scanPending--;
@@ -691,10 +707,30 @@ export class PackingScreen extends Component {
         return this._chain;
     }
 
-    _runWithTimeout(task, timeoutMs, refreshOnLate) {
+    // Yanıtı hâlâ beklenen zaman aşımlı istek sayısı sınırdaysa yeni istek gönderilmez (sunucuya ek yük binmez)
+    async _waitForOrphans() {
+        while (this._orphans.size >= MAX_ORPHAN_REQUESTS) {
+            if (this._alive) {
+                this.state.scanMsg = 'Sunucu yavaş yanıt veriyor: önceki işlemlerin yanıtı bekleniyor, '
+                    + 'okutmalarınız sırada.';
+                this.state.scanOk = false;
+            }
+            await Promise.race(this._orphans);
+        }
+    }
+
+    _runWithTimeout(task, { timeoutMs, refreshOnLate, long, ownsLoading }) {
         const ctx = { timedOut: false };
         const batchId = this.state.batch && this.state.batch.id;
         const work = Promise.resolve().then(() => task(ctx));
+        const settled = work.then(() => {}, () => {});  // yanıt geldi veya hata (reddedilmez)
+        let released = false;
+        const releaseLong = () => {
+            if (long && !released) {
+                released = true;
+                this.state.longOpPending--;
+            }
+        };
         let timer;
         const expired = new Promise((resolve) => {
             timer = setTimeout(() => {
@@ -704,27 +740,40 @@ export class PackingScreen extends Component {
         });
         return Promise.race([work.then(() => false), expired]).then((isTimeout) => {
             clearTimeout(timer);
-            if (!isTimeout) return;
-            this._onQueueTimeout();
-            // Geç gelen yanıt ekrana yazılmaz; sunucu işlemiş olabilir, liste kuyruktan yenilenir
-            work.catch(() => {}).then(() => {
+            if (!isTimeout) {
+                releaseLong();
+                return;
+            }
+            this._onQueueTimeout(long, ownsLoading);
+            if (!long) {
+                this._orphans.add(settled);
+                settled.then(() => this._orphans.delete(settled));
+            }
+            // Geç gelen yanıt ekrana yazılmaz; sunucu işlemiş olabilir, liste kuyruktan yenilenir.
+            // Uzun işin düğmeleri yenileme bitene kadar kapalı kalır (bayat ekranla ikinci basış olmaz)
+            settled.then(async () => {
                 if (refreshOnLate && this._alive && batchId) {
-                    this._enqueue((c) => this._refreshList(batchId, c), QUEUE_TIMEOUT_MS, false);
+                    await this._enqueue((c) => this._refreshList(batchId, c), { refreshOnLate: false });
                 }
-            });
+            }).finally(releaseLong);
         }, (e) => {
             clearTimeout(timer);
+            releaseLong();
             throw e;
         });
     }
 
-    _onQueueTimeout() {
+    _onQueueTimeout(long = false, ownsLoading = false) {
         if (!this._alive) return;
         this._burstErrors++;
-        this.state.loading = false;
+        // loading yalnız onu açan görev zaman aşımına uğradıysa kapanır (sıradaki Tamamla'nınki açık kalır)
+        if (ownsLoading) this.state.loading = false;
         this.state.inc_picking_id = null;
-        this.state.scanMsg = 'Sunucu yanıt vermedi (zaman aşımı). İşlemin sonucu bilinmiyor; '
-            + 'yanıt gelirse liste yenilenecek. Sıradaki okutmaya geçildi.';
+        this.state.scanMsg = long
+            ? 'Sunucu yanıt vermedi (zaman aşımı) ama işlem sunucuda sürüyor olabilir. Lütfen bekleyin, '
+                + 'tekrar basmayın: yanıt gelince liste yenilenecek.'
+            : 'Sunucu yanıt vermedi (zaman aşımı). İşlemin sonucu bilinmiyor; '
+                + 'yanıt gelirse liste yenilenecek. Sıradaki okutmaya geçildi.';
         this.state.scanOk = false;
         AudioFeedback.playError();
         vibrateError();
@@ -924,11 +973,17 @@ export class PackingScreen extends Component {
     // ─── TAMAMLA ─────────────────────────────────
     async onComplete() {
         if (!this.state.batch) return;
+        if (this.state.longOpPending) {
+            this.state.scanMsg = 'Önceki işlem sunucuda sürüyor, yanıtı gelince tekrar deneyin.';
+            this.state.scanOk = false;
+            return;
+        }
         const batchId = this.state.batch.id;
         this.state.loading = true;
         this.state.error = null;
         // Bekleyen okutmalar bitmeden tamamlama çalışmaz
-        await this._enqueue((ctx) => this._doComplete(ctx, batchId), QUEUE_LONG_TIMEOUT_MS);
+        await this._enqueue((ctx) => this._doComplete(ctx, batchId),
+            { timeoutMs: QUEUE_LONG_TIMEOUT_MS, long: true, ownsLoading: true });
     }
 
     async _doComplete(ctx, batchId) {
@@ -978,6 +1033,11 @@ export class PackingScreen extends Component {
 
     // ─── EKSİK ONAYLA (BACKORDER) ────────────────
     async onBackorder(pickingId) {
+        if (this.state.longOpPending) {
+            this.state.scanMsg = 'Önceki işlem sunucuda sürüyor, yanıtı gelince tekrar deneyin.';
+            this.state.scanOk = false;
+            return;
+        }
         const label = this._orderLabel(pickingId);
         if (!confirm(`${label} siparişini eksik ürünlerle onaylayıp kapatmak istediğinize emin misiniz?`)) return;
         if (!this.state.batch) return;
@@ -986,7 +1046,8 @@ export class PackingScreen extends Component {
         this.state.scanMsg = `${label} için backorder oluşturuluyor...`;
         this.state.inc_picking_id = null;
         this.state.inc_picking_name = '';
-        await this._enqueue((ctx) => this._doBackorder(ctx, batchId, pickingId), QUEUE_LONG_TIMEOUT_MS);
+        await this._enqueue((ctx) => this._doBackorder(ctx, batchId, pickingId),
+            { timeoutMs: QUEUE_LONG_TIMEOUT_MS, long: true, ownsLoading: true });
     }
 
     async _doBackorder(ctx, batchId, pickingId) {
@@ -1030,7 +1091,7 @@ export class PackingScreen extends Component {
         if (!this.state.batch) return;
         const batchId = this.state.batch.id;
         this.state.loading = true;
-        await this._enqueue((ctx) => this._doDecrease(ctx, batchId, pickingId, barcode));
+        await this._enqueue((ctx) => this._doDecrease(ctx, batchId, pickingId, barcode), { ownsLoading: true });
     }
 
     async _doDecrease(ctx, batchId, pickingId, barcode) {

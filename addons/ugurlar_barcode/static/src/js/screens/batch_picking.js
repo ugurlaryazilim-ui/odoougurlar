@@ -11,6 +11,9 @@ const QUEUE_TIMEOUT_MS = 20000;
 const QUEUE_LONG_TIMEOUT_MS = 90000;
 // Zaman aşımına uğramış (veya başka rotaya geçilmiş) görevin geç yanıtı ekrana yazılmaz
 class StaleResponse extends Error {}
+// Zaman aşımına uğrayıp yanıtı hâlâ beklenen kısa istek üst sınırı: dolunca kuyruk yanıtı bekler
+// (uzun iş zaten tektir: yanıtı gelene kadar Tamamla / Eksik Onayla kapalı)
+const MAX_ORPHAN_REQUESTS = 2;
 
 export class BatchPickingScreen extends Component {
     static template = xml`
@@ -247,6 +250,11 @@ export class BatchPickingScreen extends Component {
                         </button>
                     </div>
 
+                    <t t-if="state.longOpPending > 0">
+                        <div class="small text-warning fw-bold mb-1" data-long-op-pending="1">
+                            <i class="fa fa-spinner fa-spin me-1"></i>İşlem sunucuda sürüyor, yanıt bekleniyor. Lütfen bekleyin.
+                        </div>
+                    </t>
                     <t t-if="state.scanPending > 0">
                         <div class="small text-muted mt-1">
                             <i class="fa fa-hourglass-half me-1"></i>Sırada: <t t-esc="state.scanPending"/> işlem
@@ -320,6 +328,7 @@ export class BatchPickingScreen extends Component {
                         <h3>Tüm Ürünler Toplandı!</h3>
                         <p t-esc="state.collectedCount + '/' + state.items.length + ' ürün'"/>
                         <button class="btn btn-success btn-lg" t-on-click="onComplete"
+                                t-att-disabled="state.loading or state.longOpPending"
                                 t-if="state.batch and state.batch.state !== 'done'">
                             <i class="fa fa-flag-checkered"></i> Toplamayı Tamamla
                         </button>
@@ -441,12 +450,15 @@ export class BatchPickingScreen extends Component {
             sortDir: 'asc',
             // kuyrukta bekleyen + işlenen işlem sayısı
             scanPending: 0,
+            // yanıtı beklenen Tamamla sayısı (düğme kapalı)
+            longOpPending: 0,
         });
         // Okutma kuyruğu ve sıra numaraları
         this._chain = Promise.resolve();
         this._scanSeq = 0;      // en son okutmanın numarası
         this._loadSeq = 0;      // en son istenen rota satırları yüklemesinin numarası
         this._burstErrors = 0;  // kuyruk boşalana kadarki seride hatalı işlem sayısı
+        this._orphans = new Set();  // zaman aşımına uğramış, yanıtı beklenen kısa istekler
         this._alive = true;
 
         // ── Filtreleri localStorage'dan yükle (günlük cache) ──
@@ -805,13 +817,17 @@ export class BatchPickingScreen extends Component {
     // ═══ OKUTMA KUYRUĞU ═══
     // Okutma, Eksik, Geri al ve Tamamla tek zincirde sırayla çalışır (aynı anda tek istek).
     // Bir öğenin hatası veya zaman aşımı sıradakileri durdurmaz.
-    _enqueue(task, timeoutMs = QUEUE_TIMEOUT_MS, refreshOnLate = true) {
+    _enqueue(task, { timeoutMs = QUEUE_TIMEOUT_MS, refreshOnLate = true, long = false, ownsLoading = false } = {}) {
         if (this.state.scanPending === 0) this._burstErrors = 0;
         this.state.scanPending++;
+        // Uzun iş: kuyruğa girdiği andan sunucu yanıtı (zaman aşımı olsa da geç yanıt) gelene kadar sayılır
+        if (long) this.state.longOpPending++;
+        const opts = { timeoutMs, refreshOnLate, long, ownsLoading };
         this._chain = this._chain
-            .then(() => this._runWithTimeout(task, timeoutMs, refreshOnLate))
+            .then(() => this._waitForOrphans())
+            .then(() => this._runWithTimeout(task, opts))
             .catch((e) => {
-                console.error('Rota toplama kuyruğu hatası:', e);
+                if (!(e instanceof StaleResponse)) console.error('Rota toplama kuyruğu hatası:', e);
             })
             .finally(() => {
                 this.state.scanPending--;
@@ -819,10 +835,30 @@ export class BatchPickingScreen extends Component {
         return this._chain;
     }
 
-    _runWithTimeout(task, timeoutMs, refreshOnLate) {
+    // Yanıtı hâlâ beklenen zaman aşımlı istek sayısı sınırdaysa yeni istek gönderilmez (sunucuya ek yük binmez)
+    async _waitForOrphans() {
+        while (this._orphans.size >= MAX_ORPHAN_REQUESTS) {
+            if (this._alive) {
+                this.state.scanMsg = 'Sunucu yavaş yanıt veriyor: önceki işlemlerin yanıtı bekleniyor, '
+                    + 'okutmalarınız sırada.';
+                this.state.scanOk = false;
+            }
+            await Promise.race(this._orphans);
+        }
+    }
+
+    _runWithTimeout(task, { timeoutMs, refreshOnLate, long, ownsLoading }) {
         const ctx = { timedOut: false };
         const batchId = this.state.batch && this.state.batch.id;
         const work = Promise.resolve().then(() => task(ctx));
+        const settled = work.then(() => {}, () => {});  // yanıt geldi veya hata (reddedilmez)
+        let released = false;
+        const releaseLong = () => {
+            if (long && !released) {
+                released = true;
+                this.state.longOpPending--;
+            }
+        };
         let timer;
         const expired = new Promise((resolve) => {
             timer = setTimeout(() => {
@@ -832,26 +868,39 @@ export class BatchPickingScreen extends Component {
         });
         return Promise.race([work.then(() => false), expired]).then((isTimeout) => {
             clearTimeout(timer);
-            if (!isTimeout) return;
-            this._onQueueTimeout();
-            // Geç gelen yanıt ekrana yazılmaz; sunucu işlemiş olabilir, miktarlar kuyruktan yenilenir
-            work.catch(() => {}).then(() => {
+            if (!isTimeout) {
+                releaseLong();
+                return;
+            }
+            this._onQueueTimeout(long, ownsLoading);
+            if (!long) {
+                this._orphans.add(settled);
+                settled.then(() => this._orphans.delete(settled));
+            }
+            // Geç gelen yanıt ekrana yazılmaz; sunucu işlemiş olabilir, miktarlar kuyruktan yenilenir.
+            // Uzun işin düğmeleri yenileme bitene kadar kapalı kalır (bayat ekranla ikinci basış olmaz)
+            settled.then(async () => {
                 if (refreshOnLate && this._alive && batchId) {
-                    this._enqueue((c) => this._refreshItems(batchId, c), QUEUE_TIMEOUT_MS, false);
+                    await this._enqueue((c) => this._refreshItems(batchId, c), { refreshOnLate: false });
                 }
-            });
+            }).finally(releaseLong);
         }, (e) => {
             clearTimeout(timer);
+            releaseLong();
             throw e;
         });
     }
 
-    _onQueueTimeout() {
+    _onQueueTimeout(long = false, ownsLoading = false) {
         if (!this._alive) return;
         this._burstErrors++;
-        this.state.loading = false;
-        this.state.scanMsg = 'Sunucu yanıt vermedi (zaman aşımı). İşlemin sonucu bilinmiyor; '
-            + 'yanıt gelirse miktarlar yenilenecek. Sıradaki okutmaya geçildi.';
+        // loading yalnız onu açan görev zaman aşımına uğradıysa kapanır (sıradaki Tamamla'nınki açık kalır)
+        if (ownsLoading) this.state.loading = false;
+        this.state.scanMsg = long
+            ? 'Sunucu yanıt vermedi (zaman aşımı) ama işlem sunucuda sürüyor olabilir. Lütfen bekleyin, '
+                + 'tekrar basmayın: yanıt gelince miktarlar yenilenecek.'
+            : 'Sunucu yanıt vermedi (zaman aşımı). İşlemin sonucu bilinmiyor; '
+                + 'yanıt gelirse miktarlar yenilenecek. Sıradaki okutmaya geçildi.';
         this.state.scanOk = false;
         AudioFeedback.playError();
         vibrateError();
@@ -962,7 +1011,7 @@ export class BatchPickingScreen extends Component {
         if (!this.state.batch) return;
         const batchId = this.state.batch.id;
         this.state.loading = true;
-        await this._enqueue((ctx) => this._doDecrease(ctx, batchId, item));
+        await this._enqueue((ctx) => this._doDecrease(ctx, batchId, item), { ownsLoading: true });
     }
 
     async _doDecrease(ctx, batchId, item) {
@@ -1041,10 +1090,16 @@ export class BatchPickingScreen extends Component {
     // ═══ TOPLAMA TAMAMLA ═══
     async onComplete() {
         if (!this.state.batch) return;
+        if (this.state.longOpPending) {
+            this.state.scanMsg = 'Önceki işlem sunucuda sürüyor, yanıtı gelince tekrar deneyin.';
+            this.state.scanOk = false;
+            return;
+        }
         const batchId = this.state.batch.id;
         this.state.loading = true;
         // Bekleyen okutmalar bitmeden tamamlama çalışmaz
-        await this._enqueue((ctx) => this._doComplete(ctx, batchId), QUEUE_LONG_TIMEOUT_MS);
+        await this._enqueue((ctx) => this._doComplete(ctx, batchId),
+            { timeoutMs: QUEUE_LONG_TIMEOUT_MS, long: true, ownsLoading: true });
     }
 
     async _doComplete(ctx, batchId) {
