@@ -176,6 +176,15 @@ export class PackingScreen extends Component {
                             <div class="ub-packing-check">
                                 <i t-attf-class="fa {{item.matched ? 'fa-check-square text-success' : 'fa-square-o text-muted'}} fa-lg"/>
                             </div>
+                            <button type="button" t-if="item.has_image" class="ub-pk-thumb"
+                                    t-att-title="'Büyüt: ' + item.product_name"
+                                    t-on-click="() => this.openLightbox(item)">
+                                <img t-att-src="item.image_url" t-att-alt="item.product_name" loading="lazy"/>
+                                <span class="ub-pk-thumb-zoom"><i class="fa fa-search-plus"/></span>
+                            </button>
+                            <div t-else="" class="ub-pk-thumb ub-pk-thumb-empty" title="Ürün görseli yok">
+                                <i class="fa fa-picture-o"/>
+                            </div>
                             <div class="ub-prod-info" style="flex:1;">
                                 <div class="ub-prod-name" t-esc="item.product_name"/>
                                 <div class="ub-prod-barcode">
@@ -256,6 +265,30 @@ export class PackingScreen extends Component {
                     <p t-esc="state.error"/>
                 </div>
             </t>
+
+            <!-- Ürün görseli: büyük önizleme (ESC / dışarı tıklama / barkod okutma kapatır) -->
+            <div t-if="state.lightbox" class="ub-pk-lightbox" role="dialog" aria-modal="true"
+                 t-on-click="closeLightbox">
+                <div class="ub-pk-lightbox-dialog" t-on-click.stop="">
+                    <div class="ub-pk-lightbox-header">
+                        <div class="ub-pk-lightbox-title">
+                            <div class="ub-pk-lightbox-name" t-esc="state.lightbox.name"/>
+                            <div class="ub-pk-lightbox-meta" t-if="state.lightbox.barcode">
+                                <i class="fa fa-barcode me-1"/><span t-esc="state.lightbox.barcode"/>
+                            </div>
+                        </div>
+                        <a class="btn btn-link ub-pk-lightbox-action" t-att-href="state.lightbox.full"
+                           target="_blank" rel="noopener" title="Orijinal boyutta aç">
+                            <i class="fa fa-external-link"/>
+                        </a>
+                        <button type="button" class="btn-close btn-close-white" aria-label="Kapat"
+                                t-on-click="closeLightbox"/>
+                    </div>
+                    <div class="ub-pk-lightbox-body">
+                        <img t-att-src="state.lightbox.src" t-att-alt="state.lightbox.name"/>
+                    </div>
+                </div>
+            </div>
         </div>
     `;
 
@@ -285,9 +318,20 @@ export class PackingScreen extends Component {
             filterState: 'all',
             filterDateFrom: '',
             filterDateTo: '',
+            // ürün görseli önizleme
+            lightbox: null,
         });
 
+        this._onKeydown = (ev) => {
+            if (ev.key === 'Escape' && this.state.lightbox) {
+                ev.stopPropagation();
+                this.closeLightbox();
+            }
+        };
+        window.addEventListener('keydown', this._onKeydown, true);
+
         this._unsub = this.props.scanner.onScan(bc => {
+            this.state.lightbox = null;  // okutma önizlemeyi kapatır, akış kesilmez
             if (this.state.view === 'detail') {
                 this.state.scanInput = bc;
                 this.onScan();
@@ -315,7 +359,24 @@ export class PackingScreen extends Component {
 
         onWillUnmount(() => {
             if (this._unsub) this._unsub();
+            window.removeEventListener('keydown', this._onKeydown, true);
         });
+    }
+
+    // ─── ÜRÜN GÖRSELİ ÖNİZLEME ──────────────────
+    openLightbox(item) {
+        const base = item.image_url || '';
+        this.state.lightbox = {
+            src: base.replace('image_128', 'image_1024'),
+            full: base.replace('image_128', 'image_1920'),
+            name: item.product_name,
+            barcode: item.barcode,
+        };
+    }
+
+    closeLightbox() {
+        this.state.lightbox = null;
+        this._autoFocus(true);
     }
 
     _autoFocus(force = false) {
