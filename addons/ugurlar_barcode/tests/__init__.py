@@ -8,3 +8,4 @@ from . import test_packing_flows
 from . import test_schedule_window
 from . import test_security
 from . import test_security_dt
+from . import test_scan_races_static
