@@ -223,7 +223,7 @@ class TestSmallFixesStatic(TransactionCase):
         self._has(body, r'MOVEMENT_DAYS\.includes\(', 'days geçerli değer listesine karşı doğrulanmıyor')
         self._has(body, r'MOVEMENT_TYPES\.includes\(', 'moveType doğrulanmıyor')
         src = _src('screens/movements.js')
-        for v in ('1', '7', '30', '90', '365'):
+        for v in ('0', '1', '7', '30', '90', '365'):
             self.assertRegex(re.search(r'const MOVEMENT_DAYS = \[(.*?)\]', src).group(1), r'\b%s\b' % v)
 
     def test_rf6_packing_batch_list_error_is_turkish_constant_text(self):
@@ -242,3 +242,21 @@ class TestSmallFixesStatic(TransactionCase):
             m = re.search(r'if\s*\(\s*res\s*&&\s*res\.error\s*\)\s*\{(.*?)return', body, re.S)
             self.assertTrue(m, '%s: res.error dalı yok' % fname)
             self._has(m.group(1), VISIBLE, '%s: res.error görünür mesaj vermiyor' % fname)
+    def test_rf8_movements_days_list_matches_selector_options(self):
+        """R-F8: Dönem seçicisindeki her seçenek (0 = Tümü dahil) MOVEMENT_DAYS'te olmalı; yoksa Tümü
+        seçimi yenilemede 7 güne düşer. Geçersiz değerler (negatif, 999, metin, boş) varsayılana döner."""
+        src = _src('screens/movements.js')
+        listed = {int(x) for x in re.findall(r'\d+', re.search(r'const MOVEMENT_DAYS = \[(.*?)\]', src).group(1))}
+        sel = re.search(r't-on-change="onDaysChange".*?</select>', src, re.S)
+        self.assertTrue(sel, 'Dönem seçicisi bulunamadı')
+        options = {int(x) for x in re.findall(r'<option value="(\d+)"', sel.group(0))}
+        self.assertIn(0, options, 'seçicide Tümü (0) seçeneği yok')
+        self.assertIn(0, listed, 'MOVEMENT_DAYS 0 (Tümü) içermiyor: Tümü seçimi yenilemede korunmaz')
+        self.assertEqual(options, listed, 'MOVEMENT_DAYS seçici seçenekleriyle aynı olmalı')
+        body = _method_body(src, r'\n    _loadFilters\(\)')
+        self.assertTrue(body)
+        # Boş metin/false Number() ile 0'a dönüşür: doğrulama öncesi tür kontrolü olmalı
+        self._has(body, r"typeof\s+\w+\s*===\s*'number'", 'days sayı türü doğrulanmıyor')
+        self._has(body, r"typeof\s+\w+\s*===\s*'string'", 'days metin türü doğrulanmıyor')
+        self._has(body, r'MOVEMENT_DAYS\.includes\(', 'days listeye karşı doğrulanmıyor')
+

@@ -4,8 +4,9 @@ import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odo
 import { BarcodeService } from "../barcode_service";
 import { vibrate, vibrateError, speak } from "../sound_utils";
 
-// Filtre seçicisindeki geçerli değerler (sessionStorage'dan okunan değer bunlarla doğrulanır)
-const MOVEMENT_DAYS = [1, 3, 7, 14, 30, 90, 365];
+// Filtre seçicisindeki geçerli değerler (sessionStorage'dan okunan değer bunlarla doğrulanır).
+// 0 = "Tümü" (seçicideki <option value="0">; sunucu da days=0'ı tarih filtresiz işler)
+const MOVEMENT_DAYS = [0, 1, 3, 7, 14, 30, 90, 365];
 const MOVEMENT_TYPES = ['all', 'in', 'out', 'internal'];
 
 export class MovementsScreen extends Component {
@@ -397,9 +398,13 @@ export class MovementsScreen extends Component {
             const raw = sessionStorage.getItem('ub_movements_filters');
             const f = raw ? JSON.parse(raw) : {};
             // Bozuk/kurcalanmış değerler varsayılana düşer (seçicideki geçerli değerler dışı kabul edilmez)
-            const days = Number(f.days);
+            // Yalnız sayı veya sayısal metin kabul edilir (Number('') ve Number(false) 0 verir: "Tümü" sayılmasın)
+            const rawDays = f.days;
+            const daysOk = (typeof rawDays === 'number')
+                || (typeof rawDays === 'string' && rawDays.trim() !== '');
+            const days = daysOk ? Number(rawDays) : NaN;
             return {
-                days: f.days != null && MOVEMENT_DAYS.includes(days) ? days : undefined,
+                days: MOVEMENT_DAYS.includes(days) ? days : undefined,
                 moveType: MOVEMENT_TYPES.includes(f.moveType) ? f.moveType : undefined,
                 productBarcode: typeof f.productBarcode === 'string' ? f.productBarcode : undefined,
             };
