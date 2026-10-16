@@ -1,6 +1,6 @@
 {
     'name': 'Odoo Uğurlar - Nebim Entegrasyonu',
-    'version': '19.0.1.1.0',
+    'version': '19.0.1.2.0',
     'category': 'Sales',
     'summary': 'Nebim V3 ERP entegrasyonu - Ürün, Stok, Fiyat ve Fatura senkronizasyonu',
     'description': """

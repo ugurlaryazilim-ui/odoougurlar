@@ -52,6 +52,11 @@ class SaleOrder(models.Model):
     ], string='Durum Kategorisi', compute='_compute_marketplace_status',
         readonly=True,
     )
+    # Fatura kesilme anı (Nebim e-fatura gönderimi; yoksa faturanın oluşturulması). İlk müşteri
+    # faturası esas alınır; iadeler sayılmaz. Saklanır: listede sıralanır / filtrelenir.
+    invoice_datetime = fields.Datetime(
+        string='Fatura Tarihi', compute='_compute_invoice_datetime', store=True, copy=False,
+    )
     picking_batch_names = fields.Char(
         string='Rota', readonly=True, copy=False,
         help='Picking batch ataması sırasında otomatik yazılır. '
@@ -150,6 +155,15 @@ class SaleOrder(models.Model):
         ('idefix_store_id', None, 'Idefix'),
         ('pttavm_store_id', None, 'PttAvm'),
     ]
+
+    @api.depends('order_line.invoice_lines.move_id.state', 'order_line.invoice_lines.move_id.move_type',
+                 'order_line.invoice_lines.move_id.nebim_sent_date')
+    def _compute_invoice_datetime(self):
+        for order in self:
+            moves = order.order_line.invoice_lines.move_id.filtered(
+                lambda m: m.state == 'posted' and m.move_type == 'out_invoice')
+            dates = [m.nebim_sent_date or m.create_date for m in moves if m.nebim_sent_date or m.create_date]
+            order.invoice_datetime = min(dates) if dates else False
 
     @api.depends('client_order_ref')
     def _compute_marketplace_info(self):
