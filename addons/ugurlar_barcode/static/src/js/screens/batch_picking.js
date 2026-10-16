@@ -456,7 +456,8 @@ export class BatchPickingScreen extends Component {
         // Okutma kuyruğu ve sıra numaraları
         this._chain = Promise.resolve();
         this._scanSeq = 0;      // en son okutmanın numarası
-        this._loadSeq = 0;      // en son istenen rota satırları yüklemesinin numarası
+        this._loadSeq = 0;      // en son rota seçiminin (selectBatch) numarası
+        this._refreshSeq = 0;   // en son miktar yenilemesinin (_refreshItems) numarası
         this._burstErrors = 0;  // kuyruk boşalana kadarki seride hatalı işlem sayısı
         this._orphans = new Set();  // zaman aşımına uğramış, yanıtı beklenen kısa istekler
         this._alive = true;
@@ -633,13 +634,14 @@ export class BatchPickingScreen extends Component {
         this.state.loading = true;
         this.state.error = null;
         const seq = ++this._loadSeq;
+        // Önceki rotanın bekleyen miktar yenilemeleri bayat (kendi sayaçları var: seçimi bayat saymazlar)
+        this._refreshSeq++;
         try {
             const res = await BarcodeService.batchRouteItems(batchId);
-            // Daha yeni bir yükleme istendiyse bu yanıt bayat: uygulanmaz
-            if (seq !== this._loadSeq) return;
+            // Daha yeni bir seçim istendiyse bu yanıt bayat: uygulanmaz, loading'i o seçim kapatır
+            if (seq !== this._loadSeq || !this._alive) return;
             if (res.error) {
                 this.state.error = res.error;
-                this.state.loading = false;
                 speak('batch_route_not_found');
                 return;
             }
@@ -656,10 +658,13 @@ export class BatchPickingScreen extends Component {
             // Sub-state ekle (Geri tuşu listeye dönsün diye)
             history.pushState(Object.assign({}, history.state, { bpView: 'collect' }), '');
         } catch (e) {
+            if (seq !== this._loadSeq || !this._alive) return;
             this.state.error = 'Rota yüklenirken hata oluştu';
             speak('batch_error');
+        } finally {
+            // Her çıkış yolunda (bayat dahil) yükleme göstergesini yalnız en son seçim kapatır
+            if (seq === this._loadSeq) this.state.loading = false;
         }
-        this.state.loading = false;
     }
 
     // ═══ SONRAKI ÜRÜNE GEÇ ═══
@@ -918,10 +923,10 @@ export class BatchPickingScreen extends Component {
 
     // Toplanan/eksik bilgisini sunucudan yeniler; yalnız en son istenen yanıt uygulanır
     async _refreshItems(batchId, ctx = null) {
-        const seq = ++this._loadSeq;
+        const seq = ++this._refreshSeq;
         const res = await BarcodeService.batchRouteItems(batchId);
         if (ctx && ctx.timedOut) throw new StaleResponse();
-        if (seq !== this._loadSeq || !this._alive || res.error
+        if (seq !== this._refreshSeq || !this._alive || res.error
             || !this.state.batch || this.state.batch.id !== batchId) {
             return;
         }
