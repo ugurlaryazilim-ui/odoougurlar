@@ -332,6 +332,15 @@ export class BatchPickingScreen extends Component {
                                 t-if="state.batch and state.batch.state !== 'done'">
                             <i class="fa fa-flag-checkered"></i> Toplamayı Tamamla
                         </button>
+                        <!-- Zaman aşımı / "önceki işlem sürüyor" mesajları bu görünümde de görünür
+                             (Toplamayı Tamamla yalnız burada; currentItem görünümündeki scanMsg ile aynı) -->
+                        <t t-if="state.scanMsg">
+                            <div t-attf-class="bp-scan-feedback {{state.scanOk ? 'bp-scan-ok' : 'bp-scan-fail'}}"
+                                 data-all-done-msg="1">
+                                <i t-attf-class="fa {{state.scanOk ? 'fa-check-circle' : 'fa-times-circle'}}"></i>
+                                <span t-esc="state.scanMsg"/>
+                            </div>
+                        </t>
                     </div>
 
                     <!-- Tamamlanan rotanın ürün listesi (geçmiş kaydı) -->

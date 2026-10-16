@@ -186,3 +186,16 @@ class TestSmallFixesStatic(TransactionCase):
         self._has(src, r'=\s*res\.nebim_error\s*\|\|', 'müşteri aramada sunucu nebim_error metni kullanılmıyor')
         self._hasnt(src, r'customerSearchError\s*=\s*NEBIM_UNREACHABLE_MSG',
                     'müşteri aramasında fiyat/indirim metni gösterilmemeli')
+
+    # ─── R-F5: "Tüm Ürünler Toplandı" görünümünde scanMsg ──
+    def test_rf5_batch_picking_all_done_view_shows_scan_msg(self):
+        """Toplamayı Tamamla yalnız 'Tüm Ürünler Toplandı' görünümünde; zaman aşımı ve 'önceki
+        işlem sürüyor' mesajları (state.scanMsg) o görünümde de render edilmeli."""
+        src = _src('screens/batch_picking.js')
+        start = src.find('!state.currentItem and state.items.length')
+        self.assertGreater(start, 0, 'Tümü toplandı görünümü bulunamadı')
+        end = src.find('bp-route-table-history', start)
+        self.assertGreater(end, start)
+        block = src[start:end]
+        self.assertIn('Toplamayı Tamamla', block)
+        self._has(block, r'(?s)<t t-if="state\.scanMsg">.*?t-esc="state\.scanMsg"', 'scanMsg bu görünümde render edilmiyor')
