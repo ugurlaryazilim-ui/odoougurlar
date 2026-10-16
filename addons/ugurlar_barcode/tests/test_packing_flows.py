@@ -526,3 +526,35 @@ class TestPackingBackorderCancelled(PackingFlowCase):
         self.assertIn('iptal', res.get('error', ''), res)
         self.assertEqual(self._snapshot(c), before, 'hiçbir yazım olmamalı')
         self.assertFalse(self.env['stock.picking'].search([('backorder_id', '=', c.id)]))
+
+
+# ── Dal B düzeltme R4 (ÖB-2) ──────────────────────────────
+@tagged('post_install', '-at_install')
+class TestPackingSoftMatchCompletion(PackingFlowCase):
+    """ÖB-2: soft match yanıtı siparişin gerçek tamamlanma durumunu döndürür."""
+
+    def test_rb4_soft_match_not_complete_while_other_item_unscanned(self):
+        picking, _move_a = self._with_cancelled(self.prod_a, origin='SO-RB4-1')
+        batch = self._route(picking)
+        res = self.pack_ctl.packing_scan(batch_id=batch.id, barcode='PK-A')
+        self.assertTrue(res.get('soft_match'), res)
+        self.assertFalse(res['picking_completed'], 'B okutulmadan etiket basılmamalı')
+        self.assertTrue(res['complete'], res)
+        self.assertTrue(any('Paket Ürünü B' in r for r in res['remaining_items']), res)
+        res = self.pack_ctl.packing_scan(batch_id=batch.id, barcode='PK-B')
+        self.assertTrue(res.get('success'), res)
+        self.assertTrue(res['picking_completed'], res)
+
+    def test_rb4_two_unit_cancelled_line_single_label(self):
+        """A iptal satırı 2 adet: okutma sırası ne olursa olsun tek tamamlanma (etiket)."""
+        for origin, order in (('SO-RB4-2', ('PK-A', 'PK-A', 'PK-B')),
+                              ('SO-RB4-3', ('PK-B', 'PK-A', 'PK-A'))):
+            picking, _move_a = self._with_cancelled(self.prod_a, demand=2, origin=origin)
+            batch = self._route(picking)
+            results = [self.pack_ctl.packing_scan(batch_id=batch.id, barcode=code)
+                       for code in order]
+            self.assertTrue(all(r.get('success') for r in results), results)
+            self.assertEqual(
+                [bool(r.get('picking_completed')) for r in results].count(True), 1,
+                '%s: siparişe tek etiket basılmalı: %s' % (origin, results))
+            self.assertFalse(results[0]['complete'] if order[0] == 'PK-A' else False, results)

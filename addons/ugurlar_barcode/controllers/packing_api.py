@@ -140,6 +140,32 @@ class PackingApiController(BarcodeApiBase):
         return move.quantity if move.state == 'done' else move.packing_scanned_qty
 
     @staticmethod
+    def _packing_progress(picking, all_pickings):
+        """Paketleme (okutma sayacı) ilerlemesi: picking'in ve rotadaki aynı siparişe ait
+        diğer picking'lerin durumu. Normal okutma ve soft match aynı hesabı kullanır."""
+        moves = picking.move_ids
+        remaining_items = [
+            f"{m.product_id.display_name} ({m.product_uom_qty - m.packing_scanned_qty} adet)"
+            for m in moves if m.packing_scanned_qty < m.product_uom_qty]
+        siblings_complete = True
+        if picking.origin:
+            for sp in all_pickings.filtered(
+                    lambda p: p.origin == picking.origin and p.id != picking.id):
+                for m in sp.move_ids:
+                    if m.packing_scanned_qty < m.product_uom_qty:
+                        siblings_complete = False
+                        remaining_items.append(
+                            f"{m.product_id.display_name} ({m.product_uom_qty - m.packing_scanned_qty} adet)")
+        return {
+            'picking_total': sum(m.product_uom_qty for m in moves),
+            'picking_matched': sum(m.packing_scanned_qty for m in moves),
+            'picking_completed': all(
+                m.packing_scanned_qty >= m.product_uom_qty for m in moves if m.state != 'cancel'),
+            'siblings_complete': siblings_complete,
+            'remaining_items': remaining_items,
+        }
+
+    @staticmethod
     def _cancelled_sale_origins(pickings):
         """Picking'lerin origin'lerinden iptal edilmiş satış siparişi adları (tek sorgu)."""
         origins = list({p.origin for p in pickings if p.origin})
@@ -529,6 +555,20 @@ class PackingApiController(BarcodeApiBase):
                 except Exception as e:
                     _logger.error("Soft match Nebim hatası: %s", e)
 
+                # Gerçek tamamlanma (önceden sabit True: diğer ürün okutulmadan ve her
+                # okutmada etiket basılıyordu). Sipariş, iptal satırları dahil tüm sayaçlar
+                # dolu, picking doğrulanmış ve etiketi henüz basılmamışsa tamamlanır.
+                progress = self._packing_progress(soft_picking, all_pickings)
+                order_completed = (
+                    not progress['remaining_items']
+                    and soft_picking.state in ('done', 'cancel')
+                    and not soft_picking.label_printed)
+                if order_completed:
+                    soft_picking.write({
+                        'label_printed': True,
+                        'label_printed_at': fields.Datetime.now(),
+                        'label_printed_by': request.env.user.id,
+                    })
                 return {
                     'success': True,
                     'product_name': product.display_name,
@@ -536,11 +576,11 @@ class PackingApiController(BarcodeApiBase):
                     'demand_qty': soft_move.product_uom_qty,
                     'picking_name': soft_picking.name,
                     'picking_id': soft_picking.id,
-                    'picking_completed': True,
-                    'picking_total': 1,
-                    'picking_matched': 1,
-                    'remaining_items': [],
-                    'complete': True,
+                    'picking_completed': order_completed,
+                    'picking_total': progress['picking_total'],
+                    'picking_matched': progress['picking_matched'],
+                    'remaining_items': progress['remaining_items'],
+                    'complete': new_qty >= soft_move.product_uom_qty,
                     'all_matched': all(
                         m.packing_scanned_qty >= m.product_uom_qty
                         for p in scan_pickings
@@ -619,12 +659,10 @@ class PackingApiController(BarcodeApiBase):
             pass
 
         # Check if individual picking is complete (paketleme bazlı)
-        picking_total = sum(m.product_uom_qty for m in target_picking.move_ids)
-        picking_matched = sum(m.packing_scanned_qty for m in target_picking.move_ids)
-        picking_completed = all(
-            m.packing_scanned_qty >= m.product_uom_qty
-            for m in target_picking.move_ids if m.state != 'cancel'
-        )
+        progress = self._packing_progress(target_picking, all_pickings)
+        picking_total = progress['picking_total']
+        picking_matched = progress['picking_matched']
+        picking_completed = progress['picking_completed']
 
         # ─── DEBUG LOG ───
         _logger.info(
@@ -639,28 +677,9 @@ class PackingApiController(BarcodeApiBase):
             )
         )
 
-        # ─── Aynı siparişe ait diğer picking'leri kontrol et ───
-        sibling_remaining = []
-        all_siblings_complete = True
-        if target_picking.origin:
-            sibling_pickings = all_pickings.filtered(
-                lambda p: p.origin == target_picking.origin and p.id != target_picking.id
-            )
-            for sp in sibling_pickings:
-                for m in sp.move_ids:
-                    if m.packing_scanned_qty < m.product_uom_qty:
-                        all_siblings_complete = False
-                        sibling_remaining.append(
-                            f"{m.product_id.display_name} ({m.product_uom_qty - m.packing_scanned_qty} adet)"
-                        )
-
-        # Picking'in kendi kalan ürünleri
-        remaining_items = []
-        for m in target_picking.move_ids:
-            if m.packing_scanned_qty < m.product_uom_qty:
-                remaining_items.append(f"{m.product_id.display_name} ({m.product_uom_qty - m.packing_scanned_qty} adet)")
-
-        remaining_items.extend(sibling_remaining)
+        # Picking'in ve aynı siparişin diğer picking'lerinin kalan ürünleri
+        all_siblings_complete = progress['siblings_complete']
+        remaining_items = progress['remaining_items']
 
         # Gerçek tamamlanma: bu picking + aynı siparişteki diğer picking'ler
         order_completed = picking_completed and all_siblings_complete
