@@ -12,6 +12,7 @@
                   name="Mobil"
                   action="action_ugurlar_barcode"
                   web_icon="ugurlar_barcode,static/description/icon.png"
-                  sequence="25"/>
+                  sequence="25"
+                  groups="stock.group_stock_user"/>
     </data>
 </odoo>

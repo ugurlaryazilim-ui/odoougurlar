@@ -1,6 +1,6 @@
 {
     'name': 'Mobil',
-    'version': '19.0.1.2.1',
+    'version': '19.0.1.2.2',
     'category': 'Inventory/Barcode',
     'summary': 'Mobil uyumlu barkod tarama ve depo yönetim modülü',
     'description': """
