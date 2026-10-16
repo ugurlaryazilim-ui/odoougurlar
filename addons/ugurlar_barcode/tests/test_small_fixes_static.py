@@ -161,3 +161,20 @@ class TestSmallFixesStatic(TransactionCase):
         flags = set(re.findall(r'state\.(\w+)', attrs)) - {'all_matched', 'loading', 'longOpPending'}
         self.assertTrue(flags, 'düğme yalnız all_matched/loading/longOpPending\'e bağlı: '
                                'done picking için yeniden etkinleşiyor')
+
+    # ─── R-F1: packing_complete {error} yanıtı görünür ──
+    def test_rf1_packing_apply_complete_result_shows_server_error(self):
+        """packing_complete `{error}` (rota yok / eksik ürün) döndürür; ekran bunu göstermeli,
+        zaman aşımı mesajını temizlemeli ve completeDone'ı true yapmamalı (yeniden deneme açık)."""
+        body = _method_body(_src('screens/packing.js'), r'\n    _applyCompleteResult\(res\)')
+        self.assertTrue(body, '_applyCompleteResult bulunamadı')
+        m = re.search(r'if\s*\(\s*res\.error\s*\)\s*\{(.*?)\n        \}', body, re.S)
+        self.assertTrue(m, '_applyCompleteResult res.error dalı yok')
+        branch = m.group(1)
+        self._has(branch, r'state\.error\s*=\s*res\.error', 'hata state.error\'a yazılmıyor')
+        self._has(branch, r"state\.scanMsg\s*=\s*''", 'zaman aşımı mesajı (scanMsg) temizlenmiyor')
+        self._has(branch, r"speak\(\s*'packing_error'\s*\)", 'hata sesi yok')
+        self._has(branch, r'\breturn\b', 'dal erken dönmüyor')
+        self._hasnt(branch, r'completeDone\s*=\s*true', 'hata yanıtında completeDone true olmamalı')
+        # Dal başarı mantığından ÖNCE olmalı
+        self.assertLess(body.find('res.error'), body.find('completeDone = true'))

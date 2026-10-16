@@ -1037,6 +1037,15 @@ export class PackingScreen extends Component {
 
     // packing_complete yanıtını ekrana uygular (normal ve zaman aşımı sonrası geç yanıt için ortak)
     _applyCompleteResult(res) {
+        if (res.error) {
+            // Sunucu tamamlamayı reddetti (rota yok / eksik ürün var): hata görünür olsun, varsa
+            // "Lütfen bekleyin" (zaman aşımı) mesajı kalksın; completeDone false kalır -> yeniden deneme açık
+            this.state.error = res.error;
+            this.state.scanMsg = '';
+            this.state.scanOk = false;
+            speak('packing_error');
+            return;
+        }
         const hasErrors = !!(res.errors && res.errors.length);
         if (hasErrors) {
             // Doğrulanamayan siparişler adı ve hata metniyle alt alta listelenir
