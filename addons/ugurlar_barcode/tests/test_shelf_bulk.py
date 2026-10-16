@@ -99,6 +99,18 @@ class TestShelfBulk(BarcodeCase):
         self.assertTrue(skipped[0].get('reason'), 'neden metni dolu olmalı')
         self.assertEqual(res.get('moved_count'), 1)
 
+    def test_b2_move_all_skip_reason_names_reservation(self):
+        """Test raporu B2: atlama nedeni rezervi söyler, 'Yetersiz stok / İstenen' demez."""
+        self._x_y_on_source()
+        self._reserve_x(2)
+        res = self.ctl.shelf_move_all(source_barcode='SB-RAF-S', target_barcode='SB-RAF-D')
+        reason = (res.get('skipped') or [{}])[0].get('reason', '')
+        self.assertIn('2 adet rezerve', reason, res)
+        self.assertIn('taşınmadı', reason, res)
+        self.assertNotIn('İstenen', reason, res)
+        self.assertNotIn('Yetersiz', reason, res)
+        self.assertIn('rezerve', res.get('message', ''), res)
+
     def test_rg4_move_all_without_reservation_moves_everything(self):
         """RG-4: rezervsiz rafta Rafı Taşı her şeyi taşır."""
         self._x_y_on_source()
