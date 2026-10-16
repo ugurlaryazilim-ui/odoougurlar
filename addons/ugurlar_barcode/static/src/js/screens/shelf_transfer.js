@@ -4,6 +4,9 @@ import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odo
 import { BarcodeService, AudioFeedback } from "../barcode_service";
 import { vibrate, vibrateError, speak } from "../sound_utils";
 
+// Okuyucunun aynı barkodu çok kısa aralıkla iki kez göndermesi (çift tetik) tek okutma sayılır
+const DOUBLE_SCAN_MS = 300;
+
 export class ShelfTransferScreen extends Component {
     static template = xml`
         <div class="ub-screen">
@@ -241,21 +244,14 @@ export class ShelfTransferScreen extends Component {
         // İşlem sürerken gelen okutmalar sıraya alınır; işlem bitince sırayla çalışır
         // (önceden sessizce atılıyordu)
         this._scanQueue = [];
+        this._lastScan = { code: null, at: 0 };
         this._scanHandler = (barcode) => {
-            if (this.state.loading) {
-                this._scanQueue.push(barcode);
-                return;
-            }
-            if (this.state.step === 1) {
-                this.state.sourceShelfBarcode = barcode;
-                this.onSourceShelfConfirm();
-            } else if (this.state.step === 2) {
-                this.state.targetShelfBarcode = barcode;
-                this.onTargetShelfConfirm();
-            } else if (this.state.step === 3) {
-                this.state.productBarcode = barcode;
-                this.doTransfer();
-            }
+            // Çift tetik: aynı barkod 300 ms içinde tekrar geldiyse yok sayılır (ikinci taşıma yapılmaz,
+            // kaynak raf ikinci kez gelip hedef sayılmaz)
+            const now = Date.now();
+            if (barcode === this._lastScan.code && now - this._lastScan.at < DOUBLE_SCAN_MS) return;
+            this._lastScan = { code: barcode, at: now };
+            this._dispatchScan(barcode);
         };
 
         onMounted(() => {
@@ -269,11 +265,35 @@ export class ShelfTransferScreen extends Component {
         });
     }
 
+    // Okutmayı bulunduğu adıma göre işler; işlem sürüyorsa sıraya alır
+    _dispatchScan(barcode) {
+        if (this.state.loading) {
+            this._scanQueue.push(barcode);
+            return;
+        }
+        if (this.state.step === 1) {
+            this.state.sourceShelfBarcode = barcode;
+            this.onSourceShelfConfirm();
+        } else if (this.state.step === 2) {
+            this.state.targetShelfBarcode = barcode;
+            this.onTargetShelfConfirm();
+        } else if (this.state.step === 3) {
+            this.state.productBarcode = barcode;
+            this.doTransfer();
+        }
+    }
+
     // Yükleme bitişi: bekleyen okutma varsa sıradakini işle
     _finishLoading() {
         this.state.loading = false;
-        const next = this._scanQueue.shift();
-        if (next) this._scanHandler(next);
+        this._runNextQueued();
+    }
+
+    // Sıradaki okutmayı işler. Yükleme açmadan dönen yollar (boş barkod, aynı raf hatası) da
+    // bunu çağırır; yoksa sıradakiler takılı kalıp sonraki bir yüklemede başka adımın anlamıyla işlenirdi
+    _runNextQueued() {
+        const next = this.state.loading ? null : this._scanQueue.shift();
+        if (next) this._dispatchScan(next);
     }
 
     // Taşıma hatası: ses + titreşim (sessiz hata yok)
@@ -303,7 +323,10 @@ export class ShelfTransferScreen extends Component {
 
     async onSourceShelfConfirm() {
         const bc = this.state.sourceShelfBarcode.trim();
-        if (!bc) return;
+        if (!bc) {
+            this._runNextQueued();
+            return;
+        }
 
         this.state.loading = true;
         this.state.error = null;
@@ -336,10 +359,15 @@ export class ShelfTransferScreen extends Component {
 
     async onTargetShelfConfirm() {
         const bc = this.state.targetShelfBarcode.trim();
-        if (!bc) return;
+        if (!bc) {
+            this._runNextQueued();
+            return;
+        }
 
         if (bc === this.state.sourceShelfBarcode.trim()) {
             this.state.error = 'Kaynak ve hedef raf aynı olamaz!';
+            this._feedbackError();
+            this._runNextQueued();
             return;
         }
 
@@ -373,7 +401,10 @@ export class ShelfTransferScreen extends Component {
 
     async doTransfer() {
         const productBarcode = this.state.productBarcode.trim();
-        if (!productBarcode) return;
+        if (!productBarcode) {
+            this._runNextQueued();
+            return;
+        }
 
         // Klavyeden Enter ile gelen okutma da işlem sürerken kuyruğa alınır
         if (this.state.loading) {
