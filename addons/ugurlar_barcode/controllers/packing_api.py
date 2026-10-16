@@ -1471,7 +1471,9 @@ class PackingApiController(BarcodeApiBase):
                 active_invoices = sale_order.invoice_ids.filtered(
                     lambda i: i.state in ('draft', 'posted')
                 )
-                invoices_to_post = active_invoices.filtered(lambda i: i.state == 'draft')
+                # Taslak iade (out_refund) muhasebenin işidir: paketleme onu onaylamaz
+                invoices_to_post = active_invoices.filtered(
+                    lambda i: i.state == 'draft' and i.move_type == 'out_invoice')
                 with picking.env.cr.savepoint():
                     if not active_invoices and sale_order.invoice_status in ['to invoice', 'invoiced']:
                         invoices_to_post = sale_order._create_invoices()
@@ -1479,9 +1481,11 @@ class PackingApiController(BarcodeApiBase):
                     for invoice in invoices_to_post:
                         invoice.action_post()
 
-                # Nebim'e gönder
+                # Nebim'e gönder — yalnız satış faturası (cron invoice_processor ile aynı filtre);
+                # iade (out_refund) satış faturası yüküyle gönderilirse Nebim'de satış olarak işlenir
                 unposted_nebim = sale_order.invoice_ids.filtered(
-                    lambda i: i.state == 'posted' and not getattr(i, 'nebim_sent', False)
+                    lambda i: i.state == 'posted' and i.move_type == 'out_invoice'
+                    and not getattr(i, 'nebim_sent', False)
                 )
                 for check_invoice in unposted_nebim:
                     # Cron / buton aynı faturayı şu an gönderiyorsa ikinci kez gönderme
