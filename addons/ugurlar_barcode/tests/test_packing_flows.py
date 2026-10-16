@@ -653,3 +653,44 @@ class TestPackingScanGenericError(PackingFlowCase):
                 self.assertLogs(packing_api._logger.name, level='ERROR'):
             res = self.pack_ctl.packing_scan(batch_id=batch.id, barcode='PK-A')
         self.assertEqual(res, {'error': 'Sunucu hatası: test'})
+
+
+class TestPackingBackorderRouteCheck(PackingFlowCase):
+    """Güvenlik E-1: Eksik Onayla, picking'in gönderilen rotada olduğunu sunucuda denetler."""
+
+    def test_dte_r3_backorder_refuses_picking_of_another_route(self):
+        p = self._routed(self.prod_a, 3, wave=3, origin='SO-E1-1', scanned=1)
+        self._route(p)
+        q = self._routed(self.prod_b, 1, wave=1, origin='SO-E1-2')
+        other = self._route(q)
+        before = self._snapshot(p)
+
+        res = self.pack_ctl.packing_backorder(picking_id=p.id, batch_id=other.id)
+
+        self.assertIn('rotada değil', res.get('error', ''), res)
+        self.assertEqual(self._snapshot(p), before, 'hiçbir yazım olmamalı')
+        self.assertNotEqual(p.state, 'done')
+        self.assertFalse(self.env['stock.picking'].search([('backorder_id', '=', p.id)]))
+
+    def test_dte_r3_backorder_refuses_unknown_route(self):
+        p = self._routed(self.prod_a, 3, wave=3, origin='SO-E1-3', scanned=1)
+        self._route(p)
+        res = self.pack_ctl.packing_backorder(picking_id=p.id, batch_id=999999999)
+        self.assertIn('Rota bulunamadı', res.get('error', ''), res)
+        self.assertNotEqual(p.state, 'done')
+
+    def test_dte_r3_backorder_accepts_picking_of_same_route(self):
+        p = self._routed(self.prod_a, 3, wave=3, origin='SO-E1-4', scanned=1)
+        batch = self._route(p)
+        res = self.pack_ctl.packing_backorder(picking_id=p.id, batch_id=batch.id)
+        self.assertTrue(res.get('success'), res)
+        self.assertEqual(p.state, 'done')
+
+    def test_dte_r3_backorder_without_route_keeps_old_behaviour_and_warns(self):
+        """Eski önbellekli istemci batch_id göndermez: işlem yapılır, uyarı loglanır."""
+        p = self._routed(self.prod_a, 3, wave=3, origin='SO-E1-5', scanned=1)
+        self._route(p)
+        with self.assertLogs(packing_api._logger.name, level='WARNING') as logs:
+            res = self.pack_ctl.packing_backorder(picking_id=p.id)
+        self.assertTrue(res.get('success'), res)
+        self.assertTrue(any('batch_id' in line for line in logs.output), logs.output)

@@ -993,6 +993,7 @@ export class PackingScreen extends Component {
         try {
             const res = await this._guard(ctx, batchId, BarcodeService.call('/ugurlar_barcode/api/packing_backorder', {
                 picking_id: pickingId,
+                batch_id: batchId,
             }));
             if (res.error) {
                 this.state.scanMsg = res.error;

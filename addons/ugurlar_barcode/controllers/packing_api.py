@@ -820,12 +820,27 @@ class PackingApiController(BarcodeApiBase):
         return {'success': True, 'message': f'{product.name} siparişten 1 adet eksiltildi.'}
 
     @http.route('/ugurlar_barcode/api/packing_backorder', type='jsonrpc', auth='user')
-    def packing_backorder(self, picking_id=0, **kw):
+    def packing_backorder(self, picking_id=0, batch_id=0, **kw):
         """Kısmi olarak tamamlanmış siparişi kapatır ve geriye kalanları backorder (eksik) yapar."""
         self._check_internal_user()
         picking = self._get_outgoing_picking(picking_id)
         if not picking or picking.state == 'done':
             return {'error': 'Geçerli bir sipariş bulunamadı veya zaten tamamlanmış'}
+        # Picking'in ekrandaki rotaya ait olduğu sunucuda denetlenir (önceden yalnız istemcide)
+        if batch_id:
+            try:
+                batch = request.env['stock.picking.batch'].sudo().browse(int(batch_id))
+            except (TypeError, ValueError):
+                batch = request.env['stock.picking.batch']
+            if not batch.exists():
+                return {'error': 'Rota bulunamadı'}
+            if picking not in self._get_all_pickings(batch):
+                return {'error': f'{picking.name} seçili rotada değil; eksik onaylanamaz. '
+                                 'Listeyi yenileyip tekrar deneyin.'}
+        else:
+            # Eski (önbellekli) istemci batch_id göndermez: eski davranış korunur
+            _logger.warning('packing_backorder batch_id olmadan çağrıldı (picking %s, kullanıcı %s); '
+                            'rota denetimi yapılamadı', picking.id, request.env.user.id)
         # İptal siparişin açık picking'i eksikle onaylanmaz (mal sevk edilirdi); iptali
         # packing_complete yapar
         if self._cancelled_sale_origins(picking):
