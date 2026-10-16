@@ -797,11 +797,13 @@ export class PackingScreen extends Component {
                 this.state.completed = true;
                 speak(hasErrors ? 'packing_error' : 'packing_complete');
 
-                // Etiket bilgilerini hazırla — doğrulanamayan siparişlere etiket basılmaz
+                // Etiket bilgilerini hazırla — doğrulanamayan ve atlanan (hiç toplanmamış)
+                // siparişlere etiket basılmaz
                 const failedIds = res.failed_picking_ids || [];
+                const skippedIds = res.skipped_picking_ids || [];
                 const pickingInfos = [];
                 for (const item of this.state.items) {
-                    if (failedIds.includes(item.picking_id)) continue;
+                    if (failedIds.includes(item.picking_id) || skippedIds.includes(item.picking_id)) continue;
                     if (!pickingInfos.find(p => p.picking_id === item.picking_id)) {
                         pickingInfos.push({
                             id: item.picking_id,

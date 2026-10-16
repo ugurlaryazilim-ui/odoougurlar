@@ -852,6 +852,7 @@ class PackingApiController(BarcodeApiBase):
         errors = []
         failed_ids = []
         skipped = []
+        skipped_ids = []  # istemci bu siparişlere etiket basmaz
 
         all_pickings = self._get_all_pickings(batch)
 
@@ -868,6 +869,7 @@ class PackingApiController(BarcodeApiBase):
                     except Exception:
                         pass
                 skipped.append(f"{picking.name} (sipariş iptal)")
+                skipped_ids.append(picking.id)
                 continue
             filtered_pickings |= picking
         all_pickings = filtered_pickings
@@ -886,6 +888,7 @@ class PackingApiController(BarcodeApiBase):
                 )
                 if not has_collected:
                     skipped.append(picking.name)
+                    skipped_ids.append(picking.id)
                     _logger.info(
                         "Paketleme atlandı: %s (origin: %s) — hiçbir ürün "
                         "toplanmadı (wave_collected_qty=0)",
@@ -932,6 +935,7 @@ class PackingApiController(BarcodeApiBase):
             'skipped': len(skipped),
             'errors': errors,
             'failed_picking_ids': failed_ids,
+            'skipped_picking_ids': skipped_ids,
             'message': f'{validated} sipariş paketlendi ve doğrulandı',
         }
 

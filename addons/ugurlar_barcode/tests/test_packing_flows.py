@@ -576,3 +576,18 @@ class TestPackingAllMatchedRule(PackingFlowCase):
         self.assertTrue(any(i.get('cancelled') for i in detail['items']), 'ön koşul: iptal satırı')
         self.assertTrue(detail['all_matched'],
                         'detay ve okutma aynı "tümü eşleşti" kuralını kullanmalı: %s' % detail)
+
+
+# ── Dal B düzeltme R6 (ÖnB-10) ────────────────────────────
+@tagged('post_install', '-at_install')
+class TestPackingCompleteSkipped(PackingFlowCase):
+    """ÖnB-10: Tamamla'da atlanan (hiç toplanmamış) siparişler ayrı listede döner."""
+
+    def test_rb6_complete_returns_skipped_picking_ids(self):
+        p = self._routed(self.prod_a, 1, wave=1, origin='SO-RB6-1')
+        q = self._routed(self.prod_b, 1, wave=0, origin='SO-RB6-2')
+        batch = self._route(p | q)
+        res = self.pack_ctl.packing_complete(batch_id=batch.id)
+        self.assertEqual(res['validated'], 1, res)
+        self.assertEqual(res.get('skipped_picking_ids'), [q.id], res)
+        self.assertNotEqual(q.state, 'done')
