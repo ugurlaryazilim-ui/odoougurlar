@@ -253,6 +253,60 @@ class TestOperationsF(BarcodeCase):
         self.assertEqual(len(adj), 1)
         self.assertNotIn(adj.id, self._listed_ids('internal'))
 
+    # ─── R-F2: etiket, sayaç ve filtre tek tanım (`_move_kind`) ──
+    def _all_items(self):
+        res = self.ops.stock_movements(days=7, product_barcode=self.prod.barcode, move_type='all')
+        return res, {m['id']: m for m in res['movements']}
+
+    def test_rf2_inventory_increase_is_adjustment_not_internal_in_all_view(self):
+        """K: 'Tümü' görünümünde envanter düzeltmesi 'İç Transfer' etiketi almaz; artış '+'."""
+        self.api._safe_update_quant(self.prod, self.shelf_a, 4, 'RF2 düzeltme')
+        adj = self._done_moves(self.prod, location_dest_id=self.shelf_a)
+        self.assertEqual(len(adj), 1)
+        res, items = self._all_items()
+        item = items[adj.id]
+        self.assertEqual(item['move_type'], 'adjustment')
+        self.assertEqual(item['move_type_label'], 'Sayım/Düzeltme')
+        self.assertFalse(item['is_decrease'])
+        self.assertEqual(res['stats']['internal_count'], 0, 'düzeltme Transfer sayacına girmemeli')
+
+    def test_rf2_inventory_decrease_is_marked_as_decrease(self):
+        """K: stok düşüren düzeltme (raf -> envanter lokasyonu) '-' işaretli (is_decrease)."""
+        self._add_stock(self.prod, self.shelf_a, 5)
+        self.api._safe_update_quant(self.prod, self.shelf_a, -2, 'RF2 düşüş')
+        dec = self._done_moves(self.prod, location_id=self.shelf_a)
+        self.assertEqual(len(dec), 1)
+        res, items = self._all_items()
+        self.assertEqual(items[dec.id]['move_type'], 'adjustment')
+        self.assertTrue(items[dec.id]['is_decrease'])
+
+    def test_rf2_mobile_move_counted_as_internal_not_decrease(self):
+        """Y: mobil raf taşıma İç Transfer kalır, sayaca girer, '+' işaretli."""
+        move = self._mobile_shelf_move()
+        res, items = self._all_items()
+        self.assertEqual(items[move.id]['move_type'], 'internal')
+        self.assertFalse(items[move.id]['is_decrease'])
+        self.assertEqual(res['stats']['internal_count'], 1)
+
+    def test_rf2_internal_filter_and_label_agree(self):
+        """K: 'internal' filtresindeki hareketler ile 'Tümü'nde internal etiketli olanlar aynı küme
+        (taşıma + düzeltme + iç transfer picking'i karışık)."""
+        self._add_stock(self.prod, self.stock, 3)
+        picking = self._picking(self.prod, 2, picking_type=self.wh.int_type_id,
+                                src=self.stock, dest=self.shelf_a)
+        picking.move_ids.quantity = 2
+        picking.move_ids.picked = True
+        picking.with_context(skip_backorder=True)._action_done()
+        self._mobile_shelf_move()
+        self.api._safe_update_quant(self.prod, self.shelf_a, 4, 'RF2 düzeltme')
+        res, items = self._all_items()
+        labelled = {i for i, m in items.items() if m['move_type'] == 'internal'}
+        filtered = {m['id'] for m in self.ops.stock_movements(
+            days=7, product_barcode=self.prod.barcode, move_type='internal')['movements']}
+        self.assertEqual(labelled, filtered)
+        self.assertEqual(res['stats']['internal_count'], len(labelled))
+        self.assertTrue(any(m['move_type'] == 'adjustment' for m in items.values()))
+
     # ─── KK-F3: operator_performance ──────────────────
     def test_f3_operator_performance_days_clamped_to_90(self):
         """K: days=365 -> 90."""

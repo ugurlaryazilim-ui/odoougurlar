@@ -539,14 +539,25 @@
     font-weight: 600;
 }
 
+.ub-badge-adj {
+    background: #e2e3e5;
+    color: #383d41;
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
 /* Satır renklendirmesi */
 .ub-move-row-in { border-left: 3px solid #28a745; }
 .ub-move-row-out { border-left: 3px solid #dc3545; }
 .ub-move-row-int { border-left: 3px solid #E67E22; }
+.ub-move-row-adj { border-left: 3px solid #6c757d; }
 
 .ub-variant-table tbody tr.ub-move-row-in:hover { background: #f0fdf4; }
 .ub-variant-table tbody tr.ub-move-row-out:hover { background: #fff5f5; }
 .ub-variant-table tbody tr.ub-move-row-int:hover { background: #fffaf0; }
+.ub-variant-table tbody tr.ub-move-row-adj:hover { background: #f4f5f6; }
 .ub-variant-table tbody tr[class*="ub-move-row"] { cursor: pointer; }
 
 /* ─── PAGINATION ─────────────────────────────────────── */

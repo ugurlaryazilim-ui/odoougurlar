@@ -159,7 +159,7 @@ export class MovementsScreen extends Component {
                                 </thead>
                                 <tbody>
                                     <t t-foreach="paginatedMovements" t-as="m" t-key="m.id">
-                                        <tr t-attf-class="{{m.move_type === 'incoming' ? 'ub-move-row-in' : m.move_type === 'outgoing' ? 'ub-move-row-out' : 'ub-move-row-int'}}"
+                                        <tr t-attf-class="{{moveRowClass(m)}}"
                                             t-on-click="() => this.showDetail(m)">
                                             <td style="white-space:nowrap; font-size:0.82rem;" t-esc="m.date"/>
                                             <td>
@@ -167,12 +167,12 @@ export class MovementsScreen extends Component {
                                                 <div class="ub-barcode-cell" t-esc="m.product_barcode"/>
                                             </td>
                                             <td>
-                                                <span t-attf-class="badge {{m.move_type === 'incoming' ? 'ub-badge-in' : m.move_type === 'outgoing' ? 'ub-badge-out' : 'ub-badge-int'}}"
+                                                <span t-attf-class="badge {{moveBadgeClass(m)}}"
                                                       t-esc="m.move_type_label"/>
                                             </td>
                                             <td class="text-center">
-                                                <strong t-attf-class="{{m.move_type === 'outgoing' ? 'text-danger' : 'text-success'}}"
-                                                        t-esc="(m.move_type === 'outgoing' ? '-' : '+') + m.quantity"/>
+                                                <strong t-attf-class="{{isDecrease(m) ? 'text-danger' : 'text-success'}}"
+                                                        t-esc="(isDecrease(m) ? '-' : '+') + m.quantity"/>
                                             </td>
                                             <td style="font-size:0.78rem; color:#666;">
                                                 <t t-esc="shortLoc(m.source)"/> → <t t-esc="shortLoc(m.destination)"/>
@@ -239,7 +239,7 @@ export class MovementsScreen extends Component {
                             </div>
                             <div class="ub-shelf-detail-row">
                                 <span class="ub-shelf-detail-label">Hareket Tipi:</span>
-                                <span t-attf-class="badge {{state.detailItem.move_type === 'incoming' ? 'ub-badge-in' : state.detailItem.move_type === 'outgoing' ? 'ub-badge-out' : 'ub-badge-int'}}"
+                                <span t-attf-class="badge {{moveBadgeClass(state.detailItem)}}"
                                       t-esc="state.detailItem.move_type_label"/>
                             </div>
                             <div class="ub-shelf-detail-row">
@@ -298,6 +298,26 @@ export class MovementsScreen extends Component {
         onWillUnmount(() => {
             if (this._unsub) this._unsub();
         });
+    }
+
+    // ─── HAREKET TÜRÜ SINIFLARI ─────────────────────
+    // Tür (move_type) sunucudaki `_move_kind` ile belirlenir; 'adjustment' = sayım/envanter düzeltmesi
+    isDecrease(m) {
+        return !!(m.is_decrease || m.move_type === 'outgoing');
+    }
+
+    moveRowClass(m) {
+        if (m.move_type === 'incoming') return 'ub-move-row-in';
+        if (m.move_type === 'outgoing') return 'ub-move-row-out';
+        if (m.move_type === 'adjustment') return 'ub-move-row-adj';
+        return 'ub-move-row-int';
+    }
+
+    moveBadgeClass(m) {
+        if (m.move_type === 'incoming') return 'ub-badge-in';
+        if (m.move_type === 'outgoing') return 'ub-badge-out';
+        if (m.move_type === 'adjustment') return 'ub-badge-adj';
+        return 'ub-badge-int';
     }
 
     // ─── COMPUTED ──────────────────────────────────

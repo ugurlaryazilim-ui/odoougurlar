@@ -15,6 +15,21 @@ class OperationsApiController(BarcodeApiBase):
     """Stok hareketleri, etiket, toplu işlem ve performans API'leri."""
 
     # ─── STOK HAREKET RAPORU ──────────────────────────────
+    @staticmethod
+    def _move_kind(move):
+        """Hareketin türü: filtre, satır etiketi ve sayaçlar bu tek tanımı kullanır.
+
+        - picking tipi varsa onun kodu (incoming / outgoing / internal / ...)
+        - picking'siz ve kaynak + hedef iç lokasyon ise 'internal' (mobil raf taşıma)
+        - diğer picking'siz hareketler 'adjustment' (envanter/sayım düzeltmesi, hurda)
+        `stock_movements` içindeki 'internal' domain'i bu tanımın SQL karşılığıdır.
+        """
+        if move.picking_type_id:
+            return move.picking_type_id.code
+        if move.location_id.usage == 'internal' and move.location_dest_id.usage == 'internal':
+            return 'internal'
+        return 'adjustment'
+
     @http.route('/ugurlar_barcode/api/stock_movements', type='jsonrpc', auth='user')
     def stock_movements(self, days=7, product_barcode='', move_type='all', limit=200, **kw):
         """Stok hareketlerini listele (HamurLabs uyumlu gelişmiş yapı)."""
@@ -35,8 +50,8 @@ class OperationsApiController(BarcodeApiBase):
         elif move_type == 'out':
             domain.append(('picking_type_id.code', '=', 'outgoing'))
         elif move_type == 'internal':
-            # Picking tipi olan iç transfer VEYA picking'siz mobil raf hareketi
-            # (kaynak + hedef iç lokasyon; envanter düzeltmesi dışarıda kalır).
+            # `_move_kind(m) == 'internal'` ile aynı tanım: picking tipi olan iç transfer VEYA
+            # picking'siz mobil raf hareketi (kaynak + hedef iç lokasyon; envanter düzeltmesi dışarıda).
             domain += [
                 '|', ('picking_type_id.code', '=', 'internal'),
                 '&', '&', ('picking_type_id', '=', False),
@@ -75,11 +90,15 @@ class OperationsApiController(BarcodeApiBase):
             'incoming': 'Giriş',
             'outgoing': 'Çıkış',
             'internal': 'İç Transfer',
+            'adjustment': 'Sayım/Düzeltme',
         }
 
         result = []
         for m in moves:
-            mt = m.picking_type_id.code if m.picking_type_id else 'internal'
+            mt = self._move_kind(m)
+            # Düzeltme hedefi iç lokasyon değilse stok azalmıştır (ekranda '-')
+            is_decrease = mt == 'outgoing' or (
+                mt == 'adjustment' and m.location_dest_id.usage != 'internal')
             result.append({
                 'id': m.id,
                 'product_name': m.product_id.name,
@@ -94,6 +113,7 @@ class OperationsApiController(BarcodeApiBase):
                 'picking_name': m.picking_id.name if m.picking_id else '',
                 'move_type': mt,
                 'move_type_label': type_labels.get(mt, mt),
+                'is_decrease': is_decrease,
             })
 
         in_count = sum(1 for r in result if r['move_type'] == 'incoming')
