@@ -102,14 +102,15 @@ class TestLabelTemplatePermissions(SecurityCase):
         return env_tpl.sudo() if sudo else env_tpl
 
     def _denied_save(self, **kw):
-        """Controller kaydı reddedilmeli: AccessError fırlatır ya da `error` döner."""
+        """Controller kaydı reddedilmeli ve hata `{'error'}` olarak DÖNMELİ: fırlatılan
+        AccessError arayüzde alert yerine Odoo hata penceresi açar (inceleme D8)."""
         self._patch_request_as(self.stock_user, label_api)
         ctl = label_api.LabelApiController()
-        try:
-            res = ctl.label_template_save(**kw)
-        except AccessError:
-            return
-        self.assertTrue(res.get('error') and not res.get('success'), res)
+        res = ctl.label_template_save(**kw)
+        self.assertIsInstance(res, dict, res)
+        self.assertTrue(res.get('error'), res)
+        self.assertNotIn('success', res, res)
+        self.assertNotIn('id', res, res)
 
     # ─── KK-D2.1 ───────────────────────────────────────
     def test_d21_nonmanager_cannot_create_default(self):
