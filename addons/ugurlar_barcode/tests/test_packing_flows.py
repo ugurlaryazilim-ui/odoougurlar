@@ -558,3 +558,21 @@ class TestPackingSoftMatchCompletion(PackingFlowCase):
                 [bool(r.get('picking_completed')) for r in results].count(True), 1,
                 '%s: siparişe tek etiket basılmalı: %s' % (origin, results))
             self.assertFalse(results[0]['complete'] if order[0] == 'PK-A' else False, results)
+
+
+# ── Dal B düzeltme R5 (ÖB-1) ──────────────────────────────
+@tagged('post_install', '-at_install')
+class TestPackingAllMatchedRule(PackingFlowCase):
+    """ÖB-1: yedeksiz iptal satırı "tümü eşleşti"yi detayda da engellemez."""
+
+    def test_rb5_detail_all_matched_ignores_cancelled_row_like_scan(self):
+        full = self._routed(self.prod_a, 1, wave=1, origin='SO-RB5-1', scanned=1)
+        other, _cancelled = self._with_cancelled(self.prod_a, origin='SO-RB5-2')
+        batch = self._route(full | other)
+        res = self.pack_ctl.packing_scan(batch_id=batch.id, barcode='PK-B')
+        self.assertTrue(res.get('success'), res)
+        self.assertTrue(res['all_matched'], res)
+        detail = self.pack_ctl.packing_batch_detail(batch_id=batch.id)
+        self.assertTrue(any(i.get('cancelled') for i in detail['items']), 'ön koşul: iptal satırı')
+        self.assertTrue(detail['all_matched'],
+                        'detay ve okutma aynı "tümü eşleşti" kuralını kullanmalı: %s' % detail)

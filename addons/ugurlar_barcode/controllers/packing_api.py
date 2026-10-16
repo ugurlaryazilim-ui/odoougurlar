@@ -335,8 +335,12 @@ class PackingApiController(BarcodeApiBase):
                     'has_image': has_image(product),
                 })
 
-        total = len(items)
-        matched = sum(1 for i in items if i['matched'])
+        # "Tümü eşleşti" okutma ucundaki kuralla aynı: yedeksiz iptal satırı sayıma girmez
+        # (listede sayacıyla görünür; karışık durumda soft match denenmediği için butonu
+        # kalıcı olarak kapatıyordu)
+        counted = [i for i in items if not i.get('cancelled')]
+        total = len(counted)
+        matched = sum(1 for i in counted if i['matched'])
 
         return {
             'batch': {
