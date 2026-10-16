@@ -2,9 +2,16 @@
 
 import { Component, useState, xml, onMounted, onWillUnmount, useRef, onPatched } from "@odoo/owl";
 import { escapeHtml, safeNum, safeColor, safeWeight, safeAlign } from "../utils/html";
-import { BarcodeService } from "../barcode_service";
+import { BarcodeService, AudioFeedback } from "../barcode_service";
 import { speak, vibrate, vibrateError } from "../sound_utils";
 import { generateBarcodeSVG } from "./label_designer";
+
+// Okutma kuyruğu: aynı anda tek istek. Yanıt vermeyen istek kuyruğu kilitlemesin diye süre sınırı var.
+const QUEUE_TIMEOUT_MS = 20000;
+// Tamamla / Eksik Onayla fatura ve Nebim senkronu içerir: daha uzun süre tanınır
+const QUEUE_LONG_TIMEOUT_MS = 90000;
+// Zaman aşımına uğramış (veya başka rotaya geçilmiş) görevin geç yanıtı ekrana yazılmaz
+class StaleResponse extends Error {}
 
 export class PackingScreen extends Component {
     static template = xml`
@@ -136,7 +143,12 @@ export class PackingScreen extends Component {
                 </div>
 
                 <!-- Barkod tarama -->
-                <div class="ub-scan-area">
+                <div class="ub-scan-area" t-att-data-scan-pending="state.scanPending">
+                    <t t-if="state.scanPending > 0">
+                        <div class="small text-muted mb-1">
+                            <i class="fa fa-hourglass-half me-1"></i>Sırada: <t t-esc="state.scanPending"/> işlem
+                        </div>
+                    </t>
                     <div class="ub-input-group">
                         <input type="text" class="form-control ub-barcode-input"
                                placeholder="Ürün barkodunu okutun..."
@@ -158,7 +170,7 @@ export class PackingScreen extends Component {
                         </div>
                         <t t-if="state.inc_picking_id">
                             <button class="btn btn-warning w-100 fw-bold" t-on-click="() => this.onBackorder(state.inc_picking_id)">
-                                <i class="fa fa-exclamation-triangle"></i> Eksik Onayla (Backorder Yap)
+                                <i class="fa fa-exclamation-triangle"></i> Eksik Onayla (Backorder Yap): <t t-esc="incOrderLabel"/>
                             </button>
                         </t>
                         <t t-if="state.reprintPickingId">
@@ -355,8 +367,20 @@ export class PackingScreen extends Component {
             // okutulan sipariş paneli
             activeOrderKey: null,
             activeFlashMoveId: null,
+            // "Eksik Onayla" hedefi (yalnız en son okutmanın siparişi)
+            inc_picking_id: null,
+            inc_picking_name: '',
+            // kuyrukta bekleyen + işlenen işlem sayısı
+            scanPending: 0,
         });
         this._orderTimer = null;
+        // Okutma kuyruğu ve sıra numaraları
+        this._chain = Promise.resolve();
+        this._scanSeq = 0;      // en son okutmanın numarası
+        this._listSeq = 0;      // en son istenen liste yenilemesinin numarası
+        this._burstErrors = 0;  // kuyruk boşalana kadarki seride hatalı işlem sayısı
+        this._labelRequested = new Set();  // bu rotada otomatik etiket istenen picking'ler
+        this._alive = true;
 
         this._onKeydown = (ev) => {
             if (ev.key === 'Escape' && this.state.lightbox) {
@@ -394,6 +418,7 @@ export class PackingScreen extends Component {
         });
 
         onWillUnmount(() => {
+            this._alive = false;
             if (this._unsub) this._unsub();
             window.removeEventListener('keydown', this._onKeydown, true);
             clearTimeout(this._orderTimer);
@@ -635,6 +660,10 @@ export class PackingScreen extends Component {
 
     _setBatchDetail(res) {
         this._resetOrderPanel();
+        // Bu yüklemeden önce istenmiş liste yenilemeleri artık bayat
+        this._listSeq++;
+        this._labelRequested = new Set();
+        this.state.inc_picking_name = '';
         this.state.batch = res.batch;
         this.state.items = res.items;
         this.state.total = res.total;
@@ -645,22 +674,157 @@ export class PackingScreen extends Component {
         this.state.inc_picking_id = null;
     }
 
+    // ─── OKUTMA KUYRUĞU ─────────────────────────
+    // Okutma ve sayaç değiştiren eylemler tek zincirde sırayla çalışır (aynı anda tek istek).
+    // Bir öğenin hatası veya zaman aşımı sıradakileri durdurmaz.
+    _enqueue(task, timeoutMs = QUEUE_TIMEOUT_MS, refreshOnLate = true) {
+        if (this.state.scanPending === 0) this._burstErrors = 0;
+        this.state.scanPending++;
+        this._chain = this._chain
+            .then(() => this._runWithTimeout(task, timeoutMs, refreshOnLate))
+            .catch((e) => {
+                console.error('Paketleme kuyruğu hatası:', e);
+            })
+            .finally(() => {
+                this.state.scanPending--;
+            });
+        return this._chain;
+    }
+
+    _runWithTimeout(task, timeoutMs, refreshOnLate) {
+        const ctx = { timedOut: false };
+        const batchId = this.state.batch && this.state.batch.id;
+        const work = Promise.resolve().then(() => task(ctx));
+        let timer;
+        const expired = new Promise((resolve) => {
+            timer = setTimeout(() => {
+                ctx.timedOut = true;
+                resolve(true);
+            }, timeoutMs);
+        });
+        return Promise.race([work.then(() => false), expired]).then((isTimeout) => {
+            clearTimeout(timer);
+            if (!isTimeout) return;
+            this._onQueueTimeout();
+            // Geç gelen yanıt ekrana yazılmaz; sunucu işlemiş olabilir, liste kuyruktan yenilenir
+            work.catch(() => {}).then(() => {
+                if (refreshOnLate && this._alive && batchId) {
+                    this._enqueue((c) => this._refreshList(batchId, c), QUEUE_TIMEOUT_MS, false);
+                }
+            });
+        }, (e) => {
+            clearTimeout(timer);
+            throw e;
+        });
+    }
+
+    _onQueueTimeout() {
+        if (!this._alive) return;
+        this._burstErrors++;
+        this.state.loading = false;
+        this.state.inc_picking_id = null;
+        this.state.scanMsg = 'Sunucu yanıt vermedi (zaman aşımı). İşlemin sonucu bilinmiyor; '
+            + 'yanıt gelirse liste yenilenecek. Sıradaki okutmaya geçildi.';
+        this.state.scanOk = false;
+        AudioFeedback.playError();
+        vibrateError();
+        speak('packing_error');
+    }
+
+    // Zaman aşımına uğramış görevin geç yanıtı veya başka rotaya geçildiyse yanıt uygulanmaz
+    async _guard(ctx, batchId, promise) {
+        const res = await promise;
+        if (ctx.timedOut || !this._alive || !this.state.batch || this.state.batch.id !== batchId) {
+            throw new StaleResponse();
+        }
+        return res;
+    }
+
+    // Liste yenileme: yalnız en son istenen yanıt uygulanır, eski yanıt yeni durumu ezmez
+    async _refreshList(batchId, ctx = null) {
+        const seq = ++this._listSeq;
+        const fresh = await BarcodeService.call('/ugurlar_barcode/api/packing_batch_detail', {
+            batch_id: batchId,
+        });
+        if (ctx && ctx.timedOut) throw new StaleResponse();
+        if (seq !== this._listSeq || !this._alive || fresh.error
+            || !this.state.batch || this.state.batch.id !== batchId) {
+            return false;
+        }
+        this.state.items = fresh.items;
+        this.state.matched = fresh.matched;
+        this.state.all_matched = fresh.all_matched;
+        return true;
+    }
+
+    // Aynı rotada bir picking için otomatik etiket bir kez istenir; tekrarında "Tekrar Yazdır" sunulur
+    _autoPrintLabel(pickingId) {
+        if (this._labelRequested.has(pickingId)) {
+            this.state.reprintPickingId = pickingId;
+            return false;
+        }
+        this._labelRequested.add(pickingId);
+        this.printLabel(pickingId);
+        return true;
+    }
+
+    _addCompletedPicking(pickingId, pickingName, allowMissing = false) {
+        if (!this.state.completedPickings) this.state.completedPickings = [];
+        if (this.state.completedPickings.find(p => p.picking_id === pickingId)) return;
+        const matchedItem = (this.state.items || []).find(i => i.picking_id === pickingId);
+        if (!matchedItem && !allowMissing) return;
+        this.state.completedPickings.unshift({
+            id: pickingId,
+            picking_id: pickingId,
+            name: pickingName || (matchedItem && matchedItem.picking_name),
+            cargo_tracking: matchedItem ? matchedItem.cargo_tracking : '',
+            cargo_provider: matchedItem ? matchedItem.cargo_provider : '',
+            customer_name: matchedItem ? matchedItem.customer_name : '',
+        });
+    }
+
+    // "Eksik Onayla" için sipariş adı: sipariş no / origin ve picking adı
+    _orderLabel(pickingId) {
+        const item = (this.state.items || []).find(i => i.picking_id === pickingId);
+        const pickingName = (item && item.picking_name) || this.state.inc_picking_name || ('#' + pickingId);
+        const order = item && (item.order_number || item.origin);
+        return order && order !== pickingName ? `${order} (${pickingName})` : pickingName;
+    }
+
+    get incOrderLabel() {
+        return this.state.inc_picking_id ? this._orderLabel(this.state.inc_picking_id) : '';
+    }
+
     // ─── BARKOD TARAMA ──────────────────────────
     onScanKey(ev) {
         if (ev.key === 'Enter') { ev.preventDefault(); this.onScan(); }
     }
 
     async onScan() {
-        const code = this.state.scanInput.trim();
-        if (!code) return;
+        const code = (this.state.scanInput || '').trim();
+        this.state.scanInput = '';
+        if (!code || !this.state.batch) return;
+        // Her okutma önceki siparişin "Eksik Onayla" hedefini geçersiz kılar (bayat id kullanılmaz)
+        this.state.inc_picking_id = null;
+        this.state.inc_picking_name = '';
+        const batchId = this.state.batch.id;
+        const seq = ++this._scanSeq;
+        await this._enqueue((ctx) => this._processScan(ctx, code, batchId, seq));
+    }
+
+    async _processScan(ctx, code, batchId, seq) {
+        // Arkada bekleyen okutma yoksa bu en son okutmadır
+        const isLatest = () => seq === this._scanSeq;
         this.state.scanMsg = '';
         this.state.reprintPickingId = null;
+        this.state.inc_picking_id = null;
         try {
-            const res = await BarcodeService.call('/ugurlar_barcode/api/packing_scan', {
-                batch_id: this.state.batch.id,
+            const res = await this._guard(ctx, batchId, BarcodeService.call('/ugurlar_barcode/api/packing_scan', {
+                batch_id: batchId,
                 barcode: code,
-            });
+            }));
             if (res.error) {
+                this._burstErrors++;
                 this.state.scanMsg = res.error;
                 this.state.scanOk = false;
                 speak('packing_scan_wrong');
@@ -678,26 +842,16 @@ export class PackingScreen extends Component {
                     this.state.reprintPickingId = res.picking_id || null;
                     speak('packing_scan_success');
                 } else if (res.picking_completed && res.picking_id) {
-                    // Etiket henüz basılmamış — bas
-                    this.state.scanMsg = res.picking_name + " zaten paketlendi, etiket yazdırılıyor...";
+                    // Etiket henüz basılmamış — bas (bu rotada zaten istendiyse yalnız tekrar yazdır sunulur)
                     this.state.scanOk = true;
                     speak('packing_order_complete');
 
                     this.state.completed = true;
-                    this.state.inc_picking_id = null;
-                    if (!this.state.completedPickings) this.state.completedPickings = [];
-                    if (!this.state.completedPickings.find(p => p.picking_id === res.picking_id)) {
-                        const matchedItem = (this.state.items || []).find(i => i.picking_id === res.picking_id);
-                        this.state.completedPickings.unshift({
-                            id: res.picking_id,
-                            picking_id: res.picking_id,
-                            name: res.picking_name,
-                            cargo_tracking: matchedItem ? matchedItem.cargo_tracking : '',
-                            cargo_provider: matchedItem ? matchedItem.cargo_provider : '',
-                            customer_name: matchedItem ? matchedItem.customer_name : '',
-                        });
-                    }
-                    this.printLabel(res.picking_id);
+                    this._addCompletedPicking(res.picking_id, res.picking_name, true);
+                    const printed = this._autoPrintLabel(res.picking_id);
+                    this.state.scanMsg = res.picking_name + (printed
+                        ? " zaten paketlendi, etiket yazdırılıyor..."
+                        : " zaten paketlendi (etiket bu rotada yazdırıldı)");
                 } else {
                     this.state.scanMsg = res.message;
                     this.state.scanOk = true;
@@ -708,19 +862,12 @@ export class PackingScreen extends Component {
                 this.state.scanOk = true;
                 speak('packing_scan_success');
 
-
-                // Listeyi güncelle
-                const fresh = await BarcodeService.call('/ugurlar_barcode/api/packing_batch_detail', {
-                    batch_id: this.state.batch.id,
-                });
-                if (!fresh.error) {
-                    this.state.items = fresh.items;
-                    this.state.matched = fresh.matched;
-                    this.state.all_matched = fresh.all_matched;
-                }
+                // Listeyi güncelle (sıra numaralı: eski yanıt yeni listeyi ezmez)
+                await this._refreshList(batchId, ctx);
 
                 if (res.validate_error) {
                     // Okutma sayıldı ama sevkiyat doğrulanamadı: etiket basılmaz, Nebim çalışmaz
+                    this._burstErrors++;
                     this.state.scanMsg = `⚠️ ${res.validate_error}`;
                     this.state.scanOk = false;
                     speak('packing_error');
@@ -728,46 +875,42 @@ export class PackingScreen extends Component {
                     // Sipariş tamamen eşleşti: kargo etiketini otomatik yazdır
                     this.state.scanMsg = res.picking_name + " siparişi eşleşti, etiket yazdırılıyor...";
                     speak('packing_order_complete');
-                    
+
                     // Alt ekrandaki Kargo Etiketleri listesine anında ekle
                     this.state.completed = true;
-                    this.state.inc_picking_id = null;
-                    if (!this.state.completedPickings) this.state.completedPickings = [];
-                    if (!this.state.completedPickings.find(p => p.picking_id === res.picking_id)) {
-                        const matchedItem = this.state.items.find(i => i.picking_id === res.picking_id);
-                        if (matchedItem) {
-                            this.state.completedPickings.unshift({
-                                id: res.picking_id,
-                                picking_id: res.picking_id,
-                                name: res.picking_name,
-                                cargo_tracking: matchedItem.cargo_tracking,
-                                cargo_provider: matchedItem.cargo_provider,
-                                customer_name: matchedItem.customer_name,
-                            });
-                        }
-                    }
+                    this._addCompletedPicking(res.picking_id, res.picking_name);
 
                     // Otomatik yazdırmayı tetikle (Kargo etiketi servisi bitince pop-up açacak)
-                    this.printLabel(res.picking_id);
+                    this._autoPrintLabel(res.picking_id);
                 } else if (res.picking_id && res.remaining_items && res.remaining_items.length > 0) {
                     // Sipariş içerisinde okutulması gereken başka ürünler var
                     this.state.scanMsg = `${res.product_name} paketlendi ancak ${res.picking_name} siparişi BİTMEDİ. Lütfen şunları da okutun: ${res.remaining_items.join(', ')}`;
                     this.state.scanOk = false; // Farkındalık için kırmızı veya uyarı rengi
-                    this.state.inc_picking_id = res.picking_id;
+                    if (isLatest()) {
+                        // Arkada başka okutma varsa buton gösterilmez: bayat sipariş onaylanamaz
+                        this.state.inc_picking_id = res.picking_id;
+                        this.state.inc_picking_name = res.picking_name || '';
+                    }
                     speak('packing_scan_wrong');
                 }
             }
             if (!res.error && res.picking_id) {
                 this._activateOrder(res.picking_id, code);
             }
+            if (isLatest() && this._burstErrors && this.state.scanOk) {
+                // Hızlı seride hatalı okutma olduysa son başarılı mesaj onu gizlemesin
+                this.state.scanMsg += ` (bu seride ${this._burstErrors} işlem hatalı)`;
+                this.state.scanOk = false;
+            }
         } catch (e) {
+            if (e instanceof StaleResponse) return;
+            this._burstErrors++;
             const detail = (e && e.data && e.data.message) || e.message || e.toString() || '';
             this.state.scanMsg = 'Hata' + (detail ? ': ' + detail : '');
             this.state.scanOk = false;
             this.state.inc_picking_id = null;
             speak('packing_error');
         }
-        this.state.scanInput = '';
     }
 
     // ─── ETİKET TEKRAR YAZDIRMA ─────────────────────
@@ -780,12 +923,19 @@ export class PackingScreen extends Component {
 
     // ─── TAMAMLA ─────────────────────────────────
     async onComplete() {
+        if (!this.state.batch) return;
+        const batchId = this.state.batch.id;
         this.state.loading = true;
         this.state.error = null;
+        // Bekleyen okutmalar bitmeden tamamlama çalışmaz
+        await this._enqueue((ctx) => this._doComplete(ctx, batchId), QUEUE_LONG_TIMEOUT_MS);
+    }
+
+    async _doComplete(ctx, batchId) {
         try {
-            const res = await BarcodeService.call('/ugurlar_barcode/api/packing_complete', {
-                batch_id: this.state.batch.id,
-            });
+            const res = await this._guard(ctx, batchId, BarcodeService.call('/ugurlar_barcode/api/packing_complete', {
+                batch_id: batchId,
+            }));
             const hasErrors = !!(res.errors && res.errors.length);
             if (hasErrors) {
                 // Doğrulanamayan siparişler adı ve hata metniyle alt alta listelenir
@@ -820,6 +970,7 @@ export class PackingScreen extends Component {
                 speak('packing_error');
             }
         } catch (e) {
+            if (e instanceof StaleResponse) return;
             this.state.error = 'Tamamlama hatası';
         }
         this.state.loading = false;
@@ -827,15 +978,22 @@ export class PackingScreen extends Component {
 
     // ─── EKSİK ONAYLA (BACKORDER) ────────────────
     async onBackorder(pickingId) {
-        if (!confirm('Eksik ürünlerle siparişi onaylayıp kapatmak istediğinize emin misiniz?')) return;
+        const label = this._orderLabel(pickingId);
+        if (!confirm(`${label} siparişini eksik ürünlerle onaylayıp kapatmak istediğinize emin misiniz?`)) return;
+        if (!this.state.batch) return;
+        const batchId = this.state.batch.id;
         this.state.loading = true;
-        this.state.scanMsg = 'Backorder oluşturuluyor...';
+        this.state.scanMsg = `${label} için backorder oluşturuluyor...`;
         this.state.inc_picking_id = null;
-        
+        this.state.inc_picking_name = '';
+        await this._enqueue((ctx) => this._doBackorder(ctx, batchId, pickingId), QUEUE_LONG_TIMEOUT_MS);
+    }
+
+    async _doBackorder(ctx, batchId, pickingId) {
         try {
-            const res = await BarcodeService.call('/ugurlar_barcode/api/packing_backorder', {
+            const res = await this._guard(ctx, batchId, BarcodeService.call('/ugurlar_barcode/api/packing_backorder', {
                 picking_id: pickingId,
-            });
+            }));
             if (res.error) {
                 this.state.scanMsg = res.error;
                 this.state.scanOk = false;
@@ -844,38 +1002,20 @@ export class PackingScreen extends Component {
                 this.state.scanMsg = res.message;
                 this.state.scanOk = true;
                 speak('packing_order_complete');
-                
+
                 // Detayı yeniden yükle
-                const fresh = await BarcodeService.call('/ugurlar_barcode/api/packing_batch_detail', {
-                    batch_id: this.state.batch.id,
-                });
-                if (!fresh.error) {
-                    this.state.items = fresh.items;
-                    this.state.matched = fresh.matched;
-                    this.state.all_matched = fresh.all_matched;
-                }
-                
+                await this._refreshList(batchId, ctx);
+
                 // Otomatik etiket listesine ekle ve yazdır
                 this.state.completed = true;
-                if (!this.state.completedPickings) this.state.completedPickings = [];
-                if (!this.state.completedPickings.find(p => p.picking_id === pickingId)) {
-                    const matchedItem = this.state.items.find(i => i.picking_id === pickingId);
-                    if (matchedItem) {
-                        this.state.completedPickings.unshift({
-                            id: pickingId,
-                            picking_id: pickingId,
-                            name: matchedItem.picking_name,
-                            cargo_tracking: matchedItem.cargo_tracking,
-                            cargo_provider: matchedItem.cargo_provider,
-                            customer_name: matchedItem.customer_name,
-                        });
-                    }
-                }
+                this._addCompletedPicking(pickingId);
+                this._labelRequested.add(pickingId);
                 setTimeout(() => {
                     this.printLabel(pickingId);
                 }, 100);
             }
         } catch (e) {
+            if (e instanceof StaleResponse) return;
             this.state.scanMsg = 'Bağlantı hatası';
             this.state.scanOk = false;
             speak('packing_error');
@@ -886,12 +1026,18 @@ export class PackingScreen extends Component {
     // ─── GERİ AL (UNDO) MİKTAR DÜŞÜRME ────────────
     async onDecreaseQty(pickingId, barcode) {
         if (!confirm('Bu ürünün okutulmuş miktarını 1 azaltmak istediğinize emin misiniz?')) return;
+        if (!this.state.batch) return;
+        const batchId = this.state.batch.id;
         this.state.loading = true;
+        await this._enqueue((ctx) => this._doDecrease(ctx, batchId, pickingId, barcode));
+    }
+
+    async _doDecrease(ctx, batchId, pickingId, barcode) {
         try {
-            const res = await BarcodeService.call('/ugurlar_barcode/api/packing_undo', {
+            const res = await this._guard(ctx, batchId, BarcodeService.call('/ugurlar_barcode/api/packing_undo', {
                 picking_id: pickingId,
                 barcode: barcode,
-            });
+            }));
             if (res.error) {
                 this.state.scanMsg = res.error;
                 this.state.scanOk = false;
@@ -900,20 +1046,14 @@ export class PackingScreen extends Component {
                 this.state.scanMsg = res.message;
                 this.state.scanOk = true;
                 speak('packing_scan_success');
-                
+
                 // Refresh detail
-                const fresh = await BarcodeService.call('/ugurlar_barcode/api/packing_batch_detail', {
-                    batch_id: this.state.batch.id,
-                });
-                if (!fresh.error) {
-                    this.state.items = fresh.items;
-                    this.state.matched = fresh.matched;
-                    this.state.all_matched = fresh.all_matched;
-                }
+                await this._refreshList(batchId, ctx);
                 // Geri alınan adet panelde kırmızıya döner
                 this._activateOrder(pickingId, barcode);
             }
         } catch (e) {
+            if (e instanceof StaleResponse) return;
             this.state.scanMsg = 'Bağlantı hatası';
             this.state.scanOk = false;
         }

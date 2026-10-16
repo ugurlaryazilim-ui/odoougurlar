@@ -1,9 +1,16 @@
 /** @odoo-module **/
 
 import { Component, useState, xml, onMounted, onWillUnmount } from "@odoo/owl";
-import { BarcodeService } from "../barcode_service";
+import { BarcodeService, AudioFeedback } from "../barcode_service";
 import { speak, vibrate, vibrateError } from "../sound_utils";
 import { openCameraScanner } from "../camera_scanner";
+
+// Okutma kuyruğu: aynı anda tek istek. Yanıt vermeyen istek kuyruğu kilitlemesin diye süre sınırı var.
+const QUEUE_TIMEOUT_MS = 20000;
+// Rota tamamlama sevkiyat doğrulaması içerir: daha uzun süre tanınır
+const QUEUE_LONG_TIMEOUT_MS = 90000;
+// Zaman aşımına uğramış (veya başka rotaya geçilmiş) görevin geç yanıtı ekrana yazılmaz
+class StaleResponse extends Error {}
 
 export class BatchPickingScreen extends Component {
     static template = xml`
@@ -219,7 +226,7 @@ export class BatchPickingScreen extends Component {
                     </div>
 
                     <!-- BARKOD INPUT + BUTONLAR -->
-                    <div class="bp-scan-row">
+                    <div class="bp-scan-row" t-att-data-scan-pending="state.scanPending">
                         <button class="btn btn-danger bp-btn-skip" t-on-click="onSkip">Eksik</button>
                         <div class="ub-barcode-input-group bp-scan-input-wrap" style="flex: 1; margin: 0 5px;">
                             <input type="text" class="form-control ub-barcode-input bp-scan-input"
@@ -239,6 +246,12 @@ export class BatchPickingScreen extends Component {
                             <i class="fa fa-external-link"></i>
                         </button>
                     </div>
+
+                    <t t-if="state.scanPending > 0">
+                        <div class="small text-muted mt-1">
+                            <i class="fa fa-hourglass-half me-1"></i>Sırada: <t t-esc="state.scanPending"/> işlem
+                        </div>
+                    </t>
 
                     <!-- Tarama sonucu mesajı -->
                     <t t-if="state.scanMsg">
@@ -426,7 +439,15 @@ export class BatchPickingScreen extends Component {
             // ── Sıralama ──
             sortField: '',
             sortDir: 'asc',
+            // kuyrukta bekleyen + işlenen işlem sayısı
+            scanPending: 0,
         });
+        // Okutma kuyruğu ve sıra numaraları
+        this._chain = Promise.resolve();
+        this._scanSeq = 0;      // en son okutmanın numarası
+        this._loadSeq = 0;      // en son istenen rota satırları yüklemesinin numarası
+        this._burstErrors = 0;  // kuyruk boşalana kadarki seride hatalı işlem sayısı
+        this._alive = true;
 
         // ── Filtreleri localStorage'dan yükle (günlük cache) ──
         this._loadFiltersFromCache();
@@ -459,6 +480,7 @@ export class BatchPickingScreen extends Component {
         });
 
         onWillUnmount(() => {
+            this._alive = false;
             if (this._unsub) this._unsub();
             window.removeEventListener('popstate', this._onPopState);
         });
@@ -598,8 +620,11 @@ export class BatchPickingScreen extends Component {
     async selectBatch(batchId) {
         this.state.loading = true;
         this.state.error = null;
+        const seq = ++this._loadSeq;
         try {
             const res = await BarcodeService.batchRouteItems(batchId);
+            // Daha yeni bir yükleme istendiyse bu yanıt bayat: uygulanmaz
+            if (seq !== this._loadSeq) return;
             if (res.error) {
                 this.state.error = res.error;
                 this.state.loading = false;
@@ -777,15 +802,108 @@ export class BatchPickingScreen extends Component {
         if (ev.key === 'Enter') { ev.preventDefault(); this.onScan(); }
     }
 
+    // ═══ OKUTMA KUYRUĞU ═══
+    // Okutma, Eksik, Geri al ve Tamamla tek zincirde sırayla çalışır (aynı anda tek istek).
+    // Bir öğenin hatası veya zaman aşımı sıradakileri durdurmaz.
+    _enqueue(task, timeoutMs = QUEUE_TIMEOUT_MS, refreshOnLate = true) {
+        if (this.state.scanPending === 0) this._burstErrors = 0;
+        this.state.scanPending++;
+        this._chain = this._chain
+            .then(() => this._runWithTimeout(task, timeoutMs, refreshOnLate))
+            .catch((e) => {
+                console.error('Rota toplama kuyruğu hatası:', e);
+            })
+            .finally(() => {
+                this.state.scanPending--;
+            });
+        return this._chain;
+    }
+
+    _runWithTimeout(task, timeoutMs, refreshOnLate) {
+        const ctx = { timedOut: false };
+        const batchId = this.state.batch && this.state.batch.id;
+        const work = Promise.resolve().then(() => task(ctx));
+        let timer;
+        const expired = new Promise((resolve) => {
+            timer = setTimeout(() => {
+                ctx.timedOut = true;
+                resolve(true);
+            }, timeoutMs);
+        });
+        return Promise.race([work.then(() => false), expired]).then((isTimeout) => {
+            clearTimeout(timer);
+            if (!isTimeout) return;
+            this._onQueueTimeout();
+            // Geç gelen yanıt ekrana yazılmaz; sunucu işlemiş olabilir, miktarlar kuyruktan yenilenir
+            work.catch(() => {}).then(() => {
+                if (refreshOnLate && this._alive && batchId) {
+                    this._enqueue((c) => this._refreshItems(batchId, c), QUEUE_TIMEOUT_MS, false);
+                }
+            });
+        }, (e) => {
+            clearTimeout(timer);
+            throw e;
+        });
+    }
+
+    _onQueueTimeout() {
+        if (!this._alive) return;
+        this._burstErrors++;
+        this.state.loading = false;
+        this.state.scanMsg = 'Sunucu yanıt vermedi (zaman aşımı). İşlemin sonucu bilinmiyor; '
+            + 'yanıt gelirse miktarlar yenilenecek. Sıradaki okutmaya geçildi.';
+        this.state.scanOk = false;
+        AudioFeedback.playError();
+        vibrateError();
+        speak('batch_error');
+    }
+
+    // Zaman aşımına uğramış görevin geç yanıtı veya başka rotaya geçildiyse yanıt uygulanmaz
+    async _guard(ctx, batchId, promise) {
+        const res = await promise;
+        if (ctx.timedOut || !this._alive || !this.state.batch || this.state.batch.id !== batchId) {
+            throw new StaleResponse();
+        }
+        return res;
+    }
+
+    // Toplanan/eksik bilgisini sunucudan yeniler; yalnız en son istenen yanıt uygulanır
+    async _refreshItems(batchId, ctx = null) {
+        const seq = ++this._loadSeq;
+        const res = await BarcodeService.batchRouteItems(batchId);
+        if (ctx && ctx.timedOut) throw new StaleResponse();
+        if (seq !== this._loadSeq || !this._alive || res.error
+            || !this.state.batch || this.state.batch.id !== batchId) {
+            return;
+        }
+        const byMove = new Map((res.items || []).map(i => [i.move_id, i]));
+        for (const item of this.state.items) {
+            const fresh = byMove.get(item.move_id);
+            if (fresh) {
+                item.collected_qty = fresh.collected_qty;
+                item.skipped = fresh.skipped;
+            }
+        }
+        this._applyDepotFilter();
+        this._updateProgress();
+    }
+
     async onScan() {
         const barcode = (this.state.scanInput || '').trim();
-        if (!barcode) return;
+        this.state.scanInput = '';
+        if (!barcode || !this.state.batch) return;
+        const batchId = this.state.batch.id;
+        const seq = ++this._scanSeq;
+        await this._enqueue((ctx) => this._processScan(ctx, barcode, batchId, seq));
+    }
 
+    async _processScan(ctx, barcode, batchId, seq) {
         this.state.scanMsg = '';
         try {
-            const res = await BarcodeService.batchCollectScan(this.state.batch.id, barcode);
+            const res = await this._guard(ctx, batchId, BarcodeService.batchCollectScan(batchId, barcode));
 
             if (res.error) {
+                this._burstErrors++;
                 this.state.scanMsg = res.error;
                 this.state.scanOk = false;
                 speak('batch_scan_wrong');
@@ -799,7 +917,7 @@ export class BatchPickingScreen extends Component {
                 this.state.scanOk = true;
                 speak('batch_scan_success');
 
-                // İlgili satırı güncelle
+                // İlgili satırı güncelle (yanıtlar sırayla geldiği için son değer sunucunun son durumudur)
                 for (const item of this.state.items) {
                     if (item.move_id === res.move_id) {
                         item.collected_qty = res.collected_qty;
@@ -824,24 +942,34 @@ export class BatchPickingScreen extends Component {
                     }, 1000);
                 }
             }
+            if (seq === this._scanSeq && this._burstErrors && this.state.scanOk) {
+                // Hızlı seride hatalı okutma olduysa son başarılı mesaj onu gizlemesin
+                this.state.scanMsg += ` (bu seride ${this._burstErrors} işlem hatalı)`;
+                this.state.scanOk = false;
+            }
         } catch (e) {
+            if (e instanceof StaleResponse) return;
+            this._burstErrors++;
             this.state.scanMsg = 'Tarama hatası';
             this.state.scanOk = false;
             speak('batch_error');
         }
-
-        this.state.scanInput = '';
     }
 
     // ═══ MİKTAR AZALTMA (UNDO) ═══
     async onDecreaseQty(item) {
         if (!confirm('Bu ürünün toplanan miktarını 1 azaltmak istediğinize emin misiniz?')) return;
+        if (!this.state.batch) return;
+        const batchId = this.state.batch.id;
         this.state.loading = true;
-        
+        await this._enqueue((ctx) => this._doDecrease(ctx, batchId, item));
+    }
+
+    async _doDecrease(ctx, batchId, item) {
         try {
-            const res = await BarcodeService.call('/ugurlar_barcode/api/batch_undo', {
+            const res = await this._guard(ctx, batchId, BarcodeService.call('/ugurlar_barcode/api/batch_undo', {
                 move_id: item.move_id,
-            });
+            }));
             if (res.error) {
                 this.state.scanMsg = res.error;
                 this.state.scanOk = false;
@@ -850,26 +978,23 @@ export class BatchPickingScreen extends Component {
                 this.state.scanMsg = res.message;
                 this.state.scanOk = true;
                 speak('batch_scan_success');
-                
-                // Miktarı UI kısmında da güncelle
+
+                // Miktarı UI kısmında da güncelle (kuyrukta sıralı olduğu için okutmalarla çakışmaz)
                 item.collected_qty -= 1;
                 this._applyDepotFilter();
                 this._updateProgress();
-                
+
                 // Eğer ürün geri alınarak bitmemiş hale geldiyse, aktif ürünü ona çek
                 if (item.collected_qty < item.demand_qty) {
                     this.state.currentItem = item;
-                    // Eğer currentItem yokken (hepsi bittiyken) iptal edildiyse, currentItem olarak ata
-                    if (!this.state.currentItem) {
-                        this.state.currentItem = item;
-                    }
                 }
             }
         } catch (e) {
+            if (e instanceof StaleResponse) return;
             this.state.scanMsg = 'Bağlantı hatası';
             this.state.scanOk = false;
         }
-        
+
         this.state.loading = false;
     }
 
@@ -882,12 +1007,17 @@ export class BatchPickingScreen extends Component {
 
     // ═══ EKSİK / ATLA ═══
     async onSkip() {
-        if (!this.state.currentItem || this.state.loading) return;
+        if (!this.state.currentItem || this.state.loading || !this.state.batch) return;
         // Sunucuda "Eksik" işaretlenir: tamamlamada toplanan kadar sevk edilir,
         // kalan için bekleyen sevkiyat açılır (önceden yalnız arayüzde "toplandı" görünüyordu)
         const item = this.state.currentItem;
+        const batchId = this.state.batch.id;
+        await this._enqueue((ctx) => this._doSkip(ctx, batchId, item));
+    }
+
+    async _doSkip(ctx, batchId, item) {
         try {
-            const res = await BarcodeService.batchSkipItem(item.move_id, true);
+            const res = await this._guard(ctx, batchId, BarcodeService.batchSkipItem(item.move_id, true));
             if (res.error) {
                 this.state.scanMsg = res.error;
                 this.state.scanOk = false;
@@ -895,6 +1025,7 @@ export class BatchPickingScreen extends Component {
                 return;
             }
         } catch (e) {
+            if (e instanceof StaleResponse) return;
             this.state.scanMsg = 'Bağlantı hatası — eksik işaretlenemedi';
             this.state.scanOk = false;
             return;
@@ -909,9 +1040,16 @@ export class BatchPickingScreen extends Component {
 
     // ═══ TOPLAMA TAMAMLA ═══
     async onComplete() {
+        if (!this.state.batch) return;
+        const batchId = this.state.batch.id;
         this.state.loading = true;
+        // Bekleyen okutmalar bitmeden tamamlama çalışmaz
+        await this._enqueue((ctx) => this._doComplete(ctx, batchId), QUEUE_LONG_TIMEOUT_MS);
+    }
+
+    async _doComplete(ctx, batchId) {
         try {
-            const res = await BarcodeService.batchCollectComplete(this.state.batch.id);
+            const res = await this._guard(ctx, batchId, BarcodeService.batchCollectComplete(batchId));
             if (res.error && res.missing) {
                 // Toplanmamış ürün var: rota tamamlanmadı, ilk eksik ürüne odaklan
                 this.state.scanMsg = res.error;
@@ -927,11 +1065,12 @@ export class BatchPickingScreen extends Component {
                 this.state.summary = res;
                 this.state.view = 'summary';
                 speak('batch_complete');
-                
+
                 // Sub-state güncelle (Geri tuşu listeye dönsün diye)
                 history.replaceState(Object.assign({}, history.state, { bpView: 'summary' }), '');
             }
         } catch (e) {
+            if (e instanceof StaleResponse) return;
             this.state.error = 'Tamamlama hatası';
         }
         this.state.loading = false;
