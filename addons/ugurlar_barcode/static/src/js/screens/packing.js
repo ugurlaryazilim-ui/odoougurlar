@@ -169,6 +169,38 @@ export class PackingScreen extends Component {
                     </div>
                 </t>
 
+                <!-- Okutulan sipariş: her adet bir görsel (okutulan yeşil, bekleyen kırmızı) -->
+                <t t-set="order" t-value="activeOrder"/>
+                <div t-if="order" t-attf-class="ub-pk-order {{order.done ? 'ub-pk-order-done' : ''}}">
+                    <div class="ub-pk-order-head">
+                        <div class="ub-pk-order-title">
+                            <i t-attf-class="fa {{order.done ? 'fa-check-circle' : 'fa-shopping-bag'}} me-2"/>
+                            <span class="ub-pk-order-no" t-esc="order.title"/>
+                            <span t-if="order.customer" class="ub-pk-order-customer" t-esc="order.customer"/>
+                            <span t-if="order.cargo" class="badge text-bg-secondary ms-2" t-esc="order.cargo"/>
+                        </div>
+                        <div class="ub-pk-order-count">
+                            <t t-if="order.done">Sipariş tamamlandı</t>
+                            <t t-else=""><t t-esc="order.scanned"/> / <t t-esc="order.total"/> okutuldu</t>
+                        </div>
+                    </div>
+                    <div t-attf-class="ub-pk-order-grid {{order.units.length === 1 ? 'ub-pk-order-single' : ''}}">
+                        <t t-foreach="order.units" t-as="u" t-key="u.key">
+                            <button type="button"
+                                    t-attf-class="ub-pk-unit {{u.done ? 'ub-pk-unit-done' : 'ub-pk-unit-pending'}} {{u.flash ? 'ub-pk-unit-flash' : ''}}"
+                                    t-att-title="u.product_name + (u.done ? ' — okutuldu' : ' — bekliyor')"
+                                    t-on-click="() => u.has_image and this.openLightbox(u)">
+                                <img t-if="u.has_image" t-att-src="u.thumb" t-att-alt="u.product_name"/>
+                                <i t-else="" class="fa fa-picture-o ub-pk-unit-noimg"/>
+                                <span class="ub-pk-unit-badge">
+                                    <i t-attf-class="fa {{u.done ? 'fa-check' : 'fa-times'}}"/>
+                                </span>
+                            </button>
+                        </t>
+                        <div t-if="order.more" class="ub-pk-unit-more" t-esc="'+' + order.more"/>
+                    </div>
+                </div>
+
                 <!-- Ürün listesi -->
                 <div class="ub-product-list" t-if="state.items.length">
                     <t t-foreach="state.items" t-as="item" t-key="item.move_id">
@@ -320,7 +352,11 @@ export class PackingScreen extends Component {
             filterDateTo: '',
             // ürün görseli önizleme
             lightbox: null,
+            // okutulan sipariş paneli
+            activeOrderKey: null,
+            activeFlashMoveId: null,
         });
+        this._orderTimer = null;
 
         this._onKeydown = (ev) => {
             if (ev.key === 'Escape' && this.state.lightbox) {
@@ -360,7 +396,79 @@ export class PackingScreen extends Component {
         onWillUnmount(() => {
             if (this._unsub) this._unsub();
             window.removeEventListener('keydown', this._onKeydown, true);
+            clearTimeout(this._orderTimer);
         });
+    }
+
+    // ─── OKUTULAN SİPARİŞ PANELİ ────────────────
+    // Sipariş = satış siparişi (origin): aynı siparişin kardeş picking'leri birlikte gösterilir
+    _orderKey(item) {
+        return item.origin || ('pk' + item.picking_id);
+    }
+
+    get activeOrder() {
+        const key = this.state.activeOrderKey;
+        if (!key) return null;
+        const lines = (this.state.items || []).filter(i => !i.cancelled && this._orderKey(i) === key);
+        if (!lines.length) return null;
+        const MAX_UNITS = 12;
+        const units = [];
+        let total = 0;
+        let scanned = 0;
+        for (const it of lines) {
+            const demand = Math.max(0, Math.round(it.demand_qty || 0));
+            const done = Math.min(demand, Math.round(it.scanned_qty || 0));
+            total += demand;
+            scanned += done;
+            for (let i = 0; i < demand && units.length < MAX_UNITS; i++) {
+                units.push({
+                    key: it.move_id + '-' + i,
+                    done: i < done,
+                    flash: it.move_id === this.state.activeFlashMoveId && i === done - 1,
+                    image_url: it.image_url,
+                    thumb: (it.image_url || '').replace('image_128', 'image_256'),
+                    has_image: it.has_image,
+                    product_name: it.product_name,
+                    barcode: it.barcode,
+                });
+            }
+        }
+        const first = lines[0];
+        return {
+            title: first.order_number || first.origin || first.picking_name,
+            customer: first.customer_name,
+            cargo: first.cargo_provider,
+            units,
+            total,
+            scanned,
+            more: Math.max(0, total - units.length),
+            done: total > 0 && scanned >= total,
+        };
+    }
+
+    _activateOrder(pickingId, barcode) {
+        const items = this.state.items || [];
+        const inPicking = items.filter(i => i.picking_id === pickingId);
+        const item = inPicking.find(i => i.barcode === barcode) || inPicking[0];
+        if (!item) return;
+        const key = this._orderKey(item);
+        this.state.activeOrderKey = key;
+        this.state.activeFlashMoveId = item.move_id;
+        clearTimeout(this._orderTimer);
+        if (this.activeOrder && this.activeOrder.done) {
+            // Tamamlanan sipariş kısa süre yeşil görünür, sonra panel kapanır
+            this._orderTimer = setTimeout(() => {
+                if (this.state.activeOrderKey === key && this.activeOrder && this.activeOrder.done) {
+                    this.state.activeOrderKey = null;
+                }
+            }, 2000);
+        }
+    }
+
+    _resetOrderPanel() {
+        clearTimeout(this._orderTimer);
+        this.state.activeOrderKey = null;
+        this.state.activeFlashMoveId = null;
     }
 
     // ─── ÜRÜN GÖRSELİ ÖNİZLEME ──────────────────
@@ -396,6 +504,7 @@ export class PackingScreen extends Component {
 
     goBack() {
         if (this.state.view === 'detail') {
+            this._resetOrderPanel();
             this.state.view = 'search';
             this.state.error = null;
             this.state.completed = false;
@@ -525,6 +634,7 @@ export class PackingScreen extends Component {
     }
 
     _setBatchDetail(res) {
+        this._resetOrderPanel();
         this.state.batch = res.batch;
         this.state.items = res.items;
         this.state.total = res.total;
@@ -541,13 +651,14 @@ export class PackingScreen extends Component {
     }
 
     async onScan() {
-        if (!this.state.scanInput.trim()) return;
+        const code = this.state.scanInput.trim();
+        if (!code) return;
         this.state.scanMsg = '';
         this.state.reprintPickingId = null;
         try {
             const res = await BarcodeService.call('/ugurlar_barcode/api/packing_scan', {
                 batch_id: this.state.batch.id,
-                barcode: this.state.scanInput.trim(),
+                barcode: code,
             });
             if (res.error) {
                 this.state.scanMsg = res.error;
@@ -635,6 +746,9 @@ export class PackingScreen extends Component {
                     this.state.inc_picking_id = res.picking_id;
                     speak('packing_scan_wrong');
                 }
+            }
+            if (!res.error && res.picking_id) {
+                this._activateOrder(res.picking_id, code);
             }
         } catch (e) {
             const detail = (e && e.data && e.data.message) || e.message || e.toString() || '';
@@ -778,6 +892,8 @@ export class PackingScreen extends Component {
                     this.state.matched = fresh.matched;
                     this.state.all_matched = fresh.all_matched;
                 }
+                // Geri alınan adet panelde kırmızıya döner
+                this._activateOrder(pickingId, barcode);
             }
         } catch (e) {
             this.state.scanMsg = 'Bağlantı hatası';
