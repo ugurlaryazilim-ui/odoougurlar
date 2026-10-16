@@ -233,7 +233,9 @@ class TestLabelTemplatePermissions(SecurityCase):
         self.assertFalse(tpl.exists())
 
     def test_protect_nonmanager_can_edit_default_template_content(self):
-        """G12 rev: varsayılan ve kargo olmayan şablonun alanlarını stok kullanıcısı yazabilir."""
+        """G12 rev: varsayılan ve kargo olmayan şablonun alanlarını stok kullanıcısı yazabilir.
+        Sahiplik kuralı (ir.rule, DT-D R2) controller ile aynıdır: sahipsiz ya da kendi şablonu."""
+        self.default_tpl.user_id = False
         for sudo in (False, True):
             self._as_stock(sudo).browse(self.default_tpl.id).write(
                 {'width_mm': 70, 'elements_json': '[1]', 'name': 'D2 Varsayılan Yeni'})

@@ -88,3 +88,55 @@ class TestDtR1CreateDefaults(DtLabelCase):
         kargo = self.Template.with_user(self.manager).with_context(
             default_is_default=True).create({'name': 'Kargo Yönetici'})
         self.assertTrue(kargo.is_default)
+
+
+# ==== R2 ====
+@tagged('post_install', '-at_install')
+class TestDtR2Ownership(DtLabelCase):
+    """O-D2: RPC yazımı da controller'daki sahiplik kuralına (_can_edit_template) uyar."""
+
+    def setUp(self):
+        super().setUp()
+        self.other = self.Template.create({
+            'name': 'DT R2 Başkası', 'user_id': self.stock_user2.id, 'elements_json': '[]'})
+
+    def test_r2_cannot_write_others_template(self):
+        with self.assertRaises(AccessError):
+            self._as_stock(False).browse(self.other.id).write({'elements_json': '[9]'})
+        self.other.invalidate_recordset()
+        self.assertEqual(self.other.elements_json, '[]')
+
+    def test_r2_cannot_take_ownership(self):
+        with self.assertRaises(AccessError):
+            self._as_stock(False).browse(self.other.id).write({'user_id': self.stock_user.id})
+        self.other.invalidate_recordset()
+        self.assertEqual(self.other.user_id, self.stock_user2)
+
+    def test_r2_cannot_write_managers_default_template(self):
+        with self.assertRaises(AccessError):
+            self._as_stock(False).browse(self.default_tpl.id).write({'width_mm': 99})
+        self.default_tpl.invalidate_recordset()
+        self.assertNotEqual(self.default_tpl.width_mm, 99)
+
+    def test_r2_protect_own_and_ownerless_writable_all_readable(self):
+        own = self.Template.create({'name': 'DT R2 Kendi', 'user_id': self.stock_user.id})
+        free = self.Template.create({'name': 'DT R2 Sahipsiz', 'user_id': False})
+        self._as_stock(False).browse((own | free).ids).write({'elements_json': '[1]'})
+        self.assertEqual((own | free).mapped('elements_json'), ['[1]', '[1]'])
+        found = self._as_stock(False).search([('id', 'in', (self.other | self.default_tpl).ids)])
+        self.assertEqual(len(found), 2, 'okuma herkese açık kalmalı')
+
+    def test_r2_protect_manager_writes_any(self):
+        self.Template.with_user(self.manager).browse(self.other.id).write(
+            {'elements_json': '[7]', 'user_id': self.manager.id})
+        self.assertEqual(self.other.user_id, self.manager)
+
+    def test_r2_protect_controller_flow_unchanged(self):
+        ctl = self._ctl_as(self.stock_user)
+        res = ctl.label_template_save(template_id=self.other.id, name='DT R2 X', elements=[])
+        self.assertTrue(res.get('error'), res)
+        free = self.Template.create({'name': 'DT R2 Ortak', 'user_id': False})
+        res = ctl.label_template_save(template_id=free.id, name='DT R2 Ortak2', elements=[])
+        self.assertTrue(res.get('success'), res)
+        res = ctl.label_template_delete(template_id=free.id)
+        self.assertTrue(res.get('success'), res)
