@@ -676,7 +676,12 @@ export class CargoLabelDesigner extends Component {
     async onDelete() {
         if (!this.state.editingId) return;
         if (!confirm('Şablonu silmek istediğinize emin misiniz?')) return;
-        try { await BarcodeService.labelTemplateDelete(this.state.editingId); this.state.editingId = 0; this.state.templateName = 'Kargo Etiketi'; this.state.elements = []; this.state.selectedId = null; await this.loadTemplates(); } catch (e) { alert('Silme hatası'); }
+        try {
+            const res = await BarcodeService.labelTemplateDelete(this.state.editingId);
+            // Ret (yetki, varsayılan şablon) yanıtta error olarak gelir; form sıfırlanmaz
+            if (res && res.error) { alert(res.error); return; }
+            this.state.editingId = 0; this.state.templateName = 'Kargo Etiketi'; this.state.elements = []; this.state.selectedId = null; await this.loadTemplates();
+        } catch (e) { alert('Silme hatası'); }
     }
 
     exportTemplate() {

@@ -197,3 +197,23 @@ class TestDtR4FiniteDims(DtLabelCase):
             name='DT R4 Geçerli', width_mm='62.5', height_mm=30, elements=[])
         self.assertTrue(res.get('success'), res)
         self.assertEqual(self.Template.browse(res['id']).width_mm, 62.5)
+
+
+# ==== R5 ====
+@tagged('post_install', '-at_install')
+class TestDtR5DeleteErrorShown(SecurityCase):
+    """ÖNEMLİ-D2: silme yanıtındaki `error` gösterilir, form sıfırlanmaz (statik kontrol)."""
+
+    def _on_delete_body(self, path):
+        with file_open(path) as f:
+            src = f.read()
+        match = re.search(r'\n    async onDelete\(\)\s*\{\n(.*?)\n    \}\n', src, re.S)
+        self.assertTrue(match, 'onDelete bulunamadı: %s' % path)
+        return match.group(1)
+
+    def test_r5_designers_check_delete_error_before_reset(self):
+        for path in ('ugurlar_barcode/static/src/js/screens/label_designer.js',
+                     'ugurlar_barcode/static/src/js/screens/cargo_label_designer.js'):
+            body = self._on_delete_body(path)
+            self.assertIn('alert(res.error)', body, path)
+            self.assertLess(body.index('res.error'), body.index('editingId = 0'), path)
