@@ -79,6 +79,7 @@ class CargoLabelReprint extends Component {
             // 1. Label verisini çek (packing.js ile aynı API)
             const data = await rpc('/ugurlar_barcode/api/packing_label_data', {
                 picking_id: this.pickingId,
+                log_print: true,  // picking chatter'ına tek yazdırma notu
             });
 
             if (data.error) {

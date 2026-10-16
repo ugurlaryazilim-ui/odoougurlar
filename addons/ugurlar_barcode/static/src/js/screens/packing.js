@@ -921,8 +921,10 @@ export class PackingScreen extends Component {
     // ─── ETİKET BAS ─────────────────────────────
     async printLabel(pickingId) {
         try {
+            // log_print: picking chatter'ına tek "Kargo Etiketi Yazdırıldı" notu (yeniden denemede yok)
             let data = await BarcodeService.call('/ugurlar_barcode/api/packing_label_data', {
                 picking_id: pickingId,
+                log_print: true,
             });
             if (data.error) { this.state.error = data.error; return; }
 

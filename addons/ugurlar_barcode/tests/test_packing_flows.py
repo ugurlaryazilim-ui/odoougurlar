@@ -341,6 +341,20 @@ class TestPackingDetailReadOnly(PackingFlowCase):
                          "iptal siparişin picking'i listeden çıkmalı")
         self.assertIn(p.id, [i['picking_id'] for i in res['items']])
 
+    def test_b41_scan_ignores_cancelled_order_picking(self):
+        """Sözleşme G7 eki: detay artık iptal etmediği için açık kalan iptal-sipariş
+        picking'i okutulup doğrulanmamalı (mal sevk edilirdi)."""
+        p, c, batch = self._cancelled_order_batch()
+        res = self.pack_ctl.packing_scan(batch_id=batch.id, barcode='PK-B')
+        self.assertFalse(res.get('success'), res)
+        self.assertTrue(res.get('error'), res)
+        self.assertEqual(c.move_ids.packing_scanned_qty, 0)
+        self.assertNotEqual(c.state, 'done')
+        res = self.pack_ctl.packing_scan(batch_id=batch.id, barcode='PK-A')
+        self.assertTrue(res.get('success'), res)
+        self.assertTrue(res.get('all_matched'), 'iptal siparişin picking\'i all_matched\'i bozmamalı')
+        self.assertNotEqual(batch.state, 'done', "iptal siparişin açık picking'i varken rota kapanmaz")
+
     def test_b41_cancellation_still_happens_in_complete(self):
         p, c, batch = self._cancelled_order_batch()
         res = self.pack_ctl.packing_complete(batch_id=batch.id)
