@@ -111,3 +111,160 @@
         width: 100%;
     }
 }
+
+/* ═══ ÜRÜN GÖRSELİ ═══ */
+.ub-pk-thumb {
+    position: relative;
+    flex: 0 0 64px;
+    width: 64px;
+    height: 64px;
+    padding: 3px;
+    border: 1px solid var(--border-color, #dee2e6);
+    border-radius: 8px;
+    background: #fff;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: zoom-in;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.ub-pk-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+.ub-pk-thumb-zoom {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(113, 75, 103, 0.55);
+    color: #fff;
+    font-size: 1.1rem;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+.ub-pk-thumb:focus-visible {
+    border-color: var(--primary, #714B67);
+    box-shadow: 0 0 0 3px rgba(113, 75, 103, 0.15);
+    outline: none;
+}
+.ub-pk-thumb:focus-visible .ub-pk-thumb-zoom {
+    opacity: 1;
+}
+/* Büyüteç yalnız fareli cihazlarda: dokunmatikte hover takılı kalır */
+@media (hover: hover) {
+    .ub-pk-thumb:hover {
+        border-color: var(--primary, #714B67);
+        box-shadow: 0 0 0 3px rgba(113, 75, 103, 0.15);
+    }
+    .ub-pk-thumb:hover .ub-pk-thumb-zoom {
+        opacity: 1;
+    }
+}
+.ub-pk-thumb-empty {
+    cursor: default;
+    background: #f8f9fa;
+    color: #adb5bd;
+    font-size: 1.4rem;
+}
+.ub-line-done .ub-pk-thumb {
+    border-color: rgba(39, 174, 96, 0.45);
+}
+
+/* ═══ GÖRSEL ÖNİZLEME (LIGHTBOX) ═══ */
+.ub-pk-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 1060;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    background: rgba(17, 24, 39, 0.82);
+    backdrop-filter: blur(3px);
+    animation: ub-pk-fade 0.15s ease;
+}
+.ub-pk-lightbox-dialog {
+    display: flex;
+    flex-direction: column;
+    width: min(900px, 100%);
+    max-height: 100%;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #1f2937;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+    animation: ub-pk-zoom 0.18s ease;
+}
+.ub-pk-lightbox-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    color: #f9fafb;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.ub-pk-lightbox-title {
+    flex: 1;
+    min-width: 0;
+}
+.ub-pk-lightbox-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+.ub-pk-lightbox-meta {
+    margin-top: 0.15rem;
+    font-size: 0.8rem;
+    color: #9ca3af;
+}
+.ub-pk-lightbox-action {
+    color: #d1d5db;
+    padding: 0.25rem 0.5rem;
+}
+.ub-pk-lightbox-action:hover {
+    color: #fff;
+}
+.ub-pk-lightbox-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: #fff;
+}
+.ub-pk-lightbox-body img {
+    max-width: 100%;
+    max-height: calc(100vh - 9rem);
+    object-fit: contain;
+}
+@keyframes ub-pk-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+@keyframes ub-pk-zoom {
+    from { transform: scale(0.96); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
+
+@media (max-width: 576px) {
+    .ub-pk-thumb {
+        flex-basis: 52px;
+        width: 52px;
+        height: 52px;
+    }
+    .ub-pk-lightbox {
+        padding: 0.75rem;
+    }
+    .ub-pk-lightbox-body img {
+        max-height: calc(100vh - 8rem);
+    }
+}

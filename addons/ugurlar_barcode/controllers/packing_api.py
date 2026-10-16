@@ -234,6 +234,7 @@ class PackingApiController(BarcodeApiBase):
                                         'cargo_provider': cargo_provider,
                                         'order_number': order_number,
                                         'image_url': f'/web/image/product.product/{product.id}/image_128',
+                                        'has_image': bool(product.image_128),
                                     })
                                     replacement_found = True
                                     break
@@ -258,6 +259,7 @@ class PackingApiController(BarcodeApiBase):
                             'cargo_provider': cargo_provider,
                             'order_number': order_number,
                             'image_url': f'/web/image/product.product/{product.id}/image_128',
+                            'has_image': bool(product.image_128),
                             'cancelled': True,
                         })
                     continue
@@ -280,6 +282,7 @@ class PackingApiController(BarcodeApiBase):
                     'cargo_provider': cargo_provider,
                     'order_number': order_number,
                     'image_url': f'/web/image/product.product/{product.id}/image_128',
+                    'has_image': bool(product.image_128),
                 })
 
         total = len(items)
