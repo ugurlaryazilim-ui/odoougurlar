@@ -128,6 +128,11 @@ class LabelApiController(BarcodeApiBase):
             return denied
         if not name:
             return {'error': 'Şablon adı gerekli'}
+        # nan/inf JSON'a NaN/Infinity olarak girer ve şablon listesini herkes için bozar
+        width = self._parse_qty(width_mm, default=60)
+        height = self._parse_qty(height_mm, default=40)
+        if width is None or height is None:
+            return {'error': 'Şablon ölçüleri pozitif bir sayı olmalı.'}
 
         Template = request.env['ugurlar.label.template'].sudo()
         elements_json = json.dumps(elements or [], ensure_ascii=False)
@@ -149,8 +154,8 @@ class LabelApiController(BarcodeApiBase):
                     Template.search([('is_default', '=', True)]).write({'is_default': False})
                 vals = {
                     'name': name,
-                    'width_mm': float(width_mm),
-                    'height_mm': float(height_mm),
+                    'width_mm': width,
+                    'height_mm': height,
                     'elements_json': elements_json,
                     'is_default': bool(is_default),
                 }

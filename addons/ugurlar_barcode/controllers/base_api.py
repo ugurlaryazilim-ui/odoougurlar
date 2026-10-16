@@ -1,6 +1,7 @@
 """Ortak yardımcı fonksiyonlar — tüm controller'lar bu mixin'i kullanır."""
 import json
 import logging
+import math
 from datetime import datetime
 import time
 import hashlib
@@ -178,12 +179,12 @@ class BarcodeApiBase(http.Controller):
     MAX_QTY = 100000
 
     def _parse_qty(self, value, default=1, allow_zero=False):
-        """İstemciden gelen miktar: sayı değilse, negatifse veya makul üst sınırı aşıyorsa None."""
+        """İstemciden gelen miktar: sayı değilse (nan/inf dahil), negatifse veya makul üst sınırı aşıyorsa None."""
         try:
             qty = float(value if value not in (None, '') else default)
         except (TypeError, ValueError):
             return None
-        if qty != qty or qty > self.MAX_QTY or qty < 0 or (qty == 0 and not allow_zero):
+        if not math.isfinite(qty) or qty > self.MAX_QTY or qty < 0 or (qty == 0 and not allow_zero):
             return None
         return qty
 

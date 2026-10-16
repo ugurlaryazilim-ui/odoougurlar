@@ -165,3 +165,35 @@ class TestDtR3StockGroup(DtLabelCase):
     def test_r3_protect_plain_internal_user_can_list(self):
         res = self._ctl_as(self.plain_user).label_template_list()
         self.assertIn(self.default_tpl.id, [t['id'] for t in res['templates']])
+
+
+# ==== R4 ====
+@tagged('post_install', '-at_install')
+class TestDtR4FiniteDims(DtLabelCase):
+    """D-D4: ölçüler sonlu, pozitif sayı olmalı (nan/inf şablon listesinin JSON'unu bozar)."""
+
+    BAD = ('nan', 'NaN', 'inf', '-inf', 'Infinity', 'abc', '-5', '0')
+
+    def test_r4_create_rejects_non_finite(self):
+        ctl = self._ctl_as(self.stock_user)
+        for bad in self.BAD:
+            for field in ('width_mm', 'height_mm'):
+                res = ctl.label_template_save(name='DT R4 %s %s' % (bad, field), elements=[],
+                                              **{field: bad})
+                self.assertTrue(res.get('error') and not res.get('success'), (bad, field, res))
+        self.assertFalse(self.Template.search([('name', '=like', 'DT R4 %')]))
+
+    def test_r4_update_rejects_non_finite(self):
+        own = self.Template.create({'name': 'DT R4 Kendi', 'user_id': self.stock_user.id,
+                                    'width_mm': 50})
+        res = self._ctl_as(self.stock_user).label_template_save(
+            template_id=own.id, name='DT R4 Kendi', width_mm='nan', elements=[])
+        self.assertTrue(res.get('error') and not res.get('success'), res)
+        own.invalidate_recordset()
+        self.assertEqual(own.width_mm, 50)
+
+    def test_r4_protect_numeric_strings_accepted(self):
+        res = self._ctl_as(self.stock_user).label_template_save(
+            name='DT R4 Geçerli', width_mm='62.5', height_mm=30, elements=[])
+        self.assertTrue(res.get('success'), res)
+        self.assertEqual(self.Template.browse(res['id']).width_mm, 62.5)
