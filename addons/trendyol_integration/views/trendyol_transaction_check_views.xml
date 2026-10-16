@@ -56,7 +56,8 @@
         <field name="model">trendyol.transaction.check</field>
         <field name="arch" type="xml">
             <search>
-                <field name="order_number"/>
+                <field name="order_number" string="Sipariş / Komisyon Fatura / Dekont / Ödeme No"
+                       filter_domain="['|', '|', '|', ('order_number', 'ilike', self), ('commission_invoice_no', 'ilike', self), ('receipt_id', 'ilike', self), ('payment_order_id', 'ilike', self)]"/>
                 <field name="barcode"/>
                 <field name="payment_order_id"/>
                 <field name="receipt_id"/>
