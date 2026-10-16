@@ -635,3 +635,21 @@ class TestPackingSoftMatchSplitOrder(PackingFlowCase):
             self.assertEqual(p1.state, 'cancel')
             count, results = self._labels(batch, order)
             self.assertEqual(count, 1, '%s: siparişe tek etiket basılmalı: %s' % (order, results))
+
+
+# ── Dal B düzeltme 2 R2 (genel hata dalı) ──────────────────
+@tagged('post_install', '-at_install')
+class TestPackingScanGenericError(PackingFlowCase):
+    """packing_scan: eşzamanlılık dışı beklenmeyen hata yükseltilmez, `error` döner."""
+
+    def test_rb8_scan_returns_error_for_generic_exception(self):
+        p = self._routed(self.prod_a, 1, wave=1, origin='SO-RB8-1')
+        batch = self._route(p)
+        # _error_text testte request/uid'e bağlı çeviri kullanır: sabit dönüşle yamalanır
+        with patch.object(packing_api.PackingApiController, '_packing_scan_impl',
+                          side_effect=ValueError('test genel hata')), \
+                patch.object(packing_api.PackingApiController, '_error_text',
+                             return_value='Sunucu hatası: test'), \
+                self.assertLogs(packing_api._logger.name, level='ERROR'):
+            res = self.pack_ctl.packing_scan(batch_id=batch.id, barcode='PK-A')
+        self.assertEqual(res, {'error': 'Sunucu hatası: test'})
