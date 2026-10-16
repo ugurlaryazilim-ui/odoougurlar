@@ -622,6 +622,8 @@ class PickingSchedule(models.Model):
         for picking in pickings:
             labels = set()  # bu siparişin move etiketleri (availability_status için)
             for move in picking.move_ids:
+                if move.state in ('cancel', 'done'):
+                    continue  # FAZ 2 ile aynı: iptal / biten satır stok durumuna girmez
                 if move.id in moves_from_fallback and fallback_wh:
                     # Bu ürün HEYKEL'den transfer edildi — kaynak: HEYKEL
                     move.sudo().write({'source_warehouse_id': fallback_wh.id})
@@ -652,10 +654,10 @@ class PickingSchedule(models.Model):
                 picking.sudo().with_context(tracking_disable=True).write({
                     'availability_status': self._status_from_move_labels(labels)})
 
-                # Rezerv korunur (K-1): sıfırlanırsa stok başka siparişe gider, doğrulamada
-                # yeniden rezerve edilirken yetmezse WH/Stock kökünde satır açılırdı.
-                # Toplanan / okutulan miktar kendi sayaçlarında (wave_collected_qty,
-                # packing_scanned_qty); sevk her yolda _apply_collected_quantities ile yazılır.
+            # Rezerv korunur (K-1): sıfırlanırsa stok başka siparişe gider, doğrulamada
+            # yeniden rezerve edilirken yetmezse WH/Stock kökünde satır açılırdı.
+            # Toplanan / okutulan miktar kendi sayaçlarında (wave_collected_qty,
+            # packing_scanned_qty); sevk her yolda _apply_collected_quantities ile yazılır.
 
         _logger.info(
             "Toplama [%s] %s — depo dağılımı: ana=%d, yedek=%d, iade=%d, stoksuz=%d",

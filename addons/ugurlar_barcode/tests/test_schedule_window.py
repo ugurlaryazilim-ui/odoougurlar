@@ -322,6 +322,25 @@ class TestAvailabilityStatus(ScheduleCase):
         self.assertEqual(batch.other_warehouse_count, 1)
         self.assertEqual(batch.unavailable_count, 1)
 
+    def test_c3_cancelled_move_is_ignored_in_status(self):
+        """İptal edilmiş satır + ana depoda rezerve satır: sipariş 'available' (stoksuz değil)."""
+        self._add_stock(self.prod1, self.pri_shelf, 2)
+        picking = self._pri_picking(self.prod1, 1)
+        src, dest = picking.location_id, picking.location_dest_id
+        picking.write({'move_ids': [(0, 0, {
+            'product_id': self.prod2.id, 'product_uom_qty': 1,
+            'product_uom': self.prod2.uom_id.id,
+            'location_id': src.id, 'location_dest_id': dest.id,
+        })]})
+        picking.action_confirm()
+        picking.move_ids.filtered(lambda m: m.product_id == self.prod2)._action_cancel()
+
+        batch = self._run_window(picking)
+        batch.invalidate_recordset()
+
+        self.assertEqual(picking.availability_status, 'available')
+        self.assertEqual((batch.available_count, batch.unavailable_count), (1, 0))
+
     def test_c3_only_return_warehouse_stock(self):
         self._add_stock(self.prod4, self.ret_shelf, 2)
         picking = self._pri_picking(self.prod4, 1)
