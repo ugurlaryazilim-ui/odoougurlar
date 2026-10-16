@@ -106,7 +106,9 @@
         <field name="model">trendyol.settlement</field>
         <field name="arch" type="xml">
             <search string="Ara">
-                <field name="order_number"/>
+                <!-- İlk alan: yazılan/yapıştırılan her şey Enter ile burada aranır -->
+                <field name="order_number" string="Sipariş / Fatura / Dekont / Ödeme No"
+                       filter_domain="['|', '|', '|', '|', '|', ('order_number', 'ilike', self), ('commission_invoice_no', 'ilike', self), ('receipt_id', 'ilike', self), ('trendyol_id', 'ilike', self), ('payment_order_id', 'ilike', self), ('shipment_package_id', 'ilike', self)]"/>
                 <field name="barcode"/>
                 <field name="receipt_id"
                        filter_domain="['|', '|', ('receipt_id', 'ilike', self), ('commission_invoice_no', 'ilike', self), ('trendyol_id', 'ilike', self)]"/>
