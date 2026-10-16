@@ -36,13 +36,17 @@ class LabelTemplate(models.Model):
 
     @api.model_create_multi
     def create(self, vals_list):
+        records = super().create(vals_list)
+        # Denetim oluşan kayıtların GERÇEK değerleriyle yapılır: bağlam (default_*), ir.default,
+        # name_create ve load varsayılanları super().create içinde eklenir, vals'ta görünmez.
+        # Hata fırlatılınca işlem (ya da çağıranın savepoint'i) geri alınır.
         if not self._is_template_admin():
-            for vals in vals_list:
-                if self._is_cargo_name(vals.get('name')):
+            for rec in records.sudo():
+                if self._is_cargo_name(rec.name):
                     self._deny("Adında 'Kargo' geçen etiket şablonunu yalnız stok yöneticisi oluşturabilir.")
-                if vals.get('is_default'):
+                if rec.is_default:
                     self._deny("Varsayılan etiket şablonunu yalnız stok yöneticisi belirleyebilir.")
-        return super().create(vals_list)
+        return records
 
     def write(self, vals):
         if not self._is_template_admin():
