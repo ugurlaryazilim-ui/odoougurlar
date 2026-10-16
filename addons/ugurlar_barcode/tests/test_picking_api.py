@@ -1,10 +1,12 @@
 """G1 / KK-A1.2 - A1.5: gizli "Sipariş Toplama" uç noktalarının güvenliği.
 
+Düzeltme turu 1 (güvenlik K1): picking_scan / picking_validate koşulsuz kapalı;
+KK-A1.5(c) iptal edildi. picking_list / picking_detail salt okuma.
+
 Dışarıdan gözlenen davranış: yanıttaki `error` / `success` / `state` ve kayıtların durumu.
 """
 from unittest.mock import patch
 
-from odoo.exceptions import UserError
 from odoo.tests import tagged
 
 from odoo.addons.ugurlar_barcode.controllers import picking_api
@@ -80,30 +82,14 @@ class TestPickingApi(BarcodeCase):
         ):
             self.assertIn('error', res, name)
 
-    # ─── KK-A1.3 ───────────────────────────────────────
-    def test_a13_scan_cannot_exceed_demand(self):
-        """Talep 2, rezerv 2: 5 okutma sonunda quantity <= 2; aşımda hata."""
-        self._add_stock(self.prod, self.stock, 10)
-        picking = self._picking(self.prod, 2)
-        move = picking.move_ids
-        self.assertEqual(move.quantity, 2, 'ön koşul: rezerv tam')
+    # ─── KK-A1.3 - A1.5: yazma uçları kapalı (güvenlik K1, KK-A1.5(c) iptal) ───
+    def _assert_closed(self, res, picking, before):
+        self.assertEqual(res, {'error': picking_api.PickingApiController.CLOSED_ERROR}, res)
+        self.assertEqual(self._snapshot(picking), before, 'kapalı uç kaydı değiştirmemeli')
 
-        responses = [self.ctl.picking_scan(picking_id=picking.id, barcode='PA-1', quantity=1)
-                     for _i in range(5)]
-        move.invalidate_recordset()
-        self.assertLessEqual(move.quantity, 2, 'quantity talebi aşmamalı')
-        self.assertIn('error', responses[-1], f'aşan okutma hata dönmeli: {responses[-1]}')
+    def _op_count(self):
+        return self.env['ugurlar.barcode.operation'].search_count([('operation_type', '=', 'picking')])
 
-    def test_a13_scan_quantity_param_cannot_exceed_demand(self):
-        """Tek okutmada büyük miktar gönderilse de talep aşılmaz."""
-        self._add_stock(self.prod, self.stock, 10)
-        picking = self._picking(self.prod, 2)
-        res = self.ctl.picking_scan(picking_id=picking.id, barcode='PA-1', quantity=50)
-        picking.move_ids.invalidate_recordset()
-        self.assertLessEqual(picking.move_ids.quantity, 2)
-        self.assertIn('error', res)
-
-    # ─── KK-A1.4 ───────────────────────────────────────
     def _two_moves_picking(self, prod_a, prod_b):
         picking = self.env['stock.picking'].create({
             'picking_type_id': self.out_type.id,
@@ -121,14 +107,34 @@ class TestPickingApi(BarcodeCase):
         picking.action_assign()
         return picking
 
-    def test_a14_only_open_move_is_updated(self):
-        """Aynı üründe biri iptal, biri açık iki move: yalnız açık olan güncellenir."""
+    # KK-A1.3 (eski: talep aşılmaz) -> okutma hiç yazmaz
+    def test_a13_scan_closed_on_reserved_picking(self):
+        """Rezervi tam giden sevkiyatta okutma: hata, quantity ve kayıt aynı, işlem kaydı yok."""
+        self._add_stock(self.prod, self.stock, 10)
+        picking = self._picking(self.prod, 2)
+        self.assertEqual(picking.move_ids.quantity, 2, 'ön koşul: rezerv tam')
+        ops = self._op_count()
+        before = self._snapshot(picking)
+        self._assert_closed(
+            self.ctl.picking_scan(picking_id=picking.id, barcode='PA-1', quantity=1), picking, before)
+        self.assertEqual(self._op_count(), ops, 'işlem kaydı oluşmamalı')
+
+    def test_a13_scan_closed_with_quantity_param(self):
+        """Büyük miktar parametresi de hata döner, yazım yok."""
+        self._add_stock(self.prod, self.stock, 10)
+        picking = self._picking(self.prod, 2)
+        before = self._snapshot(picking)
+        self._assert_closed(
+            self.ctl.picking_scan(picking_id=picking.id, barcode='PA-1', quantity=50), picking, before)
+
+    # KK-A1.4 (eski: yalnız açık move güncellenir) -> hiçbir move güncellenmez
+    def test_a14_scan_closed_with_cancelled_and_open_move(self):
+        """Aynı üründe iptal + açık move: ikisi de yazılmaz, istisna yok."""
         picking = self.env['stock.picking'].create({
             'picking_type_id': self.out_type.id,
             'partner_id': self.customer.id,
             'location_id': self.stock.id,
             'location_dest_id': self.loc_customers.id,
-            # description_picking farklı: confirm sırasında iki move birleştirilmesin
             'move_ids': [(0, 0, {
                 'product_id': self.prod_a.id, 'product_uom_qty': 1,
                 'product_uom': self.prod_a.uom_id.id,
@@ -138,93 +144,70 @@ class TestPickingApi(BarcodeCase):
             }) for i in range(2)],
         })
         picking.action_confirm()
-        cancelled, open_move = picking.move_ids.sorted('id')
+        cancelled, _open_move = picking.move_ids.sorted('id')
         cancelled._action_cancel()
-        self.assertEqual((cancelled.state, open_move.state), ('cancel', 'confirmed'))
+        before = self._snapshot(picking)
+        self._assert_closed(
+            self.ctl.picking_scan(picking_id=picking.id, barcode='PA-2', quantity=1), picking, before)
 
-        try:
-            res = self.ctl.picking_scan(picking_id=picking.id, barcode='PA-2', quantity=1)
-        except UserError as exc:
-            self.fail(f'iptal move yazılmaya çalışıldı: {exc}')
-        cancelled.invalidate_recordset()
-        open_move.invalidate_recordset()
-        self.assertEqual(cancelled.quantity, 0, 'iptal move yazılmamalı')
-        self.assertEqual(open_move.quantity, 1, f'açık move güncellenmeli: {res}')
-        self.assertTrue(res.get('success'), res)
-
-    def test_a14_no_open_move_for_product_is_error(self):
-        """Ürünün tek move'u iptalse hata döner ve miktar yazılmaz."""
+    def test_a14_scan_closed_when_product_move_cancelled(self):
         picking = self._two_moves_picking(self.prod_a, self.prod_b)
-        cancelled = picking.move_ids.filtered(lambda m: m.product_id == self.prod_b)
-        cancelled._action_cancel()
-        self.assertEqual(cancelled.state, 'cancel')
-        self.assertNotEqual(picking.state, 'cancel')
+        picking.move_ids.filtered(lambda m: m.product_id == self.prod_b)._action_cancel()
+        before = self._snapshot(picking)
+        self._assert_closed(
+            self.ctl.picking_scan(picking_id=picking.id, barcode='PA-3', quantity=1), picking, before)
 
-        try:
-            res = self.ctl.picking_scan(picking_id=picking.id, barcode='PA-3', quantity=1)
-        except UserError as exc:
-            self.fail(f'iptal move yazılmaya çalışıldı (temiz hata yerine istisna): {exc}')
-        cancelled.invalidate_recordset()
-        self.assertIn('error', res, res)
-        self.assertEqual(cancelled.quantity, 0)
-
-    def test_scan_valid_outgoing_still_works(self):
-        """Koruma: geçerli giden sevkiyatta, rezervi olmayan move'a okutma çalışır."""
+    def test_scan_closed_on_unreserved_move(self):
+        """Eski koruma tersine döndü: rezervsiz move'a okutma artık yazmaz (kökte satır açılmaz)."""
         picking = self._two_moves_picking(self.prod_a, self.prod_b)
-        move = picking.move_ids.filtered(lambda m: m.product_id == self.prod_a)
-        res = self.ctl.picking_scan(picking_id=picking.id, barcode='PA-2', quantity=1)
-        move.invalidate_recordset()
-        self.assertTrue(res.get('success'), res)
-        self.assertEqual(move.quantity, 1)
-        self.assertEqual(res.get('done_qty'), 1)
+        self.assertEqual(picking.move_ids.mapped('quantity'), [0, 0], 'ön koşul: rezerv yok')
+        before = self._snapshot(picking)
+        self._assert_closed(
+            self.ctl.picking_scan(picking_id=picking.id, barcode='PA-2', quantity=1), picking, before)
+        self.assertFalse(picking.move_line_ids, 'move line açılmamalı')
 
-    # ─── KK-A1.5 ───────────────────────────────────────
-    def test_a15a_partial_picking_rejected(self):
-        """(a) Kısmi (quantity < talep) giden picking: hata, done olmaz, backorder yok."""
+    # KK-A1.5 (a)(b) korunur, (c) iptal: doğrulama ucu hiçbir siparişi sevk etmez
+    def test_a15a_validate_closed_on_partial_picking(self):
         self._add_stock(self.prod, self.stock, 1)
         picking = self._picking(self.prod, 3)
-        self.assertLess(picking.move_ids.quantity, picking.move_ids.product_uom_qty)
-
-        res = self.ctl.picking_validate(picking_id=picking.id)
-        picking.invalidate_recordset()
-        self.assertIn('error', res, res)
-        self.assertNotEqual(picking.state, 'done')
+        before = self._snapshot(picking)
+        self._assert_closed(self.ctl.picking_validate(picking_id=picking.id), picking, before)
         self.assertFalse(self.env['stock.picking'].search([('backorder_id', '=', picking.id)]))
 
-    def test_a15b_route_picking_rejected(self):
-        """(b) Rotadaki (batch_id dolu) picking, rezervi tam olsa da bu uçtan doğrulanmaz."""
+    def test_a15b_validate_closed_on_route_picking(self):
         self._add_stock(self.prod, self.stock, 5)
         picking = self._picking(self.prod, 2)
-        self.assertEqual(picking.move_ids.quantity, 2, 'ön koşul: rezerv tam')
         self._route(picking)
+        before = self._snapshot(picking)
+        self._assert_closed(self.ctl.picking_validate(picking_id=picking.id), picking, before)
 
-        res = self.ctl.picking_validate(picking_id=picking.id)
-        picking.invalidate_recordset()
-        self.assertIn('error', res, res)
-        self.assertIn('Rota', res['error'])
-        self.assertNotEqual(picking.state, 'done')
-
-    def test_a15c_full_unrouted_picking_validates_with_state(self):
-        """(c) Rotasız ve miktarı tam picking: doğrulanır, yanıt gerçek durumu taşır."""
+    def test_a15c_validate_closed_on_full_unrouted_picking(self):
+        """Rotasız, rezervi tam, hiç okutulmamış sipariş bu uçtan sevk edilemez (K1 senaryosu)."""
         self._add_stock(self.prod, self.stock, 5)
         picking = self._picking(self.prod, 2)
+        before = self._snapshot(picking)
+        self._assert_closed(self.ctl.picking_validate(picking_id=picking.id), picking, before)
+        self.assertEqual(picking.state, 'assigned')
+        self.assertEqual(self._shipped_qty(picking), 0)
+        self.assertEqual(self._qty(self.prod, self.stock, child=True), 5, 'stok düşmemeli')
 
-        res = self.ctl.picking_validate(picking_id=picking.id)
-        picking.invalidate_recordset()
-        self.assertTrue(res.get('success'), res)
-        self.assertEqual(res.get('state'), 'done', res)
-        self.assertEqual(picking.state, 'done')
-        self.assertEqual(self._shipped_qty(picking), 2)
-
-    def test_a15c_not_done_does_not_claim_validated(self):
-        """(c) Doğrulama done olmazsa success False ve 'doğrulandı' metni dönmez."""
+    def test_a15c_validate_never_calls_core_validation(self):
+        """Doğrulama yardımcısı hiç çağrılmaz; yanıtta 'doğrulandı' / success yok."""
         self._add_stock(self.prod, self.stock, 5)
         picking = self._picking(self.prod, 2)
-
-        with patch.object(picking_api.PickingApiController, '_safe_validate_picking',
-                          return_value=False) as validate:
+        with patch.object(picking_api.PickingApiController, '_safe_validate_picking') as validate:
             res = self.ctl.picking_validate(picking_id=picking.id)
-        self.assertTrue(validate.called, '_safe_validate_picking kullanılmalı')
-        self.assertFalse(res.get('success'), res)
+        validate.assert_not_called()
+        self.assertNotIn('success', res)
         self.assertNotIn('doğrulandı', str(res))
-        self.assertEqual(res.get('state'), 'assigned', res)
+
+    def test_detail_still_reads_outgoing_picking(self):
+        """Salt okuma ucu sürer: giden sevkiyat detayı döner, kayıt değişmez."""
+        self._add_stock(self.prod, self.stock, 5)
+        picking = self._picking(self.prod, 2)
+        before = self._snapshot(picking)
+        res = self.ctl.picking_detail(picking_id=picking.id)
+        self.assertNotIn('error', res, res)
+        self.assertEqual(res['picking']['id'], picking.id)
+        self.assertEqual([line['product_barcode'] for line in res['lines']], ['PA-1'])
+        self.assertEqual(self._snapshot(picking), before)
