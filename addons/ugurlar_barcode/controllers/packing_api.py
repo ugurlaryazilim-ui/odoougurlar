@@ -1014,8 +1014,9 @@ class PackingApiController(BarcodeApiBase):
                             nebim_invoice_found = True
                             break
 
-                # Fatura yoksa → Nebim sync tetikle ve tekrar kontrol et
-                if not nebim_invoice_found and trigger_sync:
+                # Fatura yoksa → Nebim sync tetikle ve tekrar kontrol et. Yalnız doğrulanmış
+                # (done) picking: mal çıkmadan fatura kesilmez (G6 kuralı sunucuda da geçerli)
+                if not nebim_invoice_found and trigger_sync and picking.state == 'done':
                     _logger.info(
                         "LABEL DATA: %s için fatura bulunamadı, Nebim sync tetikleniyor...",
                         picking.name)
@@ -1434,6 +1435,10 @@ class PackingApiController(BarcodeApiBase):
 
         if not sale_order:
             _logger.warning("Nebim Sync Atlandı: %s için sipariş bulunamadı.", picking.name)
+            return
+        if sale_order.state == 'cancel':
+            # İptal siparişin cari / sipariş / faturası Nebim'e gönderilmez
+            _logger.info("Nebim Sync Atlandı: %s siparişi iptal (%s).", sale_order.name, picking.name)
             return
 
         _logger.info("Nebim Senkronizasyonu başlıyor: %s", sale_order.name)

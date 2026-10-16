@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from odoo.tests import tagged
 
+from odoo.addons.ugurlar_barcode.controllers import packing_api
 from odoo.addons.ugurlar_barcode.tests.common import PackingCase
 
 
@@ -210,3 +211,53 @@ class TestPackingInvoice(PackingCase):
         sale, picking = self._sale(self.prod, 1)
         self._complete(picking, wave=1)
         self.assertEqual(len(self._out_invoices(sale)), 0)
+
+
+# ── Dal B düzeltme R1 (Ö-B1) ──────────────────────────────
+@tagged('post_install', '-at_install')
+class TestPackingNebimGuard(PackingCase):
+    """Ö-B1: etiket ucu doğrulanmamış picking için Nebim'i tetiklemez; senkron iptal
+    siparişte hiçbir şey yapmaz."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.prod = cls._new_product('Koruma Ürünü', 'GRD-1')
+
+    def setUp(self):
+        super().setUp()
+        self.nebim = self._nebim_real()
+
+    def _order_policy_sale(self):
+        """Siparişe göre faturalanan onaylı sipariş: sevk olmadan da 'to invoice'."""
+        self.prod.product_tmpl_id.invoice_policy = 'order'
+        self._add_stock(self.prod, self.stock, 5)
+        sale = self.env['sale.order'].create({
+            'partner_id': self.customer.id,
+            'order_line': [(0, 0, {
+                'product_id': self.prod.id, 'product_uom_qty': 1, 'price_unit': 10.0})],
+        })
+        sale.action_confirm()
+        picking = sale.picking_ids.filtered(lambda p: p.picking_type_code == 'outgoing')
+        picking.action_assign()
+        self.assertEqual(picking.state, 'assigned', 'ön koşul: picking doğrulanmamış')
+        self.assertEqual(sale.invoice_status, 'to invoice', 'ön koşul: sipariş faturalanabilir')
+        return sale, picking
+
+    def test_rb1_label_data_does_not_sync_undone_picking(self):
+        sale, picking = self._order_policy_sale()
+        res = self.pack_ctl.packing_label_data(picking_id=picking.id)
+        self.assertNotIn('error', res, res)
+        self.assertEqual(picking.state, 'assigned')
+        self.assertFalse(self._out_invoices(sale), 'doğrulanmamış picking için fatura kesilmemeli')
+        self.assertEqual(self.nebim['posts'], 0, "Nebim'e gönderim olmamalı")
+
+    def test_rb1_sync_skips_cancelled_order(self):
+        sale, picking = self._order_policy_sale()
+        sale.write({'state': 'cancel'})  # picking packing_complete'e kadar açık kalır (G7)
+        with patch.object(packing_api, '_extract_marketplace_info',
+                          wraps=packing_api._extract_marketplace_info) as mp:
+            self.pack_ctl._trigger_nebim_sync(picking)
+        mp.assert_not_called()
+        self.assertFalse(self._out_invoices(sale))
+        self.assertEqual(self.nebim['posts'], 0)
