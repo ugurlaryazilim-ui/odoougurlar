@@ -30,6 +30,7 @@
                 <field name="seller_revenue" sum="Hakedişe Etki" optional="hide"/>
                 <field name="payment_order_id"/>
                 <field name="receipt_id"/>
+                <field name="commission_invoice_no" optional="show"/>
                 <field name="affiliate"/>
                 <field name="is_paid" optional="hide"/>
                 <field name="order_id" optional="hide"/>
@@ -59,6 +60,7 @@
                 <field name="barcode"/>
                 <field name="payment_order_id"/>
                 <field name="receipt_id"/>
+                <field name="commission_invoice_no"/>
                 <field name="store_id"/>
                 <filter string="Ödendi" name="paid" domain="[('is_paid', '=', True)]"/>
                 <filter string="Ödenmedi" name="unpaid" domain="[('is_paid', '=', False)]"/>

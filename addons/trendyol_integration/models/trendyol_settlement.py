@@ -184,8 +184,9 @@ class TrendyolSettlement(models.Model):
             rec.signed_commission = sign * abs(rec.commission_amount or 0.0)
             if rec.source == 'settlements' or abs(rec.seller_revenue or 0.0) > 0.005:
                 rec.signed_seller_revenue = sign * abs(rec.seller_revenue or 0.0)
-            elif rec.transaction_type == 'payment' or rec.allocation_state == 'allocated':
-                # Ödeme emri hakediş değil; dağıtılmış toplu fatura sipariş satırlarında sayılıyor
+            elif rec.transaction_type in ('payment', 'commission') or rec.allocation_state == 'allocated':
+                # Ödeme emri hakediş değil; dağıtılmış toplu fatura sipariş satırlarında sayılıyor;
+                # komisyon faturası satışların komisyonunun belgesi — komisyon satış satırlarında düşülü
                 rec.signed_seller_revenue = 0.0
             else:
                 # Kesinti/fatura satırları (kargo, hizmet bedelleri, ceza, stopaj): etki = alacak − borç
@@ -340,6 +341,8 @@ class TrendyolSettlement(models.Model):
             ('Fatura kalemleri', lambda: self._process_invoice_details(api, store)),
             # Bağsız kayıtları siparişlere bağla
             ('Sipariş eşleştirme', lambda: self._relink_unlinked_settlements(store)),
+            # Komisyon faturası → dönemindeki kayıtlara fatura no
+            ('Komisyon faturaları', lambda: self._allocate_commission_invoices(store)),
             # Sipariş bazlı finansal özet — yalnız son senkrondan beri değişen siparişler
             # (Hizmet bedeli dağıtımı ayrı cron'da: trendyol.fee.payment.cron_allocate_fees)
             ('Sipariş özeti', lambda: self._update_order_financial_summary(store, since=since)),
@@ -500,12 +503,14 @@ class TrendyolSettlement(models.Model):
                 # Gece taraması: yalnız bu taramada değişen siparişler (her gece tüm geçmiş taranmaz)
                 self._process_invoice_details(api, store, recent_only=True)
                 self._relink_unlinked_settlements(store)
+                self._allocate_commission_invoices(store)
                 since = (state['started_at'] or fields.Datetime.now()) - timedelta(minutes=5)
                 self._update_order_financial_summary(store, since=since)
             else:
                 # Son adım: fatura kalemleri, eşleştirme ve tüm siparişlerin özeti
                 self._process_invoice_details(api, store, recent_only=False)
                 self._relink_unlinked_settlements(store)
+                self._allocate_commission_invoices(store)
                 self._update_order_financial_summary(store)
             self.env.cr.commit()
             result = (f"{'Gece taraması ' if state['auto'] else ''}{state['from']} → {state['to']}: "
@@ -971,7 +976,7 @@ class TrendyolSettlement(models.Model):
             'shipment_package_id': package_id,
             'barcode': data.get('barcode', ''),
             'receipt_id': str(data.get('receiptId', '') or ''),
-            'commission_invoice_no': str(data.get('commissionInvoiceSerialNumber') or '') or False,
+            'commission_invoice_no': self._commission_no_from(data, source, classified_type),
             'payment_order_id': str(data.get('paymentOrderId', '') or ''),
             'payment_date': pay_date,
             'payment_period': data.get('paymentPeriod', 0) or 0,
@@ -996,6 +1001,16 @@ class TrendyolSettlement(models.Model):
             _logger.warning("Finansal kayıt oluşturma hatası [%s]: %s — %s",
                             store.name, tid, e)
             return False
+
+    @api.model
+    def _commission_no_from(self, data, source, classified_type):
+        """commissionInvoiceSerialNumber → komisyon fatura no: satış/iade satırları (settlements) ve
+        komisyon faturasının kendisi. Kesinti faturaları (DDF kargo/platform) bu alanda kendi
+        numarasını taşır; onlar komisyon faturası değildir."""
+        number = str(data.get('commissionInvoiceSerialNumber') or '').strip()
+        if not number or (source != 'settlements' and classified_type != 'commission'):
+            return False
+        return number
 
     _UPDATABLE_FIELDS = ('transaction_type', 'debt', 'credit', 'commission_rate', 'commission_amount',
                          'seller_revenue', 'payment_order_id', 'payment_date', 'payment_period', 'affiliate',
@@ -1496,12 +1511,99 @@ class TrendyolSettlement(models.Model):
 
     def action_allocate_fees(self):
         """Seçili toplu faturaların (uyarı / eşleşmedi dahil) dağıtımını yeniden dene."""
-        stores = self.mapped('store_id')
+        commission = self.filtered(lambda r: r._is_commission_invoice())
+        for store in commission.mapped('store_id'):
+            self._allocate_commission_invoices(store, invoices=commission.filtered(lambda r: r.store_id == store))
+        fees = self - commission
+        stores = fees.mapped('store_id')
         for store in stores:
-            pos = set(self.filtered(lambda r: r.store_id == store).mapped('payment_order_id')) - {False, ''}
+            pos = set(fees.filtered(lambda r: r.store_id == store).mapped('payment_order_id')) - {False, ''}
             if pos:
                 self._allocate_service_fees(store.get_api(), store, payment_order_ids=pos)
         return True
+
+    # ═══════════════════════════════════════════════════════
+    # KOMİSYON FATURASI KONTROLÜ
+    # ═══════════════════════════════════════════════════════
+    # Trendyol komisyonu her satış/iade/indirim satırında zaten düşer; haftalık komisyon faturası
+    # (DCF...) bu komisyonların belgesidir. Hangi satırın hangi faturaya girdiğini Trendyol her
+    # satırda commissionInvoiceSerialNumber ile verir (canlı veriyle doğrulandı, 16.10.2026).
+    # Burada yalnız doğrulama yapılır: faturaya bağlı satırların komisyon toplamı fatura tutarını
+    # tutuyor mu? Tutmuyorsa satırlar eksiktir (o dönemin finans geçmişi yeniden çekilmeli).
+
+    def _is_commission_invoice(self):
+        self.ensure_one()
+        return self.source == 'otherfinancials' and self.transaction_type == 'commission'
+
+    def _commission_invoice_number(self):
+        self.ensure_one()
+        return self.commission_invoice_no or self.trendyol_id
+
+    @api.private
+    def _commission_invoice_rows(self, invoice):
+        """Trendyol'un bu komisyon faturasına bağladığı kayıtlar (satış, iade, indirim...)."""
+        return self.search([
+            ('store_id', '=', invoice.store_id.id), ('source', '=', 'settlements'),
+            ('commission_invoice_no', '=', invoice._commission_invoice_number()),
+        ])
+
+    @api.private
+    def _allocate_commission_invoices(self, store, invoices=None, recheck_days=45):
+        """Komisyon faturalarını bağlı kayıtlarıyla doğrula. Dönüş: {'allocated', 'warnings', ...}.
+
+        Yakın tarihli faturalar her senkronda yeniden kontrol edilir (bağlı kayıtlar geç gelebilir:
+        fatura no satıştan sonra dolar, eski satırlar gece taramasıyla güncellenir).
+        """
+        result = {'checked': 0, 'allocated': 0, 'warnings': 0, 'unmatched': 0, 'rows': 0}
+        if invoices is None:
+            cutoff = fields.Datetime.now() - timedelta(days=recheck_days)
+            invoices = self.search([
+                ('store_id', '=', store.id), ('source', '=', 'otherfinancials'),
+                ('transaction_type', '=', 'commission'),
+                '|', ('allocation_state', '=', False), ('transaction_date', '>=', cutoff),
+            ])
+        for invoice in invoices:
+            result['checked'] += 1
+            target = round((invoice.debt or 0.0) - (invoice.credit or 0.0), 2)
+            rows = self._commission_invoice_rows(invoice)
+            if not rows:
+                result['unmatched'] += 1
+                invoice.write({'allocation_state': 'unmatched', 'allocation_checked_at': fields.Datetime.now(),
+                               'allocation_note': "Bu faturaya bağlı kayıt henüz yok. Satırlara fatura no sonradan "
+                                                  "yazılır; gece taraması ya da \"Geçmişi Tamamla\" ile güncellenir."})
+                continue
+            total = round(sum(rows.mapped('signed_commission')), 2)
+            diff = round(total - target, 2)
+            orders = len(set(rows.mapped('order_number')) - {False, ''})
+            summary = (f"{orders} sipariş, {len(rows)} kayıt; komisyon toplamı {total:,.2f} TL, "
+                       f"fatura {target:,.2f} TL, fark {diff:,.2f} TL.")
+            if abs(diff) <= 1.0:  # kuruş yuvarlamaları
+                result['allocated'] += 1
+                result['rows'] += len(rows)
+                state, note = 'allocated', summary
+            else:
+                result['warnings'] += 1
+                state, note = 'warning', summary + (" Bazı kayıtlar eksik ya da fatura no'ları henüz "
+                                                    "gelmemiş olabilir; o dönemi \"Geçmişi Tamamla\" ile yeniden çekin.")
+            if invoice.allocation_state != state or invoice.allocation_note != note:
+                invoice.write({'allocation_state': state, 'allocation_note': note,
+                               'allocation_checked_at': fields.Datetime.now()})
+        if result['checked']:
+            _logger.info("Trendyol komisyon faturaları [%s]: %s", store.name, result)
+        return result
+
+    def action_view_commission_rows(self):
+        """Komisyon faturasına giren kayıtlar."""
+        self.ensure_one()
+        number = self._commission_invoice_number()
+        return {
+            'type': 'ir.actions.act_window',
+            'name': f'{number} — Kayıtlar',
+            'res_model': 'trendyol.settlement',
+            'view_mode': 'list,form',
+            'domain': [('store_id', '=', self.store_id.id), ('commission_invoice_no', '=', number),
+                       ('source', '=', 'settlements')],
+        }
 
     @api.model
     def sync_all_financials(self, commit=False):

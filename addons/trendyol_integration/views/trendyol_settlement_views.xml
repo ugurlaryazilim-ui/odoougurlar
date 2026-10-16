@@ -49,6 +49,9 @@
                 <header invisible="not allocation_state">
                     <button name="action_allocate_fees" type="object" string="Dağıtımı Yeniden Dene"
                             invisible="allocation_state == 'allocated'"/>
+                    <button name="action_view_commission_rows" type="object" icon="fa-list"
+                            string="Faturanın Kayıtları"
+                            invisible="transaction_type != 'commission' or source != 'otherfinancials'"/>
                     <field name="allocation_state" widget="statusbar"/>
                 </header>
                 <sheet>
@@ -106,7 +109,7 @@
                 <field name="order_number"/>
                 <field name="barcode"/>
                 <field name="receipt_id"
-                       filter_domain="['|', ('receipt_id', 'ilike', self), ('commission_invoice_no', 'ilike', self)]"/>
+                       filter_domain="['|', '|', ('receipt_id', 'ilike', self), ('commission_invoice_no', 'ilike', self), ('trendyol_id', 'ilike', self)]"/>
                 <field name="commission_invoice_no"/>
                 <field name="payment_order_id"/>
                 <filter string="Satış" name="filter_sale" domain="[('transaction_type', '=', 'sale')]"/>
@@ -123,6 +126,8 @@
                 <filter string="Ödendi" name="filter_paid" domain="[('payment_order_id', '!=', False)]"/>
                 <filter string="Ödenmedi" name="filter_not_paid" domain="[('payment_order_id', '=', False)]"/>
                 <separator/>
+                <filter string="Komisyon Faturaları" name="filter_commission_invoices"
+                        domain="[('transaction_type', '=', 'commission'), ('source', '=', 'otherfinancials')]"/>
                 <filter string="Komisyon Faturası Kesilmiş" name="filter_commission_invoiced"
                         domain="[('commission_invoice_no', '!=', False)]"/>
                 <filter string="Komisyon Faturasına Göre" name="group_commission_invoice"
