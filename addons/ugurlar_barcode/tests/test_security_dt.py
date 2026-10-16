@@ -140,3 +140,28 @@ class TestDtR2Ownership(DtLabelCase):
         self.assertTrue(res.get('success'), res)
         res = ctl.label_template_delete(template_id=free.id)
         self.assertTrue(res.get('success'), res)
+
+
+# ==== R3 ====
+@tagged('post_install', '-at_install')
+class TestDtR3StockGroup(DtLabelCase):
+    """D-D5: stok grubunda olmayan iç kullanıcı sudo controller üzerinden şablon yazamaz."""
+
+    def test_r3_plain_internal_user_cannot_save(self):
+        res = self._ctl_as(self.plain_user).label_template_save(name='DT R3 Yeni', elements=[])
+        self.assertTrue(res.get('error') and not res.get('success'), res)
+        self.assertFalse(self.Template.search([('name', '=', 'DT R3 Yeni')]))
+
+    def test_r3_plain_internal_user_cannot_update_or_delete(self):
+        free = self.Template.create({'name': 'DT R3 Ortak', 'user_id': False})
+        ctl = self._ctl_as(self.plain_user)
+        res = ctl.label_template_save(template_id=free.id, name='DT R3 Değişti', elements=[])
+        self.assertTrue(res.get('error') and not res.get('success'), res)
+        res = ctl.label_template_delete(template_id=free.id)
+        self.assertTrue(res.get('error') and not res.get('success'), res)
+        self.assertEqual(free.name, 'DT R3 Ortak')
+        self.assertTrue(free.exists())
+
+    def test_r3_protect_plain_internal_user_can_list(self):
+        res = self._ctl_as(self.plain_user).label_template_list()
+        self.assertIn(self.default_tpl.id, [t['id'] for t in res['templates']])

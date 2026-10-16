@@ -105,6 +105,13 @@ class LabelApiController(BarcodeApiBase):
             })
         return {'templates': result, 'total': len(result)}
 
+    def _template_editor_error(self):
+        """Controller sudo ile yazar; ACL'deki gibi şablon yazımı yalnız stok kullanıcısına açık."""
+        user = request.env.user
+        if not (user.has_group('stock.group_stock_user') or user.has_group('base.group_system')):
+            return {'error': 'Etiket şablonunu yalnız stok kullanıcıları değiştirebilir.'}
+        return None
+
     def _can_edit_template(self, tmpl):
         """Ortak şablonlar (kargo etiketi dahil) herkesçe ezilip silinmesin."""
         return (not tmpl.user_id or tmpl.user_id == request.env.user
@@ -116,6 +123,9 @@ class LabelApiController(BarcodeApiBase):
                             elements=None, is_default=False, **kw):
         """Şablon kaydet veya güncelle."""
         self._check_internal_user()
+        denied = self._template_editor_error()
+        if denied:
+            return denied
         if not name:
             return {'error': 'Şablon adı gerekli'}
 
@@ -159,6 +169,9 @@ class LabelApiController(BarcodeApiBase):
     def label_template_delete(self, template_id=0, **kw):
         """Şablon sil."""
         self._check_internal_user()
+        denied = self._template_editor_error()
+        if denied:
+            return denied
         if not template_id:
             return {'error': 'Şablon ID gerekli'}
         Template = request.env['ugurlar.label.template'].sudo()
