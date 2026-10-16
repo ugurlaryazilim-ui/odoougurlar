@@ -123,16 +123,19 @@ class LabelApiController(BarcodeApiBase):
         elements_json = json.dumps(elements or [], ensure_ascii=False)
 
         # Yetki, varsayılan bayrağı temizlemeden ÖNCE denetlenir (model kuralı da ayrıca korur)
-        if is_default and not self._is_stock_manager():
-            return {'error': 'Varsayılan etiket şablonunu yalnız stok yöneticisi belirleyebilir.'}
-
+        is_manager = self._is_stock_manager()
         tmpl = Template.browse(int(template_id)) if template_id else Template
-        if tmpl and tmpl.exists() and not self._can_edit_template(tmpl):
+        existing = bool(tmpl) and tmpl.exists()
+        if existing and not self._can_edit_template(tmpl):
             return {'error': 'Bu şablonu yalnız oluşturan kişi veya stok yöneticisi değiştirebilir.'}
+        # Yalnız varsayılan YAPMA girişimi kısıtlıdır; zaten varsayılan olan şablonun içeriği düzenlenebilir
+        makes_default = bool(is_default) and not (existing and tmpl.is_default)
+        if makes_default and not is_manager:
+            return {'error': 'Varsayılan etiket şablonunu yalnız stok yöneticisi belirleyebilir.'}
 
         try:
             with request.env.cr.savepoint():
-                if is_default:
+                if makes_default:
                     Template.search([('is_default', '=', True)]).write({'is_default': False})
                 vals = {
                     'name': name,
@@ -141,7 +144,9 @@ class LabelApiController(BarcodeApiBase):
                     'elements_json': elements_json,
                     'is_default': bool(is_default),
                 }
-                if tmpl and tmpl.exists():
+                if existing:
+                    if not is_manager:
+                        vals.pop('is_default')   # yönetici dışı varsayılan bayrağını değiştiremez
                     tmpl.write(vals)
                     return {'success': True, 'id': tmpl.id, 'message': 'Şablon güncellendi'}
                 tmpl = Template.create(vals)

@@ -232,6 +232,32 @@ class TestLabelTemplatePermissions(SecurityCase):
         self.assertTrue(res.get('success'), res)
         self.assertFalse(tpl.exists())
 
+    def test_protect_nonmanager_can_edit_default_template_content(self):
+        """G12 rev: varsayılan ve kargo olmayan şablonun alanlarını stok kullanıcısı yazabilir."""
+        for sudo in (False, True):
+            self._as_stock(sudo).browse(self.default_tpl.id).write(
+                {'width_mm': 70, 'elements_json': '[1]', 'name': 'D2 Varsayılan Yeni'})
+            self.default_tpl.invalidate_recordset()
+            self.assertEqual(self.default_tpl.width_mm, 70)
+            self.assertTrue(self.default_tpl.is_default)
+        # controller: arayüz is_default göndermez (False); bayrak ve içerik korunur
+        own_default = self.Template.create({
+            'name': 'D2 Sahibi Stok', 'user_id': self.stock_user.id, 'is_default': False})
+        self.default_tpl.user_id = self.stock_user
+        self._patch_request_as(self.stock_user, label_api)
+        ctl = label_api.LabelApiController()
+        res = ctl.label_template_save(template_id=self.default_tpl.id, name='D2 Varsayılan Yeni',
+                                      width_mm=80, height_mm=30, elements=[{'type': 'x'}])
+        self.assertTrue(res.get('success'), res)
+        res = ctl.label_template_save(template_id=self.default_tpl.id, name='D2 Varsayılan Yeni',
+                                      width_mm=85, height_mm=30, elements=[], is_default=True)
+        self.assertTrue(res.get('success'), res)
+        self.default_tpl.invalidate_recordset()
+        own_default.invalidate_recordset()
+        self.assertEqual(self.default_tpl.width_mm, 85)
+        self.assertTrue(self.default_tpl.is_default)
+        self.assertFalse(own_default.is_default)
+
     def test_protect_nonmanager_can_list_templates(self):
         self._patch_request_as(self.stock_user, label_api)
         res = label_api.LabelApiController().label_template_list()
