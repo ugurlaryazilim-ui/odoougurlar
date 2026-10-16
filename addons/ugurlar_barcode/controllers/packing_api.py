@@ -379,14 +379,19 @@ class PackingApiController(BarcodeApiBase):
                     ('origin', '=', cancelled_picking.origin),
                     ('state', 'not in', ['cancel']),
                 ])
-                # 1) Önce henüz tamamlanmamış aktif move ara
+                # 1) Önce henüz tamamlanmamış aktif move ara.
+                # Rotadan geçmiş (rotada / rotadan çıkarılmış) replacement her zaman aktiftir:
+                # rezervi korunur (K-1), quantity ilerleme değildir; ardından wave_qty kontrolü
+                # karar verir. Rotaya hiç girmemiş ve rezervi tam olan replacement eskisi gibi
+                # aktif sayılmaz (soft match).
                 for rp in replacement_pickings:
                     if rp.id in (all_pickings.ids if hasattr(all_pickings, 'ids') else []):
                         continue
+                    routed = bool(rp.batch_id or rp.batch_schedule_time)
                     for move in rp.move_ids:
                         if (move.product_id.id in match_product_ids and
                                 move.state not in ('cancel', 'done') and
-                                move.quantity < move.product_uom_qty):
+                                (routed or move.quantity < move.product_uom_qty)):
                             target_move = move
                             target_picking = rp
                             _logger.info(

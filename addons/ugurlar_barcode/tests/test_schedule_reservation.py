@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import pytz
 
+from odoo import fields
 from odoo.tests import tagged
 
 from odoo.addons.ugurlar_barcode.controllers import batch_api, packing_api, shelf_api
@@ -428,6 +429,53 @@ class TestReservedRouteScreens(BarcodeCase):
         res = self.pack_ctl.packing_scan(batch_id=batch.id, barcode='RR-X')
         self.assertTrue(res.get('replacement_match'), res)
         self.assertFalse(res['all_matched'])
+
+    # ─── İnceleme Ö-1: rotadaki replacement soft match'e düşmez ───
+    def _routed_replacement_x(self, origin, wave=0):
+        """Replacement başka bir rotada (R2), rezervi tam (A7: FAZ 5 sıfırlamaz)."""
+        repl = self._replacement_x(origin)
+        repl.move_ids.wave_collected_qty = wave
+        other_batch = self._route(repl)
+        repl.batch_schedule_time = fields.Datetime.now()
+        return repl, other_batch
+
+    def test_review_o1_replacement_in_other_route_not_soft_matched(self):
+        """R2 henüz toplamadı: R1 paketlemesi 'eşleşti' demez, 'rota toplanmamış' hatası verir."""
+        _orig, batch = self._orig_with_cancelled_x('SO-O1A')
+        repl, _r2 = self._routed_replacement_x('SO-O1A')
+        res = self.pack_ctl.packing_scan(batch_id=batch.id, barcode='RR-X')
+        self.assertFalse(res.get('soft_match'), res)
+        self.assertFalse(res.get('success'), res)
+        self.assertTrue(res.get('not_collected'), res)
+        self.assertEqual(repl.move_ids.packing_scanned_qty, 0)
+        self.nebim.assert_not_called()
+
+    def test_review_o1_replacement_removed_from_route_not_soft_matched(self):
+        """Rotada hiç toplanamayıp çıkarılan (batch_id boş, rotadan geçmiş) replacement da aynı."""
+        _orig, batch = self._orig_with_cancelled_x('SO-O1B')
+        repl, _r2 = self._routed_replacement_x('SO-O1B')
+        repl.batch_id = False
+        res = self.pack_ctl.packing_scan(batch_id=batch.id, barcode='RR-X')
+        self.assertFalse(res.get('soft_match'), res)
+        self.assertTrue(res.get('not_collected'), res)
+
+    def test_review_o1_collected_routed_replacement_counts_scan(self):
+        """R2 toplandı (wave 1): okutma replacement sayacına yazılır, soft match değil."""
+        _orig, batch = self._orig_with_cancelled_x('SO-O1C')
+        repl, _r2 = self._routed_replacement_x('SO-O1C', wave=1)
+        res = self.pack_ctl.packing_scan(batch_id=batch.id, barcode='RR-X')
+        self.assertTrue(res.get('success'), res)
+        self.assertFalse(res.get('soft_match'), res)
+        self.assertEqual(res.get('picking_id'), repl.id)
+        self.assertEqual(repl.move_ids.packing_scanned_qty, 1)
+
+    def test_review_o1_unrouted_reserved_replacement_keeps_soft_match(self):
+        """Koruma (eski davranış): rotaya hiç girmemiş, Odoo'nun rezerve ettiği replacement soft match."""
+        _orig, batch = self._orig_with_cancelled_x('SO-O1D')
+        repl = self._replacement_x('SO-O1D')
+        res = self.pack_ctl.packing_scan(batch_id=batch.id, barcode='RR-X')
+        self.assertTrue(res.get('soft_match'), res)
+        self.assertEqual(repl.move_ids.packing_scanned_qty, 0)
 
     # ─── KK-A7.5 ───────────────────────────────────────
     def test_a75_packing_completion_validates_via_scanned_counter(self):
