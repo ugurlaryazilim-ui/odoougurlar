@@ -294,7 +294,7 @@ export class PackingScreen extends Component {
             <t t-if="state.error">
                 <div class="ub-error-card">
                     <i class="fa fa-exclamation-triangle"></i>
-                    <p t-esc="state.error"/>
+                    <p style="white-space: pre-line;" t-esc="state.error"/>
                 </div>
             </t>
 
@@ -666,7 +666,12 @@ export class PackingScreen extends Component {
                 speak('packing_scan_wrong');
             } else if (res.warning) {
                 // "Zaten paketlendi" durumu
-                if (res.label_already_printed) {
+                if (res.validate_pending) {
+                    // Okutması bitmiş ama doğrulanamamış sipariş: etiket basılmaz
+                    this.state.scanMsg = `⚠️ ${res.message}`;
+                    this.state.scanOk = false;
+                    speak('packing_error');
+                } else if (res.label_already_printed) {
                     // Etiket zaten basıldı — tekrar basma seçeneği sun
                     this.state.scanMsg = `✅ ${res.message} (etiket daha önce basıldı)`;
                     this.state.scanOk = true;
@@ -714,8 +719,13 @@ export class PackingScreen extends Component {
                     this.state.all_matched = fresh.all_matched;
                 }
 
-                // Eğer sipariş tamamen eşleştiyse kargo etiketini otomatik yazdır
-                if (res.picking_completed && res.picking_id) {
+                if (res.validate_error) {
+                    // Okutma sayıldı ama sevkiyat doğrulanamadı: etiket basılmaz, Nebim çalışmaz
+                    this.state.scanMsg = `⚠️ ${res.validate_error}`;
+                    this.state.scanOk = false;
+                    speak('packing_error');
+                } else if (res.picking_completed && res.picking_id) {
+                    // Sipariş tamamen eşleşti: kargo etiketini otomatik yazdır
                     this.state.scanMsg = res.picking_name + " siparişi eşleşti, etiket yazdırılıyor...";
                     speak('packing_order_complete');
                     
@@ -776,18 +786,22 @@ export class PackingScreen extends Component {
             const res = await BarcodeService.call('/ugurlar_barcode/api/packing_complete', {
                 batch_id: this.state.batch.id,
             });
-            if (res.errors && res.errors.length) {
+            const hasErrors = !!(res.errors && res.errors.length);
+            if (hasErrors) {
+                // Doğrulanamayan siparişler adı ve hata metniyle alt alta listelenir
                 this.state.error = res.errors.join('\n');
             }
             if (res.success || res.validated > 0) {
                 this.state.scanMsg = res.message;
                 this.state.scanOk = true;
                 this.state.completed = true;
-                speak('packing_complete');
+                speak(hasErrors ? 'packing_error' : 'packing_complete');
 
-                // Etiket bilgilerini hazırla
+                // Etiket bilgilerini hazırla — doğrulanamayan siparişlere etiket basılmaz
+                const failedIds = res.failed_picking_ids || [];
                 const pickingInfos = [];
                 for (const item of this.state.items) {
+                    if (failedIds.includes(item.picking_id)) continue;
                     if (!pickingInfos.find(p => p.picking_id === item.picking_id)) {
                         pickingInfos.push({
                             id: item.picking_id,
@@ -800,6 +814,8 @@ export class PackingScreen extends Component {
                     }
                 }
                 this.state.completedPickings = pickingInfos;
+            } else if (hasErrors) {
+                speak('packing_error');
             }
         } catch (e) {
             this.state.error = 'Tamamlama hatası';

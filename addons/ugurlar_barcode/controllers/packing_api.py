@@ -12,6 +12,7 @@ from markupsafe import Markup, escape
 
 from odoo import fields, http
 from odoo.http import request
+from odoo.service.model import PG_CONCURRENCY_EXCEPTIONS_TO_RETRY
 
 from .base_api import BarcodeApiBase
 
@@ -344,19 +345,25 @@ class PackingApiController(BarcodeApiBase):
             match_product_ids |= set(product.substituted_by_ids.ids)
 
         # Batch'teki picking'lerde bu ürünü bul (henüz eşleştirilmemiş)
-        target_move = None
-        target_picking = None
         all_pickings = self._get_all_pickings(batch)
-        for picking in all_pickings:
-            for move in picking.move_ids:
-                if (move.product_id.id in match_product_ids and
-                        move.state != 'cancel' and
-                        move.packing_scanned_qty < move.product_uom_qty):
-                    target_move = move
-                    target_picking = picking
-                    break
-            if target_move:
-                break
+        active_moves = [
+            (picking, move)
+            for picking in all_pickings for move in picking.move_ids
+            if move.product_id.id in match_product_ids and move.state != 'cancel'
+        ]
+        # Önce toplanan miktarı dolmamış move: ilk sipariş Eksik / az toplanmışsa okutma
+        # sıradaki toplanmış siparişe gider (önceden ilk siparişte "toplanmamış" hatası
+        # dönüyor, toplanmış sipariş hiç paketlenemiyordu)
+        target_picking, target_move = next(
+            ((p, m) for p, m in active_moves
+             if m.packing_scanned_qty < min(m.product_uom_qty, m.wave_collected_qty or 0)),
+            (None, None))
+        if not target_move:
+            # Toplanan sınırı her yerde dolu: eski seçim; aşağıdaki rota toplama kontrolü
+            # "henüz toplanmamış" / "rotada yalnız N adet toplandı" mesajını üretir
+            target_picking, target_move = next(
+                ((p, m) for p, m in active_moves if m.packing_scanned_qty < m.product_uom_qty),
+                (None, None))
 
         if not target_move:
             # ─── Fallback: İptal edilmiş move varsa yeniden yönlendirilmiş olabilir ───
@@ -458,8 +465,10 @@ class PackingApiController(BarcodeApiBase):
                         }
 
             # Hâlâ bulunamadı ama iptal edilmiş move var →
-            # "soft match" yap (paketleme sadece doğrulama, stok hareketi değil)
-            if not target_move and cancelled_move:
+            # "soft match" yap (paketleme sadece doğrulama, stok hareketi değil).
+            # Ürünün rotada iptal olmayan move'u varsa soft match yapılmaz: kapasitesi dolmuş
+            # ürün iptal move'u üzerinden "başarılı" sayılıyordu; "zaten paketlendi" döner
+            if not target_move and cancelled_move and not active_moves:
                 _logger.info(
                     "Soft match: %s (cancelled move, picking=%s)",
                     product.display_name, cancelled_picking.name if cancelled_picking else '?')
@@ -501,33 +510,29 @@ class PackingApiController(BarcodeApiBase):
                 }
 
         if not target_move:
-            # Belki paketlemede zaten tamamlanmış — bilgi ver
-            for picking in all_pickings:
-                for move in picking.move_ids:
-                    if move.product_id.id in match_product_ids and move.state != 'cancel':
-                        if move.packing_scanned_qty >= move.product_uom_qty:
-                            # Bu ürün paketlemede zaten okutulmuş
-                            picking_completed = all(
-                                m.packing_scanned_qty >= m.product_uom_qty
-                                for m in picking.move_ids if m.state != 'cancel'
-                            )
-                            return {
-                                'warning': True,
-                                'message': f'{product.display_name} zaten paketlendi',
-                                'product_name': product.display_name,
-                                'picking_completed': picking_completed,
-                                'picking_id': picking.id,
-                                'picking_name': picking.name,
-                                'label_already_printed': picking.label_printed,
-                            }
-                        else:
-                            # Ürün henüz okutulmamış ama target_move bulunamadı
-                            # (state filtresi yüzünden olabilir) — tekrar dene
-                            target_move = move
-                            target_picking = picking
-                            break
-                if target_move:
-                    break
+            # Ürünün tüm aktif move'ları paketlemede zaten okutulmuş — bilgi ver
+            if active_moves:
+                picking = active_moves[0][0]
+                picking_completed = all(
+                    m.packing_scanned_qty >= m.product_uom_qty
+                    for m in picking.move_ids if m.state != 'cancel'
+                )
+                # Okutması bitmiş ama doğrulaması başarısız kalmış picking: etiket basılmaz
+                # (istemci picking_completed ile etiket basıp Nebim'i tetikliyor)
+                validate_pending = picking_completed and picking.state not in ('done', 'cancel')
+                message = f'{product.display_name} zaten paketlendi'
+                if validate_pending:
+                    message += ' — sevkiyat doğrulanmadı, "Tamamla" ile yeniden deneyin'
+                return {
+                    'warning': True,
+                    'message': message,
+                    'product_name': product.display_name,
+                    'picking_completed': picking_completed and picking.state == 'done',
+                    'validate_pending': validate_pending,
+                    'picking_id': picking.id,
+                    'picking_name': picking.name,
+                    'label_already_printed': picking.label_printed,
+                }
             return {'error': f'Ürün toplama listesinde bulunamadı — barkod eşleşmedi (Yanlış beden/varyant okutmuş olabilirsiniz): [{product.barcode or "?"}] {product.display_name}'}
 
         # ─── Rota toplama kontrolü ───
@@ -620,22 +625,24 @@ class PackingApiController(BarcodeApiBase):
         order_completed = picking_completed and all_siblings_complete
 
         # Picking zaten done ise (rota'da validate edilmiş) → paketleme tamamlanınca Nebim sync
+        validate_error = None
         if picking_completed:
             _logger.info("PACKING COMPLETION: %s → packing_done=True, state=%s",
                          target_picking.name, target_picking.state)
-            target_picking.packing_done = True
+            if target_picking.state in ('done', 'cancel'):
+                target_picking.packing_done = True
+            else:
+                # Sevk miktarı okutma sayacından yazılır (quantity rota rezervidir, ilerleme
+                # göstergesi değil). Savepoint'te: hata verirse doğrulama yazımları geri alınır,
+                # okutma sayacı (yukarıda, savepoint öncesi yazıldı) korunur
+                done, validate_error = self._validate_in_savepoint(
+                    target_picking, 'packing_scanned_qty')
+                if not done:
+                    order_completed = False
 
-            # Picking done değilse validate et
-            if target_picking.state not in ('done', 'cancel'):
-                try:
-                    # Sevk miktarı okutma sayacından yazılır (quantity rota rezervidir,
-                    # ilerleme göstergesi değil): tüm doğrulama yollarıyla aynı kalıp
-                    self._apply_collected_quantities(target_picking, 'packing_scanned_qty')
-                    self._safe_validate_picking(target_picking)
-                except Exception as e:
-                    _logger.error("Picking %s validate hatası: %s", target_picking.name, e)
-
-            # Nebim sync tetikle (fatura oluşsun) — validate'den bağımsız çalışsın
+        # Doğrulanamayan picking için Nebim ve etiket bayrağı çalışmaz (kullanıcı kararı)
+        if picking_completed and not validate_error:
+            # Nebim sync tetikle (fatura oluşsun)
             try:
                 _logger.info("NEBIM SYNC tetikleniyor: %s (origin=%s)",
                              target_picking.name, target_picking.origin)
@@ -672,7 +679,7 @@ class PackingApiController(BarcodeApiBase):
         except Exception as e:
             _logger.warning("Batch %s state güncelleme hatası: %s", batch.name, e)
 
-        return {
+        res = {
             'success': True,
             'product_name': product.display_name,
             'done_qty': new_qty,
@@ -686,6 +693,10 @@ class PackingApiController(BarcodeApiBase):
             'complete': new_qty >= target_move.product_uom_qty,
             'all_matched': all_matched,
         }
+        if validate_error:
+            # Okutma sayıldı ama sevkiyat doğrulanamadı: istemci hatayı gösterir, etiket basmaz
+            res['validate_error'] = f'{target_picking.name} doğrulanamadı: {validate_error}'
+        return res
 
     @http.route('/ugurlar_barcode/api/packing_undo', type='jsonrpc', auth='user')
     def packing_undo(self, picking_id=0, barcode='', **kw):
@@ -741,25 +752,23 @@ class PackingApiController(BarcodeApiBase):
         if not picking or picking.state == 'done':
             return {'error': 'Geçerli bir sipariş bulunamadı veya zaten tamamlanmış'}
 
-        try:
-            picking.packing_done = True
-            # Önceden rezerve miktar doğrulanıyordu: okutulmayan ürünler de sevk ediliyordu.
-            # Sevk = paketlemede okutulan; kalan için bekleyen sevkiyat açılır
-            self._apply_collected_quantities(picking, 'packing_scanned_qty')
-            self._safe_validate_picking(picking, backorder=True)
-            
-            # Log kaydı
-            user = request.env.user
-            msg = Markup(
-                '<b>&#9888; Eksik Urunle Kapatma (Backorder):</b> <em>%s</em> tarafindan '
-                'bu siparis eksik urun ile zorla onaylandi. Degisiklikler uygulandi.'
-            ) % user.name
-            picking.message_post(body=msg, message_type='notification')
-            
-            return {'success': True, 'message': '%s eksik ürünlerle onaylandı (Backorder oluşturuldu).' % picking.name}
-        except Exception:
-            _logger.exception("Backorder error for %s", picking.name)
-            return {'error': 'Eksik onaylama hatası'}
+        # Önceden rezerve miktar doğrulanıyordu: okutulmayan ürünler de sevk ediliyordu.
+        # Sevk = paketlemede okutulan; kalan için bekleyen sevkiyat açılır.
+        # Doğrulama savepoint'te: hata verirse packing_done / quantity / picked geri alınır
+        # (önceden yarım yazım kalıyor ve operatör yalnız "Eksik onaylama hatası" görüyordu)
+        done, error = self._validate_in_savepoint(
+            picking, 'packing_scanned_qty', backorder=True)
+        if not done:
+            return {'error': f'Eksik onaylama hatası: {error}'}
+
+        user = request.env.user
+        msg = Markup(
+            '<b>&#9888; Eksik Urunle Kapatma (Backorder):</b> <em>%s</em> tarafindan '
+            'bu siparis eksik urun ile zorla onaylandi. Degisiklikler uygulandi.'
+        ) % user.name
+        self._log_chatter(picking, msg)
+
+        return {'success': True, 'message': '%s eksik ürünlerle onaylandı (Backorder oluşturuldu).' % picking.name}
 
     @http.route('/ugurlar_barcode/api/packing_complete', type='jsonrpc', auth='user')
     def packing_complete(self, batch_id=0, **kw):
@@ -771,6 +780,7 @@ class PackingApiController(BarcodeApiBase):
 
         validated = 0
         errors = []
+        failed_ids = []
         skipped = []
 
         all_pickings = self._get_all_pickings(batch)
@@ -824,15 +834,18 @@ class PackingApiController(BarcodeApiBase):
                     validated += 1
                     continue
 
-                picking.packing_done = True
-                _total, partial = self._apply_collected_quantities(picking)
-                if self._safe_validate_picking(picking, backorder=partial):
-                    self._trigger_nebim_sync(picking)
-                    validated += 1
-                else:
-                    _logger.warning("Picking %s validate edilemedi (state=%s)",
-                                    picking.name, picking.state)
-                
+                # Doğrulama kendi savepoint'inde: hata verirse yalnız bu picking'in yazımları
+                # geri alınır, diğerleri sürer. Nebim (commit yapar) savepoint dışında.
+                done, error = self._validate_in_savepoint(picking)
+                if not done:
+                    errors.append(f"{picking.name}: {error}")
+                    failed_ids.append(picking.id)
+                    continue
+                self._trigger_nebim_sync(picking)
+                validated += 1
+
+            except PG_CONCURRENCY_EXCEPTIONS_TO_RETRY:
+                raise
             except Exception as e:
                 _logger.exception("Sipariş Onay/Senkronizasyon Hatası %s:", picking.name)
                 errors.append(f"{picking.name}: {self._error_text(e)}")
@@ -854,6 +867,7 @@ class PackingApiController(BarcodeApiBase):
             'total': len(all_pickings),
             'skipped': len(skipped),
             'errors': errors,
+            'failed_picking_ids': failed_ids,
             'message': f'{validated} sipariş paketlendi ve doğrulandı',
         }
 
