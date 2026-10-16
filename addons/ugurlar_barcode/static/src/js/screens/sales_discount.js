@@ -236,6 +236,9 @@ export class SalesDiscount extends Component {
     setup() {
         this.barcodeInputRef = useRef('barcodeInput');
         this.uidCounter = 1;
+        // Hesaplama isteklerinin artan sıra numarası: yalnız SON isteğin yanıtı uygulanır,
+        // geç dönen eski yanıt yeni sepeti/fiyatı ezmez
+        this._discountSeq = 0;
 
         // localStorage'dan yükle
         const savedState = localStorage.getItem('ub_discount_state');
@@ -414,12 +417,18 @@ export class SalesDiscount extends Component {
         if (this.state.basket.length > 0) {
             this.calculateDiscounts();
         } else {
+            // Sepet boşaldı: uçuştaki yanıt silinen ürünü geri getirmesin
+            this._discountSeq++;
+            this.state.loading = false;
             this.state.summary = { total_retail: 0, total_discount: 0, total_final: 0, total_installment: 0, total_installment_discount: 0, total_installment_final: 0 };
             this.saveState();
         }
     }
 
     clearBasket() {
+        // Uçuştaki hesaplama yanıtı temizlenen sepeti doldurmasın
+        this._discountSeq++;
+        this.state.loading = false;
         this.state.basket = [];
         this.state.summary = { total_retail: 0, total_discount: 0, total_final: 0, total_installment: 0, total_installment_discount: 0, total_installment_final: 0 };
         this.state.error = null;
@@ -430,6 +439,7 @@ export class SalesDiscount extends Component {
     async calculateDiscounts() {
         if (this.state.basket.length === 0) return;
 
+        const seq = ++this._discountSeq;
         this.state.loading = true;
         this.state.error = null;
 
@@ -437,6 +447,9 @@ export class SalesDiscount extends Component {
             const payload = this.state.basket.map(i => ({ barcode: i.barcode, quantity: i.quantity }));
             
             const result = await BarcodeService.calculateDiscounts(payload, this.state.customerCode);
+
+            // Daha yeni bir istek gönderildiyse bu yanıt eskidir: sepete/fiyata uygulanmaz
+            if (seq !== this._discountSeq) return;
             
             if (result.error) {
                 this.state.error = result.error;
@@ -481,10 +494,12 @@ export class SalesDiscount extends Component {
                 }
             }
         } catch (e) {
+            if (seq !== this._discountSeq) return;
             this.state.error = 'Bağlantı Hatası: ' + (e.message || e);
             AudioFeedback.playError();
         } finally {
-            this.state.loading = false;
+            // Eski isteğin bitişi, uçuştaki yeni isteğin yükleniyor göstergesini kapatmasın
+            if (seq === this._discountSeq) this.state.loading = false;
         }
     }
 
