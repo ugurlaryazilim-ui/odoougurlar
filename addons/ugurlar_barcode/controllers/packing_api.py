@@ -794,6 +794,10 @@ class PackingApiController(BarcodeApiBase):
         picking = self._get_outgoing_picking(picking_id)
         if not picking or picking.state == 'done':
             return {'error': 'Geçerli bir sipariş bulunamadı veya zaten tamamlanmış'}
+        # İptal siparişin açık picking'i eksikle onaylanmaz (mal sevk edilirdi); iptali
+        # packing_complete yapar
+        if self._cancelled_sale_origins(picking):
+            return {'error': f'{picking.origin} siparişi iptal edilmiş, eksikle onaylanamaz'}
 
         # Önceden rezerve miktar doğrulanıyordu: okutulmayan ürünler de sevk ediliyordu.
         # Sevk = paketlemede okutulan; kalan için bekleyen sevkiyat açılır.

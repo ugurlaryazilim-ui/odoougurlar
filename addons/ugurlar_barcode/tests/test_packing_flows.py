@@ -503,3 +503,26 @@ class TestPackingScanConcurrency(PackingFlowCase):
                           side_effect=exc):
             with self.assertRaises(type(exc)):
                 self.pack_ctl.packing_scan(batch_id=batch.id, barcode='PK-A')
+
+
+# ── Dal B düzeltme R3 (Ö-B5) ──────────────────────────────
+@tagged('post_install', '-at_install')
+class TestPackingBackorderCancelled(PackingFlowCase):
+    """Ö-B5: iptal siparişin açık picking'i eksikle onaylanmaz."""
+
+    def test_rb3_backorder_refuses_cancelled_order_picking(self):
+        sale = self.env['sale.order'].create({
+            'partner_id': self.customer.id,
+            'order_line': [(0, 0, {
+                'product_id': self.prod_a.id, 'product_uom_qty': 3, 'price_unit': 5.0})],
+        })
+        sale.write({'state': 'cancel'})
+        c = self._routed(self.prod_a, 3, wave=3, origin=sale.name, scanned=1)
+        self._route(c)
+        before = self._snapshot(c)
+
+        res = self.pack_ctl.packing_backorder(picking_id=c.id)
+
+        self.assertIn('iptal', res.get('error', ''), res)
+        self.assertEqual(self._snapshot(c), before, 'hiçbir yazım olmamalı')
+        self.assertFalse(self.env['stock.picking'].search([('backorder_id', '=', c.id)]))
