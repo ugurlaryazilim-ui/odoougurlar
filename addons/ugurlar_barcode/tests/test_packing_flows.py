@@ -487,3 +487,19 @@ class TestPackingSoftMatchLimit(PackingFlowCase):
         self.pack_ctl.packing_scan(batch_id=batch.id, barcode='PK-A')
         second = row()
         self.assertEqual((second['scanned_qty'], second['matched']), (1, True))
+
+
+# ── Dal B düzeltme R2 (Ö-B2) ──────────────────────────────
+@tagged('post_install', '-at_install')
+class TestPackingScanConcurrency(PackingFlowCase):
+    """Ö-B2: eşzamanlılık hatası yutulmaz, Odoo isteği yeniden denesin diye yükselir."""
+
+    def test_rb2_scan_reraises_concurrency_error(self):
+        from odoo.service.model import PG_CONCURRENCY_EXCEPTIONS_TO_RETRY
+        p = self._routed(self.prod_a, 1, wave=1, origin='SO-RB2-1')
+        batch = self._route(p)
+        exc = PG_CONCURRENCY_EXCEPTIONS_TO_RETRY[0]('test kilit hatası')
+        with patch.object(packing_api.PackingApiController, '_packing_scan_impl',
+                          side_effect=exc):
+            with self.assertRaises(type(exc)):
+                self.pack_ctl.packing_scan(batch_id=batch.id, barcode='PK-A')

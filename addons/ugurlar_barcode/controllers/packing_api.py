@@ -335,6 +335,9 @@ class PackingApiController(BarcodeApiBase):
         self._check_internal_user()
         try:
             return self._packing_scan_impl(batch_id, barcode, **kw)
+        except PG_CONCURRENCY_EXCEPTIONS_TO_RETRY:
+            # Kilit / serileştirme hatası: Odoo isteği yeniden denesin (yutulmaz)
+            raise
         except Exception as e:
             _logger.error("packing_scan exception (batch=%s, barcode=%s): %s", batch_id, barcode, e, exc_info=True)
             return {'error': self._error_text(e, 'Sunucu hatası: ')}
