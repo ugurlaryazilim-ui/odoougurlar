@@ -35,7 +35,14 @@ class OperationsApiController(BarcodeApiBase):
         elif move_type == 'out':
             domain.append(('picking_type_id.code', '=', 'outgoing'))
         elif move_type == 'internal':
-            domain.append(('picking_type_id.code', '=', 'internal'))
+            # Picking tipi olan iç transfer VEYA picking'siz mobil raf hareketi
+            # (kaynak + hedef iç lokasyon; envanter düzeltmesi dışarıda kalır).
+            domain += [
+                '|', ('picking_type_id.code', '=', 'internal'),
+                '&', '&', ('picking_type_id', '=', False),
+                ('location_id.usage', '=', 'internal'),
+                ('location_dest_id.usage', '=', 'internal'),
+            ]
 
         # Ürün bilgisi (barkod ile arama yapıldıysa)
         product_info = None
@@ -194,8 +201,11 @@ class OperationsApiController(BarcodeApiBase):
     def operator_performance(self, days=7, **kw):
         """Operatör performans istatistikleri."""
         self._check_internal_user()
-        date_from = datetime.now() - timedelta(days=int(days))
+        days = self._clamp_days(days, default=7)
+        date_from = datetime.now() - timedelta(days=days)
 
+        # Özet sayaçları (toplam işlem, operatör toplamları) ürettiği için limit konmaz:
+        # liste kesilirse toplamlar yanlış çıkar. Yük `days` ≤ 90 sınırıyla sınırlıdır.
         operations = request.env['ugurlar.barcode.operation'].sudo().search([
             ('create_date', '>=', date_from),
             ('state', '=', 'done'),

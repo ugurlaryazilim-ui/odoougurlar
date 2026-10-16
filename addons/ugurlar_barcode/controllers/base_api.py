@@ -223,14 +223,10 @@ class BarcodeApiBase(http.Controller):
         Odoo picking done olunca batch_id'yi temizliyor.
         all_picking_ids kalıcı alanı varsa onu kullan, yoksa fallback'ler.
         """
-        # 1. Kalıcı alan (tablo yoksa hata verir — yakala)
-        try:
-            pickings = batch.all_picking_ids
-            if pickings:
-                return pickings
-        except Exception:
-            # Tablo henüz oluşturulmamış (modül upgrade edilmemiş)
-            _logger.debug("all_picking_ids tablosu mevcut değil — fallback kullanılacak")
+        # 1. Kalıcı alan
+        pickings = batch.all_picking_ids
+        if pickings:
+            return pickings
 
         # 2. DB sorgusu (batch_id henüz temizlenmemiş olanlar)
         pickings = request.env['stock.picking'].sudo().search([
@@ -319,6 +315,15 @@ class BarcodeApiBase(http.Controller):
         if not product:
             product = Product.search([('default_code', '=', barcode)], limit=1)
         return product
+
+    @staticmethod
+    def _clamp_days(days, default=7, lo=1, hi=90):
+        """Gün sayısını [lo, hi] aralığına kısar (metin gelirse sayıya çevirir)."""
+        try:
+            days = int(days)
+        except (TypeError, ValueError):
+            days = default
+        return max(lo, min(days, hi))
 
     def _get_physical_barcode(self, product):
         """Ürünün fiziksel barkodunu döndür (okutulabilir barkod).

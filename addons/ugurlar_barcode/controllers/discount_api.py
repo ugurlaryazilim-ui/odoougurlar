@@ -8,6 +8,8 @@ from .base_api import BarcodeApiBase
 
 _logger = logging.getLogger(__name__)
 
+NEBIM_ERROR_TEXT = "Nebim'e iletilemedi. Bağlantıyı kontrol edip tekrar deneyin."
+
 
 class DiscountApiController(BarcodeApiBase):
     """Satış İndirimleri API'si."""
@@ -55,11 +57,13 @@ class DiscountApiController(BarcodeApiBase):
                 return {'error': 'Nebim V3 indirim hesaplama sonucu boş döndü.'}
             
             if isinstance(results, dict) and results.get('ExceptionMessage'):
-                return {'error': f"Nebim Hatası: {results.get('ExceptionMessage')}"}
+                # Ayrıntı yalnız log'a; istemciye ayrı `nebim_error` alanı (bağlantı bilgisi sızmaz)
+                _logger.error('Nebim V3 İndirim Hesaplama Hatası: %s', results.get('ExceptionMessage'))
+                return {'nebim_error': NEBIM_ERROR_TEXT}
 
         except Exception as e:
             _logger.error('Nebim V3 İndirim Hesaplama Hatası: %s', str(e))
-            return {'error': self._error_text(e, 'İndirim hesaplanırken hata oluştu: ')}
+            return {'nebim_error': NEBIM_ERROR_TEXT}
 
         # 3. Odoo'dan Ürün Resimlerini (image_url) ve Ek Bilgileri Ekle
         # Nebim'den dönen Barcode'ları toplayıp Odoo'da arıyoruz.
@@ -174,5 +178,5 @@ class DiscountApiController(BarcodeApiBase):
             return {'customers': customers}
         except Exception as e:
             _logger.error('Nebim V3 Müşteri Arama Hatası: %s', str(e))
-            return {'customers': []}
+            return {'customers': [], 'nebim_error': NEBIM_ERROR_TEXT}
 

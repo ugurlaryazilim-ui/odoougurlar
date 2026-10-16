@@ -203,12 +203,14 @@ class CountingApiController(BarcodeApiBase):
     def count_list(self, days=30, **kw):
         """Geçmiş sayımları listele — raf bazında gruplu."""
         self._check_internal_user()
-        date_from = datetime.now() - timedelta(days=int(days))
+        days = self._clamp_days(days, default=30)
+        date_from = datetime.now() - timedelta(days=days)
 
+        # En yeni 500 kayıt okunur (yoğun dönemde bellek/yanıt boyutu sınırı)
         operations = request.env['ugurlar.barcode.operation'].sudo().search([
             ('operation_type', '=', 'counting'),
             ('create_date', '>=', date_from),
-        ], order='create_date desc')
+        ], order='create_date desc', limit=500)
 
         # Sayım numarası bazında gruplama
         # Her raf+tarih kombinasyonu = 1 sayım
