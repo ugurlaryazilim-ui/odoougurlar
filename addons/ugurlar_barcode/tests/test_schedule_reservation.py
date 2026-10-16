@@ -208,6 +208,39 @@ class TestScheduleReservation(BarcodeCase):
         self.assertEqual(self._qty(self.prod, self.pri.lot_stock_id, child=True), 0)
         self.assertNotEqual(picking.move_ids.source_warehouse_id, self.fbk)
 
+    # ─── İnceleme Ö-2: stok durumu kendi rezervini serbest sayar, ürün UoM'u ile ───
+    def _status(self, picking):
+        return picking._check_availability_status(self.pri, self.fbk, self.ret)
+
+    def test_review_o2_own_reservation_counts_as_available(self):
+        """Rezervi tam rota siparişi (stok 2, talep 2, rezerv 2) 'stokta' görünür."""
+        self._add_stock(self.prod, self.pri_shelf, 2)
+        picking = self._pri_picking(self.prod, 2, assign=True)
+        self.assertEqual(picking.move_ids.quantity, 2, 'ön koşul: rezerv tam')
+        self._route(picking, self.pri.out_type_id)
+        self.assertEqual(self._status(picking), 'available')
+        self.assertEqual(picking.availability_status, 'available')
+
+    def test_review_o2_other_order_reservation_still_blocks(self):
+        """Başka siparişin rezervi serbest sayılmaz: stok 2'nin tamamı A'da, B stoksuz."""
+        self._add_stock(self.prod, self.pri_shelf, 2)
+        self._pri_picking(self.prod, 2, assign=True)
+        other = self._pri_picking(self.prod, 2, assign=True)
+        self.assertEqual(other.move_ids.quantity, 0, 'ön koşul: B rezervsiz')
+        self.assertEqual(self._status(other), 'unavailable')
+
+    def test_review_o2_dozen_demand_uses_product_uom(self):
+        """1 düzine talep: ana depoda 12 adet yeterli, 11 adet yetersiz (move birimi değil ürün birimi)."""
+        dozen = self.env.ref('uom.product_uom_dozen')
+        self._add_stock(self.prod, self.pri_shelf, 11)
+        picking = self._pri_picking(self.prod, 1, uom=dozen)
+        self.assertNotEqual(self._status(picking), 'available', '11 adet 1 düzineyi karşılamaz')
+        self._add_stock(self.prod, self.pri_shelf, 1)
+        self.assertEqual(self._status(picking), 'available')
+        picking.action_assign()
+        self.assertEqual(picking.move_ids.quantity, 1, 'ön koşul: 1 düzine rezerve')
+        self.assertEqual(self._status(picking), 'available', 'kendi düzine rezervi 12 adet sayılmalı')
+
     # ─── KK-A6 ─────────────────────────────────────────
     def test_a6_failed_fallback_transfer_does_not_label_fallback(self):
         """Yedek depo transferi None dönerse move'lar yedek depo etiketi almaz."""
