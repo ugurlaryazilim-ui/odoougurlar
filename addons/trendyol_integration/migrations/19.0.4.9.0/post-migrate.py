@@ -17,9 +17,18 @@ def migrate(cr, version):
     """)
     _logger.info("Trendyol: %s komisyon faturasının hakediş etkisi sıfırlandı", cr.rowcount)
 
-    # Mevcut komisyon faturaları dönemlerindeki kayıtlarla hemen eşleştirilir (API gerekmez)
+    # Kargo/platform faturaları (DDF) commissionInvoiceSerialNumber'da kendi numarasını taşır;
+    # 19.0.4.8.0 bunu komisyon fatura no diye yazmıştı
+    cr.execute("""
+        UPDATE trendyol_settlement SET commission_invoice_no = NULL
+         WHERE commission_invoice_no IS NOT NULL AND COALESCE(source, '') <> 'settlements'
+           AND COALESCE(transaction_type, '') <> 'commission'
+    """)
+    _logger.info("Trendyol: %s kesinti faturasındaki komisyon fatura no temizlendi", cr.rowcount)
+
+    # Mevcut komisyon faturaları bağlı kayıtlarıyla hemen doğrulanır (API gerekmez)
     env = api.Environment(cr, SUPERUSER_ID, {})
     Settlement = env['trendyol.settlement']
     for store in env['trendyol.store'].with_context(active_test=False).search([]):
         res = Settlement._allocate_commission_invoices(store, recheck_days=36500)
-        _logger.info("Trendyol komisyon faturaları eşleştirildi [%s]: %s", store.name, res)
+        _logger.info("Trendyol komisyon faturaları doğrulandı [%s]: %s", store.name, res)

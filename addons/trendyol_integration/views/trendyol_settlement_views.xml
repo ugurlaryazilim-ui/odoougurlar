@@ -51,10 +51,7 @@
                             invisible="allocation_state == 'allocated'"/>
                     <button name="action_view_commission_rows" type="object" icon="fa-list"
                             string="Faturanın Kayıtları"
-                            invisible="transaction_type != 'commission' or source != 'otherfinancials' or allocation_state != 'allocated'"/>
-                    <button name="action_view_commission_rows" type="object" icon="fa-list"
-                            string="Dönemdeki Kayıtlar"
-                            invisible="transaction_type != 'commission' or source != 'otherfinancials' or allocation_state == 'allocated'"/>
+                            invisible="transaction_type != 'commission' or source != 'otherfinancials'"/>
                     <field name="allocation_state" widget="statusbar"/>
                 </header>
                 <sheet>
