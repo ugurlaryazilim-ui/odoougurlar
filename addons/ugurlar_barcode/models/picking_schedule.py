@@ -116,23 +116,35 @@ class PickingSchedule(models.Model):
 
         Picking = self.env['stock.picking'].sudo()
 
-        # Tüm outgoing picking'ler
-        all_outgoing = Picking.search([('picking_type_id', '=', picking_type.id)])
-        result['total_outgoing'] = len(all_outgoing)
+        # Durum dağılımı: tüm sevkiyatları yüklemeden tek gruplama sorgusu
+        open_states = ('confirmed', 'waiting', 'assigned')
+        groups = Picking._read_group(
+            [('picking_type_id', '=', picking_type.id)],
+            ['state', 'batch_id'], ['__count'])
+        total = eligible = batched = finished = draft = 0
+        for state, batch, count in groups:
+            total += count
+            if state in open_states:
+                if batch:
+                    batched += count
+                else:
+                    eligible += count
+            elif state in ('done', 'cancel'):
+                finished += count
+            elif state == 'draft':
+                draft += count
+        result['total_outgoing'] = total
+        result['eligible'] = eligible
+        result['already_batched'] = batched
+        result['done_or_cancel'] = finished
+        result['draft'] = draft
 
-        # State dağılımı
-        result['eligible'] = len(all_outgoing.filtered(
-            lambda p: p.state in ('confirmed', 'waiting', 'assigned') and not p.batch_id))
-        result['already_batched'] = len(all_outgoing.filtered(
-            lambda p: p.state in ('confirmed', 'waiting', 'assigned') and p.batch_id))
-        result['done_or_cancel'] = len(all_outgoing.filtered(
-            lambda p: p.state in ('done', 'cancel')))
-        result['draft'] = len(all_outgoing.filtered(
-            lambda p: p.state == 'draft'))
-
-        # Uygun picking'lerin stok durumu
-        eligible_pickings = all_outgoing.filtered(
-            lambda p: p.state in ('confirmed', 'waiting', 'assigned') and not p.batch_id)
+        # Uygun picking'lerin stok durumu (teşhis kayıt değiştirmez: write=False)
+        eligible_pickings = Picking.search([
+            ('picking_type_id', '=', picking_type.id),
+            ('state', 'in', open_states),
+            ('batch_id', '=', False),
+        ]) if eligible else Picking.browse()
 
         stock_available = 0
         stock_fallback = 0
@@ -141,7 +153,8 @@ class PickingSchedule(models.Model):
 
         for picking in eligible_pickings:
             status = picking._check_availability_status(
-                self.warehouse_id, self.fallback_warehouse_id, self.return_warehouse_id)
+                self.warehouse_id, self.fallback_warehouse_id, self.return_warehouse_id,
+                write=False)
             if status == 'available':
                 stock_available += 1
             elif status in ('other_warehouse', 'partial'):
@@ -607,22 +620,23 @@ class PickingSchedule(models.Model):
         # FAZ 3'te otomatik transfer onaylandıktan sonra tüm move'lar 'assigned'
         # olur ama fiziksel ürün hâlâ yedek depodadır — doğru depoyu göstermeliyiz.
         for picking in pickings:
+            labels = set()  # bu siparişin move etiketleri (availability_status için)
             for move in picking.move_ids:
-                pid = move.product_id.id
-                demand = move.product_uom_qty
-
                 if move.id in moves_from_fallback and fallback_wh:
                     # Bu ürün HEYKEL'den transfer edildi — kaynak: HEYKEL
                     move.sudo().write({'source_warehouse_id': fallback_wh.id})
                     count_fallback += 1
+                    labels.add('fallback')
                 elif move.id in moves_from_return and return_wh:
                     # Bu ürün İADE deposundan transfer edildi — kaynak: İADE
                     move.sudo().write({'source_warehouse_id': return_wh.id})
                     count_return += 1
+                    labels.add('return')
                 elif move.state == 'assigned':
                     # Stok zaten primary depodaydı (transfer gerekmedi)
                     move.sudo().write({'source_warehouse_id': primary_wh.id})
                     count_primary += 1
+                    labels.add('primary')
                 else:
                     # Hiçbir depoda stok bulunamadı
                     if return_wh:
@@ -630,6 +644,13 @@ class PickingSchedule(models.Model):
                     else:
                         move.sudo().write({'source_warehouse_id': primary_wh.id})
                     count_unavailable += 1
+                    labels.add('unavailable')
+
+            # Sipariş düzeyinde stok durumu: rota sayaçları (Stokta / Başka Depoda / Stoksuz)
+            # ve liste filtreleri bunu okur. Chatter gürültüsü olmasın diye izleme kapalı.
+            if labels:
+                picking.sudo().with_context(tracking_disable=True).write({
+                    'availability_status': self._status_from_move_labels(labels)})
 
                 # Rezerv korunur (K-1): sıfırlanırsa stok başka siparişe gider, doğrulamada
                 # yeniden rezerve edilirken yetmezse WH/Stock kökünde satır açılırdı.
@@ -697,6 +718,25 @@ class PickingSchedule(models.Model):
     # ═══════════════════════════════════════════════════════
     # OTOMATİK İÇ TRANSFER
     # ═══════════════════════════════════════════════════════
+
+    @staticmethod
+    def _status_from_move_labels(labels):
+        """Move etiketleri ('primary'/'fallback'/'return'/'unavailable') -> availability_status.
+
+        Stoksuz move varsa sipariş 'unavailable': rota sayaçlarında eksik kalan siparişin
+        görünür olduğu tek yer "Stoksuz"dur ('partial' hiçbir sayaçta yok). Ana depo + başka
+        depo karışımı 'partial'; yalnız başka depo 'other_warehouse' (yedek ağır basar),
+        yalnız iade 'return_warehouse'.
+        """
+        if 'unavailable' in labels:
+            return 'unavailable'
+        if labels == {'primary'}:
+            return 'available'
+        if 'primary' in labels:
+            return 'partial'
+        if 'fallback' in labels:
+            return 'other_warehouse'
+        return 'return_warehouse'
 
     def _safe_assign(self, pickings):
         """Rezervasyon: her picking kendi savepoint'inde (SQL hatası tüm turu bozmasın)."""
@@ -928,7 +968,8 @@ class PickingSchedule(models.Model):
         orders = SaleOrder.browse(list(order_ids))
         for order in orders:
             existing = order.picking_batch_names or ''
-            if batch_name in existing:
+            # Tam eşleşme: alt dize olmaz ('R1000' eki 'R10000' içinde "var" sayılmasın)
+            if batch_name in [name.strip() for name in existing.split(',')]:
                 continue  # Zaten bu rota atanmış
             if existing:
                 order.write({'picking_batch_names': f'{existing}, {batch_name}'})

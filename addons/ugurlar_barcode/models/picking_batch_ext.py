@@ -64,16 +64,13 @@ class StockPickingBatchExt(models.Model):
         """picking_ids değiştiğinde all_picking_ids'i de güncelle."""
         res = super().write(vals)
         if 'picking_ids' in vals:
-            try:
-                for batch in self:
-                    # Mevcut picking_ids'i all_picking_ids'e ekle (sadece ekleme, çıkarma yok)
-                    current_all = set(batch.all_picking_ids.ids)
-                    current_picking = batch.picking_ids.ids
-                    new_ids = [pid for pid in current_picking if pid not in current_all]
-                    if new_ids:
-                        batch.all_picking_ids = [(4, pid) for pid in new_ids]
-            except Exception:
-                pass  # Tablo henüz oluşturulmamış olabilir
+            for batch in self:
+                # Mevcut picking_ids'i all_picking_ids'e ekle (sadece ekleme, çıkarma yok).
+                # Hata yutulmaz: sessiz bir except kalıcı listeyi sessizce eksik bırakırdı
+                current_all = set(batch.all_picking_ids.ids)
+                new_ids = [pid for pid in batch.picking_ids.ids if pid not in current_all]
+                if new_ids:
+                    batch.all_picking_ids = [(4, pid) for pid in new_ids]
         return res
 
     @api.model

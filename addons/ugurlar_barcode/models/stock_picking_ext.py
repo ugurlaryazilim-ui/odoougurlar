@@ -106,13 +106,15 @@ class StockPickingExt(models.Model):
                 new_batch.sudo().write({'all_picking_ids': [(4, picking.id)]})
         return res
 
-    def _check_availability_status(self, primary_warehouse, fallback_warehouse=None, return_warehouse=None):
+    def _check_availability_status(self, primary_warehouse, fallback_warehouse=None, return_warehouse=None,
+                                   write=True):
         """Ürün stoğunu kontrol et ve durumu ata.
 
         Args:
             primary_warehouse: Ana depo (İNTERNET MAĞAZA DEPO)
             fallback_warehouse: Yedek depo (HEYKEL MAĞAZA DEPO)
             return_warehouse: İade deposu (MAĞAZA İADE DEPOSU)
+            write: False ise yalnız durumu hesaplar, picking'e yazmaz (teşhis).
 
         Returns:
             'available' | 'partial' | 'other_warehouse' | 'return_warehouse' | 'unavailable'
@@ -121,10 +123,11 @@ class StockPickingExt(models.Model):
         Quant = self.env['stock.quant'].sudo()
 
         if not self.move_ids:
-            self.write({
-                'availability_status': 'unavailable',
-                'source_warehouse_info': '',
-            })
+            if write:
+                self.write({
+                    'availability_status': 'unavailable',
+                    'source_warehouse_info': '',
+                })
             return 'unavailable'
 
         # ── TOPLU STOK SORGUSU (N+1 önleme) ──
@@ -222,10 +225,11 @@ class StockPickingExt(models.Model):
             status = 'unavailable'
             info = 'Hiçbir depoda stok yok'
 
-        self.write({
-            'availability_status': status,
-            'source_warehouse_info': info,
-        })
+        if write:
+            self.write({
+                'availability_status': status,
+                'source_warehouse_info': info,
+            })
 
         return status
 
