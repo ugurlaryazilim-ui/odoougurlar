@@ -269,10 +269,12 @@ export class MovementsScreen extends Component {
 
     setup() {
         this.barcodeInputRef = useRef('barcodeInput');
+        // Filtreler (barkod/dönem/tür) sayfa yenilemede ve ekrana dönüşte korunur
+        const saved = this._loadFilters();
         this.state = useState({
-            days: 7,
-            moveType: 'all',
-            productBarcode: '',
+            days: saved.days ?? 7,
+            moveType: saved.moveType ?? 'all',
+            productBarcode: saved.productBarcode ?? '',
             loading: false,
             error: null,
             result: null,
@@ -365,6 +367,31 @@ export class MovementsScreen extends Component {
         this.state.page = 1;
     }
 
+    // ─── FİLTRE SAKLAMA (sessionStorage) ──────────
+    _loadFilters() {
+        try {
+            const raw = sessionStorage.getItem('ub_movements_filters');
+            const f = raw ? JSON.parse(raw) : {};
+            return {
+                days: f.days != null ? f.days : undefined,
+                moveType: typeof f.moveType === 'string' ? f.moveType : undefined,
+                productBarcode: typeof f.productBarcode === 'string' ? f.productBarcode : undefined,
+            };
+        } catch (e) {
+            return {};
+        }
+    }
+
+    _saveFilters() {
+        try {
+            sessionStorage.setItem('ub_movements_filters', JSON.stringify({
+                days: this.state.days,
+                moveType: this.state.moveType,
+                productBarcode: this.state.productBarcode,
+            }));
+        } catch (e) { /* özel/dolu depolama: filtre yalnız bu oturumda tutulmaz */ }
+    }
+
     // ─── EVENTS ───────────────────────────────────
     onDaysChange(ev) { this.state.days = ev.target.value; }
     onTypeChange(ev) { this.state.moveType = ev.target.value; }
@@ -387,6 +414,7 @@ export class MovementsScreen extends Component {
 
     // ─── DATA ─────────────────────────────────────
     async loadMovements() {
+        this._saveFilters();
         this.state.loading = true;
         this.state.error = null;
         this.state.result = null;
@@ -408,7 +436,7 @@ export class MovementsScreen extends Component {
             speak('movements_error');
         }
         this.state.loading = false;
-        this.state.productBarcode = '';
+        // Ürün filtresi silinmez: Dönem/Tür değişince aynı ürün için yeniden aranır
         if (this.barcodeInputRef.el) { this.barcodeInputRef.el.focus(); }
     }
 

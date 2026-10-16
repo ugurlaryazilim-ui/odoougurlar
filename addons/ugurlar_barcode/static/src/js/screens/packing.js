@@ -274,7 +274,7 @@ export class PackingScreen extends Component {
                 <div class="ub-action-bar" t-if="state.all_matched">
                     <button class="btn btn-lg w-100 ub-packing-complete-btn"
                             t-on-click="onComplete"
-                            t-att-disabled="state.loading or state.longOpPending">
+                            t-att-disabled="state.loading or state.longOpPending or state.completeDone">
                         <i class="fa fa-check-circle"></i> Paketle &amp; Tamamla
                     </button>
                 </div>
@@ -366,6 +366,9 @@ export class PackingScreen extends Component {
             scanOk: false,
             // completed
             completed: false,
+            // Tamamla tüm picking'lerde hatasız bitti (zaman aşımı sonrası geç yanıt dahil):
+            // "Paketle & Tamamla" yeniden etkinleşmez. Hata/kısmi başarıda false kalır (yeniden deneme)
+            completeDone: false,
             completedPickings: [],
             // filtreler
             filterState: 'all',
@@ -550,6 +553,7 @@ export class PackingScreen extends Component {
             this.state.view = 'search';
             this.state.error = null;
             this.state.completed = false;
+            this.state.completeDone = false;
         } else {
             this.props.navigate('main');
         }
@@ -577,8 +581,15 @@ export class PackingScreen extends Component {
             }
             const res = await BarcodeService.call('/ugurlar_barcode/api/batch_list', params);
             this.state.batches = res.batches || [];
+            // Önceki liste hatası (yalnız o) başarılı yenilemede kalkar
+            if (this._batchListError && this.state.error === this._batchListError) {
+                this.state.error = null;
+            }
+            this._batchListError = null;
         } catch (e) {
-            // sessiz
+            // Sessiz kalmaz: boş liste "rota yok" gibi görünmesin
+            this._batchListError = 'Rota listesi yüklenemedi: ' + (e.message || e);
+            this.state.error = this._batchListError;
         }
     }
 
@@ -688,6 +699,7 @@ export class PackingScreen extends Component {
         this.state.all_matched = res.all_matched;
         this.state.view = 'detail';
         this.state.completed = false;
+        this.state.completeDone = false;
         this.state.inc_picking_id = null;
     }
 
@@ -717,7 +729,7 @@ export class PackingScreen extends Component {
         while (this._orphans.size >= MAX_ORPHAN_REQUESTS) {
             if (this._alive) {
                 this.state.scanMsg = 'Sunucu yavaş yanıt veriyor: önceki işlemlerin yanıtı bekleniyor, '
-                    + 'okutmalarınız sırada.';
+                    + 'okutmalarınız sırada. Yanıt uzun süre gelmezse ekrandan çıkıp tekrar girin.';
                 this.state.scanOk = false;
             }
             await Promise.race(this._orphans);
@@ -782,9 +794,11 @@ export class PackingScreen extends Component {
         this.state.inc_picking_id = null;
         this.state.scanMsg = long
             ? 'Sunucu yanıt vermedi (zaman aşımı) ama işlem sunucuda sürüyor olabilir. Lütfen bekleyin, '
-                + 'tekrar basmayın: yanıt gelince liste yenilenecek.'
+                + 'tekrar basmayın: yanıt gelince liste yenilenecek. Yanıt uzun süre gelmezse '
+                + 'ekrandan çıkıp tekrar girin.'
             : 'Sunucu yanıt vermedi (zaman aşımı). İşlemin sonucu bilinmiyor; '
-                + 'yanıt gelirse liste yenilenecek. Sıradaki okutmaya geçildi.';
+                + 'yanıt gelirse liste yenilenecek. Sıradaki okutmaya geçildi. Sunucu uzun süre '
+                + 'yanıt vermezse ekrandan çıkıp tekrar girin.';
         this.state.scanOk = false;
         AudioFeedback.playError();
         vibrateError();
@@ -1001,47 +1015,64 @@ export class PackingScreen extends Component {
 
     async _doComplete(ctx, batchId) {
         try {
-            const res = await this._guard(ctx, batchId, BarcodeService.call('/ugurlar_barcode/api/packing_complete', {
+            const call = BarcodeService.call('/ugurlar_barcode/api/packing_complete', {
                 batch_id: batchId,
-            }));
-            const hasErrors = !!(res.errors && res.errors.length);
-            if (hasErrors) {
-                // Doğrulanamayan siparişler adı ve hata metniyle alt alta listelenir
-                this.state.error = res.errors.join('\n');
-            }
-            if (res.success || res.validated > 0) {
-                this.state.scanMsg = res.message;
-                this.state.scanOk = true;
-                this.state.completed = true;
-                speak(hasErrors ? 'packing_error' : 'packing_complete');
-
-                // Etiket bilgilerini hazırla — doğrulanamayan ve atlanan (hiç toplanmamış)
-                // siparişlere etiket basılmaz
-                const failedIds = res.failed_picking_ids || [];
-                const skippedIds = res.skipped_picking_ids || [];
-                const pickingInfos = [];
-                for (const item of this.state.items) {
-                    if (failedIds.includes(item.picking_id) || skippedIds.includes(item.picking_id)) continue;
-                    if (!pickingInfos.find(p => p.picking_id === item.picking_id)) {
-                        pickingInfos.push({
-                            id: item.picking_id,
-                            picking_id: item.picking_id,
-                            name: item.picking_name,
-                            cargo_tracking: item.cargo_tracking,
-                            cargo_provider: item.cargo_provider,
-                            customer_name: item.customer_name,
-                        });
-                    }
+            });
+            // Zaman aşımından SONRA gelen yanıt _guard'da atılır; ama sunucu işi bitirmiş olabilir.
+            // Aynı rotadaysak sonucu (zaman aşımı mesajını temizleyerek) yine uygula.
+            call.then((late) => {
+                if (ctx.timedOut && this._alive && this.state.batch
+                    && this.state.batch.id === batchId && late) {
+                    this._applyCompleteResult(late);
                 }
-                this.state.completedPickings = pickingInfos;
-            } else if (hasErrors) {
-                speak('packing_error');
-            }
+            }, () => {});
+            const res = await this._guard(ctx, batchId, call);
+            this._applyCompleteResult(res);
         } catch (e) {
             if (e instanceof StaleResponse) return;
             this.state.error = 'Tamamlama hatası';
         }
         this.state.loading = false;
+    }
+
+    // packing_complete yanıtını ekrana uygular (normal ve zaman aşımı sonrası geç yanıt için ortak)
+    _applyCompleteResult(res) {
+        const hasErrors = !!(res.errors && res.errors.length);
+        if (hasErrors) {
+            // Doğrulanamayan siparişler adı ve hata metniyle alt alta listelenir
+            this.state.error = res.errors.join('\n');
+        }
+        if (res.success || res.validated > 0) {
+            // scanMsg'in üzerine yazılır: varsa zaman aşımı mesajı kalkar
+            this.state.scanMsg = res.message;
+            this.state.scanOk = true;
+            this.state.completed = true;
+            // Yalnız hatasız tam başarıda düğme kilitlenir; hata/kısmi başarıda yeniden deneme açık kalır
+            if (res.success && !hasErrors) this.state.completeDone = true;
+            speak(hasErrors ? 'packing_error' : 'packing_complete');
+
+            // Etiket bilgilerini hazırla — doğrulanamayan ve atlanan (hiç toplanmamış)
+            // siparişlere etiket basılmaz
+            const failedIds = res.failed_picking_ids || [];
+            const skippedIds = res.skipped_picking_ids || [];
+            const pickingInfos = [];
+            for (const item of this.state.items) {
+                if (failedIds.includes(item.picking_id) || skippedIds.includes(item.picking_id)) continue;
+                if (!pickingInfos.find(p => p.picking_id === item.picking_id)) {
+                    pickingInfos.push({
+                        id: item.picking_id,
+                        picking_id: item.picking_id,
+                        name: item.picking_name,
+                        cargo_tracking: item.cargo_tracking,
+                        cargo_provider: item.cargo_provider,
+                        customer_name: item.customer_name,
+                    });
+                }
+            }
+            this.state.completedPickings = pickingInfos;
+        } else if (hasErrors) {
+            speak('packing_error');
+        }
     }
 
     // ─── EKSİK ONAYLA (BACKORDER) ────────────────

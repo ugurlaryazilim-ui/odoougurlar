@@ -4,6 +4,8 @@ import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odo
 import { BarcodeService, AudioFeedback } from "../barcode_service";
 import { openCameraScanner } from "../camera_scanner";
 
+const NEBIM_UNREACHABLE_MSG = "Nebim'e iletilemedi. Fiyat/indirim hesaplanamadı, bağlantıyı kontrol edip tekrar deneyin.";
+
 export class SalesDiscount extends Component {
     static template = xml`
         <div class="ub-screen ub-discount-screen">
@@ -337,7 +339,10 @@ export class SalesDiscount extends Component {
                     const res = await BarcodeService.call('/ugurlar_barcode/api/search_customer', { query: val.trim() });
                     this.state.customerSearchLoading = false;
                     
-                    if (res && res.error) {
+                    if (res && res.nebim_error) {
+                        // Nebim hatası "sonuç yok" gibi görünmesin
+                        this.state.customerSearchError = NEBIM_UNREACHABLE_MSG;
+                    } else if (res && res.error) {
                         this.state.customerSearchError = res.error;
                     } else if (res && res.customers) {
                         this.state.customerSearchResults = res.customers;
@@ -451,7 +456,11 @@ export class SalesDiscount extends Component {
             // Daha yeni bir istek gönderildiyse bu yanıt eskidir: sepete/fiyata uygulanmaz
             if (seq !== this._discountSeq) return;
             
-            if (result.error) {
+            if (result.nebim_error) {
+                // Nebim'e ulaşılamadı: genel hata değil, ayrı mesaj; fiyatlar güncellenmedi
+                this.state.error = NEBIM_UNREACHABLE_MSG;
+                AudioFeedback.playError();
+            } else if (result.error) {
                 this.state.error = result.error;
                 AudioFeedback.playError();
             } else if (result.success) {

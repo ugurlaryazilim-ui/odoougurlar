@@ -207,7 +207,9 @@ export class LabelScreen extends Component {
                 this.state.selectedTemplateId = def.id;
                 this.state.selectedTemplate = def;
             }
-        } catch (e) { /* sessiz */ }
+        } catch (e) {
+            this.state.error = 'Şablonlar yüklenemedi: ' + (e.message || e);
+        }
     }
 
     onTemplateChange(ev) {

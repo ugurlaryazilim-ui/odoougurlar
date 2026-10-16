@@ -663,7 +663,12 @@ export class LabelDesigner extends Component {
 
     // ─── ŞABLON CRUD ──────────────────────────────
     async loadTemplates() {
-        try { const res = await BarcodeService.labelTemplateList(); this.state.templates = res.templates || []; } catch (e) {}
+        try {
+            const res = await BarcodeService.labelTemplateList();
+            this.state.templates = res.templates || [];
+        } catch (e) {
+            alert('Şablonlar yüklenemedi: ' + (e.message || e));
+        }
     }
     onLoadTemplate(ev) {
         const id = parseInt(ev.target.value);

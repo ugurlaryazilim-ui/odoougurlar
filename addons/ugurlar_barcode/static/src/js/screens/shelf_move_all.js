@@ -273,7 +273,9 @@ export class ShelfMoveAll extends Component {
                 this.state.targetBarcode = barcode;
                 this.loadTargetShelf();
             } else {
-                // İki raf da kilitli: okutma sessizce yok sayılmaz, kullanıcı ne yapacağını bilir
+                // Kilitli (bulunmuş) rafın barkodu yeniden gelirse çift tetiktir: yanlış uyarı çıkmaz
+                if (barcode === this.state.sourceBarcode || barcode === this.state.targetBarcode) return;
+                // İki raf da kilitli: FARKLI bir okutma sessizce yok sayılmaz, kullanıcı ne yapacağını bilir
                 this.state.error = `Raflar kilitli, ${barcode} okutması işlenmedi. `
                     + "Rafı değiştirmek için Değiştir'e basın.";
                 AudioFeedback.playError();

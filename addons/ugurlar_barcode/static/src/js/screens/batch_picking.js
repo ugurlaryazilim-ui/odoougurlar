@@ -849,7 +849,7 @@ export class BatchPickingScreen extends Component {
         while (this._orphans.size >= MAX_ORPHAN_REQUESTS) {
             if (this._alive) {
                 this.state.scanMsg = 'Sunucu yavaş yanıt veriyor: önceki işlemlerin yanıtı bekleniyor, '
-                    + 'okutmalarınız sırada.';
+                    + 'okutmalarınız sırada. Yanıt uzun süre gelmezse ekrandan çıkıp tekrar girin.';
                 this.state.scanOk = false;
             }
             await Promise.race(this._orphans);
@@ -913,9 +913,11 @@ export class BatchPickingScreen extends Component {
         if (ownsLoading) this.state.loading = false;
         this.state.scanMsg = long
             ? 'Sunucu yanıt vermedi (zaman aşımı) ama işlem sunucuda sürüyor olabilir. Lütfen bekleyin, '
-                + 'tekrar basmayın: yanıt gelince miktarlar yenilenecek.'
+                + 'tekrar basmayın: yanıt gelince miktarlar yenilenecek. Yanıt uzun süre gelmezse '
+                + 'ekrandan çıkıp tekrar girin.'
             : 'Sunucu yanıt vermedi (zaman aşımı). İşlemin sonucu bilinmiyor; '
-                + 'yanıt gelirse miktarlar yenilenecek. Sıradaki okutmaya geçildi.';
+                + 'yanıt gelirse miktarlar yenilenecek. Sıradaki okutmaya geçildi. Sunucu uzun süre '
+                + 'yanıt vermezse ekrandan çıkıp tekrar girin.';
         this.state.scanOk = false;
         AudioFeedback.playError();
         vibrateError();
