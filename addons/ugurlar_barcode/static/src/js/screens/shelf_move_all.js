@@ -42,10 +42,14 @@ export class ShelfMoveAll extends Component {
                             <input type="text" class="form-control ub-barcode-input"
                                    placeholder="Kaynak raf barkodunu okutun..."
                                    t-att-value="state.sourceBarcode"
+                                   t-att-readonly="!!state.sourceInfo"
                                    t-on-input="(ev) => this.state.sourceBarcode = ev.target.value"
                                    t-on-keydown="(e) => e.key === 'Enter' &amp;&amp; this.loadSourceShelf()"
                                    t-ref="sourceInput"/>
-                            <button class="ub-scan-icon-btn" t-on-click="() => this.scanCamera('source')" title="Kamera ile tara">
+                            <button t-if="state.sourceInfo" class="btn btn-sm btn-outline-secondary" t-on-click="changeSource" title="Kaynak rafı değiştir">
+                                <i class="fa fa-pencil"></i> Değiştir
+                            </button>
+                            <button t-else="" class="ub-scan-icon-btn" t-on-click="() => this.scanCamera('source')" title="Kamera ile tara">
                                 <i class="fa fa-barcode"></i>
                             </button>
                         </div>
@@ -121,10 +125,14 @@ export class ShelfMoveAll extends Component {
                                     <input type="text" class="form-control ub-barcode-input"
                                            placeholder="Hedef raf barkodunu okutun..."
                                            t-att-value="state.targetBarcode"
+                                           t-att-readonly="!!state.targetInfo"
                                            t-on-input="(ev) => this.state.targetBarcode = ev.target.value"
                                            t-on-keydown="(e) => e.key === 'Enter' &amp;&amp; this.loadTargetShelf()"
                                            t-ref="targetInput"/>
-                                    <button class="ub-scan-icon-btn" t-on-click="() => this.scanCamera('target')" title="Kamera ile tara">
+                                    <button t-if="state.targetInfo" class="btn btn-sm btn-outline-secondary" t-on-click="changeTarget" title="Hedef rafı değiştir">
+                                        <i class="fa fa-pencil"></i> Değiştir
+                                    </button>
+                                    <button t-else="" class="ub-scan-icon-btn" t-on-click="() => this.scanCamera('target')" title="Kamera ile tara">
                                         <i class="fa fa-barcode"></i>
                                     </button>
                                 </div>
@@ -284,7 +292,31 @@ export class ShelfMoveAll extends Component {
         }, 100);
     }
 
+    // Bulunan raf kilitlidir: başka okutma/Enter rafı sessizce değiştirmez ("Değiştir" ile açılır)
+    changeSource() {
+        Object.assign(this.state, {
+            sourceBarcode: '',
+            sourceInfo: null,
+            sourceProducts: [],
+            totalQty: 0,
+            targetBarcode: '',
+            targetInfo: null,
+            error: null,
+        });
+        this._focusCurrentInput();
+    }
+
+    changeTarget() {
+        Object.assign(this.state, {
+            targetBarcode: '',
+            targetInfo: null,
+            error: null,
+        });
+        this._focusCurrentInput();
+    }
+
     async loadSourceShelf() {
+        if (this.state.sourceInfo) return;  // raf bulundu ve kilitli
         this.state.error = null;
         this.state.sourceInfo = null;
         this.state.sourceProducts = [];
@@ -316,6 +348,7 @@ export class ShelfMoveAll extends Component {
     }
 
     async loadTargetShelf() {
+        if (this.state.targetInfo) return;  // raf bulundu ve kilitli
         this.state.error = null;
         this.state.targetInfo = null;
 

@@ -266,6 +266,9 @@ export class PutawayScreen extends Component {
             historyModal: null,  // Stok geçmişi modali
         });
 
+        // İşlem sürerken gelen okutmalar dizi kuyruğunda bekler (tek yuva olunca 2. okutma 1.yi eziyordu)
+        this._pendingScans = [];
+
         // Barkod okuyucu — SADECE scanner callback kullanılır
         this._unsub = this.props.scanner.onScan(bc => this.onScanDetected(bc));
 
@@ -273,6 +276,7 @@ export class PutawayScreen extends Component {
 
         onWillUnmount(() => {
             if (this._unsub) this._unsub();
+            this._pendingScans = [];
         });
     }
 
@@ -327,8 +331,8 @@ export class PutawayScreen extends Component {
             }
 
             if (this.state.processing) {
-                // Kilit varsa kuyruğa al, kilit kalktığında çalışacak
-                this._pendingScan = bc;
+                // Kilit varsa kuyruğa al, kilit kalktığında sırayla çalışacak
+                this._pendingScans.push(bc);
                 return;
             }
             this._executeScan(bc);
@@ -374,12 +378,15 @@ export class PutawayScreen extends Component {
     }
 
     changeShelf() {
+        // Eski rafa ait bekleyen okutmalar yeni rafa uygulanmaz; sessizce atılmaz, kullanıcıya bildirilir
+        const dropped = this._pendingScans.length;
+        this._pendingScans = [];
         this.state.step = 1;
         this.state.shelfBarcode = '';
         this.state.shelfInfo = {};
         this.state.shelfProducts = [];
         this.state.productBarcode = '';
-        this.state.error = null;
+        this.state.error = dropped ? `${dropped} bekleyen okutma raf değiştirildiği için işlenmedi` : null;
         this.state.success = null;
         this.state.toast = null;
         this._focusCurrentInput();
@@ -413,7 +420,7 @@ export class PutawayScreen extends Component {
 
         // ─── ÇİFT TETİKLENME KİLİDİ ───
         if (this.state.processing) {
-            this._pendingScan = barcode;
+            this._pendingScans.push(barcode);
             return;
         }
 
@@ -429,6 +436,8 @@ export class PutawayScreen extends Component {
                 this._showToast('error', msg);
                 AudioFeedback.playError();
                 vibrateError();
+                // Bu okutma reddedildi; kuyruktaki sonraki okutmalar takılı kalmasın
+                this._runNextPending();
                 return;
             }
         }
@@ -488,16 +497,17 @@ export class PutawayScreen extends Component {
         }
 
         this.state.loading = false;
-        // Kilidi kısa gecikme ile kaldır + kuyrukta barkod varsa çalıştır
+        // Kilidi kısa gecikme ile kaldır + kuyrukta barkod varsa sırayla çalıştır
         setTimeout(() => {
             this.state.processing = false;
-            // Kilit sırasında gelen barkodu işle
-            if (this._pendingScan) {
-                const pending = this._pendingScan;
-                this._pendingScan = null;
-                this._executeScan(pending);
-            }
+            // Kilit sırasında gelen barkodlardan sıradakini işle (kalanlar bu bitince işlenir)
+            this._runNextPending();
         }, 100);
+    }
+
+    _runNextPending() {
+        const next = this._pendingScans.shift();
+        if (next) this._executeScan(next);
     }
 
     async _refreshShelf() {

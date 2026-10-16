@@ -1,7 +1,7 @@
 /** @odoo-module **/
 
 import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
-import { BarcodeService } from "../barcode_service";
+import { BarcodeService, AudioFeedback } from "../barcode_service";
 import { vibrate, vibrateError, speak } from "../sound_utils";
 
 export class ShelfTransferScreen extends Component {
@@ -238,8 +238,14 @@ export class ShelfTransferScreen extends Component {
             history: [],
         });
 
+        // İşlem sürerken gelen okutmalar sıraya alınır; işlem bitince sırayla çalışır
+        // (önceden sessizce atılıyordu)
+        this._scanQueue = [];
         this._scanHandler = (barcode) => {
-            if (this.state.loading) return;
+            if (this.state.loading) {
+                this._scanQueue.push(barcode);
+                return;
+            }
             if (this.state.step === 1) {
                 this.state.sourceShelfBarcode = barcode;
                 this.onSourceShelfConfirm();
@@ -259,7 +265,22 @@ export class ShelfTransferScreen extends Component {
 
         onWillUnmount(() => {
             if (this.props.scanner) this.props.scanner.offScan(this._scanHandler);
+            this._scanQueue = [];
         });
+    }
+
+    // Yükleme bitişi: bekleyen okutma varsa sıradakini işle
+    _finishLoading() {
+        this.state.loading = false;
+        const next = this._scanQueue.shift();
+        if (next) this._scanHandler(next);
+    }
+
+    // Taşıma hatası: ses + titreşim (sessiz hata yok)
+    _feedbackError() {
+        AudioFeedback.playError();
+        speak('transfer_error');
+        vibrateError();
     }
 
     _focusStep() {
@@ -305,7 +326,7 @@ export class ShelfTransferScreen extends Component {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
             speak('transfer_error');
         }
-        this.state.loading = false;
+        this._finishLoading();
     }
 
     // ═══ ADIM 2: HEDEF RAF ═══
@@ -342,7 +363,7 @@ export class ShelfTransferScreen extends Component {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
             speak('transfer_error');
         }
-        this.state.loading = false;
+        this._finishLoading();
     }
 
     // ═══ ADIM 3: TAŞIMA ═══
@@ -353,6 +374,13 @@ export class ShelfTransferScreen extends Component {
     async doTransfer() {
         const productBarcode = this.state.productBarcode.trim();
         if (!productBarcode) return;
+
+        // Klavyeden Enter ile gelen okutma da işlem sürerken kuyruğa alınır
+        if (this.state.loading) {
+            this._scanQueue.push(productBarcode);
+            this.state.productBarcode = '';
+            return;
+        }
 
         this.state.loading = true;
         this.state.error = null;
@@ -369,6 +397,7 @@ export class ShelfTransferScreen extends Component {
 
             if (res.error) {
                 this.state.error = res.error;
+                this._feedbackError();
             } else {
                 this.state.success = res.message;
                 speak('transfer_success');
@@ -390,10 +419,9 @@ export class ShelfTransferScreen extends Component {
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-            speak('transfer_error');
-            vibrateError();
+            this._feedbackError();
         }
-        this.state.loading = false;
+        this._finishLoading();
     }
 
     clearProduct() {
@@ -405,6 +433,8 @@ export class ShelfTransferScreen extends Component {
     }
 
     resetAll() {
+        // Eski akışa ait bekleyen okutmalar yeni akışa karışmasın
+        this._scanQueue = [];
         Object.assign(this.state, {
             step: 1,
             sourceShelfBarcode: '',
