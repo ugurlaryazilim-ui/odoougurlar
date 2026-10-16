@@ -178,3 +178,11 @@ class TestSmallFixesStatic(TransactionCase):
         self._hasnt(branch, r'completeDone\s*=\s*true', 'hata yanıtında completeDone true olmamalı')
         # Dal başarı mantığından ÖNCE olmalı
         self.assertLess(body.find('res.error'), body.find('completeDone = true'))
+
+    def test_rf3_sales_discount_uses_server_nebim_message(self):
+        """Ön yüz sunucunun ayrıştırılmış `nebim_error` metnini göstermeli (sabit tek metin değil)."""
+        src = _src('screens/sales_discount.js')
+        self._has(src, r'=\s*result\.nebim_error\s*\|\|', 'hesaplamada sunucu nebim_error metni kullanılmıyor')
+        self._has(src, r'=\s*res\.nebim_error\s*\|\|', 'müşteri aramada sunucu nebim_error metni kullanılmıyor')
+        self._hasnt(src, r'customerSearchError\s*=\s*NEBIM_UNREACHABLE_MSG',
+                    'müşteri aramasında fiyat/indirim metni gösterilmemeli')

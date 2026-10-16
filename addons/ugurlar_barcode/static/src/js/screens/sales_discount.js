@@ -4,7 +4,9 @@ import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odo
 import { BarcodeService, AudioFeedback } from "../barcode_service";
 import { openCameraScanner } from "../camera_scanner";
 
+// Sunucu `nebim_error` metnini (bağlantı / Nebim reddetti ayrımı) gönderir; bu metinler yedektir
 const NEBIM_UNREACHABLE_MSG = "Nebim'e iletilemedi. Fiyat/indirim hesaplanamadı, bağlantıyı kontrol edip tekrar deneyin.";
+const NEBIM_CUSTOMER_UNREACHABLE_MSG = "Nebim'e iletilemedi, müşteri aranamadı. Bağlantıyı kontrol edip tekrar deneyin.";
 
 export class SalesDiscount extends Component {
     static template = xml`
@@ -341,7 +343,7 @@ export class SalesDiscount extends Component {
                     
                     if (res && res.nebim_error) {
                         // Nebim hatası "sonuç yok" gibi görünmesin
-                        this.state.customerSearchError = NEBIM_UNREACHABLE_MSG;
+                        this.state.customerSearchError = res.nebim_error || NEBIM_CUSTOMER_UNREACHABLE_MSG;
                     } else if (res && res.error) {
                         this.state.customerSearchError = res.error;
                     } else if (res && res.customers) {
@@ -458,7 +460,7 @@ export class SalesDiscount extends Component {
             
             if (result.nebim_error) {
                 // Nebim'e ulaşılamadı: genel hata değil, ayrı mesaj; fiyatlar güncellenmedi
-                this.state.error = NEBIM_UNREACHABLE_MSG;
+                this.state.error = result.nebim_error || NEBIM_UNREACHABLE_MSG;
                 AudioFeedback.playError();
             } else if (result.error) {
                 this.state.error = result.error;

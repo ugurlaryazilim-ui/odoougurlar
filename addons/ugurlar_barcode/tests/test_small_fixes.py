@@ -455,6 +455,42 @@ class TestDiscountNebimErrorF(BarcodeCase):
         self.assertEqual(len(res['lines']), 1)
         self.assertEqual(res['summary']['total_final'], 90.0)
 
+    # ─── R-F3: bağlantı hatası ile Nebim iş kuralı hatası ayrı metin ──
+    def test_rf3_connection_and_rule_errors_have_different_texts(self):
+        """K: bağlantı hatası ile Nebim'in reddi aynı mesajı vermez (yeniden deneme yönlendirmesi)."""
+        with self._proc(exc=ConnectionError('Nebim down')):
+            conn = self.ctl.calculate_discounts(basket=self.BASKET)
+        with self._proc(result={'ExceptionMessage': 'SP bulunamadı'}):
+            rule = self.ctl.calculate_discounts(basket=self.BASKET)
+        self.assertTrue(conn['nebim_error'] and rule['nebim_error'])
+        self.assertNotEqual(conn['nebim_error'], rule['nebim_error'])
+        self.assertEqual(conn['nebim_error'], discount_api.NEBIM_CONN_ERROR_TEXT)
+        self.assertEqual(rule['nebim_error'], discount_api.NEBIM_RULE_ERROR_TEXT)
+
+    def test_rf3_rule_error_detail_only_in_log_not_in_response(self):
+        """Y (güvenlik): Nebim'in hata metni (ör. host/müşteri ayrıntısı) yanıta girmez, log'a yazılır."""
+        with self.assertLogs(discount_api._logger.name, level='ERROR') as cm:
+            with self._proc(result={'ExceptionMessage': 'Cari 10.1.2.3 SECRET123 yok'}):
+                res = self.ctl.calculate_discounts(basket=self.BASKET)
+        self.assertNotIn('SECRET123', str(res))
+        self.assertNotIn('10.1.2.3', str(res))
+        self.assertIn('SECRET123', '\n'.join(cm.output))
+
+    def test_rf3_search_customer_error_text_is_about_customer_search(self):
+        """K: müşteri aramada hata metni 'fiyat/indirim' değil müşteri aramasına uygun; ayrıntı sızmaz."""
+        with self._proc(exc=ConnectionError('tcp://10.1.2.3 pwd=SECRET123')):
+            conn = self.ctl.search_customer(query='ahmet')
+        self.assertEqual(conn['nebim_error'], discount_api.NEBIM_CUSTOMER_CONN_ERROR_TEXT)
+        self.assertIn('müşteri', conn['nebim_error'].lower())
+        self.assertNotIn('indirim', conn['nebim_error'].lower())
+        self.assertNotIn('SECRET123', str(conn))
+        with self._proc(result={'ExceptionMessage': 'SP hatası SECRET123'}):
+            rule = self.ctl.search_customer(query='ahmet')
+        self.assertEqual(rule['customers'], [])
+        self.assertEqual(rule['nebim_error'], discount_api.NEBIM_CUSTOMER_RULE_ERROR_TEXT)
+        self.assertNotEqual(rule['nebim_error'], conn['nebim_error'])
+        self.assertNotIn('SECRET123', str(rule))
+
     # ─── search_customer: yutulan hata ────────────────
     def test_f4_search_customer_failure_reports_nebim_error(self):
         """K: arama Nebim hatasında boş liste ile 'sonuç yok' arasında fark yok; ayrı alan."""
