@@ -200,6 +200,19 @@ class TestSmallFixesStatic(TransactionCase):
         self.assertIn('Toplamayı Tamamla', block)
         self._has(block, r'(?s)<t t-if="state\.scanMsg">.*?t-esc="state\.scanMsg"', 'scanMsg bu görünümde render edilmiyor')
 
+    # ─── R-F7: tümü toplandı mesajı (done rota / renk) ──
+    def test_rf7_all_collected_message_only_on_open_route_and_marked_ok(self):
+        """`_goToNextItem` 'Tamamla butonuna basın' mesajını yalnız done olmayan rotada yazar ve
+        başarı (scanOk=true) işaretler; done rotada Tamamla düğmesi yok, mesaj boş kalır."""
+        body = _method_body(_src('screens/batch_picking.js'), r'\n    _goToNextItem\(\)')
+        self.assertTrue(body, '_goToNextItem bulunamadı')
+        m = re.search(r"if\s*\([^)]*state\.batch\.state\s*!==\s*'done'[^)]*\)\s*\{(.*?)\}\s*else\s*\{(.*?)\}", body, re.S)
+        self.assertTrue(m, 'mesaj batch.state !== done koşuluna bağlı değil')
+        self.assertIn('Tamamla butonuna basın', m.group(1))
+        self._has(m.group(1), r'scanOk\s*=\s*true', 'başarı mesajı scanOk=true işaretlemiyor (kırmızı görünür)')
+        self.assertNotIn('Tamamla butonuna basın', m.group(2))
+        self._has(m.group(2), r"scanMsg\s*=\s*''", 'done rotada mesaj temizlenmiyor')
+
     # ─── R-F6: küçük ön yüz düzeltmeleri ───────────────
     def test_rf6_sales_discount_failure_drops_pending_placeholder_rows(self):
         """Nebim/sunucu/bağlantı hatasında 'Hesaplanıyor...' (₺0,00) satırı sepette kalmamalı."""
@@ -226,22 +239,6 @@ class TestSmallFixesStatic(TransactionCase):
         for v in ('0', '1', '7', '30', '90', '365'):
             self.assertRegex(re.search(r'const MOVEMENT_DAYS = \[(.*?)\]', src).group(1), r'\b%s\b' % v)
 
-    def test_rf6_packing_batch_list_error_is_turkish_constant_text(self):
-        """Rota listesi hata metni sürücünün İngilizce ağ mesajını içermez."""
-        body = _method_body(_src('screens/packing.js'), r'async loadBatchList\(\)')
-        self.assertTrue(body)
-        catch = _catch_bodies(body)[0]
-        self._has(catch, r"Rota listesi yüklenemedi", 'hata metni yok')
-        self._hasnt(catch, r'_batchListError\s*=[^;]*e\.message', 'hata metni e.message içeriyor')
-
-    def test_rf6_label_template_list_error_response_is_visible(self):
-        """label_template_list `{error}` döndürürse (yetki vb.) ekranda görünür mesaj olmalı."""
-        for fname in ('labels.js', 'label_designer.js'):
-            body = _method_body(_src('screens/' + fname), r'async loadTemplates\(\)')
-            self.assertTrue(body, '%s loadTemplates bulunamadı' % fname)
-            m = re.search(r'if\s*\(\s*res\s*&&\s*res\.error\s*\)\s*\{(.*?)return', body, re.S)
-            self.assertTrue(m, '%s: res.error dalı yok' % fname)
-            self._has(m.group(1), VISIBLE, '%s: res.error görünür mesaj vermiyor' % fname)
     def test_rf8_movements_days_list_matches_selector_options(self):
         """R-F8: Dönem seçicisindeki her seçenek (0 = Tümü dahil) MOVEMENT_DAYS'te olmalı; yoksa Tümü
         seçimi yenilemede 7 güne düşer. Geçersiz değerler (negatif, 999, metin, boş) varsayılana döner."""
@@ -260,3 +257,19 @@ class TestSmallFixesStatic(TransactionCase):
         self._has(body, r"typeof\s+\w+\s*===\s*'string'", 'days metin türü doğrulanmıyor')
         self._has(body, r'MOVEMENT_DAYS\.includes\(', 'days listeye karşı doğrulanmıyor')
 
+    def test_rf6_packing_batch_list_error_is_turkish_constant_text(self):
+        """Rota listesi hata metni sürücünün İngilizce ağ mesajını içermez."""
+        body = _method_body(_src('screens/packing.js'), r'async loadBatchList\(\)')
+        self.assertTrue(body)
+        catch = _catch_bodies(body)[0]
+        self._has(catch, r"Rota listesi yüklenemedi", 'hata metni yok')
+        self._hasnt(catch, r'_batchListError\s*=[^;]*e\.message', 'hata metni e.message içeriyor')
+
+    def test_rf6_label_template_list_error_response_is_visible(self):
+        """label_template_list `{error}` döndürürse (yetki vb.) ekranda görünür mesaj olmalı."""
+        for fname in ('labels.js', 'label_designer.js'):
+            body = _method_body(_src('screens/' + fname), r'async loadTemplates\(\)')
+            self.assertTrue(body, '%s loadTemplates bulunamadı' % fname)
+            m = re.search(r'if\s*\(\s*res\s*&&\s*res\.error\s*\)\s*\{(.*?)return', body, re.S)
+            self.assertTrue(m, '%s: res.error dalı yok' % fname)
+            self._has(m.group(1), VISIBLE, '%s: res.error görünür mesaj vermiyor' % fname)
