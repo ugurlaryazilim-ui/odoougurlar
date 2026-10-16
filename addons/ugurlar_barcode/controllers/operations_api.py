@@ -224,12 +224,13 @@ class OperationsApiController(BarcodeApiBase):
         days = self._clamp_days(days, default=7)
         date_from = datetime.now() - timedelta(days=days)
 
-        # Özet sayaçları (toplam işlem, operatör toplamları) ürettiği için limit konmaz:
-        # liste kesilirse toplamlar yanlış çıkar. Yük `days` ≤ 90 sınırıyla sınırlıdır.
-        operations = request.env['ugurlar.barcode.operation'].sudo().search([
-            ('create_date', '>=', date_from),
-            ('state', '=', 'done'),
-        ])
+        # Sayımlar veritabanında gruplanır (kayıtlar Python'a yüklenmez): limit gerekmez, toplamlar
+        # kesilmez. Yük `days` ≤ 90 sınırı ve gruplama (kullanıcı x tür) ile sınırlıdır.
+        groups = request.env['ugurlar.barcode.operation'].sudo()._read_group(
+            [('create_date', '>=', date_from), ('state', '=', 'done')],
+            groupby=['user_id', 'operation_type'],
+            aggregates=['__count', 'create_date:max'],
+        )
 
         user_stats = {}
         type_labels = {
@@ -245,35 +246,34 @@ class OperationsApiController(BarcodeApiBase):
         }
 
         type_totals = {}
-        for op in operations:
-            uid = op.user_id.id
-            uname = op.user_id.name or 'Bilinmeyen'
-
+        total_operations = 0
+        for user, op_type, count, last_create in groups:
+            uid = user.id if user else False
             if uid not in user_stats:
                 user_stats[uid] = {
                     'user_id': uid,
-                    'user_name': uname,
+                    'user_name': (user.name if user else '') or 'Bilinmeyen',
                     'total': 0,
                     'types': {},
                     'last_activity': '',
                 }
 
-            user_stats[uid]['total'] += 1
-            op_type = op.operation_type or 'unknown'
-            type_label = type_labels.get(op_type, op_type)
-            user_stats[uid]['types'][type_label] = user_stats[uid]['types'].get(type_label, 0) + 1
-            # Toplam tip istatistikleri (tek döngüde)
-            type_totals[type_label] = type_totals.get(type_label, 0) + 1
+            total_operations += count
+            user_stats[uid]['total'] += count
+            type_label = type_labels.get(op_type or 'unknown', op_type or 'unknown')
+            user_stats[uid]['types'][type_label] = user_stats[uid]['types'].get(type_label, 0) + count
+            type_totals[type_label] = type_totals.get(type_label, 0) + count
 
-            op_date = str(self._local_dt(op.create_date))[:16]
-            if op_date > user_stats[uid]['last_activity']:
-                user_stats[uid]['last_activity'] = op_date
+            if last_create:
+                op_date = str(self._local_dt(last_create))[:16]
+                if op_date > user_stats[uid]['last_activity']:
+                    user_stats[uid]['last_activity'] = op_date
 
         sorted_users = sorted(user_stats.values(), key=lambda x: x['total'], reverse=True)
 
         return {
             'operators': sorted_users,
             'type_totals': type_totals,
-            'total_operations': len(operations),
+            'total_operations': total_operations,
             'period_days': int(days),
         }

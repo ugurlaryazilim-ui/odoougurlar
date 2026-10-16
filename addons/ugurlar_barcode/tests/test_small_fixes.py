@@ -346,6 +346,36 @@ class TestOperationsF(BarcodeCase):
         self.assertEqual(sum(o['total'] for o in res['operators'])
                          - sum(o['total'] for o in before['operators']), 520)
 
+    def test_rf4_operator_performance_counts_in_database_and_keeps_structure(self):
+        """K (güvenlik F-1): sayım _read_group ile; operatör/tür toplamları ve yapı aynı kalır,
+        kayıtlar Python'a yüklenmez (operation.search çağrılmaz)."""
+        other = self.env['res.users'].create({'name': 'RF4 Op', 'login': 'rf4_op_user'})
+        Op = self.env['ugurlar.barcode.operation']
+        before = self.ops.operator_performance(days=7)
+        self._op('putaway', n=3)
+        self._op('counting', n=2)
+        Op.create([{'operation_type': 'putaway', 'barcode': 'RF4-%d' % i, 'product_id': self.prod.id,
+                    'location_id': self.shelf_a.id, 'quantity': 1, 'user_id': other.id}
+                   for i in range(4)])
+        model_cls = type(Op)
+        with patch.object(model_cls, 'search', side_effect=AssertionError('search çağrılmamalı')):
+            res = self.ops.operator_performance(days=7)
+        self.assertEqual(set(res), {'operators', 'type_totals', 'total_operations', 'period_days'})
+        self.assertEqual(res['total_operations'] - before['total_operations'], 9)
+        self.assertEqual(res['type_totals'].get('Raflama', 0) - before['type_totals'].get('Raflama', 0), 7)
+        self.assertEqual(res['type_totals'].get('Sayım', 0) - before['type_totals'].get('Sayım', 0), 2)
+        by_user = {o['user_id']: o for o in res['operators']}
+        prev = {o['user_id']: o for o in before['operators']}
+        mine = by_user[self.env.user.id]
+        self.assertEqual(mine['total'] - prev.get(self.env.user.id, {}).get('total', 0), 5)
+        self.assertEqual(mine['user_name'], self.env.user.name)
+        self.assertEqual(set(mine), {'user_id', 'user_name', 'total', 'types', 'last_activity'})
+        self.assertRegex(mine['last_activity'], r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$')
+        self.assertEqual(by_user[other.id]['total'], 4)
+        self.assertEqual(by_user[other.id]['types'], {'Raflama': 4})
+        totals = [o['total'] for o in res['operators']]
+        self.assertEqual(totals, sorted(totals, reverse=True), 'operatörler toplama göre azalan')
+
     # ─── KK-F3: count_list ────────────────────────────
     def test_f3_count_list_days_clamped_to_90(self):
         """K: 100 gün önceki sayım days=365 ile listelenmez; 60 gün önceki listelenir."""
