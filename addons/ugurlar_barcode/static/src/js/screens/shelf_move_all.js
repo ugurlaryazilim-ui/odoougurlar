@@ -187,7 +187,10 @@ export class ShelfMoveAll extends Component {
             <t t-if="state.result">
                 <div class="ub-result-card ub-result-success" style="margin:0 1.5rem;text-align:center;padding:2rem">
                     <div style="font-size:2.5rem;margin-bottom:0.5rem"><i class="fa fa-check-circle"></i></div>
-                    <div style="font-size:1.1rem;font-weight:700;margin-bottom:1rem">Taşıma Tamamlandı!</div>
+                    <div style="font-size:1.1rem;font-weight:700;margin-bottom:1rem">
+                        <t t-if="state.result.skipped_count > 0">Taşıma Kısmen Tamamlandı</t>
+                        <t t-else="">Taşıma Tamamlandı!</t>
+                    </div>
                     <div style="display:flex;justify-content:center;gap:2rem;margin-bottom:1rem">
                         <div style="text-align:center">
                             <div style="font-size:1.8rem;font-weight:700;color:#27AE60"><t t-esc="state.result.moved_count"/></div>
@@ -199,6 +202,20 @@ export class ShelfMoveAll extends Component {
                         </div>
                     </div>
                 </div>
+                <t t-if="state.result.skipped_count > 0">
+                    <div class="alert alert-warning ub-skipped-list" style="margin:1rem 1.5rem">
+                        <div style="font-weight:700;margin-bottom:0.4rem">
+                            <i class="fa fa-exclamation-triangle"></i>
+                            <t t-esc="state.result.skipped_count"/> ürün taşınmadı
+                        </div>
+                        <t t-foreach="state.result.skipped" t-as="s" t-key="s_index">
+                            <div style="font-size:0.85rem;padding:0.35rem 0;border-top:1px solid rgba(0,0,0,0.08)">
+                                <strong t-esc="s.product_name"/> (<t t-esc="s.barcode || '-'"/>)
+                                <div t-esc="s.reason"/>
+                            </div>
+                        </t>
+                    </div>
+                </t>
                 <div class="ub-transfer-info" style="margin-top:1rem">
                     <div class="ub-transfer-info-row">
                         <span class="ub-transfer-info-label"><i class="fa fa-sign-out"></i> Kaynak:</span>
