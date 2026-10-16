@@ -44,6 +44,7 @@ class TrendyolTransactionCheck(models.Model):
                                   help='Panelde "Net Sipariş Tutarı" karşılığı (Finansal İşlemler → Hakedişe Etki toplamı)')
     payment_order_id = fields.Char(string='Hakediş Ödeme No', readonly=True)
     receipt_id = fields.Char(string='Dekont No', readonly=True)
+    commission_invoice_no = fields.Char(string='Komisyon Fatura No', readonly=True)
     affiliate = fields.Char(string='Affiliate', readonly=True)
     is_paid = fields.Boolean(string='Ödendi', readonly=True)
 
@@ -89,6 +90,7 @@ class TrendyolTransactionCheck(models.Model):
                     SUM(COALESCE(s.signed_seller_revenue, 0)) AS seller_revenue,
                     STRING_AGG(DISTINCT NULLIF(s.payment_order_id, ''), ', ') AS payment_order_id,
                     STRING_AGG(DISTINCT NULLIF(s.receipt_id, ''), ', ') AS receipt_id,
+                    STRING_AGG(DISTINCT NULLIF(s.commission_invoice_no, ''), ', ') AS commission_invoice_no,
                     STRING_AGG(DISTINCT NULLIF(s.affiliate, ''), ', ') AS affiliate,
                     BOOL_AND(COALESCE(s.payment_order_id, '') <> '')
                         FILTER (WHERE s.transaction_type = 'sale') AS is_paid
