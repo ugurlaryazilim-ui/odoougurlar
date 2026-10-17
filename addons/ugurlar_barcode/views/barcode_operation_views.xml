@@ -13,7 +13,7 @@
                 <field name="operation_ids" string="Ürün/Barkod Ara" filter_domain="['|', ('operation_ids.barcode', 'ilike', self), ('operation_ids.product_id', 'ilike', self)]"/>
                 
                 <separator/>
-                <filter string="Bugün" name="today" domain="[('date', '&gt;=', datetime.datetime.combine(context_today(), datetime.time(0,0,0))), ('date', '&lt;=', datetime.datetime.combine(context_today(), datetime.time(23,59,59)))]"/>
+                <filter string="Bugün" name="today" domain="[('date', '&gt;=', datetime.datetime.combine(context_today(), datetime.time(0, 0, 0)).to_utc().strftime('%Y-%m-%d %H:%M:%S')), ('date', '&lt;', datetime.datetime.combine(context_today() + datetime.timedelta(days=1), datetime.time(0, 0, 0)).to_utc().strftime('%Y-%m-%d %H:%M:%S'))]"/>
                 
                 <separator/>
                 <filter string="Taslak" name="state_draft" domain="[('state', '=', 'draft')]"/>

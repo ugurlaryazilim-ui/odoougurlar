@@ -53,10 +53,10 @@ export class BarcodeScanner {
      * Hızlı ardışık tuş basımlarını algılar + Enter ile tamamlar
      */
     _onKeyDown(ev) {
-        // Eğer bir input/textarea'da yazıyorsa ve barcode-input değilse atla
+        // Eğer bir input/textarea/contenteditable alanında yazıyorsa ve barcode-input değilse atla
         const tag = ev.target.tagName;
         const isBarcodeInput = ev.target.classList.contains('ub-barcode-input');
-        if ((tag === 'INPUT' || tag === 'TEXTAREA') && !isBarcodeInput) {
+        if ((tag === 'INPUT' || tag === 'TEXTAREA' || ev.target.isContentEditable) && !isBarcodeInput) {
             return;
         }
 
@@ -68,6 +68,8 @@ export class BarcodeScanner {
             this._buffer = '';
         }
         this._lastKeyTime = now;
+        // Hızlı ardışık tuş dizisinin devamı mı? (ilk karakter buffer'ı henüz boş bulur)
+        const inFastSequence = timeDiff < 200 && this._buffer.length > 0;
 
         if (ev.key === 'Enter') {
             if (this._buffer.length >= 3) {
@@ -90,9 +92,16 @@ export class BarcodeScanner {
 
         // Kontrol tuşlarını yoksay
         if (ev.key.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+            // Dizinin başındaki Space okuyucu verisi değildir (düğmeyi tıklama/boşluk tuşu):
+            // buffer'a alınmaz, olay olduğu gibi geçer.
+            if (ev.key === ' ' && !this._buffer) return;
             this._buffer += ev.key;
-            // Hızlı tuş basımı (scanner) → input'a yazma, sadece buffer'a ekle
-            if (!isBarcodeInput || timeDiff < 200) {
+            // Hızlı tuş basımı (scanner) → alana/düğmeye yazma, sadece buffer'a ekle.
+            // Barkod alanı olmayan hedeflerde (düğme, select...) tek ve yavaş basılan tuş
+            // yutulmaz: odaktaki düğmede Space tıklamayı tetikler. Okuyucu dizisinin içindeki
+            // Space (hızlı ardışık) ise yine buffer'a gider, düğmeyi tıklamaz.
+            const swallow = isBarcodeInput ? timeDiff < 200 : inFastSequence;
+            if (swallow) {
                 ev.preventDefault();
                 ev.stopPropagation();
             }

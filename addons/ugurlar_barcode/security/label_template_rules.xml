@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Şablon sahipliği: controller'daki _can_edit_template ile AYNI kural (DT-D R2, O-D2).
+         Okuma herkese açık (perm_read=False); controller sudo ile çalıştığı için mobil akış etkilenmez. -->
+    <record id="rule_label_template_user_own" model="ir.rule">
+        <field name="name">Etiket şablonu: stok kullanıcısı yalnız kendi veya sahipsiz şablonu değiştirir</field>
+        <field name="model_id" ref="model_ugurlar_label_template"/>
+        <field name="groups" eval="[(4, ref('stock.group_stock_user'))]"/>
+        <field name="domain_force">['|', ('user_id', '=', False), ('user_id', '=', user.id)]</field>
+        <field name="perm_read" eval="False"/>
+        <field name="perm_write" eval="True"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="True"/>
+    </record>
+    <record id="rule_label_template_manager_all" model="ir.rule">
+        <field name="name">Etiket şablonu: stok yöneticisi / sistem yöneticisi tüm şablonlar</field>
+        <field name="model_id" ref="model_ugurlar_label_template"/>
+        <field name="groups" eval="[(4, ref('stock.group_stock_manager')), (4, ref('base.group_system'))]"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="perm_read" eval="False"/>
+        <field name="perm_write" eval="True"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="True"/>
+    </record>
+</odoo>

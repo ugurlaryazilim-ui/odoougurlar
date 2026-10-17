@@ -4,6 +4,10 @@ import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odo
 import { BarcodeService, AudioFeedback } from "../barcode_service";
 import { openCameraScanner } from "../camera_scanner";
 
+// Sunucu `nebim_error` metnini (bağlantı / Nebim reddetti ayrımı) gönderir; bu metinler yedektir
+const NEBIM_UNREACHABLE_MSG = "Nebim'e iletilemedi. Fiyat/indirim hesaplanamadı, bağlantıyı kontrol edip tekrar deneyin.";
+const NEBIM_CUSTOMER_UNREACHABLE_MSG = "Nebim'e iletilemedi, müşteri aranamadı. Bağlantıyı kontrol edip tekrar deneyin.";
+
 export class SalesDiscount extends Component {
     static template = xml`
         <div class="ub-screen ub-discount-screen">
@@ -236,6 +240,9 @@ export class SalesDiscount extends Component {
     setup() {
         this.barcodeInputRef = useRef('barcodeInput');
         this.uidCounter = 1;
+        // Hesaplama isteklerinin artan sıra numarası: yalnız SON isteğin yanıtı uygulanır,
+        // geç dönen eski yanıt yeni sepeti/fiyatı ezmez
+        this._discountSeq = 0;
 
         // localStorage'dan yükle
         const savedState = localStorage.getItem('ub_discount_state');
@@ -301,7 +308,7 @@ export class SalesDiscount extends Component {
 
     saveState() {
         localStorage.setItem('ub_discount_state', JSON.stringify({
-            basket: this.state.basket,
+            basket: this.state.basket.filter(i => !i.pending),
             summary: this.state.summary,
             customerCode: this.state.customerCode
         }));
@@ -334,7 +341,10 @@ export class SalesDiscount extends Component {
                     const res = await BarcodeService.call('/ugurlar_barcode/api/search_customer', { query: val.trim() });
                     this.state.customerSearchLoading = false;
                     
-                    if (res && res.error) {
+                    if (res && res.nebim_error) {
+                        // Nebim hatası "sonuç yok" gibi görünmesin
+                        this.state.customerSearchError = res.nebim_error || NEBIM_CUSTOMER_UNREACHABLE_MSG;
+                    } else if (res && res.error) {
                         this.state.customerSearchError = res.error;
                     } else if (res && res.customers) {
                         this.state.customerSearchResults = res.customers;
@@ -387,6 +397,7 @@ export class SalesDiscount extends Component {
                 barcode: barcode,
                 quantity: 1,
                 name: 'Hesaplanıyor...',
+                pending: true,
                 image_url: '',
                 retail_price: 0,
                 installment_price: 0,
@@ -414,12 +425,18 @@ export class SalesDiscount extends Component {
         if (this.state.basket.length > 0) {
             this.calculateDiscounts();
         } else {
+            // Sepet boşaldı: uçuştaki yanıt silinen ürünü geri getirmesin
+            this._discountSeq++;
+            this.state.loading = false;
             this.state.summary = { total_retail: 0, total_discount: 0, total_final: 0, total_installment: 0, total_installment_discount: 0, total_installment_final: 0 };
             this.saveState();
         }
     }
 
     clearBasket() {
+        // Uçuştaki hesaplama yanıtı temizlenen sepeti doldurmasın
+        this._discountSeq++;
+        this.state.loading = false;
         this.state.basket = [];
         this.state.summary = { total_retail: 0, total_discount: 0, total_final: 0, total_installment: 0, total_installment_discount: 0, total_installment_final: 0 };
         this.state.error = null;
@@ -427,9 +444,19 @@ export class SalesDiscount extends Component {
         if (this.barcodeInputRef.el) this.barcodeInputRef.el.focus();
     }
 
+    // Hesaplama başarısız olunca "Hesaplanıyor..." yer tutucu satırları (₺0,00 görünürdü) sepetten kalkar;
+    // daha önce fiyatlanmış satırlar korunur
+    _dropPendingItems() {
+        if (this.state.basket.some(i => i.pending)) {
+            this.state.basket = this.state.basket.filter(i => !i.pending);
+            this.saveState();
+        }
+    }
+
     async calculateDiscounts() {
         if (this.state.basket.length === 0) return;
 
+        const seq = ++this._discountSeq;
         this.state.loading = true;
         this.state.error = null;
 
@@ -437,9 +464,18 @@ export class SalesDiscount extends Component {
             const payload = this.state.basket.map(i => ({ barcode: i.barcode, quantity: i.quantity }));
             
             const result = await BarcodeService.calculateDiscounts(payload, this.state.customerCode);
+
+            // Daha yeni bir istek gönderildiyse bu yanıt eskidir: sepete/fiyata uygulanmaz
+            if (seq !== this._discountSeq) return;
             
-            if (result.error) {
+            if (result.nebim_error) {
+                // Nebim'e ulaşılamadı: genel hata değil, ayrı mesaj; fiyatlar güncellenmedi
+                this.state.error = result.nebim_error || NEBIM_UNREACHABLE_MSG;
+                this._dropPendingItems();
+                AudioFeedback.playError();
+            } else if (result.error) {
                 this.state.error = result.error;
+                this._dropPendingItems();
                 AudioFeedback.playError();
             } else if (result.success) {
                 const newBasket = [];
@@ -481,10 +517,13 @@ export class SalesDiscount extends Component {
                 }
             }
         } catch (e) {
+            if (seq !== this._discountSeq) return;
             this.state.error = 'Bağlantı Hatası: ' + (e.message || e);
+            this._dropPendingItems();
             AudioFeedback.playError();
         } finally {
-            this.state.loading = false;
+            // Eski isteğin bitişi, uçuştaki yeni isteğin yükleniyor göstergesini kapatmasın
+            if (seq === this._discountSeq) this.state.loading = false;
         }
     }
 

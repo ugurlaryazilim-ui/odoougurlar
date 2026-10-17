@@ -1,6 +1,6 @@
 {
     'name': 'Mobil',
-    'version': '19.0.1.2.0',
+    'version': '19.0.1.2.2',
     'category': 'Inventory/Barcode',
     'summary': 'Mobil uyumlu barkod tarama ve depo yönetim modülü',
     'description': """
@@ -19,6 +19,7 @@
     'depends': ['stock', 'barcodes', 'odoougurlar', 'stock_picking_batch', 'sale_stock'],
     'data': [
         'security/ir.model.access.csv',
+        'security/label_template_rules.xml',
 'views/barcode_menu.xml',
         'views/picking_schedule_views.xml',
         'views/picking_batch_views.xml',

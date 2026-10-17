@@ -135,7 +135,8 @@ export class ShelfClearAllScreen extends Component {
                 <div class="ub-shelf-clear-result">
                     <div class="ub-shelf-clear-result-header">
                         <i class="fa fa-check-circle"></i>
-                        <h3>Raf Temizlendi!</h3>
+                        <h3 t-if="state.result.skipped_count > 0">Raf Kısmen Temizlendi</h3>
+                        <h3 t-else="">Raf Temizlendi!</h3>
                     </div>
                     <div class="ub-shelf-clear-result-stats">
                         <div class="ub-shelf-clear-stat">
@@ -148,6 +149,20 @@ export class ShelfClearAllScreen extends Component {
                         </div>
                     </div>
                 </div>
+                <t t-if="state.result.skipped_count > 0">
+                    <div class="alert alert-warning ub-skipped-list" style="margin:1rem 1.5rem">
+                        <div style="font-weight:700;margin-bottom:0.4rem">
+                            <i class="fa fa-exclamation-triangle"></i>
+                            <t t-esc="state.result.skipped_count"/> ürün raftan kaldırılmadı
+                        </div>
+                        <t t-foreach="state.result.skipped" t-as="s" t-key="s_index">
+                            <div style="font-size:0.85rem;padding:0.35rem 0;border-top:1px solid rgba(0,0,0,0.08)">
+                                <strong t-esc="s.product_name"/> (<t t-esc="s.barcode || '-'"/>)
+                                <div t-esc="s.reason"/>
+                            </div>
+                        </t>
+                    </div>
+                </t>
                 <div class="ub-search-form">
                     <button class="btn btn-primary ub-search-submit-btn" t-on-click="resetForm">
                         <i class="fa fa-refresh"></i> Yeni İşlem

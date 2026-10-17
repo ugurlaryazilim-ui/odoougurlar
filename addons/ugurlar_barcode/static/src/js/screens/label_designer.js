@@ -663,7 +663,16 @@ export class LabelDesigner extends Component {
 
     // ─── ŞABLON CRUD ──────────────────────────────
     async loadTemplates() {
-        try { const res = await BarcodeService.labelTemplateList(); this.state.templates = res.templates || []; } catch (e) {}
+        try {
+            const res = await BarcodeService.labelTemplateList();
+            if (res && res.error) {
+                alert('Şablonlar yüklenemedi: ' + res.error);
+                return;
+            }
+            this.state.templates = res.templates || [];
+        } catch (e) {
+            alert('Şablonlar yüklenemedi: ' + (e.message || e));
+        }
     }
     onLoadTemplate(ev) {
         const id = parseInt(ev.target.value);
@@ -702,7 +711,12 @@ export class LabelDesigner extends Component {
     async onDelete() {
         if (!this.state.editingId) return;
         if (!confirm('Şablonu silmek istediğinize emin misiniz?')) return;
-        try { await BarcodeService.labelTemplateDelete(this.state.editingId); this.state.editingId = 0; this.state.templateName = 'Yeni Etiket'; this.state.elements = []; this.state.selectedId = null; await this.loadTemplates(); } catch (e) { alert('Silme hatası'); }
+        try {
+            const res = await BarcodeService.labelTemplateDelete(this.state.editingId);
+            // Ret (yetki, varsayılan şablon) yanıtta error olarak gelir; form sıfırlanmaz
+            if (res && res.error) { alert(res.error); return; }
+            this.state.editingId = 0; this.state.templateName = 'Yeni Etiket'; this.state.elements = []; this.state.selectedId = null; await this.loadTemplates();
+        } catch (e) { alert('Silme hatası'); }
     }
 
     exportTemplate() {

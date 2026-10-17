@@ -1,8 +1,11 @@
 /** @odoo-module **/
 
 import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odoo/owl";
-import { BarcodeService } from "../barcode_service";
+import { BarcodeService, AudioFeedback } from "../barcode_service";
 import { vibrate, vibrateError, speak } from "../sound_utils";
+
+// Okuyucunun aynı barkodu çok kısa aralıkla iki kez göndermesi (çift tetik) tek okutma sayılır
+const DOUBLE_SCAN_MS = 300;
 
 export class ShelfTransferScreen extends Component {
     static template = xml`
@@ -238,18 +241,17 @@ export class ShelfTransferScreen extends Component {
             history: [],
         });
 
+        // İşlem sürerken gelen okutmalar sıraya alınır; işlem bitince sırayla çalışır
+        // (önceden sessizce atılıyordu)
+        this._scanQueue = [];
+        this._lastScan = { code: null, at: 0 };
         this._scanHandler = (barcode) => {
-            if (this.state.loading) return;
-            if (this.state.step === 1) {
-                this.state.sourceShelfBarcode = barcode;
-                this.onSourceShelfConfirm();
-            } else if (this.state.step === 2) {
-                this.state.targetShelfBarcode = barcode;
-                this.onTargetShelfConfirm();
-            } else if (this.state.step === 3) {
-                this.state.productBarcode = barcode;
-                this.doTransfer();
-            }
+            // Çift tetik: aynı barkod 300 ms içinde tekrar geldiyse yok sayılır (ikinci taşıma yapılmaz,
+            // kaynak raf ikinci kez gelip hedef sayılmaz)
+            const now = Date.now();
+            if (barcode === this._lastScan.code && now - this._lastScan.at < DOUBLE_SCAN_MS) return;
+            this._lastScan = { code: barcode, at: now };
+            this._dispatchScan(barcode);
         };
 
         onMounted(() => {
@@ -259,7 +261,46 @@ export class ShelfTransferScreen extends Component {
 
         onWillUnmount(() => {
             if (this.props.scanner) this.props.scanner.offScan(this._scanHandler);
+            this._scanQueue = [];
         });
+    }
+
+    // Okutmayı bulunduğu adıma göre işler; işlem sürüyorsa sıraya alır
+    _dispatchScan(barcode) {
+        if (this.state.loading) {
+            this._scanQueue.push(barcode);
+            return;
+        }
+        if (this.state.step === 1) {
+            this.state.sourceShelfBarcode = barcode;
+            this.onSourceShelfConfirm();
+        } else if (this.state.step === 2) {
+            this.state.targetShelfBarcode = barcode;
+            this.onTargetShelfConfirm();
+        } else if (this.state.step === 3) {
+            this.state.productBarcode = barcode;
+            this.doTransfer();
+        }
+    }
+
+    // Yükleme bitişi: bekleyen okutma varsa sıradakini işle
+    _finishLoading() {
+        this.state.loading = false;
+        this._runNextQueued();
+    }
+
+    // Sıradaki okutmayı işler. Yükleme açmadan dönen yollar (boş barkod, aynı raf hatası) da
+    // bunu çağırır; yoksa sıradakiler takılı kalıp sonraki bir yüklemede başka adımın anlamıyla işlenirdi
+    _runNextQueued() {
+        const next = this.state.loading ? null : this._scanQueue.shift();
+        if (next) this._dispatchScan(next);
+    }
+
+    // Taşıma hatası: ses + titreşim (sessiz hata yok)
+    _feedbackError() {
+        AudioFeedback.playError();
+        speak('transfer_error');
+        vibrateError();
     }
 
     _focusStep() {
@@ -282,7 +323,10 @@ export class ShelfTransferScreen extends Component {
 
     async onSourceShelfConfirm() {
         const bc = this.state.sourceShelfBarcode.trim();
-        if (!bc) return;
+        if (!bc) {
+            this._runNextQueued();
+            return;
+        }
 
         this.state.loading = true;
         this.state.error = null;
@@ -305,7 +349,7 @@ export class ShelfTransferScreen extends Component {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
             speak('transfer_error');
         }
-        this.state.loading = false;
+        this._finishLoading();
     }
 
     // ═══ ADIM 2: HEDEF RAF ═══
@@ -315,10 +359,15 @@ export class ShelfTransferScreen extends Component {
 
     async onTargetShelfConfirm() {
         const bc = this.state.targetShelfBarcode.trim();
-        if (!bc) return;
+        if (!bc) {
+            this._runNextQueued();
+            return;
+        }
 
         if (bc === this.state.sourceShelfBarcode.trim()) {
             this.state.error = 'Kaynak ve hedef raf aynı olamaz!';
+            this._feedbackError();
+            this._runNextQueued();
             return;
         }
 
@@ -342,7 +391,7 @@ export class ShelfTransferScreen extends Component {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
             speak('transfer_error');
         }
-        this.state.loading = false;
+        this._finishLoading();
     }
 
     // ═══ ADIM 3: TAŞIMA ═══
@@ -352,7 +401,17 @@ export class ShelfTransferScreen extends Component {
 
     async doTransfer() {
         const productBarcode = this.state.productBarcode.trim();
-        if (!productBarcode) return;
+        if (!productBarcode) {
+            this._runNextQueued();
+            return;
+        }
+
+        // Klavyeden Enter ile gelen okutma da işlem sürerken kuyruğa alınır
+        if (this.state.loading) {
+            this._scanQueue.push(productBarcode);
+            this.state.productBarcode = '';
+            return;
+        }
 
         this.state.loading = true;
         this.state.error = null;
@@ -369,6 +428,7 @@ export class ShelfTransferScreen extends Component {
 
             if (res.error) {
                 this.state.error = res.error;
+                this._feedbackError();
             } else {
                 this.state.success = res.message;
                 speak('transfer_success');
@@ -390,10 +450,9 @@ export class ShelfTransferScreen extends Component {
             }
         } catch (e) {
             this.state.error = 'Bağlantı hatası: ' + (e.message || e);
-            speak('transfer_error');
-            vibrateError();
+            this._feedbackError();
         }
-        this.state.loading = false;
+        this._finishLoading();
     }
 
     clearProduct() {
@@ -405,6 +464,8 @@ export class ShelfTransferScreen extends Component {
     }
 
     resetAll() {
+        // Eski akışa ait bekleyen okutmalar yeni akışa karışmasın
+        this._scanQueue = [];
         Object.assign(this.state, {
             step: 1,
             sourceShelfBarcode: '',

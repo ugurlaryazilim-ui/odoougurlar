@@ -32,13 +32,8 @@ class ProductApiController(BarcodeApiBase):
 
         # ─── BARKOD ARAMASI ────────────────────────
         if search_type == 'barcode':
-            product = Product.search([('barcode', '=', query)], limit=1)
-            if not product:
-                product = Product.search([('nebim_barcode', 'like', query)], limit=1)
-                if product and query not in (product.nebim_barcode or '').split(','):
-                    product = Product.browse()
-            if not product:
-                product = Product.search([('default_code', '=', query)], limit=1)
+            # barcode → nebim_barcode (virgüllü listede TAM eşleşme) → default_code
+            product = self._find_product(query)
             if product:
                 templates = product.product_tmpl_id
                 show_variants = False
@@ -102,18 +97,17 @@ class ProductApiController(BarcodeApiBase):
         Quant = request.env['stock.quant'].sudo()
 
         if variant_ids:
-            quant_data = Quant.read_group(
+            quant_data = Quant._read_group(
                 domain=[
                     ('product_id', 'in', variant_ids),
                     ('location_id.usage', '=', 'internal'),
                     ('quantity', '>', 0),
                 ],
-                fields=['product_id', 'quantity:sum'],
                 groupby=['product_id'],
+                aggregates=['quantity:sum'],
             )
-            for qd in quant_data:
-                pid = qd['product_id'][0]
-                stock_map[pid] = qd['quantity']
+            for prod, qty_sum in quant_data:
+                stock_map[prod.id] = qty_sum
 
         # Batch prefetch: tüm varyantların attribute value'larını önceden yükle
         all_variants.mapped('product_template_attribute_value_ids.attribute_id')
@@ -148,7 +142,7 @@ class ProductApiController(BarcodeApiBase):
         variants_data.sort(key=sort_key)
 
         # ─── STOK BİLGİLERİ (seçili varyant için lokasyon detayları) ──
-        # read_group'tan toplam stok zaten stock_map'te var, sadece lokasyon detayı lazım
+        # _read_group'tan toplam stok zaten stock_map'te var, sadece lokasyon detayı lazım
         quants = Quant.search([
             ('product_id', '=', product.id),
             ('location_id.usage', '=', 'internal'),

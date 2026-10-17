@@ -1,6 +1,7 @@
 """Ortak yardımcı fonksiyonlar — tüm controller'lar bu mixin'i kullanır."""
 import json
 import logging
+import math
 from datetime import datetime
 import time
 import hashlib
@@ -8,8 +9,13 @@ import hashlib
 from odoo import _, http
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.http import request, Response
+from odoo.service.model import PG_CONCURRENCY_EXCEPTIONS_TO_RETRY
 
 _logger = logging.getLogger(__name__)
+
+
+class _ValidationIncomplete(Exception):
+    """Doğrulama hatasız döndü ama picking done olmadı: savepoint geri alınsın."""
 
 # Basit in-process duplicate guard (son istek hash'i + timestamp)
 _last_requests = {}  # key: user_id + endpoint + args_hash → timestamp
@@ -140,16 +146,45 @@ class BarcodeApiBase(http.Controller):
         picking.invalidate_recordset(['state'])
         return picking.state == 'done'
 
+    def _validate_in_savepoint(self, picking, qty_field='wave_collected_qty', backorder=None):
+        """Paketleme doğrulaması tek savepoint'te: packing_done + sevk miktarı + doğrulama.
+
+        Doğrulama hata verir ya da picking done olmazsa bu çağrının yazımları (quantity,
+        picked, packing_done) geri alınır; önceden hata yutuluyor, picking yarım yazımla
+        kalıyor ve ardından gelen Nebim commit'i onu kalıcılaştırıyordu.
+        Nebim, etiket ve commit bu yardımcının İÇİNDE çağrılmaz (savepoint içinde commit yasak).
+        backorder=None: kısmi sevkte bekleyen sevkiyat açılır, tam sevkte açılmaz.
+
+        Returns: (done: bool, error: str|None)
+        """
+        try:
+            with picking.env.cr.savepoint():
+                picking.packing_done = True
+                _total, partial = self._apply_collected_quantities(picking, qty_field)
+                done = self._safe_validate_picking(
+                    picking, backorder=partial if backorder is None else backorder)
+                if not done:
+                    raise _ValidationIncomplete()
+        except _ValidationIncomplete:
+            _logger.warning("Picking %s doğrulanamadı (sihirbaz tamamlanmadı)", picking.name)
+            return False, _('Sevkiyat doğrulanamadı, Odoo onay adımı tamamlanmadı.')
+        except PG_CONCURRENCY_EXCEPTIONS_TO_RETRY:
+            raise  # eşzamanlı yazım: Odoo isteği baştan yeniden denesin
+        except Exception as e:
+            _logger.warning("Picking %s doğrulama hatası: %s", picking.name, e)
+            return False, self._error_text(e)
+        return True, None
+
     # El terminalinde miktar kutusuna düşen barkod (8690123456789) gibi değerler stok yazmasın
     MAX_QTY = 100000
 
     def _parse_qty(self, value, default=1, allow_zero=False):
-        """İstemciden gelen miktar: sayı değilse, negatifse veya makul üst sınırı aşıyorsa None."""
+        """İstemciden gelen miktar: sayı değilse (nan/inf dahil), negatifse veya makul üst sınırı aşıyorsa None."""
         try:
             qty = float(value if value not in (None, '') else default)
         except (TypeError, ValueError):
             return None
-        if qty != qty or qty > self.MAX_QTY or qty < 0 or (qty == 0 and not allow_zero):
+        if not math.isfinite(qty) or qty > self.MAX_QTY or qty < 0 or (qty == 0 and not allow_zero):
             return None
         return qty
 
@@ -188,14 +223,10 @@ class BarcodeApiBase(http.Controller):
         Odoo picking done olunca batch_id'yi temizliyor.
         all_picking_ids kalıcı alanı varsa onu kullan, yoksa fallback'ler.
         """
-        # 1. Kalıcı alan (tablo yoksa hata verir — yakala)
-        try:
-            pickings = batch.all_picking_ids
-            if pickings:
-                return pickings
-        except Exception:
-            # Tablo henüz oluşturulmamış (modül upgrade edilmemiş)
-            _logger.debug("all_picking_ids tablosu mevcut değil — fallback kullanılacak")
+        # 1. Kalıcı alan
+        pickings = batch.all_picking_ids
+        if pickings:
+            return pickings
 
         # 2. DB sorgusu (batch_id henüz temizlenmemiş olanlar)
         pickings = request.env['stock.picking'].sudo().search([
@@ -284,6 +315,15 @@ class BarcodeApiBase(http.Controller):
         if not product:
             product = Product.search([('default_code', '=', barcode)], limit=1)
         return product
+
+    @staticmethod
+    def _clamp_days(days, default=7, lo=1, hi=90):
+        """Gün sayısını [lo, hi] aralığına kısar (metin gelirse sayıya çevirir)."""
+        try:
+            days = int(days)
+        except (TypeError, ValueError):
+            days = default
+        return max(lo, min(days, hi))
 
     def _get_physical_barcode(self, product):
         """Ürünün fiziksel barkodunu döndür (okutulabilir barkod).

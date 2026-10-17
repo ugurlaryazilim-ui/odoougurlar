@@ -1,6 +1,5 @@
-"""Sipariş Toplama API — picking_list, picking_detail, picking_scan, picking_validate."""
+"""Sipariş Toplama API — picking_list / picking_detail salt okuma; picking_scan / picking_validate kapalı."""
 import logging
-from markupsafe import Markup
 
 from odoo import http
 from odoo.http import request
@@ -42,8 +41,9 @@ class PickingApiController(BarcodeApiBase):
     def picking_detail(self, picking_id=0, **kw):
         """Toplama siparişi detayı — ürün satırları."""
         self._check_internal_user()
-        picking = request.env['stock.picking'].sudo().browse(int(picking_id))
-        if not picking.exists():
+        # Yalnız giden sevkiyat: giriş / iç transfer id'si bu uçtan okunmaz
+        picking = self._get_outgoing_picking(picking_id)
+        if not picking:
             return {'error': 'Sipariş bulunamadı'}
 
         lines = []
@@ -71,80 +71,21 @@ class PickingApiController(BarcodeApiBase):
             'lines': lines,
         }
 
-    # ─── SİPARİŞ TOPLAMA — ÜRÜN TARA ─────────────────────
+    # ─── SİPARİŞ TOPLAMA — YAZMA UÇLARI KAPALI ───────────
+    # Ekran kullanılmıyor (Q3) ve güvenli bir "tamamlandı" ölçütü yok: rota rezervi korunduğu
+    # için (K-1) move.quantity rezervdir, ilerleme değildir. Okutma rezervsiz move'a yazıp kökte
+    # satır açabiliyor, doğrulama okutulmamış siparişi tamamen sevk edebiliyordu (güvenlik K1).
+    # Route'lar eski istemciler hata görsün diye kalır; stoğa ve kayda dokunulmaz.
+    CLOSED_ERROR = 'Sipariş Toplama ekranı kapatıldı; Rota Toplama kullanın'
+
     @http.route('/ugurlar_barcode/api/picking_scan', type='jsonrpc', auth='user')
     def picking_scan(self, picking_id=0, barcode='', quantity=1, **kw):
-        """Toplama sırasında ürün barkodu tara → qty artır."""
+        """Kapalı uç: her çağrıda hata döner."""
         self._check_internal_user()
-        # Duplicate guard: aynı barkod 500ms içinde tekrar taranırsa atla
-        if self._check_duplicate_request('picking_scan', picking_id, barcode):
-            return {'warning': True, 'message': 'Çift okutma algılandı'}
-        picking = request.env['stock.picking'].sudo().browse(int(picking_id))
-        if not picking.exists():
-            return {'error': 'Sipariş bulunamadı'}
-        # Tamamlanmış sevkiyatta miktar değişirse gerçek stok değişir
-        if picking.state in ('done', 'cancel'):
-            return {'error': 'Bu sipariş tamamlanmış veya iptal edilmiş'}
+        return {'error': self.CLOSED_ERROR}
 
-        barcode = barcode.strip()
-        quantity = self._parse_qty(quantity)
-        if quantity is None:
-            return {'error': 'Geçersiz miktar'}
-
-        product = self._find_product(barcode)
-        if not product:
-            return {'error': f'Ürün bulunamadı: {barcode}'}
-
-        target_move = None
-        for move in picking.move_ids:
-            if move.product_id.id == product.id:
-                target_move = move
-                break
-
-        if not target_move:
-            return {'error': f'Bu ürün siparişte yok: {product.name}'}
-
-        new_qty = target_move.quantity + quantity
-        target_move.write({'quantity': new_qty})
-
-        request.env['ugurlar.barcode.operation'].sudo().create({
-            'operation_type': 'picking',
-            'barcode': barcode,
-            'product_id': product.id,
-            'quantity': quantity,
-            'state': 'done',
-        })
-
-        # Varyant chatter log
-        try:
-            user = request.env.user
-            msg = Markup(
-                '<b>&#128230; Siparis Toplama:</b> <em>%s</em> tarafindan '
-                '<b>%s</b> siparisinde <b>%d</b> adet toplandi.'
-            ) % (user.name, picking.name, int(quantity))
-            product.sudo().message_post(
-                body=msg, message_type='notification', subtype_xmlid='mail.mt_note')
-        except Exception as e:
-            _logger.warning('Chatter log hatasi: %s', e)
-
-        return {
-            'success': True,
-            'product_name': product.name,
-            'done_qty': new_qty,
-            'demand_qty': target_move.product_uom_qty,
-            'complete': new_qty >= target_move.product_uom_qty,
-        }
-
-    # ─── SİPARİŞ TOPLAMA — DOĞRULA ──────────────────────
     @http.route('/ugurlar_barcode/api/picking_validate', type='jsonrpc', auth='user')
     def picking_validate(self, picking_id=0, **kw):
-        """Toplama tamamlandı → siparişi doğrula."""
+        """Kapalı uç: her çağrıda hata döner."""
         self._check_internal_user()
-        picking = request.env['stock.picking'].sudo().browse(int(picking_id))
-        if not picking.exists():
-            return {'error': 'Sipariş bulunamadı'}
-        try:
-            picking.button_validate()
-            return {'success': True, 'message': f'{picking.name} doğrulandı'}
-        except Exception as e:
-            return {'error': self._error_text(e, 'Doğrulama hatası: ')}
+        return {'error': self.CLOSED_ERROR}

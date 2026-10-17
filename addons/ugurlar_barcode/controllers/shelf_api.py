@@ -351,6 +351,10 @@ class ShelfApiController(BarcodeApiBase):
         if not target_loc:
             return {'error': f'Hedef raf bulunamadı: {target_shelf_barcode}'}
 
+        # Barkod ve ad gibi farklı yazımlar aynı lokasyona çözülebilir
+        if source_loc.id == target_loc.id:
+            return {'error': 'Kaynak ve hedef raf aynı olamaz'}
+
         # Güvenli taşıma (her iki tarafta lock)
         success, error = self._safe_move_quant(product, source_loc, target_loc, quantity)
         if not success:
@@ -414,6 +418,10 @@ class ShelfApiController(BarcodeApiBase):
         if not target_loc:
             return {'error': f'Hedef raf bulunamadi: {target_barcode}'}
 
+        # Barkod ve ad gibi farklı yazımlar aynı lokasyona çözülebilir
+        if source_loc.id == target_loc.id:
+            return {'error': 'Kaynak ve hedef raf ayni olamaz'}
+
         # Kaynak raftaki tüm ürünler
         StockQuant = request.env['stock.quant'].sudo()
         source_quants = StockQuant.search([
@@ -434,15 +442,34 @@ class ShelfApiController(BarcodeApiBase):
 
         moved_count = 0
         total_quantity = 0
+        skipped = []
+        reserved_skips = 0
 
-        for quant in source_quants:
-            product = quant.product_id
-            qty = quant.quantity
+        # Ürün bazında: aynı ürünün birden çok quant'ı tek seferde taşınır (kısmi taşıma yok)
+        for product in source_quants.mapped('product_id'):
+            qty, reserved = self._shelf_qty(product, source_loc)
+            if qty <= 0:
+                continue
+            # Rezervi olan ürün tamamen atlanır (kısmi taşıma yok); neden açıkça rezervdir.
+            # _safe_move_quant da reddederdi ama "Yetersiz stok ... İstenen" metniyle.
+            if reserved > 0:
+                reserved_skips += 1
+                skipped.append({
+                    'product_name': product.name,
+                    'barcode': product.barcode or '',
+                    'reason': f'{reserved:g} adet rezerve (siparişe ayrılmış); ürün taşınmadı',
+                })
+                continue
 
             # Güvenli taşıma (lock ile)
-            success, _ = self._safe_move_quant(product, source_loc, target_loc, qty,
-                                               'Mobil: Tüm Rafı Taşı')
+            success, error = self._safe_move_quant(product, source_loc, target_loc, qty,
+                                                   'Mobil: Tüm Rafı Taşı')
             if not success:
+                skipped.append({
+                    'product_name': product.name,
+                    'barcode': product.barcode or '',
+                    'reason': error or 'Taşınamadı',
+                })
                 continue
 
             # İşlem kaydı
@@ -469,13 +496,20 @@ class ShelfApiController(BarcodeApiBase):
             moved_count += 1
             total_quantity += qty
 
+        message = f'{moved_count} urun {source_loc.complete_name} -> {target_loc.complete_name} tasindi'
+        if skipped:
+            message += f'; {len(skipped)} urun atlandi'
+            if reserved_skips:
+                message += f' ({reserved_skips} urun rezerve oldugu icin)'
         return {
             'success': True,
             'moved_count': moved_count,
             'total_quantity': int(total_quantity),
             'source': source_loc.complete_name,
             'target': target_loc.complete_name,
-            'message': f'{moved_count} urun {source_loc.complete_name} -> {target_loc.complete_name} tasindi',
+            'skipped': skipped,
+            'skipped_count': len(skipped),
+            'message': message,
         }
 
     # ─── TOPLU RAF SİLME ─────────────────────────────────────
@@ -503,10 +537,24 @@ class ShelfApiController(BarcodeApiBase):
         user = request.env.user
         cleared_count = 0
         total_quantity = 0
+        skipped = []
 
-        for quant in quants:
-            product = quant.product_id
-            qty = quant.quantity
+        # Ürün bazında: rezervi olan ürün tamamen atlanır (kısmi çıkarma yok), siparişin
+        # ayırdığı adet raftan düşülmez. _safe_update_quant rezervi kendisi kontrol etmez.
+        for product in quants.mapped('product_id'):
+            qty, reserved = self._shelf_qty(product, location)
+            if qty <= 0:
+                continue
+            if reserved > 0:
+                skipped.append({
+                    'product_name': product.name,
+                    'barcode': product.barcode or '',
+                    'reason': f'{reserved:g} adet rezerve (siparişe ayrılmış)',
+                })
+                continue
+
+            # Güvenli kaldırma (lock ile)
+            self._safe_update_quant(product, location, -qty, 'Mobil: Rafı Boşalt')
 
             # İşlem kaydı
             request.env['ugurlar.barcode.operation'].sudo().create({
@@ -527,16 +575,18 @@ class ShelfApiController(BarcodeApiBase):
             ) % (user.name, int(qty), location.complete_name)
             self._log_chatter(product, msg)
 
-            # Güvenli kaldırma (lock ile)
-            self._safe_update_quant(product, location, -qty, 'Mobil: Rafı Boşalt')
-
             cleared_count += 1
             total_quantity += qty
 
+        message = f'{cleared_count} urun {location.complete_name} rafindan kaldirildi'
+        if skipped:
+            message += f'; {len(skipped)} urun rezerve oldugu icin atlandi'
         return {
             'success': True,
             'cleared_count': cleared_count,
             'total_quantity': int(total_quantity),
             'shelf': location.complete_name,
-            'message': f'{cleared_count} urun {location.complete_name} rafindan kaldirildi',
+            'skipped': skipped,
+            'skipped_count': len(skipped),
+            'message': message,
         }

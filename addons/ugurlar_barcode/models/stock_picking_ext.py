@@ -106,13 +106,15 @@ class StockPickingExt(models.Model):
                 new_batch.sudo().write({'all_picking_ids': [(4, picking.id)]})
         return res
 
-    def _check_availability_status(self, primary_warehouse, fallback_warehouse=None, return_warehouse=None):
+    def _check_availability_status(self, primary_warehouse, fallback_warehouse=None, return_warehouse=None,
+                                   write=True):
         """Ürün stoğunu kontrol et ve durumu ata.
 
         Args:
             primary_warehouse: Ana depo (İNTERNET MAĞAZA DEPO)
             fallback_warehouse: Yedek depo (HEYKEL MAĞAZA DEPO)
             return_warehouse: İade deposu (MAĞAZA İADE DEPOSU)
+            write: False ise yalnız durumu hesaplar, picking'e yazmaz (teşhis).
 
         Returns:
             'available' | 'partial' | 'other_warehouse' | 'return_warehouse' | 'unavailable'
@@ -121,10 +123,11 @@ class StockPickingExt(models.Model):
         Quant = self.env['stock.quant'].sudo()
 
         if not self.move_ids:
-            self.write({
-                'availability_status': 'unavailable',
-                'source_warehouse_info': '',
-            })
+            if write:
+                self.write({
+                    'availability_status': 'unavailable',
+                    'source_warehouse_info': '',
+                })
             return 'unavailable'
 
         # ── TOPLU STOK SORGUSU (N+1 önleme) ──
@@ -141,6 +144,14 @@ class StockPickingExt(models.Model):
             for q in primary_quants:
                 primary_qty_map.setdefault(q.product_id.id, 0)
                 primary_qty_map[q.product_id.id] += (q.quantity - q.reserved_quantity)
+            # Bu siparişin kendi rezervi serbest sayılır (rota rezervi korunur, K-1);
+            # quant.reserved_quantity onu da içerir. Ürün biriminde (quantity_product_uom).
+            own_lines = self.move_ids.filtered(
+                lambda m: m.state not in ('done', 'cancel')).move_line_ids.filtered(
+                lambda ml: ml.location_id._child_of(primary_stock_loc))
+            for ml in own_lines:
+                primary_qty_map.setdefault(ml.product_id.id, 0)
+                primary_qty_map[ml.product_id.id] += ml.quantity_product_uom
 
         # Yedek depo: tüm ürünler için tek sorgu
         fallback_qty_map = {}
@@ -172,7 +183,8 @@ class StockPickingExt(models.Model):
         available_in_return = 0
 
         for move in self.move_ids:
-            demand = move.product_uom_qty
+            # Quant haritaları ürün biriminde; talep de ürün biriminde (düzine -> 12 adet)
+            demand = move.product_qty
             primary_qty = max(0, primary_qty_map.get(move.product_id.id, 0))
 
             if primary_qty >= demand:
@@ -213,10 +225,11 @@ class StockPickingExt(models.Model):
             status = 'unavailable'
             info = 'Hiçbir depoda stok yok'
 
-        self.write({
-            'availability_status': status,
-            'source_warehouse_info': info,
-        })
+        if write:
+            self.write({
+                'availability_status': status,
+                'source_warehouse_info': info,
+            })
 
         return status
 

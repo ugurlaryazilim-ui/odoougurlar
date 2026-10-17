@@ -15,6 +15,21 @@ class OperationsApiController(BarcodeApiBase):
     """Stok hareketleri, etiket, toplu işlem ve performans API'leri."""
 
     # ─── STOK HAREKET RAPORU ──────────────────────────────
+    @staticmethod
+    def _move_kind(move):
+        """Hareketin türü: filtre, satır etiketi ve sayaçlar bu tek tanımı kullanır.
+
+        - picking tipi varsa onun kodu (incoming / outgoing / internal / ...)
+        - picking'siz ve kaynak + hedef iç lokasyon ise 'internal' (mobil raf taşıma)
+        - diğer picking'siz hareketler 'adjustment' (envanter/sayım düzeltmesi, hurda)
+        `stock_movements` içindeki 'internal' domain'i bu tanımın SQL karşılığıdır.
+        """
+        if move.picking_type_id:
+            return move.picking_type_id.code
+        if move.location_id.usage == 'internal' and move.location_dest_id.usage == 'internal':
+            return 'internal'
+        return 'adjustment'
+
     @http.route('/ugurlar_barcode/api/stock_movements', type='jsonrpc', auth='user')
     def stock_movements(self, days=7, product_barcode='', move_type='all', limit=200, **kw):
         """Stok hareketlerini listele (HamurLabs uyumlu gelişmiş yapı)."""
@@ -35,7 +50,14 @@ class OperationsApiController(BarcodeApiBase):
         elif move_type == 'out':
             domain.append(('picking_type_id.code', '=', 'outgoing'))
         elif move_type == 'internal':
-            domain.append(('picking_type_id.code', '=', 'internal'))
+            # `_move_kind(m) == 'internal'` ile aynı tanım: picking tipi olan iç transfer VEYA
+            # picking'siz mobil raf hareketi (kaynak + hedef iç lokasyon; envanter düzeltmesi dışarıda).
+            domain += [
+                '|', ('picking_type_id.code', '=', 'internal'),
+                '&', '&', ('picking_type_id', '=', False),
+                ('location_id.usage', '=', 'internal'),
+                ('location_dest_id.usage', '=', 'internal'),
+            ]
 
         # Ürün bilgisi (barkod ile arama yapıldıysa)
         product_info = None
@@ -68,11 +90,15 @@ class OperationsApiController(BarcodeApiBase):
             'incoming': 'Giriş',
             'outgoing': 'Çıkış',
             'internal': 'İç Transfer',
+            'adjustment': 'Sayım/Düzeltme',
         }
 
         result = []
         for m in moves:
-            mt = m.picking_type_id.code if m.picking_type_id else 'internal'
+            mt = self._move_kind(m)
+            # Düzeltme hedefi iç lokasyon değilse stok azalmıştır (ekranda '-')
+            is_decrease = mt == 'outgoing' or (
+                mt == 'adjustment' and m.location_dest_id.usage != 'internal')
             result.append({
                 'id': m.id,
                 'product_name': m.product_id.name,
@@ -87,6 +113,7 @@ class OperationsApiController(BarcodeApiBase):
                 'picking_name': m.picking_id.name if m.picking_id else '',
                 'move_type': mt,
                 'move_type_label': type_labels.get(mt, mt),
+                'is_decrease': is_decrease,
             })
 
         in_count = sum(1 for r in result if r['move_type'] == 'incoming')
@@ -194,12 +221,16 @@ class OperationsApiController(BarcodeApiBase):
     def operator_performance(self, days=7, **kw):
         """Operatör performans istatistikleri."""
         self._check_internal_user()
-        date_from = datetime.now() - timedelta(days=int(days))
+        days = self._clamp_days(days, default=7)
+        date_from = datetime.now() - timedelta(days=days)
 
-        operations = request.env['ugurlar.barcode.operation'].sudo().search([
-            ('create_date', '>=', date_from),
-            ('state', '=', 'done'),
-        ])
+        # Sayımlar veritabanında gruplanır (kayıtlar Python'a yüklenmez): limit gerekmez, toplamlar
+        # kesilmez. Yük `days` ≤ 90 sınırı ve gruplama (kullanıcı x tür) ile sınırlıdır.
+        groups = request.env['ugurlar.barcode.operation'].sudo()._read_group(
+            [('create_date', '>=', date_from), ('state', '=', 'done')],
+            groupby=['user_id', 'operation_type'],
+            aggregates=['__count', 'create_date:max'],
+        )
 
         user_stats = {}
         type_labels = {
@@ -215,35 +246,34 @@ class OperationsApiController(BarcodeApiBase):
         }
 
         type_totals = {}
-        for op in operations:
-            uid = op.user_id.id
-            uname = op.user_id.name or 'Bilinmeyen'
-
+        total_operations = 0
+        for user, op_type, count, last_create in groups:
+            uid = user.id if user else False
             if uid not in user_stats:
                 user_stats[uid] = {
                     'user_id': uid,
-                    'user_name': uname,
+                    'user_name': (user.name if user else '') or 'Bilinmeyen',
                     'total': 0,
                     'types': {},
                     'last_activity': '',
                 }
 
-            user_stats[uid]['total'] += 1
-            op_type = op.operation_type or 'unknown'
-            type_label = type_labels.get(op_type, op_type)
-            user_stats[uid]['types'][type_label] = user_stats[uid]['types'].get(type_label, 0) + 1
-            # Toplam tip istatistikleri (tek döngüde)
-            type_totals[type_label] = type_totals.get(type_label, 0) + 1
+            total_operations += count
+            user_stats[uid]['total'] += count
+            type_label = type_labels.get(op_type or 'unknown', op_type or 'unknown')
+            user_stats[uid]['types'][type_label] = user_stats[uid]['types'].get(type_label, 0) + count
+            type_totals[type_label] = type_totals.get(type_label, 0) + count
 
-            op_date = str(self._local_dt(op.create_date))[:16]
-            if op_date > user_stats[uid]['last_activity']:
-                user_stats[uid]['last_activity'] = op_date
+            if last_create:
+                op_date = str(self._local_dt(last_create))[:16]
+                if op_date > user_stats[uid]['last_activity']:
+                    user_stats[uid]['last_activity'] = op_date
 
         sorted_users = sorted(user_stats.values(), key=lambda x: x['total'], reverse=True)
 
         return {
             'operators': sorted_users,
             'type_totals': type_totals,
-            'total_operations': len(operations),
+            'total_operations': total_operations,
             'period_days': int(days),
         }

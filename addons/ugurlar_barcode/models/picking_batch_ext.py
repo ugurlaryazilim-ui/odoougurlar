@@ -55,8 +55,10 @@ class StockPickingBatchExt(models.Model):
                 len(p.move_ids) for p in pickings)
             batch.available_count = len(
                 pickings.filtered(lambda p: p.availability_status == 'available'))
-            batch.other_warehouse_count = len(
-                pickings.filtered(lambda p: p.availability_status == 'other_warehouse'))
+            # "Başka Depoda": yedek, ana+başka depo karışımı ve iade deposu (teşhis gruplamasıyla
+            # aynı); böylece Stokta + Başka Depoda + Stoksuz toplamı total_orders'a eşit olur
+            batch.other_warehouse_count = len(pickings.filtered(
+                lambda p: p.availability_status in ('other_warehouse', 'partial', 'return_warehouse')))
             batch.unavailable_count = len(
                 pickings.filtered(lambda p: p.availability_status == 'unavailable'))
 
@@ -64,49 +66,62 @@ class StockPickingBatchExt(models.Model):
         """picking_ids değiştiğinde all_picking_ids'i de güncelle."""
         res = super().write(vals)
         if 'picking_ids' in vals:
-            try:
-                for batch in self:
-                    # Mevcut picking_ids'i all_picking_ids'e ekle (sadece ekleme, çıkarma yok)
-                    current_all = set(batch.all_picking_ids.ids)
-                    current_picking = batch.picking_ids.ids
-                    new_ids = [pid for pid in current_picking if pid not in current_all]
-                    if new_ids:
-                        batch.all_picking_ids = [(4, pid) for pid in new_ids]
-            except Exception:
-                pass  # Tablo henüz oluşturulmamış olabilir
+            for batch in self:
+                # Mevcut picking_ids'i all_picking_ids'e ekle (sadece ekleme, çıkarma yok).
+                # Hata yutulmaz: sessiz bir except kalıcı listeyi sessizce eksik bırakırdı
+                current_all = set(batch.all_picking_ids.ids)
+                new_ids = [pid for pid in batch.picking_ids.ids if pid not in current_all]
+                if new_ids:
+                    batch.all_picking_ids = [(4, pid) for pid in new_ids]
         return res
 
     @api.model
-    def _cron_cleanup_route_batches(self):
+    def _cron_cleanup_route_batches(self, batch_size=500, max_pages=20):
         """Biten / boş rotaları kapatır (günlük).
 
         Rotayı kapatan bir akış yoktu: ağustostan kalan rotalar "Devam" görünüyordu.
         Yalnız kesin durumlar: tüm siparişleri sevk / iptal edilmiş rota → Tamamlandı
         (hepsi iptalse İptal), hiç siparişi kalmamış rota → İptal. Açık siparişi olan
         rotaya dokunulmaz.
+
+        Açık siparişli rotalar sabit bir `limit` sonucunu tıkamasın diye id'ye göre sayfalanır
+        (`batch_size` kayıtlık sayfalar); bir çalışmada en çok `max_pages` sayfa işlenir.
         """
         cutoff = fields.Datetime.now() - timedelta(days=1)
-        batches = self.search([
+        domain = [
             ('state', 'in', ('draft', 'in_progress')),
             '|', ('schedule_time', '<', cutoff),
             '&', ('schedule_time', '=', False), ('create_date', '<', cutoff),
-        ], limit=500, order='id')
+        ]
         done = cancelled = 0
-        for batch in batches:
-            pickings = batch.all_picking_ids | batch.picking_ids
-            states = set(pickings.mapped('state'))
-            if pickings and not states <= {'done', 'cancel'}:
-                continue
-            new_state = 'done' if 'done' in states else 'cancel'
-            try:
-                with self.env.cr.savepoint():
-                    batch.write({'state': new_state})
-                if new_state == 'done':
-                    done += 1
-                else:
-                    cancelled += 1
-            except Exception as e:
-                _logger.warning("Rota %s kapatılamadı: %s", batch.name, e)
+        last_id = 0
+        for _page in range(max_pages):
+            batches = self.search(domain + [('id', '>', last_id)], limit=batch_size, order='id')
+            if not batches:
+                break
+            last_id = batches[-1].id
+            for batch in batches:
+                pickings = batch.all_picking_ids | batch.picking_ids
+                states = set(pickings.mapped('state'))
+                if pickings and not states <= {'done', 'cancel'}:
+                    continue
+                new_state = 'done' if 'done' in states else 'cancel'
+                try:
+                    with self.env.cr.savepoint():
+                        batch.write({'state': new_state})
+                    if new_state == 'done':
+                        done += 1
+                    else:
+                        cancelled += 1
+                except Exception as e:
+                    _logger.warning("Rota %s kapatılamadı: %s", batch.name, e)
+            if len(batches) < batch_size:
+                break
+        else:
+            # Tüm sayfalar dolu çıktı: sonraki rotalar bu çalışmada işlenmedi
+            _logger.warning(
+                "Rota temizliği sayfa tavanına ulaştı (%d sayfa x %d rota); kalan rotalar "
+                "sonraki çalışmaya kaldı", max_pages, batch_size)
         if done or cancelled:
             _logger.info("Rota temizliği: %d rota tamamlandı, %d boş/iptal rota kapatıldı",
                          done, cancelled)

@@ -55,7 +55,6 @@ export class MainMenu extends Component {
             { key: 'shelf_validate', icon: 'fa-check-square-o', title: 'Raf Ürün Doğrulama', desc: 'Raftaki ürünleri doğrula', color: 'validate', disabled: false },
             { key: 'bulk_putaway', icon: 'fa-cubes', title: 'Toplu Ürün Raflama', desc: 'Rafa sürekli ürün tara', color: 'bulk-putaway', disabled: false },
             { key: 'shelf_clear_all', icon: 'fa-trash-o', title: 'Toplu Raf Silme', desc: 'Raftaki tüm ürünleri kaldır', color: 'clear-all', disabled: false },
-            { key: 'picking', icon: 'fa-shopping-cart', title: 'Sipariş Toplama', desc: 'Sipariş ürünlerini topla', color: 'picking', disabled: false },
             { key: 'batch_picking', icon: 'fa-list-ol', title: 'Rota Toplama', desc: 'Toplama listesi ile raf raf topla', color: 'batch-picking', disabled: false },
             { key: 'packing', icon: 'fa-gift', title: 'Paketleme & Fatura', desc: 'Rota ile eşleştir ve faturala', color: 'packing', disabled: false },
             { key: 'counting', icon: 'fa-calculator', title: 'Sayım', desc: 'Raf sayımı yap', color: 'counting', disabled: false },

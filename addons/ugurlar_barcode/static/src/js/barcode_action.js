@@ -27,10 +27,10 @@ import { CargoLabelDesigner } from "./screens/cargo_label_designer";
 import { InventoryMatrix } from "./screens/inventory_matrix";
 import { loadTtsConfig } from "./sound_utils";
 
-// Geçerli ekran isimleri
+// Geçerli ekran isimleri ('picking' / Sipariş Toplama kapatıldı: hash ve sessionStorage ana menüye düşer)
 const VALID_SCREENS = new Set([
     'main', 'stock_search', 'sales_discount', 'shelf_search', 'shelf_control',
-    'putaway', 'shelf_transfer', 'shelf_move_all', 'shelf_validate', 'bulk_putaway', 'shelf_clear_all', 'picking', 'batch_picking', 'counting', 'movements',
+    'putaway', 'shelf_transfer', 'shelf_move_all', 'shelf_validate', 'bulk_putaway', 'shelf_clear_all', 'batch_picking', 'counting', 'movements',
     'labels', 'label_designer', 'bulk', 'performance', 'packing', 'cargo_label_designer', 'inventory_matrix',
 ]);
 
@@ -160,6 +160,8 @@ class BarcodeApp extends Component {
 
     // ═══ NAVİGASYON ═══
     navigate(screen) {
+        // Kapatılmış / bilinmeyen ekran (ör. 'picking') açılmaz
+        if (!VALID_SCREENS.has(screen)) screen = 'main';
         if (this.state.screen === screen) return;
         this.state.screen = screen;
         this._saveToStorage(screen);

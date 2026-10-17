@@ -201,13 +201,20 @@ export class LabelScreen extends Component {
     async loadTemplates() {
         try {
             const res = await BarcodeService.labelTemplateList();
+            if (res && res.error) {
+                // Sunucu {error} döndürdü (yetki vb.): boş şablon listesi "şablon yok" gibi görünmesin
+                this.state.error = 'Şablonlar yüklenemedi: ' + res.error;
+                return;
+            }
             this.state.templates = res.templates || [];
             const def = this.state.templates.find(t => t.is_default);
             if (def) {
                 this.state.selectedTemplateId = def.id;
                 this.state.selectedTemplate = def;
             }
-        } catch (e) { /* sessiz */ }
+        } catch (e) {
+            this.state.error = 'Şablonlar yüklenemedi: ' + (e.message || e);
+        }
     }
 
     onTemplateChange(ev) {
@@ -528,10 +535,13 @@ export class LabelScreen extends Component {
 
     _generateBarcodeImg(code, widthMm, heightMm) {
         if (!code) return '';
-        // 300 DPI: 1mm ≈ 11.8px → widthMm * 12 ve heightMm * 12 ile yüksek çözünürlük
-        const imgW = Math.round(widthMm * 12);
-        const imgH = Math.round(heightMm * 12);
-        return `<img src="/report/barcode/Code128/${encodeURIComponent(code)}?width=${imgW}&amp;height=${imgH}&amp;humanreadable=1" style="width:${widthMm}mm; height:${heightMm}mm; display:block; object-fit:fill; image-rendering:-moz-crisp-edges; image-rendering:-webkit-crisp-edges; image-rendering:pixelated;"/>`;
+        // 300 DPI: 1mm ≈ 11.8px → genişlik ve yükseklik mm değeri * 12 ile yüksek çözünürlük
+        // Şablondan gelen ölçüler HTML'e ham girmesin: sayıya ya da varsayılana düşer
+        const wMm = safeNum(widthMm, 40);
+        const hMm = safeNum(heightMm, 15);
+        const imgW = Math.round(wMm * 12);
+        const imgH = Math.round(hMm * 12);
+        return `<img src="/report/barcode/Code128/${encodeURIComponent(code)}?width=${imgW}&amp;height=${imgH}&amp;humanreadable=1" style="width:${wMm}mm; height:${hMm}mm; display:block; object-fit:fill; image-rendering:-moz-crisp-edges; image-rendering:-webkit-crisp-edges; image-rendering:pixelated;"/>`;
     }
 
     _getFieldValue(el, label) {

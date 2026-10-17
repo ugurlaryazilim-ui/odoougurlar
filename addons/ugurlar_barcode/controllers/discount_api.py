@@ -8,6 +8,13 @@ from .base_api import BarcodeApiBase
 
 _logger = logging.getLogger(__name__)
 
+# İstemciye yalnız bu sabit metinler gider (ayrıntı yalnız log'a). Bağlantı hatasında yeniden
+# denemek anlamlıdır; Nebim iş kuralı hatasında (Nebim'e ulaşıldı, istek reddedildi) değildir.
+NEBIM_CONN_ERROR_TEXT = "Nebim'e iletilemedi. Bağlantıyı kontrol edip tekrar deneyin."
+NEBIM_RULE_ERROR_TEXT = "Nebim hesaplamayı reddetti. Ayrıntı sistem kaydında, yöneticiye bildirin."
+NEBIM_CUSTOMER_CONN_ERROR_TEXT = "Nebim'e iletilemedi, müşteri aranamadı. Bağlantıyı kontrol edip tekrar deneyin."
+NEBIM_CUSTOMER_RULE_ERROR_TEXT = "Nebim müşteri aramasını reddetti. Ayrıntı sistem kaydında, yöneticiye bildirin."
+
 
 class DiscountApiController(BarcodeApiBase):
     """Satış İndirimleri API'si."""
@@ -55,11 +62,13 @@ class DiscountApiController(BarcodeApiBase):
                 return {'error': 'Nebim V3 indirim hesaplama sonucu boş döndü.'}
             
             if isinstance(results, dict) and results.get('ExceptionMessage'):
-                return {'error': f"Nebim Hatası: {results.get('ExceptionMessage')}"}
+                # Ayrıntı yalnız log'a; istemciye ayrı `nebim_error` alanı (bağlantı bilgisi sızmaz)
+                _logger.error('Nebim V3 İndirim Hesaplama Hatası: %s', results.get('ExceptionMessage'))
+                return {'nebim_error': NEBIM_RULE_ERROR_TEXT}
 
         except Exception as e:
             _logger.error('Nebim V3 İndirim Hesaplama Hatası: %s', str(e))
-            return {'error': self._error_text(e, 'İndirim hesaplanırken hata oluştu: ')}
+            return {'nebim_error': NEBIM_CONN_ERROR_TEXT}
 
         # 3. Odoo'dan Ürün Resimlerini (image_url) ve Ek Bilgileri Ekle
         # Nebim'den dönen Barcode'ları toplayıp Odoo'da arıyoruz.
@@ -160,7 +169,11 @@ class DiscountApiController(BarcodeApiBase):
             proc_params = [{'Name': 'SearchText', 'Value': query}]
             sp_name = request.env['ir.config_parameter'].sudo().get_param('odoougurlar.nebim_sp_search_customer', 'sp_Odoougurlar_SearchCustomer')
             results = NebimConnector.run_proc(sp_name, params=proc_params)
-            
+
+            if isinstance(results, dict) and results.get('ExceptionMessage'):
+                _logger.error('Nebim V3 Müşteri Arama Hatası: %s', results.get('ExceptionMessage'))
+                return {'customers': [], 'nebim_error': NEBIM_CUSTOMER_RULE_ERROR_TEXT}
+
             customers = []
             if results and isinstance(results, list):
                 for i, row in enumerate(results):
@@ -174,5 +187,5 @@ class DiscountApiController(BarcodeApiBase):
             return {'customers': customers}
         except Exception as e:
             _logger.error('Nebim V3 Müşteri Arama Hatası: %s', str(e))
-            return {'customers': []}
+            return {'customers': [], 'nebim_error': NEBIM_CUSTOMER_CONN_ERROR_TEXT}
 

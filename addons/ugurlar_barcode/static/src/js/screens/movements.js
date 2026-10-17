@@ -4,6 +4,11 @@ import { Component, useState, xml, onWillUnmount, onMounted, useRef } from "@odo
 import { BarcodeService } from "../barcode_service";
 import { vibrate, vibrateError, speak } from "../sound_utils";
 
+// Filtre seçicisindeki geçerli değerler (sessionStorage'dan okunan değer bunlarla doğrulanır).
+// 0 = "Tümü" (seçicideki <option value="0">; sunucu da days=0'ı tarih filtresiz işler)
+const MOVEMENT_DAYS = [0, 1, 3, 7, 14, 30, 90, 365];
+const MOVEMENT_TYPES = ['all', 'in', 'out', 'internal'];
+
 export class MovementsScreen extends Component {
     static template = xml`
         <div class="ub-screen">
@@ -159,7 +164,7 @@ export class MovementsScreen extends Component {
                                 </thead>
                                 <tbody>
                                     <t t-foreach="paginatedMovements" t-as="m" t-key="m.id">
-                                        <tr t-attf-class="{{m.move_type === 'incoming' ? 'ub-move-row-in' : m.move_type === 'outgoing' ? 'ub-move-row-out' : 'ub-move-row-int'}}"
+                                        <tr t-attf-class="{{moveRowClass(m)}}"
                                             t-on-click="() => this.showDetail(m)">
                                             <td style="white-space:nowrap; font-size:0.82rem;" t-esc="m.date"/>
                                             <td>
@@ -167,12 +172,12 @@ export class MovementsScreen extends Component {
                                                 <div class="ub-barcode-cell" t-esc="m.product_barcode"/>
                                             </td>
                                             <td>
-                                                <span t-attf-class="badge {{m.move_type === 'incoming' ? 'ub-badge-in' : m.move_type === 'outgoing' ? 'ub-badge-out' : 'ub-badge-int'}}"
+                                                <span t-attf-class="badge {{moveBadgeClass(m)}}"
                                                       t-esc="m.move_type_label"/>
                                             </td>
                                             <td class="text-center">
-                                                <strong t-attf-class="{{m.move_type === 'outgoing' ? 'text-danger' : 'text-success'}}"
-                                                        t-esc="(m.move_type === 'outgoing' ? '-' : '+') + m.quantity"/>
+                                                <strong t-attf-class="{{isDecrease(m) ? 'text-danger' : 'text-success'}}"
+                                                        t-esc="(isDecrease(m) ? '-' : '+') + m.quantity"/>
                                             </td>
                                             <td style="font-size:0.78rem; color:#666;">
                                                 <t t-esc="shortLoc(m.source)"/> → <t t-esc="shortLoc(m.destination)"/>
@@ -239,7 +244,7 @@ export class MovementsScreen extends Component {
                             </div>
                             <div class="ub-shelf-detail-row">
                                 <span class="ub-shelf-detail-label">Hareket Tipi:</span>
-                                <span t-attf-class="badge {{state.detailItem.move_type === 'incoming' ? 'ub-badge-in' : state.detailItem.move_type === 'outgoing' ? 'ub-badge-out' : 'ub-badge-int'}}"
+                                <span t-attf-class="badge {{moveBadgeClass(state.detailItem)}}"
                                       t-esc="state.detailItem.move_type_label"/>
                             </div>
                             <div class="ub-shelf-detail-row">
@@ -269,10 +274,12 @@ export class MovementsScreen extends Component {
 
     setup() {
         this.barcodeInputRef = useRef('barcodeInput');
+        // Filtreler (barkod/dönem/tür) sayfa yenilemede ve ekrana dönüşte korunur
+        const saved = this._loadFilters();
         this.state = useState({
-            days: 7,
-            moveType: 'all',
-            productBarcode: '',
+            days: saved.days ?? 7,
+            moveType: saved.moveType ?? 'all',
+            productBarcode: saved.productBarcode ?? '',
             loading: false,
             error: null,
             result: null,
@@ -296,6 +303,26 @@ export class MovementsScreen extends Component {
         onWillUnmount(() => {
             if (this._unsub) this._unsub();
         });
+    }
+
+    // ─── HAREKET TÜRÜ SINIFLARI ─────────────────────
+    // Tür (move_type) sunucudaki `_move_kind` ile belirlenir; 'adjustment' = sayım/envanter düzeltmesi
+    isDecrease(m) {
+        return !!(m.is_decrease || m.move_type === 'outgoing');
+    }
+
+    moveRowClass(m) {
+        if (m.move_type === 'incoming') return 'ub-move-row-in';
+        if (m.move_type === 'outgoing') return 'ub-move-row-out';
+        if (m.move_type === 'adjustment') return 'ub-move-row-adj';
+        return 'ub-move-row-int';
+    }
+
+    moveBadgeClass(m) {
+        if (m.move_type === 'incoming') return 'ub-badge-in';
+        if (m.move_type === 'outgoing') return 'ub-badge-out';
+        if (m.move_type === 'adjustment') return 'ub-badge-adj';
+        return 'ub-badge-int';
     }
 
     // ─── COMPUTED ──────────────────────────────────
@@ -365,6 +392,37 @@ export class MovementsScreen extends Component {
         this.state.page = 1;
     }
 
+    // ─── FİLTRE SAKLAMA (sessionStorage) ──────────
+    _loadFilters() {
+        try {
+            const raw = sessionStorage.getItem('ub_movements_filters');
+            const f = raw ? JSON.parse(raw) : {};
+            // Bozuk/kurcalanmış değerler varsayılana düşer (seçicideki geçerli değerler dışı kabul edilmez)
+            // Yalnız sayı veya sayısal metin kabul edilir (Number('') ve Number(false) 0 verir: "Tümü" sayılmasın)
+            const rawDays = f.days;
+            const daysOk = (typeof rawDays === 'number')
+                || (typeof rawDays === 'string' && rawDays.trim() !== '');
+            const days = daysOk ? Number(rawDays) : NaN;
+            return {
+                days: MOVEMENT_DAYS.includes(days) ? days : undefined,
+                moveType: MOVEMENT_TYPES.includes(f.moveType) ? f.moveType : undefined,
+                productBarcode: typeof f.productBarcode === 'string' ? f.productBarcode : undefined,
+            };
+        } catch (e) {
+            return {};
+        }
+    }
+
+    _saveFilters() {
+        try {
+            sessionStorage.setItem('ub_movements_filters', JSON.stringify({
+                days: this.state.days,
+                moveType: this.state.moveType,
+                productBarcode: this.state.productBarcode,
+            }));
+        } catch (e) { /* özel/dolu depolama: filtre yalnız bu oturumda tutulmaz */ }
+    }
+
     // ─── EVENTS ───────────────────────────────────
     onDaysChange(ev) { this.state.days = ev.target.value; }
     onTypeChange(ev) { this.state.moveType = ev.target.value; }
@@ -387,6 +445,7 @@ export class MovementsScreen extends Component {
 
     // ─── DATA ─────────────────────────────────────
     async loadMovements() {
+        this._saveFilters();
         this.state.loading = true;
         this.state.error = null;
         this.state.result = null;
@@ -408,7 +467,7 @@ export class MovementsScreen extends Component {
             speak('movements_error');
         }
         this.state.loading = false;
-        this.state.productBarcode = '';
+        // Ürün filtresi silinmez: Dönem/Tür değişince aynı ürün için yeniden aranır
         if (this.barcodeInputRef.el) { this.barcodeInputRef.el.focus(); }
     }
 

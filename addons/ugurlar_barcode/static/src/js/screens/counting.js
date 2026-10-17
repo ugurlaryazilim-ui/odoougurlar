@@ -5,6 +5,7 @@ import { ConfirmationDialog } from "@web/core/confirmation_dialog/confirmation_d
 import { useService } from "@web/core/utils/hooks";
 import { BarcodeService, AudioFeedback } from "../barcode_service";
 import { vibrate, vibrateError } from "../sound_utils";
+import { openCameraScanner } from "../camera_scanner";
 
 export class CountingScreen extends Component {
     static template = xml`
@@ -218,6 +219,7 @@ export class CountingScreen extends Component {
                                         <td>
                                             <span t-if="r.status === 'updated'" class="badge" style="background:#27ae60;color:#fff;">✓</span>
                                             <span t-if="r.status === 'not_found'" class="badge" style="background:#e74c3c;color:#fff;">Bulunamadı</span>
+                                            <span t-if="r.status === 'error'" class="badge" style="background:#c0392b;color:#fff;" t-att-title="r.error || r.message || ''">Hata<t t-if="r.error || r.message">: <t t-esc="r.error || r.message"/></t></span>
                                         </td>
                                     </tr>
                                 </t>
@@ -490,7 +492,14 @@ export class CountingScreen extends Component {
     // ─── KAMERA ───────────────────────────────────
     cameraScan(target) {
         if (!('BarcodeDetector' in window)) {
-            alert('Bu tarayıcı kamera ile barkod okumayı desteklemiyor.');
+            openCameraScanner((barcode) => {
+                if (target === 'shelf') {
+                    this.state.shelfBarcode = barcode;
+                    this.onShelfScan();
+                } else {
+                    this.addProductByBarcode(barcode);
+                }
+            });
             return;
         }
         const overlay = document.createElement('div');
