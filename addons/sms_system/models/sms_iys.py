@@ -55,6 +55,7 @@ class SmsSystemIys(models.AbstractModel):
         return until if until and until > fields.Datetime.now() else None
 
     @api.model
+    @api.private
     def test_connection(self):
         client = self._client()
         client.session_id = None
@@ -64,6 +65,7 @@ class SmsSystemIys(models.AbstractModel):
     # ── Sorgu ──
 
     @api.model
+    @api.private
     def refresh_contacts(self, contacts, deadline=None, guard=True):
         """Kişilerin İYS SMS iznini sorgula ve yaz. Süre dolunca durur.
 
@@ -107,6 +109,7 @@ class SmsSystemIys(models.AbstractModel):
     # ── Artımlı senkron (/report2) ──
 
     @api.model
+    @api.private
     def sync_report(self, deadline=None):
         """Son senkrondan bugüne izin hareketlerini çek (7 günlük pencereler, tüm sayfalar).
 

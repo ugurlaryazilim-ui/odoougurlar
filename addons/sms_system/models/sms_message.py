@@ -90,12 +90,16 @@ class SmsSystemMessage(models.Model):
     # ── Gönderim API'si (diğer modüller bunu kullanır) ──
 
     @api.model
+    @api.private
     def send_sms(self, numbers, body=None, record=None, template=None, values=None, originator=None):
         """SMS gönder ve kayıtlarını döndür.
 
         numbers: tek numara ya da liste. body verilmezse template + values ile üretilir.
         record: kaynak kayıt (iz için); chatter'ı varsa gönderim notu düşülür.
         Geçersiz numara UserError verir. Sağlayıcı hatası kaydı 'error' bırakır (istisna fırlatmaz).
+        RPC'ye kapalıdır (@api.private): yalnız Python'dan çağrılır. Kayıtlar sudo ile oluşturulur
+        (normal kullanıcının mesaj ACL'i yalnız okuma) ve gönderen çağıran kullanıcıdır; dönen recordset
+        çağıranın env'indedir (kendi kaydını rule_sms_message_own ile okur).
         """
         if isinstance(numbers, str):
             numbers = [numbers]
@@ -120,7 +124,8 @@ class SmsSystemMessage(models.Model):
         if manual:
             self._check_manual_limit(len(normalized))
         sender = originator or cfg['originator']
-        messages = self.create([{
+        messages = self.sudo().create([{
+            'user_id': self.env.uid,
             'number': num,
             'body': text,
             'originator': sender,
@@ -131,13 +136,13 @@ class SmsSystemMessage(models.Model):
             'template_id': template.id if template else False,
             'manual': manual,
         } for num in normalized])
-        messages.sudo()._deliver(cfg)
+        messages._deliver(cfg)
         if record and hasattr(record, 'message_post'):
             states = dict(self._fields['state'].selection)
             for msg in messages:
                 record.message_post(body=_('SMS → %(num)s [%(state)s]: %(text)s') % {
                     'num': msg.number, 'state': states[msg.state], 'text': msg.body})
-        return messages
+        return messages.with_env(self.env)
 
     @api.model
     def _check_manual_limit(self, count):
@@ -217,6 +222,7 @@ class SmsSystemMessage(models.Model):
         failed._deliver()
 
     @api.model
+    @api.private
     def check_credit(self):
         """Ayarlar ekranındaki 'Bağlantı / Kredi' butonu."""
         return self._client().credit()

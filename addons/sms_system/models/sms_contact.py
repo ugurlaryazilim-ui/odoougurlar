@@ -102,6 +102,7 @@ class SmsSystemContact(models.Model):
             c.display_name = '%s (%s)' % (c.name, c.mobile) if c.name else (c.mobile or '')
 
     @api.model
+    @api.private
     def upsert_numbers(self, rows, source, lists=None):
         """Numara listesini rehbere ekle/güncelle; listelere bağla.
 
