@@ -391,6 +391,20 @@ class TestLinkNotFoundLateCheck(RulesCase):
         payment.invalidate_recordset()
         self.assertEqual(payment.state, 'error')
 
+    def test_oc_yeni_link_oncesi_kayit_kilitliyse_engellenir(self):
+        """Geç kontrol kaydı başka işlemde kilitli (sorgulanamıyor): doğrulanmadan yeni link yok."""
+        payment = self.not_found(checked_ago=timedelta(minutes=1))
+        self.set_invoice(invoice_rows())
+        with patch.object(type(self.env['sanal.pos.payment']), '_lock_for_provider_call',
+                          return_value=False):
+            with self.assertRaises(UserError) as cm:
+                self.wizard(**BOTH).action_create_link()
+        self.assertIn('doğrulanamadı', str(cm.exception))
+        self.assertEqual(self.mock.count('QUERYTRANSACTION'), 0)
+        self.assertEqual(self.mock.count('PAYBYLINKPAYMENT'), 0)
+        payment.invalidate_recordset()
+        self.assertEqual(payment.state, 'error')
+
     def test_oc_yeni_link_oncesi_odeme_yoksa_link_acilir(self):
         self.not_found(checked_ago=timedelta(minutes=1))
         self.set_invoice(invoice_rows())
