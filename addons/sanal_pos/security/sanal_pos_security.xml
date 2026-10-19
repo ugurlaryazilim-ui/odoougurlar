@@ -12,4 +12,28 @@
         <field name="name">Sanal POS / Yönetici</field>
         <field name="implied_ids" eval="[(4, ref('group_sanal_pos_user'))]"/>
     </record>
+
+    <!-- Sihirbazlar (TransientModel) Odoo 19'da oluşturanla sınırlı DEĞİLDİR; müşteri
+         telefonu/e-postası taşıdıkları için başkasının açık sihirbazı okunamasın/değiştirilemesin.
+         Kalıcı modellerde kayıt kuralı yoktur (S-4/V-1: tek şirket, herkes tüm talepleri görür). -->
+    <record id="rule_payment_create_wizard_own" model="ir.rule">
+        <field name="name">Sanal POS yeni link sihirbazı: yalnız oluşturan</field>
+        <field name="model_id" ref="model_sanal_pos_payment_create_wizard"/>
+        <field name="domain_force">[('create_uid', '=', user.id)]</field>
+    </record>
+    <record id="rule_payment_resend_wizard_own" model="ir.rule">
+        <field name="name">Sanal POS yeniden gönder sihirbazı: yalnız oluşturan</field>
+        <field name="model_id" ref="model_sanal_pos_payment_resend_wizard"/>
+        <field name="domain_force">[('create_uid', '=', user.id)]</field>
+    </record>
+    <record id="rule_payment_refund_wizard_own" model="ir.rule">
+        <field name="name">Sanal POS iade sihirbazı: yalnız oluşturan</field>
+        <field name="model_id" ref="model_sanal_pos_payment_refund_wizard"/>
+        <field name="domain_force">[('create_uid', '=', user.id)]</field>
+    </record>
+    <record id="rule_payment_review_close_wizard_own" model="ir.rule">
+        <field name="name">Sanal POS inceleme kapatma sihirbazı: yalnız oluşturan</field>
+        <field name="model_id" ref="model_sanal_pos_payment_review_close_wizard"/>
+        <field name="domain_force">[('create_uid', '=', user.id)]</field>
+    </record>
 </odoo>
