@@ -8,10 +8,12 @@ import pytz
 from markupsafe import Markup
 
 from odoo import _, api, fields, models
-from odoo.tools import html_escape
+from odoo.tools import html2plaintext, html_escape
 from odoo.exceptions import UserError
 
 from ..services.turatel import MAX_SEGMENTS, prepare_text, segment_count
+from .sms_iys import FRESH
+from .sms_message import MAX_RETRY
 from .sms_template import PLACEHOLDER
 
 _logger = logging.getLogger(__name__)
@@ -20,6 +22,7 @@ PACK_SIZE = 500          # Turatel'e tek istekte giden en fazla numara
 MIN_TIME_LEFT = 20       # cron süresinin sonuna bu kadar saniye kala dur, kalan sonraki çalışmada
 STUCK_MINUTES = 15
 CREATE_CHUNK = 5000      # büyük kampanyada gönderim kayıtları parça parça oluşturulur       # 'gönderiliyor'da bu kadar kalan kayıt belirsiz sayılır (tekrar gönderilmez)
+IYS_REFRESH_SECONDS = 120  # gönderim anı İYS tazelemesine ayrılan süre; yetmezse paket bekler, sonraki çalışma sürdürür
 
 
 class SmsSystemCampaign(models.Model):
@@ -70,8 +73,10 @@ class SmsSystemCampaign(models.Model):
     total_count = fields.Integer(string='Alıcı', compute='_compute_stats')
     sent_count = fields.Integer(string='Gönderilen', compute='_compute_stats')
     error_count = fields.Integer(string='Hatalı', compute='_compute_stats')
+    uncertain_count = fields.Integer(string='Belirsiz', compute='_compute_stats',
+                                     help='Sağlayıcıya gidip gitmediği bilinmeyen kayıtlar; mükerrer olmasın diye yeniden gönderilmez')
     pending_count = fields.Integer(string='Bekleyen', compute='_compute_stats')
-    progress = fields.Float(string='İlerleme', compute='_compute_stats', help='Gönderilen + hatalı / toplam (%)')
+    progress = fields.Float(string='İlerleme', compute='_compute_stats', help='Gönderilen + hatalı + belirsiz / toplam (%)')
     phone_preview = fields.Html(string='Telefonda Görünüm', compute='_compute_phone_preview', sanitize=True)
 
     # ── Hesaplar ──
@@ -95,14 +100,20 @@ class SmsSystemCampaign(models.Model):
             domain.append(('iys_status', '=', 'approved'))
         return domain
 
-    def _iys_stale(self):
-        """Ticari gönderim adayları içinde izni 24 saatten eski (ya da hiç bakılmamış) olanlar."""
-        self.ensure_one()
-        from .sms_iys import FRESH
+    def _iys_stale_domain(self):
+        """Gönderimden önce İYS'den (yeniden) sorgulanacak kişiler: hiç sorgulanmamışlar ile izni 24 saatten eski
+        ONAYLILAR. Daha önce sorgulanmış 'unknown'/'rejected' kişiler sorgulanmaz: zaten gönderilmezler ve
+        "kayıtsız" cevapları SmartADM hata oranını şişirip hesabı 24 saat bloklatabilir (S-6)."""
         limit_dt = fields.Datetime.now() - FRESH
-        return self.env['sms.system.contact'].sudo().search([
-            ('list_ids', 'in', self.list_ids.ids), ('opt_out', '=', False), ('iys_status', '!=', 'rejected'),
-            '|', ('iys_checked_at', '=', False), ('iys_checked_at', '<', limit_dt)], order='id')
+        return ['&', ('opt_out', '=', False),
+                '|', ('iys_checked_at', '=', False),
+                '&', ('iys_status', '=', 'approved'), ('iys_checked_at', '<', limit_dt)]
+
+    def _iys_stale(self):
+        """Ticari gönderim adayları içinde İYS sorgusu gereken kişiler (bkz. _iys_stale_domain)."""
+        self.ensure_one()
+        return self.env['sms.system.contact'].sudo().search(
+            [('list_ids', 'in', self.list_ids.ids)] + self._iys_stale_domain(), order='id')
 
     def _recipients(self):
         """(gönderilecek kişiler, atlanan sayısı) — numara bazında tekil."""
@@ -152,8 +163,9 @@ class SmsSystemCampaign(models.Model):
             camp.total_count = sum(d.values())
             camp.sent_count = d.get('sent', 0) + d.get('test', 0)
             camp.error_count = d.get('error', 0)
+            camp.uncertain_count = d.get('uncertain', 0)
             camp.pending_count = d.get('queued', 0) + d.get('sending', 0)
-            done = camp.sent_count + camp.error_count
+            done = camp.sent_count + camp.error_count + camp.uncertain_count
             camp.progress = (100.0 * done / camp.total_count) if camp.total_count else 0.0
 
     @api.depends('final_body', 'preview_segments')
@@ -209,6 +221,10 @@ class SmsSystemCampaign(models.Model):
             count = len(self._iys_stale())
         if not count:
             raise UserError(_('Gönderilecek alıcı yok (listeler boş, kara listede ya da İYS onaylı değil).'))
+        self._check_daily_limit(count)
+
+    def _check_daily_limit(self, count):
+        """Günlük toplu SMS sınırı: `count` yeni kayıt eklenirse son 24 saatteki toplam sınırı aşıyor mu."""
         limit = int(self._icp('sms_system.daily_limit', '0') or 0)
         if limit:
             today = fields.Datetime.now() - timedelta(days=1)
@@ -278,13 +294,46 @@ class SmsSystemCampaign(models.Model):
         self.filtered(lambda c: c.state in ('scheduled', 'cancel')).write({'state': 'draft'})
 
     def action_retry_errors(self):
-        for camp in self:
-            errors = camp.sudo().message_ids_sms.filtered(lambda m: m.state == 'error')
-            if errors:
-                errors.write({'state': 'queued', 'error': False})
-                camp.state = 'sending'
-                camp.finished_at = False
-        self.env.ref('sms_system.cron_sms_campaign_queue').sudo()._trigger()
+        """Hatalı kayıtları yeniden kuyruğa al (belirsizler asla; mükerrer SMS olmasın).
+
+        Sıra: ticari + İYS kapalı → UserError; kara listede / İYS onayı olmayan kayıtlar gerekçeli hata olarak
+        kalır, kuyruğa girmez; günlük sınır kuyruğa girecek sayıyla denetlenir, aşılırsa hiçbir kayıt değişmez.
+        İYS tazeliği (24 saat) gönderim anında _commercial_gate ile denetlenir.
+        """
+        self.ensure_one()
+        if self.message_type == 'commercial' and self._icp('sms_system.iys_enabled') != 'True':
+            raise UserError(_('Ticari (kampanya/indirim) SMS için İYS izin kontrolü zorunludur. İYS (SmartADM) '
+                              'entegrasyonu etkin olmadığı için hatalı kayıtlar yeniden gönderilemez.'))
+        messages = self.sudo().message_ids_sms
+        errors = messages.filtered(lambda m: m.state == 'error')
+        uncertain = len(messages.filtered(lambda m: m.state == 'uncertain'))
+        uncertain_text = _('%s belirsiz kayıt mükerrer olmaması için yeniden gönderilmez.') % uncertain
+        if not errors:
+            if uncertain:
+                raise UserError(uncertain_text)
+            return self._notify(_('Yeniden gönderilecek hatalı kayıt yok.'), 'warning')
+        sendable, rejected = self._gate_split(errors)
+        self._check_daily_limit(len(sendable))   # aşılırsa hiçbir kayıt değişmez
+        self._reject_messages(rejected)
+        parts = []
+        if sendable:
+            sendable.write({'state': 'queued', 'error': False})
+            self.write({'state': 'sending', 'finished_at': False})
+            self.env.ref('sms_system.cron_sms_campaign_queue').sudo()._trigger()
+            parts.append(_('%s kayıt kuyruğa alındı.') % len(sendable))
+        else:
+            parts.append(_('Kuyruğa alınacak kayıt yok.'))
+        blocked = sum(len(ids) for ids in rejected.values())
+        if blocked:
+            parts.append(_('%s kayıt kara listede ya da İYS onayı olmadığı için gönderilmedi.') % blocked)
+        if uncertain:
+            parts.append(uncertain_text)
+        return self._notify(' '.join(parts), 'success' if sendable else 'warning')
+
+    def _notify(self, message, kind='success'):
+        return {'type': 'ir.actions.client', 'tag': 'display_notification',
+                'params': {'message': message, 'type': kind, 'sticky': False,
+                           'next': {'type': 'ir.actions.client', 'tag': 'soft_reload'}}}
 
     def action_view_messages(self):
         self.ensure_one()
@@ -293,6 +342,100 @@ class SmsSystemCampaign(models.Model):
             'view_mode': 'list,form', 'domain': [('campaign_id', '=', self.id)],
             'context': {'search_default_group_state': 1},
         }
+
+    # ── Gönderim anı kapısı ──
+
+    def _gate_reason(self, contact):
+        """Kişiye gönderimi engelleyen gerekçe ('' = engel yok). İYS tazeliği burada denetlenmez."""
+        if not contact or contact.opt_out:
+            return _('Kara listede (ya da rehberde yok): gönderilmedi.')
+        if self.message_type == 'commercial' and contact.iys_status != 'approved':
+            return _('İYS onayı yok: gönderilmedi.')
+        return ''
+
+    def _gate_split(self, messages, still_stale=frozenset()):
+        """Kayıtları ayır: (gönderilebilir kayıtlar, {gerekçe: [kayıt id]}). still_stale: tazelenemeyen kişi
+        id'leri; bunların kayıtları ne gönderilebilir ne reddedilir (bekletilir)."""
+        sendable_ids, rejected = [], {}
+        for msg in messages:
+            contact = msg.contact_id
+            reason = self._gate_reason(contact)
+            if reason:
+                rejected.setdefault(reason, []).append(msg.id)
+            elif contact.id not in still_stale:
+                sendable_ids.append(msg.id)
+        return messages.browse(sendable_ids), rejected
+
+    def _reject_messages(self, rejected):
+        Message = self.env['sms.system.message'].sudo()
+        for reason, ids in rejected.items():
+            Message.browse(ids).write({'state': 'error', 'error': reason})
+
+    def _note_once(self, text):
+        """Kampanya notu: son (içeriği olan) not aynı metinse tekrar yazma. Yeni kolon gerekmez; aynı hata her
+        cron çalışmasında chatter'ı doldurmasın (S-7)."""
+        self.ensure_one()
+        last = self.env['mail.message'].sudo().search(
+            [('model', '=', self._name), ('res_id', '=', self.id)], order='id desc', limit=10)
+        for note in last:
+            plain = html2plaintext(note.body or '').strip()
+            if plain:
+                if plain == text.strip():
+                    return False
+                break
+        self.message_post(body=text)
+        return True
+
+    def _refresh_iys(self, contacts):
+        """Kişileri İYS'den korumalı (hata oranı korumalı) sorgula. Döner: (tamam, hata metni).
+        tamam=False: sorgu yapılamadı/durdu; çağıran gönderimi bekletir. Beklenmeyen istisna yutulmaz:
+        loga yazılır ve hata metniyle çağırana döner (çağıran kullanıcıya not düşer)."""
+        Iys = self.env['sms.system.iys']
+        paused = Iys._paused_until()
+        if paused:
+            return False, _('İYS sorgusu hata oranı koruması nedeniyle %s tarihine kadar durduruldu '
+                            '(SmartADM hesabı bloklanmasın diye).') % fields.Datetime.to_string(paused)
+        try:
+            stats = Iys.refresh_contacts(contacts, deadline=time.monotonic() + IYS_REFRESH_SECONDS)
+        except Exception as e:  # noqa: BLE001 — beklenmeyen hata: loga yaz, çağıran not düşer
+            _logger.exception('İYS tazelemesi beklenmeyen hatayla durdu (kampanya %s)', self.id)
+            return False, _('Beklenmeyen hata: %s') % e
+        self.env['ir.cron']._commit_progress()
+        if stats.get('stopped') == 'error':
+            return False, stats.get('error') or _('bilinmeyen hata')
+        if stats.get('stopped') == 'guard':
+            return False, _('İYS sorgusu hata oranı koruması nedeniyle durduruldu: numaraların çoğu İYS kaydında yok.')
+        return True, ''
+
+    def _commercial_gate(self, messages):
+        """Paketi göndermeden önce denetle; gönderilebilir kayıtları döndür.
+
+        Rehber kaydı yok / kara liste / (ticari) İYS onayı yok → gerekçeli 'error'. Ticari kampanyada izni 24
+        saatten eski onaylı ya da hiç sorgulanmamış kişiler göndermeden önce İYS'den (korumalı) sorgulanır.
+        Sorgu yapılamazsa paket gönderilmez, 'queued' kalır (not düşülür). Bilgilendirme/personel: yalnız kara
+        liste süzülür, SmartADM çağrısı yoktur.
+        """
+        self.ensure_one()
+        messages = messages.sudo()
+        commercial = self.message_type == 'commercial'
+        if commercial and not self.env['sms.system.iys']._enabled():
+            self._note_once(_('İYS kontrolü kapalı olduğu için ticari SMS gönderimi bekletiliyor.'))
+            return messages.browse()
+        sendable, rejected = self._gate_split(messages)
+        self._reject_messages(rejected)
+        if commercial and sendable:
+            Contact = self.env['sms.system.contact'].sudo().with_context(active_test=False)
+            stale_domain = self._iys_stale_domain()
+            stale = Contact.search([('id', 'in', sendable.contact_id.ids)] + stale_domain, order='id')
+            if stale:
+                ok, error = self._refresh_iys(stale)
+                if not ok:
+                    self._note_once(_('İYS kontrolü yapılamadı, ticari gönderim bekletiliyor: %s') % error)
+                    return messages.browse()
+                still_stale = set(Contact.search([('id', 'in', stale.ids)] + stale_domain).ids)
+                sendable, rejected = self._gate_split(sendable, still_stale)
+                self._reject_messages(rejected)
+        return sendable
 
     # ── Kuyruk ──
 
@@ -335,14 +478,9 @@ class SmsSystemCampaign(models.Model):
                     continue
                 stale = camp._iys_stale()
                 if stale:
-                    try:
-                        stats = Iys.refresh_contacts(stale, deadline=time.monotonic() + 200, guard=False)
-                    except Exception as e:  # noqa: BLE001 — bağlantı hatası: sonraki çalışmada tekrar
-                        _logger.warning('Ticari SMS İYS kontrolü başarısız (%s): %s', camp.id, e)
-                        continue
-                    IrCron._commit_progress()
-                    if stats.get('stopped') == 'error':
-                        camp.message_post(body=_('İYS kontrolü yapılamadı, tekrar denenecek: %s') % stats.get('error'))
+                    ok, error = camp._refresh_iys(stale)
+                    if not ok:
+                        camp._note_once(_('İYS kontrolü yapılamadı, tekrar denenecek: %s') % error)
                         continue
                     if camp._iys_stale():
                         continue  # süre yetmedi; kalanlar sonraki çalışmada
@@ -358,8 +496,9 @@ class SmsSystemCampaign(models.Model):
         stuck = Message.search([('campaign_id', '!=', False), ('state', '=', 'sending'),
                                 ('write_date', '<', now - timedelta(minutes=STUCK_MINUTES))])
         if stuck:
-            stuck.write({'state': 'error', 'error': _('Gönderim yarıda kesildi; iletilip iletilmediği belirsiz. '
-                                                      'Tekrar gönderilmedi (mükerrer olmasın diye).')})
+            stuck.write({'state': 'uncertain', 'retry_count': MAX_RETRY,
+                         'error': _('Gönderim yarıda kesildi; iletilip iletilmediği belirsiz. '
+                                    'Tekrar gönderilmedi (mükerrer olmasın diye).')})
 
         cfg = Message._settings()
         client = Message._client(cfg)
@@ -367,18 +506,24 @@ class SmsSystemCampaign(models.Model):
         remaining = Message.search_count([('campaign_id', 'in', campaigns.ids), ('state', '=', 'queued')])
         IrCron._commit_progress(remaining=remaining)
         for camp in campaigns:
-            while True:
+            held = False   # İYS doğrulanamadı: bu kampanyanın kalanı sonraki çalışmaya
+            while not held:
                 queued = Message.search([('campaign_id', '=', camp.id), ('state', '=', 'queued')],
                                         order='id', limit=PACK_SIZE * 4)
                 if not queued:
                     break
                 for pack in self._make_packs(queued):
-                    pack.write({'state': 'sending'})
+                    sendable = camp._commercial_gate(pack)
                     IrCron._commit_progress()
-                    pack._deliver_pack(cfg, client)
-                    time_left = IrCron._commit_progress(len(pack))
-                    if time_left < MIN_TIME_LEFT:
-                        return
+                    held = bool(pack.filtered(lambda m: m.state == 'queued') - sendable)
+                    if sendable:
+                        sendable.write({'state': 'sending'})
+                        IrCron._commit_progress()
+                        sendable._deliver_pack(cfg, client)
+                        if IrCron._commit_progress(len(sendable)) < MIN_TIME_LEFT:
+                            return
+                    if held:
+                        break
             if not Message.search_count([('campaign_id', '=', camp.id), ('state', 'in', ('queued', 'sending'))]):
                 camp._finish()
                 IrCron._commit_progress()
@@ -397,8 +542,9 @@ class SmsSystemCampaign(models.Model):
     def _finish(self):
         self.ensure_one()
         self.write({'state': 'done', 'finished_at': fields.Datetime.now()})
-        self.message_post(body=_('Tamamlandı: %(sent)s gönderildi, %(err)s hatalı, %(skip)s atlandı.',
-                                 sent=self.sent_count, err=self.error_count, skip=self.skipped_count))
+        self.message_post(body=_('Tamamlandı: %(sent)s gönderildi, %(err)s hatalı, %(unc)s belirsiz, %(skip)s atlandı.',
+                                 sent=self.sent_count, err=self.error_count, unc=self.uncertain_count,
+                                 skip=self.skipped_count))
 
 
 class SmsSystemCampaignConfirm(models.TransientModel):

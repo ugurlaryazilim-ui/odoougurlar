@@ -489,3 +489,74 @@ class TestCampaignSingleInvariants(CampaignMixin, SmsTestCase):
         self._test_to_me(camp)
         self.assertEqual(len(self.net.turatel_calls), 1)
         self.assertEqual(self.net.smartadm_calls, [])
+
+
+@tagged('post_install', '-at_install')
+class TestCampaignGuardAndMigration(CampaignMixin, SmsTestCase):
+
+    # ── S-6: kayıtsız numaralar korumalı sorgulanır, koruma devreye girince kampanya bekler ──
+    def test_s6_kayitsiz_numaralar_korumali_sorgulanir_ve_kampanya_bekler(self):
+        self.configure_sms(iys=True)
+        lst = self.make_list()
+        for i in range(30):
+            self.make_contact('5320300%03d' % i, lst)   # hiç sorgulanmamış, İYS'de kayıtsız
+        self.net.default_iys = 'missing'
+        camp = self.make_campaign(lst, 'commercial', state='scheduled', scheduled_at=self.ago(minutes=1))
+        self.run_queue()
+        self.assertEqual(len(self.net.queried), 20, 'hata oranı koruması 20 sorgudan sonra durdurmalı')
+        self.assertTrue(self.env['sms.system.iys']._paused_until())
+        camp.invalidate_recordset()
+        self.assertEqual(camp.state, 'scheduled')
+        self.run_queue(2)
+        self.assertEqual(len(self.net.queried), 20, 'koruma süresince yeni sorgu yapılmamalı')
+        self.assertEqual(self.net.turatel_calls, [])
+
+    # ── Gönderim anı kapısı: İYS kapanırsa ticari paket gitmez ──
+    def test_ticari_paket_iys_kapaliysa_gonderilmez_ve_kuyrukta_kalir(self):
+        self.configure_sms(iys=False)
+        lst = self.make_list()
+        camp = self.make_campaign(lst, 'commercial', state='sending')
+        contact = self.make_contact('5320400001', lst, iys_status='approved', iys_checked_at=self.ago(hours=1))
+        msg = self.campaign_message(camp, contact, state='queued')
+        before = set(camp.message_ids.ids)
+        self.run_queue(2)
+        self.refresh(msg, camp)
+        self.assertEqual(msg.state, 'queued')
+        self.assertEqual(camp.state, 'sending')
+        self.assertEqual(self.net.calls, [])
+        self.assertEqual(len(self.new_notes(camp, before)), 1, 'aynı bekletme notu tekrarlanmamalı')
+
+    # ── Migration (yalnız veri) ──
+    def _migrate(self):
+        import importlib.util
+        from pathlib import Path
+        path = Path(__file__).resolve().parents[1] / 'migrations' / '19.0.1.7.0' / 'post-migrate.py'
+        spec = importlib.util.spec_from_file_location('sms_post_migrate_1_7_0', path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.migrate(self.env.cr, '19.0.1.6.0')
+        self.env.invalidate_all()
+
+    def test_migration_eski_takili_kampanya_hatalarini_belirsiz_yapar(self):
+        lst = self.make_list()
+        camp = self.make_campaign(lst, 'info')
+        stuck_text = ('Gönderim yarıda kesildi; iletilip iletilmediği belirsiz. '
+                      'Tekrar gönderilmedi (mükerrer olmasın diye).')
+        stuck = self.campaign_message(camp, self.make_contact('5320500001', lst), error=stuck_text)
+        other = self.campaign_message(camp, self.make_contact('5320500002', lst), error='Turatel hatası: kredi')
+        single = self.make_message(number='5320500003', state='error', error=stuck_text)
+        sent = self.campaign_message(camp, self.make_contact('5320500004', lst), state='sent')
+        icp_before = {r.key: r.value for r in self.icp.search([('key', '=like', 'sms_system.%')])}
+        self._migrate()
+        self.assertEqual((stuck.state, stuck.retry_count), ('uncertain', 3))
+        self.assertEqual(other.state, 'error')
+        self.assertEqual(single.state, 'error', 'kampanyasız kayıt değişmemeli')
+        self.assertEqual(sent.state, 'sent')
+        self._migrate()   # idempotent
+        self.assertEqual(stuck.state, 'uncertain')
+        icp_after = {r.key: r.value for r in self.icp.search([('key', '=like', 'sms_system.%')])}
+        self.assertEqual(icp_after, icp_before, 'migration ayarlara dokunmamalı')
+        camp.invalidate_recordset()
+        self.assertEqual(camp.uncertain_count, 1)
+        camp.action_retry_errors()   # yalnız diğer hata kuyruğa alınır, belirsiz kayıt alınmaz
+        self.assertEqual((other.state, stuck.state), ('queued', 'uncertain'))

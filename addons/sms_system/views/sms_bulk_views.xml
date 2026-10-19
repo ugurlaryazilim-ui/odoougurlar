@@ -157,6 +157,7 @@
                 <field name="total_count"/>
                 <field name="sent_count"/>
                 <field name="error_count"/>
+                <field name="uncertain_count" optional="show"/>
                 <field name="progress" widget="progressbar" optional="show"/>
                 <field name="state" widget="badge" decoration-success="state == 'done'"
                        decoration-info="state in ('scheduled', 'sending')"/>
@@ -174,7 +175,8 @@
                     <button name="action_confirm_send" string="Gönder" type="object" class="btn-primary"
                             invisible="state != 'draft'"/>
                     <button name="action_retry_errors" string="Hatalıları Yeniden Gönder" type="object"
-                            invisible="state != 'done' or not error_count"/>
+                            invisible="state != 'done' or not (error_count or uncertain_count)"
+                            confirm="Yalnız hatalı kayıtlar yeniden gönderilir; belirsiz kayıtlar mükerrer SMS olmasın diye gönderilmez. Devam edilsin mi?"/>
                     <button name="action_cancel" string="Durdur / İptal" type="object"
                             invisible="state not in ('scheduled', 'sending')"
                             confirm="Henüz gönderilmemiş SMS'ler iptal edilecek. Devam edilsin mi?"/>
@@ -202,6 +204,11 @@
                     <div class="alert alert-warning" role="alert" invisible="message_type != 'commercial' or not iys_enabled">
                         Ticari SMS yalnız İYS onaylı numaralara gider; ret metni (Ayarlar &gt; SMS) otomatik eklenir.
                     </div>
+                    <div class="alert alert-warning" role="alert" invisible="not uncertain_count">
+                        <b>Belirsiz kayıtlar var.</b> Bazı SMS'lerin Turatel'e iletilip iletilmediği bilinmiyor
+                        (bağlantı koptu ya da gönderim yarıda kesildi). Mükerrer SMS gitmesin diye bu kayıtlar
+                        otomatik ya da "Hatalıları Yeniden Gönder" ile tekrar gönderilmez.
+                    </div>
                     <group>
                         <group>
                             <field name="message_type" readonly="state != 'draft'"/>
@@ -222,6 +229,7 @@
                             <field name="progress" widget="progressbar"/>
                             <field name="sent_count"/>
                             <field name="error_count"/>
+                            <field name="uncertain_count" invisible="not uncertain_count"/>
                             <field name="pending_count" invisible="not pending_count"/>
                             <field name="skipped_count"/>
                             <field name="started_at"/>
