@@ -886,7 +886,15 @@ class SanalPosPayment(models.Model):
         values = {'state': 'review', 'last_error_code': code, 'last_error_message': reason[:250]}
         if tran:
             values.update(self._payment_values(tran))
-        cents = [self._to_amount2(t.get('amount')) for t in approved or []]
+        # Aynı pgTranId birden çok listelenirse tek tahsilattır (referanssızlar ayrı sayılır)
+        unique, seen = [], set()
+        for t in approved or []:
+            ref = t.get('ref')
+            if ref and ref in seen:
+                continue
+            seen.add(ref)
+            unique.append(t)
+        cents = [self._to_amount2(t.get('amount')) for t in unique]
         if len(cents) > 1 and None not in cents:
             # Ö-D: birden fazla onaylı satış -> ödenen = toplam. Kabul edilip fazlası iade
             # edildiğinde durum 'Kısmi iade' kalır ('İade edildi' değil).

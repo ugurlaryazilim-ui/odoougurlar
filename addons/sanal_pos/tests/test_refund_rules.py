@@ -288,3 +288,22 @@ class TestReviewMultipleRefund(RefundCase):
         payment = self.review_multiple(late=True)
         self.assertEqual(payment.last_error_code, 'REVIEW_LATE')
         self.assertEqual(payment.paid_amount, 18000.0)
+
+    def test_od_ayni_pgtranid_toplamda_bir_kez_sayilir(self):
+        payment = self.make_payment(state='sent')
+        self.set_query_transactions(tran('AP', 'SALE', '9000.00', 'T1'),
+                                    tran('AP', 'SALE', '9000.00', 'T1'),
+                                    tran('AP', 'SALE', '9000.00', 'T2'))
+        payment.sudo()._sync_status()
+        payment.invalidate_recordset()
+        self.assertEqual(payment.state, 'review')
+        self.assertEqual(payment.paid_amount, 18000.0, 'T1 iki kez listelense de bir tahsilattır')
+
+    def test_od_yalniz_ayni_satis_tekrarliysa_toplam_tek_satistir(self):
+        payment = self.make_payment(state='error')
+        self.set_query_transactions(tran('AP', 'SALE', '9000.00', 'T1'),
+                                    tran('AP', 'SALE', '9000.00', 'T1'))
+        payment.sudo()._sync_status()
+        payment.invalidate_recordset()
+        self.assertEqual(payment.state, 'review')
+        self.assertEqual(payment.paid_amount, 9000.0)
