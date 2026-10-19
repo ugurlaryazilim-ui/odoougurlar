@@ -4,10 +4,13 @@ Not: otomatik durum SMS'i (sms_<durum>_enabled) ile elle SMS ucundaki 60 sn ayn�
 elle SMS testleri otomatik durum SMS'ini kapatır (vc_setup(auto_sms=False) varsayılanı).
 """
 import time
+from unittest.mock import patch
 
 import requests
+from lxml import etree
 from odoo.exceptions import UserError
 from odoo.tests.common import tagged
+from odoo.tools.safe_eval import safe_eval
 
 from .common import PIXEL, VcCase
 
@@ -385,10 +388,20 @@ class TestStrictAndLinks(VcCase):
 
     def test_kk_b21_vendor_claim_res_id_bos_ek_baglanir(self):
         claim = self.make_claim()
-        pending = self._orphan(self.user2, res_model='vendor.claim', res_id=0)
+        pending = self._orphan(self.user, res_model='vendor.claim', res_id=0)   # formda yüklenip kaydedilmemiş
         claim.sudo().write({'photo_ids': [(4, pending.id)]})
         pending.invalidate_recordset()
         self.assertEqual((pending.res_model, pending.res_id), ('vendor.claim', claim.id))
+
+    def test_g2_baska_kullanicinin_vendor_claim_res_id_bos_eki_baglanmaz(self):
+        claim = self.make_claim()
+        for field in ('photo_ids', 'vendor_report_ids'):
+            with self.subTest(alan=field):
+                foreign = self._orphan(self.user2, res_model='vendor.claim', res_id=0)
+                claim.sudo().write({field: [(4, foreign.id)]})
+                foreign.invalidate_recordset()
+                self.assertEqual((foreign.res_model, foreign.res_id), ('vendor.claim', 0),
+                                 'başkasının kaydedilmemiş eki kayda bağlanmamalı')
 
     def test_kk_b21_baska_modele_ait_ek_dokunulmaz(self):
         claim = self.make_claim()

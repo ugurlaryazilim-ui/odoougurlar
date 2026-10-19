@@ -455,9 +455,11 @@ class VendorClaim(models.Model):
         """Yüklenen fotoğraf / yanıt belgelerini kayda bağla (başka kullanıcılar ve PDF de görebilsin)."""
         for claim in self:
             uid = self.env.user.id
+            # Yalnız kullanıcının kendi yüklediği, henüz bir kayda bağlanmamış ekler (başkasının kaydedilmemiş
+            # eki, kimliği tahmin edilerek bu kayda çekilemez; çekirdek kural onu yalnız oluşturana gösterir)
             loose = (claim.photo_ids | claim.vendor_report_ids).sudo().filtered(
-                lambda a: (a.res_model == claim._name and not a.res_id)
-                or (not a.res_model and a.create_uid.id == uid))
+                lambda a: a.create_uid.id == uid
+                and (not a.res_model or (a.res_model == claim._name and not a.res_id)))
             if loose:
                 loose.write({'res_model': claim._name, 'res_id': claim.id})
 
