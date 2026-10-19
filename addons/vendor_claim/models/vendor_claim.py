@@ -450,8 +450,10 @@ class VendorClaim(models.Model):
     def _link_attachments(self):
         """Yüklenen fotoğraf / yanıt belgelerini kayda bağla (başka kullanıcılar ve PDF de görebilsin)."""
         for claim in self:
+            uid = self.env.user.id
             loose = (claim.photo_ids | claim.vendor_report_ids).sudo().filtered(
-                lambda a: not a.res_model or (a.res_model == claim._name and not a.res_id))
+                lambda a: (a.res_model == claim._name and not a.res_id)
+                or (not a.res_model and a.create_uid.id == uid))
             if loose:
                 loose.write({'res_model': claim._name, 'res_id': claim.id})
 
