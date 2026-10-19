@@ -26,6 +26,7 @@ STUCK_MINUTES = 15       # 'gönderiliyor'da bu kadar dakika kalan kayıt belirs
 CREATE_CHUNK = 5000      # büyük kampanyada gönderim kayıtları parça parça oluşturulur
 CREDIT_TIMEOUT = (3, 6)  # onay penceresinde kredi okuması: yavaş Turatel pencereyi uzun bekletmesin
 IYS_REFRESH_SECONDS = 120  # gönderim anı İYS tazelemesine ayrılan süre; yetmezse paket bekler, sonraki çalışma sürdürür
+CONTENT_FIELDS = ('body', 'message_type', 'list_ids', 'template_id')   # yalnız taslakta değişir (G-C2)
 
 
 class SmsSystemCampaign(models.Model):
@@ -233,6 +234,39 @@ class SmsSystemCampaign(models.Model):
     def _onchange_template_id(self):
         if self.template_id:
             self.body = self.template_id.body
+
+    def write(self, vals):
+        if vals.get('state') == 'draft' or any(name in vals for name in CONTENT_FIELDS):
+            self._check_content_locked(vals)
+        return super().write(vals)
+
+    def _check_content_locked(self, vals):
+        """G-C2: onaylanmış (taslak dışı) kampanyanın metni, türü, listeleri ve şablonu değişmez.
+
+        Ekrandaki readonly yalnız arayüzdür; RPC ile değişiklik ticari kapıyı (tür) ya da onaylanan içeriği
+        atlatırdı. Aynı değerin yeniden yazılması serbesttir. Gönderimi başlamış kampanya taslağa da alınamaz
+        (önce taslağa al, sonra değiştir yolunu kapatır); planlı/iptal kampanya "Taslağa Al" ile düzenlenir.
+        """
+        for camp in self:
+            if camp.state == 'draft':
+                continue
+            if vals.get('state') == 'draft' and camp.state in ('sending', 'done'):
+                raise UserError(_('Gönderimi başlamış toplu SMS taslağa alınamaz: %s') % camp.name)
+            changed = [name for name in CONTENT_FIELDS if name in vals and not camp._same_content(name, vals[name])]
+            if changed:
+                raise UserError(_("Onaylanmış toplu SMS'in içeriği değiştirilemez (%(fields)s). Değiştirmek için "
+                                  'önce taslağa alın: %(name)s',
+                                  fields=', '.join(self._fields[n].string for n in changed), name=camp.name))
+
+    def _same_content(self, name, value):
+        if name == 'list_ids':
+            # Yalnız aynı kümeyi yeniden kuran komut değişiklik sayılmaz; diğer her komut değişikliktir
+            commands = list(value or [])
+            return (len(commands) == 1 and isinstance(commands[0], (list, tuple)) and commands[0][0] == 6
+                    and set(commands[0][2] or []) == set(self.list_ids.ids))
+        if name == 'template_id':
+            return (getattr(value, 'id', value) or False) == (self.template_id.id or False)
+        return (value or False) == (self[name] or False)
 
     # ── Kontroller ──
 

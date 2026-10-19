@@ -6,6 +6,7 @@ G-C3: yönlendirme izlenmez, 3xx sınıflaması, ayarlarda https zorunlu. N5: re
 """
 from unittest.mock import patch
 
+from odoo.exceptions import UserError
 from odoo.tests.common import tagged
 
 from .common import SmsTestCase
@@ -211,3 +212,70 @@ class TestReviewO2TokenTtl(JsonModelMixin, SmsTestCase):
         self.assertEqual(len(self.net.tj.tokens_issued), 2)
         self.assertEqual([c['bearer'] for c in self.net.json_sends],
                          [token for _user, token in self.net.tj.tokens_issued])
+
+
+@tagged('post_install', '-at_install')
+class TestReviewGC2CampaignLocked(JsonModelMixin, SmsTestCase):
+    """G-C2: onaylanmış (taslak dışı) kampanyada metin/tür/liste/şablon değişmez; sistem yazımları etkilenmez."""
+
+    def setUp(self):
+        super().setUp()
+        self.template = self.env['sms.system.template'].create({'name': 'Şablon', 'body': 'Şablon metni {ad}'})
+        self.other_list = self.make_list('Diğer liste')
+
+    def content_changes(self):
+        return {
+            'body': {'body': 'Yeni metin'},
+            'message_type': {'message_type': 'commercial'},
+            'list_ids_ekle': {'list_ids': [(4, self.other_list.id)]},
+            'list_ids_degistir': {'list_ids': [(6, 0, self.other_list.ids)]},
+            'template_id': {'template_id': self.template.id},
+        }
+
+    def test_gc2_taslak_disinda_icerik_degisikligi_reddedilir(self):
+        for state in ('scheduled', 'sending', 'done', 'cancel'):
+            camp = self.make_json_campaign(state=state)
+            for label, vals in self.content_changes().items():
+                with self.subTest(state=state, alan=label):
+                    with self.assertRaises(UserError):
+                        camp.write(vals)
+
+    def test_gc2_taslakta_icerik_serbest(self):
+        camp = self.make_json_campaign()
+        for vals in self.content_changes().values():
+            camp.write(vals)
+        self.assertEqual((camp.body, camp.message_type, camp.template_id), ('Yeni metin', 'commercial', self.template))
+
+    def test_gc2_sistem_yazimlari_ve_ayni_deger_serbest(self):
+        camp = self.make_json_campaign(state='sending')
+        camp.write({'state': 'done', 'finished_at': self.ago(minutes=1), 'skipped_count': 2})
+        camp.write({'state': 'sending', 'finished_at': False})
+        camp.write({'body': camp.body, 'message_type': camp.message_type, 'template_id': False,
+                    'list_ids': [(6, 0, camp.list_ids.ids)]})
+        self.assertEqual(camp.state, 'sending')
+
+    def test_gc2_baslamis_kampanya_taslaga_alinamaz(self):
+        for state in ('sending', 'done'):
+            camp = self.make_json_campaign(state=state)
+            with self.subTest(state=state), self.assertRaises(UserError):
+                camp.write({'state': 'draft'})
+        for state in ('scheduled', 'cancel'):
+            camp = self.make_json_campaign(state=state)
+            camp.action_draft()
+            self.assertEqual(camp.state, 'draft')
+            camp.write({'body': 'Düzeltildi'})
+
+    def test_gc2_poc_onayli_ticari_kampanya_bilgilendirmeye_cevrilemez(self):
+        self.configure_json(iys=True)
+        self.set_param('optout_text', RET_TEXT)
+        camp = self.make_json_campaign(message_type='commercial', body='Indirim {ad}')
+        camp.action_send()
+        self.assertEqual(camp.state, 'scheduled')
+        with self.assertRaises(UserError):
+            camp.write({'message_type': 'info'})
+        self.run_queue()
+        sends = self.net.json_sends
+        self.assertEqual(len(sends), 1)
+        self.assertEqual(sends[0]['user'], 'com_user')
+        self.assertEqual(int(sends[0]['payload']['accountId']), 65672)
+        self.assertIs(sends[0]['payload']['isCheckBlackList'], True)
