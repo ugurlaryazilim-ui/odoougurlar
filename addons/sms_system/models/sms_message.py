@@ -8,6 +8,7 @@ from odoo.exceptions import AccessError, UserError
 
 from ..services.turatel import (MAX_SEGMENTS, TuratelClient, TuratelError, normalize_number, prepare_text,
                                 segment_count)
+from ..services.turatel_json import TuratelJsonClient
 
 _logger = logging.getLogger(__name__)
 
@@ -27,6 +28,9 @@ DEFAULT_ACCOUNT_COMMERCIAL = '65672'
 DEFAULT_SINGLE_URL = 'https://platform.turatel.com/singlesms'
 DEFAULT_BULK_URL = 'https://platform.turatel.com/bulksms'
 DEFAULT_VALIDITY_MINUTES = 1260
+# KK-C29: ticari gönderim asla bilgi setine düşmez; set boşsa istek yapılmadan kalıcı hata
+NO_COMMERCIAL_CREDS = 'Reklam hesabı kimlik bilgileri (kullanıcı adı/şifre) tanımlı değil'
+NO_INFO_CREDS = 'Bilgi hesabı kimlik bilgileri (kullanıcı adı/şifre) tanımlı değil'
 
 
 def test_mode_enabled(value):
@@ -97,6 +101,21 @@ class SmsSystemMessage(models.Model):
     manual = fields.Boolean(string='Elle Gönderildi', help='"Yeni SMS" penceresinden serbest metinle gönderildi')
     contact_id = fields.Many2one('sms.system.contact', string='Rehber Kişisi', index='btree_not_null',
                                  ondelete='set null')
+    # Turatel JSON API (C3, tasarım §5.4); legacy ve eski kayıtlarda boş kalır (iletim takibi yok)
+    provider_packet_id = fields.Char(string='Turatel Paket No', index='btree_not_null')
+    delivery_state = fields.Selection([
+        ('pending', 'Onay Bekliyor'),
+        ('delivered', 'İletildi'),
+        ('undelivered', 'İletilemedi'),
+        ('unknown', 'Bilinmiyor'),
+    ], string='İletim Durumu', index=True)
+    delivery_code = fields.Char(string='İletim Kodu')
+    provider_service = fields.Selection([
+        ('legacy', 'Eski XML'),
+        ('single', 'singlesms'),
+        ('bulk', 'bulksms'),
+    ], string='Turatel Servisi')
+    provider_account_id = fields.Char(string='Turatel Hesap No')
 
     # ── Ayarlar ──
 
@@ -140,9 +159,36 @@ class SmsSystemMessage(models.Model):
         }
 
     @api.model
-    def _client(self, cfg=None):
+    def _client(self, cfg=None, service='single', purpose='info'):
+        """Gönderim istemcisinin tek seçim noktası (tasarım §5.3, K-10).
+
+        Legacy modda `service`/`purpose` yok sayılır ve eski XML istemcisi döner. JSON modunda
+        (TuratelJsonClient, accountId) döner: purpose 'commercial' → reklam seti, diğerleri → bilgi seti;
+        service 'single' → singlesms, 'bulk' → bulksms. Set boşsa istek yapmadan kalıcı TuratelError
+        (reklam seti asla bilgi setine düşmez, KK-C29). İstemci kurmak ağa çıkmaz.
+        """
+        cfg = cfg or self._settings()
+        if cfg['api_mode'] != 'json':
+            return self._legacy_client(cfg)
+        creds = cfg['json_creds'].get('commercial' if purpose == 'commercial' else 'info')
+        if not creds:
+            raise TuratelError(NO_COMMERCIAL_CREDS if purpose == 'commercial' else NO_INFO_CREDS)
+        user_id, username, password, account = creds
+        url = cfg['bulk_url'] if service == 'bulk' else cfg['single_url']
+        return TuratelJsonClient(url, user_id, username, password), account
+
+    @api.model
+    def _legacy_client(self, cfg=None):
         cfg = cfg or self._settings()
         return TuratelClient(cfg['channel_code'], cfg['username'], cfg['password'], url=cfg['url'])
+
+    @api.model
+    def _db8(self):
+        return (self.env['ir.config_parameter'].sudo().get_param('database.uuid') or '')[:8]
+
+    def _client_ref(self, db8):
+        """Alıcı clientId'si (KK-C12): id'den yeniden üretilebilir, ayrı kolon gerekmez."""
+        return '%s-m%d' % (db8, self.id)
 
     # ── Gönderim API'si (diğer modüller bunu kullanır) ──
 
@@ -271,21 +317,54 @@ class SmsSystemMessage(models.Model):
         pending = self._settle_without_provider(cfg)
         if not pending:
             return
+        if cfg['api_mode'] == 'json':
+            pending._deliver_json(cfg)
+            return
         client = self._client(cfg)
         for msg in pending:
             try:
                 msg_id, answer = client.send([msg.number], msg.body, msg.originator, msg.sms_type)
                 msg.write({'state': 'sent', 'provider_msg_id': msg_id, 'provider_answer': answer,
-                           'sent_at': fields.Datetime.now(), 'error': False})
+                           'sent_at': fields.Datetime.now(), 'error': False, 'provider_service': 'legacy'})
             except TuratelError as e:
-                _logger.warning('SMS gönderilemedi (%s): %s', msg.id, e)
-                if e.uncertain:
-                    # Gidip gitmediği belirsiz: asla otomatik yeniden gönderilmez (mükerrer SMS riski)
-                    msg.write({'state': 'uncertain', 'error': str(e), 'retry_count': MAX_RETRY})
-                else:
-                    # Kalıcı hatalar (hesap/başlık/kredi/numara) otomatik yeniden denenmez
-                    msg.write({'state': 'error', 'error': str(e),
-                               'retry_count': msg.retry_count + 1 if e.retryable else MAX_RETRY})
+                msg._write_send_error(e)
+
+    def _write_send_error(self, e, extra=None):
+        """Tekli gönderim hatasını kayda yaz (iki modda aynı eşleme)."""
+        _logger.warning('SMS gönderilemedi (%s): %s', self.id, e)
+        if e.uncertain:
+            # Gidip gitmediği belirsiz: asla otomatik yeniden gönderilmez (mükerrer SMS riski)
+            self.write(dict(extra or {}, state='uncertain', error=str(e), retry_count=MAX_RETRY))
+        else:
+            # Kalıcı hatalar (hesap/başlık/kredi/numara) otomatik yeniden denenmez
+            self.write({'state': 'error', 'error': str(e),
+                        'retry_count': self.retry_count + 1 if e.retryable else MAX_RETRY})
+
+    def _json_success_vals(self, result, ref, service, account):
+        return {'state': 'sent', 'provider_msg_id': result.message_ids.get(ref) or False,
+                'provider_packet_id': result.packet_id or False, 'provider_service': service,
+                'provider_account_id': account, 'delivery_state': 'pending', 'delivery_code': False,
+                'provider_answer': result.raw, 'sent_at': fields.Datetime.now(), 'error': False}
+
+    def _deliver_json(self, cfg):
+        """JSON tekli yol: kayıt başına bir SendSms; referenceId = alıcının clientId'si (KK-C12)."""
+        try:
+            client, account = self._client(cfg, service='single', purpose='info')
+        except TuratelError as e:
+            for msg in self:
+                msg._write_send_error(e)
+            return
+        db8 = self._db8()
+        for msg in self:
+            ref = msg._client_ref(db8)
+            try:
+                result = client.send_sms(account, msg.originator, msg.body, [msg.number], client_ids=[ref],
+                                         reference_id=ref, check_blacklist=False,
+                                         validity_minutes=cfg['validity_minutes'])
+                msg.write(msg._json_success_vals(result, ref, 'single', account))
+            except TuratelError as e:
+                # Belirsiz kayıt C5 durum cron'unda bu hesabın setiyle uzlaştırılır
+                msg._write_send_error(e, extra={'provider_service': 'single', 'provider_account_id': account})
 
     def _deliver_pack(self, cfg, client):
         """Aynı metni taşıyan kayıtları tek Turatel isteğiyle gönder (toplu SMS kuyruğu, sudo)."""
@@ -299,10 +378,13 @@ class SmsSystemMessage(models.Model):
         if cfg['test_mode']:
             self.write({'state': 'test', 'sent_at': fields.Datetime.now(), 'provider_answer': 'TEST'})
             return
+        if cfg['api_mode'] == 'json':
+            self._deliver_pack_json(cfg)
+            return
         try:
             msg_id, answer = client.send(self.mapped('number'), first.body, first.originator, first.sms_type)
             self.write({'state': 'sent', 'provider_msg_id': msg_id, 'provider_answer': answer,
-                        'sent_at': fields.Datetime.now(), 'error': False})
+                        'sent_at': fields.Datetime.now(), 'error': False, 'provider_service': 'legacy'})
         except TuratelError as e:
             _logger.warning('Toplu SMS paketi gönderilemedi (%s numara): %s', len(self), e)
             if e.uncertain:
@@ -310,6 +392,41 @@ class SmsSystemMessage(models.Model):
                 self.write({'state': 'uncertain', 'error': str(e), 'retry_count': MAX_RETRY})
             else:
                 self.write({'state': 'error', 'error': str(e)})
+
+    def _deliver_pack_json(self, cfg):
+        """JSON paket yolu: bulksms; ticari kampanya → reklam seti + isCheckBlackList, diğerleri → bilgi seti.
+
+        Her kayıt kendi clientId'siyle gider; yanıttaki mesaj kimliği clientId ile eşlenir (paket içinde
+        kimlikler karışmaz). referenceId = {db8}-p{ilk kayıt id}.
+        """
+        first = self[0]
+        purpose = 'commercial' if first.campaign_id.message_type == 'commercial' else 'info'
+        try:
+            client, account = self._client(cfg, service='bulk', purpose=purpose)
+        except TuratelError as e:
+            # Kimlik seti yok (KK-C29): istek yapılmadı, kalıcı hata
+            self.write({'state': 'error', 'error': str(e), 'retry_count': MAX_RETRY})
+            return
+        db8 = self._db8()
+        refs = [msg._client_ref(db8) for msg in self]
+        try:
+            result = client.send_sms(account, first.originator, first.body, self.mapped('number'), client_ids=refs,
+                                     reference_id='%s-p%d' % (db8, first.id),
+                                     check_blacklist=purpose == 'commercial',
+                                     validity_minutes=cfg['validity_minutes'])
+        except TuratelError as e:
+            _logger.warning('Toplu SMS paketi gönderilemedi (%s numara): %s', len(self), e)
+            if e.uncertain:
+                # Paket Turatel'e ulaşmış olabilir: C5 durum cron'u bu hesabın setiyle uzlaştırır
+                self.write({'state': 'uncertain', 'error': str(e), 'retry_count': MAX_RETRY,
+                            'provider_service': 'bulk', 'provider_account_id': account})
+            elif e.retryable:
+                self.write({'state': 'error', 'error': str(e)})
+            else:
+                self.write({'state': 'error', 'error': str(e), 'retry_count': MAX_RETRY})
+            return
+        for msg, ref in zip(self, refs):
+            msg.write(msg._json_success_vals(result, ref, 'bulk', account))
 
     # ── Butonlar / cron ──
 
@@ -346,7 +463,7 @@ class SmsSystemMessage(models.Model):
         }
 
     def action_fetch_report(self):
-        client = self._client()
+        client = self._legacy_client()
         for msg in self.filtered('provider_msg_id'):
             try:
                 msg.sudo().delivery_report = client.report(msg.provider_msg_id)[:2000]
@@ -455,4 +572,4 @@ class SmsSystemMessage(models.Model):
     @api.private
     def check_credit(self):
         """Ayarlar ekranındaki 'Bağlantı / Kredi' butonu."""
-        return self._client().credit()
+        return self._legacy_client().credit()

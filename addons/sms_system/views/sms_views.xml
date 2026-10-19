@@ -47,6 +47,15 @@
                             <field name="user_id"/>
                             <field name="sent_at"/>
                             <field name="provider_msg_id"/>
+                            <field name="provider_packet_id" invisible="not provider_packet_id"
+                                   groups="sms_system.group_sms_manager"/>
+                            <field name="provider_service" invisible="not provider_service"
+                                   groups="sms_system.group_sms_manager"/>
+                            <field name="provider_account_id" invisible="not provider_account_id"
+                                   groups="sms_system.group_sms_manager"/>
+                            <field name="delivery_state" invisible="not delivery_state"/>
+                            <field name="delivery_code" invisible="not delivery_code"
+                                   groups="sms_system.group_sms_manager"/>
                             <field name="provider_answer"/>
                             <field name="retry_count"/>
                             <field name="res_model"/>

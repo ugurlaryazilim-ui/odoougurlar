@@ -1,4 +1,6 @@
 """KK-C8 (log/sır), C10..C15 (yönlendirme, alanlar, legacy, test modu), C17 (mükerrer), C29/C30 (reklam seti, jeton)."""
+from unittest.mock import patch
+
 import requests
 from odoo.exceptions import UserError
 from odoo.tests.common import tagged
@@ -271,7 +273,8 @@ class TestJsonRouting(JsonModelMixin, SmsTestCase):
     def test_kk_c14_legacy_modda_json_istegi_yok(self):
         self.set_param('api_mode', 'legacy_xml')
         self.Message.send_sms(NUMBER, 'Tekli')
-        msgs = self.launch(self.make_json_campaign())
+        # Sabit gövde: legacy kişiselleştirme yapmaz, {ad} ile her ad ayrı paket olurdu (davranış değişmez)
+        msgs = self.launch(self.make_json_campaign(body='Sabit metin'))
         self.assertEqual(self.net.json_calls, [])
         self.assertEqual(len(self.net.turatel_calls), 2)
         self.assertEqual(set(msgs.mapped('state')), {'sent'})
@@ -280,7 +283,7 @@ class TestJsonRouting(JsonModelMixin, SmsTestCase):
         self.set_param('api_mode', 'legacy_xml')
         self.configure_json(commercial=False, iys=True)
         self.set_param('api_mode', 'legacy_xml')
-        msgs = self.launch(self.make_json_campaign(message_type='commercial'))
+        msgs = self.launch(self.make_json_campaign(message_type='commercial', body='Sabit metin'))
         self.assertEqual(set(msgs.mapped('state')), {'sent'}, msgs.mapped('error'))
         self.assertEqual(self.net.json_calls, [])
         self.assertEqual(len(self.net.turatel_calls), 1)
@@ -589,3 +592,133 @@ class TestJsonCommercialSet(JsonModelMixin, SmsTestCase):
         self.launch(self.make_json_campaign(message_type='commercial'))
         self.assertEqual(len(self.net.tj.tokens_issued), len(issued_before) + 1, 'Reklam jetonu korunmalı')
         self.assertIn(com_token, self.net.tj.tokens)
+
+
+@tagged('post_install', '-at_install')
+class TestJsonRoutingFixedBody(JsonModelMixin, SmsTestCase):
+    """C3 kanıtı sabit gövdeyle: {ad} kişiselleştirmesi (tek pakette {1} + parametre) C4'tür; buradaki
+    kontroller C3'ün yönlendirme, kimlik eşleme ve mükerrer önleme sözleşmesini C4'ten bağımsız doğrular."""
+
+    BODY = 'Sabit metin'
+
+    def test_c3_uc_alicili_paket_tek_istek_kimlikler_karismaz(self):
+        msgs = self.launch(self.make_json_campaign(body=self.BODY))
+        self.assertEqual(set(msgs.mapped('state')), {'sent'}, msgs.mapped('error'))
+        self.assertEqual(len(self.net.json_sends), 1)
+        call = self.net.json_sends[0]
+        payload = call['payload']
+        self.assertEqual((call['service'], call['user'], int(payload['accountId'])), ('bulksms', 'info_user', 9254))
+        self.assertIs(payload['isCheckBlackList'], False)
+        self.assertEqual(payload['referenceId'], '%s-p%d' % (self.db8(), msgs[0].id))
+        self.assertEqual([tail10(n) for n in payload['receiverList']], [m.number[-10:] for m in msgs])
+        self.assertEqual([p['clientId'] for p in payload['personalMessages']], [self.client_id_of(m) for m in msgs])
+        fake = self.net.tj
+        for msg in msgs:
+            sent = fake.message_by_client(self.client_id_of(msg))
+            self.assertEqual(tail10(sent['number']), msg.number[-10:])
+            self.assertEqual(str(msg.provider_msg_id), str(sent['message_id']))
+            self.assertEqual(str(msg.provider_packet_id), str(sent['packet_id']))
+            self.assertEqual((msg.provider_service, msg.provider_account_id, msg.delivery_state),
+                             ('bulk', '9254', 'pending'))
+        self.assertEqual(len(set(msgs.mapped('provider_msg_id'))), 3)
+
+    def test_c3_ticari_paket_reklam_seti_kara_liste_true(self):
+        self.configure_json(iys=True)
+        self.set_param('optout_text', RET_TEXT)
+        msgs = self.launch(self.make_json_campaign(message_type='commercial', body=self.BODY))
+        self.assertEqual(set(msgs.mapped('state')), {'sent'}, msgs.mapped('error'))
+        self.assertEqual(len(self.net.json_sends), 1)
+        call = self.net.json_sends[0]
+        self.assertEqual((call['service'], call['user'], int(call['payload']['accountId'])),
+                         ('bulksms', 'com_user', 65672))
+        self.assertIs(call['payload']['isCheckBlackList'], True)
+        self.assertEqual({m.provider_account_id for m in msgs}, {'65672'})
+
+    def test_c3_paket_sendsms_aninda_sending(self):
+        camp = self.make_json_campaign(body=self.BODY)
+        camp.action_send()
+        msgs = self.campaign_msgs(camp)
+        seen = []
+
+        def hook(call):
+            if call['endpoint'] == 'Sms/SendSms':
+                seen.append({self.db_state(m, flush=False) for m in msgs})
+
+        self.net.tj.hook = hook
+        self.run_queue()
+        self.assertEqual(seen, [{'sending'}])
+
+    def test_c3_reference_id_her_istekte_benzersiz(self):
+        self.Message.send_sms('05321234567', 'bir')
+        self.Message.send_sms('05321234568', 'iki')
+        self.launch(self.make_json_campaign(body=self.BODY))
+        self.launch(self.make_json_campaign(body=self.BODY))
+        refs = [c['payload']['referenceId'] for c in self.net.json_sends]
+        self.assertEqual(len(refs), 4)
+        self.assertEqual(len(set(refs)), 4)
+
+    def test_c3_kilitli_kampanya_kaydi_pakete_girmez(self):
+        """Başka işlemin kilitlediği kayıt (SKIP LOCKED) bu çalışmada gönderilmez, kuyrukta kalır."""
+        camp = self.make_json_campaign(body=self.BODY)
+        camp.action_send()
+        msgs = self.campaign_msgs(camp)
+        busy = msgs[1]
+        original = type(self.Message)._lock_for_send
+
+        def lock(model, ids, states):
+            return original(model, [i for i in ids if i != busy.id], states)
+
+        with patch.object(type(self.Message), '_lock_for_send', lock):
+            self.run_queue()
+        self.refresh_all(*msgs)
+        self.assertEqual(busy.state, 'queued')
+        self.assertEqual(self.sends_with(busy), 0)
+        self.assertEqual((msgs - busy).mapped('state'), ['sent', 'sent'])
+
+    def test_c3_belirsiz_json_kaydi_servis_ve_hesap_tasir(self):
+        """Belirsiz kayıt C5'te uzlaştırılabilsin: hangi servis/hesapla gönderildiği yazılır."""
+        self.net.tj.add_script('Sms/SendSms', requests.exceptions.ReadTimeout('okuma zaman aşımı'))
+        msg = self.Message.send_sms(NUMBER, 'Belirsiz')
+        self.assertEqual((msg.state, msg.retry_count), ('uncertain', 3))
+        self.assertEqual((msg.provider_service, msg.provider_account_id), ('single', '9254'))
+        self.assertFalse(msg.delivery_state)
+
+    def test_c3_ticari_reklam_seti_yoksa_hatali_kayit_yeniden_gonderilemez(self):
+        self.configure_json(commercial=False, iys=True)
+        self.set_param('optout_text', RET_TEXT)
+        camp = self.make_json_campaign(message_type='commercial', body=self.BODY, state='sending')
+        for contact in self.Contact.search([('list_ids', 'in', camp.list_ids.ids)]):
+            self.campaign_message(camp, contact, state='error', body=self.BODY)
+        with self.assertRaises(UserError) as ctx:
+            camp.action_retry_errors()
+        self.assertIn('Reklam hesabı kimlik bilgileri', str(ctx.exception))
+        self.assertEqual(set(self.campaign_msgs(camp).mapped('state')), {'error'})
+        self.assertEqual(self.net.json_calls, [])
+
+    def test_c3_kampanya_iletim_sayaclari(self):
+        msgs = self.launch(self.make_json_campaign(body=self.BODY))
+        msgs[0].delivery_state = 'delivered'
+        msgs[1].delivery_state = 'undelivered'
+        camp = msgs[0].campaign_id
+        camp.invalidate_recordset()
+        self.assertEqual((camp.delivered_count, camp.undelivered_count), (1, 1))
+
+    def test_c3_belirsiz_paket_tekrar_gonderilmez(self):
+        self.net.tj.add_script('Sms/SendSms', requests.exceptions.ReadTimeout('okuma zaman aşımı'))
+        camp = self.make_json_campaign(body=self.BODY)
+        msgs = self.launch(camp)
+        self.assertEqual(set(msgs.mapped('state')), {'uncertain'})
+        self.assertEqual({(m.provider_service, m.provider_account_id) for m in msgs}, {('bulk', '9254')})
+        with self.assertRaises(UserError):
+            camp.action_retry_errors()
+        self.run_queue(2)
+        self.Message._cron_retry_failed()
+        self.assertEqual(len(self.net.json_sends), 1)
+
+    def test_c3_yanit_eslesmezse_sent_kimlik_bos_paket_no_yazilir(self):
+        self.net.tj.add_script('Sms/SendSms', lambda call: json_ok({'packetId': 4999, 'unexpected': True}))
+        msgs = self.launch(self.make_json_campaign(body=self.BODY))
+        self.assertEqual(set(msgs.mapped('state')), {'sent'}, msgs.mapped('error'))
+        self.assertEqual({m.provider_msg_id for m in msgs}, {False})
+        self.assertEqual({m.provider_packet_id for m in msgs}, {'4999'})
+        self.assertEqual({m.delivery_state for m in msgs}, {'pending'})
