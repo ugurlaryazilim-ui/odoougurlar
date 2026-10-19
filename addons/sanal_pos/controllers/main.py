@@ -21,6 +21,7 @@ from odoo import http
 from odoo.http import request
 
 from .. import tools
+from ..models.sanal_pos_payment import SYNC_DEFERRED_CODE
 
 _logger = logging.getLogger(__name__)
 
@@ -139,12 +140,13 @@ class SanalPosParatikaController(http.Controller):
                 _logger.warning('sanal_pos: %s tetiği kurulamadı (%s)', action, type(exc).__name__)
                 payment = env['sanal.pos.payment'].browse()
         try:
-            self._log_event(provider, action, params, mpid, payment)
+            self._log_event(provider, action, params, mpid, payment,
+                            deferred=bool(payment.env.context.get('sanal_pos_sync_deferred')))
         except Exception as exc:  # noqa: BLE001 - olay kaydı yanıtı bozmaz
             _logger.warning('sanal_pos: %s olayı kaydedilemedi (%s)', action, type(exc).__name__)
 
     @staticmethod
-    def _log_event(provider, action, params, mpid, payment):
+    def _log_event(provider, action, params, mpid, payment, deferred=False):
         """``sanal.pos.log`` satırı: alan adları + izin listesindeki alanların kırpılmış değerleri."""
         values = {}
         for key, value in params.items():
@@ -161,4 +163,6 @@ class SanalPosParatikaController(http.Controller):
         environment = payment.environment if payment else provider._param('sanal_pos.environment')
         provider._log_call(
             payment, action, 'paratika', environment, http_status=200,
-            success=bool(payment), request_body=body)
+            success=bool(payment), request_body=body,
+            # Y-1: kilit yüzünden bayrak yazılamadı; bayrak cron'u bu satırdan yeniden dener
+            error_code=SYNC_DEFERRED_CODE if deferred else None)

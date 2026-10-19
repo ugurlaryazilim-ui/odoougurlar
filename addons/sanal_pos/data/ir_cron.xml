@@ -11,6 +11,18 @@
         <field name="user_id" ref="base.user_root"/>
         <field name="active" eval="True"/>
     </record>
+    <!-- Y-1: webhook/dönüş tetikli tur; yalnız bayraklı kayıtlar (G-1 çoğaltma koruması).
+         Asıl çalışması tetikledir; saatlik çalışma yalnız kaçan tetik için güvenlik ağıdır. -->
+    <record id="cron_sanal_pos_sync_flagged" model="ir.cron">
+        <field name="name">Sanal POS: bildirim tetikli senkron</field>
+        <field name="model_id" ref="model_sanal_pos_payment"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_sync_flagged()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">hours</field>
+        <field name="user_id" ref="base.user_root"/>
+        <field name="active" eval="True"/>
+    </record>
     <!-- G8: log temizliği (KK-39) ve son 30 günde ödenenlerin iade senkronu (KK-27). -->
     <record id="cron_sanal_pos_daily" model="ir.cron">
         <field name="name">Sanal POS: günlük temizlik ve iade senkronu</field>

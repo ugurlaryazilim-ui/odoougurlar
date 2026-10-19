@@ -5,11 +5,12 @@ Gerçek HTTP (HttpCase.url_open): public kullanıcı, CSRF'siz POST, GET reddi, 
 Uç nokta Paratika'ya ASLA çağrı yapmaz; yalnız ``sync_requested`` bayrağı + cron tetiği.
 """
 import time
+from unittest.mock import patch
 
 from odoo.tests import tagged
 
 from .common import (
-    CRON_SYNC, CUSTOMER_NAME, EMAIL, INV_NO, PASSWORD, SanalPosHttpCase, tran,
+    CRON_SYNC, CRON_SYNC_FLAGGED, CUSTOMER_NAME, EMAIL, INV_NO, PASSWORD, SanalPosHttpCase, tran,
 )
 
 NOTIFY = '/sanal_pos/paratika/notify'
@@ -37,15 +38,29 @@ class TestNotifyEndpoint(HookCase):
 
     def test_kk22_post_200_ok_bayrak_ve_tetik(self):
         payment = self.make_payment(state='sent')
-        before = self.cron_trigger_count(CRON_SYNC)
+        before = self.cron_trigger_count(CRON_SYNC_FLAGGED)
         started = time.monotonic()
         response = self.notify(payment.merchant_payment_id)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.text.strip(), 'OK')
         self.assertLess(time.monotonic() - started, 5)
         self.assertTrue(self.reload(payment).sync_requested)
-        self.assertGreater(self.cron_trigger_count(CRON_SYNC), before)
+        self.assertGreater(self.cron_trigger_count(CRON_SYNC_FLAGGED), before)
         self.assertEqual(payment.state, 'sent')
+
+    def test_y1_kilitli_satirda_bildirim_kaybolmaz(self):
+        payment = self.make_payment(state='sent')
+        with patch.object(type(self.env['sanal.pos.payment']), '_try_lock_nowait',
+                          return_value=False):
+            response = self.notify(payment.merchant_payment_id)
+        self.assertEqual(response.text.strip(), 'OK')
+        self.assertFalse(self.reload(payment).sync_requested)
+        log = self.env['sanal.pos.log'].sudo().search(
+            [('payment_id', '=', payment.id), ('action', '=', 'NOTIFY')], limit=1)
+        self.assertEqual(log.error_code, 'SYNC_DEFERRED')
+        self.set_query_transactions(tran('AP', 'SALE', '9000.00', 'PG-Y1-HTTP'))
+        self.run_cron(CRON_SYNC_FLAGGED)
+        self.assertEqual(self.reload(payment).state, 'paid')
 
     def test_kk22_uc_nokta_paratikaya_cagri_yapmaz(self):
         payment = self.make_payment(state='sent')
@@ -219,12 +234,12 @@ class TestReturnEndpoint(HookCase):
 
     def test_kk29_post_yalniz_dogrulama_tetikler_durumu_degistirmez(self):
         payment = self.make_payment(state='sent')
-        before = self.cron_trigger_count(CRON_SYNC)
+        before = self.cron_trigger_count(CRON_SYNC_FLAGGED)
         self.post(RETURN, {'MERCHANTPAYMENTID': payment.merchant_payment_id, 'STATUS': 'AP', 'AMOUNT': '9000.00'})
         self.reload(payment)
         self.assertEqual(payment.state, 'sent')
         self.assertTrue(payment.sync_requested)
-        self.assertGreater(self.cron_trigger_count(CRON_SYNC), before)
+        self.assertGreater(self.cron_trigger_count(CRON_SYNC_FLAGGED), before)
         self.assertNoParatikaCalls()
 
     def test_kk29_bilinmeyen_kayitta_ayni_sayfa(self):

@@ -54,6 +54,8 @@ BASE_SETTINGS = {
 }
 
 CRON_SYNC = 'sanal_pos.cron_sanal_pos_sync'
+# Y-1: webhook/dönüş tetiği yalnız bayraklı kayıtları işleyen ayrı cron'a kurulur
+CRON_SYNC_FLAGGED = 'sanal_pos.cron_sanal_pos_sync_flagged'
 CRON_DAILY = 'sanal_pos.cron_sanal_pos_daily'
 
 OPEN_STATES = ('sending', 'sent', 'unknown')

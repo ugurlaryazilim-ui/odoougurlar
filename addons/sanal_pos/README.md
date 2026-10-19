@@ -11,6 +11,7 @@ Başka modüle bağımlılığı yoktur (`ugurlar_tailor` kurulu olmasa da çal�
 - **Öneri (D-4a):** ilk elle kurulumdan sonra `sanal_pos`, üretim compose dosyasındaki otomatik `-u` modül listesine eklenmeli; böylece sonraki deploy'larda güncelleme unutulmaz.
 - **Sonraki her sürüm:** deploy biter bitmez **hemen** `odoo -d <veritabani> -u sanal_pos --stop-after-init`.
   Yeni saklanan (stored) alanlar modül güncellenene kadar veritabanında yoktur; arada durum senkronu cron'u (10 dakikada bir) hata verir. Güncellemeyi geciktirmeyin.
+  "Sanal POS: bildirim tetikli senkron" cron'u da `-u` ile oluşur; o zamana kadar bildirim tetikleri 10 dakikalık periyodik cron'a kurulur.
 - Test: `odoo -d bc_test -u sanal_pos --test-tags /sanal_pos --stop-after-init --workers=0 --max-cron-threads=0` (Paratika ve MSSQL taklit edilir; gerçek çağrı gitmez).
 
 ## 2. Ayarlar (Sanal POS > Ayarlar; yalnız sistem yöneticisi)
@@ -45,7 +46,7 @@ Sır alanları (API şifresi, secretKey, MSSQL kullanıcı/şifre) hiçbir kayı
 2. **Dönüş (return) adresi:** `https://<odoo-alan-adi>/sanal_pos/paratika/return` (müşterinin ödeme sonrası döndüğü teşekkür sayfası). Yalnız POST kabul eder.
 3. API kullanıcısında link, sorgu, **VOID ve REFUND** yetkileri açık olmalı (test ve canlı için ayrı kullanıcılar).
 4. Odoo'nun `web.base.url` sistem parametresi gerçek alan adını (`https://`) göstermeli ve `web.base.url.freeze = True` yapılmalı; aksi halde yönetici girişi adresi değiştirebilir, dönüş/bildirim adresleri bozulur (D-3).
-5. **Bildirim çoğaltmasına karşı (öneri, reverse proxy):** Modül aynı ödemeye gelen tekrar bildirimlerde tek cron tetiği kurar, ödeme başına en çok dakikada bir sorgu yapar ve tetiklenen ek turlarda son 9 dakikada sorgulanmış "Gönderildi" kayıtlarını atlar. Ek koruma olarak nginx/Coolify'da `/sanal_pos/paratika/` yolları için gövde sınırı ve IP başına hız sınırı önerilir, örnek: `client_max_body_size 16k;` ve `limit_req zone=sanalpos burst=20 nodelay;` (`limit_req_zone $binary_remote_addr zone=sanalpos:1m rate=30r/m;`). Paratika bildirim IP'leri öğrenilirse yalnız onlara izin verilebilir. (Modül bu ayarları yapmaz.)
+5. **Bildirim çoğaltmasına karşı (öneri, reverse proxy):** Modül aynı ödemeye gelen tekrar bildirimlerde tek cron tetiği kurar, ödeme başına en çok dakikada bir sorgu yapar ve bildirim tetiğini yalnız bayraklı kayıtları işleyen ayrı cron'a ("Sanal POS: bildirim tetikli senkron") kurar; 10 dakikalık periyodik tur bildirimle çoğalmaz ve hiçbir kaydı atlamaz. Ek koruma olarak nginx/Coolify'da `/sanal_pos/paratika/` yolları için gövde sınırı ve IP başına hız sınırı önerilir, örnek: `client_max_body_size 16k;` ve `limit_req zone=sanalpos burst=20 nodelay;` (`limit_req_zone $binary_remote_addr zone=sanalpos:1m rate=30r/m;`). Paratika bildirim IP'leri öğrenilirse yalnız onlara izin verilebilir. (Modül bu ayarları yapmaz.)
 
 ## 5. Nebim fatura görünümü
 

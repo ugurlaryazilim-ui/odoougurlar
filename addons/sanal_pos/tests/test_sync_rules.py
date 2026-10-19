@@ -14,7 +14,7 @@ from unittest.mock import patch
 from odoo.exceptions import AccessError, UserError
 from odoo.tests import tagged
 
-from .common import CRON_DAILY, CRON_SYNC, invoice_rows, timeout_exc, tran
+from .common import CRON_DAILY, CRON_SYNC, CRON_SYNC_FLAGGED, invoice_rows, timeout_exc, tran
 from .test_sync import SyncCase
 
 NOT_FOUND = "Link Paratika'da bulunamadı; yeni link oluşturabilirsiniz."
@@ -168,19 +168,19 @@ class TestWebhookFlag(RulesCase):
 
     def test_bayrak_yazilir_cron_tetiklenir_dis_cagri_yok(self):
         payment = self.sent()
-        before = self.cron_trigger_count()
+        before = self.cron_trigger_count(CRON_SYNC_FLAGGED)
         rec = self.env['sanal.pos.payment']._mark_sync_requested(payment.merchant_payment_id)
         self.assertEqual(rec, payment)
         payment.invalidate_recordset()
         self.assertTrue(payment.sync_requested)
-        self.assertGreater(self.cron_trigger_count(), before)
+        self.assertGreater(self.cron_trigger_count(CRON_SYNC_FLAGGED), before)
         self.assertNoParatikaCalls()
 
     def test_bilinmeyen_odeme_numarasi_bos_doner(self):
-        before = self.cron_trigger_count()
+        before = self.cron_trigger_count(CRON_SYNC_FLAGGED)
         rec = self.env['sanal.pos.payment']._mark_sync_requested('YOK-1')
         self.assertFalse(rec)
-        self.assertEqual(self.cron_trigger_count(), before)
+        self.assertEqual(self.cron_trigger_count(CRON_SYNC_FLAGGED), before)
 
     def test_risk2_bayrak_yazilamasa_da_siradaki_cron_odemeyi_yakalar(self):
         payment = self.sent()
@@ -198,33 +198,81 @@ class TestWebhookFlag(RulesCase):
 
 @tagged('post_install', '-at_install', 'sanal_pos')
 class TestWebhookAmplification(RulesCase):
-    """G-1: webhook kaynaklı sorgu çoğaltması (tetik tekilleştirme, 9 dk kuralı, hız sınırı)."""
+    """G-1: webhook kaynaklı sorgu çoğaltması (tetik tekilleştirme, ayrı bayrak cron'u, hız
+    sınırı). Y-1: periyodik tur atlama yapmaz (KK-25 <= 10 dk)."""
 
     def now(self):
         return datetime.utcnow().replace(microsecond=0)
 
     def last_trigger_at(self):
-        cron = self.env.ref(CRON_SYNC).sudo()
+        cron = self.env.ref(CRON_SYNC_FLAGGED).sudo()
         trig = self.env['ir.cron.trigger'].sudo().search([('cron_id', '=', cron.id)],
                                                           order='id desc', limit=1)
         return trig.call_at
 
     def test_g1_ayni_odemeye_bes_bildirim_tek_tetik(self):
         payment = self.sent()
-        before = self.cron_trigger_count()
+        before = self.cron_trigger_count(CRON_SYNC_FLAGGED)
+        periodic = self.cron_trigger_count(CRON_SYNC)
         for _i in range(5):
             self.env['sanal.pos.payment']._mark_sync_requested(payment.merchant_payment_id)
-        self.assertEqual(self.cron_trigger_count(), before + 1, 'tetik yalnız bayrak False->True geçişinde')
+        self.assertEqual(self.cron_trigger_count(CRON_SYNC_FLAGGED), before + 1,
+                         'tetik yalnız bayrak False->True geçişinde')
+        self.assertEqual(self.cron_trigger_count(CRON_SYNC), periodic,
+                         'webhook periyodik (tüm kayıtlar) turu tetiklememeli')
         payment.invalidate_recordset()
         self.assertTrue(payment.sync_requested)
         self.assertNoParatikaCalls()
 
-    def test_g1_kilitliyse_bayrak_ve_tetik_yok(self):
+    def test_y1_kilitliyse_bayrak_yok_tetik_1_dk_sonra(self):
         payment = self.sent()
-        before = self.cron_trigger_count()
+        before = self.cron_trigger_count(CRON_SYNC_FLAGGED)
+        periodic = self.cron_trigger_count(CRON_SYNC)
+        start = self.now()
         with patch.object(type(self.env['sanal.pos.payment']), '_try_lock_nowait', return_value=False):
-            self.env['sanal.pos.payment']._mark_sync_requested(payment.merchant_payment_id)
-        self.assertEqual(self.cron_trigger_count(), before)
+            rec = self.env['sanal.pos.payment']._mark_sync_requested(payment.merchant_payment_id)
+        self.assertTrue(rec.env.context.get('sanal_pos_sync_deferred'))
+        payment.invalidate_recordset()
+        self.assertFalse(payment.sync_requested)
+        self.assertEqual(self.cron_trigger_count(CRON_SYNC_FLAGGED), before + 1)
+        self.assertGreaterEqual(self.last_trigger_at(), start + timedelta(minutes=1))
+        self.assertEqual(self.cron_trigger_count(CRON_SYNC), periodic)
+
+    def deferred_log(self, payment):
+        return self.env['sanal.pos.log'].sudo().create({
+            'action': 'NOTIFY', 'provider': 'paratika', 'payment_id': payment.id,
+            'error_code': 'SYNC_DEFERRED', 'success': True})
+
+    def test_y1_kilit_nedeniyle_ertelenen_bildirim_bayrak_cronunda_islenir(self):
+        payment = self.sent(last_checked_at=self.now() - timedelta(minutes=5))
+        self.deferred_log(payment)
+        self.set_query_transactions(tran('AP', 'SALE', '9000.00', 'PG-Y1-DEF'))
+        self.run_cron(CRON_SYNC_FLAGGED)
+        self.assertEqual(self.mock.count('QUERYTRANSACTION'), 1)
+        payment.invalidate_recordset()
+        self.assertEqual(payment.state, 'paid')
+        self.run_cron(CRON_SYNC_FLAGGED)
+        self.assertEqual(self.mock.count('QUERYTRANSACTION'), 1, 'ertelenen istek bir kez işlenir')
+
+    def test_y1_ertelenen_bildirim_hala_kilitliyse_yeniden_tetiklenir(self):
+        payment = self.sent()
+        self.deferred_log(payment)
+        before = self.cron_trigger_count(CRON_SYNC_FLAGGED)
+        with patch.object(type(self.env['sanal.pos.payment']), '_try_lock_nowait', return_value=False):
+            self.run_cron(CRON_SYNC_FLAGGED)
+        self.assertEqual(self.mock.count('QUERYTRANSACTION'), 0)
+        self.assertEqual(self.cron_trigger_count(CRON_SYNC_FLAGGED), before + 1)
+        self.run_cron(CRON_SYNC_FLAGGED)
+        self.assertEqual(self.mock.count('QUERYTRANSACTION'), 1)
+
+    def test_y1_periyodik_tur_yakin_sorgulanmis_kaydi_da_sorgular(self):
+        """KK-25: önceki tur geç uyandı/uzadı (kayıt 8,5 dk önce sorgulandı); bu periyodik tur
+        atlarsa iki sorgu arası ~20 dk olurdu."""
+        payment = self.sent(last_checked_at=self.now() - timedelta(minutes=8, seconds=30))
+        self.run_cron(CRON_SYNC)
+        self.assertEqual(self.mock.count('QUERYTRANSACTION'), 1)
+        payment.invalidate_recordset()
+        self.assertGreater(payment.last_checked_at, self.now() - timedelta(minutes=1))
 
     def test_g1_yeni_sorgulanmis_odemenin_tetigi_hiz_siniri_kadar_ertelenir(self):
         checked = self.now() - timedelta(seconds=20)
@@ -232,17 +280,19 @@ class TestWebhookAmplification(RulesCase):
         self.env['sanal.pos.payment']._mark_sync_requested(payment.merchant_payment_id)
         self.assertGreaterEqual(self.last_trigger_at(), checked + timedelta(minutes=1))
 
-    def test_g1_tetiklenen_turda_yeni_sorgulanmis_bayraksiz_sent_atlanir(self):
+    def test_g1_bayrak_cronu_yalniz_bayrakli_kaydi_sorgular(self):
         target = self.sent(invoice_no='UGRG1-0', last_checked_at=self.now() - timedelta(minutes=30))
         for i in range(1, 4):
             self.sent(invoice_no='UGRG1-%d' % i, last_checked_at=self.now() - timedelta(minutes=3))
         old = self.sent(invoice_no='UGRG1-9', last_checked_at=self.now() - timedelta(minutes=20))
         never = self.sent(invoice_no='UGRG1-8', last_checked_at=False)
         self.env['sanal.pos.payment']._mark_sync_requested(target.merchant_payment_id)
-        self.run_cron(CRON_SYNC)
+        self.run_cron(CRON_SYNC_FLAGGED)
         queried = {c.params['MERCHANTPAYMENTID'] for c in self.mock.calls_for('QUERYTRANSACTION')}
-        self.assertEqual(queried, {target.merchant_payment_id, old.merchant_payment_id,
-                                   never.merchant_payment_id})
+        self.assertEqual(queried, {target.merchant_payment_id})
+        target.invalidate_recordset()
+        self.assertFalse(target.sync_requested)
+        self.assertTrue(old.exists() and never.exists())
 
     def test_g1_bayrakli_odeme_hiz_siniri_icinde_sorgulanmaz_bayrak_korunur(self):
         payment = self.sent(sync_requested=True, last_checked_at=self.now() - timedelta(seconds=10))

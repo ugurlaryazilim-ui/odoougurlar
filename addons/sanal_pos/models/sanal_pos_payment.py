@@ -64,6 +64,12 @@ UNKNOWN_MSG = 'Paratika yanıt vermedi; link oluşmuş olabilir. Durum otomatik 
 BUSY_MSG = 'Bu kayıt üzerinde başka bir işlem sürüyor; birazdan tekrar deneyin.'
 
 SYNC_CRON_XMLID = 'sanal_pos.cron_sanal_pos_sync'   # G8
+# Y-1: webhook/dönüş tetiği yalnız bayraklı kayıtları işleyen ayrı cron'a kurulur; periyodik
+# tur (KK-25 <= 10 dk) hiçbir kaydı "yakında sorgulandı" diye atlamaz.
+SYNC_FLAGGED_CRON_XMLID = 'sanal_pos.cron_sanal_pos_sync_flagged'
+SYNC_DEFERRED_CODE = 'SYNC_DEFERRED'          # kilit yüzünden bayrağı yazılamamış bildirim (log)
+SYNC_DEFERRED_DONE_CODE = 'SYNC_DEFERRED_DONE'
+SYNC_DEFERRED_WINDOW = timedelta(minutes=15)  # daha eski ertelenmişleri periyodik tur zaten aldı
 UNKNOWN_SYNC_DELAY = timedelta(minutes=2)
 
 # G8: durum senkronu (tasarım §6.2, §6.3; 08-sozlesme-G8.md)
@@ -84,7 +90,6 @@ UNVERIFIED_PRIOR_MSG = ("Bu faturanın önceki link denemesi Paratika'da bulunam
 CRON_SYNC_LIMIT = 200
 # G-1: webhook kaynaklı sorgu çoğaltmasına karşı
 SYNC_REQUEST_MIN_INTERVAL = timedelta(minutes=1)   # ödeme başına iki sorgu arası en az
-SENT_RECHECK_AGE = timedelta(minutes=9)            # bayraksız 'sent' periyodik yeniden sorgu yaşı
 CRON_TIME_BUDGET = 8 * 60  # saniye; aşılırsa cron kendini hemen yeniden planlar
 QUERY_FAILED_MSG = 'Paratika durum sorgusu yanıt vermedi; durum değiştirilmedi.'
 LINK_NOT_FOUND_MSG = "Link Paratika'da bulunamadı; yeni link oluşturabilirsiniz."
@@ -573,9 +578,14 @@ class SanalPosPayment(models.Model):
             self._post_note('Link oluşturulamadı: %s' % message)
 
     @api.model
-    def _trigger_sync_cron(self, at=None):
-        """Senkron cron'unu öne çeker: varsayılan ``now+2dk`` (G7 belirsiz), G9 ``at=now``."""
-        cron = self.env.ref(SYNC_CRON_XMLID, raise_if_not_found=False)
+    def _trigger_sync_cron(self, at=None, flagged=False):
+        """Senkron cron'unu öne çeker: varsayılan ``now+2dk`` (G7 belirsiz), G9 ``at=now``.
+
+        ``flagged``: yalnız bayraklı kayıtları işleyen cron (webhook yolu, G-1/Y-1). Modül
+        güncellenmeden önce o cron yoksa periyodik cron tetiklenir.
+        """
+        cron = flagged and self.env.ref(SYNC_FLAGGED_CRON_XMLID, raise_if_not_found=False)
+        cron = cron or self.env.ref(SYNC_CRON_XMLID, raise_if_not_found=False)
         if not cron:
             return
         when = at or (fields.Datetime.now() + UNKNOWN_SYNC_DELAY)
@@ -1019,28 +1029,61 @@ class SanalPosPayment(models.Model):
     def _mark_sync_requested(self, merchant_payment_id):
         """Webhook/dönüş tetiği: yalnız bayrak + cron tetiği. Dış çağrı ve commit yok.
 
-        Gövde asla karar için okunmaz. Satır kilitliyse bayrak atlanır; sent/unknown kayıtlar
-        periyodik cron'da zaten sorgulanır (Risk 2). Dönüş: kayıt veya boş recordset.
+        Gövde asla karar için okunmaz. Dönüş: kayıt veya boş recordset.
 
-        G-1: cron tetiği yalnız bayrak False->True geçişinde kurulur (aynı ödemeye tekrarlanan
-        bildirimler tetik çoğaltmaz) ve son sorgudan ``SYNC_REQUEST_MIN_INTERVAL`` sonrasına
-        ertelenir. Kilit alınamazsa tetik de kurulmaz.
+        G-1: tetik yalnız bayrak False->True geçişinde ve yalnız bayrak cron'una kurulur (aynı
+        ödemeye tekrarlanan bildirimler tetik/sorgu çoğaltmaz); son sorgudan
+        ``SYNC_REQUEST_MIN_INTERVAL`` sonrasına ertelenir.
+        Y-1: satır kilitliyse bayrak yazılamaz; dönen kayıt ``sanal_pos_sync_deferred``
+        context'i taşır (denetleyici bildirimi ``SYNC_DEFERRED`` koduyla loglar) ve bayrak cron'u
+        1 dk sonrasına tetiklenir; orada bayrak yeniden denenir (bildirim kaybolmaz).
         """
         Payment = self.sudo()
         if not merchant_payment_id:
             return Payment.browse()
         rec = Payment.search([('merchant_payment_id', '=', merchant_payment_id)], limit=1)
-        if not rec or not rec._try_lock_nowait():
+        if not rec:
             return rec
-        rec.invalidate_recordset(['sync_requested', 'last_checked_at'])
-        if rec.sync_requested:
-            return rec  # tetik zaten kurulu; bayrak cron'da temizlenene kadar yeni tetik yok
-        rec.write({'sync_requested': True})
-        when = fields.Datetime.now()
-        if rec.last_checked_at and rec.last_checked_at + SYNC_REQUEST_MIN_INTERVAL > when:
-            when = rec.last_checked_at + SYNC_REQUEST_MIN_INTERVAL
-        self._trigger_sync_cron(at=when)
+        if not rec._try_lock_nowait():
+            self._trigger_sync_cron(
+                at=fields.Datetime.now() + SYNC_REQUEST_MIN_INTERVAL, flagged=True)
+            return rec.with_context(sanal_pos_sync_deferred=True)
+        rec._request_sync()
         return rec
+
+    def _request_sync(self):
+        """Kilitli kayıtta bayrak + (yalnız False->True geçişinde) bayrak cron'u tetiği."""
+        self.ensure_one()
+        self.invalidate_recordset(['sync_requested', 'last_checked_at'])
+        if self.sync_requested:
+            return  # tetik zaten kurulu; bayrak cron'da temizlenene kadar yeni tetik yok
+        self.write({'sync_requested': True})
+        when = fields.Datetime.now()
+        if self.last_checked_at and self.last_checked_at + SYNC_REQUEST_MIN_INTERVAL > when:
+            when = self.last_checked_at + SYNC_REQUEST_MIN_INTERVAL
+        self._trigger_sync_cron(at=when, flagged=True)
+
+    @api.model
+    def _apply_deferred_sync_requests(self):
+        """Y-1: kilit yüzünden bayrağı yazılamamış bildirimleri (log ``SYNC_DEFERRED``) bayrağa
+        çevirir. Hâlâ kilitliyse bayrak cron'u 1 dk sonra yeniden tetiklenir."""
+        now = fields.Datetime.now()
+        logs = self.env['sanal.pos.log'].sudo().search([
+            ('error_code', '=', SYNC_DEFERRED_CODE), ('payment_id', '!=', False),
+            ('create_date', '>=', now - SYNC_DEFERRED_WINDOW)])
+        retry = False
+        for payment in logs.payment_id:
+            with self.env.cr.savepoint():
+                if payment._try_lock_nowait():
+                    payment._request_sync()
+                    logs.filtered(lambda l: l.payment_id == payment).write(
+                        {'error_code': SYNC_DEFERRED_DONE_CODE})
+                else:
+                    retry = True
+        if retry:
+            self._trigger_sync_cron(at=now + SYNC_REQUEST_MIN_INTERVAL, flagged=True)
+        if logs:
+            self._sp_commit()
 
     # ---------------------------------------------------------------- kullanıcı: Durumu Sorgula (KK-28)
     def action_check_status(self):
@@ -1445,26 +1488,28 @@ class SanalPosPayment(models.Model):
 
     # ---------------------------------------------------------------- cron'lar (KK-25, KK-27, KK-39)
     @api.model
-    def _sync_candidate_ids(self, limit):
+    def _sync_candidate_ids(self, limit, flagged_only=False):
         """Kilitsiz aday listesi: bayraklı > bayat sending > uzlaştırılacak iade satırı (G11) >
-        unknown/sent (en eski sorgu önce)."""
+        unknown/sent (en eski sorgu önce). ``flagged_only``: yalnız bayraklılar (Y-1)."""
         self.flush_model()
         self.env['sanal.pos.refund'].flush_model()
         cr = self.env.cr
+        flagged = 'SELECT id FROM sanal_pos_payment WHERE sync_requested ORDER BY id LIMIT %s'
+        if flagged_only:
+            cr.execute(flagged, [limit])
+            return [pid for (pid,) in cr.fetchall()]
         now = fields.Datetime.now()
         stale_before = now - STALE_SENDING_AGE
         ids = []
         for query, params in (
-            ('SELECT id FROM sanal_pos_payment WHERE sync_requested ORDER BY id LIMIT %s', []),
+            (flagged, []),
             ("SELECT id FROM sanal_pos_payment WHERE state = 'sending' AND create_date < %s "
              'ORDER BY id LIMIT %s', [stale_before]),
             ("SELECT DISTINCT payment_id FROM sanal_pos_refund WHERE state = 'unknown' "
              "OR (state = 'processing' AND create_date < %s) ORDER BY payment_id LIMIT %s",
              [now - REFUND_STALE_AGE]),
-            # G-1: bayraksız 'sent' son SENT_RECHECK_AGE içinde sorgulandıysa bu tur atlanır
-            ("SELECT id FROM sanal_pos_payment WHERE state = 'unknown' OR (state = 'sent' "
-             'AND (last_checked_at IS NULL OR last_checked_at < %s)) '
-             'ORDER BY last_checked_at ASC NULLS FIRST, id LIMIT %s', [now - SENT_RECHECK_AGE]),
+            ("SELECT id FROM sanal_pos_payment WHERE state IN ('unknown', 'sent') "
+             'ORDER BY last_checked_at ASC NULLS FIRST, id LIMIT %s', []),
             # Ö-C: 'Hata / link bulunamadı' kayıtları, link süresi + 1 gün, saatte bir
             ("SELECT id FROM sanal_pos_payment WHERE state = 'error' AND link_not_found_count >= %s "
              'AND paid_at IS NULL AND create_date + make_interval(hours => '
@@ -1479,20 +1524,18 @@ class SanalPosPayment(models.Model):
                     ids.append(pid)
         return ids[:limit]
 
-    def _cron_sync_one(self):
+    def _cron_sync_one(self, flagged_only=False):
         """Kilitli kayıt üzerinde tek senkron adımı. False: kayıt bu tur uygun değil."""
         self.ensure_one()
         if not self._try_lock_skip_locked():
             return False
         self.invalidate_recordset()
+        if flagged_only and not self.sync_requested:
+            return False  # bayrak başka turda işlendi; bayrak cron'u bayraksız kayda dokunmaz
         now = fields.Datetime.now()
         recent = self.last_checked_at and self.last_checked_at > now - SYNC_REQUEST_MIN_INTERVAL
         if self.sync_requested and recent:
             return False  # G-1 hız sınırı: bayrak korunur, ertelenmiş tetik/periyodik cron alır
-        if (self.state == 'sent' and not self.sync_requested and self.last_checked_at
-                and self.last_checked_at >= now - SENT_RECHECK_AGE
-                and not self._has_refund_to_reconcile(now)):
-            return False  # G-1: yakın zamanda sorgulandı (tetiklenmiş ek tur)
         if self.state == 'sending':
             if not self.create_date or self.create_date >= now - STALE_SENDING_AGE:
                 return False  # G7 isteği sürüyor olabilir; bayrak korunur
@@ -1515,18 +1558,24 @@ class SanalPosPayment(models.Model):
             for l in self.refund_ids)
 
     @api.model
-    def _cron_sync(self, limit=CRON_SYNC_LIMIT):
+    def _cron_sync_flagged(self, limit=CRON_SYNC_LIMIT):
+        """Y-1: webhook/dönüş tetikli tur; yalnız bayraklı (ve kilit yüzünden ertelenmiş) kayıtlar."""
+        self.sudo()._apply_deferred_sync_requests()
+        return self._cron_sync(limit, flagged_only=True)
+
+    @api.model
+    def _cron_sync(self, limit=CRON_SYNC_LIMIT, flagged_only=False):
         """10 dakikalık senkron: kayıt başına savepoint + SKIP LOCKED + commit; hata izolasyonu."""
         Payment = self.sudo()
         started = time.monotonic()
-        for pid in Payment._sync_candidate_ids(limit):
+        for pid in Payment._sync_candidate_ids(limit, flagged_only=flagged_only):
             if time.monotonic() - started > CRON_TIME_BUDGET:
-                Payment._trigger_sync_cron(at=fields.Datetime.now())
+                Payment._trigger_sync_cron(at=fields.Datetime.now(), flagged=flagged_only)
                 break
             rec = Payment.browse(pid)
             try:
                 with self.env.cr.savepoint():
-                    rec._cron_sync_one()
+                    rec._cron_sync_one(flagged_only=flagged_only)
             except Exception as exc:  # noqa: BLE001 - tek kayıt cron'u durdurmaz (KK-25)
                 _logger.warning('sanal_pos: senkron hatası (%s), ödeme id=%s',
                                 type(exc).__name__, pid)
