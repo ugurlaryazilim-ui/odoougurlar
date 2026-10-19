@@ -197,6 +197,66 @@ class TestWebhookFlag(RulesCase):
 
 
 @tagged('post_install', '-at_install', 'sanal_pos')
+class TestWebhookAmplification(RulesCase):
+    """G-1: webhook kaynaklı sorgu çoğaltması (tetik tekilleştirme, 9 dk kuralı, hız sınırı)."""
+
+    def now(self):
+        return datetime.utcnow().replace(microsecond=0)
+
+    def last_trigger_at(self):
+        cron = self.env.ref(CRON_SYNC).sudo()
+        trig = self.env['ir.cron.trigger'].sudo().search([('cron_id', '=', cron.id)],
+                                                          order='id desc', limit=1)
+        return trig.call_at
+
+    def test_g1_ayni_odemeye_bes_bildirim_tek_tetik(self):
+        payment = self.sent()
+        before = self.cron_trigger_count()
+        for _i in range(5):
+            self.env['sanal.pos.payment']._mark_sync_requested(payment.merchant_payment_id)
+        self.assertEqual(self.cron_trigger_count(), before + 1, 'tetik yalnız bayrak False->True geçişinde')
+        payment.invalidate_recordset()
+        self.assertTrue(payment.sync_requested)
+        self.assertNoParatikaCalls()
+
+    def test_g1_kilitliyse_bayrak_ve_tetik_yok(self):
+        payment = self.sent()
+        before = self.cron_trigger_count()
+        with patch.object(type(self.env['sanal.pos.payment']), '_try_lock_nowait', return_value=False):
+            self.env['sanal.pos.payment']._mark_sync_requested(payment.merchant_payment_id)
+        self.assertEqual(self.cron_trigger_count(), before)
+
+    def test_g1_yeni_sorgulanmis_odemenin_tetigi_hiz_siniri_kadar_ertelenir(self):
+        checked = self.now() - timedelta(seconds=20)
+        payment = self.sent(last_checked_at=checked)
+        self.env['sanal.pos.payment']._mark_sync_requested(payment.merchant_payment_id)
+        self.assertGreaterEqual(self.last_trigger_at(), checked + timedelta(minutes=1))
+
+    def test_g1_tetiklenen_turda_yeni_sorgulanmis_bayraksiz_sent_atlanir(self):
+        target = self.sent(invoice_no='UGRG1-0', last_checked_at=self.now() - timedelta(minutes=30))
+        for i in range(1, 4):
+            self.sent(invoice_no='UGRG1-%d' % i, last_checked_at=self.now() - timedelta(minutes=3))
+        old = self.sent(invoice_no='UGRG1-9', last_checked_at=self.now() - timedelta(minutes=20))
+        never = self.sent(invoice_no='UGRG1-8', last_checked_at=False)
+        self.env['sanal.pos.payment']._mark_sync_requested(target.merchant_payment_id)
+        self.run_cron(CRON_SYNC)
+        queried = {c.params['MERCHANTPAYMENTID'] for c in self.mock.calls_for('QUERYTRANSACTION')}
+        self.assertEqual(queried, {target.merchant_payment_id, old.merchant_payment_id,
+                                   never.merchant_payment_id})
+
+    def test_g1_bayrakli_odeme_hiz_siniri_icinde_sorgulanmaz_bayrak_korunur(self):
+        payment = self.sent(sync_requested=True, last_checked_at=self.now() - timedelta(seconds=10))
+        self.run_cron(CRON_SYNC)
+        self.assertEqual(self.mock.count('QUERYTRANSACTION'), 0)
+        payment.invalidate_recordset()
+        self.assertTrue(payment.sync_requested, 'bayrak sonraki tura korunmalı')
+        payment.write({'last_checked_at': self.now() - timedelta(minutes=2)})
+        self.run_cron(CRON_SYNC)
+        self.assertEqual(self.mock.count('QUERYTRANSACTION'), 1)
+        payment.invalidate_recordset()
+        self.assertFalse(payment.sync_requested)
+
+@tagged('post_install', '-at_install', 'sanal_pos')
 class TestReviewCloseNote(RulesCase):
     """Risk 3: kapatma notu zorunlu ve chatter'da."""
 

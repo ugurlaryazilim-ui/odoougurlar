@@ -43,6 +43,7 @@ Sır alanları (API şifresi, secretKey, MSSQL kullanıcı/şifre) hiçbir kayı
 2. **Dönüş (return) adresi:** `https://<odoo-alan-adi>/sanal_pos/paratika/return` (müşterinin ödeme sonrası döndüğü teşekkür sayfası). Yalnız POST kabul eder.
 3. API kullanıcısında link, sorgu, **VOID ve REFUND** yetkileri açık olmalı (test ve canlı için ayrı kullanıcılar).
 4. Odoo'nun `web.base.url` sistem parametresi gerçek alan adını göstermeli.
+5. **Bildirim çoğaltmasına karşı (öneri, reverse proxy):** Modül aynı ödemeye gelen tekrar bildirimlerde tek cron tetiği kurar, ödeme başına en çok dakikada bir sorgu yapar ve tetiklenen ek turlarda son 9 dakikada sorgulanmış "Gönderildi" kayıtlarını atlar. Ek koruma olarak nginx/Coolify'da `/sanal_pos/paratika/` yolları için gövde sınırı ve IP başına hız sınırı önerilir, örnek: `client_max_body_size 16k;` ve `limit_req zone=sanalpos burst=20 nodelay;` (`limit_req_zone $binary_remote_addr zone=sanalpos:1m rate=30r/m;`). Paratika bildirim IP'leri öğrenilirse yalnız onlara izin verilebilir. (Modül bu ayarları yapmaz.)
 
 ## 5. Nebim fatura görünümü
 

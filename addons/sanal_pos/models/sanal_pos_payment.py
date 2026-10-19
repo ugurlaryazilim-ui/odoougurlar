@@ -77,6 +77,9 @@ REFUND_SYNC_WINDOW = timedelta(days=30)
 LINK_NOT_FOUND_MIN_CHECKS = 2
 LINK_NOT_FOUND_MIN_AGE = timedelta(minutes=15)
 CRON_SYNC_LIMIT = 200
+# G-1: webhook kaynaklı sorgu çoğaltmasına karşı
+SYNC_REQUEST_MIN_INTERVAL = timedelta(minutes=1)   # ödeme başına iki sorgu arası en az
+SENT_RECHECK_AGE = timedelta(minutes=9)            # bayraksız 'sent' periyodik yeniden sorgu yaşı
 CRON_TIME_BUDGET = 8 * 60  # saniye; aşılırsa cron kendini hemen yeniden planlar
 QUERY_FAILED_MSG = 'Paratika durum sorgusu yanıt vermedi; durum değiştirilmedi.'
 LINK_NOT_FOUND_MSG = "Link Paratika'da bulunamadı; yeni link oluşturabilirsiniz."
@@ -958,15 +961,25 @@ class SanalPosPayment(models.Model):
 
         Gövde asla karar için okunmaz. Satır kilitliyse bayrak atlanır; sent/unknown kayıtlar
         periyodik cron'da zaten sorgulanır (Risk 2). Dönüş: kayıt veya boş recordset.
+
+        G-1: cron tetiği yalnız bayrak False->True geçişinde kurulur (aynı ödemeye tekrarlanan
+        bildirimler tetik çoğaltmaz) ve son sorgudan ``SYNC_REQUEST_MIN_INTERVAL`` sonrasına
+        ertelenir. Kilit alınamazsa tetik de kurulmaz.
         """
         Payment = self.sudo()
         if not merchant_payment_id:
             return Payment.browse()
         rec = Payment.search([('merchant_payment_id', '=', merchant_payment_id)], limit=1)
-        if rec:
-            if rec._try_lock_nowait():
-                rec.write({'sync_requested': True})
-            self._trigger_sync_cron(at=fields.Datetime.now())
+        if not rec or not rec._try_lock_nowait():
+            return rec
+        rec.invalidate_recordset(['sync_requested', 'last_checked_at'])
+        if rec.sync_requested:
+            return rec  # tetik zaten kurulu; bayrak cron'da temizlenene kadar yeni tetik yok
+        rec.write({'sync_requested': True})
+        when = fields.Datetime.now()
+        if rec.last_checked_at and rec.last_checked_at + SYNC_REQUEST_MIN_INTERVAL > when:
+            when = rec.last_checked_at + SYNC_REQUEST_MIN_INTERVAL
+        self._trigger_sync_cron(at=when)
         return rec
 
     # ---------------------------------------------------------------- kullanıcı: Durumu Sorgula (KK-28)
@@ -1388,8 +1401,10 @@ class SanalPosPayment(models.Model):
             ("SELECT DISTINCT payment_id FROM sanal_pos_refund WHERE state = 'unknown' "
              "OR (state = 'processing' AND create_date < %s) ORDER BY payment_id LIMIT %s",
              [now - REFUND_STALE_AGE]),
-            ("SELECT id FROM sanal_pos_payment WHERE state IN ('unknown', 'sent') "
-             'ORDER BY last_checked_at ASC NULLS FIRST, id LIMIT %s', []),
+            # G-1: bayraksız 'sent' son SENT_RECHECK_AGE içinde sorgulandıysa bu tur atlanır
+            ("SELECT id FROM sanal_pos_payment WHERE state = 'unknown' OR (state = 'sent' "
+             'AND (last_checked_at IS NULL OR last_checked_at < %s)) '
+             'ORDER BY last_checked_at ASC NULLS FIRST, id LIMIT %s', [now - SENT_RECHECK_AGE]),
         ):
             cr.execute(query, params + [limit])
             for (pid,) in cr.fetchall():
@@ -1404,6 +1419,13 @@ class SanalPosPayment(models.Model):
             return False
         self.invalidate_recordset()
         now = fields.Datetime.now()
+        recent = self.last_checked_at and self.last_checked_at > now - SYNC_REQUEST_MIN_INTERVAL
+        if self.sync_requested and recent:
+            return False  # G-1 hız sınırı: bayrak korunur, ertelenmiş tetik/periyodik cron alır
+        if (self.state == 'sent' and not self.sync_requested and self.last_checked_at
+                and self.last_checked_at >= now - SENT_RECHECK_AGE
+                and not self._has_refund_to_reconcile(now)):
+            return False  # G-1: yakın zamanda sorgulandı (tetiklenmiş ek tur)
         if self.state == 'sending':
             if not self.create_date or self.create_date >= now - STALE_SENDING_AGE:
                 return False  # G7 isteği sürüyor olabilir; bayrak korunur
