@@ -258,3 +258,56 @@ class TestConcurrency(DupCase):
             self.set_invoice(invoice_rows(n), invoice_no=n)
             self.wizard(invoice_no=n, **BOTH).action_create_link()
         self.assertEqual(self.mock.count('PAYBYLINKPAYMENT'), 3)
+
+
+@tagged('post_install', '-at_install', 'sanal_pos')
+class TestCanonicalInvoiceNo(DupCase):
+    """G-3: fatura no her yerde kaynağın döndürdüğü kanonik değerdir; harf/boşluk farkı ve
+    context default'ları çift açık link açtıramaz."""
+
+    LOWER = INV_NO.lower()
+
+    def setUp(self):
+        super().setUp()
+        # MSSQL harmanlaması büyük/küçük harfe duyarsız: küçük harfle sorgu aynı satırı döndürür
+        self.invoices[self.LOWER] = invoice_rows()
+
+    def test_g3_kucuk_harf_ve_bosluklu_fatura_no_ikinci_link_acamaz(self):
+        first = self.create_link(**BOTH)
+        self.assertEqual(first.state, 'sent')
+        self.mock.calls.clear()
+        wiz = self.wizard(invoice_no='  %s ' % self.LOWER, **BOTH)
+        self.assertEqual(wiz.fetched_invoice_no, INV_NO)
+        with self.assertRaises(UserError) as cm:
+            wiz.action_create_link()
+        self.assertIn(OPEN_MSG, str(cm.exception))
+        self.assertEqual(self.mock.count('PAYBYLINKPAYMENT'), 0)
+        self.assertEqual(len(self.env['sanal.pos.payment'].sudo().search(
+            [('invoice_no', '=ilike', INV_NO)])), 1)
+
+    def test_g3_context_default_ile_getir_denetimi_atlatilamaz(self):
+        self.create_link(**BOTH)
+        self.mock.calls.clear()
+        Wizard = self.env(user=self.user_sp)['sanal.pos.payment.create.wizard'].with_context(
+            default_fetched=True, default_fetched_invoice_no=self.LOWER, default_fetched_amount=9000.0)
+        try:
+            wiz = Wizard.create({'invoice_no': self.LOWER, 'customer_email': 'a@example.com', **BOTH})
+        except UserError:
+            wiz = None
+        if wiz:
+            self.assertFalse(wiz.fetched or wiz.fetched_invoice_no or wiz.fetched_amount,
+                             'context default korumalı alanı doldurdu')
+            with self.assertRaises(UserError):
+                wiz.action_create_link()
+        self.assertEqual(self.mock.count('PAYBYLINKPAYMENT'), 0)
+        self.assertFalse(self.env['sanal.pos.payment'].sudo().search([('invoice_no', '=', self.LOWER)]))
+
+    def test_g3_link_kaynagin_kanonik_numarasiyla_acilir(self):
+        """Getirilen no kanonik değilse (eski/manipüle sihirbaz) yeniden okuma reddeder."""
+        wiz = self.wizard(**BOTH)
+        wiz._write_fetched({'invoice_no': self.LOWER, 'fetched_invoice_no': self.LOWER})
+        with self.assertRaises(UserError) as cm:
+            wiz.action_create_link()
+        self.assertIn('faturayı yeniden getirin', str(cm.exception))
+        self.assertEqual(self.mock.count('PAYBYLINKPAYMENT'), 0)
+        self.assertFalse(self.env['sanal.pos.payment'].sudo().search([('invoice_no', '=', self.LOWER)]))

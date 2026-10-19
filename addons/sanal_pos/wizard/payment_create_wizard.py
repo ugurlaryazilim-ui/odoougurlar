@@ -140,7 +140,15 @@ class SanalPosPaymentCreateWizard(models.TransientModel):
     def create(self, vals_list):
         for vals in vals_list:
             self._check_protected_vals(vals)
-        return super().create(vals_list)
+        # G-3: ``default_fetched*`` context anahtarları korumalı alanları vals dışından
+        # doldurabilirdi; süzülür ve sonuç ayrıca doğrulanır.
+        blocked = {'default_%s' % name for name in _PROTECTED_FIELDS}
+        if blocked & set(self.env.context):
+            self = self.with_context({k: v for k, v in self.env.context.items() if k not in blocked})
+        records = super().create(vals_list)
+        if any(rec.fetched or rec.fetched_invoice_no or rec.fetched_amount for rec in records):
+            raise UserError('Fatura bilgisi yalnız "Faturayı Getir" ile alınabilir.')
+        return records
 
     def write(self, vals):
         self._check_protected_vals(vals)
@@ -290,6 +298,11 @@ class SanalPosPaymentCreateWizard(models.TransientModel):
             raise UserError('Fatura numarası değişti; faturayı yeniden getirin.')
         # 2. fatura yeniden okunur, tutar kilidi
         info = self._read_invoice(invoice_no)
+        # G-3: indeks, açık link kontrolü ve MPID kaynağın kanonik numarasını kullanır
+        # (MSSQL harmanlaması harfe duyarsız; DB tekillik indeksi duyarlı).
+        if info['invoice_no'] != invoice_no:
+            raise UserError('Fatura numarası değişti; faturayı yeniden getirin.')
+        invoice_no = info['invoice_no']
         amount = float(info['amount'])
         if float_compare(amount, self.fetched_amount, precision_digits=2) != 0:
             raise UserError('Fatura tutarı değişti (getirilen: %s, şimdiki: %s); faturayı yeniden getirin.'
