@@ -2,7 +2,7 @@
 import re
 
 from odoo.exceptions import UserError
-from odoo.tests.common import tagged
+from odoo.tests.common import new_test_user, tagged
 
 from .common import SmsTestCase
 from .test_json_routing import JsonModelMixin, RET_TEXT
@@ -95,6 +95,26 @@ class TestTestNumbersSettings(TestNumbersMixin, SmsTestCase):
     def test_kk_c27_yinelenen_numara_tek_sayilir(self):
         self.save('%s, 0%s, +90%s' % (LISTED_A, LISTED_A, LISTED_A))
         self.assertEqual(self.stored(), [LISTED_A])
+
+    def test_g_c1_test_numaralari_yonetici_olmayana_gorunmez(self):
+        # G-C1: numaralar çalışan telefonlarıdır (KVKK); RPC'ye açık default_get/get_values sızdırmamalı
+        self.require_field()
+        self.set_param('test_numbers', '%s,%s' % (LISTED_A, LISTED_B))
+        self.assertEqual(self.Settings()._fields['sms_test_numbers'].groups, 'base.group_system')
+        manager = new_test_user(self.env, login='sms_t_mgr_c1', groups='base.group_user,sms_system.group_sms_manager')
+        for user in (self.plain_user, manager):
+            res = self.Settings().with_user(user).default_get(['sms_test_numbers', 'sms_test_mode'])
+            self.assertNotIn('sms_test_numbers', res)
+            values = self.Settings().with_user(user).get_values()
+            self.assertNotIn('sms_test_numbers', values)
+            for number in (LISTED_A, LISTED_B):
+                self.assertNotIn(number, repr(res) + repr(values))
+
+    def test_g_c1_sistem_yoneticisi_test_numaralarini_gorur(self):
+        self.require_field()
+        self.set_param('test_numbers', LISTED_A)
+        res = self.Settings().with_user(self.admin_user).default_get(['sms_test_numbers'])
+        self.assertEqual(res.get('sms_test_numbers'), LISTED_A)
 
     def test_kk_c27_ayarlar_sozlugu_test_numaralarini_tasir(self):
         self.set_param('test_numbers', '%s,%s' % (LISTED_A, LISTED_B))

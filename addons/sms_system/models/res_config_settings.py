@@ -57,7 +57,7 @@ class ResConfigSettings(models.TransientModel):
     sms_test_mode = fields.Boolean(string='Test modu',
                                    help='Açıkken SMS gönderilmez, yalnız kayıt oluşur')
 
-    sms_test_numbers = fields.Char(string='Test modunda gerçek gönderilecek numaralar',
+    sms_test_numbers = fields.Char(string='Test modunda gerçek gönderilecek numaralar', groups='base.group_system',
                                    help='Test modu açıkken yalnız bu numaralara (en çok 5, virgülle ayırın) gerçek SMS '
                                         'gider; diğerleri test olarak kaydedilir. Test modu kapalıyken etkisizdir.')
 
