@@ -104,6 +104,10 @@ def parse_validity_minutes(value):
     return minutes if minutes > 0 else DEFAULT_VALIDITY_MINUTES
 
 
+# G-2c: kullanıcı yazımıyla değişmeyen gönderim alanları; campaign_id her durumda, diğerleri bu durumlarda
+SEND_CONTENT_FIELDS = ('campaign_id', 'body', 'number', 'originator', 'sms_type', 'contact_id')
+LOCKED_CONTENT_STATES = ('queued', 'sending', 'sent', 'uncertain')
+
 class SmsSystemMessage(models.Model):
     """Gönderilen her SMS'in kaydı (numara başına bir kayıt)."""
     _name = 'sms.system.message'
@@ -221,6 +225,32 @@ class SmsSystemMessage(models.Model):
         user_id, username, password, account = creds
         url = cfg['bulk_url'] if service == 'bulk' else cfg['single_url']
         return TuratelJsonClient(url, user_id, username, password), account
+
+    def write(self, vals):
+        if not self.env.su and any(name in vals for name in SEND_CONTENT_FIELDS):
+            self._check_send_content_locked(vals)
+        return super().write(vals)
+
+    def _check_send_content_locked(self, vals):
+        """G-2c (PoC P2i): kullanıcı yazımıyla kaydın kampanyası ve gönderim içeriği değişmez.
+
+        Gönderim anında amaç (bilgi/ticari), ret metni ve şablon kampanyadan okunur; kuyruktaki ticari kaydı başka
+        kampanyaya taşımak onay kapılarını atlatırdı. Kampanya bağı her durumda, metin/numara/başlık ise kayıt
+        gönderim sürecindeyken (kuyruk, gönderiliyor, gönderildi, belirsiz) kilitlidir. Aynı değerin yeniden yazımı
+        serbesttir. Sistem yazımları (kuyruk, cron, uzlaştırma, kampanya akışları) su/sudo ile yapılır.
+        """
+        for msg in self:
+            for name in SEND_CONTENT_FIELDS:
+                if name not in vals:
+                    continue
+                if name != 'campaign_id' and msg.state not in LOCKED_CONTENT_STATES:
+                    continue
+                new, old = vals[name], msg[name]
+                new = getattr(new, 'id', new) or False
+                old = getattr(old, 'id', old) or False
+                if new != old:
+                    raise UserError(_('SMS kaydının kampanyası ve gönderim içeriği elle değiştirilemez (%s).')
+                                    % self._fields[name].string)
 
     @api.model
     def _json_target(self, cfg, service, purpose='info'):

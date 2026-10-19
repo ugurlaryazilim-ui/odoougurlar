@@ -236,7 +236,7 @@ class SmsSystemCampaign(models.Model):
             self.body = self.template_id.body
 
     def write(self, vals):
-        if vals.get('state') in ('draft', 'scheduled', 'cancel') or any(name in vals for name in CONTENT_FIELDS):
+        if vals.get('state') in ('draft', 'scheduled', 'cancel', 'sending') or any(name in vals for name in CONTENT_FIELDS):
             self._check_content_locked(vals)
         return super().write(vals)
 
@@ -252,6 +252,10 @@ class SmsSystemCampaign(models.Model):
         kayıtsız kampanyada çalışır; kayıtlı kampanyada iptal zaten 'done' yapar.
         """
         for camp in self:
+            if vals.get('state') == 'sending' and camp.state != 'sending' and not self.env.su:
+                # G-2c: gönderimi yalnız onay/gönderim akışları (sudo) başlatır; RPC ile taslak/planlı -> sending
+                # onay kapılarını (İYS, ret metni, günlük sınır) atlatırdı
+                raise UserError(_('Toplu SMS gönderimi elle başlatılamaz; "Gönder" akışını kullanın: %s') % camp.name)
             has_messages = bool(camp.sudo().message_ids_sms)
             if (vals.get('state') in ('draft', 'scheduled', 'cancel') and vals['state'] != camp.state
                     and has_messages and not self.env.su):
@@ -446,7 +450,7 @@ class SmsSystemCampaign(models.Model):
         parts = []
         if sendable:
             sendable.write({'state': 'queued', 'error': False})
-            self.write({'state': 'sending', 'finished_at': False})
+            self.sudo().write({'state': 'sending', 'finished_at': False})
             self.env.ref('sms_system.cron_sms_campaign_queue').sudo()._trigger()
             parts.append(_('%s kayıt kuyruğa alındı.') % len(sendable))
         else:
@@ -594,7 +598,7 @@ class SmsSystemCampaign(models.Model):
         Message = self.env['sms.system.message'].sudo()
         for i in range(0, len(vals_list), CREATE_CHUNK):
             Message.create(vals_list[i:i + CREATE_CHUNK])
-        self.write({'state': 'sending', 'started_at': fields.Datetime.now(), 'skipped_count': skipped})
+        self.sudo().write({'state': 'sending', 'started_at': fields.Datetime.now(), 'skipped_count': skipped})
         self.message_post(body=_('%(n)s alıcıya gönderim başladı (%(s)s numara atlandı).%(warn)s',
                                  n=len(vals_list), s=skipped, warn=self._commercial_hour_warning()))
 

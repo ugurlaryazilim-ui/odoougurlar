@@ -353,6 +353,52 @@ class TestReviewGC2CampaignLocked(JsonModelMixin, SmsTestCase):
         self.run_queue()
         self.assertEqual(camp.state, 'draft')
 
+    def test_gc2c_poc_p2i_kuyruktaki_ticari_kayit_baska_kampanyaya_tasinamaz(self):
+        """PoC P2i: bilgi kampanyasını doğrudan 'sending' yap, ticari kaydı ona taşı. İki adım da kapalı."""
+        self.configure_json(iys=True)
+        commercial = self.make_sent_campaign(message_type='commercial', body='Indirim {ad}')
+        msg = commercial.sudo().message_ids_sms
+        info = self.make_json_campaign(message_type='info', body='BAMBASKA {ad}').with_user(self.sms_manager)
+        with self.assertRaises(UserError):
+            info.write({'state': 'sending'})
+        self.assertEqual(info.state, 'draft')
+        with self.assertRaises(UserError):
+            msg.with_user(self.sms_manager).write({'campaign_id': info.id})
+        self.assertEqual(msg.campaign_id, commercial.sudo())
+
+    def test_gc2c_kampanya_kullanici_yazimiyla_dogrudan_sending_olamaz(self):
+        for state in ('draft', 'scheduled', 'done'):
+            camp = self.make_json_campaign(state=state).with_user(self.sms_manager)
+            with self.subTest(state=state), self.assertRaises(UserError):
+                camp.write({'state': 'sending'})
+            self.assertEqual(camp.state, state)
+
+    def test_gc2c_mesaj_gonderim_icerigi_kullanici_yazimiyla_degismez(self):
+        camp = self.make_json_campaign(state='sending')
+        for state in ('queued', 'sending', 'sent', 'uncertain'):
+            msg = self.make_message(state=state, campaign_id=camp.id, contact_id=False)
+            as_manager = msg.with_user(self.sms_manager)
+            for vals in ({'body': 'Başka'}, {'number': '5329998877'}, {'originator': 'BASKA'},
+                         {'campaign_id': False}, {'campaign_id': self.make_json_campaign().id}):
+                with self.subTest(state=state, vals=vals), self.assertRaises(UserError):
+                    as_manager.write(vals)
+            as_manager.write({'body': msg.body, 'campaign_id': camp.id})   # aynı değer serbest
+            msg.sudo().write({'body': 'Sistem yazımı'})                    # sistem serbest
+
+    def test_gc2c_meshru_akislar_etkilenmez(self):
+        """Gönderim, yeniden deneme, onay akışı kullanıcı ortamında çalışmaya devam eder."""
+        self.configure_json(iys=True)
+        self.set_param('optout_text', RET_TEXT)
+        camp = self.make_json_campaign(message_type='commercial', body='Indirim {ad}').with_user(self.sms_manager)
+        camp.action_send()   # draft -> scheduled -> cron _start: sending
+        self.run_queue()
+        self.assertEqual(camp.sudo().state, 'done')
+        self.assertTrue(camp.sudo().message_ids_sms)
+        info = self.make_json_campaign().with_user(self.sms_manager)
+        info.action_send()
+        self.assertEqual(info.sudo().state, 'sending')
+        self.assertTrue(info.sudo().message_ids_sms)
+
 
 @tagged('post_install', '-at_install')
 class TestReviewGC3Redirects(JsonModelMixin, SmsTestCase):
