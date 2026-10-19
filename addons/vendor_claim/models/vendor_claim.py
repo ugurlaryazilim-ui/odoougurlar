@@ -2,6 +2,7 @@ import logging
 from datetime import timedelta
 
 from markupsafe import Markup, escape
+from psycopg2 import errors as pg_errors
 
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
@@ -13,6 +14,7 @@ _logger = logging.getLogger(__name__)
 PARAM = 'vendor_claim.'
 MIN_TIME_LEFT = 20   # cron süresinin sonuna bu kadar saniye kala dur, kalan sonraki çalışmada
 VENDOR_ATTRIBUTE = 'Tedarikçi'
+MANUAL_SMS_GUARD_SECONDS = 60   # mobil elle SMS: aynı kayıt + aynı şablon için tekrar engeli
 
 # İzinli durum geçişleri (yönetici her geçişi yapabilir)
 ALLOWED_TRANSITIONS = {
@@ -546,6 +548,27 @@ class VendorClaim(models.Model):
             return None
         return self.env['sms.system.message'].send_sms(
             number, template=template, values=self._sms_values(), record=self, queue=queue)
+
+    def _lock_for_manual_sms(self):
+        """Mobil elle SMS için satırı transaction sonuna kadar kilitler (NOWAIT); alınamazsa False.
+
+        İki cihaz/çift dokunuş aynı anda gelirse ikincisi beklemeden reddedilir. LockNotAvailable Odoo'nun
+        yeniden deneme listesindedir: savepoint içinde yakalanmazsa istek yeniden çalışır (ikinci SMS riski)."""
+        self.ensure_one()
+        try:
+            with self.env.cr.savepoint(flush=False):
+                self.env.cr.execute('SELECT id FROM vendor_claim WHERE id = %s FOR UPDATE NOWAIT', [self.id])
+        except pg_errors.LockNotAvailable:
+            return False
+        return True
+
+    def _recent_template_sms(self, code, seconds=MANUAL_SMS_GUARD_SECONDS):
+        """Bu kayıt için son `seconds` sn içinde aynı şablonla alınmış (hata olmayan) SMS kaydı var mı (K4)."""
+        self.ensure_one()
+        since = fields.Datetime.now() - timedelta(seconds=seconds)
+        return bool(self.env['sms.system.message'].sudo().search_count([
+            ('res_model', '=', self._name), ('res_id', '=', self.id), ('template_id.code', '=', code),
+            ('state', 'in', ('queued', 'sending', 'sent', 'test')), ('create_date', '>=', since)]))
 
     def _notify_state_sms(self):
         """Durumun otomatik SMS'i: ayar açıksa, numara varsa, o durum için daha önce kuyruğa alınmadıysa.

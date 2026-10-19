@@ -358,6 +358,11 @@ class VendorClaimController(http.Controller):
         self._check_user()
         try:
             claim = self._get_claim(claim_id)
+            # Çift dokunuş / ikinci cihaz: satır kilidi (NOWAIT) + 60 sn aynı şablon engeli.
+            # Kilit alındıktan sonra durum/sayaç yeniden okunur (önce biten isteğin commit'i görünür).
+            if not claim._lock_for_manual_sms():
+                return {'error': _('Bu kayıt için SMS işlemi sürüyor. Birkaç saniye sonra tekrar deneyin.')}
+            claim.invalidate_recordset()
             code = {'received': 'vendor_claim_received', 'sent': 'vendor_claim_sent',
                     'returned': 'vendor_claim_reminder' if claim.sms_returned_sent else 'vendor_claim_returned',
                     'delivered': 'vendor_claim_delivered'}.get(claim.state)
@@ -365,13 +370,20 @@ class VendorClaimController(http.Controller):
                 return {'error': _('Bu durumda SMS gönderilmez.')}
             if not claim.customer_mobile:
                 return {'error': _('Müşterinin cep telefonu yok.')}
-            msg = claim._send_template_sms(code, queue=True)
+            if claim._recent_template_sms(code):
+                return {'error': _('Bu kayıt için az önce SMS gönderildi.')}
+            # sms_manual: kullanıcı başı günlük elle sınır (sms_system; SMS yöneticisi muaf)
+            msg = claim.with_context(sms_manual=True)._send_template_sms(code, queue=True)
             if not msg:
                 return {'error': _('SMS şablonu bulunamadı.')}
             if msg.state == 'error':
                 return {'error': _('SMS gönderilemedi: %s') % (msg.error or '')}
+            if code == 'vendor_claim_reminder':   # mobil hatırlatma cron sayacına işlenir (KK-B20)
+                claim.sudo().write({'reminder_count': claim.reminder_count + 1,
+                                    'last_reminder_at': fields.Datetime.now()})
+            sms = {'state': msg.state, 'error': ''}
             if msg.state == 'test':
-                return {'ok': True, 'message': _('Test modu: SMS gönderilmedi (%s)') % msg.number}
-            return {'ok': True, 'message': _('SMS gönderildi: %s') % msg.number}
+                return {'ok': True, 'sms': sms, 'message': _('Test modu: SMS gönderilmedi (%s)') % msg.number}
+            return {'ok': True, 'sms': sms, 'message': _('SMS gönderildi: %s') % msg.number}
         except Exception as e:
             return self._error(e)

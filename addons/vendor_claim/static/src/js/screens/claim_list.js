@@ -6,6 +6,7 @@ import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
 import { openCameraScanner } from "@ugurlar_barcode/js/camera_scanner";
 import { readPhoto } from "@ugurlar_tailor/js/photo_utils";
+import { notifySms } from "@vendor_claim/js/sms_notice";
 
 export const RESULT_OPTIONS = [
     ["repaired", _t("Tamir Edildi")],
@@ -134,6 +135,7 @@ export class VcClaimList extends Component {
                 if (successMsg) {
                     this.notification.add(successMsg, { type: "success" });
                 }
+                notifySms(this.notification, res.sms);
             }
         } catch (e) {
             this.notification.add(_t("İşlem hatası: %(error)s", { error: e.message }), { type: "danger" });
@@ -190,14 +192,22 @@ export class VcClaimList extends Component {
     }
 
     async sendSms() {
+        // İdempotent olmayan iş: yanıt gelene kadar kilitli (çift dokunuşta iki SMS gitmesin, KK-B6)
+        if (this.state.busy) return;
+        this.state.busy = true;
         try {
             const res = await rpc("/vendor_claim/send_sms", { claim_id: this.state.detail.id });
-            this.notification.add(res.error || res.message, { type: res.error ? "danger" : "success" });
-            if (!res.error) {
+            if (res.error) {
+                this.notification.add(res.error, { type: "danger" });
+            } else {
+                // Test modunda "SMS gönderildi" denmez (KK-B15): uyarı tipi
+                this.notification.add(res.message, { type: res.sms?.state === "test" ? "warning" : "success" });
                 await this.open(this.state.detail.id);
             }
         } catch (e) {
             this.notification.add(_t("SMS hatası: %(error)s", { error: e.message }), { type: "danger" });
+        } finally {
+            this.state.busy = false;
         }
     }
 

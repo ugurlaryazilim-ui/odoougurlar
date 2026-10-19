@@ -6,6 +6,7 @@ import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
 import { openCameraScanner } from "@ugurlar_barcode/js/camera_scanner";
 import { readPhoto } from "@ugurlar_tailor/js/photo_utils";
+import { notifySms } from "@vendor_claim/js/sms_notice";
 
 /**
  * Yeni inceleme kaydı:
@@ -217,6 +218,7 @@ export class VcNewClaim extends Component {
                 s.created = res;
                 s.step = 3;
                 this.notification.add(_t("%(name)s kaydedildi.", { name: res.name }), { type: "success" });
+                notifySms(this.notification, res.sms);
             }
         } catch (e) {
             this.notification.add(_t("Kayıt hatası: %(error)s", { error: e.message }), { type: "danger" });

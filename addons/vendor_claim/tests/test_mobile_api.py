@@ -4,6 +4,8 @@ from unittest.mock import patch
 from odoo.tests import HttpCase, tagged
 from odoo.tests.common import new_test_user
 
+from .common import VcCase
+
 # 1x1 PNG
 PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
 
@@ -92,3 +94,45 @@ class TestVendorClaimMobileApi(HttpCase):
         resp = self.url_open('/report/html/vendor_claim.report_vendor_claim_slip/%s' % claim.id)
         self.assertEqual(resp.status_code, 200)
         self.assertIn(claim.name, resp.text)
+
+
+@tagged('post_install', '-at_install')
+class TestMobileSmsGuards(VcCase):
+    """B6: mobil SMS ucunun kilit/koruma davranışı (kabul testlerini tamamlar)."""
+
+    def test_satir_kilidi_alinamazsa_hata_ve_sifir_kayit(self):
+        claim = self.make_claim()
+        with patch.object(self.env.registry['vendor.claim'], '_lock_for_manual_sms', return_value=False):
+            res = self.controller('send_sms', claim_id=claim.id)
+        self.assertIn('SMS işlemi sürüyor', res.get('error', ''))
+        self.assertFalse(self.claim_sms(claim))
+
+    def test_gercek_satir_kilidi_alinir(self):
+        claim = self.make_claim()
+        self.assertTrue(claim._lock_for_manual_sms())
+
+    def test_canli_modda_hatirlatma_kuyruga_alininca_da_sayac_artar(self):
+        self.set_param('test_mode', 'False')
+        claim = self.make_claim()
+        self.force_state(claim, 'returned', sms_returned_sent=True, returned_at=self.ago(days=1))
+        res = self.controller('send_sms', claim_id=claim.id)
+        self.assertTrue(res.get('ok'), res)
+        self.assertEqual(res['sms']['state'], 'queued')
+        claim.invalidate_recordset()
+        self.assertEqual(claim.reminder_count, 1)
+
+    def test_hata_yolunda_sayac_artmaz(self):
+        self.set_param('user_daily_limit', '1')
+        first = self.make_claim(customer_mobile='05321234560')
+        self.assertTrue(self.controller('send_sms', claim_id=first.id).get('ok'))
+        claim = self.make_claim(customer_mobile='05321234561')
+        self.force_state(claim, 'returned', sms_returned_sent=True, returned_at=self.ago(days=1))
+        res = self.controller('send_sms', claim_id=claim.id)
+        self.assertIn('Günlük elle SMS sınırınız doldu', res.get('error', ''))
+        claim.invalidate_recordset()
+        self.assertEqual(claim.reminder_count, 0)
+
+    def test_yanit_sms_durumu_tasir(self):
+        claim = self.make_claim()
+        res = self.controller('send_sms', claim_id=claim.id)
+        self.assertEqual(res['sms'], {'state': 'test', 'error': ''})

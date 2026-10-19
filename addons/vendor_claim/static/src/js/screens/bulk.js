@@ -6,6 +6,7 @@ import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
 import { openCameraScanner } from "@ugurlar_barcode/js/camera_scanner";
 import { RESULT_OPTIONS } from "./claim_list";
+import { notifySms } from "@vendor_claim/js/sms_notice";
 
 /**
  * Toplu işlem: hedef seçilir, takip no (INC-...) ya da ürün barkodları art arda okutulur,
@@ -103,6 +104,7 @@ export class VcBulk extends Component {
                     }),
                     { type: fail ? "warning" : "success" }
                 );
+                notifySms(this.notification, s.results.filter((r) => r.ok).map((r) => r.sms));
                 // Başarılı olanlar listeden çıkar; hatalılar sebebiyle kalır
                 s.items = s.items.filter((i) => !this.resultFor(i.id)?.ok);
             }

@@ -248,7 +248,7 @@
                 </div>
 
                 <div class="vc-actions">
-                    <button class="vc-btn vc-btn-light" t-if="d.customer_mobile and d.state !== 'cancelled'" t-on-click="sendSms"><i class="fa fa-comment"/> SMS</button>
+                    <button class="vc-btn vc-btn-light" t-if="d.customer_mobile and d.state !== 'cancelled'" t-on-click="sendSms" t-att-disabled="state.busy"><i class="fa fa-comment"/> SMS</button>
                     <button class="vc-btn vc-btn-light" t-on-click="() =&gt; this.print('report_vendor_claim_slip')"><i class="fa fa-print"/> Müşteri Fişi</button>
                     <button class="vc-btn vc-btn-light" t-on-click="() =&gt; this.print('report_vendor_claim_form')"><i class="fa fa-print"/> İnceleme Formu</button>
                     <button class="vc-btn vc-btn-light" t-on-click="openInBackend"><i class="fa fa-external-link"/> Formda Aç</button>
