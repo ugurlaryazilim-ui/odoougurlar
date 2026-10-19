@@ -131,6 +131,9 @@ class SmsSystemMessage(models.Model):
         if segment_count(text, sms_type) > MAX_SEGMENTS:
             raise UserError(_('SMS metni çok uzun (%(n)s parça). En fazla %(max)s parça gönderilebilir; metni kısaltın.',
                               n=segment_count(text, sms_type), max=MAX_SEGMENTS))
+        if record:
+            # Sağlayıcıdan ÖNCE: yetkisiz kayıtta SMS hiç gitmez (sonra gelen AccessError kaydı geri alırdı, G-1)
+            self._check_record_access(record)
         manual = bool(self.env.context.get('sms_manual'))
         if manual:
             self._check_manual_limit(len(normalized))
@@ -153,11 +156,33 @@ class SmsSystemMessage(models.Model):
         else:
             messages._deliver(cfg)
         if record and hasattr(record, 'message_post'):
-            states = dict(self._fields['state'].selection)
-            for msg in messages:
-                record.message_post(body=_('SMS → %(num)s [%(state)s]: %(text)s') % {
-                    'num': msg.number, 'state': states[msg.state], 'text': msg.body})
+            self._post_sms_note(record, messages)
         return messages.with_env(self.env)
+
+    @api.model
+    def _check_record_access(self, record):
+        """Kaynak kayda gönderim notu düşülebilir mi: chatter'lı kayıtta not yazma yetkisi (_mail_post_access,
+        varsayılan write), diğerlerinde okuma. Yetkisizse AccessError; sağlayıcı çağrılmadan önce çalışır."""
+        if hasattr(record, 'message_post'):
+            operations = set(record._mail_get_operation_for_mail_message_operation('create').values())
+        else:
+            operations = {'read'}
+        for operation in operations:
+            record.check_access(operation)
+
+    @api.model
+    def _post_sms_note(self, record, messages):
+        """Kaynak kayda gönderim notu. Sağlayıcı çağrısından sonra çalışır: hiçbir hata SMS kaydını (iz ve günlük
+        sınır sayacı) geri aldırmamalı. Not savepoint içinde yazılır, hata yalnız loglanır."""
+        states = dict(self._fields['state'].selection)
+        try:
+            with self.env.cr.savepoint():
+                for msg in messages:
+                    record.message_post(body=_('SMS → %(num)s [%(state)s]: %(text)s') % {
+                        'num': msg.number, 'state': states[msg.state], 'text': msg.body})
+        except Exception:  # noqa: BLE001 — SMS gitti/kuyrukta; not yazılamaması kaydı geri aldırmamalı
+            _logger.warning('SMS gönderim notu kaynak kayda yazılamadı (%s,%s); SMS kayıtları korundu (%s)',
+                            record._name, record.id, messages.ids, exc_info=True)
 
     @api.model
     def _check_manual_limit(self, count):
