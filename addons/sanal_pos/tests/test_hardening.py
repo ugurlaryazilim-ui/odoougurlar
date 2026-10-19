@@ -11,6 +11,7 @@ test_security.py (kabul testleri) tek tek yüzeyleri sınar; bu dosya ona EK ola
 * Sırlar ve kişisel veri: tüm akışlar (oluştur, zaman aşımı, hata, iade) sonrası her yüzey taranır.
 """
 import json
+from unittest.mock import patch
 
 import requests
 from odoo import fields
@@ -19,7 +20,7 @@ from odoo.service.model import get_public_method
 from odoo.tests import tagged
 
 from .common import (
-    CRON_SYNC, CUSTOMER_NAME, EMAIL, INV_NO, MSSQL_USER, PASSWORD, SECRET_KEY,
+    BASE_SETTINGS, CRON_SYNC, CUSTOMER_NAME, EMAIL, INV_NO, MSSQL_USER, PASSWORD, SECRET_KEY,
     RawResponse, SanalPosCase, SanalPosHttpCase, err_body, tran,
 )
 from .test_security import FULL_PHONE_FORMS, NOTIFY, SECRETS, SecurityCase
@@ -308,6 +309,48 @@ class TestSecretSurfaces(SecurityCase):
                 with self.assertRaises(AccessError):
                     Settings.with_user(user).action_copy_tailor_mssql()
 
+    def test_g2_set_values_dogrudan_cagrisi_sistem_yoneticisine_ozel(self):
+        """G-2: çekirdek set_values yönetici denetimi yapmaz (yalnız execute yapar); boş kayıt
+        kümesiyle çağrı tüm config parametrelerini boş değerle ezebilirdi."""
+        ICP = self.env['ir.config_parameter'].sudo()
+        portal = self.env['res.users'].with_context(no_reset_password=True).create({
+            'name': 'Test sp_portal', 'login': 'sp_portal_g2', 'email': 'sp_portal_g2@example.com',
+            'group_ids': [(6, 0, [self.env.ref('base.group_portal').id])]})
+        before = {key: ICP.get_param(key) for key in BASE_SETTINGS}
+        Settings = self.env['res.config.settings']
+        writes = []
+        real_set_param = type(ICP).set_param
+
+        def spy_set_param(this, key, value):
+            writes.append(key)
+            return real_set_param(this, key, value)
+
+        with patch.object(type(ICP), 'set_param', spy_set_param):
+            for user in (self.user_plain, self.user_sp, self.user_mgr, portal):
+                with self.subTest(user=user.login, method='set_values'):
+                    with self.assertRaises(AccessError):
+                        Settings.with_user(user).set_values()
+                    # Çekirdek, sır alanını okurken AccessError verene kadar parametreleri
+                    # siliyordu (yalnız işlem geri alımı kurtarıyordu). Denetim yazmadan önce olmalı.
+                    self.assertEqual(writes, [], 'yetkisiz set_values parametre yazdı')
+                with self.subTest(user=user.login, method='execute'):
+                    # Çekirdek execute: ensure_one + is_admin denetimi (boş kümede ValueError).
+                    try:
+                        with self.env.cr.savepoint():
+                            Settings.with_user(user).execute()
+                    except (AccessError, ValueError):
+                        pass
+                    else:
+                        self.fail('yetkisiz execute reddedilmedi')
+        self.assertEqual({key: ICP.get_param(key) for key in BASE_SETTINGS}, before)
+        self.assertNotEqual(ICP.get_param('sanal_pos.require_contact'), 'False')
+
+    def test_g2_sistem_yoneticisi_ayar_kaydedebilir(self):
+        settings = self.env['res.config.settings'].with_user(self.user_sys).create(
+            {'sanal_pos_require_contact': False})
+        settings.execute()
+        self.assertEqual(self.env['ir.config_parameter'].sudo().get_param('sanal_pos.require_contact'), 'False')
+
     def test_ayar_alanlari_okuma_yollari_sirsiz(self):
         """fields_get + default_get: sır alanları yalnız sistem yöneticisinde."""
         secret_fields = {n for n, f in self.env['res.config.settings']._fields.items()
@@ -549,6 +592,24 @@ class TestHttpRpcSurface(SanalPosHttpCase):
         self.assertEqual((payment.state, payment.amount), ('paid', 9000.0))
         self.assertNoParatikaCalls()
         self.assertEqual(self.mssql_calls, [])
+
+    def test_g2_set_values_rpc_ile_ayar_ezilemez(self):
+        """G-2: /web/dataset/call_kw ile set_values (boş kayıt kümesi) sistem yöneticisi
+        olmayan iç kullanıcı ve portal kullanıcısı için reddedilir; parametreler değişmez."""
+        ICP = self.env['ir.config_parameter'].sudo()
+        portal = self.env['res.users'].with_context(no_reset_password=True).create({
+            'name': 'Test sp_portal', 'login': 'sp_portal_rpc', 'email': 'sp_portal_rpc@example.com',
+            'group_ids': [(6, 0, [self.env.ref('base.group_portal').id])]})
+        before = {key: ICP.get_param(key) for key in BASE_SETTINGS}
+        for user in (self.user_sp, self.user_mgr, portal):
+            self.login_as(user)
+            for method in ('set_values', 'execute'):
+                with self.subTest(user=user.login, method=method):
+                    body = self.call_kw('res.config.settings', method, [[]])
+                    self.assertIn('error', body, '%s RPC ile reddedilmedi' % method)
+                    self.env.invalidate_all()
+                    self.assertEqual({key: ICP.get_param(key) for key in BASE_SETTINGS}, before)
+                    self.assertNotEqual(ICP.get_param('sanal_pos.require_contact'), 'False')
 
     def test_sanal_pos_kullanicisi_ayarlari_ve_sirlari_okuyamaz(self):
         self.login_as(self.user_sp)

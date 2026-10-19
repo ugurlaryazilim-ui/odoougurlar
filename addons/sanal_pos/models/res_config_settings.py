@@ -196,6 +196,11 @@ class ResConfigSettings(models.TransientModel):
         return res
 
     def set_values(self):
+        # G-2: çekirdek set_values yönetici denetimi yapmaz (denetim yalnız execute'ta) ve
+        # RPC'ye açıktır; boş kayıt kümesiyle çağrı tüm config parametrelerini/grupları boş
+        # değerle ezmeye başlar. Denetim HER yazmadan önce yapılmalı.
+        if not self.env.is_superuser() and not self.env.user.has_group('base.group_system'):
+            raise AccessError('Ayarları yalnız sistem yöneticisi değiştirebilir.')
         super().set_values()
         ICP = self.env['ir.config_parameter'].sudo()
         for fname, key in _TRUE_DEFAULT_BOOLS.items():
