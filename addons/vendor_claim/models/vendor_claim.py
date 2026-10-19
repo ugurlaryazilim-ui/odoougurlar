@@ -298,15 +298,26 @@ class VendorClaim(models.Model):
         detail['items'] = items
         detail['customer_mobile'] = self._normalize_mobile(detail.get('customer_mobile'))
         if not detail['customer_mobile'] and detail.get('customer_code'):
-            detail['customer_mobile'] = self._mobile_from_history(detail['customer_code'])
+            detail['customer_mobile'] = self._mobile_from_history(detail['customer_code'], detail.get('customer_name'))
         return detail
 
+    @staticmethod
+    def _norm_name(name):
+        return ' '.join((name or '').lower().split())
+
     @api.model
-    def _mobile_from_history(self, customer_code):
-        """Aynı müşteri kodunun önceki kayıtlarında tek bir cep numarası varsa onu öner (kasa kodları ortaktır)."""
+    def _mobile_from_history(self, customer_code, customer_name):
+        """Aynı kod VE aynı adla açılmış önceki kayıtlarda tek bir cep numarası varsa onu öner.
+
+        Kasa kodları ortaktır; yalnız kodla eşleşirse başka müşterinin numarası sızar (kişisel veri).
+        """
+        name = self._norm_name(customer_name)
+        if not name:
+            return ''
         claims = self.sudo().search([('customer_code', '=', customer_code), ('customer_mobile', '!=', False)],
-                                    order='id desc', limit=20)
-        numbers = {normalize_number(c.customer_mobile) for c in claims} - {None}
+                                    order='id desc', limit=50)
+        numbers = {normalize_number(c.customer_mobile) for c in claims
+                   if self._norm_name(c.customer_name) == name} - {None}
         return '0' + numbers.pop() if len(numbers) == 1 else ''
 
     @api.model
