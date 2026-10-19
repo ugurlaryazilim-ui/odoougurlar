@@ -6,7 +6,9 @@ Başka modüle bağımlılığı yoktur (`ugurlar_tailor` kurulu olmasa da çal�
 
 ## 1. Kurulum ve güncelleme
 
+- **Sıra (D-4c):** önce SQL Server'da `data/sql/vw_TerziFaturalar_v2.sql` çalıştırılır ve doğrulanır (5. bölüm), **sonra** modül kurulur. v2 olmadan fatura getirme "Fatura görünümü güncel değil (v2 gerekli)" der.
 - **İlk kurulum:** `odoo -d <veritabani> -i sanal_pos --stop-after-init`
+- **Öneri (D-4a):** ilk elle kurulumdan sonra `sanal_pos`, üretim compose dosyasındaki otomatik `-u` modül listesine eklenmeli; böylece sonraki deploy'larda güncelleme unutulmaz.
 - **Sonraki her sürüm:** deploy biter bitmez **hemen** `odoo -d <veritabani> -u sanal_pos --stop-after-init`.
   Yeni saklanan (stored) alanlar modül güncellenene kadar veritabanında yoktur; arada durum senkronu cron'u (10 dakikada bir) hata verir. Güncellemeyi geciktirmeyin.
 - Test: `odoo -d bc_test -u sanal_pos --test-tags /sanal_pos --stop-after-init --workers=0 --max-cron-threads=0` (Paratika ve MSSQL taklit edilir; gerçek çağrı gitmez).
@@ -42,7 +44,7 @@ Sır alanları (API şifresi, secretKey, MSSQL kullanıcı/şifre) hiçbir kayı
 1. **Bildirim (notify) adresi:** `https://<odoo-alan-adi>/sanal_pos/paratika/notify` (POST). Ayar ekranındaki "Bildirim adresi" ile aynıdır. Bildirim yalnız tetiktir; durum Paratika'ya sorularak doğrulanır. Sabit `200 OK` döner. Reverse proxy'de (nginx/Coolify) bu yola POST ile erişilebildiğini `curl -X POST https://<odoo-alan-adi>/sanal_pos/paratika/notify` ile doğrulayın (yanıt `OK`).
 2. **Dönüş (return) adresi:** `https://<odoo-alan-adi>/sanal_pos/paratika/return` (müşterinin ödeme sonrası döndüğü teşekkür sayfası). Yalnız POST kabul eder.
 3. API kullanıcısında link, sorgu, **VOID ve REFUND** yetkileri açık olmalı (test ve canlı için ayrı kullanıcılar).
-4. Odoo'nun `web.base.url` sistem parametresi gerçek alan adını göstermeli.
+4. Odoo'nun `web.base.url` sistem parametresi gerçek alan adını (`https://`) göstermeli ve `web.base.url.freeze = True` yapılmalı; aksi halde yönetici girişi adresi değiştirebilir, dönüş/bildirim adresleri bozulur (D-3).
 5. **Bildirim çoğaltmasına karşı (öneri, reverse proxy):** Modül aynı ödemeye gelen tekrar bildirimlerde tek cron tetiği kurar, ödeme başına en çok dakikada bir sorgu yapar ve tetiklenen ek turlarda son 9 dakikada sorgulanmış "Gönderildi" kayıtlarını atlar. Ek koruma olarak nginx/Coolify'da `/sanal_pos/paratika/` yolları için gövde sınırı ve IP başına hız sınırı önerilir, örnek: `client_max_body_size 16k;` ve `limit_req zone=sanalpos burst=20 nodelay;` (`limit_req_zone $binary_remote_addr zone=sanalpos:1m rate=30r/m;`). Paratika bildirim IP'leri öğrenilirse yalnız onlara izin verilebilir. (Modül bu ayarları yapmaz.)
 
 ## 5. Nebim fatura görünümü
@@ -53,6 +55,8 @@ Sır alanları (API şifresi, secretKey, MSSQL kullanıcı/şifre) hiçbir kayı
 - Modül MSSQL'e yalnız parametreli `SELECT` ile bağlanır; yazma yapmaz.
 
 ## 6. CANLIYA ALMADAN ÖNCE (zorunlu)
+
+**Webhook dış erişim testi (D-3):** Sunucu Cloudflare Tunnel/Coolify arkasında olduğundan WAF/Bot kuralları Paratika'nın POST'unu engelleyebilir. Canlıda şirket ağı **dışından** `curl -X POST https://<odoo-alan-adi>/sanal_pos/paratika/notify` çalıştırın; yanıt `OK` olmalı (403/challenge sayfası gelirse WAF'ta bu yol için istisna tanımlayın). Bildirim gelmezse ödeme yine cron sorgusuyla (10 dk) yakalanır ama gecikir.
 
 **Paratika sandbox denemesi (test ortamı, uçtan uca):** link (SMS+e-posta), Türkçe ad görünümü, test kartla ödeme, webhook ile "Ödendi", başarısız kart, link iptali, aynı gün iptal, ertesi gün kısmi ve tam iade. Bu deneme şu belirsizlikleri kapatır; sonuca göre çoğunlukla yalnız ayar veya eşleme değişir:
 

@@ -5,13 +5,14 @@
     'category': 'Accounting/Payment',
     'summary': 'Nebim faturasına bağlı Paratika ödeme linki oluşturma, takip, iptal ve iade',
     'description': """
-        Sanal POS / Ödeme Linki
-        =======================
-        * Nebim fatura numarasından ödeme linki oluşturma (Paratika)
-        * Durum takibi (webhook tetiği + sorgu ile doğrulama, cron uzlaştırma)
-        * Ödeme iptali (VOID) ve iade (REFUND)
-        * Sağlayıcı katmanı (yeni sağlayıcı = yeni sanal.pos.provider.<kod> modeli)
-    """,
+Sanal POS / Ödeme Linki
+=======================
+
+* Nebim fatura numarasından ödeme linki oluşturma (Paratika)
+* Durum takibi (webhook tetiği + sorgu ile doğrulama, cron uzlaştırma)
+* Ödeme iptali (VOID) ve iade (REFUND)
+* Sağlayıcı katmanı (yeni sağlayıcı = yeni ``sanal.pos.provider.<kod>`` modeli)
+""",
     'author': 'Uğurlar',
     'license': 'LGPL-3',
     'depends': ['base', 'mail'],

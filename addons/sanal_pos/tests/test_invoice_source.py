@@ -13,7 +13,8 @@ from odoo.service.model import get_public_method
 from odoo.tests import tagged
 
 from .common import (
-    CUSTOMER_NAME, INV_NO, MSSQL_PASSWORD, MSSQL_USER, SanalPosCase, invoice_rows,
+    CUSTOMER_NAME, INV_NO, MSSQL_PASSWORD, MSSQL_USER, PASSWORD, SECRET_KEY, SanalPosCase,
+    invoice_rows,
 )
 
 SOURCE = 'sanal.pos.invoice.source.nebim'
@@ -167,6 +168,16 @@ class TestFindInvoice(SanalPosCase):
         self.assertNotIn(MSSQL_PASSWORD, message)
         self.assertNotIn(MSSQL_PASSWORD, '\n'.join(records), 'MSSQL şifresi logda açık metin')
         self.assertFalse(self.payments(), 'hata sonrası kayıt oluşmamalı')
+
+    def test_o6_paratika_sirlari_da_loga_girmez(self):
+        """Ö-6: hata metnine Paratika şifresi/secretKey girerse de log satırında süzülür."""
+        self.mssql_error = Exception('driver error pw=%s key=%s' % (PASSWORD, SECRET_KEY))
+        with self.capture_logs() as records:
+            with self.assertRaises(UserError):
+                self.find()
+        text = '\n'.join(records)
+        self.assertNotIn(PASSWORD, text)
+        self.assertNotIn(SECRET_KEY, text)
 
     def test_kk3_zaman_asimi_ayni_mesaj(self):
         self.mssql_error = TimeoutError('timed out')

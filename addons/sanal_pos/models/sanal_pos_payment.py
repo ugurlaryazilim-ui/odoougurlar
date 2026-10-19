@@ -157,7 +157,9 @@ class SanalPosPayment(models.Model):
     # ---------------------------------------------------------------- kimlik
     name = fields.Char(string='Talep No', readonly=True, copy=False, index=True, default='/')
     provider = fields.Selection(
-        [('paratika', 'Paratika')], string='Sağlayıcı', required=True, default='paratika')
+        [('paratika', 'Paratika')], string='Sağlayıcı', required=True,
+        default=lambda self: self._default_provider(),
+        help='Oluşturma anındaki "Sanal POS sağlayıcısı" ayarı.')
     environment = fields.Selection(
         [('test', 'Test'), ('live', 'Canlı')], string='Ortam', required=True,
         default=lambda self: self._default_environment(),
@@ -243,6 +245,12 @@ class SanalPosPayment(models.Model):
     can_resend = fields.Boolean(string='Yeniden gönderilebilir', compute='_compute_can_resend')
 
     # ---------------------------------------------------------------- varsayılanlar
+    @api.model
+    def _default_provider(self):
+        value = self.env['ir.config_parameter'].sudo().get_param('sanal_pos.provider')
+        valid = [key for key, _label in self._fields['provider'].selection]
+        return value if value in valid else 'paratika'
+
     @api.model
     def _default_environment(self):
         value = self.env['ir.config_parameter'].sudo().get_param('sanal_pos.environment')
@@ -687,7 +695,7 @@ class SanalPosPayment(models.Model):
                                             format_try(line.amount), REFUND_STALE_MSG))
         financial = [t for t in transactions if t.get('kind') in ('refund', 'void')]
         approved = [t for t in financial if t.get('status') == 'approved'
-                    and rec._to_cents(t.get('amount')) is not None]
+                    and rec._to_amount2(t.get('amount')) is not None]
         pending = [t for t in financial if t.get('status') == 'pending']
         listed = {t.get('ref') for t in approved if t.get('ref')}
         for tran in approved:
@@ -702,11 +710,11 @@ class SanalPosPayment(models.Model):
         ref = tran.get('ref') or False
         if ref and ref in set(self.refund_ids.mapped('provider_ref')):
             return 'known'
-        kind, cents = tran['kind'], self._to_cents(tran.get('amount'))
+        kind, cents = tran['kind'], self._to_amount2(tran.get('amount'))
         label = REFUND_KIND_LABELS[kind]
 
         def same(line):
-            return line.kind == kind and self._to_cents(line.amount) == cents
+            return line.kind == kind and self._to_amount2(line.amount) == cents
 
         when = tran.get('time')
         line = self.refund_ids.filtered(
@@ -769,7 +777,8 @@ class SanalPosPayment(models.Model):
                 line.write({'not_found_count': count})
 
     @api.model
-    def _to_cents(self, value):
+    def _to_amount2(self, value):
+        """Tutarı 2 haneli ``Decimal``'a çevirir (kuruş tamsayısı DEĞİL); geçersizse None."""
         try:
             return Decimal(str(value)).quantize(Decimal('0.01'))
         except (InvalidOperation, TypeError, ValueError):
@@ -791,7 +800,7 @@ class SanalPosPayment(models.Model):
                   'paid_at': tran.get('time') or fields.Datetime.now(),
                   'installment_count': tran.get('installment_count') or 1,
                   'card_last4': tran.get('card_last4') or False}
-        cents = self._to_cents(tran.get('amount'))
+        cents = self._to_amount2(tran.get('amount'))
         if cents is not None:
             values['paid_amount'] = float(cents)
         return values
@@ -834,7 +843,7 @@ class SanalPosPayment(models.Model):
 
     def _review_reason(self, approved, in_review, others):
         """İnceleme nedeni (boş = ödendi sayılabilir)."""
-        expected = self._to_cents(self.amount)
+        expected = self._to_amount2(self.amount)
         currency = self.currency_id.name or 'TRY'
         if len(approved) > 1:
             amounts = ', '.join(format_try(t.get('amount') or 0) for t in approved)
@@ -843,7 +852,7 @@ class SanalPosPayment(models.Model):
                                            len(approved), amounts, format_try(self.amount)))
         if approved:
             tran = approved[0]
-            got = self._to_cents(tran.get('amount'))
+            got = self._to_amount2(tran.get('amount'))
             if got is None or got != expected:
                 return 'REVIEW_AMOUNT', ('Tutar uyuşmazlığı: Paratika\'da tahsil edilen %s, '
                                          'talep tutarı %s.' % (
@@ -867,7 +876,7 @@ class SanalPosPayment(models.Model):
         values = {'state': 'review', 'last_error_code': code, 'last_error_message': reason[:250]}
         if tran:
             values.update(self._payment_values(tran))
-        cents = [self._to_cents(t.get('amount')) for t in approved or []]
+        cents = [self._to_amount2(t.get('amount')) for t in approved or []]
         if len(cents) > 1 and None not in cents:
             # Ö-D: birden fazla onaylı satış -> ödenen = toplam. Kabul edilip fazlası iade
             # edildiğinde durum 'Kısmi iade' kalır ('İade edildi' değil).
@@ -1264,9 +1273,9 @@ class SanalPosPayment(models.Model):
     def _refundable_cents(self):
         """Ödenen − başarılı − devam eden (kuruş)."""
         self.ensure_one()
-        used = sum(int(self._to_cents(l.amount) * 100) for l in self.refund_ids
+        used = sum(int(self._to_amount2(l.amount) * 100) for l in self.refund_ids
                    if l.state in ('done', 'processing', 'unknown'))
-        return int((self._to_cents(self.paid_amount or 0) or 0) * 100) - used
+        return int((self._to_amount2(self.paid_amount or 0) or 0) * 100) - used
 
     def _refund_validate(self, kind, cents):
         """Durum, devam eden satır ve tutar/iptal kuralları (kilitten önce ve sonra)."""

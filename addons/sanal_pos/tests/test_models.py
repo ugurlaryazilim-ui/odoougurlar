@@ -132,6 +132,21 @@ class TestPaymentModel(ModelCase):
         self.assertFalse(self.make_payment(invoice_no='T2', merchant_payment_id='T2-1',
                                            state='expired', environment='live').is_test)
 
+    def test_saglayici_ayari_varsayilani_belirler(self):
+        """sanal_pos.provider ayarı yeni kaydın sağlayıcısıdır; geçersiz değer -> paratika."""
+        Payment = self.env['sanal.pos.payment']
+        ICP = self.env['ir.config_parameter'].sudo()
+        calls = []
+        real = type(ICP).get_param
+
+        def spy(model, key, default=False):
+            calls.append(key)
+            return 'yok_boyle' if key == 'sanal_pos.provider' else real(model, key, default)
+        with patch.object(type(ICP), 'get_param', spy):
+            self.assertEqual(Payment._default_provider(), 'paratika')
+        self.assertIn('sanal_pos.provider', calls)
+        self.assertEqual(Payment._fields['provider'].default(Payment), 'paratika')
+
     def test_kk17_link_adresi_varsayilan_gizli(self):
         payment = self.make_payment(provider_token='TOK-LINK-1')
         self.assertFalse(payment.link_url)

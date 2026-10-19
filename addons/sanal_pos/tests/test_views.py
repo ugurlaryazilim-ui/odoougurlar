@@ -30,6 +30,23 @@ class TestScreens(SanalPosCase):
         for view_type, arch in views.items():
             self.assertTrue(arch, 'görünüm boş: %s' % view_type)
 
+    def test_o2_olusturulma_sutunu_turkce(self):
+        """Test Ö-2: create_date sütunu 'Created on' değil, Türkçe."""
+        for model, user in ((PAYMENT, self.user_sp), (LOG, self.user_mgr)):
+            arch = self.views(model, user, types=('list',))['list']
+            self.assertIn('name="create_date" string="Oluşturulma"', arch, model)
+        form = self.views(PAYMENT, self.user_sp, types=('form',))['form']
+        self.assertNotIn('<field name="create_date"/>', form, 'iade geçmişi sütunu')
+
+    def test_d6_manifest_aciklamasi_gecerli_rst(self):
+        from docutils.core import publish_doctree
+        with file_open('sanal_pos/__manifest__.py') as handle:
+            manifest = ast.literal_eval(handle.read())
+        stream = io.StringIO()
+        publish_doctree(manifest['description'], settings_overrides={
+            'warning_stream': stream, 'report_level': 2, 'halt_level': 5})
+        self.assertFalse(stream.getvalue(), stream.getvalue())
+
     def test_g5_islem_kaydi_gorunumleri_yonetici_icin_yuklenir(self):
         views = self.views(LOG, self.user_mgr)
         self.assertIn('response_body', views['form'])

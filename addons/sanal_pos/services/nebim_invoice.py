@@ -94,7 +94,10 @@ class NebimInvoiceSource(models.AbstractModel):
     def _secrets(self):
         """Loglardan ve mesajlardan süzülecek sır değerleri."""
         ICP = self.env['ir.config_parameter'].sudo()
-        return [ICP.get_param('sanal_pos.mssql_password'), ICP.get_param('sanal_pos.mssql_user')]
+        # Ö-6: Paratika sırları da (savunma derinliği; hata metnine girerse loglanmasın)
+        return [ICP.get_param(key) for key in (
+            'sanal_pos.mssql_password', 'sanal_pos.mssql_user',
+            'sanal_pos.paratika_merchant_password', 'sanal_pos.paratika_secret_key')]
 
     # ------------------------------------------------------------------ MSSQL (tek dar nokta)
     @api.model
