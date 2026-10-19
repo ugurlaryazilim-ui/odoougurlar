@@ -445,7 +445,8 @@ class VendorClaim(models.Model):
                 vals['vendor_id'] = self._resolve_vendor(vals['vendor_name']).id or False
         claims = super().create(vals_list)
         claims._link_attachments()
-        claims._notify_state_sms()
+        if not self.env.context.get('vendor_claim_defer_sms'):   # denetleyici: fotoğraflardan sonra kendisi çağırır
+            claims._notify_state_sms()
         return claims
 
     def _link_attachments(self):
@@ -547,21 +548,44 @@ class VendorClaim(models.Model):
             number, template=template, values=self._sms_values(), record=self, queue=queue)
 
     def _notify_state_sms(self):
-        """Durumun otomatik SMS'i (ayar açıksa, numara varsa, o durum için daha önce gönderilmediyse)."""
+        """Durumun otomatik SMS'i: ayar açıksa, numara varsa, o durum için daha önce kuyruğa alınmadıysa.
+
+        SMS istek içinde gönderilmez, sms_system tekli kuyruğuna alınır (KK-B11). Döner: {claim_id: {'state',
+        'error'}}; state queued | test | error | none. Bağlamda 'vendor_claim_sms_out' sözlüğü varsa sonuç ona da
+        yazılır (denetleyici yanıtı için; yalnız bu çağrıda yeni kuyruğa alınanlar)."""
         icp = self.env['ir.config_parameter'].sudo()
+        out = self.env.context.get('vendor_claim_sms_out')
+        result = {}
         for claim in self:
+            res = {'state': 'none', 'error': ''}
+            result[claim.id] = res
             spec = STATE_SMS.get(claim.state)
             if not spec or not claim.customer_mobile:
                 continue
             code, flag = spec
-            if claim[flag] or icp.get_param(PARAM + 'sms_%s_enabled' % claim.state) != 'True':
+            if icp.get_param(PARAM + 'sms_%s_enabled' % claim.state) != 'True':
+                continue
+            if claim[flag]:
+                # Bu geçişin SMS'i zaten alındı: tekrar kuyruğa alınmaz, son kaydın durumu bildirilir
+                last = self.env['sms.system.message'].sudo().search(
+                    [('res_model', '=', claim._name), ('res_id', '=', claim.id), ('template_id.code', '=', code)],
+                    order='id desc', limit=1)
+                if last:
+                    res.update(state=last.state, error=last.error or '')
                 continue
             try:
-                msg = claim._send_template_sms(code)
-                if msg and msg.state in ('sent', 'test'):
-                    claim.sudo()[flag] = True
+                msg = claim._send_template_sms(code, queue=True)
             except UserError as e:  # geçersiz numara vb. durum değişikliğini engellemesin
                 claim.message_post(body=_('SMS gönderilemedi: %s') % e)
+                res.update(state='error', error=str(e))
+            else:
+                if msg:
+                    res.update(state=msg.state, error=msg.error or '')
+                    if msg.state in ('queued', 'test'):
+                        claim.sudo()[flag] = True
+            if out is not None:
+                out[claim.id] = dict(res)
+        return result
 
     def action_send_sms(self):
         """Formdaki 'SMS Gönder' — şablon seçilebilen pencere."""

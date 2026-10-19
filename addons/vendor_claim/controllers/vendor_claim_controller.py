@@ -217,11 +217,13 @@ class VendorClaimController(http.Controller):
             vals['invoice_items'] = data['invoice_items']
         try:
             with request.env.cr.savepoint():
-                claim = self._claims().create(vals)
+                # SMS fotoğraflardan sonra kuyruğa alınır: fotoğraf hatası kaydı geri alırsa SMS kaydı kalmaz
+                claim = self._claims().with_context(vendor_claim_defer_sms=True).create(vals)
                 self._attach_photos(claim, photos)
+                sms = claim._notify_state_sms()[claim.id]
         except Exception as e:
             return self._error(e)
-        return {'id': claim.id, 'name': claim.name, 'vendor': claim.vendor_id.name or '',
+        return {'id': claim.id, 'name': claim.name, 'vendor': claim.vendor_id.name or '', 'sms': sms,
                 'slip_url': '/report/pdf/vendor_claim.report_vendor_claim_slip/%s' % claim.id}
 
     # ─── Liste / detay ───────────────────────────────
@@ -278,9 +280,14 @@ class VendorClaimController(http.Controller):
 
     # ─── İşlemler ────────────────────────────────────
 
-    def _apply_action(self, claim, action, vals):
+    @staticmethod
+    def _sms_result(out, claim):
+        """İşlemde kuyruğa alınan durum SMS'inin özeti ({state, error}); yoksa none."""
+        return out.get(claim.id) or {'state': 'none', 'error': ''}
+
+    def _apply_action(self, claim, action, vals, sms_out=None):
         vals = vals or {}
-        claim = claim.with_context(vendor_claim_strict=True)
+        claim = claim.with_context(vendor_claim_strict=True, vendor_claim_sms_out=sms_out)
         if action == 'send':
             claim.write({k: (vals.get(k) or '').strip() or claim[k] for k in ('out_carrier', 'out_tracking')
                          if k in vals})
@@ -320,9 +327,10 @@ class VendorClaimController(http.Controller):
         self._check_user()
         try:
             claim = self._get_claim(claim_id)
+            sms_out = {}
             with request.env.cr.savepoint():
-                self._apply_action(claim, action, vals)
-            return self._detail(claim)
+                self._apply_action(claim, action, vals, sms_out)
+            return dict(self._detail(claim), sms=self._sms_result(sms_out, claim))
         except Exception as e:
             return self._error(e)
 
@@ -336,9 +344,10 @@ class VendorClaimController(http.Controller):
         for claim_id in (claim_ids or [])[:200]:
             try:
                 claim = self._get_claim(claim_id)
+                sms_out = {}
                 with request.env.cr.savepoint():
-                    self._apply_action(claim, action, vals)
-                results.append({'id': claim.id, 'ok': True})
+                    self._apply_action(claim, action, vals, sms_out)
+                results.append({'id': claim.id, 'ok': True, 'sms': self._sms_result(sms_out, claim)})
             except Exception as e:
                 results.append({'id': claim_id, 'ok': False, 'error': self._error(e)['error']})
         return {'results': results}
@@ -356,11 +365,13 @@ class VendorClaimController(http.Controller):
                 return {'error': _('Bu durumda SMS gönderilmez.')}
             if not claim.customer_mobile:
                 return {'error': _('Müşterinin cep telefonu yok.')}
-            msg = claim._send_template_sms(code)
+            msg = claim._send_template_sms(code, queue=True)
             if not msg:
                 return {'error': _('SMS şablonu bulunamadı.')}
             if msg.state == 'error':
                 return {'error': _('SMS gönderilemedi: %s') % (msg.error or '')}
+            if msg.state == 'test':
+                return {'ok': True, 'message': _('Test modu: SMS gönderilmedi (%s)') % msg.number}
             return {'ok': True, 'message': _('SMS gönderildi: %s') % msg.number}
         except Exception as e:
             return self._error(e)
