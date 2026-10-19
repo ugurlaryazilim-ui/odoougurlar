@@ -3,6 +3,7 @@
 KK-39 (log ACL), KK-45 (DB düzeyi), KK-48, KK-10 (savunma), KK-17 (link_url).
 """
 from datetime import datetime, timedelta
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from psycopg2 import IntegrityError
@@ -140,6 +141,25 @@ class TestPaymentModel(ModelCase):
         payment = self.make_payment(provider_token='TOK-LINK-1')
         self.assertIn('TOK-LINK-1', payment.link_url or '')
         self.assertTrue((payment.link_url or '').startswith('https://'))
+
+    def test_oe_link_adresi_saglayicidan_gelir(self):
+        """Ö-E: adres kalıbı tek yerde (sağlayıcının ``_link_url``'i); model kopya kurmaz."""
+        self.set_setting('paratika_show_link_url', True)
+        provider_cls = type(self.env['sanal.pos.provider.paratika'])
+        with patch.object(provider_cls, '_link_url', autospec=True,
+                          return_value='https://odeme.example/p/TOK-LINK-2') as spy:
+            payment = self.make_payment(provider_token='TOK-LINK-2', environment='live')
+            self.assertEqual(payment.link_url, 'https://odeme.example/p/TOK-LINK-2')
+        self.assertEqual(spy.call_args.args[1:], (payment, 'TOK-LINK-2'))
+
+    def test_oe_link_adresi_saglayici_ile_ayni(self):
+        self.set_setting('paratika_show_link_url', True)
+        self.env['ir.config_parameter'].sudo().set_param(
+            'sanal_pos.paratika_live_url', '  https://vpos.example/paratika/api/v2/  ')
+        payment = self.make_payment(provider_token='TOK-LINK-3', environment='live')
+        expected = self.env['sanal.pos.provider.paratika']._link_url(payment, 'TOK-LINK-3')
+        self.assertEqual(expected, 'https://vpos.example/merchant/payment/TOK-LINK-3')
+        self.assertEqual(payment.link_url, expected)
 
     def test_kk17_token_yoksa_link_yok(self):
         self.set_setting('paratika_show_link_url', True)

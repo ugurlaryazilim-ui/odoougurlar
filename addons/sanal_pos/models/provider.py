@@ -73,6 +73,11 @@ class SanalPosProvider(models.AbstractModel):
     def parse_notification(self, params):
         raise NotImplementedError()
 
+    @api.private
+    def _link_url(self, payment, token):
+        """Ödeme sayfası adresi; sağlayıcı biçimi bilmiyorsa None (alan boş kalır)."""
+        return None
+
     # ---------------------------------------------------------------- ortak yardımcılar
     @api.model
     def _result(self, ok=False, timeout=False, error_code=None, error_message=None,

@@ -13,7 +13,6 @@ import logging
 import time
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from psycopg2 import errors as pg_errors
@@ -133,8 +132,6 @@ REFUND_KIND_LABELS = {'void': 'Ödeme iptali', 'refund': 'İade'}
 
 _ISTANBUL = ZoneInfo('Europe/Istanbul')
 _UTC = ZoneInfo('UTC')
-_DEFAULT_TEST_URL = 'https://test.paratika.com.tr/paratika/api/v2'
-_DEFAULT_LIVE_URL = 'https://vpos.paratika.com.tr/paratika/api/v2'
 
 
 class SanalPosPayment(models.Model):
@@ -282,19 +279,14 @@ class SanalPosPayment(models.Model):
         """Ödeme sayfası adresi; yalnız ``sanal_pos.paratika_show_link_url`` açıksa dolu (KK-17)."""
         # Boolean ayar kapatılınca parametre satırı silinir: yok = kapalı
         show = get_bool_param(self.env, 'sanal_pos.paratika_show_link_url', default=False)
-        ICP = self.env['ir.config_parameter'].sudo()
         for rec in self:
             rec.link_url = False
-            if not show or not rec.provider_token or rec.provider != 'paratika':
+            if not show or not rec.provider_token:
                 continue
-            if rec.environment == 'live':
-                api_url = ICP.get_param('sanal_pos.paratika_live_url') or _DEFAULT_LIVE_URL
-            else:
-                api_url = ICP.get_param('sanal_pos.paratika_test_url') or _DEFAULT_TEST_URL
-            parts = urlsplit(api_url)
-            if parts.scheme and parts.netloc:
-                rec.link_url = '%s://%s/merchant/payment/%s' % (
-                    parts.scheme, parts.netloc, rec.provider_token)
+            if 'sanal.pos.provider.%s' % (rec.provider or '') not in self.env:
+                continue
+            # Ö-E: adres kalıbı yalnız sağlayıcıda (create_link yanıtıyla aynı kaynak)
+            rec.link_url = rec._provider()._link_url(rec, rec.provider_token) or False
 
     @api.depends('state', 'expires_at')
     def _compute_can_resend(self):
