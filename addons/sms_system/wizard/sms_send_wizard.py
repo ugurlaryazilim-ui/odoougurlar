@@ -1,7 +1,9 @@
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
-from ..services.turatel import MAX_SEGMENTS, normalize_number, prepare_text, segment_count
+from ..models.sms_message import count_segments, resolve_api_mode
+from ..services.turatel import MAX_SEGMENTS, normalize_number, prepare_text
+from ..services.turatel_json import MAX_TEXT_LENGTH
 
 
 class SmsSendWizard(models.TransientModel):
@@ -41,13 +43,16 @@ class SmsSendWizard(models.TransientModel):
 
     @api.depends('body', 'number')
     def _compute_counts(self):
-        ascii_mode = self.env['ir.config_parameter'].sudo().get_param('sms_system.ascii_mode') == 'True'
+        icp = self.env['ir.config_parameter'].sudo()
+        ascii_mode = icp.get_param('sms_system.ascii_mode') == 'True'
+        api_mode = resolve_api_mode(icp.get_param('sms_system.api_mode'))
         for wiz in self:
             text, sms_type = prepare_text(wiz.body or '', ascii_mode=ascii_mode)
             wiz.char_count = len(text)
-            wiz.segments = segment_count(text, sms_type) if text else 0
+            wiz.segments = count_segments(api_mode, text, sms_type) if text else 0
             wiz.number_ok = bool(normalize_number(wiz.number))
-            wiz.too_long = wiz.segments > MAX_SEGMENTS
+            # JSON modunda sınır 402 karakter (KK-C23), eski modda 7 parça
+            wiz.too_long = len(text) > MAX_TEXT_LENGTH if api_mode == 'json' else wiz.segments > MAX_SEGMENTS
 
     def action_send(self):
         self.ensure_one()

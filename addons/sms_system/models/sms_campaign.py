@@ -11,10 +11,11 @@ from odoo import _, api, fields, models
 from odoo.tools import html2plaintext, html_escape
 from odoo.exceptions import UserError
 
-from ..services.turatel import MAX_SEGMENTS, TuratelError, prepare_text, segment_count
-from ..services.turatel_json import TuratelJsonClient, mask_digits
+from ..services.turatel import MAX_SEGMENTS, TuratelError, prepare_text
+from ..services.turatel_json import MAX_TEXT_LENGTH, TuratelJsonClient, mask_digits
 from .sms_iys import FRESH
-from .sms_message import MAX_RETRY, NO_COMMERCIAL_CREDS
+from .sms_message import (MAX_RETRY, NO_COMMERCIAL_CREDS, NO_OPTOUT_TEXT, NUMERIC_PLACEHOLDER, count_segments,
+                          resolve_api_mode)
 from .sms_template import PLACEHOLDER
 
 _logger = logging.getLogger(__name__)
@@ -99,6 +100,18 @@ class SmsSystemCampaign(models.Model):
                 body = '%s %s' % (body, optout)
         return body
 
+    def _optout_text(self):
+        return (self._icp('sms_system.optout_text') or '').strip()
+
+    def _json_template(self, ascii_mode=False):
+        """JSON gönderim şablonu: (metin, kişiye özel mi). `{ad}` → `{1}` (alıcı başına parameter), diğer
+        yer tutucular boş. Kişiye özel değilse metin son metindir (KK-C21)."""
+        self.ensure_one()
+        body = self._build_body()
+        personalized = any(m.group(1) == 'ad' for m in PLACEHOLDER.finditer(body))
+        text = PLACEHOLDER.sub(lambda m: '{1}' if m.group(1) == 'ad' else '', body)
+        return prepare_text(text, ascii_mode=ascii_mode)[0], personalized
+
     def _recipient_domain(self):
         self.ensure_one()
         domain = [('list_ids', 'in', self.list_ids.ids), ('opt_out', '=', False)]
@@ -134,6 +147,7 @@ class SmsSystemCampaign(models.Model):
     @api.depends('body', 'message_type', 'list_ids')
     def _compute_preview(self):
         ascii_mode = self._icp('sms_system.ascii_mode') == 'True'
+        api_mode = resolve_api_mode(self._icp('sms_system.api_mode'))
         sample_name = _('Ayşe Yılmaz')
         for camp in self:
             body = camp._build_body()
@@ -141,7 +155,7 @@ class SmsSystemCampaign(models.Model):
             sample = PLACEHOLDER.sub(lambda m: sample_name if m.group(1) == 'ad' else '', body)
             text, sms_type = prepare_text(sample, ascii_mode=ascii_mode)
             camp.final_body = text
-            camp.preview_segments = segment_count(text, sms_type) if text else 0
+            camp.preview_segments = count_segments(api_mode, text, sms_type) if text else 0
             if camp.state in ('draft', 'scheduled'):
                 contacts, skipped = camp._recipients()
                 camp.preview_count = len(contacts)
@@ -236,6 +250,10 @@ class SmsSystemCampaign(models.Model):
             raise UserError(_(
                 'Reklam hesabı kimlik bilgileri (kullanıcı adı/şifre) tanımlı değil. Ayarlar > SMS > Turatel JSON API '
                 'bölümünde reklam kimlik setini doldurun; ticari kampanya bilgi hesabıyla gönderilmez.'))
+        if self.message_type == 'commercial' and not self._optout_text():
+            raise UserError(self._no_optout_message())
+        if resolve_api_mode(self._icp('sms_system.api_mode')) == 'json':
+            self._check_json_text()
         if self.preview_segments > MAX_SEGMENTS:
             raise UserError(_('Metin çok uzun (%(n)s parça). En fazla %(max)s parça gönderilebilir.',
                               n=self.preview_segments, max=MAX_SEGMENTS))
@@ -244,6 +262,21 @@ class SmsSystemCampaign(models.Model):
         if not count:
             raise UserError(_('Gönderilecek alıcı yok (listeler boş, kara listede ya da İYS onaylı değil).'))
         self._check_daily_limit(count)
+
+    def _no_optout_message(self):
+        return _('%s. Ayarlar > SMS bölümünde "Ret metni" alanını doldurun.') % NO_OPTOUT_TEXT
+
+    def _check_json_text(self):
+        """JSON modu metin kuralları: kullanıcı {<sayı>} yazamaz (KK-C22); örnek adla hesaplanan metin 402
+        karakteri aşamaz (KK-C23). Aşan tek tek alıcılar gönderimde hataya düşer (_json_pack_content)."""
+        self.ensure_one()
+        if NUMERIC_PLACEHOLDER.search(self._build_body()):
+            raise UserError(_('Metinde {1}, {2} gibi sayılı yer tutucu kullanılamaz (kişiselleştirme için '
+                              'ayrılmıştır). Kişinin adı için {ad} yazın.'))
+        length = len(self.final_body or '')
+        if length > MAX_TEXT_LENGTH:
+            raise UserError(_('Metin çok uzun (örnek adla %(n)s karakter). En fazla %(max)s karakter gönderilebilir; '
+                              'metni kısaltın.', n=length, max=MAX_TEXT_LENGTH))
 
     def _json_creds_missing(self):
         """JSON modunda ticari kampanyanın reklam kimlik seti boş mu (KK-C29). Bilgi setine düşülmez."""
@@ -354,6 +387,8 @@ class SmsSystemCampaign(models.Model):
             # KK-C29: kuyruğa alınsa da kalıcı hataya düşerdi; ticari kampanya bilgi hesabıyla gönderilmez
             raise UserError(_('%s. Ayarlar > SMS > Turatel JSON API bölümünde reklam kimlik setini doldurun.')
                             % NO_COMMERCIAL_CREDS)
+        if self.message_type == 'commercial' and not self._optout_text():
+            raise UserError(self._no_optout_message())
         messages = self.sudo().message_ids_sms
         errors = messages.filtered(lambda m: m.state == 'error')
         uncertain = len(messages.filtered(lambda m: m.state == 'uncertain'))
@@ -508,7 +543,7 @@ class SmsSystemCampaign(models.Model):
             text, sms_type = prepare_text(text, ascii_mode=cfg['ascii_mode'])
             vals_list.append({
                 'number': contact.mobile, 'body': text, 'originator': cfg['originator'],
-                'sms_type': sms_type, 'segments': segment_count(text, sms_type),
+                'sms_type': sms_type, 'segments': count_segments(cfg['api_mode'], text, sms_type),
                 'campaign_id': self.id, 'contact_id': contact.id, 'state': 'queued',
                 'res_model': self._name, 'res_id': self.id, 'template_id': self.template_id.id or False,
                 'user_id': self.env.user.id,
@@ -528,6 +563,12 @@ class SmsSystemCampaign(models.Model):
         Iys = self.env['sms.system.iys']
         for camp in self.search([('state', '=', 'scheduled'), ('scheduled_at', '<=', now)]):
             if camp.message_type == 'commercial':
+                if not camp._optout_text():
+                    # KK-C26: ret metni silinmişse İYS sorgusuna da başlanmaz; ayar girilip yeniden planlanır
+                    camp.write({'state': 'draft'})
+                    camp.message_post(body=_('Planlı gönderim başlatılamadı: %s') % camp._no_optout_message())
+                    IrCron._commit_progress()
+                    continue
                 if not Iys._enabled():
                     camp.write({'state': 'draft'})
                     camp.message_post(body=_('İYS kontrolü kapalı olduğu için ticari SMS gönderilmedi.'))
@@ -567,18 +608,26 @@ class SmsSystemCampaign(models.Model):
         # JSON modunda istemci paket başına kampanya türüne göre seçilir (_deliver_pack_json); burada kurulmaz
         client = Message._client(cfg) if cfg['api_mode'] != 'json' else None
         campaigns = self.search([('state', '=', 'sending')], order='id')
+        json_mode = cfg['api_mode'] == 'json'
         remaining = Message.search_count([('campaign_id', 'in', campaigns.ids), ('state', '=', 'queued')])
         IrCron._commit_progress(remaining=remaining)
         for camp in campaigns:
             if camp.message_type == 'commercial' and camp._json_creds_missing():
                 camp._fail_without_commercial_creds()
+            if (camp.message_type == 'commercial' and not camp._optout_text()
+                    and Message.search_count([('campaign_id', '=', camp.id), ('state', '=', 'queued')])):
+                # KK-C26: ret metni sonradan silindiyse ticari kayıtlar kuyrukta bekler (ayar girilince sürer)
+                camp._note_once(camp._no_optout_message())
+                continue
+            # JSON + {ad}: tek metin şablonu ({1}) → alıcı adlarına bakmadan aynı pakette toplanır (KK-C21)
+            personalized = json_mode and camp._json_template(cfg['ascii_mode'])[1]
             held = False   # İYS doğrulanamadı: bu kampanyanın kalanı sonraki çalışmaya
             while not held:
                 queued = Message.search([('campaign_id', '=', camp.id), ('state', '=', 'queued')],
                                         order='id', limit=PACK_SIZE * 4)
                 if not queued:
                     break
-                for pack in self._make_packs(queued):
+                for pack in self._make_packs(queued, personalized):
                     gated = camp._commercial_gate(pack)
                     IrCron._commit_progress()
                     # Kilit altında yeniden doğrula: başka işlemin tuttuğu/değiştirdiği kayıt bu pakete girmez (KK-C17)
@@ -614,11 +663,15 @@ class SmsSystemCampaign(models.Model):
             self.env['ir.cron']._commit_progress()
 
     @api.model
-    def _make_packs(self, messages):
-        """Aynı metin/başlık/türdeki numaraları en fazla PACK_SIZE'lık paketlere ayır."""
+    def _make_packs(self, messages, personalized=False):
+        """Aynı metin/başlık/türdeki numaraları en fazla PACK_SIZE'lık paketlere ayır.
+
+        personalized (JSON + {ad}): metin şablonu ortaktır, kişiye özel kısım parameter'dadır; yalnız başlığa
+        göre gruplanır."""
         groups = OrderedDict()
         for msg in messages:
-            groups.setdefault((msg.body, msg.originator, msg.sms_type), []).append(msg.id)
+            key = (None, msg.originator, None) if personalized else (msg.body, msg.originator, msg.sms_type)
+            groups.setdefault(key, []).append(msg.id)
         Message = self.env['sms.system.message'].sudo()
         for ids in groups.values():
             for i in range(0, len(ids), PACK_SIZE):

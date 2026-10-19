@@ -17,3 +17,4 @@ from . import test_json_text
 from . import test_delivery_status
 from . import test_test_numbers
 from . import test_json_buttons
+from . import test_json_c4_extra

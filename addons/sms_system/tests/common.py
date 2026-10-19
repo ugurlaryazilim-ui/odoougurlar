@@ -500,6 +500,8 @@ class SmsFakes:
         self.icp.set_param('sms_system.test_mode', test_mode)
         self.icp.set_param('sms_system.user_daily_limit', '50')
         self.icp.set_param('sms_system.daily_limit', '0')
+        # KK-C26: ticari SMS için ret metni zorunlu; testlerin varsayılan ret metni
+        self.icp.set_param('sms_system.optout_text', 'Ret icin RET yazip 3030a gonderin. Mersis 0123456789012345')
         if iys:
             self.icp.set_param('sms_system.iys_enabled', 'True')
             self.icp.set_param('sms_system.iys_customer_code', 'CUST')

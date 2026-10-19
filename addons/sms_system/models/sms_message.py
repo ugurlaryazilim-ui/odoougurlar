@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import timedelta
 
 from psycopg2 import errors as pg_errors
@@ -8,7 +9,7 @@ from odoo.exceptions import AccessError, UserError
 
 from ..services.turatel import (MAX_SEGMENTS, TuratelClient, TuratelError, normalize_number, prepare_text,
                                 segment_count)
-from ..services.turatel_json import TuratelJsonClient
+from ..services.turatel_json import MAX_TEXT_LENGTH, TuratelJsonClient, json_segment_count
 
 _logger = logging.getLogger(__name__)
 
@@ -31,6 +32,12 @@ DEFAULT_VALIDITY_MINUTES = 1260
 # KK-C29: ticari gönderim asla bilgi setine düşmez; set boşsa istek yapılmadan kalıcı hata
 NO_COMMERCIAL_CREDS = 'Reklam hesabı kimlik bilgileri (kullanıcı adı/şifre) tanımlı değil'
 NO_INFO_CREDS = 'Bilgi hesabı kimlik bilgileri (kullanıcı adı/şifre) tanımlı değil'
+# KK-C26: ticari SMS ret metni (çıkış talimatı + Mersis no) olmadan gitmez; iki modda da geçerli
+NO_OPTOUT_TEXT = 'Ticari SMS için ret metni (çıkış talimatı ve Mersis no) zorunludur'
+# KK-C22: {1}, {2}... Turatel parametre yer tutucularıdır; kullanıcı yazarsa kişiselleştirme bozulur
+NUMERIC_PLACEHOLDER = re.compile(r'\{\d+\}')
+# KK-C23: Turatel tek SMS metni sınırı (JSON modu); alıcı başına son metin için hata iletisi
+TEXT_TOO_LONG = 'metin %d karakteri aşıyor' % MAX_TEXT_LENGTH
 
 
 def test_mode_enabled(value):
@@ -56,6 +63,11 @@ def parse_user_daily_limit(value):
 def resolve_api_mode(value):
     """API modu: yalnız tam 'json' JSON'dur; yok/boş/bilinmeyen her değer eski XML (legacy_xml) sayılır."""
     return 'json' if value == 'json' else 'legacy_xml'
+
+
+def count_segments(api_mode, text, sms_type='1'):
+    """Parça tahmini (KK-C24): JSON modunda GSM-7/UCS-2 kuralı, eski modda eski hesap değişmeden."""
+    return json_segment_count(text) if api_mode == 'json' else segment_count(text, sms_type)
 
 
 def parse_validity_minutes(value):
@@ -223,9 +235,14 @@ class SmsSystemMessage(models.Model):
 
         cfg = self._settings()
         text, sms_type = prepare_text(body, ascii_mode=cfg['ascii_mode'])
-        if segment_count(text, sms_type) > MAX_SEGMENTS:
+        segments = count_segments(cfg['api_mode'], text, sms_type)
+        if cfg['api_mode'] == 'json':
+            if len(text) > MAX_TEXT_LENGTH:   # KK-C23: tam 402 serbest; kayıt oluşmaz
+                raise UserError(_('SMS metni çok uzun (%(n)s karakter). En fazla %(max)s karakter gönderilebilir; '
+                                  'metni kısaltın.', n=len(text), max=MAX_TEXT_LENGTH))
+        elif segments > MAX_SEGMENTS:
             raise UserError(_('SMS metni çok uzun (%(n)s parça). En fazla %(max)s parça gönderilebilir; metni kısaltın.',
-                              n=segment_count(text, sms_type), max=MAX_SEGMENTS))
+                              n=segments, max=MAX_SEGMENTS))
         if record:
             # Sağlayıcıdan ÖNCE: yetkisiz kayıtta SMS hiç gitmez (sonra gelen AccessError kaydı geri alırdı, G-1)
             self._check_record_access(record)
@@ -239,7 +256,7 @@ class SmsSystemMessage(models.Model):
             'body': text,
             'originator': sender,
             'sms_type': sms_type,
-            'segments': segment_count(text, sms_type),
+            'segments': segments,
             'res_model': record._name if record else False,
             'res_id': record.id if record else False,
             'template_id': template.id if template else False,
@@ -393,11 +410,38 @@ class SmsSystemMessage(models.Model):
             else:
                 self.write({'state': 'error', 'error': str(e)})
 
+    def _json_pack_content(self, cfg):
+        """Paketin gönderilecek içeriği: (gönderilebilir kayıtlar, messageText, parametreler ya da None).
+
+        Kişiselleştirilmiş kampanyada (JSON, {ad}) messageText `{1}` içeren şablondur; her alıcının parameter'ı
+        `[güncel ad]`dır ve kaydın `body`'si o kişiye giden son metne yazılır (gönderilen = görünen, KK-C21).
+        Son metni 402 karakteri aşan alıcı (uzun ad) gönderilmeden kalıcı hataya alınır, diğerleri gider (KK-C23).
+        """
+        campaign = self[0].campaign_id
+        template, personalized = campaign._json_template(cfg['ascii_mode']) if campaign else (None, False)
+        if personalized:
+            names = {msg.id: prepare_text(msg.contact_id.name or '', ascii_mode=cfg['ascii_mode'])[0] for msg in self}
+            finals = {msg.id: template.replace('{1}', names[msg.id]) for msg in self}
+            too_long = self.filtered(lambda m: len(finals[m.id]) > MAX_TEXT_LENGTH)
+            sendable = self - too_long
+            for msg in sendable:
+                if msg.body != finals[msg.id]:
+                    msg.body = finals[msg.id]
+            message_text, parameters = template, [[names[msg.id]] for msg in sendable]
+        else:
+            message_text, parameters = self[0].body, None
+            too_long = self if len(message_text) > MAX_TEXT_LENGTH else self.browse()
+            sendable = self - too_long
+        if too_long:
+            too_long.write({'state': 'error', 'retry_count': MAX_RETRY, 'error': TEXT_TOO_LONG})
+        return sendable, message_text, parameters
+
     def _deliver_pack_json(self, cfg):
         """JSON paket yolu: bulksms; ticari kampanya → reklam seti + isCheckBlackList, diğerleri → bilgi seti.
 
         Her kayıt kendi clientId'siyle gider; yanıttaki mesaj kimliği clientId ile eşlenir (paket içinde
-        kimlikler karışmaz). referenceId = {db8}-p{ilk kayıt id}.
+        kimlikler karışmaz). referenceId = {db8}-p{ilk kayıt id}. Kişiselleştirilmiş kampanya tek istekte
+        `{1}` şablonu + alıcı başına parameter ile gider (_json_pack_content).
         """
         first = self[0]
         purpose = 'commercial' if first.campaign_id.message_type == 'commercial' else 'info'
@@ -407,25 +451,28 @@ class SmsSystemMessage(models.Model):
             # Kimlik seti yok (KK-C29): istek yapılmadı, kalıcı hata
             self.write({'state': 'error', 'error': str(e), 'retry_count': MAX_RETRY})
             return
+        pack, message_text, parameters = self._json_pack_content(cfg)
+        if not pack:
+            return
         db8 = self._db8()
-        refs = [msg._client_ref(db8) for msg in self]
+        refs = [msg._client_ref(db8) for msg in pack]
         try:
-            result = client.send_sms(account, first.originator, first.body, self.mapped('number'), client_ids=refs,
-                                     reference_id='%s-p%d' % (db8, first.id),
-                                     check_blacklist=purpose == 'commercial',
+            result = client.send_sms(account, first.originator, message_text, pack.mapped('number'),
+                                     client_ids=refs, reference_id='%s-p%d' % (db8, pack[0].id),
+                                     parameters=parameters, check_blacklist=purpose == 'commercial',
                                      validity_minutes=cfg['validity_minutes'])
         except TuratelError as e:
-            _logger.warning('Toplu SMS paketi gönderilemedi (%s numara): %s', len(self), e)
+            _logger.warning('Toplu SMS paketi gönderilemedi (%s numara): %s', len(pack), e)
             if e.uncertain:
                 # Paket Turatel'e ulaşmış olabilir: C5 durum cron'u bu hesabın setiyle uzlaştırır
-                self.write({'state': 'uncertain', 'error': str(e), 'retry_count': MAX_RETRY,
+                pack.write({'state': 'uncertain', 'error': str(e), 'retry_count': MAX_RETRY,
                             'provider_service': 'bulk', 'provider_account_id': account})
             elif e.retryable:
-                self.write({'state': 'error', 'error': str(e)})
+                pack.write({'state': 'error', 'error': str(e)})
             else:
-                self.write({'state': 'error', 'error': str(e), 'retry_count': MAX_RETRY})
+                pack.write({'state': 'error', 'error': str(e), 'retry_count': MAX_RETRY})
             return
-        for msg, ref in zip(self, refs):
+        for msg, ref in zip(pack, refs):
             msg.write(msg._json_success_vals(result, ref, 'bulk', account))
 
     # ── Butonlar / cron ──
