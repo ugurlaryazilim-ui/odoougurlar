@@ -76,6 +76,11 @@ REFUND_SYNC_WINDOW = timedelta(days=30)
 # Risk 1 (yönetici kararı): zaman aşımı sonrası "bulunamadı" yanıtı tek başına yeterli değildir
 LINK_NOT_FOUND_MIN_CHECKS = 2
 LINK_NOT_FOUND_MIN_AGE = timedelta(minutes=15)
+# Ö-C: 'Hata / link bulunamadı' kayıtları link süresi + bu pencere boyunca seyrek sorgulanır
+LATE_CHECK_GRACE = timedelta(days=1)
+LINK_NOT_FOUND_RECHECK_INTERVAL = timedelta(hours=1)
+UNVERIFIED_PRIOR_MSG = ("Bu faturanın önceki link denemesi Paratika'da bulunamamıştı ve şu an "
+                        "doğrulanamadı; çift tahsilatı önlemek için birazdan tekrar deneyin.")
 CRON_SYNC_LIMIT = 200
 # G-1: webhook kaynaklı sorgu çoğaltmasına karşı
 SYNC_REQUEST_MIN_INTERVAL = timedelta(minutes=1)   # ödeme başına iki sorgu arası en az
@@ -393,11 +398,16 @@ class SanalPosPayment(models.Model):
             return ''
         Payment = self.sudo()
         domain = [('invoice_no', '=', invoice_no)]
+        unverified = Payment.browse()
         if refresh:
+            now = fields.Datetime.now()
             stale = Payment.search(
-                domain + [('state', '=', 'sent'), ('expires_at', '<', fields.Datetime.now())])
-            if stale:
-                stale._refresh_before_new_link()
+                domain + [('state', '=', 'sent'), ('expires_at', '<', now)])
+            # Ö-C: link bulunamadı denip Hata yapılmış denemeler geç ödeme almış olabilir
+            late = Payment.search(domain + self._late_check_domain()).filtered(
+                lambda rec: rec._in_late_check_window(now))
+            if stale or late:
+                unverified = (stale | late)._refresh_before_new_link()
         records = Payment.search(
             domain + [('state', 'in', PAID_STATES + OPEN_STATES + REFUNDED_STATES)], order='id desc')
         if any(rec.state in PAID_STATES for rec in records):
@@ -406,29 +416,59 @@ class SanalPosPayment(models.Model):
         if open_rec:
             creator = open_rec.user_id or open_rec.create_uid
             return self._open_link_message(creator.name, open_rec.create_date)
+        if unverified:
+            return UNVERIFIED_PRIOR_MSG
         if not confirm_prior_refund and any(rec.state in REFUNDED_STATES for rec in records):
             return PRIOR_REFUND_MSG
         return ''
 
     def _refresh_before_new_link(self):
-        """Süresi geçmiş 'Gönderildi' kayıtlarını yeni link öncesi sorgular (expired/paid/review).
+        """Süresi geçmiş 'Gönderildi' ve (Ö-C) 'Hata / link bulunamadı' kayıtlarını yeni link
+        öncesi sorgular (expired/paid/review).
 
-        Kayıt başına NOWAIT kilit; meşgul kayıt atlanır (açık kalır, KK-18 engeller: güvenli
-        taraf). Sonuç ``_sp_commit`` ile kalıcılaşır, böylece ardından gelen KK-19 UserError'ı
-        sorgu sonucunu (ör. paid) geri almaz. Bir savepoint içinden çağrılmamalıdır.
+        Kayıt başına NOWAIT kilit; meşgul 'Gönderildi' kaydı atlanır (açık kalır, KK-18 engeller:
+        güvenli taraf). Sonuç ``_sp_commit`` ile kalıcılaşır, böylece ardından gelen KK-19
+        UserError'ı sorgu sonucunu (ör. review) geri almaz. Bir savepoint içinden çağrılmamalıdır.
+        Dönüş: doğrulanamayan (kilitli ya da sorgusu yanıtsız) 'Hata' kayıtları.
         """
         refreshed = False
+        unverified = self.sudo().browse()
         for rec in self.sudo():
+            late = rec.state == 'error'
             if not rec._lock_for_provider_call():
+                if late:
+                    unverified |= rec
                 continue
             rec.invalidate_recordset()
-            if rec.state != 'sent':
+            if rec.state not in ('sent', 'error'):
                 continue
-            rec._sync_status()
+            result = rec._sync_status()
             refreshed = True
+            if late and rec.state == 'error' and not result.get('ok'):
+                unverified |= rec
         if refreshed:
             self._sp_commit()
-        return True
+        return unverified
+
+    @api.model
+    def _late_check_domain(self):
+        """Ö-C: link Paratika'da bulunamadı diye Hata yapılmış, ödeme bilgisi almamış kayıtlar."""
+        return [('state', '=', 'error'), ('link_not_found_count', '>=', LINK_NOT_FOUND_MIN_CHECKS),
+                ('paid_at', '=', False)]
+
+    def _in_late_check_window(self, now):
+        """Link süresi + ``LATE_CHECK_GRACE`` içinde mi (Paratika linki hâlâ ödenebilir olabilir)."""
+        self.ensure_one()
+        start = self.create_date or now
+        return now <= start + timedelta(hours=self.expiry_hours or 168) + LATE_CHECK_GRACE
+
+    def _needs_late_check(self, now):
+        """Cron: Ö-C kaydı pencere içinde ve son sorgudan ``LINK_NOT_FOUND_RECHECK_INTERVAL`` geçti."""
+        self.ensure_one()
+        return bool(self.state == 'error' and self.link_not_found_count >= LINK_NOT_FOUND_MIN_CHECKS
+                    and not self.paid_at and self._in_late_check_window(now)
+                    and (not self.last_checked_at
+                         or self.last_checked_at < now - LINK_NOT_FOUND_RECHECK_INTERVAL))
 
     @api.model
     def _open_link_message_sql(self, invoice_no):
@@ -1405,6 +1445,13 @@ class SanalPosPayment(models.Model):
             ("SELECT id FROM sanal_pos_payment WHERE state = 'unknown' OR (state = 'sent' "
              'AND (last_checked_at IS NULL OR last_checked_at < %s)) '
              'ORDER BY last_checked_at ASC NULLS FIRST, id LIMIT %s', [now - SENT_RECHECK_AGE]),
+            # Ö-C: 'Hata / link bulunamadı' kayıtları, link süresi + 1 gün, saatte bir
+            ("SELECT id FROM sanal_pos_payment WHERE state = 'error' AND link_not_found_count >= %s "
+             'AND paid_at IS NULL AND create_date + make_interval(hours => '
+             'COALESCE(NULLIF(expiry_hours, 0), 168)) + %s >= %s '
+             'AND (last_checked_at IS NULL OR last_checked_at < %s) '
+             'ORDER BY last_checked_at ASC NULLS FIRST, id LIMIT %s',
+             [LINK_NOT_FOUND_MIN_CHECKS, LATE_CHECK_GRACE, now, now - LINK_NOT_FOUND_RECHECK_INTERVAL]),
         ):
             cr.execute(query, params + [limit])
             for (pid,) in cr.fetchall():
@@ -1432,7 +1479,8 @@ class SanalPosPayment(models.Model):
             self._mark_stale_sending()
         if self.state == 'unknown':
             self._reconcile_unknown_link()
-        elif self.state == 'sent' or self.sync_requested or self._has_refund_to_reconcile(now):
+        elif (self.state == 'sent' or self.sync_requested or self._has_refund_to_reconcile(now)
+              or self._needs_late_check(now)):
             self._sync_status()
         else:
             return False

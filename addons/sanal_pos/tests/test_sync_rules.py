@@ -257,6 +257,85 @@ class TestWebhookAmplification(RulesCase):
         self.assertFalse(payment.sync_requested)
 
 @tagged('post_install', '-at_install', 'sanal_pos')
+class TestLinkNotFoundLateCheck(RulesCase):
+    """Ö-C: 'Hata / link bulunamadı' kaydı link süresi + 1 gün boyunca seyrek sorgulanır ve aynı
+    faturaya yeni link açılmadan önce mutlaka sorgulanır (geç ödeme çift tahsilata dönmesin)."""
+
+    PAID = 'Bu fatura için ödeme alınmış/incelemede; yeni link oluşturulamaz.'
+
+    def not_found(self, checked_ago=timedelta(hours=2), created_ago=timedelta(hours=1), **vals):
+        now = datetime.utcnow().replace(microsecond=0)
+        vals.setdefault('last_checked_at', now - checked_ago if checked_ago is not None else False)
+        vals.setdefault('last_error_code', 'LINK_NOT_FOUND')
+        payment = self.make_payment(
+            state='error', provider_token=False, sent_at=False, expires_at=False,
+            link_not_found_count=2, unknown_since=now - created_ago, **vals)
+        self.set_create_date(payment, now - created_ago)
+        return payment
+
+    def test_oc_cron_hata_kaydini_sorgular_ve_seyreltir(self):
+        payment = self.not_found()
+        self.run_cron(CRON_SYNC)
+        self.assertEqual(self.mock.count('QUERYTRANSACTION'), 1)
+        self.run_cron(CRON_SYNC)
+        self.assertEqual(self.mock.count('QUERYTRANSACTION'), 1, 'saatte bir kez yeter')
+        payment.invalidate_recordset()
+        self.assertEqual(payment.state, 'error')
+
+    def test_oc_cron_gec_odemeyi_incelemeye_alir(self):
+        payment = self.not_found()
+        self.set_query_transactions(tran('AP', 'SALE', '9000.00', 'PG-OC-LATE'))
+        self.run_cron(CRON_SYNC)
+        payment.invalidate_recordset()
+        self.assertEqual(payment.state, 'review')
+        self.assertIn(self.user_sp.partner_id, self.notified_partners(payment))
+
+    def test_oc_link_suresi_ve_pencere_bitince_sorgulanmaz(self):
+        self.not_found(created_ago=timedelta(hours=168 + 25))
+        self.run_cron(CRON_SYNC)
+        self.assertEqual(self.mock.count('QUERYTRANSACTION'), 0)
+
+    def test_oc_kapatilmis_inceleme_yeniden_sorgulanmaz(self):
+        self.not_found(last_error_code='REVIEW_CLOSED', paid_at=datetime.utcnow().replace(microsecond=0),
+                       provider_tran_ref='PG-OLD')
+        self.run_cron(CRON_SYNC)
+        self.assertEqual(self.mock.count('QUERYTRANSACTION'), 0)
+
+    def test_oc_yeni_link_oncesi_sorgulanir_gec_odeme_varsa_engellenir(self):
+        payment = self.not_found(checked_ago=timedelta(minutes=1))
+        self.set_query_transactions(tran('AP', 'SALE', '9000.00', 'PG-OC-NEW'))
+        self.set_invoice(invoice_rows())
+        commits = self.commit_count
+        # assertRaises savepoint'i geri alır; üretimde sonuç _sp_commit ile kalıcıdır
+        try:
+            self.wizard(**BOTH).action_create_link()
+        except UserError as exc:
+            message = str(exc)
+        else:
+            self.fail('geç ödemeli faturaya yeni link açıldı')
+        self.assertIn(self.PAID, message)
+        self.assertGreater(self.commit_count, commits, 'inceleme durumu commit edilmeli')
+        self.assertEqual(self.mock.count('PAYBYLINKPAYMENT'), 0)
+        payment.invalidate_recordset()
+        self.assertEqual(payment.state, 'review')
+
+    def test_oc_yeni_link_oncesi_sorgu_yanitsizsa_engellenir(self):
+        self.not_found(checked_ago=timedelta(minutes=1))
+        self.mock.queue('QUERYTRANSACTION', timeout_exc())
+        self.set_invoice(invoice_rows())
+        with self.assertRaises(UserError) as cm:
+            self.wizard(**BOTH).action_create_link()
+        self.assertIn('doğrulanamadı', str(cm.exception))
+        self.assertEqual(self.mock.count('PAYBYLINKPAYMENT'), 0)
+
+    def test_oc_yeni_link_oncesi_odeme_yoksa_link_acilir(self):
+        self.not_found(checked_ago=timedelta(minutes=1))
+        self.set_invoice(invoice_rows())
+        self.wizard(**BOTH).action_create_link()
+        self.assertEqual(self.mock.actions[:2], ['QUERYTRANSACTION', 'PAYBYLINKPAYMENT'])
+        self.assertEqual(self.last_payment().state, 'sent')
+
+@tagged('post_install', '-at_install', 'sanal_pos')
 class TestReviewCloseNote(RulesCase):
     """Risk 3: kapatma notu zorunlu ve chatter'da."""
 
