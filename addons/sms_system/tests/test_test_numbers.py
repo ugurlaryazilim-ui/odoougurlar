@@ -96,6 +96,27 @@ class TestTestNumbersSettings(TestNumbersMixin, SmsTestCase):
         self.save('%s, 0%s, +90%s' % (LISTED_A, LISTED_A, LISTED_A))
         self.assertEqual(self.stored(), [LISTED_A])
 
+    def test_c_t2_bosluklu_numara_tek_numaradir(self):
+        # T2: "0532 111 22 33" bölünmemeli; ayraç yalnız virgül, noktalı virgül, satır sonu
+        self.save('0532 111 00 01')
+        self.assertEqual(self.stored(), [LISTED_A])
+        self.save('(532) 111-00-02')
+        self.assertEqual(self.stored(), [LISTED_B])
+        self.save('0532 111 00 01;\n+90 532 111 00 02\r\n532-111-00-03, 0532 111 00 01')
+        self.assertEqual(self.stored(), [LISTED_A, LISTED_B, OTHER])
+
+    def test_c_t2_bosluklu_kayitli_deger_ekrana_dogru_gelir(self):
+        self.set_param('test_numbers', '0532 111 00 01;532 111 00 02')
+        res = self.Settings().default_get(['sms_test_numbers'])
+        self.assertEqual(res.get('sms_test_numbers'), '%s, %s' % (LISTED_A, LISTED_B))
+
+    def test_c_t2_ayracsiz_bitisik_numaralar_acik_hatayla_reddedilir(self):
+        self.save(LISTED_A)
+        with self.assertRaises(UserError) as ctx:
+            self.save('%s %s' % (LISTED_A, LISTED_B))   # boşluk ayraç değil: 20 hane geçerli numara değil
+        self.assertIn('virgül', str(ctx.exception))
+        self.assertEqual(self.stored(), [LISTED_A])
+
     def test_g_c1_test_numaralari_yonetici_olmayana_gorunmez(self):
         # G-C1: numaralar çalışan telefonlarıdır (KVKK); RPC'ye açık default_get/get_values sızdırmamalı
         self.require_field()

@@ -60,10 +60,14 @@ def test_mode_enabled(value):
     return value != 'False'
 
 
+# Test numarası ayracı: virgül, noktalı virgül, satır sonu. BOŞLUK ayraç DEĞİLDİR: '0532 111 22 33' tek numaradır (C-T2)
+TEST_NUMBER_SEPARATORS = re.compile(r'[,;\r\n]+')
+
+
 def parse_test_numbers(value):
     """Kayıtlı virgüllü test numaraları -> normalize numara listesi (geçersiz parça atlanır)."""
     out = []
-    for part in re.split(r'[,;\s]+', value or ''):
+    for part in TEST_NUMBER_SEPARATORS.split(value or ''):
         num = normalize_number(part) if part else None
         if num and num not in out:
             out.append(num)

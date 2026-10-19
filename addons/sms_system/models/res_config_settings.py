@@ -1,5 +1,3 @@
-import re
-
 from odoo import _, api, fields, models
 from odoo.exceptions import AccessError, UserError
 
@@ -7,7 +5,8 @@ from ..services.smartadm import SmartAdmError
 from ..services.turatel import ERROR_HINTS, TuratelError, normalize_number
 from ..services.turatel_json import TuratelJsonClient, mask_digits
 from .sms_message import (API_MODES, DEFAULT_ACCOUNT_COMMERCIAL, DEFAULT_ACCOUNT_INFO, DEFAULT_BULK_URL,
-                          DEFAULT_JSON_USER_ID, DEFAULT_SINGLE_URL, DEFAULT_VALIDITY_MINUTES, parse_test_numbers,
+                          DEFAULT_JSON_USER_ID, DEFAULT_SINGLE_URL, DEFAULT_VALIDITY_MINUTES,
+                          TEST_NUMBER_SEPARATORS, parse_test_numbers,
                           parse_user_daily_limit, parse_validity_minutes, resolve_api_mode, test_mode_enabled)
 
 MAX_TEST_NUMBERS = 5
@@ -58,8 +57,9 @@ class ResConfigSettings(models.TransientModel):
                                    help='Açıkken SMS gönderilmez, yalnız kayıt oluşur')
 
     sms_test_numbers = fields.Char(string='Test modunda gerçek gönderilecek numaralar', groups='base.group_system',
-                                   help='Test modu açıkken yalnız bu numaralara (en çok 5, virgülle ayırın) gerçek SMS '
-                                        'gider; diğerleri test olarak kaydedilir. Test modu kapalıyken etkisizdir.')
+                                   help='Test modu açıkken yalnız bu numaralara (en çok 5; virgül, noktalı virgül ya da satır sonuyla '
+                                        'ayırın; boşluk ayraç değildir) gerçek SMS gider; diğerleri test olarak '
+                                        'kaydedilir. Test modu kapalıyken etkisizdir.')
 
     sms_daily_limit = fields.Integer(string='Günlük toplu SMS sınırı', config_parameter='sms_system.daily_limit',
                                      help='Son 24 saatte toplu SMS ile gönderilebilecek en fazla numara (0 = sınırsız)')
@@ -157,12 +157,12 @@ class ResConfigSettings(models.TransientModel):
         """Test numaralarını normalleştirir (KK-C27): en çok 5 geçerli, yinelenen tek sayılır; aksi UserError."""
         self.ensure_one()
         out = []
-        for part in re.split(r'[,;\s]+', self.sms_test_numbers or ''):
+        for part in TEST_NUMBER_SEPARATORS.split(self.sms_test_numbers or ''):
             if not part:
                 continue
             num = normalize_number(part)
             if not num:
-                raise UserError(_('Geçersiz test numarası: %s (5XX XXX XX XX biçiminde cep numarası girin).') % part)
+                raise UserError(_('Geçersiz test numarası: %s (5XX XXX XX XX biçiminde cep numarası girin; numaraları virgülle ayırın, boşlukla değil).') % part)
             if num not in out:
                 out.append(num)
         if len(out) > MAX_TEST_NUMBERS:
