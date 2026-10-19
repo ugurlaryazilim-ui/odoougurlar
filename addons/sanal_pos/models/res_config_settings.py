@@ -19,6 +19,13 @@ from odoo.exceptions import AccessError, UserError, ValidationError
 # Varsayılanı True olan boolean ayarlar: alan adı -> parametre anahtarı
 _TRUE_DEFAULT_BOOLS = {'sanal_pos_require_contact': 'sanal_pos.require_contact'}
 _FALSE_VALUES = ('', 'false', '0', 'no', 'none')
+# Yalnız sistem yöneticisinin görebileceği sır alanları (default_get sızıntısı için)
+_SECRET_FIELDS = (
+    'sanal_pos_paratika_merchant_password',
+    'sanal_pos_paratika_secret_key',
+    'sanal_pos_mssql_user',
+    'sanal_pos_mssql_password',
+)
 _VIEW_NAME_RE = re.compile(r'^[\w.\[\]]+$')
 
 # (ugurlar_tailor.<ad> parametresi, sanal_pos ayar alanı); hedef parametre sanal_pos.<ad>
@@ -178,6 +185,11 @@ class ResConfigSettings(models.TransientModel):
     @api.model
     def default_get(self, fields_list):
         res = super().default_get(fields_list)
+        if not self.env.user.has_group('base.group_system'):
+            # Odoo config_parameter değerlerini sudo ile okur; alan 'groups' kısıtı
+            # default_get yolunda uygulanmaz. Sır değerleri RPC ile sızmasın.
+            for fname in _SECRET_FIELDS:
+                res.pop(fname, None)
         for fname, key in _TRUE_DEFAULT_BOOLS.items():
             if not fields_list or fname in fields_list:
                 res[fname] = get_bool_param(self.env, key, default=True)
