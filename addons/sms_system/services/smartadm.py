@@ -50,13 +50,19 @@ ERROR_TEXTS = {
 }
 SESSION_ERRORS = {(-1, -6), (-1, -7)}
 NOT_FOUND = (-6, -601)
+# Numaraya özgü kalıcı hatalar: hesabı değil yalnız o numarayı ilgilendirir (D-8)
+INVALID_NUMBER_CODES = {(-3, -114)}
 
 
 class SmartAdmError(Exception):
-    def __init__(self, message, code=None, retryable=False):
+    """SmartADM hatası. retryable: geçici (sonra tekrar denenebilir). invalid_number: yalnız bu numaraya özgü
+    kalıcı hata (biçim geçersiz); hesap/oturum sorunu değildir, toplu sorgu diğer numaralarla sürebilir."""
+
+    def __init__(self, message, code=None, retryable=False, invalid_number=False):
         super().__init__(message)
         self.code = code
         self.retryable = retryable
+        self.invalid_number = invalid_number
 
 
 def to_msisdn(number):
@@ -162,7 +168,7 @@ class SmartAdmClient:
             if code == (0, 0) or code in allow:
                 return code, data
             raise SmartAdmError(self.error_text(code, data.get('Value')), code=code,
-                                retryable=code == (-99, -99))
+                                retryable=code == (-99, -99), invalid_number=code in INVALID_NUMBER_CODES)
         raise SmartAdmError('SmartADM oturumu açılamadı')
 
     # ── uçlar ──
@@ -171,7 +177,7 @@ class SmartAdmClient:
         """Numaranın SMS ticari ileti izni: {'status': approved|rejected|unknown, 'found': bool}."""
         msisdn = to_msisdn(number)
         if not msisdn:
-            raise SmartAdmError('Geçersiz cep telefonu: %s' % mask_number(number))
+            raise SmartAdmError('Geçersiz cep telefonu: %s' % mask_number(number), invalid_number=True)
         code, data = self.call('query', {'CommunicationToolType': 'Msisdn', 'Value': msisdn, 'ResponseType': '1'},
                                allow=(NOT_FOUND,))
         if code == NOT_FOUND:
@@ -231,7 +237,7 @@ class SmartAdmClient:
         """Mağazada / formla alınan SMS iznini İYS'ye yükle. when: datetime (≤ 3 iş günü önce)."""
         msisdn = to_msisdn(number)
         if not msisdn:
-            raise SmartAdmError('Geçersiz cep telefonu: %s' % mask_number(number))
+            raise SmartAdmError('Geçersiz cep telefonu: %s' % mask_number(number), invalid_number=True)
         date = when.strftime('%Y%m%d%H%M%S')
         details = {'EtkMsisdnSms': {'Value': '1' if approved else '0', 'AuthorizationDate': date,
                                     'AuthorizationSpecificData': {'IysRecordSource': source}}}
@@ -244,7 +250,7 @@ class SmartAdmClient:
         """Müşteriye onay kodu SMS'i gönder; TriggerId döndürür."""
         msisdn = to_msisdn(number)
         if not msisdn:
-            raise SmartAdmError('Geçersiz cep telefonu: %s' % mask_number(number))
+            raise SmartAdmError('Geçersiz cep telefonu: %s' % mask_number(number), invalid_number=True)
         _code, data = self.call('trigger', {'CommunicationToolType': 'Msisdn', 'Value': msisdn,
                                             'CommunicationType': 'Sms'})
         return str(data.get('Value') or '')

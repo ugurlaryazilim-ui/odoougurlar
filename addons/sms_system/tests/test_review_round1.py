@@ -15,7 +15,7 @@ from odoo.tests.common import tagged
 from odoo.addons.sms_system.services.smartadm import SmartAdmClient, SmartAdmError
 from odoo.addons.sms_system.services.turatel import TuratelClient, TuratelError
 
-from .common import SmsHttpCase, SmsTestCase, smart_error
+from .common import SmsHttpCase, SmsTestCase, smart_error, smart_ok
 from .test_campaign import CampaignMixin
 from .test_settings import SettingsMixin
 
@@ -250,3 +250,79 @@ class TestD7NegativeUserLimit(SettingsMixin, SmsTestCase):
     def test_d7_sifir_hala_sinirsiz_kaydedilir(self):
         self.save_screen(sms_user_daily_limit=0)
         self.assertEqual(self.param('user_daily_limit'), '0')
+
+
+# ==== S7 D-8 ====
+@tagged('post_install', '-at_install')
+class TestD8NumberSpecificIysError(CampaignMixin, SmsTestCase):
+    """Tek numaranın kalıcı İYS hatası (biçim geçersiz) ticari kampanyayı süresiz bekletmez."""
+
+    BAD = '5320800001'
+
+    def setUp(self):
+        super().setUp()
+        self.configure_sms(iys=True)
+
+        def query(call):
+            if call['number'] == self.BAD:
+                return smart_error(-3, -114)
+            return smart_ok([{'Authorization': {'Etk': {'Msisdn': {'Sms': '1'}}}}])
+        self.net.smart_query = query
+
+    def test_d8_refresh_gecersiz_numarada_durmaz_kisi_isaretlenir(self):
+        lst = self.make_list()
+        contacts = (self.make_contact('5320800000', lst) | self.make_contact(self.BAD, lst)
+                    | self.make_contact('5320800002', lst))
+        stats = self.env['sms.system.iys'].refresh_contacts(contacts)
+        self.assertIsNone(stats['stopped'])
+        self.assertEqual(self.net.queried, ['5320800000', self.BAD, '5320800002'])
+        bad = contacts.filtered(lambda c: c.mobile == self.BAD)
+        self.assertEqual(bad.iys_status, 'unknown')
+        self.assertTrue(bad.iys_checked_at, 'geçersiz numara tekrar tekrar sorgulanmamalı')
+        self.assertEqual(set((contacts - bad).mapped('iys_status')), {'approved'})
+
+    def _sending_campaign(self, bad_checked_at):
+        lst = self.make_list()
+        camp = self.make_campaign(lst, 'commercial', state='sending')
+        good = self.make_contact('5320800000', lst, iys_status='approved', iys_checked_at=self.ago(days=3))
+        bad = self.make_contact(self.BAD, lst, iys_status='approved', iys_checked_at=bad_checked_at)
+        msgs = {'good': self.campaign_message(camp, good, state='queued'),
+                'bad': self.campaign_message(camp, bad, state='queued')}
+        return camp, msgs
+
+    def test_d8_kampanya_kalanlari_gonderir_gecersizi_gerekceli_hata(self):
+        camp, msgs = self._sending_campaign(self.ago(days=3))
+        self.run_queue()
+        self.assertEqual(self.net.sent_numbers, ['5320800000'])
+        self.refresh(camp, *msgs.values())
+        self.assertEqual(msgs['bad'].state, 'error')
+        self.assertIn('İYS', msgs['bad'].error)
+        self.assertEqual(camp.state, 'done', 'kampanya geçersiz tek numara yüzünden beklememeli')
+
+    def test_d8_yalniz_gecersiz_numara_bayatsa_da_kampanya_ilerler(self):
+        camp, msgs = self._sending_campaign(self.ago(days=3))
+        msgs['good'].contact_id.iys_checked_at = self.ago(hours=1)   # taze: sorgulanmaz
+        self.run_queue()
+        self.assertEqual(self.net.queried, [self.BAD])
+        self.assertEqual(self.net.sent_numbers, ['5320800000'])
+        self.refresh(camp, *msgs.values())
+        self.assertEqual(msgs['bad'].state, 'error')
+        self.assertEqual(camp.state, 'done')
+
+    def test_d8_planli_kampanya_taslaga_donmez(self):
+        lst = self.make_list()
+        self.make_contact('5320800000', lst, iys_status='approved', iys_checked_at=self.ago(days=3))
+        self.make_contact(self.BAD, lst, iys_status='approved', iys_checked_at=self.ago(days=3))
+        camp = self.make_campaign(lst, 'commercial', state='scheduled', scheduled_at=self.ago(minutes=1))
+        self.run_queue()
+        self.refresh(camp)
+        self.assertNotEqual(camp.state, 'draft')
+        self.assertEqual(self.net.sent_numbers, ['5320800000'])
+
+    def test_d8_hesap_hatasi_hala_bekletir(self):
+        camp, msgs = self._sending_campaign(self.ago(days=3))
+        self.net.smart_session = smart_error(-1, -1)
+        self.run_queue()
+        self.assertEqual(self.net.turatel_calls, [])
+        self.refresh(*msgs.values())
+        self.assertEqual({m.state for m in msgs.values()}, {'queued'})

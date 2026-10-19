@@ -184,7 +184,8 @@ class SmsSystemContact(models.Model):
                 'message': _('%(d)s sorgulandı: %(a)s onaylı, %(r)s ret, %(n)s İYS kaydında yok.%(g)s',
                              d=stats['done'], a=stats['approved'], r=stats['rejected'], n=stats['not_found'],
                              g=_(' Numaraların çoğu İYS\'de olmadığı için sorgu durduruldu (hesap koruması).')
-                             if stats['stopped'] == 'guard' else ''),
+                             if stats['stopped'] == 'guard' else '')
+                + (_(' %s numara geçersiz (İYS onayı yok sayılır).') % stats['invalid'] if stats.get('invalid') else ''),
                 'next': {'type': 'ir.actions.client', 'tag': 'soft_reload'},
             },
         }

@@ -1,9 +1,8 @@
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 
-from odoo import _, api, fields, models
-from odoo.exceptions import UserError
+from odoo import api, fields, models
 
 from ..services.smartadm import SmartAdmClient, SmartAdmError
 
@@ -74,11 +73,12 @@ class SmsSystemIys(models.AbstractModel):
         hatada (yanlış şifre vb.) beklemez, geçici hatada sonra tekrar dener.
         guard: "kişi yok" cevapları çoğunluktaysa durdur (SmartADM yüksek hata oranında hesabı 24 saat bloklar).
         """
-        stats = {'done': 0, 'approved': 0, 'rejected': 0, 'not_found': 0, 'errors': 0, 'stopped': None}
+        stats = {'done': 0, 'approved': 0, 'rejected': 0, 'not_found': 0, 'errors': 0, 'invalid': 0,
+                 'stopped': None}
         if not contacts:
             return stats
         client = self._client()
-        last_error = None
+        last_error = last_invalid = None
         for contact in contacts:
             if deadline and time.monotonic() > deadline:
                 stats['stopped'] = 'time'
@@ -86,32 +86,44 @@ class SmsSystemIys(models.AbstractModel):
             try:
                 res = client.query(contact.mobile)
             except SmartAdmError as e:
-                stats['errors'] += 1
-                _logger.warning('İYS sorgusu başarısız (%s): %s', contact.id, e)
-                last_error = e
-                if not e.retryable or stats['errors'] >= 3:
-                    stats['stopped'] = 'error'
-                    break
-                continue
-            stats['done'] += 1
-            if not res['found']:
-                stats['not_found'] += 1
-            elif res['status'] in ('approved', 'rejected'):
-                stats[res['status']] += 1
-            contact.sudo().write({'iys_status': res['status'], 'iys_checked_at': fields.Datetime.now()})
-            if guard and stats['done'] >= GUARD_MIN and stats['not_found'] / stats['done'] > GUARD_RATIO:
+                if not e.invalid_number:
+                    stats['errors'] += 1
+                    _logger.warning('İYS sorgusu başarısız (%s): %s', contact.id, e)
+                    last_error = e
+                    if not e.retryable or stats['errors'] >= 3:
+                        stats['stopped'] = 'error'
+                        break
+                    continue
+                # Yalnız bu numaraya özgü kalıcı hata: tur durmaz. Kişi 'bilinmiyor' + sorgulandı işaretlenir;
+                # ticari kapı onu gerekçeyle reddeder, kalanlar gönderilir, numara her turda yeniden sorgulanmaz (D-8)
+                stats['invalid'] += 1
+                _logger.warning('İYS sorgusu numara geçersiz (%s): %s', contact.id, e)
+                last_invalid = e
+                contact.sudo().write({'iys_status': 'unknown', 'iys_checked_at': fields.Datetime.now()})
+            else:
+                stats['done'] += 1
+                if not res['found']:
+                    stats['not_found'] += 1
+                elif res['status'] in ('approved', 'rejected'):
+                    stats[res['status']] += 1
+                contact.sudo().write({'iys_status': res['status'], 'iys_checked_at': fields.Datetime.now()})
+            # Koruma: SmartADM hata oranını sayar; geçersiz numara cevabı da "kişi yok" gibi orana girer
+            answered = stats['done'] + stats['invalid']
+            failed = stats['not_found'] + stats['invalid']
+            if guard and answered >= GUARD_MIN and failed / answered > GUARD_RATIO:
                 stats['stopped'] = 'guard'
                 self._icp().set_param('sms_system.iys_paused_until',
                                       fields.Datetime.to_string(fields.Datetime.now() + GUARD_PAUSE))
-                _logger.warning('İYS toplu sorgu durduruldu: %s/%s numara İYS kaydında yok (hesap blok riskine karşı)',
-                                stats['not_found'], stats['done'])
+                _logger.warning('İYS toplu sorgu durduruldu: %s/%s numara İYS kaydında yok ya da geçersiz (hesap blok '
+                                'riskine karşı)', failed, answered)
                 break
             time.sleep(REQUEST_GAP)
-        if last_error and not stats['stopped'] and not stats['done']:
+        failure = last_error or last_invalid
+        if failure and not stats['stopped'] and not stats['done']:
             stats['stopped'] = 'error'   # hiç sorgu başarılı olmadı: geçici hata da olsa bildirilir
-        if last_error and stats['stopped'] == 'error':
-            stats['error'] = str(last_error)
-            stats['retryable'] = bool(last_error.retryable)
+        if failure and stats['stopped'] == 'error':
+            stats['error'] = str(failure)
+            stats['retryable'] = bool(failure.retryable)
         return stats
 
     # ── Artımlı senkron (/report2) ──

@@ -402,6 +402,10 @@ class SmsSystemCampaign(models.Model):
             _logger.exception('İYS tazelemesi beklenmeyen hatayla durdu (kampanya %s)', self.id)
             return False, _('Beklenmeyen hata: %s') % e, True
         self.env['ir.cron']._commit_progress()
+        if stats.get('stopped') == 'error' and stats.get('invalid') and not stats.get('errors'):
+            # Yalnız numaraya özgü geçersiz numara hataları: kişiler 'bilinmiyor' işaretlendi, kapı onları gerekçeyle
+            # reddeder; tek geçersiz numara ticari kampanyayı süresiz bekletmemeli (D-8)
+            return True, '', True
         if stats.get('stopped') == 'error':
             return False, stats.get('error') or _('bilinmeyen hata'), bool(stats.get('retryable'))
         if stats.get('stopped') == 'guard':
