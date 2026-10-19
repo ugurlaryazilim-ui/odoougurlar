@@ -17,6 +17,7 @@ from odoo.addons.sms_system.services.turatel import TuratelClient, TuratelError
 
 from .common import SmsHttpCase, SmsTestCase, smart_error
 from .test_campaign import CampaignMixin
+from .test_settings import SettingsMixin
 
 MAX_RETRY = 3
 
@@ -234,3 +235,18 @@ class TestD4LegacyUndefinedAnswer(SmsTestCase):
         msg.action_retry()
         self.Message._cron_retry_failed()
         self.assertEqual(len(self.net.turatel_calls), 1)
+
+
+# ==== S6 D-7 ====
+@tagged('post_install', '-at_install')
+class TestD7NegativeUserLimit(SettingsMixin, SmsTestCase):
+
+    def test_d7_negatif_sinir_reddedilir_ve_parametre_degismez(self):
+        self.set_param('user_daily_limit', '30')
+        with self.assertRaises(UserError):
+            self.save_screen(sms_user_daily_limit=-5)
+        self.assertEqual(self.param('user_daily_limit'), '30', 'negatif değer sınırı kaldırmamalı')
+
+    def test_d7_sifir_hala_sinirsiz_kaydedilir(self):
+        self.save_screen(sms_user_daily_limit=0)
+        self.assertEqual(self.param('user_daily_limit'), '0')

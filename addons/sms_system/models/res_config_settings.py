@@ -71,11 +71,14 @@ class ResConfigSettings(models.TransientModel):
         # Çekirdek set_values RPC'ye açıktır (yönetici denetimi yalnız execute'ta): super()'den ÖNCE denetle.
         if not (self.env.su or self.env.user.has_group('base.group_system')):
             raise AccessError(_('Yalnız sistem yöneticileri ayarları değiştirebilir.'))
+        # Negatif sınır '0' (sınırsız) olarak kaydedilmemeli: hiçbir parametre yazılmadan reddedilir (D-7)
+        if any((rec.sms_user_daily_limit or 0) < 0 for rec in self):
+            raise UserError(_('Kullanıcı başı günlük SMS sınırı negatif olamaz (0 = sınırsız).'))
         super().set_values()
         icp = self.env['ir.config_parameter'].sudo()
         # 'False' ve '0' açıkça yazılır; set_param(False) parametreyi silerdi
         icp.set_param('sms_system.test_mode', 'True' if self.sms_test_mode else 'False')
-        icp.set_param('sms_system.user_daily_limit', str(max(self.sms_user_daily_limit or 0, 0)))
+        icp.set_param('sms_system.user_daily_limit', str(self.sms_user_daily_limit or 0))
 
     @api.model
     def default_get(self, fields_list):
