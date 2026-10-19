@@ -183,6 +183,45 @@ class TestTestMode(SettingsMixin, SmsTestCase):
         for i in range(4):
             self.send_manual(self.sms_manager, '53200000%02d' % i)
 
+    # ── KK-C9 (sır sızıntısı; kodda groups var ama çekirdek default_get sudo ile okur) ──
+    def _seed_secrets(self):
+        self.icp.set_param('sms_system.turatel_password', 'TURATEL-SIR-1')
+        self.icp.set_param('sms_system.iys_password', 'SMARTADM-SIR-2')
+
+    def _restricted_sms_fields(self):
+        return [name for name, field in self.Settings._fields.items() if name.startswith('sms_') and field.groups]
+
+    def test_kk_c9_default_get_yonetici_olmayana_gruplu_alanlari_dondurmez(self):
+        self._seed_secrets()
+        names = self._restricted_sms_fields()
+        self.assertIn('sms_turatel_password', names)
+        self.assertIn('sms_iys_password', names)
+        res = self.Settings.with_user(self.plain_user).default_get(names + ['sms_test_mode', 'sms_turatel_originator'])
+        for name in names:
+            self.assertNotIn(name, res, '%s yönetici olmayana döndü' % name)
+        self.assertNotIn('TURATEL-SIR-1', repr(res))
+        self.assertNotIn('SMARTADM-SIR-2', repr(res))
+        self.assertIn('sms_test_mode', res)   # gruplu olmayan alanlar etkilenmez
+
+    def test_kk_c9_sms_yoneticisi_de_sir_alamaz(self):
+        self._seed_secrets()
+        res = self.Settings.with_user(self.sms_manager).default_get(self._restricted_sms_fields())
+        self.assertNotIn('TURATEL-SIR-1', repr(res))
+        self.assertNotIn('SMARTADM-SIR-2', repr(res))
+
+    def test_kk_c9_sistem_yoneticisi_sirlari_gorur(self):
+        self._seed_secrets()
+        res = self.Settings.with_user(self.admin_user).default_get(self._restricted_sms_fields())
+        self.assertEqual(res.get('sms_turatel_password'), 'TURATEL-SIR-1')
+        self.assertEqual(res.get('sms_iys_password'), 'SMARTADM-SIR-2')
+
+    # ── KK-A5 (ek): bozuk değer ekranı kırmaz, varsayılana düşer ──
+    def test_kk_a5_bozuk_limit_degeri_varsayilan_50(self):
+        for value in ('', 'abc', '-3'):
+            with self.subTest(deger=value):
+                self.set_param('user_daily_limit', value)
+                self.assertEqual(self.screen_value('sms_user_daily_limit'), 50)
+
 
 @tagged('post_install', '-at_install')
 class TestSettingsRpc(SettingsMixin, SmsHttpCase):
@@ -200,3 +239,15 @@ class TestSettingsRpc(SettingsMixin, SmsHttpCase):
                 self.env.invalidate_all()
                 self.assertEqual({k: self.param(k) for k in keys}, before)
         self.assertIsNotNone(self.param('turatel_password'), 'RPC sms_system parametrelerini sildi')
+
+    # ── KK-C9 (RPC) ──
+    def test_kk_c9_rpc_default_get_sirlari_dondurmez(self):
+        self.icp.set_param('sms_system.turatel_password', 'TURATEL-SIR-1')
+        self.icp.set_param('sms_system.iys_password', 'SMARTADM-SIR-2')
+        self.authenticate(self.plain_user.login, self.PW)
+        fields_list = ['sms_turatel_password', 'sms_iys_password', 'sms_turatel_username', 'sms_test_mode']
+        body = self.call_kw('res.config.settings', 'default_get', [fields_list])
+        self.assertNotIn('TURATEL-SIR-1', repr(body))
+        self.assertNotIn('SMARTADM-SIR-2', repr(body))
+        for name in ('sms_turatel_password', 'sms_iys_password'):
+            self.assertNotIn(name, body.get('result') or {})

@@ -10,6 +10,27 @@ from ..services.turatel import (MAX_SEGMENTS, TuratelClient, TuratelError, norma
 _logger = logging.getLogger(__name__)
 
 MAX_RETRY = 3
+DEFAULT_USER_DAILY_LIMIT = 50
+
+
+def test_mode_enabled(value):
+    """Test modu tek kaynağı (K2): yalnız tam 'False' kapatır.
+
+    Parametrenin yokluğu, boş değer, 'True', '0', 'false' ya da başka her değer test modunu AÇIK sayar:
+    bozuk/silinmiş bir ayar canlı gönderime yol açmamalı.
+    """
+    return value != 'False'
+
+
+def parse_user_daily_limit(value):
+    """Kullanıcı başı günlük elle SMS sınırı: parametre yok/boş/bozuk/negatifse 50; '0' korunur (sınırsız)."""
+    if not value:   # get_param yokluğu/boşu False döndürür; int(False) == 0 yanlışlıkla "sınırsız" olurdu
+        return DEFAULT_USER_DAILY_LIMIT
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_USER_DAILY_LIMIT
+    return limit if limit >= 0 else DEFAULT_USER_DAILY_LIMIT
 
 
 class SmsSystemMessage(models.Model):
@@ -58,7 +79,7 @@ class SmsSystemMessage(models.Model):
             'password': icp.get_param('sms_system.turatel_password', ''),
             'originator': icp.get_param('sms_system.turatel_originator', ''),
             'ascii_mode': icp.get_param('sms_system.ascii_mode') == 'True',
-            'test_mode': icp.get_param('sms_system.test_mode', 'True') == 'True',
+            'test_mode': test_mode_enabled(icp.get_param('sms_system.test_mode')),
         }
 
     @api.model
@@ -123,7 +144,7 @@ class SmsSystemMessage(models.Model):
         """'Yeni SMS' ile serbest metin gönderiminde kullanıcı başı 24 saatlik sınır (yönetici muaf)."""
         if self.env.user.has_group('sms_system.group_sms_manager'):
             return
-        limit = int(self.env['ir.config_parameter'].sudo().get_param('sms_system.user_daily_limit', '50') or 0)
+        limit = parse_user_daily_limit(self.env['ir.config_parameter'].sudo().get_param('sms_system.user_daily_limit'))
         if not limit:
             return
         since = fields.Datetime.now() - timedelta(days=1)
