@@ -84,6 +84,19 @@ LINK_NOT_FOUND_PENDING_MSG = "Link Paratika'da henüz bulunamadı; durum tekrar 
 AMBIGUOUS_MSG = ("Paratika'da birden fazla aday link bulundu; yönetici Paratika panelinden "
                  'kontrol etmelidir.')
 STALE_SENDING_MSG = "Link oluşturma işlemi yarıda kaldı; durum Paratika'dan uzlaştırılacak."
+# G10: yeniden gönder / link iptali (KK-31, KK-32)
+CHANNEL_MSG = 'En az bir gönderim kanalı seçin.'                                         # KK-9
+RESEND_CHANNELS = ('sms', 'email')
+RESEND_LABELS = {'sms': 'SMS', 'email': 'E-posta'}
+RESEND_FAILED_MSG = 'Yeniden gönderim başarısız oldu; mesaj gönderilmedi.'
+RESEND_TIMEOUT_MSG = ('Paratika yanıt vermedi; mesaj gönderilmiş olabilir. '
+                      'Müşteriye ulaşıp ulaşmadığını kontrol edin.')
+CANCEL_FAILED_MSG = 'Link iptali başarısız oldu; link hâlâ açık olabilir.'
+CANCEL_TIMEOUT_MSG = ('Paratika yanıt vermedi; link iptal edilmiş sayılmadı. '
+                      'Durumu sorgulayıp gerekirse tekrar deneyin.')
+CANCEL_PENDING_MSG = ("Paratika'da devam eden bir ödeme işlemi var; link iptal edilmedi. "
+                      'Birazdan durumu sorgulayın.')
+CANCEL_ALREADY_MSG = "Link Paratika'da zaten iptal edilmiş; kayıt iptal olarak işaretlendi."
 
 _ISTANBUL = ZoneInfo('Europe/Istanbul')
 _UTC = ZoneInfo('UTC')
@@ -197,6 +210,7 @@ class SanalPosPayment(models.Model):
         compute='_compute_refundable_amount')
     can_void = fields.Boolean(string='İptal edilebilir', compute='_compute_can_void')
     can_refund = fields.Boolean(string='İade edilebilir', compute='_compute_can_refund')
+    can_resend = fields.Boolean(string='Yeniden gönderilebilir', compute='_compute_can_resend')
 
     # ---------------------------------------------------------------- varsayılanlar
     @api.model
@@ -248,6 +262,14 @@ class SanalPosPayment(models.Model):
             if parts.scheme and parts.netloc:
                 rec.link_url = '%s://%s/merchant/payment/%s' % (
                     parts.scheme, parts.netloc, rec.provider_token)
+
+    @api.depends('state', 'expires_at')
+    def _compute_can_resend(self):
+        """KK-31: yalnız Gönderildi ve süresi dolmamış linkler yeniden gönderilebilir."""
+        now = fields.Datetime.now()
+        for rec in self:
+            rec.can_resend = bool(
+                rec.state == 'sent' and (not rec.expires_at or rec.expires_at > now))
 
     @api.depends('refund_ids.state', 'refund_ids.amount')
     def _compute_refunded_amount(self):
@@ -520,8 +542,8 @@ class SanalPosPayment(models.Model):
             'target': 'current',
         }
 
-    def _notification_action(self, message, kind):
-        """Kalıcı bildirim + ardından ödeme formu (hata/belirsiz sonuçlar raise edilmez)."""
+    def _notification_action(self, message, kind, sticky=True):
+        """Bildirim + ardından ödeme formu (hata/belirsiz sonuçlar raise edilmez)."""
         self.ensure_one()
         return {
             'type': 'ir.actions.client',
@@ -530,7 +552,7 @@ class SanalPosPayment(models.Model):
                 'title': 'Ödeme linki: %s' % self.name,
                 'message': message,
                 'type': kind,
-                'sticky': True,
+                'sticky': sticky,
                 'next': self._form_action(),
             },
         }
@@ -561,19 +583,19 @@ class SanalPosPayment(models.Model):
     # ---------------------------------------------------------------- durum senkronu (G8, tasarım §6.2/§6.3)
     # Kilit kuralı: ``_sync_status`` / ``_reconcile_unknown_link`` kilit ALMAZ ve commit ETMEZ;
     # çağıran (cron: SKIP LOCKED, buton: NOWAIT) satırı kilitler ve ``_sp_commit`` eder.
-    def _call_provider_safely(self, method, label):
-        """Sağlayıcı sorgusu; beklenmeyen istisna belirsiz sonuca çevrilir (raise yok)."""
+    def _call_provider_safely(self, method, label, *args, message=QUERY_FAILED_MSG):
+        """Sağlayıcı çağrısı; beklenmeyen istisna belirsiz sonuca çevrilir (raise yok)."""
         self.ensure_one()
         payment_id = self.id
         try:
             with self.env.cr.savepoint():
-                return getattr(self._provider(), method)(self)
+                return getattr(self._provider(), method)(self, *args)
         except Exception as exc:  # noqa: BLE001 - dış çağrıdan sonra raise yok
             # Metin sır içerebilir (KK-37): yalnız sınıf adı loglanır
             _logger.error('sanal_pos: %s beklenmeyen hata (%s), ödeme id=%s',
                           label, type(exc).__name__, payment_id)
             return {'ok': False, 'timeout': True, 'error_code': 'EXCEPTION',
-                    'error_message': QUERY_FAILED_MSG, 'transactions': []}
+                    'error_message': message, 'transactions': []}
 
     def _sync_status(self):
         """QUERYTRANSACTION ile durumu günceller (kararın tek kaynağı). Son sonucu döndürür."""
@@ -855,6 +877,126 @@ class SanalPosPayment(models.Model):
             message = '%s – %s' % (message, rec.last_error_message)
         kind = 'success' if result.get('ok') else 'warning'
         return self._notification_action(message, kind)
+
+    # ---------------------------------------------------------------- kullanıcı: link yönetimi (G10)
+    # Desen (G7/G8 ile aynı): NOWAIT kilit -> kilitten sonra durum yeniden doğrulanır -> dış çağrı ->
+    # sonuç yazılır -> ``_sp_commit`` -> bildirim. Dış çağrıdan sonra ASLA raise edilmez (sonuç
+    # Paratika'da gerçekleşmiş olabilir); hatalar kayda ve bildirime yazılır. Kilit, çağrı boyunca
+    # tutulur (commit çağrıdan sonradır): önce commit kilidi bırakırdı.
+    def _check_link_open(self, require_unexpired):
+        """Yalnız 'Gönderildi' linkler (yeniden gönderim için ayrıca süresi dolmamış)."""
+        self.ensure_one()
+        if self.state != 'sent':
+            raise UserError('Bu işlem yalnız "Gönderildi" durumundaki linklerde yapılabilir.')
+        if require_unexpired and self.expires_at and self.expires_at <= fields.Datetime.now():
+            raise UserError('Linkin süresi dolmuş; yeniden gönderilemez. Yeni link oluşturun.')
+
+    def action_resend(self, channels=None):
+        """KK-31: linki seçilen kanallardan yeniden gönderir.
+
+        ``channels`` verilmezse (form düğmesi) kanal seçim sihirbazı açılır; sihirbaz
+        ``['sms', 'email']`` alt kümesiyle bu metodu yeniden çağırır.
+        """
+        self.ensure_one()
+        self._check_sanal_pos_user()
+        rec = self.sudo()
+        rec._check_link_open(require_unexpired=True)
+        if channels is None:
+            return {
+                'type': 'ir.actions.act_window',
+                'name': 'Linki Yeniden Gönder',
+                'res_model': 'sanal.pos.payment.resend.wizard',
+                'view_mode': 'form',
+                'views': [(False, 'form')],
+                'target': 'new',
+                'context': {'default_payment_id': self.id},
+            }
+        channels = list(channels)
+        if not channels:
+            raise UserError(CHANNEL_MSG)
+        if any(c not in RESEND_CHANNELS for c in channels):
+            raise UserError('Geçersiz gönderim kanalı.')
+        channels = [c for c in RESEND_CHANNELS if c in channels]
+        if not rec._lock_for_provider_call():
+            raise UserError(BUSY_MSG)
+        rec.invalidate_recordset()
+        rec._check_link_open(require_unexpired=True)
+        # Kilitten sonra raise yok: sonuç kayda ve bildirime yazılır
+        result = rec._call_provider_safely(
+            'resend', 'yeniden gönderimde', channels, message=RESEND_FAILED_MSG)
+        if result.get('ok'):
+            label = '+'.join(RESEND_LABELS[c] for c in channels)
+            if rec.last_error_code and rec.last_error_code != 'CARD_FAILED':
+                rec.write({'last_error_code': False, 'last_error_message': False})
+            rec._post_note('Yeniden gönderildi (%s)' % label)
+            message, kind = 'Yeniden gönderildi (%s)' % label, 'success'
+        else:
+            if result.get('timeout'):
+                code, message, kind = 'TIMEOUT', RESEND_TIMEOUT_MSG, 'warning'
+            else:
+                code = result.get('error_code') or False
+                message = result.get('error_message') or RESEND_FAILED_MSG
+                kind = 'danger'
+            rec.write({'last_error_code': code, 'last_error_message': message})
+        self._sp_commit()
+        return self._notification_action(message, kind, sticky=kind != 'success')
+
+    def action_cancel_link(self):
+        """KK-32: açık linki Paratika'da iptal eder.
+
+        ERR10143 (zaten ödenmiş/iptal): gerçek durum QUERYTRANSACTION ile belirlenir (tek sorgu);
+        yanıt alınamayan (zaman aşımı) iptal, iptal sayılmaz.
+        """
+        self.ensure_one()
+        self._check_sanal_pos_user()
+        rec = self.sudo()
+        rec._check_link_open(require_unexpired=False)
+        if not rec._lock_for_provider_call():
+            raise UserError(BUSY_MSG)
+        rec.invalidate_recordset()
+        rec._check_link_open(require_unexpired=False)
+        # Kilitten sonra raise yok
+        result = rec._call_provider_safely(
+            'cancel_link', 'link iptalinde', message=CANCEL_FAILED_MSG)
+        if result.get('ok'):
+            message, kind = rec._set_link_cancelled('Link iptal edildi.')
+        elif result.get('already_closed'):
+            message, kind = rec._resolve_already_closed()
+        elif result.get('timeout'):
+            rec.write({'last_error_code': 'TIMEOUT', 'last_error_message': CANCEL_TIMEOUT_MSG})
+            message, kind = CANCEL_TIMEOUT_MSG, 'warning'
+        else:
+            message = result.get('error_message') or CANCEL_FAILED_MSG
+            rec.write({'last_error_code': result.get('error_code') or False,
+                       'last_error_message': message})
+            kind = 'danger'
+        self._sp_commit()
+        return self._notification_action(message, kind, sticky=kind != 'success')
+
+    def _set_link_cancelled(self, note):
+        self.ensure_one()
+        self.write({'state': 'link_cancelled', 'last_error_code': False,
+                    'last_error_message': False})
+        self._post_note(note)
+        return note, 'success'
+
+    def _resolve_already_closed(self):
+        """ERR10143: link zaten ödenmiş ya da iptal edilmiş; gerçek durum tek sorguyla yazılır."""
+        self.ensure_one()
+        result = self._sync_status()
+        if self.state == 'sent':
+            # Sorgu onaylı/inceleme işlemi göstermedi: bekleyen işlem yoksa link zaten iptaldir
+            _approved, _in_review, pending, _failed, _others = self._classify(
+                result.get('transactions') or [])
+            if result.get('ok') and not pending:
+                return self._set_link_cancelled(CANCEL_ALREADY_MSG)
+            message = CANCEL_PENDING_MSG if result.get('ok') else QUERY_FAILED_MSG
+            self.write({'last_error_code': 'CANCEL_UNRESOLVED', 'last_error_message': message})
+            return message, 'warning'
+        label = dict(PAYMENT_STATES).get(self.state, self.state)
+        if self.state == 'paid':
+            return 'Ödeme alınmış; link iptal edilemedi. Durum: %s' % label, 'warning'
+        return 'Link iptal edilemedi; gerçek durum: %s' % label, 'warning'
 
     # ---------------------------------------------------------------- yönetici: inceleme (KK-24)
     def _check_review_action(self):

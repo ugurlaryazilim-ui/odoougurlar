@@ -25,6 +25,7 @@
         'data/ir_cron.xml',
         'wizard/payment_create_wizard_views.xml',
         'wizard/review_close_wizard_views.xml',
+        'wizard/payment_resend_wizard_views.xml',
         'views/sanal_pos_payment_views.xml',
         'views/sanal_pos_log_views.xml',
         'views/res_config_settings_views.xml',

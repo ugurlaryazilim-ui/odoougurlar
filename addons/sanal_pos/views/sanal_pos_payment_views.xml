@@ -51,6 +51,13 @@
                     <button name="action_review_close" type="object" string="İncelemeyi Kapat"
                             class="btn-secondary" groups="sanal_pos.group_sanal_pos_manager"
                             invisible="state != 'review'"/>
+                    <button name="action_resend" type="object" string="Yeniden Gönder"
+                            class="btn-secondary" groups="sanal_pos.group_sanal_pos_user"
+                            invisible="not can_resend"/>
+                    <button name="action_cancel_link" type="object" string="Linki İptal Et"
+                            class="btn-secondary" groups="sanal_pos.group_sanal_pos_user"
+                            invisible="state != 'sent'"
+                            confirm="Link Paratika'da iptal edilecek. Devam edilsin mi?"/>
                     <button name="action_new_link" type="object" string="Yeni Link Oluştur"
                             class="btn-primary" groups="sanal_pos.group_sanal_pos_user"
                             invisible="state not in ('expired', 'link_cancelled', 'error', 'voided', 'refunded')"/>
@@ -59,13 +66,14 @@
                 </header>
                 <sheet>
                     <field name="is_test" invisible="1"/>
+                    <field name="can_resend" invisible="1"/>
                     <field name="currency_id" invisible="1"/>
                     <div class="alert alert-danger text-center fw-bold" role="alert"
                          invisible="not is_test">
                         TEST ORTAMI – gerçek tahsilat yapılmaz
                     </div>
                     <div class="alert alert-warning" role="alert"
-                         invisible="not last_error_message or state not in ('error', 'unknown', 'review')">
+                         invisible="not last_error_message or state not in ('sent', 'error', 'unknown', 'review')">
                         <field name="last_error_message" readonly="1" nolabel="1"/>
                     </div>
                     <div class="oe_title">
