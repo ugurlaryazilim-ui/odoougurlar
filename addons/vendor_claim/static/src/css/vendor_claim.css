@@ -386,3 +386,8 @@
         font-size: 18px;
     }
 }
+
+/* "Daha fazla" düğmesi (liste sayfalama) */
+.vc-app .vc-more {
+    margin: 8px 0 16px;
+}

@@ -34,12 +34,15 @@ export class VcClaimList extends Component {
 
     setup() {
         this.notification = useService("notification");
+        this._loadSeq = 0; // yalnız liste yüklemelerine ait sıra sayacı (bayat yanıtı ayıklar)
+        this._query = null;
         this.state = useState({
             status: this.props.initialStatus || "open",
             search: "",
             items: [],
             total: 0,
             loading: false,
+            loadingMore: false,
             detail: null,
             busy: false,
             form: {},
@@ -60,19 +63,53 @@ export class VcClaimList extends Component {
         onWillUnmount(() => this._unsub && this._unsub());
     }
 
+    /** Listeyi ilk sayfadan yükler (filtre/arama/okutma). Yalnız en son istek sonucu işlenir (KK-B17). */
     async load(autoOpen = false) {
+        const seq = ++this._loadSeq;
+        const query = { search: this.state.search, status: this.state.status };
+        this._query = query;
         this.state.loading = true;
+        this.state.loadingMore = false; // yarım kalan 'daha fazla' isteği artık bayat
         try {
-            const res = await rpc("/vendor_claim/list", { search: this.state.search, status: this.state.status });
+            const res = await rpc("/vendor_claim/list", { ...query, offset: 0 });
+            if (seq !== this._loadSeq) return; // bayat yanıt: daha yeni bir istek var
             this.state.items = res.items || [];
             this.state.total = res.total || 0;
             if (autoOpen && this.state.items.length === 1) {
                 await this.open(this.state.items[0].id);
             }
         } catch (e) {
-            this.notification.add(_t("Liste alınamadı: %(error)s", { error: e.message }), { type: "danger" });
+            if (seq === this._loadSeq) {
+                this.notification.add(_t("Liste alınamadı: %(error)s", { error: e.message }), { type: "danger" });
+            }
+        } finally {
+            if (seq === this._loadSeq) {
+                this.state.loading = false;
+            }
         }
-        this.state.loading = false;
+    }
+
+    /** "Daha fazla": son yüklenen sorgunun sonraki sayfasını listeye ekler (KK-B16). */
+    async loadMore() {
+        if (this.state.loading || this.state.loadingMore || this.state.items.length >= this.state.total) return;
+        const seq = ++this._loadSeq;
+        const query = this._query || { search: this.state.search, status: this.state.status };
+        this.state.loadingMore = true;
+        try {
+            const res = await rpc("/vendor_claim/list", { ...query, offset: this.state.items.length });
+            if (seq !== this._loadSeq) return;
+            const known = new Set(this.state.items.map((i) => i.id));
+            this.state.items = this.state.items.concat((res.items || []).filter((i) => !known.has(i.id)));
+            this.state.total = res.total || 0;
+        } catch (e) {
+            if (seq === this._loadSeq) {
+                this.notification.add(_t("Liste alınamadı: %(error)s", { error: e.message }), { type: "danger" });
+            }
+        } finally {
+            if (seq === this._loadSeq) {
+                this.state.loadingMore = false;
+            }
+        }
     }
 
     setStatus(status) {
