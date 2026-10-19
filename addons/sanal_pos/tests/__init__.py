@@ -1,0 +1,13 @@
+# -*- coding: utf-8 -*-
+from . import test_tools
+from . import test_settings
+from . import test_invoice_source
+from . import test_provider_paratika
+from . import test_models
+from . import test_create_link
+from . import test_duplicate
+from . import test_sync
+from . import test_controllers
+from . import test_link_actions
+from . import test_refund
+from . import test_security
