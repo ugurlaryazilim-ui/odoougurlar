@@ -459,7 +459,8 @@ class VendorClaim(models.Model):
         return self.env.su or self.env.user.has_group('vendor_claim.group_vendor_claim_manager')
 
     def _check_transition(self, new_state):
-        if self._is_claim_manager():
+        # vendor_claim_strict: mobil/toplu uçlarda yönetici/sudo muafiyeti yok
+        if not self.env.context.get('vendor_claim_strict') and self._is_claim_manager():
             return
         labels = dict(self._fields['state'].selection)
         for claim in self:

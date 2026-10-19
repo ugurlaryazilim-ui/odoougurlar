@@ -280,6 +280,7 @@ class VendorClaimController(http.Controller):
 
     def _apply_action(self, claim, action, vals):
         vals = vals or {}
+        claim = claim.with_context(vendor_claim_strict=True)
         if action == 'send':
             claim.write({k: (vals.get(k) or '').strip() or claim[k] for k in ('out_carrier', 'out_tracking')
                          if k in vals})
