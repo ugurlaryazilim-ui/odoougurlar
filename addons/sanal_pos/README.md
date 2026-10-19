@@ -57,6 +57,19 @@ Sır alanları (API şifresi, secretKey, MSSQL kullanıcı/şifre) hiçbir kayı
 
 ## 6. CANLIYA ALMADAN ÖNCE (zorunlu)
 
+Sıralı özet (ayrıntılar aşağıda ve 1-5. bölümlerde):
+1. v2 görünüm SQL'i uygulandı ve 9000,00 doğrulaması yapıldı (5. bölüm).
+2. Paratika sandbox denemesi bitti: R-3, P-10, telefon biçimi, link token/adres, PAYBYLINKSTATUS, QUERYTRANSACTION boş yanıtı.
+3. Canlı API adresi Paratika ile teyit edildi.
+4. Deploy sonrası hemen `-i sanal_pos` (sonraki sürümlerde `-u sanal_pos`); Ayarlar > Teknik > Zamanlanmış Eylemler'de 3 cron göründüğü kontrol edildi (durum senkronu, bildirim tetikli senkron, günlük temizlik ve iade senkronu).
+5. Paratika paneline bildirim ve dönüş adresleri girildi (4. bölüm).
+6. Şirket ağı dışından `curl -X POST .../sanal_pos/paratika/notify` yanıtı `OK` (WAF/Cloudflare).
+7. nginx/Cloudflare'de `/sanal_pos/paratika/` için `limit_req` + 16k gövde sınırı (4. bölüm, madde 5).
+8. `web.base.url` doğru ve `web.base.url.freeze = True`.
+9. `sanal_pos` üretim compose `-u` listesine eklendi.
+10. Kullanıcılara Sanal POS / Kullanıcı ve Yönetici grupları atandı; sistem yöneticisine iade yetkisi gerekiyorsa Yönetici grubu ayrıca verildi.
+11. Ortam Canlı yapıldı; 1 TL ödeme + aynı gün iptal ile doğrulandı.
+
 **Webhook dış erişim testi (D-3):** Sunucu Cloudflare Tunnel/Coolify arkasında olduğundan WAF/Bot kuralları Paratika'nın POST'unu engelleyebilir. Canlıda şirket ağı **dışından** `curl -X POST https://<odoo-alan-adi>/sanal_pos/paratika/notify` çalıştırın; yanıt `OK` olmalı (403/challenge sayfası gelirse WAF'ta bu yol için istisna tanımlayın). Bildirim gelmezse ödeme yine cron sorgusuyla (10 dk) yakalanır ama gecikir.
 
 **Paratika sandbox denemesi (test ortamı, uçtan uca):** link (SMS+e-posta), Türkçe ad görünümü, test kartla ödeme, webhook ile "Ödendi", başarısız kart, link iptali, aynı gün iptal, ertesi gün kısmi ve tam iade. Bu deneme şu belirsizlikleri kapatır; sonuca göre çoğunlukla yalnız ayar veya eşleme değişir:
@@ -65,6 +78,7 @@ Sır alanları (API şifresi, secretKey, MSSQL kullanıcı/şifre) hiçbir kayı
 - **P-10 gün sonu saati:** VOID'den REFUND'a geçiş saati ve kısmi iade sayısı sınırı.
 - **Telefon biçimi:** hangi biçim SMS'i ulaştırıyor (Ayarlar > Telefon biçimi).
 - **Link token ve adres:** `sessionToken` = `PAYBYLINKTOKEN` mi (yeniden gönder ve iptal bunu kullanır); link adresi `/merchant/payment/<token>` mı? Doğruysa "Link adresini göster" açılır.
+- **QUERYTRANSACTION boş yanıt:** Paratika'da hiç oluşmamış bir `MERCHANTPAYMENTID` için `responseCode=00` + boş liste mi döner, hata kodu mu? (Hata kodu dönerse "link bulunamadı" kayıtları link süresi boyunca kilitli kalır.)
 - **PAYBYLINKSTATUS değerleri:** yalnız `SD` görüldü; tüm değerler listelenip eşleme doğrulanır.
 - Dönüşün POST olduğunu doğrulayın (GET gelirse tasarım değişikliği gerekir).
 
