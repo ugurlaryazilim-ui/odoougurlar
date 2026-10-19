@@ -79,8 +79,9 @@ LINK_NOT_FOUND_MIN_AGE = timedelta(minutes=15)
 # Ö-C: 'Hata / link bulunamadı' kayıtları link süresi + bu pencere boyunca seyrek sorgulanır
 LATE_CHECK_GRACE = timedelta(days=1)
 LINK_NOT_FOUND_RECHECK_INTERVAL = timedelta(hours=1)
-UNVERIFIED_PRIOR_MSG = ("Bu faturanın önceki link denemesi Paratika'da bulunamamıştı ve şu an "
-                        "doğrulanamadı; çift tahsilatı önlemek için birazdan tekrar deneyin.")
+UNVERIFIED_PRIOR_MSG = ("Bu faturanın önceki link denemesi Paratika'da bulunamamıştı; durumu şu an "
+                        "doğrulanamadı ya da Paratika'da sonuçlanmamış bir ödeme var. Çift "
+                        "tahsilatı önlemek için birazdan tekrar deneyin.")
 CRON_SYNC_LIMIT = 200
 # G-1: webhook kaynaklı sorgu çoğaltmasına karşı
 SYNC_REQUEST_MIN_INTERVAL = timedelta(minutes=1)   # ödeme başına iki sorgu arası en az
@@ -444,7 +445,10 @@ class SanalPosPayment(models.Model):
                 continue
             result = rec._sync_status()
             refreshed = True
-            if late and rec.state == 'error' and not result.get('ok'):
+            # Sorgu başarılı olsa da bekleyen (IP) satış kaydı 'Hata'da bırakır; o işlem
+            # sonradan onaylanabilir -> yeni link çift tahsilat olur (fail-closed)
+            if late and rec.state == 'error' and (
+                    not result.get('ok') or rec._late_status_blocks(result)):
                 unverified |= rec
         if refreshed:
             self._sp_commit()
@@ -909,8 +913,18 @@ class SanalPosPayment(models.Model):
             self.write({'state': 'expired'})
             self._post_note('Link süresi doldu; Paratika\'da onaylı ödeme yok.')
 
+    @api.model
+    def _late_status_blocks(self, result):
+        """Geç sorgu sonucunda onaylı, incelemede ya da bekleyen satış var mı (yeni link engeli)."""
+        approved, in_review, pending, _failed, _others = self._classify(
+            result.get('transactions') or [])
+        return bool(approved or in_review or pending)
+
     def _apply_late_status(self, transactions):
-        """Süresi dolmuş / iptal / hatalı kayda gelen ödeme: tutar eşit olsa bile review."""
+        """Süresi dolmuş / iptal / hatalı kayda gelen ödeme: tutar eşit olsa bile review.
+
+        Bekleyen (IP) satış durumu değiştirmez; yeni link öncesi ``_late_status_blocks`` engeller.
+        """
         approved, in_review, _pending, _failed, _others = self._classify(transactions)
         tran = (approved or in_review or [None])[0]
         if not tran:

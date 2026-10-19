@@ -328,6 +328,19 @@ class TestLinkNotFoundLateCheck(RulesCase):
         self.assertIn('doğrulanamadı', str(cm.exception))
         self.assertEqual(self.mock.count('PAYBYLINKPAYMENT'), 0)
 
+    def test_oc_yeni_link_oncesi_bekleyen_satis_varsa_engellenir(self):
+        """Sorgu başarılı ama satış 'IP' (sonuçlanmamış): kayıt 'Hata' kalır; yeni link açılırsa
+        bekleyen işlem onaylandığında çift tahsilat olur (fail-open)."""
+        payment = self.not_found(checked_ago=timedelta(minutes=1))
+        self.set_query_transactions(tran('IP', 'SALE', '9000.00', 'PG-OC-IP'))
+        self.set_invoice(invoice_rows())
+        with self.assertRaises(UserError) as cm:
+            self.wizard(**BOTH).action_create_link()
+        self.assertIn('sonuçlanmamış', str(cm.exception))
+        self.assertEqual(self.mock.count('PAYBYLINKPAYMENT'), 0)
+        payment.invalidate_recordset()
+        self.assertEqual(payment.state, 'error')
+
     def test_oc_yeni_link_oncesi_odeme_yoksa_link_acilir(self):
         self.not_found(checked_ago=timedelta(minutes=1))
         self.set_invoice(invoice_rows())
