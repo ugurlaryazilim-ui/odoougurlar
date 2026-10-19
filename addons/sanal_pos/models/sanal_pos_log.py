@@ -6,7 +6,11 @@ sorumluluğundadır. Yazım yalnız sağlayıcı katmanından ``sudo().create`` 
 ACL yalnız yöneticiye okuma verir. Temizlik (günlük cron): 180 günden eski ve
 ``is_financial`` olmayan kayıtlar.
 """
-from odoo import fields, models
+from datetime import timedelta
+
+from odoo import api, fields, models
+
+PURGE_BATCH = 5000
 
 
 class SanalPosLog(models.Model):
@@ -31,3 +35,17 @@ class SanalPosLog(models.Model):
     response_body = fields.Text(string='Yanıt (maskeli)')
     is_financial = fields.Boolean(
         string='Finansal işlem', help='VOID/REFUND kayıtları temizlikten muaftır.')
+
+    @api.model
+    def _purge_old(self, days=180):
+        """KK-39: ``days`` günden eski ve mali olmayan kayıtları siler (VOID/REFUND kalır)."""
+        cutoff = fields.Datetime.now() - timedelta(days=days)
+        Log = self.sudo()
+        deleted = 0
+        while True:
+            batch = Log.search([('create_date', '<', cutoff), ('is_financial', '=', False)],
+                               limit=PURGE_BATCH, order='id')
+            if not batch:
+                return deleted
+            deleted += len(batch)
+            batch.unlink()

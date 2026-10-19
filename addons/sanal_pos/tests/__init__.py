@@ -7,6 +7,7 @@ from . import test_models
 from . import test_create_link
 from . import test_duplicate
 from . import test_sync
+from . import test_sync_rules
 from . import test_controllers
 from . import test_link_actions
 from . import test_refund

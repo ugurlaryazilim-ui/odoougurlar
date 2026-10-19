@@ -10,7 +10,9 @@ Dış çağrı kuralı: çağrıdan ÖNCE "işlemde" durumu yazılıp ``_sp_comm
 ``_sp_commit`` asla bir ``cr.savepoint()`` bloğunun içinden çağrılmaz.
 """
 import logging
+import time
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
@@ -20,6 +22,7 @@ from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tools import float_compare
 
+from ..tools import format_try
 from .res_config_settings import get_bool_param
 
 _logger = logging.getLogger(__name__)
@@ -63,6 +66,24 @@ BUSY_MSG = 'Bu kayıt üzerinde başka bir işlem sürüyor; birazdan tekrar den
 
 SYNC_CRON_XMLID = 'sanal_pos.cron_sanal_pos_sync'   # G8
 UNKNOWN_SYNC_DELAY = timedelta(minutes=2)
+
+# G8: durum senkronu (tasarım §6.2, §6.3; 08-sozlesme-G8.md)
+IRREVERSIBLE_STATES = ('paid', 'partial_refund', 'refunded', 'voided')
+LATE_PAYMENT_STATES = ('expired', 'link_cancelled', 'error')
+STALE_SENDING_AGE = timedelta(minutes=5)
+CHECK_STATUS_MAX_AGE = timedelta(days=30)
+REFUND_SYNC_WINDOW = timedelta(days=30)
+# Risk 1 (yönetici kararı): zaman aşımı sonrası "bulunamadı" yanıtı tek başına yeterli değildir
+LINK_NOT_FOUND_MIN_CHECKS = 2
+LINK_NOT_FOUND_MIN_AGE = timedelta(minutes=15)
+CRON_SYNC_LIMIT = 200
+CRON_TIME_BUDGET = 8 * 60  # saniye; aşılırsa cron kendini hemen yeniden planlar
+QUERY_FAILED_MSG = 'Paratika durum sorgusu yanıt vermedi; durum değiştirilmedi.'
+LINK_NOT_FOUND_MSG = "Link Paratika'da bulunamadı; yeni link oluşturabilirsiniz."
+LINK_NOT_FOUND_PENDING_MSG = "Link Paratika'da henüz bulunamadı; durum tekrar kontrol edilecek."
+AMBIGUOUS_MSG = ("Paratika'da birden fazla aday link bulundu; yönetici Paratika panelinden "
+                 'kontrol etmelidir.')
+STALE_SENDING_MSG = "Link oluşturma işlemi yarıda kaldı; durum Paratika'dan uzlaştırılacak."
 
 _ISTANBUL = ZoneInfo('Europe/Istanbul')
 _UTC = ZoneInfo('UTC')
@@ -162,6 +183,9 @@ class SanalPosPayment(models.Model):
     last_checked_at = fields.Datetime(string='Son Sorgu', copy=False)
     sync_requested = fields.Boolean(string='Senkron İstendi', index=True, copy=False)
     last_refund_sync_at = fields.Datetime(string='Son İade Senkronu', copy=False)
+    # Belirsiz link uzlaştırması (KK-16, Risk 1): "bulunamadı" yanıtı sayacı ve başlangıç zamanı
+    unknown_since = fields.Datetime(string='Belirsizlik Başlangıcı', copy=False)
+    link_not_found_count = fields.Integer(string='"Bulunamadı" Yanıt Sayısı', copy=False)
 
     # ---------------------------------------------------------------- iade
     refund_ids = fields.One2many('sanal.pos.refund', 'payment_id', string='İade Geçmişi')
@@ -338,11 +362,23 @@ class SanalPosPayment(models.Model):
         return ''
 
     def _refresh_before_new_link(self):
-        """Süresi geçmiş 'Gönderildi' kayıtlarını yeni link öncesi tazeler.
+        """Süresi geçmiş 'Gönderildi' kayıtlarını yeni link öncesi sorgular (expired/paid/review).
 
-        G7: işlem yok (kayıt açık kalır, KK-18 ile engellenir: güvenli taraf).
-        G8: NOWAIT kilit + ``_sync_status`` (expired/paid) ile doldurulur.
+        Kayıt başına NOWAIT kilit; meşgul kayıt atlanır (açık kalır, KK-18 engeller: güvenli
+        taraf). Sonuç ``_sp_commit`` ile kalıcılaşır, böylece ardından gelen KK-19 UserError'ı
+        sorgu sonucunu (ör. paid) geri almaz. Bir savepoint içinden çağrılmamalıdır.
         """
+        refreshed = False
+        for rec in self.sudo():
+            if not rec._lock_for_provider_call():
+                continue
+            rec.invalidate_recordset()
+            if rec.state != 'sent':
+                continue
+            rec._sync_status()
+            refreshed = True
+        if refreshed:
+            self._sp_commit()
         return True
 
     @api.model
@@ -432,6 +468,7 @@ class SanalPosPayment(models.Model):
             self.write({
                 'state': 'unknown', 'last_error_code': result.get('error_code') or 'TIMEOUT',
                 'last_error_message': UNKNOWN_MSG,
+                'unknown_since': fields.Datetime.now(), 'link_not_found_count': 0,
             })
             self._post_note(UNKNOWN_MSG)
         else:
@@ -442,14 +479,16 @@ class SanalPosPayment(models.Model):
             })
             self._post_note('Link oluşturulamadı: %s' % message)
 
-    def _trigger_sync_cron(self):
-        """Belirsiz sonuçta uzlaştırma cron'unu öne çeker (cron G8'de; yoksa sessiz)."""
+    @api.model
+    def _trigger_sync_cron(self, at=None):
+        """Senkron cron'unu öne çeker: varsayılan ``now+2dk`` (G7 belirsiz), G9 ``at=now``."""
         cron = self.env.ref(SYNC_CRON_XMLID, raise_if_not_found=False)
         if not cron:
             return
+        when = at or (fields.Datetime.now() + UNKNOWN_SYNC_DELAY)
         try:
             with self.env.cr.savepoint():
-                cron.sudo()._trigger(fields.Datetime.now() + UNKNOWN_SYNC_DELAY)
+                cron.sudo()._trigger(when)
         except Exception as exc:  # noqa: BLE001 - tetik kurulamazsa periyodik cron toplar
             _logger.warning('sanal_pos: senkron tetiği kurulamadı (%s)', type(exc).__name__)
 
@@ -518,6 +557,455 @@ class SanalPosPayment(models.Model):
             'expiry_hours': self.expiry_hours or wizard.expiry_hours,
         })
         return wizard._reopen_action()
+
+    # ---------------------------------------------------------------- durum senkronu (G8, tasarım §6.2/§6.3)
+    # Kilit kuralı: ``_sync_status`` / ``_reconcile_unknown_link`` kilit ALMAZ ve commit ETMEZ;
+    # çağıran (cron: SKIP LOCKED, buton: NOWAIT) satırı kilitler ve ``_sp_commit`` eder.
+    def _call_provider_safely(self, method, label):
+        """Sağlayıcı sorgusu; beklenmeyen istisna belirsiz sonuca çevrilir (raise yok)."""
+        self.ensure_one()
+        payment_id = self.id
+        try:
+            with self.env.cr.savepoint():
+                return getattr(self._provider(), method)(self)
+        except Exception as exc:  # noqa: BLE001 - dış çağrıdan sonra raise yok
+            # Metin sır içerebilir (KK-37): yalnız sınıf adı loglanır
+            _logger.error('sanal_pos: %s beklenmeyen hata (%s), ödeme id=%s',
+                          label, type(exc).__name__, payment_id)
+            return {'ok': False, 'timeout': True, 'error_code': 'EXCEPTION',
+                    'error_message': QUERY_FAILED_MSG, 'transactions': []}
+
+    def _sync_status(self):
+        """QUERYTRANSACTION ile durumu günceller (kararın tek kaynağı). Son sonucu döndürür."""
+        result = {}
+        for rec in self.sudo():
+            result = rec._call_provider_safely('query_status', 'durum sorgusunda')
+            rec._apply_status(result)
+        return result
+
+    def _sync_refunds(self, transactions):
+        """Panelden yapılan iade/iptal satırları (KK-27). G8'de boş kanca; G11 doldurur."""
+        return False
+
+    @api.model
+    def _to_cents(self, value):
+        try:
+            return Decimal(str(value)).quantize(Decimal('0.01'))
+        except (InvalidOperation, TypeError, ValueError):
+            return None
+
+    def _creator_partner(self):
+        self.ensure_one()
+        return (self.user_id or self.create_uid).partner_id
+
+    def _notify_creator(self, body):
+        """Chatter notu + linki oluşturana Odoo bildirimi (KK-30). Müşteriye mesaj gitmez."""
+        self.ensure_one()
+        partner = self._creator_partner()
+        self.message_post(body=body, message_type='comment', subtype_xmlid='mail.mt_note',
+                          partner_ids=partner.ids)
+
+    def _payment_values(self, tran):
+        values = {'provider_tran_ref': tran.get('ref') or False,
+                  'paid_at': tran.get('time') or fields.Datetime.now(),
+                  'installment_count': tran.get('installment_count') or 1,
+                  'card_last4': tran.get('card_last4') or False}
+        cents = self._to_cents(tran.get('amount'))
+        if cents is not None:
+            values['paid_amount'] = float(cents)
+        return values
+
+    def _apply_status(self, result):
+        """Sorgu sonucunu uygular (08-sozlesme-G8 §2). Bildirim yalnız geçiş anında yazılır."""
+        self.ensure_one()
+        rec = self.sudo()
+        now = fields.Datetime.now()
+        if not result.get('ok'):
+            values = {'last_checked_at': now}
+            if rec.state in ('sent', 'review') + LATE_PAYMENT_STATES:
+                values.update(last_error_code=result.get('error_code') or 'TIMEOUT',
+                              last_error_message=result.get('error_message') or QUERY_FAILED_MSG)
+            rec.write(values)
+            return False
+        transactions = result.get('transactions') or []
+        rec.write({'last_checked_at': now})
+        if rec.state in IRREVERSIBLE_STATES:
+            rec._sync_refunds(transactions)
+            return True
+        if rec.state in ('sent', 'unknown'):
+            rec._apply_open_status(transactions, now)
+        elif rec.state in LATE_PAYMENT_STATES:
+            rec._apply_late_status(transactions)
+        # review: yalnız yönetici eylemiyle çıkar; sending: G7/cron'un işidir
+        return True
+
+    @api.model
+    def _classify(self, transactions):
+        sales = [t for t in transactions if t.get('kind') == 'sale']
+        approved = [t for t in sales if t.get('status') == 'approved']
+        in_review = [t for t in sales if t.get('status') == 'review']
+        pending = [t for t in sales if t.get('status') == 'pending']
+        failed = {t.get('ref') or '#%d' % i for i, t in enumerate(sales)
+                  if t.get('status') in ('failed', 'cancelled')}
+        others = [t for t in transactions
+                  if t.get('kind') != 'sale' and t.get('status') == 'approved']
+        return approved, in_review, pending, failed, others
+
+    def _review_reason(self, approved, in_review, others):
+        """İnceleme nedeni (boş = ödendi sayılabilir)."""
+        expected = self._to_cents(self.amount)
+        currency = self.currency_id.name or 'TRY'
+        if len(approved) > 1:
+            amounts = ', '.join(format_try(t.get('amount') or 0) for t in approved)
+            return 'REVIEW_MULTIPLE', ('Birden fazla onaylı satış (%d adet: %s); çift tahsilat '
+                                       'olabilir. Talep tutarı %s.' % (
+                                           len(approved), amounts, format_try(self.amount)))
+        if approved:
+            tran = approved[0]
+            got = self._to_cents(tran.get('amount'))
+            if got is None or got != expected:
+                return 'REVIEW_AMOUNT', ('Tutar uyuşmazlığı: Paratika\'da tahsil edilen %s, '
+                                         'talep tutarı %s.' % (
+                                             format_try(tran.get('amount') or 0),
+                                             format_try(self.amount)))
+            if (tran.get('currency') or '') != currency:
+                return 'REVIEW_CURRENCY', ('Para birimi uyuşmazlığı: Paratika %s, talep %s '
+                                           '(tutar %s).' % (tran.get('currency') or '-', currency,
+                                                            format_try(tran.get('amount') or 0)))
+            return '', ''
+        if in_review:
+            return 'REVIEW_MR', ('Paratika işlemi manuel incelemede (MR): %s, talep tutarı %s.' % (
+                format_try(in_review[0].get('amount') or 0), format_try(self.amount)))
+        if others:
+            return 'REVIEW_OTHER', ('Onaylı satış olmadan onaylı iptal/iade işlemi var: %s, '
+                                    'talep tutarı %s.' % (format_try(others[0].get('amount') or 0),
+                                                         format_try(self.amount)))
+        return None, None
+
+    def _set_review(self, code, reason, tran):
+        values = {'state': 'review', 'last_error_code': code, 'last_error_message': reason[:250]}
+        if tran:
+            values.update(self._payment_values(tran))
+        self.write(values)
+        self._notify_creator('%s – İnceleme gerekli. %s' % (self.invoice_no, reason))
+
+    def _apply_open_status(self, transactions, now):
+        approved, in_review, pending, failed, others = self._classify(transactions)
+        values = {'failed_attempt_count': len(failed)}
+        code, reason = self._review_reason(approved, in_review, others)
+        if code == '':
+            tran = approved[0]
+            values.update(self._payment_values(tran))
+            values.update(state='paid', last_error_code=False, last_error_message=False)
+            self.write(values)
+            detail = ['%d taksit' % (values.get('installment_count') or 1)]
+            if values.get('card_last4'):
+                detail.append('kart son 4: %s' % values['card_last4'])
+            self._notify_creator('%s – %s ödendi (%s)' % (
+                self.invoice_no, format_try(tran.get('amount')), ', '.join(detail)))
+            self._sync_refunds(transactions)
+            return
+        if code:
+            self.write(values)
+            self._set_review(code, reason, (approved or in_review or [None])[0])
+            return
+        if failed:
+            values.update(last_error_code='CARD_FAILED',
+                          last_error_message='Kart denemesi başarısız (%d)' % len(failed))
+        elif self.state == 'sent':
+            values.update(last_error_code=False, last_error_message=False)
+        self.write(values)
+        if self.state == 'sent' and self.expires_at and now > self.expires_at and not pending:
+            self.write({'state': 'expired'})
+            self._post_note('Link süresi doldu; Paratika\'da onaylı ödeme yok.')
+
+    def _apply_late_status(self, transactions):
+        """Süresi dolmuş / iptal / hatalı kayda gelen ödeme: tutar eşit olsa bile review."""
+        approved, in_review, _pending, _failed, _others = self._classify(transactions)
+        tran = (approved or in_review or [None])[0]
+        if not tran:
+            return
+        code, reason = self._review_reason(approved, in_review, [])
+        prefix = 'Kapalı linke (%s) geç ödeme geldi: Paratika %s, talep tutarı %s.' % (
+            dict(PAYMENT_STATES).get(self.state, self.state),
+            format_try(tran.get('amount') or 0), format_try(self.amount))
+        self._set_review('REVIEW_LATE', ('%s %s' % (prefix, reason or '')).strip(), tran)
+
+    # ---------------------------------------------------------------- belirsiz uzlaştırma (KK-16)
+    def _mark_stale_sending(self):
+        """5 dakikadan eski 'Gönderiliyor' (yarıda kalmış istek) -> 'Belirsiz'."""
+        self.ensure_one()
+        self.sudo().write({'state': 'unknown', 'unknown_since': fields.Datetime.now(),
+                           'link_not_found_count': 0, 'last_error_code': 'STALE_SENDING',
+                           'last_error_message': UNKNOWN_MSG})
+        self._post_note(STALE_SENDING_MSG)
+
+    def _reconcile_unknown_link(self):
+        """'Belirsiz' kaydı uzlaştırır: önce ödeme sorgusu, onay yoksa ``find_link``.
+
+        Risk 1 (yönetici kararı): "bulunamadı" yanıtı kaydı ancak en az
+        ``LINK_NOT_FOUND_MIN_CHECKS`` ayrı sorguda ve ilk belirsizlikten
+        ``LINK_NOT_FOUND_MIN_AGE`` geçtikten sonra 'Hata' yapar (Paratika gecikmesiyle
+        eski link açıkken yeni link açılıp çift tahsilat olmasın).
+        """
+        self.ensure_one()
+        rec = self.sudo()
+        result = rec._sync_status()
+        if rec.state != 'unknown' or not result.get('ok'):
+            return result
+        found = rec._call_provider_safely('find_link', 'link uzlaştırmasında')
+        now = fields.Datetime.now()
+        if found.get('ok') and found.get('found') and found.get('token'):
+            sent_at = rec.create_date or now
+            rec.write({
+                'state': 'sent', 'provider_token': found['token'], 'sent_at': sent_at,
+                'expires_at': sent_at + timedelta(hours=rec.expiry_hours or 168),
+                'link_not_found_count': 0, 'last_error_code': False, 'last_error_message': False,
+            })
+            rec._post_note('Link Paratika\'da bulundu; durum Gönderildi olarak düzeltildi.')
+            # Süre geçmişse aynı turda expired (sorgu sonucu zaten elde)
+            rec._apply_status(result)
+            return found
+        answered = bool(found.get('ok') or found.get('ambiguous'))
+        if found.get('ambiguous'):
+            if rec.last_error_code != 'AMBIGUOUS':
+                rec._post_note(AMBIGUOUS_MSG)
+            rec.write({'last_error_code': 'AMBIGUOUS', 'last_error_message': AMBIGUOUS_MSG})
+        elif found.get('ok'):
+            count = rec.link_not_found_count + 1
+            since = rec.unknown_since or rec.create_date or now
+            if count >= LINK_NOT_FOUND_MIN_CHECKS and now >= since + LINK_NOT_FOUND_MIN_AGE:
+                rec.write({'state': 'error', 'link_not_found_count': count,
+                           'last_error_code': 'LINK_NOT_FOUND',
+                           'last_error_message': LINK_NOT_FOUND_MSG})
+                rec._post_note(LINK_NOT_FOUND_MSG)
+                return found
+            rec.write({'link_not_found_count': count, 'last_error_code': 'LINK_NOT_FOUND_PENDING',
+                       'last_error_message': LINK_NOT_FOUND_PENDING_MSG})
+        # Fark 2 (onaylı): link süresi dolmuş, sorgu ve arama onaylı işlem göstermiyor -> expired
+        window_end = (rec.create_date or now) + timedelta(hours=rec.expiry_hours or 168)
+        if answered and rec.state == 'unknown' and now > window_end:
+            rec.write({'state': 'expired'})
+            rec._post_note('Link süresi doldu; Paratika\'da onaylı ödeme bulunmadı.')
+        return found
+
+    # ---------------------------------------------------------------- kilit yardımcıları
+    def _try_lock_skip_locked(self):
+        """Cron: satırı kilitler; başkası tutuyorsa False (beklemez)."""
+        self.ensure_one()
+        self.env.cr.execute(
+            'SELECT id FROM sanal_pos_payment WHERE id = %s FOR UPDATE SKIP LOCKED', [self.id])
+        return bool(self.env.cr.fetchone())
+
+    def _try_lock_nowait(self):
+        """Webhook bayrağı: kilit beklenmez; kilitli veya eşzamanlı değişmişse False."""
+        self.ensure_one()
+        try:
+            with self.env.cr.savepoint(flush=False):
+                self.env.cr.execute(
+                    'SELECT id FROM sanal_pos_payment WHERE id = %s FOR UPDATE NOWAIT', [self.id])
+        except (pg_errors.LockNotAvailable, pg_errors.SerializationFailure):
+            return False
+        return True
+
+    # ---------------------------------------------------------------- G9 arayüzü
+    @api.model
+    @api.private
+    def _mark_sync_requested(self, merchant_payment_id):
+        """Webhook/dönüş tetiği: yalnız bayrak + cron tetiği. Dış çağrı ve commit yok.
+
+        Gövde asla karar için okunmaz. Satır kilitliyse bayrak atlanır; sent/unknown kayıtlar
+        periyodik cron'da zaten sorgulanır (Risk 2). Dönüş: kayıt veya boş recordset.
+        """
+        Payment = self.sudo()
+        if not merchant_payment_id:
+            return Payment.browse()
+        rec = Payment.search([('merchant_payment_id', '=', merchant_payment_id)], limit=1)
+        if rec:
+            if rec._try_lock_nowait():
+                rec.write({'sync_requested': True})
+            self._trigger_sync_cron(at=fields.Datetime.now())
+        return rec
+
+    # ---------------------------------------------------------------- kullanıcı: Durumu Sorgula (KK-28)
+    def action_check_status(self):
+        self.ensure_one()
+        self._check_sanal_pos_user()
+        rec = self.sudo()
+        now = fields.Datetime.now()
+        if rec.state not in OPEN_STATES + ('review',) and rec.create_date < now - CHECK_STATUS_MAX_AGE:
+            raise UserError('30 günden eski kapanmış kayıt sorgulanamaz.')
+        if rec.state == 'sending' and rec.create_date >= now - STALE_SENDING_AGE:
+            raise UserError(BUSY_MSG)
+        if not rec._lock_for_provider_call():
+            raise UserError(BUSY_MSG)
+        rec.invalidate_recordset()
+        # Kilitten sonra raise yok: dış çağrı sonucu commit edilir, bildirimle gösterilir
+        if rec.state == 'sending':
+            rec._mark_stale_sending()
+        if rec.state == 'unknown':
+            result = rec._reconcile_unknown_link()
+        else:
+            result = rec._sync_status()
+        rec.write({'sync_requested': False})
+        self._sp_commit()
+        label = dict(PAYMENT_STATES).get(rec.state, rec.state)
+        message = 'Durum: %s' % label
+        if rec.last_error_message:
+            message = '%s – %s' % (message, rec.last_error_message)
+        kind = 'success' if result.get('ok') else 'warning'
+        return self._notification_action(message, kind)
+
+    # ---------------------------------------------------------------- yönetici: inceleme (KK-24)
+    def _check_review_action(self):
+        self.ensure_one()
+        if not (self.env.su or self.env.user.has_group('sanal_pos.group_sanal_pos_manager')):
+            raise AccessError('Bu işlem için Sanal POS yönetici yetkisi gerekir.')
+        if self.state != 'review':
+            raise UserError('Bu işlem yalnız "İnceleme gerekli" durumundaki taleplerde yapılabilir.')
+
+    def action_review_accept(self):
+        """İnceleme -> Ödendi (yönetici). KK-30 bildirimi oluşturana gider."""
+        self._check_review_action()
+        rec = self.sudo()
+        if not rec._lock_for_provider_call():
+            raise UserError(BUSY_MSG)
+        rec.invalidate_recordset()
+        rec._check_review_action()
+        amount = rec.paid_amount or rec.amount
+        rec.write({'state': 'paid', 'paid_amount': amount,
+                   'paid_at': rec.paid_at or fields.Datetime.now(),
+                   'last_error_code': False, 'last_error_message': False})
+        rec._notify_creator('%s – %s ödendi (inceleme sonucu kabul eden yönetici: %s)' % (
+            rec.invoice_no, format_try(amount), self.env.user.name))
+        return self._form_action()
+
+    def action_review_close(self):
+        """İnceleme -> Hata (yönetici). Kapatma notu zorunludur (Risk 3): sihirbaz açılır."""
+        self._check_review_action()
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'İncelemeyi Kapat',
+            'res_model': 'sanal.pos.payment.review.close.wizard',
+            'view_mode': 'form',
+            'views': [(False, 'form')],
+            'target': 'new',
+            'context': {'default_payment_id': self.id},
+        }
+
+    def _review_close(self, reason):
+        """Sihirbazdan: notu chatter'a yazar ve kaydı 'Hata' yapar (fatura yeni linke açılır)."""
+        self._check_review_action()
+        reason = (reason or '').strip()
+        if len(reason) < 5:
+            raise UserError('Kapatma notu zorunludur (en az 5 karakter).')
+        rec = self.sudo()
+        if not rec._lock_for_provider_call():
+            raise UserError(BUSY_MSG)
+        rec.invalidate_recordset()
+        rec._check_review_action()
+        rec.write({'state': 'error', 'last_error_code': 'REVIEW_CLOSED',
+                   'last_error_message': ('İnceleme kapatıldı: %s' % reason)[:250]})
+        rec._post_note('İnceleme kapatıldı (yönetici: %s). Not: %s' % (self.env.user.name, reason))
+        return self._form_action()
+
+    # ---------------------------------------------------------------- cron'lar (KK-25, KK-27, KK-39)
+    @api.model
+    def _sync_candidate_ids(self, limit):
+        """Kilitsiz aday listesi: bayraklı > bayat sending > unknown/sent (en eski sorgu önce)."""
+        self.flush_model()
+        cr = self.env.cr
+        stale_before = fields.Datetime.now() - STALE_SENDING_AGE
+        ids = []
+        for query, params in (
+            ('SELECT id FROM sanal_pos_payment WHERE sync_requested ORDER BY id LIMIT %s', []),
+            ("SELECT id FROM sanal_pos_payment WHERE state = 'sending' AND create_date < %s "
+             'ORDER BY id LIMIT %s', [stale_before]),
+            ("SELECT id FROM sanal_pos_payment WHERE state IN ('unknown', 'sent') "
+             'ORDER BY last_checked_at ASC NULLS FIRST, id LIMIT %s', []),
+        ):
+            cr.execute(query, params + [limit])
+            for (pid,) in cr.fetchall():
+                if pid not in ids:
+                    ids.append(pid)
+        return ids[:limit]
+
+    def _cron_sync_one(self):
+        """Kilitli kayıt üzerinde tek senkron adımı. False: kayıt bu tur uygun değil."""
+        self.ensure_one()
+        if not self._try_lock_skip_locked():
+            return False
+        self.invalidate_recordset()
+        now = fields.Datetime.now()
+        if self.state == 'sending':
+            if not self.create_date or self.create_date >= now - STALE_SENDING_AGE:
+                return False  # G7 isteği sürüyor olabilir; bayrak korunur
+            self._mark_stale_sending()
+        if self.state == 'unknown':
+            self._reconcile_unknown_link()
+        elif self.state == 'sent' or self.sync_requested:
+            self._sync_status()
+        else:
+            return False
+        self.write({'sync_requested': False, 'last_checked_at': fields.Datetime.now()})
+        return True
+
+    @api.model
+    def _cron_sync(self, limit=CRON_SYNC_LIMIT):
+        """10 dakikalık senkron: kayıt başına savepoint + SKIP LOCKED + commit; hata izolasyonu."""
+        Payment = self.sudo()
+        started = time.monotonic()
+        for pid in Payment._sync_candidate_ids(limit):
+            if time.monotonic() - started > CRON_TIME_BUDGET:
+                Payment._trigger_sync_cron(at=fields.Datetime.now())
+                break
+            rec = Payment.browse(pid)
+            try:
+                with self.env.cr.savepoint():
+                    rec._cron_sync_one()
+            except Exception as exc:  # noqa: BLE001 - tek kayıt cron'u durdurmaz (KK-25)
+                _logger.warning('sanal_pos: senkron hatası (%s), ödeme id=%s',
+                                type(exc).__name__, pid)
+                try:
+                    with self.env.cr.savepoint():
+                        rec.write({'last_checked_at': fields.Datetime.now()})
+                except Exception as exc2:  # noqa: BLE001
+                    _logger.warning('sanal_pos: son sorgu zamanı yazılamadı (%s), ödeme id=%s',
+                                    type(exc2).__name__, pid)
+            Payment._sp_commit()
+        return True
+
+    @api.model
+    def _cron_daily(self):
+        """Günlük: log temizliği (KK-39) + son 30 günde ödenenlerin iade senkronu (KK-27)."""
+        self.env['sanal.pos.log'].sudo()._purge_old()
+        self._sp_commit()
+        Payment = self.sudo()
+        now = fields.Datetime.now()
+        local_now = now.replace(tzinfo=_UTC).astimezone(_ISTANBUL)
+        day_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0) \
+            .astimezone(_UTC).replace(tzinfo=None)
+        candidates = Payment.search([
+            ('state', 'in', ('paid', 'partial_refund')),
+            ('paid_at', '>=', now - REFUND_SYNC_WINDOW),
+            '|', ('last_refund_sync_at', '=', False), ('last_refund_sync_at', '<', day_start),
+        ], order='id', limit=1000)
+        started = time.monotonic()
+        for pid in candidates.ids:
+            if time.monotonic() - started > CRON_TIME_BUDGET:
+                break  # kalanlar ertesi gün (gün içinde ikinci kez sorgulanmaz)
+            rec = Payment.browse(pid)
+            try:
+                with self.env.cr.savepoint():
+                    if rec._try_lock_skip_locked():
+                        rec.invalidate_recordset()
+                        rec._sync_status()
+                        rec.write({'last_refund_sync_at': fields.Datetime.now()})
+            except Exception as exc:  # noqa: BLE001
+                _logger.warning('sanal_pos: günlük iade senkronu hatası (%s), ödeme id=%s',
+                                type(exc).__name__, pid)
+            Payment._sp_commit()
+        return True
 
     def _recompute_refund_state(self):
         """İade satırlarından durumu yeniden hesaplar (yalnız paid/partial_refund kayıtlara).

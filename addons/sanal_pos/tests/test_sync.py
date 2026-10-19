@@ -568,8 +568,11 @@ class TestUnknownReconcile(SyncCase):
         self.assertTrue(payment.expires_at)
 
     def test_kk16_link_bulunamazsa_hata(self):
-        payment = self.make_payment(state='unknown', provider_token=False, sent_at=False, expires_at=False)
+        # Yönetici kararı (G8 Risk 1): "bulunamadı" en az 2 sorgu + ilk belirsizlikten >= 15 dk
+        payment = self.make_payment(state='unknown', provider_token=False, sent_at=False, expires_at=False,
+                                    unknown_since=datetime.utcnow() - timedelta(minutes=20))
         with self.patch_find_link(found=False):
+            self.run_cron(CRON_SYNC)
             self.run_cron(CRON_SYNC)
         payment.invalidate_recordset()
         self.assertEqual(payment.state, 'error')
@@ -598,7 +601,10 @@ class TestUnknownReconcile(SyncCase):
         self.wizard(channel_sms=True, channel_email=True).action_create_link()
         payment = self.last_payment()
         self.assertEqual(payment.state, 'unknown')
+        # Yönetici kararı (G8 Risk 1): "bulunamadı" en az 2 sorgu + ilk belirsizlikten >= 15 dk
+        payment.sudo().write({'unknown_since': datetime.utcnow() - timedelta(minutes=20)})
         with self.patch_find_link(found=False):
+            self.run_cron(CRON_SYNC)
             self.run_cron(CRON_SYNC)
         payment.invalidate_recordset()
         self.assertEqual(payment.state, 'error')
@@ -621,8 +627,11 @@ class TestReviewActions(SyncCase):
         self.assertIn(self.user_mgr.name, self.chatter(payment))
 
     def test_yonetici_inceleme_kapatir(self):
+        # Yönetici kararı (G8 Risk 3): kapatma notu zorunlu; düğme not sihirbazını açar
         payment = self.review()
-        payment.with_user(self.user_mgr).action_review_close()
+        action = payment.with_user(self.user_mgr).action_review_close()
+        self.env[action['res_model']].with_user(self.user_mgr).with_context(action['context']).create(
+            {'reason': 'Paratika panelinde tahsilat yok'}).action_confirm()
         payment.invalidate_recordset()
         self.assertEqual(payment.state, 'error')
 

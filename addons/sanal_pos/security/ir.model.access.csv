@@ -6,3 +6,4 @@ access_sanal_pos_refund_manager,sanal.pos.refund manager,model_sanal_pos_refund,
 access_sanal_pos_log_manager,sanal.pos.log manager,model_sanal_pos_log,group_sanal_pos_manager,1,0,0,0
 access_sanal_pos_payment_create_wizard_user,sanal.pos.payment.create.wizard user,model_sanal_pos_payment_create_wizard,group_sanal_pos_user,1,1,1,0
 access_sanal_pos_payment_create_wizard_manager,sanal.pos.payment.create.wizard manager,model_sanal_pos_payment_create_wizard,group_sanal_pos_manager,1,1,1,0
+access_sanal_pos_payment_review_close_wizard_manager,sanal.pos.payment.review.close.wizard manager,model_sanal_pos_payment_review_close_wizard,group_sanal_pos_manager,1,1,1,0
