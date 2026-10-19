@@ -394,8 +394,9 @@ class SanalPosProviderParatika(models.AbstractModel):
         """Belirsiz linki uzlaştırır (KK-16): MERCHANTNOTE + tarih aralığı ile arar.
 
         Eşleşme: tutar eşit, ``createdTs`` gönderimden 2 dk öncesinden yeni, token başka
-        kayıtta kullanılmamış. Birden fazla aday -> ``ambiguous=True``, ``ok=False``,
-        ``timeout=True`` (kayıt Belirsiz kalır; yönetici Paratika panelinden bakar).
+        kayıtta kullanılmamış. Birden fazla aday ya da liste dolu ama aday yok (Ö-B) ->
+        ``ambiguous=True``, ``ok=False``, ``timeout=True`` (kayıt Belirsiz kalır; yönetici
+        Paratika panelinden bakar). Yalnız boş liste "bulunamadı"dır.
         """
         payment.ensure_one()
         payment = payment.sudo()
@@ -418,7 +419,8 @@ class SanalPosProviderParatika(models.AbstractModel):
         sending_at = (payment.create_date or base) - timedelta(minutes=2)
         used = self.env['sanal.pos.payment'].sudo()
         candidates = []
-        for item in (data or {}).get('payByLinkPaymentList') or []:
+        items = (data or {}).get('payByLinkPaymentList') or []
+        for item in items:
             token = item.get('token')
             if not token:
                 continue
@@ -434,6 +436,12 @@ class SanalPosProviderParatika(models.AbstractModel):
             res.update(
                 ok=False, timeout=True, ambiguous=True, error_code='AMBIGUOUS',
                 error_message='Birden fazla aday link bulundu; Paratika panelinden kontrol edin.')
+        elif items and not candidates:
+            # Ö-B: MPID notuyla kalem döndü ama hiçbiri eşleşmedi (tutar/zaman/token). Bu
+            # "bulunamadı" değildir; sayılırsa kayıt Hata olur ve geç ödeme çift tahsilata döner.
+            res.update(
+                ok=False, timeout=True, ambiguous=True, error_code='AMBIGUOUS',
+                error_message='Ödeme numarasıyla eşleşmeyen link kaydı bulundu; Paratika panelinden kontrol edin.')
         elif candidates:
             res.update(found=True, token=str(candidates[0]['token']),
                        status=candidates[0].get('status'))

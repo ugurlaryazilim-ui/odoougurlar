@@ -437,6 +437,50 @@ class TestOtherActions(ProviderCase):
         self.assertFalse(res['ok'])
         self.assertTrue(res['timeout'])
 
+    def _find_with(self, *items, invoice_no=INV_NO):
+        payment = self.make_payment(state='unknown', provider_token=False, invoice_no=invoice_no,
+                                    sent_at=datetime.utcnow().replace(microsecond=0))
+        self.mock.queue('QUERYPAYBYLINKPAYMENT', ok_body(payByLinkPaymentList=list(items)))
+        return payment, self.provider.find_link(payment)
+
+    def link_item(self, token, amount='9000.00', **kw):
+        epoch_ms = int(datetime.utcnow().timestamp() * 1000)
+        return dict({'token': token, 'amount': amount, 'createdTs': epoch_ms, 'status': 'ACTIVE'}, **kw)
+
+    def test_kk16_find_link_tek_aday_bulunur(self):
+        _payment, res = self._find_with(self.link_item('TOK-FL1'))
+        self.assertTrue(res['ok'])
+        self.assertTrue(res['found'])
+        self.assertEqual(res['token'], 'TOK-FL1')
+
+    def test_kk16_find_link_iki_aday_ambiguous(self):
+        _payment, res = self._find_with(self.link_item('TOK-FL1'), self.link_item('TOK-FL2'))
+        self.assertTrue(res['ambiguous'])
+        self.assertFalse(res['ok'])
+        self.assertFalse(res['found'])
+
+    def test_ob_liste_dolu_ama_aday_yoksa_ambiguous_bulunamadi_degil(self):
+        """Ö-B: MERCHANTNOTE (MPID) ile gelen kalemler eşleşmiyorsa 'bulunamadı' sayılmaz."""
+        other = self.make_payment(invoice_no='UGRFL-OTHER', provider_token='TOK-USED')
+        cases = (
+            ('tutar farklı', self.link_item('TOK-FL3', amount='8999.99')),
+            ('token başka kayıtta', self.link_item(other.provider_token)),
+            ('token yok', self.link_item(False)),
+        )
+        for i, (label, item) in enumerate(cases):
+            with self.subTest(label):
+                payment, res = self._find_with(item, invoice_no='UGRFL-%d' % i)
+                self.assertTrue(res['ambiguous'], label)
+                self.assertFalse(res['ok'])
+                self.assertFalse(res['found'])
+                self.assertEqual(res['error_code'], 'AMBIGUOUS')
+                # kayıt unknown kalır, LINK_NOT_FOUND sayacı artmaz
+                self.mock.queue('QUERYPAYBYLINKPAYMENT', ok_body(payByLinkPaymentList=[item]))
+                payment.sudo()._reconcile_unknown_link()
+                payment.invalidate_recordset()
+                self.assertEqual(payment.state, 'unknown')
+                self.assertEqual(payment.link_not_found_count, 0)
+
     def test_void_istegi(self):
         payment = self.make_paid(self.sent(), tran_ref='T1')
         line = self.make_refund_line(payment, 9000.0, kind='void', state='processing')
