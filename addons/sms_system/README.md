@@ -43,6 +43,8 @@ Yeni kolonlar redeploy ile `-u sms_system` arasında yoktur; bu pencerede `sms_s
    ```
    docker exec <odoo-konteyner> odoo -d ugurlar -u sms_system --stop-after-init --no-http
    ```
+   `<veritabanı_adı>`: canlı veritabanının adı; Coolify'daki Odoo servisinin `DB_NAME`/`POSTGRES_DB` ortam değişkeninde ya da
+   `docker exec <odoo-konteyner> psql -l` çıktısında görünür (emin değilsen komutu çalıştırma, önce adı doğrula).
    tailor/vendor_claim bağımlı olarak birlikte yükselir. Yeni kolonlar: `provider_packet_id`, `delivery_state`,
    `delivery_code`, `provider_service`, `provider_account_id`.
 3. `-u` biter bitmez **cron'ları aç** (not edilen id'lerle):
@@ -67,6 +69,9 @@ Yeni kolonlar redeploy ile `-u sms_system` arasında yoktur; bu pencerede `sms_s
   Telefondaki SMS'te **adın doğru çözüldüğünü** ve kayıttaki `body` ile aynı olduğunu gör. **`{1}` (ya da başka
   bir yer tutucu) görünüyorsa test modunu KAPATMA**: `{ad}` -> `{1}` + `parameter` sözdizimi canlıda henüz
   görülmedi (C0 SendSms'i kapsamadı); yanlışsa ilk gerçek kampanya binlerce alıcıya "Merhaba {1}" olarak gider.
+- [ ] **Jeton yenilemesi:** jeton ~30 dk önbellekte tutulur. İlk SMS'ten en az 30 dk sonra bir SMS daha gönder ve
+  başarılı gittiğini gör (jeton yenilemesi canlıda yalnız böyle görülür).
+- [ ] **Turatel adresleri** (Ayarlar > tekli/toplu servis adresi) `https://` ile başlamalı; `http://` kaydedilmez.
 - [ ] İsteğe bağlı: kendi İYS onaylı numarana ticari kampanya (reklam seti). Mersis no ret metninin içinde olmalı.
 - [ ] "Durumu Sorgula" ve durum cron'u **gerçek satır döndürür** ve "İletildi" yazar; SMS "Onay Bekliyor"da kalmaz.
 - [ ] **`-6` doğrulaması:** kayıt varken de `-6` (boş) dönüyorsa durum takibi doğrulanmamıştır; **test modunu kapatma**,
