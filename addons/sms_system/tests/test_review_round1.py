@@ -13,7 +13,7 @@ from odoo.exceptions import AccessError, UserError
 from odoo.tests.common import tagged
 
 
-from .common import SmsTestCase
+from .common import SmsHttpCase, SmsTestCase
 from .test_campaign import CampaignMixin
 
 MAX_RETRY = 3
@@ -137,3 +137,34 @@ class TestO1LegacyUncertainMigration(CampaignMixin, SmsTestCase):
             camp.action_retry_errors()   # kampanyada yalnız belirsizler var: hiçbiri kuyruğa alınmaz
         self.Campaign._cron_process_queue()
         self.assertEqual(self.net.sent_numbers, [not_sent.number])
+
+
+# ==== S3 G-3 ====
+@tagged('post_install', '-at_install')
+class TestG3RetryGroup(SmsTestCase):
+
+    def test_g3_duz_kullanici_action_retry_access_error(self):
+        msg = self.make_message(state='error', retry_count=MAX_RETRY, user_id=self.plain_user.id)
+        with self.assertRaises(AccessError):
+            msg.with_user(self.plain_user).action_retry()
+        msg.invalidate_recordset()
+        self.assertEqual(msg.state, 'error')
+
+    def test_g3_sms_yoneticisi_kuyruga_alabilir(self):
+        msg = self.make_message(state='error', retry_count=MAX_RETRY, user_id=self.plain_user.id)
+        msg.with_user(self.sms_manager).action_retry()
+        msg.invalidate_recordset()
+        self.assertEqual(msg.state, 'queued')
+
+
+@tagged('post_install', '-at_install')
+class TestG3RetryGroupRpc(SmsHttpCase):
+
+    def test_g3_rpc_action_retry_reddedilir_ve_durum_degismez(self):
+        msg = self.make_message(state='error', retry_count=MAX_RETRY, user_id=self.plain_user.id)
+        self.authenticate(self.plain_user.login, self.PW)
+        body = self.call_kw('sms.system.message', 'action_retry', [[msg.id]])
+        self.assertIn('error', body, 'düz kullanıcı RPC ile yeniden gönderimi kuyruğa aldı')
+        self.assertIn('AccessError', str(body['error']))
+        self.env.invalidate_all()
+        self.assertEqual(msg.state, 'error')

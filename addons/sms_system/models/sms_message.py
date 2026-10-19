@@ -4,7 +4,7 @@ from datetime import timedelta
 from psycopg2 import errors as pg_errors
 
 from odoo import _, api, fields, models
-from odoo.exceptions import UserError
+from odoo.exceptions import AccessError, UserError
 
 from ..services.turatel import (MAX_SEGMENTS, TuratelClient, TuratelError, normalize_number, prepare_text,
                                 segment_count)
@@ -269,7 +269,10 @@ class SmsSystemMessage(models.Model):
 
         Belirsiz, gönderiliyor ya da başka bir işlemde kilitli kayıtlar atlanır (KK-A16, A17).
         retry_count değişmez; gönderim kuyruk cron'unun tetiklenmesiyle saniyeler içinde yapılır.
+        Yalnız SMS yöneticisi: düğmedeki groups yalnız görünürlüktür, RPC yolunu sunucu tarafı denetim kapatır (G-3).
         """
+        if not (self.env.su or self.env.user.has_group('sms_system.group_sms_manager')):
+            raise AccessError(_('Yalnız SMS yöneticileri SMS yeniden gönderebilir.'))
         candidates = self.filtered(lambda m: m.state == 'error' and not m.campaign_id)
         queued = self.sudo()._lock_for_send(candidates.ids, ('error',))
         if queued:
