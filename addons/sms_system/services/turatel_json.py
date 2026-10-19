@@ -36,6 +36,8 @@ TZ = pytz.timezone('Europe/Istanbul')
 AUTH_ERROR = 'Turatel kimlik hatası (kullanıcı adı/şifre/userId ya da jeton reddedildi)'
 AUTH_CODES = {'-1'}
 STATUS_EMPTY_CODES = {'-6'}   # durum uçlarında "kayıt yok" (C0, belgesiz)
+# 301/307/308: hedef taşınmış, istek işlenmeden geri çevrildi (RFC 9110 §15.4). 302/303 işlenmiş olabilir.
+REDIRECT_NOT_PROCESSED = frozenset({301, 307, 308})
 TOKEN_TTL = 30 * 60        # sn; yanıtta süre yoksa jeton en çok bu kadar önbellekte kalır (Ö2)
 TOKEN_MARGIN = 60          # sn; yanıttaki süreden düşülen pay (saat kayması, istek süresi)
 TOKEN_MIN_TTL = 30         # sn
@@ -257,8 +259,9 @@ class TuratelJsonClient:
         headers = {'Content-Type': 'application/json'}
         if token:
             headers['Authorization'] = 'Bearer ' + token
+        # Yönlendirme izlenmez (G-C3): izlenseydi istek (jeton/şifre) başka adrese, POST da GET'e dönüşerek giderdi
         return requests.post('%s/%s' % (self.base_url, endpoint), json=payload, headers=headers,
-                             timeout=self.timeout)
+                             timeout=self.timeout, allow_redirects=False)
 
     def _request(self, endpoint, payload, token, reading, empty_codes=()):
         """Tek POST; zarfı çöz ve ``data`` döndür. Kimlik reddi ``_AuthFailed``, diğer hatalar ``TuratelError``.
@@ -278,6 +281,11 @@ class TuratelJsonClient:
         if status == 401:
             self._log(endpoint, status, None, None, started)
             raise _AuthFailed()
+        if status in REDIRECT_NOT_PROCESSED:
+            # İşlenmeden geri çevrildi: SendSms için de belirsiz değil, yeniden denenebilir (adres yanlış olabilir)
+            self._log(endpoint, status, None, None, started)
+            raise TuratelError('Turatel HTTP %s yönlendirmesi döndü (izlenmedi); servis adresini kontrol edin.'
+                               % status, retryable=True)
         if status != 200:
             self._log(endpoint, status, None, None, started)
             if reading:

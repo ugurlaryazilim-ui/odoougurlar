@@ -11,6 +11,7 @@ from odoo.tests.common import tagged
 
 from .common import SmsTestCase
 from .test_json_routing import JsonModelMixin, NUMBER, RET_TEXT
+from .test_json_settings import FULL, JsonSettingsMixin
 
 
 class WorkerKilled(BaseException):
@@ -279,3 +280,64 @@ class TestReviewGC2CampaignLocked(JsonModelMixin, SmsTestCase):
         self.assertEqual(sends[0]['user'], 'com_user')
         self.assertEqual(int(sends[0]['payload']['accountId']), 65672)
         self.assertIs(sends[0]['payload']['isCheckBlackList'], True)
+
+
+@tagged('post_install', '-at_install')
+class TestReviewGC3Redirects(JsonModelMixin, SmsTestCase):
+    """G-C3: Turatel JSON istekleri yönlendirme izlemez; 3xx sınıflaması."""
+
+    def test_gc3_istekler_allow_redirects_false(self):
+        msg = self.Message.send_sms(NUMBER, 'Yönlendirme yok')
+        self.assertEqual(msg.state, 'sent', msg.error)
+        self.assertTrue(self.net.json_calls)
+        self.assertEqual({c['allow_redirects'] for c in self.net.json_calls}, {False})
+
+    def test_gc3_301_307_308_sendsms_islenmedi_yeniden_denenebilir(self):
+        for status in (301, 307, 308):
+            with self.subTest(status=status):
+                self.net.tj.add_script('Sms/SendSms', status)
+                msg = self.Message.send_sms(NUMBER, 'Kalıcı yönlendirme %s' % status)
+                self.assertEqual((msg.state, msg.retry_count), ('error', 1), msg.error)
+                self.assertIn(str(status), msg.error)
+                self.assertIn('yönlendirme', msg.error)
+
+    def test_gc3_302_303_sendsms_belirsiz(self):
+        for status in (302, 303):
+            with self.subTest(status=status):
+                self.net.tj.add_script('Sms/SendSms', status)
+                msg = self.Message.send_sms(NUMBER, 'Belirsiz yönlendirme %s' % status)
+                self.assertEqual(msg.state, 'uncertain', msg.error)
+
+    def test_gc3_okuma_ucunda_yonlendirme_yeniden_denenebilir(self):
+        from odoo.addons.sms_system.services.turatel import TuratelError
+        client = self.json_client('info')
+        self.net.tj.add_script('Sms/GetCredit', 308)
+        with self.assertRaises(TuratelError) as ctx:
+            client.get_credit(9254)
+        self.assertTrue(ctx.exception.retryable)
+        self.assertFalse(ctx.exception.uncertain)
+
+
+@tagged('post_install', '-at_install')
+class TestReviewGC3Https(JsonSettingsMixin, SmsTestCase):
+    """G-C3: JSON servis adresleri https olmalı; hata ayar kaydında, hiçbir parametre yazılmadan."""
+
+    def test_gc3_http_adres_kaydedilemez_parametreler_degismez(self):
+        self.save_screen(**FULL)
+        for field, key in (('sms_single_url', 'turatel_single_url'), ('sms_bulk_url', 'turatel_bulk_url')):
+            with self.subTest(alan=field):
+                before = {k: self.param(k) for k in ('turatel_single_url', 'turatel_bulk_url',
+                                                     'turatel_json_info_username')}
+                bad = FULL[field].replace('https://', 'http://')
+                try:
+                    self.save_screen(**dict(FULL, sms_json_info_username='baska_user', **{field: bad}))
+                except UserError as e:
+                    self.assertIn('https://', str(e))
+                else:
+                    self.fail('http:// adres kaydedilmemeli: %s' % field)
+                self.assertEqual({k: self.param(k) for k in before}, before)
+                self.assertEqual(self.param(key), FULL[field])
+
+    def test_gc3_https_buyuk_harf_ve_bos_adres_kabul(self):
+        self.save_screen(**dict(FULL, sms_single_url='HTTPS://platform.turatel.com/singlesms', sms_bulk_url=''))
+        self.assertEqual(self.param('turatel_single_url'), 'HTTPS://platform.turatel.com/singlesms')

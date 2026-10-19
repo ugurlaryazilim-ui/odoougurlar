@@ -185,6 +185,10 @@ class ResConfigSettings(models.TransientModel):
         for name in _JSON_DIGIT_FIELDS:
             if values[name] and not values[name].isdigit():
                 raise UserError(_('"%s" yalnız rakamlardan oluşmalıdır.') % self._fields[name].string)
+        for name in ('sms_single_url', 'sms_bulk_url'):
+            # Jeton ve şifre bu adreslere gider: düz http kabul edilmez (G-C3); boş = varsayılan https adres
+            if values[name] and not values[name].lower().startswith('https://'):
+                raise UserError(_('"%s" https:// ile başlamalıdır.') % self._fields[name].string)
         mode = self.sms_api_mode if self.sms_api_mode in API_MODES else 'legacy_xml'
         values['sms_api_mode'] = mode
         values['sms_validity_minutes'] = parse_validity_minutes(self.sms_validity_minutes)

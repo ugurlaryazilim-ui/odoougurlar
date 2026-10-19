@@ -296,6 +296,8 @@ class FakeTuratelJson:
             self._violate(call, 'Content-Type application/json değil')
         if call['timeout'] is None:
             self._violate(call, 'zaman aşımı verilmemiş')
+        if call['allow_redirects'] is not False:
+            self._violate(call, 'yönlendirme izlenmemeli (allow_redirects=False, G-C3)')
         if endpoint in ('Sms/ConfirmSms', 'Sms/AbortSms'):
             self._violate(call, 'çağrılmamalı (KK-C25)')
             return
@@ -348,6 +350,7 @@ class FakeTuratelJson:
         bearer = bearer[7:] if bearer.startswith('Bearer ') else None
         call = {'kind': 'turatel_json', 'url': url, 'service': match.group(1).lower(), 'endpoint': match.group(2),
                 'payload': payload, 'headers': headers, 'timeout': kwargs.get('timeout'), 'bearer': bearer,
+                'allow_redirects': kwargs.get('allow_redirects', True),
                 'body': json.dumps(payload) if payload is not None else '', 'user': None}
         self.net.calls.append(call)
         self.net.events.append(('post', 'turatel_json'))
