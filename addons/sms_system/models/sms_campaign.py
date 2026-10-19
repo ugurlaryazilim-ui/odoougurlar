@@ -636,7 +636,7 @@ class SmsSystemCampaign(models.Model):
                     # sonraki çalışmaya kalır (aynı kayıtları yeniden çekip dönmesin)
                     held = bool(pack.filtered(lambda m: m.state == 'queued') - sendable)
                     if sendable:
-                        sendable.write({'state': 'sending'})
+                        sendable._mark_sending(cfg, 'bulk', sendable._pack_purpose())
                         IrCron._commit_progress()
                         sendable._deliver_pack(cfg, client)
                         if IrCron._commit_progress(len(sendable)) < MIN_TIME_LEFT:

@@ -219,6 +219,30 @@ class SmsSystemMessage(models.Model):
         return TuratelJsonClient(url, user_id, username, password), account
 
     @api.model
+    def _json_target(self, cfg, service, purpose='info'):
+        """JSON modunda kaydın gideceği servis ve hesap (C5 uzlaştırma bağlamı); legacy ya da set yoksa {}."""
+        if cfg['api_mode'] != 'json':
+            return {}
+        creds = cfg['json_creds'].get('commercial' if purpose == 'commercial' else 'info')
+        return {'provider_service': service, 'provider_account_id': creds[3]} if creds else {}
+
+    def _mark_sending(self, cfg, service, purpose='info'):
+        """'sending' yazımı; JSON modunda servis ve hesap da aynı yazımda (KK-C16, Ö1).
+
+        Çağıran hemen ardından commit eder ve sağlayıcıyı çağırır: işçi SendSms sırasında ölürse takılı kayıt
+        süpürmesi kaydı belirsiz yapar ve C5 durum cron'u / "Durumu Sorgula" onu bu bağlamla bulur. Test modunda
+        gönderilmeyecek (engellenen) kayıtlar bağlam almaz.
+        """
+        target = self._json_target(cfg, service, purpose)
+        blocked = self.filtered(lambda m: self._blocked_by_test_mode(cfg, normalize_number(m.number)))
+        (self - blocked).write(dict(target, state='sending'))
+        blocked.write({'state': 'sending'})
+
+    def _pack_purpose(self):
+        """Paketin kimlik seti: ticari kampanya → reklam, diğerleri → bilgi (tek karar noktası)."""
+        return 'commercial' if self[:1].campaign_id.message_type == 'commercial' else 'info'
+
+    @api.model
     def _legacy_client(self, cfg=None):
         cfg = cfg or self._settings()
         return TuratelClient(cfg['channel_code'], cfg['username'], cfg['password'], url=cfg['url'])
@@ -486,7 +510,7 @@ class SmsSystemMessage(models.Model):
         `{1}` şablonu + alıcı başına parameter ile gider (_json_pack_content).
         """
         first = self[0]
-        purpose = 'commercial' if first.campaign_id.message_type == 'commercial' else 'info'
+        purpose = self._pack_purpose()
         try:
             client, account = self._client(cfg, service='bulk', purpose=purpose)
         except TuratelError as e:
@@ -814,7 +838,7 @@ class SmsSystemMessage(models.Model):
             msg = self._lock_for_send([msg_id], states)
             if not msg:
                 continue
-            msg.write({'state': 'sending'})
+            msg._mark_sending(cfg, 'single')
             IrCron._commit_progress()
             msg._deliver(cfg)
             if IrCron._commit_progress(1) < SINGLE_MIN_TIME_LEFT:
