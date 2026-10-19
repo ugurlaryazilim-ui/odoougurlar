@@ -215,6 +215,32 @@ class TestTestMode(SettingsMixin, SmsTestCase):
         self.assertEqual(res.get('sms_turatel_password'), 'TURATEL-SIR-1')
         self.assertEqual(res.get('sms_iys_password'), 'SMARTADM-SIR-2')
 
+    # ── A2-G1: get_values de (RPC'ye açık, @api.model) gruplu sms_* alanı döndürmemeli ──
+    # Bugün çekirdek get_values {} döner (config_parameter alanları default_get'ten gelir); bu testler zincirdeki
+    # bir get_values'un (ör. sonraki JSON şifresi) yönetici olmayana sızmasını yakalar.
+    def _leaky_get_values(self):
+        return {'sms_turatel_password': 'TURATEL-SIR-1', 'sms_iys_password': 'SMARTADM-SIR-2',
+                'sms_turatel_originator': 'BASLIK'}
+
+    def test_a2_g1_get_values_yonetici_olmayana_gruplu_alanlari_dondurmez(self):
+        names = self._restricted_sms_fields()
+        with patch('odoo.addons.base.models.res_config.ResConfigSettings.get_values', self._leaky_get_values):
+            for user in (self.plain_user, self.sms_manager):
+                with self.subTest(user=user.login):
+                    res = self.Settings.with_user(user).get_values()
+                    for name in names:
+                        self.assertNotIn(name, res, '%s yönetici olmayana döndü' % name)
+                    self.assertNotIn('TURATEL-SIR-1', repr(res))
+                    self.assertNotIn('SMARTADM-SIR-2', repr(res))
+                    self.assertEqual(res.get('sms_turatel_originator'), 'BASLIK')   # gruplu olmayan etkilenmez
+                    self.assertIn('sms_test_mode', res)
+
+    def test_a2_g1_get_values_sistem_yoneticisi_sirlari_gorur(self):
+        with patch('odoo.addons.base.models.res_config.ResConfigSettings.get_values', self._leaky_get_values):
+            res = self.Settings.with_user(self.admin_user).get_values()
+        self.assertEqual(res.get('sms_turatel_password'), 'TURATEL-SIR-1')
+        self.assertEqual(res.get('sms_iys_password'), 'SMARTADM-SIR-2')
+
     # ── KK-A5 (ek): bozuk değer ekranı kırmaz, varsayılana düşer ──
     def test_kk_a5_bozuk_limit_degeri_varsayilan_50(self):
         for value in ('', 'abc', '-3'):
@@ -251,3 +277,15 @@ class TestSettingsRpc(SettingsMixin, SmsHttpCase):
         self.assertNotIn('SMARTADM-SIR-2', repr(body))
         for name in ('sms_turatel_password', 'sms_iys_password'):
             self.assertNotIn(name, body.get('result') or {})
+
+    # ── A2-G1 (RPC) ──
+    def test_a2_g1_rpc_get_values_sirlari_dondurmez(self):
+        self.icp.set_param('sms_system.turatel_password', 'TURATEL-SIR-1')
+        self.icp.set_param('sms_system.iys_password', 'SMARTADM-SIR-2')
+        self.authenticate(self.plain_user.login, self.PW)
+        body = self.call_kw('res.config.settings', 'get_values', [])
+        self.assertNotIn('TURATEL-SIR-1', repr(body))
+        self.assertNotIn('SMARTADM-SIR-2', repr(body))
+        result = body.get('result') or {}
+        for name in ('sms_turatel_password', 'sms_iys_password', 'sms_turatel_username'):
+            self.assertNotIn(name, result)

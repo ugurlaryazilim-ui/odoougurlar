@@ -48,12 +48,24 @@ class ResConfigSettings(models.TransientModel):
                               help='Boşsa https://adm.smartadm.net/webservice/api')
 
     @api.model
+    def _drop_restricted_sms_values(self, res):
+        """Sistem yöneticisi olmayandan groups'lu sms_* alanlarını düşür (DERSLER 19.10).
+
+        default_get ve get_values RPC'ye açıktır ve config_parameter sırlarını sudo ile okuyabilir.
+        """
+        if not (self.env.su or self.env.user.has_group('base.group_system')):
+            for name, field in self._fields.items():
+                if name.startswith('sms_') and field.groups:
+                    res.pop(name, None)
+        return res
+
+    @api.model
     def get_values(self):
         res = super().get_values()
         icp = self.env['ir.config_parameter'].sudo()
         res['sms_test_mode'] = test_mode_enabled(icp.get_param('sms_system.test_mode'))
         res['sms_user_daily_limit'] = parse_user_daily_limit(icp.get_param('sms_system.user_daily_limit'))
-        return res
+        return self._drop_restricted_sms_values(res)
 
     def set_values(self):
         # Çekirdek set_values RPC'ye açıktır (yönetici denetimi yalnız execute'ta): super()'den ÖNCE denetle.
@@ -67,14 +79,7 @@ class ResConfigSettings(models.TransientModel):
 
     @api.model
     def default_get(self, fields_list):
-        res = super().default_get(fields_list)
-        # Çekirdek default_get groups'lu config_parameter alanlarını sudo ile okuyup RPC'ye döndürür:
-        # sistem yöneticisi olmayana yetkisi gerektiren sms_* alanlarını verme (DERSLER 19.10).
-        if not (self.env.su or self.env.user.has_group('base.group_system')):
-            for name, field in self._fields.items():
-                if name.startswith('sms_') and field.groups:
-                    res.pop(name, None)
-        return res
+        return self._drop_restricted_sms_values(super().default_get(fields_list))
 
     def action_iys_test(self):
         self.ensure_one()
