@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sanal POS uygulama ikonu (256x256). Marka/logo içermez: kredi kartı + POS cihazı.
+     icon.png bu çizimin birebir PIL karşılığıdır (bağımlılık eklememek için PNG PIL ile üretildi). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <rect width="256" height="256" rx="48" fill="#0E8F7E"/>
+  <g transform="rotate(-12 128 128)">
+    <rect x="34" y="56" width="148" height="92" rx="14" fill="#FFFFFF"/>
+    <rect x="34" y="76" width="148" height="20" fill="#0B5E52"/>
+    <rect x="50" y="108" width="30" height="22" rx="5" fill="#F4B942"/>
+    <rect x="92" y="114" width="64" height="8" rx="4" fill="#C7D3D1"/>
+  </g>
+  <rect x="128" y="120" width="88" height="108" rx="14" fill="#26323D"/>
+  <rect x="140" y="132" width="64" height="34" rx="7" fill="#CFEFE8"/>
+  <path d="M158 150 L168 160 L188 140" fill="none" stroke="#0E8F7E" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#8FA3AD">
+    <circle cx="152" cy="186" r="6"/><circle cx="172" cy="186" r="6"/><circle cx="192" cy="186" r="6"/>
+    <circle cx="152" cy="204" r="6"/><circle cx="172" cy="204" r="6"/><circle cx="192" cy="204" r="6"/>
+  </g>
+</svg>

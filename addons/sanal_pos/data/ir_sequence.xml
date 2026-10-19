@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- Ödeme talebi numarası: SP/2026/00001 -->
+    <record id="seq_sanal_pos_payment" model="ir.sequence">
+        <field name="name">Sanal POS Ödeme Talebi</field>
+        <field name="code">sanal.pos.payment</field>
+        <field name="prefix">SP/%(year)s/</field>
+        <field name="padding">5</field>
+        <field name="company_id" eval="False"/>
+    </record>
+</odoo>

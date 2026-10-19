@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- İptal / iade onayı (yönetici, G11): onaylanmadan Paratika'ya istek gitmez (KK-50). -->
+    <record id="view_sanal_pos_payment_refund_wizard_form" model="ir.ui.view">
+        <field name="name">sanal.pos.payment.refund.wizard.form</field>
+        <field name="model">sanal.pos.payment.refund.wizard</field>
+        <field name="arch" type="xml">
+            <form string="İptal / İade Onayı">
+                <field name="is_test" invisible="1"/>
+                <field name="currency_id" invisible="1"/>
+                <div class="alert alert-danger text-center fw-bold" role="alert"
+                     invisible="not is_test">
+                    TEST ORTAMI – gerçek para iadesi yapılmaz
+                </div>
+                <div class="alert alert-warning" role="alert">
+                    Bu işlem geri alınamaz. Onayladığınızda istek Paratika'ya gönderilir.
+                </div>
+                <h3><field name="summary" readonly="1" nolabel="1"/></h3>
+                <group>
+                    <field name="payment_id"/>
+                    <field name="kind" readonly="1"/>
+                    <field name="paid_amount" widget="monetary"/>
+                    <field name="refundable_amount" widget="monetary" invisible="kind == 'void'"/>
+                    <field name="amount" widget="monetary"
+                           options="{'currency_field': 'currency_id'}"
+                           readonly="kind == 'void'"/>
+                    <field name="reason" required="1"
+                           placeholder="İptal/iade nedeni (en az 5 karakter)"/>
+                </group>
+                <footer>
+                    <button name="action_confirm" type="object" class="btn-danger"
+                            string="Onayla ve Paratika'ya gönder"/>
+                    <button string="Vazgeç" special="cancel" class="btn-secondary"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+</odoo>

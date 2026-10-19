@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <record id="res_config_settings_view_form_sanal_pos" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.sanal.pos</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app data-string="Sanal POS" string="Sanal POS" name="sanal_pos" groups="base.group_system">
+                    <block title="Genel" name="sanal_pos_general">
+                        <setting string="Sağlayıcı" help="Şimdilik yalnız Paratika.">
+                            <field name="sanal_pos_provider"/>
+                        </setting>
+                        <setting string="Ortam" help="Test ortamında gerçek tahsilat yapılmaz. Canlıya geçmeden önce Paratika canlı bilgilerini girin.">
+                            <field name="sanal_pos_environment"/>
+                        </setting>
+                        <setting string="Varsayılan geçerlilik süresi (saat)" help="Yeni linkin geçerlilik süresi; 1-168 saat.">
+                            <field name="sanal_pos_default_expiry_hours"/>
+                        </setting>
+                        <setting help="Açıkken geçerli e-posta ve telefon olmadan link oluşturulamaz.">
+                            <field name="sanal_pos_require_contact"/>
+                        </setting>
+                        <setting help="Paratika Türkçe karakterleri kabul etmezse açın (Ç->C, ş->s).">
+                            <field name="sanal_pos_ascii_mode"/>
+                        </setting>
+                    </block>
+
+                    <block title="Paratika" name="sanal_pos_paratika">
+                        <setting string="Üye iş yeri kodu">
+                            <field name="sanal_pos_paratika_merchant"/>
+                        </setting>
+                        <setting string="API kullanıcı adı">
+                            <field name="sanal_pos_paratika_merchant_user"/>
+                        </setting>
+                        <setting string="API şifresi" help="Yalnız Odoo sistem yöneticisi görür; kayıtlara ve loglara yazılmaz.">
+                            <field name="sanal_pos_paratika_merchant_password" password="True"/>
+                        </setting>
+                        <setting string="Gizli anahtar (secretKey)" help="Yalnız Odoo sistem yöneticisi görür.">
+                            <field name="sanal_pos_paratika_secret_key" password="True"/>
+                        </setting>
+                        <setting string="Test API adresi">
+                            <field name="sanal_pos_paratika_test_url"/>
+                        </setting>
+                        <setting string="Canlı API adresi" help="Paratika ile teyit edilmelidir.">
+                            <field name="sanal_pos_paratika_live_url"/>
+                        </setting>
+                        <setting string="Telefon biçimi" help="Paratika'ya gönderilen cep telefonu biçimi.">
+                            <field name="sanal_pos_paratika_phone_format"/>
+                        </setting>
+                        <setting help="Paratika link adresi biçimi teyit edilene kadar kapalı kalmalıdır.">
+                            <field name="sanal_pos_paratika_show_link_url"/>
+                        </setting>
+                        <setting string="Bildirim adresi" help="Bu adresi Paratika panelinde bildirim URL'si olarak tanımlayın.">
+                            <field name="sanal_pos_notify_url" readonly="1"/>
+                        </setting>
+                        <setting string="Dönüş adresi" help="Ödeme sonrası müşterinin döneceği adres.">
+                            <field name="sanal_pos_return_url" readonly="1"/>
+                        </setting>
+                    </block>
+
+                    <block title="Nebim fatura kaynağı (MSSQL)" name="sanal_pos_mssql">
+                        <setting string="Terzi ayarlarından kopyala"
+                                 help="Terzi modülündeki SQL bağlantı bilgilerini bu bölüme kopyalar."
+                                 invisible="not sanal_pos_has_tailor_mssql">
+                            <field name="sanal_pos_has_tailor_mssql" invisible="1"/>
+                            <button name="action_copy_tailor_mssql" type="object" class="btn-link"
+                                    string="Terzi ayarlarından kopyala" icon="oi-arrow-right"
+                                    groups="base.group_system"/>
+                        </setting>
+                        <setting string="SQL Server adresi">
+                            <field name="sanal_pos_mssql_server" placeholder="192.168.0.10"/>
+                        </setting>
+                        <setting string="SQL port">
+                            <field name="sanal_pos_mssql_port"/>
+                        </setting>
+                        <setting string="SQL veritabanı">
+                            <field name="sanal_pos_mssql_database"/>
+                        </setting>
+                        <setting string="Fatura görünümü adı" help="vw_TerziFaturalar v2 (belge: data/sql/vw_TerziFaturalar_v2.sql).">
+                            <field name="sanal_pos_mssql_view_name" placeholder="dbo.vw_TerziFaturalar"/>
+                        </setting>
+                        <setting string="SQL kullanıcı adı" help="Yalnız Odoo sistem yöneticisi görür.">
+                            <field name="sanal_pos_mssql_user"/>
+                        </setting>
+                        <setting string="SQL şifre" help="Yalnız Odoo sistem yöneticisi görür.">
+                            <field name="sanal_pos_mssql_password" password="True"/>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+</odoo>

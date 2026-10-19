@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <menuitem id="menu_sanal_pos_root"
+              name="Sanal POS"
+              web_icon="sanal_pos,static/description/icon.png"
+              groups="sanal_pos.group_sanal_pos_user"
+              sequence="90"/>
+
+    <menuitem id="menu_sanal_pos_new_link"
+              name="Yeni Ödeme Linki"
+              parent="menu_sanal_pos_root"
+              action="action_sanal_pos_payment_create_wizard"
+              groups="sanal_pos.group_sanal_pos_user"
+              sequence="20"/>
+
+    <menuitem id="menu_sanal_pos_payments"
+              name="Ödeme Talepleri"
+              parent="menu_sanal_pos_root"
+              action="action_sanal_pos_payment"
+              groups="sanal_pos.group_sanal_pos_user"
+              sequence="10"/>
+
+    <!-- İşlem kayıtları (API günlüğü) yalnız Sanal POS yöneticisinde (KK-36, KK-39) -->
+    <menuitem id="menu_sanal_pos_logs"
+              name="İşlem Kayıtları"
+              parent="menu_sanal_pos_root"
+              action="action_sanal_pos_log"
+              groups="sanal_pos.group_sanal_pos_manager"
+              sequence="80"/>
+
+    <record id="action_sanal_pos_settings" model="ir.actions.act_window">
+        <field name="name">Ayarlar</field>
+        <field name="res_model">res.config.settings</field>
+        <field name="view_mode">form</field>
+        <field name="target">current</field>
+        <field name="context">{'module': 'sanal_pos', 'bin_size': False}</field>
+    </record>
+
+    <!-- Ayarlar yalnız Odoo sistem yöneticisindedir (tasarım §11, U-1) -->
+    <menuitem id="menu_sanal_pos_settings"
+              name="Ayarlar"
+              parent="menu_sanal_pos_root"
+              action="action_sanal_pos_settings"
+              groups="base.group_system"
+              sequence="90"/>
+</odoo>

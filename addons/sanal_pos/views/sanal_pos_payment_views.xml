@@ -1,0 +1,238 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- Ödeme talepleri: liste / form / arama (tasarım §8, KK-33, KK-34, KK-48).
+         Henüz eylem düğmesi yok; ilgili görevler (G7-G11) başlık düğmelerini ekler. -->
+
+    <record id="view_sanal_pos_payment_list" model="ir.ui.view">
+        <field name="name">sanal.pos.payment.list</field>
+        <field name="model">sanal.pos.payment</field>
+        <field name="arch" type="xml">
+            <list string="Ödeme Talepleri" create="0" edit="0" delete="0"
+                  decoration-muted="state in ('expired', 'link_cancelled', 'voided')">
+                <field name="name" optional="hide"/>
+                <field name="invoice_no"/>
+                <field name="customer_name"/>
+                <field name="customer_phone"/>
+                <field name="currency_id" column_invisible="True"/>
+                <field name="amount" sum="Toplam"/>
+                <field name="refunded_amount" optional="show"/>
+                <field name="channels_display"/>
+                <field name="state" widget="badge"
+                       decoration-success="state == 'paid'"
+                       decoration-info="state in ('sending', 'sent')"
+                       decoration-warning="state in ('unknown', 'review', 'partial_refund')"
+                       decoration-danger="state == 'error'"
+                       decoration-muted="state in ('expired', 'link_cancelled', 'voided', 'refunded')"/>
+                <field name="environment" widget="badge"
+                       decoration-danger="environment == 'test'"
+                       decoration-success="environment == 'live'"/>
+                <field name="user_id" widget="many2one_avatar_user"/>
+                <field name="create_date" string="Oluşturulma"/>
+                <field name="expires_at"/>
+                <field name="paid_at"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_sanal_pos_payment_form" model="ir.ui.view">
+        <field name="name">sanal.pos.payment.form</field>
+        <field name="model">sanal.pos.payment</field>
+        <field name="arch" type="xml">
+            <form string="Ödeme Talebi" create="0" edit="0" delete="0">
+                <header>
+                    <!-- Eylem düğmeleri: Durumu Sorgula / inceleme (G8); Yeniden Gönder, Link İptal (G10) -->
+                    <button name="action_check_status" type="object" string="Durumu Sorgula"
+                            class="btn-secondary" groups="sanal_pos.group_sanal_pos_user"
+                            invisible="state == 'sending'"/>
+                    <button name="action_review_accept" type="object" string="İncelendi: Ödendi kabul et"
+                            class="btn-primary" groups="sanal_pos.group_sanal_pos_manager"
+                            invisible="state != 'review'"
+                            confirm="Paratika panelinde tahsilatı kontrol ettiniz mi? Kayıt Ödendi olarak işaretlenecek."/>
+                    <button name="action_review_close" type="object" string="İncelemeyi Kapat"
+                            class="btn-secondary" groups="sanal_pos.group_sanal_pos_manager"
+                            invisible="state != 'review'"/>
+                    <button name="action_resend" type="object" string="Yeniden Gönder"
+                            class="btn-secondary" groups="sanal_pos.group_sanal_pos_user"
+                            invisible="not can_resend"/>
+                    <button name="action_cancel_link" type="object" string="Linki İptal Et"
+                            class="btn-secondary" groups="sanal_pos.group_sanal_pos_user"
+                            invisible="state != 'sent'"
+                            confirm="Link Paratika'da iptal edilecek. Devam edilsin mi?"/>
+                    <button name="action_new_link" type="object" string="Yeni Link Oluştur"
+                            class="btn-primary" groups="sanal_pos.group_sanal_pos_user"
+                            invisible="state not in ('expired', 'link_cancelled', 'error', 'voided', 'refunded')"/>
+                    <!-- G11: iptal/iade yalnız yönetici; onay sihirbazı açılır (KK-40, KK-41, KK-50) -->
+                    <button name="action_open_void_wizard" type="object" string="Ödemeyi İptal Et"
+                            class="btn-danger" groups="sanal_pos.group_sanal_pos_manager"
+                            invisible="not can_void"/>
+                    <button name="action_open_refund_wizard" type="object" string="İade Et"
+                            class="btn-danger" groups="sanal_pos.group_sanal_pos_manager"
+                            invisible="not can_refund"/>
+                    <field name="state" widget="statusbar"
+                           statusbar_visible="sent,paid,partial_refund,refunded"/>
+                </header>
+                <sheet>
+                    <field name="is_test" invisible="1"/>
+                    <field name="can_resend" invisible="1"/>
+                    <field name="can_void" invisible="1"/>
+                    <field name="can_refund" invisible="1"/>
+                    <field name="currency_id" invisible="1"/>
+                    <div class="alert alert-danger text-center fw-bold" role="alert"
+                         invisible="not is_test">
+                        TEST ORTAMI – gerçek tahsilat yapılmaz
+                    </div>
+                    <div class="alert alert-warning" role="alert"
+                         invisible="not last_error_message or state not in ('sent', 'error', 'unknown', 'review')">
+                        <field name="last_error_message" readonly="1" nolabel="1"/>
+                    </div>
+                    <div class="oe_title">
+                        <h1><field name="name" readonly="1"/></h1>
+                    </div>
+                    <group>
+                        <group string="Fatura">
+                            <field name="invoice_no"/>
+                            <field name="invoice_date"/>
+                            <field name="customer_code"/>
+                            <field name="amount"/>
+                            <field name="state" widget="badge"
+                                   decoration-success="state == 'paid'"
+                                   decoration-info="state in ('sending', 'sent')"
+                                   decoration-warning="state in ('unknown', 'review', 'partial_refund')"
+                                   decoration-danger="state == 'error'"/>
+                        </group>
+                        <group string="Link">
+                            <field name="channels_display"/>
+                            <field name="expiry_hours"/>
+                            <field name="sent_at"/>
+                            <field name="expires_at"/>
+                            <field name="user_id"/>
+                            <field name="environment" widget="badge"
+                                   decoration-danger="environment == 'test'"
+                                   decoration-success="environment == 'live'"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Müşteri" name="customer">
+                            <group>
+                                <group string="Gönderilen bilgiler">
+                                    <field name="customer_name"/>
+                                    <field name="customer_phone"/>
+                                    <field name="customer_email"/>
+                                    <field name="customer_address"/>
+                                    <field name="customer_city"/>
+                                    <field name="customer_zip"/>
+                                </group>
+                                <group string="Faturadaki ham değerler">
+                                    <field name="source_name"/>
+                                    <field name="source_phone"/>
+                                    <field name="source_email"/>
+                                </group>
+                            </group>
+                        </page>
+                        <page string="Ödeme" name="payment">
+                            <group>
+                                <group>
+                                    <field name="paid_at"/>
+                                    <field name="paid_amount"/>
+                                    <field name="installment_count"/>
+                                    <field name="card_last4"/>
+                                    <field name="provider_tran_ref"/>
+                                </group>
+                                <group>
+                                    <field name="failed_attempt_count"/>
+                                    <field name="last_error_code"/>
+                                    <field name="refunded_amount"/>
+                                    <field name="refundable_amount"/>
+                                </group>
+                            </group>
+                        </page>
+                        <page string="İade Geçmişi" name="refunds">
+                            <field name="refund_ids" readonly="1">
+                                <list create="0" edit="0" delete="0">
+                                    <field name="create_date" string="Oluşturulma"/>
+                                    <field name="kind"/>
+                                    <field name="amount"/>
+                                    <field name="state"/>
+                                    <field name="source"/>
+                                    <field name="reason"/>
+                                    <field name="user_id"/>
+                                    <field name="provider_ref"/>
+                                    <field name="error_code" optional="show"/>
+                                    <field name="error_message" optional="hide"/>
+                                    <field name="done_at" optional="hide"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Teknik" name="technical">
+                            <group>
+                                <group>
+                                    <field name="provider"/>
+                                    <field name="merchant_payment_id"/>
+                                    <field name="attempt_no"/>
+                                    <field name="invoice_ref"/>
+                                    <field name="last_checked_at"/>
+                                </group>
+                                <group>
+                                    <!-- KK-17: link adresi ve onu ele geçirmeye yarayan token yalnız
+                                         "link adresini göster" ayarı açıkken görünür. -->
+                                    <field name="link_url" widget="CopyClipboardChar"
+                                           invisible="not link_url"/>
+                                    <field name="provider_token" invisible="not link_url"/>
+                                </group>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_sanal_pos_payment_search" model="ir.ui.view">
+        <field name="name">sanal.pos.payment.search</field>
+        <field name="model">sanal.pos.payment</field>
+        <field name="arch" type="xml">
+            <search string="Ödeme Talepleri">
+                <field name="invoice_no"/>
+                <field name="customer_name"/>
+                <field name="customer_phone"/>
+                <field name="merchant_payment_id" string="Ödeme Numarası"/>
+                <filter name="open" string="Açık"
+                        domain="[('state', 'in', ('sent', 'unknown'))]"/>
+                <separator/>
+                <filter name="paid" string="Ödendi" domain="[('state', '=', 'paid')]"/>
+                <filter name="partial_refund" string="Kısmen iade edildi"
+                        domain="[('state', '=', 'partial_refund')]"/>
+                <filter name="refunded" string="İade edildi" domain="[('state', '=', 'refunded')]"/>
+                <filter name="voided" string="Ödeme iptal edildi" domain="[('state', '=', 'voided')]"/>
+                <filter name="expired" string="Süresi doldu" domain="[('state', '=', 'expired')]"/>
+                <filter name="link_cancelled" string="Link iptal edildi"
+                        domain="[('state', '=', 'link_cancelled')]"/>
+                <filter name="error" string="Hata" domain="[('state', '=', 'error')]"/>
+                <filter name="review" string="İnceleme gerekli" domain="[('state', '=', 'review')]"/>
+                <separator/>
+                <filter name="mine" string="Benim oluşturduklarım"
+                        domain="[('user_id', '=', uid)]"/>
+                <group>
+                    <filter name="group_state" string="Durum" context="{'group_by': 'state'}"/>
+                    <filter name="group_user" string="Oluşturan" context="{'group_by': 'user_id'}"/>
+                    <filter name="group_environment" string="Ortam" context="{'group_by': 'environment'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_sanal_pos_payment" model="ir.actions.act_window">
+        <field name="name">Ödeme Talepleri</field>
+        <field name="res_model">sanal.pos.payment</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_sanal_pos_payment_search"/>
+        <field name="context">{'search_default_open': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">Henüz ödeme talebi yok</p>
+            <p>Fatura numarasıyla oluşturulan ödeme linkleri burada izlenir.
+               "Ortam" sütunundaki kırmızı <b>Test</b> rozeti, kaydın test ortamında
+               oluşturulduğunu ve gerçek tahsilat yapılmadığını gösterir.</p>
+        </field>
+    </record>
+</odoo>
