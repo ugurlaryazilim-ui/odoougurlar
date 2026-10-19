@@ -354,8 +354,17 @@ class SanalPosMixin:
 
     @contextmanager
     def capture_logs(self):
-        """Tüm logger çıktılarını (DEBUG dahil) toplar; liste döner."""
+        """Kodumuzun ürettiği logger çıktılarını (DEBUG dahil) toplar; liste döner.
+
+        ``odoo.sql_db`` DEBUG satırları (``--log-level=test`` altında her SQL'i parametreleriyle
+        yazar) test altyapısına aittir, bizim kodumuz değildir; bu yüzden yakalanmaz.
+        Fixture kurulumunu yakalama BLOĞUNUN DIŞINDA yapın.
+        """
         records = []
+
+        class _Filter(logging.Filter):
+            def filter(self, record):
+                return not record.name.startswith(('odoo.sql_db', 'odoo.tests'))
 
         class _Handler(logging.Handler):
             def emit(self, record):
@@ -365,6 +374,7 @@ class SanalPosMixin:
                     records.append(str(record.msg))
 
         handler = _Handler(logging.DEBUG)
+        handler.addFilter(_Filter())
         names = ('', 'odoo', 'odoo.addons.sanal_pos')
         old_levels = {}
         for name in names:

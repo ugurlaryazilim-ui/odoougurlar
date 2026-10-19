@@ -35,9 +35,18 @@ class ProviderCase(SanalPosCase):
         vals.setdefault('provider_token', False)
         vals.setdefault('sent_at', False)
         vals.setdefault('expires_at', False)
-        return self.make_payment(**vals)
+        return self._payment(**vals)
 
     def sent(self, **vals):
+        return self._payment(**vals)
+
+    def _payment(self, **vals):
+        """Aynı testte tekrar çağrılabilir: ilk kayıt varsayılan fatura no/MPID'i kullanır,
+        sonrakiler benzersiz fatura no alır (MPID ve 'tek açık link' kısıtları çakışmasın)."""
+        if 'invoice_no' not in vals and 'merchant_payment_id' not in vals:
+            self._fixture_count = getattr(self, '_fixture_count', 0) + 1
+            if self._fixture_count > 1:
+                vals['invoice_no'] = '%s-F%d' % (INV_NO, self._fixture_count)
         return self.make_payment(**vals)
 
     def call(self, action=None):
@@ -144,8 +153,9 @@ class TestCreateLinkRequest(ProviderCase):
             with self.subTest(fmt=fmt):
                 self.set_setting('paratika_phone_format', fmt)
                 self.mock.calls.clear()
+                tag = fmt.replace('+', 'p')   # '90' ile '+90' aynı MPID'i üretmesin
                 self.provider.create_link(self.pay(
-                    invoice_no='PH%s' % fmt.strip('+'), merchant_payment_id='PH%s-1' % fmt.strip('+')))
+                    invoice_no='PH%s' % tag, merchant_payment_id='PH%s-1' % tag))
                 self.assertEqual(self.call().params['CUSTOMERPHONE'], expected)
 
     def test_returnurl_ascii_degilse_hata(self):
@@ -618,9 +628,12 @@ class TestProviderLogging(ProviderCase):
 
     def test_kk37_python_loglarinda_govde_ve_sir_yok(self):
         """Tasarım §5.1: logger'a gövde yazılmaz; telefon yalnız son 4 hane."""
+        # Fixture'lar yakalamanın DIŞINDA kurulur: yalnız sağlayıcı çağrıları izlenir.
+        pay = self.pay()
+        sent = self.sent()
         with self.capture_logs() as records:
-            self.provider.create_link(self.pay())
-            self.provider.query_status(self.sent())
+            self.provider.create_link(pay)
+            self.provider.query_status(sent)
         text = '\n'.join(records)
         for secret in (PASSWORD, SECRET_KEY, '5321112233', EMAIL, 'MERCHANTPASSWORD=%s' % PASSWORD):
             self.assertNotIn(secret, text)
