@@ -110,6 +110,21 @@ def normalize_number(raw):
     return None
 
 
+def mask_number(raw):
+    """Telefonu log/istisna metni için maskele: 5321234567 → 532*****67 (ilk 3 + son 2 hane).
+
+    Geçerli TR cep numarası değilse (biçimi bilinmeyen girdi) yalnız son 2 hane gösterilir; boş girdi sabit
+    '-' döner. Ham numara loga ve hata metnine yazılmaz (KVKK).
+    """
+    number = normalize_number(raw)
+    if number:
+        return '%s*****%s' % (number[:3], number[-2:])
+    digits = re.sub(r'\D', '', str(raw or ''))
+    if not digits:
+        return '-'
+    return '*' * max(len(digits) - 2, 0) + digits[-2:]
+
+
 def prepare_text(text, ascii_mode=False):
     """Metni hazırla ve Turatel Type değerini döndür: (metin, type)."""
     text = (text or '').strip()

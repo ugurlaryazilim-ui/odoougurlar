@@ -69,13 +69,16 @@ class SmsSystemIys(models.AbstractModel):
     def refresh_contacts(self, contacts, deadline=None, guard=True):
         """Kişilerin İYS SMS iznini sorgula ve yaz. Süre dolunca durur.
 
-        Dönen: {'done', 'approved', 'rejected', 'not_found', 'errors', 'stopped': None|'time'|'guard'|'error'}
+        Dönen: {'done', 'approved', 'rejected', 'not_found', 'errors', 'stopped': None|'time'|'guard'|'error',
+        'retryable'} — stopped='error' ise 'error' (metin) ve 'retryable' (geçici hata mı) dolar; çağıran kalıcı
+        hatada (yanlış şifre vb.) beklemez, geçici hatada sonra tekrar dener.
         guard: "kişi yok" cevapları çoğunluktaysa durdur (SmartADM yüksek hata oranında hesabı 24 saat bloklar).
         """
         stats = {'done': 0, 'approved': 0, 'rejected': 0, 'not_found': 0, 'errors': 0, 'stopped': None}
         if not contacts:
             return stats
         client = self._client()
+        last_error = None
         for contact in contacts:
             if deadline and time.monotonic() > deadline:
                 stats['stopped'] = 'time'
@@ -85,9 +88,9 @@ class SmsSystemIys(models.AbstractModel):
             except SmartAdmError as e:
                 stats['errors'] += 1
                 _logger.warning('İYS sorgusu başarısız (%s): %s', contact.id, e)
+                last_error = e
                 if not e.retryable or stats['errors'] >= 3:
                     stats['stopped'] = 'error'
-                    stats['error'] = str(e)
                     break
                 continue
             stats['done'] += 1
@@ -104,6 +107,11 @@ class SmsSystemIys(models.AbstractModel):
                                 stats['not_found'], stats['done'])
                 break
             time.sleep(REQUEST_GAP)
+        if last_error and not stats['stopped'] and not stats['done']:
+            stats['stopped'] = 'error'   # hiç sorgu başarılı olmadı: geçici hata da olsa bildirilir
+        if last_error and stats['stopped'] == 'error':
+            stats['error'] = str(last_error)
+            stats['retryable'] = bool(last_error.retryable)
         return stats
 
     # ── Artımlı senkron (/report2) ──

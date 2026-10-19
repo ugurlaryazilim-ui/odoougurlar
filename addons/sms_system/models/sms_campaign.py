@@ -20,8 +20,8 @@ _logger = logging.getLogger(__name__)
 
 PACK_SIZE = 500          # Turatel'e tek istekte giden en fazla numara
 MIN_TIME_LEFT = 20       # cron süresinin sonuna bu kadar saniye kala dur, kalan sonraki çalışmada
-STUCK_MINUTES = 15
-CREATE_CHUNK = 5000      # büyük kampanyada gönderim kayıtları parça parça oluşturulur       # 'gönderiliyor'da bu kadar kalan kayıt belirsiz sayılır (tekrar gönderilmez)
+STUCK_MINUTES = 15       # 'gönderiliyor'da bu kadar dakika kalan kayıt belirsiz sayılır (tekrar gönderilmez)
+CREATE_CHUNK = 5000      # büyük kampanyada gönderim kayıtları parça parça oluşturulur
 IYS_REFRESH_SECONDS = 120  # gönderim anı İYS tazelemesine ayrılan süre; yetmezse paket bekler, sonraki çalışma sürdürür
 
 
@@ -387,25 +387,27 @@ class SmsSystemCampaign(models.Model):
         return True
 
     def _refresh_iys(self, contacts):
-        """Kişileri İYS'den korumalı (hata oranı korumalı) sorgula. Döner: (tamam, hata metni).
-        tamam=False: sorgu yapılamadı/durdu; çağıran gönderimi bekletir. Beklenmeyen istisna yutulmaz:
-        loga yazılır ve hata metniyle çağırana döner (çağıran kullanıcıya not düşer)."""
+        """Kişileri İYS'den korumalı (hata oranı korumalı) sorgula. Döner: (tamam, hata metni, geçici mi).
+        tamam=False: sorgu yapılamadı/durdu; çağıran gönderimi bekletir. geçici=False: kalıcı hata (yanlış şifre
+        vb.), beklemek çözmez. Beklenmeyen istisna yutulmaz: loga yazılır, geçici sayılır ve hata metniyle
+        çağırana döner (çağıran kullanıcıya not düşer)."""
         Iys = self.env['sms.system.iys']
         paused = Iys._paused_until()
         if paused:
             return False, _('İYS sorgusu hata oranı koruması nedeniyle %s tarihine kadar durduruldu '
-                            '(SmartADM hesabı bloklanmasın diye).') % fields.Datetime.to_string(paused)
+                            '(SmartADM hesabı bloklanmasın diye).') % fields.Datetime.to_string(paused), True
         try:
             stats = Iys.refresh_contacts(contacts, deadline=time.monotonic() + IYS_REFRESH_SECONDS)
         except Exception as e:  # noqa: BLE001 — beklenmeyen hata: loga yaz, çağıran not düşer
             _logger.exception('İYS tazelemesi beklenmeyen hatayla durdu (kampanya %s)', self.id)
-            return False, _('Beklenmeyen hata: %s') % e
+            return False, _('Beklenmeyen hata: %s') % e, True
         self.env['ir.cron']._commit_progress()
         if stats.get('stopped') == 'error':
-            return False, stats.get('error') or _('bilinmeyen hata')
+            return False, stats.get('error') or _('bilinmeyen hata'), bool(stats.get('retryable'))
         if stats.get('stopped') == 'guard':
-            return False, _('İYS sorgusu hata oranı koruması nedeniyle durduruldu: numaraların çoğu İYS kaydında yok.')
-        return True, ''
+            return False, _('İYS sorgusu hata oranı koruması nedeniyle durduruldu: numaraların çoğu İYS kaydında '
+                            'yok.'), True
+        return True, '', True
 
     def _commercial_gate(self, messages):
         """Paketi göndermeden önce denetle; gönderilebilir kayıtları döndür.
@@ -428,7 +430,7 @@ class SmsSystemCampaign(models.Model):
             stale_domain = self._iys_stale_domain()
             stale = Contact.search([('id', 'in', sendable.contact_id.ids)] + stale_domain, order='id')
             if stale:
-                ok, error = self._refresh_iys(stale)
+                ok, error, _transient = self._refresh_iys(stale)
                 if not ok:
                     self._note_once(_('İYS kontrolü yapılamadı, ticari gönderim bekletiliyor: %s') % error)
                     return messages.browse()
@@ -478,9 +480,16 @@ class SmsSystemCampaign(models.Model):
                     continue
                 stale = camp._iys_stale()
                 if stale:
-                    ok, error = camp._refresh_iys(stale)
-                    if not ok:
+                    ok, error, transient = camp._refresh_iys(stale)
+                    if not ok and transient:
                         camp._note_once(_('İYS kontrolü yapılamadı, tekrar denenecek: %s') % error)
+                        continue   # geçici hata: planlı kalır, sonraki çalışmada yeniden denenir
+                    if not ok:
+                        # kalıcı hata: beklemek çözmez; ayar düzeltilip yeniden planlanmalı
+                        camp.write({'state': 'draft'})
+                        camp._note_once(_('İYS kontrolü kalıcı bir hatayla başarısız oldu, planlı gönderim iptal '
+                                          'edilip taslağa alındı. Ayarları düzeltip yeniden planlayın: %s') % error)
+                        IrCron._commit_progress()
                         continue
                     if camp._iys_stale():
                         continue  # süre yetmedi; kalanlar sonraki çalışmada

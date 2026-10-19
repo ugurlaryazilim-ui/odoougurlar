@@ -16,6 +16,8 @@ import re
 
 import requests
 
+from .turatel import mask_number
+
 _logger = logging.getLogger(__name__)
 
 DEFAULT_URL = 'https://adm.smartadm.net/webservice/api'
@@ -165,7 +167,7 @@ class SmartAdmClient:
         """Numaranın SMS ticari ileti izni: {'status': approved|rejected|unknown, 'found': bool}."""
         msisdn = to_msisdn(number)
         if not msisdn:
-            raise SmartAdmError('Geçersiz cep telefonu: %s' % number)
+            raise SmartAdmError('Geçersiz cep telefonu: %s' % mask_number(number))
         code, data = self.call('query', {'CommunicationToolType': 'Msisdn', 'Value': msisdn, 'ResponseType': '1'},
                                allow=(NOT_FOUND,))
         if code == NOT_FOUND:
@@ -225,7 +227,7 @@ class SmartAdmClient:
         """Mağazada / formla alınan SMS iznini İYS'ye yükle. when: datetime (≤ 3 iş günü önce)."""
         msisdn = to_msisdn(number)
         if not msisdn:
-            raise SmartAdmError('Geçersiz cep telefonu: %s' % number)
+            raise SmartAdmError('Geçersiz cep telefonu: %s' % mask_number(number))
         date = when.strftime('%Y%m%d%H%M%S')
         details = {'EtkMsisdnSms': {'Value': '1' if approved else '0', 'AuthorizationDate': date,
                                     'AuthorizationSpecificData': {'IysRecordSource': source}}}
@@ -238,7 +240,7 @@ class SmartAdmClient:
         """Müşteriye onay kodu SMS'i gönder; TriggerId döndürür."""
         msisdn = to_msisdn(number)
         if not msisdn:
-            raise SmartAdmError('Geçersiz cep telefonu: %s' % number)
+            raise SmartAdmError('Geçersiz cep telefonu: %s' % mask_number(number))
         _code, data = self.call('trigger', {'CommunicationToolType': 'Msisdn', 'Value': msisdn,
                                             'CommunicationType': 'Sms'})
         return str(data.get('Value') or '')
