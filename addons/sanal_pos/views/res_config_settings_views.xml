@@ -59,6 +59,14 @@
                     </block>
 
                     <block title="Nebim fatura kaynağı (MSSQL)" name="sanal_pos_mssql">
+                        <setting string="Terzi ayarlarından kopyala"
+                                 help="Terzi modülündeki SQL bağlantı bilgilerini bu bölüme kopyalar."
+                                 invisible="not sanal_pos_has_tailor_mssql">
+                            <field name="sanal_pos_has_tailor_mssql" invisible="1"/>
+                            <button name="action_copy_tailor_mssql" type="object" class="btn-link"
+                                    string="Terzi ayarlarından kopyala" icon="oi-arrow-right"
+                                    groups="base.group_system"/>
+                        </setting>
                         <setting string="SQL Server adresi">
                             <field name="sanal_pos_mssql_server" placeholder="192.168.0.10"/>
                         </setting>

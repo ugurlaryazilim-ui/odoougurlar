@@ -14,12 +14,23 @@ bu sınıf onu açıkça ``'True'/'False'`` olarak saklar. Kod tarafında okurke
 import re
 
 from odoo import api, fields, models
-from odoo.exceptions import ValidationError
+from odoo.exceptions import AccessError, UserError, ValidationError
 
 # Varsayılanı True olan boolean ayarlar: alan adı -> parametre anahtarı
 _TRUE_DEFAULT_BOOLS = {'sanal_pos_require_contact': 'sanal_pos.require_contact'}
 _FALSE_VALUES = ('', 'false', '0', 'no', 'none')
 _VIEW_NAME_RE = re.compile(r'^[\w.\[\]]+$')
+
+# (ugurlar_tailor.<ad> parametresi, sanal_pos ayar alanı); hedef parametre sanal_pos.<ad>
+# Modül bağımlılığı YOK: yalnız ir.config_parameter okunur.
+_TAILOR_MSSQL_MAP = (
+    ('mssql_server', 'sanal_pos_mssql_server'),
+    ('mssql_port', 'sanal_pos_mssql_port'),
+    ('mssql_database', 'sanal_pos_mssql_database'),
+    ('mssql_user', 'sanal_pos_mssql_user'),
+    ('mssql_password', 'sanal_pos_mssql_password'),
+    ('mssql_view_name', 'sanal_pos_mssql_view_name'),
+)
 
 
 def get_bool_param(env, key, default=False):
@@ -96,6 +107,9 @@ class ResConfigSettings(models.TransientModel):
         string='SQL şifre', groups='base.group_system',
         config_parameter='sanal_pos.mssql_password')
 
+    sanal_pos_has_tailor_mssql = fields.Boolean(
+        string='Terzi MSSQL ayarı var', compute='_compute_sanal_pos_has_tailor_mssql')
+
     # ---------------------------------------------------------------- bilgi (salt okunur)
     sanal_pos_notify_url = fields.Char(
         string='Bildirim adresi', compute='_compute_sanal_pos_urls',
@@ -108,6 +122,41 @@ class ResConfigSettings(models.TransientModel):
         for rec in self:
             rec.sanal_pos_notify_url = '%s/sanal_pos/paratika/notify' % base
             rec.sanal_pos_return_url = '%s/sanal_pos/paratika/return' % base
+
+    def _compute_sanal_pos_has_tailor_mssql(self):
+        has = bool(self.env['ir.config_parameter'].sudo().get_param('ugurlar_tailor.mssql_server'))
+        for rec in self:
+            rec.sanal_pos_has_tailor_mssql = has
+
+    def action_copy_tailor_mssql(self):
+        """Terzi modülünün MSSQL ayarlarını Sanal POS ayarlarına kopyalar (yalnız sistem yöneticisi).
+
+        ``ugurlar_tailor`` modülüne bağımlılık yoktur; yalnız ``ir.config_parameter``
+        okunur. Terzi tarafında boş olan değer mevcut Sanal POS ayarını boşaltmaz.
+        """
+        if not self.env.user.has_group('base.group_system'):
+            raise AccessError('Bu işlemi yalnız sistem yöneticisi yapabilir.')
+        ICP = self.env['ir.config_parameter'].sudo()
+        if not ICP.get_param('ugurlar_tailor.mssql_server'):
+            raise UserError('Terzi ayarlarında MSSQL bilgisi bulunamadı; kopyalanacak bir şey yok.')
+        values = {}
+        for tailor_name, fname in _TAILOR_MSSQL_MAP:
+            raw = ICP.get_param('ugurlar_tailor.%s' % tailor_name)
+            if not raw:
+                continue
+            if tailor_name == 'mssql_view_name' and not _VIEW_NAME_RE.match(raw):
+                continue
+            if tailor_name == 'mssql_port':
+                try:
+                    raw = int(raw)
+                except ValueError:
+                    continue
+            values[fname] = raw
+        for fname, raw in values.items():
+            ICP.set_param('sanal_pos.%s' % fname[len('sanal_pos_'):], str(raw))
+        if values:
+            self.write(values)  # açık ayar ekranındaki eski değer ile geri ezilmesin
+        return {'type': 'ir.actions.client', 'tag': 'reload'}
 
     # ---------------------------------------------------------------- doğrulama
     @api.constrains('sanal_pos_default_expiry_hours')
