@@ -281,6 +281,78 @@ class TestReviewGC2CampaignLocked(JsonModelMixin, SmsTestCase):
         self.assertEqual(int(sends[0]['payload']['accountId']), 65672)
         self.assertIs(sends[0]['payload']['isCheckBlackList'], True)
 
+    def make_sent_campaign(self, state='sending', **vals):
+        """Kampanyaya ait SMS kaydı olan (gönderimi başlamış) kampanya; yazımlar SMS yöneticisi olarak yapılır."""
+        camp = self.make_json_campaign(state=state, **vals)
+        self.make_message(state='queued', campaign_id=camp.id)
+        return camp.with_user(self.sms_manager)
+
+    def test_gc2b_poc_p2b_scheduled_taslak_icerik_zinciri_kapali(self):
+        """PoC P2b: sending -> scheduled -> draft -> içerik -> sending. İlk adım zaten reddedilir."""
+        self.configure_json(iys=True)
+        camp = self.make_sent_campaign(message_type='commercial', body='Indirim {ad}')
+        original = (camp.message_type, camp.body)
+        with self.assertRaises(UserError):
+            camp.write({'state': 'scheduled'})
+        with self.assertRaises(UserError):
+            camp.write({'state': 'draft'})
+        with self.assertRaises(UserError):
+            camp.write({'message_type': 'info', 'body': 'BAMBASKA METIN {ad}'})
+        self.assertEqual((camp.state, camp.message_type, camp.body), ('sending',) + original)
+
+    def test_gc2b_poc_p2c_cancel_taslak_icerik_zinciri_kapali(self):
+        """PoC P2c: iptal -> taslak -> içerik. Kayıtlı kampanya 'cancel'/'draft'e geri alınamaz."""
+        camp = self.make_sent_campaign(state='cancel', message_type='commercial', body='Indirim {ad}')
+        with self.assertRaises(UserError):
+            camp.write({'state': 'draft'})
+        with self.assertRaises(UserError):
+            camp.action_draft()
+        with self.assertRaises(UserError):
+            camp.write({'message_type': 'info', 'body': 'BAMBASKA METIN {ad}'})
+        self.assertEqual((camp.state, camp.message_type), ('cancel', 'commercial'))
+
+    def test_gc2b_kayitli_kampanyada_taslak_olsa_bile_icerik_kilitli(self):
+        camp = self.make_sent_campaign(state='draft')
+        for label, vals in self.content_changes().items():
+            with self.subTest(alan=label), self.assertRaises(UserError):
+                camp.write(vals)
+
+    def test_gc2b_kayitli_kampanya_baska_duruma_geri_alinamaz(self):
+        for target in ('draft', 'scheduled', 'cancel'):
+            camp = self.make_sent_campaign(state='sending')
+            with self.subTest(hedef=target), self.assertRaises(UserError):
+                camp.write({'state': target})
+            self.assertEqual(camp.state, 'sending')
+
+    def test_gc2b_sistem_yazimlari_ve_meshru_akislar_calisir(self):
+        # sudo (cron/sistem) geri almayı yapabilir; kayıtsız kampanyada kullanıcı akışları açık
+        sent = self.make_json_campaign(state='scheduled')
+        self.make_message(state='queued', campaign_id=sent.id)
+        sent.sudo().write({'state': 'draft'})
+        self.assertEqual(sent.state, 'draft')
+        empty = self.make_json_campaign(state='scheduled').with_user(self.sms_manager)
+        empty.action_draft()
+        empty.write({'body': 'Düzeltildi'})
+        self.assertEqual((empty.state, empty.body), ('draft', 'Düzeltildi'))
+        empty.action_cancel()
+        self.assertEqual(empty.state, 'cancel')
+        empty.action_draft()
+        copy = empty.copy()
+        self.assertEqual(copy.state, 'draft')
+        done = self.make_json_campaign(state='sending')
+        self.make_message(state='sent', campaign_id=done.id)
+        done = done.with_user(self.sms_manager)
+        done.action_cancel()   # gönderilmiş kayıt varsa 'cancel' değil 'done'
+        self.assertEqual(done.state, 'done')
+
+    def test_gc2b_cron_planli_kampanyayi_taslaga_alabilir(self):
+        self.configure_json(iys=True)   # ret metni yok: planlı ticari kampanya cron'da taslağa döner
+        self.set_param('optout_text', '')
+        camp = self.make_json_campaign(message_type='commercial', body='Indirim {ad}', state='scheduled',
+                                       scheduled_at=self.ago(minutes=5))
+        self.run_queue()
+        self.assertEqual(camp.state, 'draft')
+
 
 @tagged('post_install', '-at_install')
 class TestReviewGC3Redirects(JsonModelMixin, SmsTestCase):

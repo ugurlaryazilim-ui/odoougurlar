@@ -236,22 +236,31 @@ class SmsSystemCampaign(models.Model):
             self.body = self.template_id.body
 
     def write(self, vals):
-        if vals.get('state') == 'draft' or any(name in vals for name in CONTENT_FIELDS):
+        if vals.get('state') in ('draft', 'scheduled', 'cancel') or any(name in vals for name in CONTENT_FIELDS):
             self._check_content_locked(vals)
         return super().write(vals)
 
     def _check_content_locked(self, vals):
-        """G-C2: onaylanmış (taslak dışı) kampanyanın metni, türü, listeleri ve şablonu değişmez.
+        """G-C2: onaylanmış kampanyanın metni, türü, listeleri ve şablonu değişmez.
 
         Ekrandaki readonly yalnız arayüzdür; RPC ile değişiklik ticari kapıyı (tür) ya da onaylanan içeriği
-        atlatırdı. Aynı değerin yeniden yazılması serbesttir. Gönderimi başlamış kampanya taslağa da alınamaz
-        (önce taslağa al, sonra değiştir yolunu kapatır); planlı/iptal kampanya "Taslağa Al" ile düzenlenir.
+        atlatırdı. Aynı değerin yeniden yazılması serbesttir. Kilit yalnız o anki duruma bakmaz: kampanyaya ait SMS
+        kaydı varsa (G-C2b) durum ne olursa olsun içerik kilitlidir; böyle bir kampanya kullanıcı yazımıyla
+        taslağa/planlıya/iptale de geri alınamaz (sending -> scheduled/cancel -> draft -> içerik -> sending zinciri).
+        Sistem yazımları (cron, _start/_finish) sudo ile yapılır ve geri alma denetiminden muaftır; bağlam bayrağı
+        kullanılmaz çünkü RPC çağıranı bağlamı kendisi belirler. Meşru akışlar etkilenmez: "Taslağa Al" ve iptal,
+        kayıtsız kampanyada çalışır; kayıtlı kampanyada iptal zaten 'done' yapar.
         """
         for camp in self:
-            if camp.state == 'draft':
-                continue
+            has_messages = bool(camp.sudo().message_ids_sms)
+            if (vals.get('state') in ('draft', 'scheduled', 'cancel') and vals['state'] != camp.state
+                    and has_messages and not self.env.su):
+                raise UserError(_('Gönderimi başlamış toplu SMS taslağa, plana ya da iptale geri alınamaz: %s')
+                                % camp.name)
             if vals.get('state') == 'draft' and camp.state in ('sending', 'done'):
                 raise UserError(_('Gönderimi başlamış toplu SMS taslağa alınamaz: %s') % camp.name)
+            if camp.state == 'draft' and not has_messages:
+                continue
             changed = [name for name in CONTENT_FIELDS if name in vals and not camp._same_content(name, vals[name])]
             if changed:
                 raise UserError(_("Onaylanmış toplu SMS'in içeriği değiştirilemez (%(fields)s). Değiştirmek için "
@@ -599,12 +608,12 @@ class SmsSystemCampaign(models.Model):
             if camp.message_type == 'commercial':
                 if not camp._optout_text():
                     # KK-C26: ret metni silinmişse İYS sorgusuna da başlanmaz; ayar girilip yeniden planlanır
-                    camp.write({'state': 'draft'})
+                    camp.sudo().write({'state': 'draft'})
                     camp.message_post(body=_('Planlı gönderim başlatılamadı: %s') % camp._no_optout_message())
                     IrCron._commit_progress()
                     continue
                 if not Iys._enabled():
-                    camp.write({'state': 'draft'})
+                    camp.sudo().write({'state': 'draft'})
                     camp.message_post(body=_('İYS kontrolü kapalı olduğu için ticari SMS gönderilmedi.'))
                     continue
                 stale = camp._iys_stale()
@@ -615,7 +624,7 @@ class SmsSystemCampaign(models.Model):
                         continue   # geçici hata: planlı kalır, sonraki çalışmada yeniden denenir
                     if not ok:
                         # kalıcı hata: beklemek çözmez; ayar düzeltilip yeniden planlanmalı
-                        camp.write({'state': 'draft'})
+                        camp.sudo().write({'state': 'draft'})
                         camp._note_once(_('İYS kontrolü kalıcı bir hatayla başarısız oldu, planlı gönderim iptal '
                                           'edilip taslağa alındı. Ayarları düzeltip yeniden planlayın: %s') % error)
                         IrCron._commit_progress()
@@ -625,7 +634,7 @@ class SmsSystemCampaign(models.Model):
             try:
                 camp._start()
             except UserError as e:
-                camp.write({'state': 'draft'})
+                camp.sudo().write({'state': 'draft'})
                 camp.message_post(body=_('Planlı gönderim başlatılamadı: %s') % e)
             IrCron._commit_progress()
 
