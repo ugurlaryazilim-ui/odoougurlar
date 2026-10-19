@@ -31,6 +31,9 @@
                         <setting help="Açıkken SMS gönderilmez, yalnız kayıt oluşur. Canlıya geçince kapatın.">
                             <field name="sms_test_mode"/>
                         </setting>
+                        <setting string="Test Numaraları" help="Test modu açıkken yalnız bu numaralara gerçek SMS gider (en çok 5, virgülle ayırın). Boşsa hiçbirine gitmez.">
+                            <field name="sms_test_numbers" placeholder="5XXXXXXXXX, 5XXXXXXXXX"/>
+                        </setting>
                         <setting help="ı ş ğ İ Ş Ğ harfleri i s g I S G olarak gönderilir; mesaj daha az parçaya bölünür">
                             <field name="sms_ascii_mode"/>
                         </setting>

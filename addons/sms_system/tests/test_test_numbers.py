@@ -32,7 +32,7 @@ class TestNumbersMixin(JsonModelMixin):
         for i, number in enumerate(numbers):
             extra = {'iys_status': 'approved', 'iys_checked_at': self.ago(hours=1)} if message_type == 'commercial' else {}
             self.make_contact(number, lst, name='Kişi%d' % i, **extra)
-        return self.make_campaign(lst, message_type, body='Merhaba {ad}')
+        return self.make_campaign(lst, message_type, state='draft', body='Merhaba {ad}')
 
     def states_by_number(self, msgs):
         out = {}

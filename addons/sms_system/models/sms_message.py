@@ -60,6 +60,16 @@ def test_mode_enabled(value):
     return value != 'False'
 
 
+def parse_test_numbers(value):
+    """Kayıtlı virgüllü test numaraları -> normalize numara listesi (geçersiz parça atlanır)."""
+    out = []
+    for part in re.split(r'[,;\s]+', value or ''):
+        num = normalize_number(part) if part else None
+        if num and num not in out:
+            out.append(num)
+    return out
+
+
 def parse_user_daily_limit(value):
     """Kullanıcı başı günlük elle SMS sınırı: parametre yok/boş/bozuk/negatifse 50; '0' korunur (sınırsız)."""
     if not value:   # get_param yokluğu/boşu False döndürür; int(False) == 0 yanlışlıkla "sınırsız" olurdu
@@ -186,6 +196,7 @@ class SmsSystemMessage(models.Model):
             'originator': icp.get_param('sms_system.turatel_originator', ''),
             'ascii_mode': icp.get_param('sms_system.ascii_mode') == 'True',
             'test_mode': test_mode_enabled(icp.get_param('sms_system.test_mode')),
+            'test_numbers': parse_test_numbers(icp.get_param('sms_system.test_numbers')),
         }
 
     @api.model
@@ -342,9 +353,18 @@ class SmsSystemMessage(models.Model):
                            'error': _('Mesaj başlığı (Originator) ayarlanmamış.')})
             pending -= missing
         if cfg['test_mode']:
-            pending.write({'state': 'test', 'sent_at': fields.Datetime.now(), 'provider_answer': 'TEST'})
-            return self.browse()
+            blocked = pending.filtered(lambda m: self._blocked_by_test_mode(cfg, normalize_number(m.number)))
+            blocked.write({'state': 'test', 'sent_at': fields.Datetime.now(), 'provider_answer': 'TEST'})
+            pending -= blocked
         return pending
+
+    @api.model
+    def _blocked_by_test_mode(self, cfg, number):
+        """Test modunda gerçek gönderim yalnız 'Test numaraları' listesindekilere yapılır (C7, KK-C27).
+
+        Liste boşsa test modunda hiçbir numara gönderilmez (KK-A27); test modu kapalıysa liste etkisizdir.
+        """
+        return bool(cfg['test_mode'] and number not in cfg['test_numbers'])
 
     def _deliver(self, cfg=None):
         """Kayıtları Turatel'e gönder (sudo ile çağrılır)."""
@@ -411,8 +431,11 @@ class SmsSystemMessage(models.Model):
                         'error': _('Mesaj başlığı (Originator) ayarlanmamış.')})
             return
         if cfg['test_mode']:
-            self.write({'state': 'test', 'sent_at': fields.Datetime.now(), 'provider_answer': 'TEST'})
-            return
+            blocked = self.filtered(lambda m: self._blocked_by_test_mode(cfg, normalize_number(m.number)))
+            blocked.write({'state': 'test', 'sent_at': fields.Datetime.now(), 'provider_answer': 'TEST'})
+            self -= blocked
+            if not self:
+                return
         if cfg['api_mode'] == 'json':
             self._deliver_pack_json(cfg)
             return

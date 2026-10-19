@@ -1,12 +1,16 @@
+import re
+
 from odoo import _, api, fields, models
 from odoo.exceptions import AccessError, UserError
 
 from ..services.smartadm import SmartAdmError
-from ..services.turatel import ERROR_HINTS, TuratelError
+from ..services.turatel import ERROR_HINTS, TuratelError, normalize_number
 from ..services.turatel_json import TuratelJsonClient, mask_digits
 from .sms_message import (API_MODES, DEFAULT_ACCOUNT_COMMERCIAL, DEFAULT_ACCOUNT_INFO, DEFAULT_BULK_URL,
-                          DEFAULT_JSON_USER_ID, DEFAULT_SINGLE_URL, DEFAULT_VALIDITY_MINUTES, parse_user_daily_limit,
-                          parse_validity_minutes, resolve_api_mode, test_mode_enabled)
+                          DEFAULT_JSON_USER_ID, DEFAULT_SINGLE_URL, DEFAULT_VALIDITY_MINUTES, parse_test_numbers,
+                          parse_user_daily_limit, parse_validity_minutes, resolve_api_mode, test_mode_enabled)
+
+MAX_TEST_NUMBERS = 5
 
 # JSON API (C1): ekran alanı -> ir.config_parameter anahtarı. Hepsi get_values/set_values'ta AÇIKÇA okunup yazılır
 # (config_parameter kullanılmaz): boş değer parametreyi siler, okuma varsayılanı bu tabloya göre döner.
@@ -52,6 +56,10 @@ class ResConfigSettings(models.TransientModel):
     # 'False' metnini True okuyor. get_values/set_values aşağıda açık yazılır (test modu: K2).
     sms_test_mode = fields.Boolean(string='Test modu',
                                    help='Açıkken SMS gönderilmez, yalnız kayıt oluşur')
+
+    sms_test_numbers = fields.Char(string='Test modunda gerçek gönderilecek numaralar',
+                                   help='Test modu açıkken yalnız bu numaralara (en çok 5, virgülle ayırın) gerçek SMS '
+                                        'gider; diğerleri test olarak kaydedilir. Test modu kapalıyken etkisizdir.')
 
     sms_daily_limit = fields.Integer(string='Günlük toplu SMS sınırı', config_parameter='sms_system.daily_limit',
                                      help='Son 24 saatte toplu SMS ile gönderilebilecek en fazla numara (0 = sınırsız)')
@@ -116,6 +124,7 @@ class ResConfigSettings(models.TransientModel):
         res = super().get_values()
         icp = self.env['ir.config_parameter'].sudo()
         res['sms_test_mode'] = test_mode_enabled(icp.get_param('sms_system.test_mode'))
+        res['sms_test_numbers'] = ', '.join(parse_test_numbers(icp.get_param('sms_system.test_numbers')))
         res['sms_user_daily_limit'] = parse_user_daily_limit(icp.get_param('sms_system.user_daily_limit'))
         res['sms_api_mode'] = resolve_api_mode(icp.get_param('sms_system.api_mode'))
         for name, key in _JSON_TEXT_PARAMS.items():
@@ -130,6 +139,7 @@ class ResConfigSettings(models.TransientModel):
         # Negatif sınır '0' (sınırsız) olarak kaydedilmemeli: hiçbir parametre yazılmadan reddedilir (D-7)
         if any((rec.sms_user_daily_limit or 0) < 0 for rec in self):
             raise UserError(_('Kullanıcı başı günlük SMS sınırı negatif olamaz (0 = sınırsız).'))
+        test_numbers = [rec._test_numbers_checked() for rec in self]   # hata -> hiçbir şey yazılmaz
         json_values = [rec._json_values_checked() for rec in self]   # super()'den önce: hata -> hiçbir şey yazılmaz
         super().set_values()
         icp = self.env['ir.config_parameter'].sudo()
@@ -141,6 +151,23 @@ class ResConfigSettings(models.TransientModel):
         # 'False' ve '0' açıkça yazılır; set_param(False) parametreyi silerdi
         icp.set_param('sms_system.test_mode', 'True' if self.sms_test_mode else 'False')
         icp.set_param('sms_system.user_daily_limit', str(self.sms_user_daily_limit or 0))
+        icp.set_param('sms_system.test_numbers', ','.join(test_numbers[-1]) if test_numbers else False)
+
+    def _test_numbers_checked(self):
+        """Test numaralarını normalleştirir (KK-C27): en çok 5 geçerli, yinelenen tek sayılır; aksi UserError."""
+        self.ensure_one()
+        out = []
+        for part in re.split(r'[,;\s]+', self.sms_test_numbers or ''):
+            if not part:
+                continue
+            num = normalize_number(part)
+            if not num:
+                raise UserError(_('Geçersiz test numarası: %s (5XX XXX XX XX biçiminde cep numarası girin).') % part)
+            if num not in out:
+                out.append(num)
+        if len(out) > MAX_TEST_NUMBERS:
+            raise UserError(_('En çok %s test numarası girilebilir.') % MAX_TEST_NUMBERS)
+        return out
 
     def _json_values_checked(self):
         """JSON ayarlarını normalleştirip doğrular (KK-C2, KK-C29); hata UserError, hiçbir parametre yazılmaz.
