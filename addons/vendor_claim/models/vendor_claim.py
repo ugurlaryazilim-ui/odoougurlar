@@ -11,6 +11,7 @@ from odoo.addons.sms_system.services.turatel import normalize_number
 _logger = logging.getLogger(__name__)
 
 PARAM = 'vendor_claim.'
+MIN_TIME_LEFT = 20   # cron süresinin sonuna bu kadar saniye kala dur, kalan sonraki çalışmada
 VENDOR_ATTRIBUTE = 'Tedarikçi'
 
 # İzinli durum geçişleri (yönetici her geçişi yapabilir)
@@ -118,7 +119,7 @@ class VendorClaim(models.Model):
     sms_sent_sent = fields.Boolean(string='Gönderildi SMS', readonly=True, copy=False)
     sms_returned_sent = fields.Boolean(string='İncelemeden Geldi SMS', readonly=True, copy=False)
     sms_delivered_sent = fields.Boolean(string='Teslim Edildi SMS', readonly=True, copy=False)
-    reminder_count = fields.Integer(string='Hatırlatma SMS Sayısı', readonly=True, copy=False)
+    reminder_count = fields.Integer(string='Hatırlatma SMS Sayısı', readonly=True, copy=False, default=0)
     last_reminder_at = fields.Datetime(string='Son Hatırlatma', readonly=True, copy=False)
 
     # ─── Hesaplananlar ───────────────────────────────
@@ -491,7 +492,8 @@ class VendorClaim(models.Model):
                 claim.vendor_id = self._resolve_vendor(claim.vendor_name)
             if not claim.vendor_id:
                 raise UserError(_('%s: önce tedarikçiyi seçin.') % claim.name)
-        self._set_state('sent', {'sent_at': fields.Datetime.now(), 'returned_at': False, 'overdue_notified': False})
+        self._set_state('sent', {'sent_at': fields.Datetime.now(), 'returned_at': False, 'overdue_notified': False,
+                                   'reminder_count': 0, 'last_reminder_at': False})
         self.activity_unlink(['mail.mail_activity_data_todo'])
 
     def action_mark_returned(self):
@@ -532,15 +534,17 @@ class VendorClaim(models.Model):
             'magaza': self.company_id.name or self.env.company.name or '',
         }
 
-    def _send_template_sms(self, code, number=None):
-        """Şablonla SMS gönder; sms.system.message kaydını döndür (numara/şablon yoksa None)."""
+    def _send_template_sms(self, code, number=None, queue=False):
+        """Şablonla SMS gönder; sms.system.message kaydını döndür (numara/şablon yoksa None).
+
+        queue=True: sağlayıcı çağrılmaz, kayıt sms_system tekli kuyruğuna alınır."""
         self.ensure_one()
         number = number or self.customer_mobile
         template = self.env['sms.system.template'].sudo().get_by_code(code)
         if not number or not template:
             return None
         return self.env['sms.system.message'].send_sms(
-            number, template=template, values=self._sms_values(), record=self)
+            number, template=template, values=self._sms_values(), record=self, queue=queue)
 
     def _notify_state_sms(self):
         """Durumun otomatik SMS'i (ayar açıksa, numara varsa, o durum için daha önce gönderilmediyse)."""
@@ -594,13 +598,17 @@ class VendorClaim(models.Model):
             ('reminder_count', '<', max_count), ('returned_at', '<=', limit),
             '|', ('last_reminder_at', '=', False), ('last_reminder_at', '<=', limit),
         ], limit=200)
+        IrCron = self.env['ir.cron']
         for claim in claims:
             try:
-                claim._send_template_sms('vendor_claim_reminder')
+                claim._send_template_sms('vendor_claim_reminder', queue=True)
             except UserError as e:
                 claim.message_post(body=_('Hatırlatma SMS gönderilemedi: %s') % e)
             # Numara geçersiz / şablon yoksa da sayaç artar: her gün yeniden denenmesin
             claim.write({'reminder_count': claim.reminder_count + 1, 'last_reminder_at': fields.Datetime.now()})
+            # Kayıt başına commit: cron kesilse de işlenen kayıtlar kalıcı olur, aynı müşteriye tekrar gitmez
+            if IrCron._commit_progress(1) < MIN_TIME_LEFT:
+                break
 
     @api.model
     def _cron_overdue_alerts(self):
