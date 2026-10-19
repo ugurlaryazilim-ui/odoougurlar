@@ -341,3 +341,39 @@ class TestReviewGC3Https(JsonSettingsMixin, SmsTestCase):
     def test_gc3_https_buyuk_harf_ve_bos_adres_kabul(self):
         self.save_screen(**dict(FULL, sms_single_url='HTTPS://platform.turatel.com/singlesms', sms_bulk_url=''))
         self.assertEqual(self.param('turatel_single_url'), 'HTTPS://platform.turatel.com/singlesms')
+
+
+@tagged('post_install', '-at_install')
+class TestReviewN5NoCommercialSet(JsonModelMixin, SmsTestCase):
+    """N5: reklam seti yokken kalıcı hata sonrası gönderim döngüsüne girilmez (İYS/Turatel çağrısı yok)."""
+
+    def test_n5_kilitli_kayit_kalsa_da_iys_ve_turatel_cagrilmaz(self):
+        self.configure_json(commercial=False, iys=True)
+        self.set_param('optout_text', RET_TEXT)
+        lst = self.make_list()
+        camp = self.make_campaign(lst, 'commercial', state='sending', body='Indirim')
+        msgs = self.Message.sudo()
+        for _i in range(3):
+            # İYS'si hiç sorgulanmamış kişi: kapıya girilirse SmartADM sorgulanırdı
+            contact = self.make_contact(self.new_mobile(), lst, iys_status='approved')
+            msgs |= self.campaign_message(camp, contact, state='queued', body='Indirim')
+        busy = msgs[1]
+        original = type(self.Message)._lock_for_send
+
+        def lock(model, ids, states):
+            return original(model, [i for i in ids if i != busy.id], states)
+
+        with patch.object(type(self.Message), '_lock_for_send', lock):
+            self.run_queue()
+        self.refresh_all(camp, *msgs)
+        self.assertEqual(self.net.smartadm_calls, [], 'Reklam seti yokken İYS sorgusu yapılmamalı')
+        self.assertEqual(self.net.json_calls, [])
+        self.assertEqual(busy.state, 'queued')
+        self.assertEqual(set((msgs - busy).mapped('state')), {'error'})
+        self.assertEqual(camp.state, 'sending', 'Kuyrukta kayıt varken kampanya bitmez')
+        self.run_queue()   # kilit kalktı: kalan kayıt da kalıcı hataya alınır, kampanya biter
+        self.refresh_all(camp, *msgs)
+        self.assertEqual(set(msgs.mapped('state')), {'error'})
+        self.assertEqual(camp.state, 'done')
+        self.assertEqual(self.net.smartadm_calls, [])
+        self.assertEqual(self.net.json_calls, [])

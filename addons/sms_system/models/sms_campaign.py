@@ -646,16 +646,19 @@ class SmsSystemCampaign(models.Model):
         remaining = Message.search_count([('campaign_id', 'in', campaigns.ids), ('state', '=', 'queued')])
         IrCron._commit_progress(remaining=remaining)
         for camp in campaigns:
-            if camp.message_type == 'commercial' and camp._json_creds_missing():
+            creds_missing = camp.message_type == 'commercial' and camp._json_creds_missing()
+            if creds_missing:
+                # Kuyruktakiler kalıcı hata; o an kilitli olan kalırsa sonraki çalışmada. Gönderim döngüsüne
+                # girilmez (N5): girilseydi kapı İYS'yi sorgular, paket de reklam seti olmadan denenirdi
                 camp._fail_without_commercial_creds()
-            if (camp.message_type == 'commercial' and not camp._optout_text()
+            elif (camp.message_type == 'commercial' and not camp._optout_text()
                     and Message.search_count([('campaign_id', '=', camp.id), ('state', '=', 'queued')])):
                 # KK-C26: ret metni sonradan silindiyse ticari kayıtlar kuyrukta bekler (ayar girilince sürer)
                 camp._note_once(camp._no_optout_message())
                 continue
             # JSON + {ad}: tek metin şablonu ({1}) → alıcı adlarına bakmadan aynı pakette toplanır (KK-C21)
             personalized = json_mode and camp._json_template(cfg['ascii_mode'])[1]
-            held = False   # İYS doğrulanamadı: bu kampanyanın kalanı sonraki çalışmaya
+            held = creds_missing   # True: kampanyanın kalanı sonraki çalışmaya (İYS doğrulanamadı, kilitli, set yok)
             while not held:
                 queued = Message.search([('campaign_id', '=', camp.id), ('state', '=', 'queued')],
                                         order='id', limit=PACK_SIZE * 4)
