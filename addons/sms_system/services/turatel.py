@@ -26,6 +26,9 @@ TIMEOUT = (5, 15)   # (bağlanma, okuma) saniye: bağlanamama çabuk anlaşılı
 TURKISH_CHARS = set('İıĞğŞş')
 ASCII_MAP = str.maketrans({'İ': 'I', 'ı': 'i', 'Ğ': 'G', 'ğ': 'g', 'Ş': 'S', 'ş': 's'})
 
+# Eski XML API'nin hata yanıtı yalnız (işaretli) sayısal koddur; başka her şey tanımsız yanıttır
+_ERROR_CODE = re.compile(r'-?\d+')
+
 # Olası hata kodları — Turatel'in güncel listesiyle ilk canlı testte doğrulanacak; ham cevap her zaman saklanır
 ERROR_HINTS = {
     '20': 'Gönderilen XML hatalı veya eksik — metinde desteklenmeyen karakter olabilir',
@@ -199,8 +202,13 @@ class TuratelClient:
     def send(self, numbers, text, originator, sms_type='1'):
         """Gönder; başarıda Turatel mesaj id'sini döndür, hatada TuratelError."""
         answer = self._post(self.build_send_xml(numbers, text, originator, sms_type))
-        if answer.upper().startswith('ID:'):
+        if answer.upper().startswith('ID:') and answer[3:].strip():
             return answer[3:].strip(), answer
+        if not _ERROR_CODE.fullmatch(answer):
+            # HTTP 200 ama ne 'ID:' ne sayısal hata kodu (boş, HTML bakım sayfası, ara katman yanıtı): isteğin
+            # işlenip işlenmediği bilinmez → belirsiz; ham yanıt metne yazılmaz (D-4)
+            raise TuratelError('Turatel yanıtı tanımsız (%d karakter); iletilip iletilmediği belirsiz.' % len(answer),
+                               uncertain=True)
         raise TuratelError('%s (%s)' % (self.error_text(answer), answer[:50]))
 
     def report(self, msg_id):

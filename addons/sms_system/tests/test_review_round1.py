@@ -13,6 +13,7 @@ from odoo.exceptions import AccessError, UserError
 from odoo.tests.common import tagged
 
 from odoo.addons.sms_system.services.smartadm import SmartAdmClient, SmartAdmError
+from odoo.addons.sms_system.services.turatel import TuratelClient, TuratelError
 
 from .common import SmsHttpCase, SmsTestCase, smart_error
 from .test_campaign import CampaignMixin
@@ -201,3 +202,35 @@ class TestG5SmartAdmUnknownErrorMasked(SmsTestCase):
             stats = self.env['sms.system.iys'].refresh_contacts(contact)
         joined = '\n'.join(logs.output) + '\n' + str(stats.get('error'))
         self.assertNotIn('5321234567', joined)
+
+
+# ==== S5 D-4 ====
+@tagged('post_install', '-at_install')
+class TestD4LegacyUndefinedAnswer(SmsTestCase):
+
+    UNDEFINED = ('', '<html><body>Bakim</body></html>', 'Bilinmeyen cevap', 'ID')
+
+    def test_d4_tanimsiz_yanit_belirsiz(self):
+        for answer in self.UNDEFINED:
+            with self.subTest(answer=answer):
+                self.net.turatel_script = [answer]
+                with self.assertRaises(TuratelError) as ctx:
+                    TuratelClient('CH1', 'user1', 'pass1').send(['5321234567'], 'x', 'ORG')
+                self.assertTrue(ctx.exception.uncertain, 'HTTP 200 + tanımsız yanıt belirsiz olmalı')
+                self.assertFalse(ctx.exception.retryable)
+
+    def test_d4_sayisal_kod_kalici_hata_kalir(self):
+        for answer in ('99', '-1', '30'):
+            with self.subTest(answer=answer):
+                self.net.turatel_script = [answer]
+                with self.assertRaises(TuratelError) as ctx:
+                    TuratelClient('CH1', 'user1', 'pass1').send(['5321234567'], 'x', 'ORG')
+                self.assertFalse(ctx.exception.uncertain)
+
+    def test_d4_send_sms_tanimsiz_yanit_kaydi_belirsiz_ve_tekrar_gonderilmez(self):
+        self.net.turatel_script = ['<html>502 Bad Gateway</html>']
+        msg = self.Message.send_sms('05321234567', 'Merhaba')
+        self.assertEqual((msg.state, msg.retry_count), ('uncertain', MAX_RETRY))
+        msg.action_retry()
+        self.Message._cron_retry_failed()
+        self.assertEqual(len(self.net.turatel_calls), 1)
