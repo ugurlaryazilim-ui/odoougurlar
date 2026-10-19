@@ -587,8 +587,14 @@ class SmsSystemMessage(models.Model):
         """
         if not (self.env.su or self.env.user.has_group('sms_system.group_sms_manager')):
             raise AccessError(_('Yalnız SMS yöneticileri iletim durumunu sorgulayabilir.'))
-        json_msgs = self.filtered(lambda m: m.provider_service in JSON_SERVICES)
-        legacy = (self - json_msgs).filtered('provider_msg_id')
+        # Y1: yalnız gönderilmiş/belirsiz kayıt sorgulanır; hata kaydı servis/hesap taşısa da (Ö1) Turatel'de yoktur
+        queryable = self.filtered(lambda m: m.state in ('sent', 'uncertain'))
+        if not queryable:
+            return {'type': 'ir.actions.client', 'tag': 'display_notification',
+                    'params': {'message': _("Yalnız gönderilmiş ya da belirsiz SMS'lerin iletim durumu sorgulanır."),
+                               'type': 'warning', 'sticky': False}}
+        json_msgs = queryable.filtered(lambda m: m.provider_service in JSON_SERVICES)
+        legacy = (queryable - json_msgs).filtered('provider_msg_id')
         if legacy:
             client = self._legacy_client()
             for msg in legacy:

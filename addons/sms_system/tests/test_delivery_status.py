@@ -481,6 +481,30 @@ class TestDeliveryStatusExtra(StatusMixin, SmsTestCase):
         self.refresh_all(msg)
         self.assertEqual(msg.delivery_state, 'pending')
 
+    def test_y1_durumu_sorgula_yalniz_gonderilmis_ya_da_belirsiz_kayitta(self):
+        """Y1: hata kaydı servis/hesap taşısa da (Ö1) düğme gizli, sunucu metodu ağa gitmez."""
+        err = self.make_tracked('05321230021', state='error', message_id=False, error='Kalıcı hata')
+        self.assertEqual((err.provider_service, err.provider_account_id), ('single', '9254'))
+        result = err.action_fetch_report()
+        self.assertEqual(result['params']['type'], 'warning')
+        self.assertEqual(self.net.calls, [], 'Hata kaydı için sağlayıcı sorgusu yapılmamalı')
+        # sent/uncertain sorgulanır
+        sent = self.make_tracked('05321230022')
+        unsure = self.make_tracked('05321230023', state='uncertain', message_id=False)
+        self.register_at_provider(sent, code=0)
+        (sent | unsure | err).action_fetch_report()
+        self.assertTrue([c for c in self.net.json_calls if c['endpoint'].startswith('Sms/GetStatus')])
+        self.refresh_all(err)
+        self.assertEqual(err.state, 'error')
+
+    def test_y1_durumu_sorgula_dugmesi_hata_kaydinda_gizli(self):
+        arch = etree.fromstring(self.env['sms.system.message'].get_view(view_type='form')['arch'])
+        button = next(b for b in arch.iter('button') if b.get('name') == 'action_fetch_report')
+        condition = button.get('invisible') or ''
+        self.assertIn('state', condition)
+        self.assertIn("'sent'", condition)
+        self.assertIn("'uncertain'", condition)
+
     def test_c5_iletim_aciklamasi(self):
         delivered = self.make_tracked('05321230015', delivery_state='delivered', delivery_code='0')
         failed = self.make_tracked('05321230016', delivery_state='undelivered', delivery_code='103')

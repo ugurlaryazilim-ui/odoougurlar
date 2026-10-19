@@ -31,7 +31,7 @@
                     <button name="action_retry" string="Yeniden Gönder" type="object" class="btn-primary"
                             invisible="state != 'error'" groups="sms_system.group_sms_manager"/>
                     <button name="action_fetch_report" string="Durumu Sorgula" type="object"
-                            invisible="not provider_msg_id and provider_service not in ('single', 'bulk')"
+                            invisible="state not in ('sent', 'uncertain') or (not provider_msg_id and provider_service not in ('single', 'bulk'))"
                             groups="sms_system.group_sms_manager"/>
                     <field name="state" widget="statusbar"/>
                 </header>
