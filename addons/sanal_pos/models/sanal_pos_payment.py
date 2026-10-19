@@ -867,10 +867,15 @@ class SanalPosPayment(models.Model):
                                                          format_try(self.amount)))
         return None, None
 
-    def _set_review(self, code, reason, tran):
+    def _set_review(self, code, reason, tran, approved=None):
         values = {'state': 'review', 'last_error_code': code, 'last_error_message': reason[:250]}
         if tran:
             values.update(self._payment_values(tran))
+        cents = [self._to_cents(t.get('amount')) for t in approved or []]
+        if len(cents) > 1 and None not in cents:
+            # Ö-D: birden fazla onaylı satış -> ödenen = toplam. Kabul edilip fazlası iade
+            # edildiğinde durum 'Kısmi iade' kalır ('İade edildi' değil).
+            values['paid_amount'] = float(sum(cents))
         self.write(values)
         self._notify_creator('%s – İnceleme gerekli. %s' % (self.invoice_no, reason))
 
@@ -892,7 +897,7 @@ class SanalPosPayment(models.Model):
             return
         if code:
             self.write(values)
-            self._set_review(code, reason, (approved or in_review or [None])[0])
+            self._set_review(code, reason, (approved or in_review or [None])[0], approved)
             return
         if failed:
             values.update(last_error_code='CARD_FAILED',
@@ -914,7 +919,7 @@ class SanalPosPayment(models.Model):
         prefix = 'Kapalı linke (%s) geç ödeme geldi: Paratika %s, talep tutarı %s.' % (
             dict(PAYMENT_STATES).get(self.state, self.state),
             format_try(tran.get('amount') or 0), format_try(self.amount))
-        self._set_review('REVIEW_LATE', ('%s %s' % (prefix, reason or '')).strip(), tran)
+        self._set_review('REVIEW_LATE', ('%s %s' % (prefix, reason or '')).strip(), tran, approved)
 
     # ---------------------------------------------------------------- belirsiz uzlaştırma (KK-16)
     def _mark_stale_sending(self):

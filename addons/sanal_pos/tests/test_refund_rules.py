@@ -253,3 +253,38 @@ class TestRefundWizardRemainder(RefundCase):
         self.make_refund_line(payment, 9.9, state='unknown', provider_ref=False)
         wiz = self.env[WIZARD].with_user(self.user_mgr).new({'payment_id': payment.id, 'kind': 'refund'})
         self.assertEqual(repr(wiz.amount), repr(59.8))
+
+
+@tagged('post_install', '-at_install', 'sanal_pos')
+class TestReviewMultipleRefund(RefundCase):
+    """Ö-D: çift tahsilat (REVIEW_MULTIPLE) kabul edilip fazlası panelden iade edilince kayıt
+    'İade edildi' olmaz; müşteri hâlâ bir tahsilat ödemiş durumdadır."""
+
+    def review_multiple(self, late=False):
+        payment = self.make_payment(state='error' if late else 'sent')
+        self.set_query_transactions(tran('AP', 'SALE', '9000.00', 'T1'),
+                                    tran('AP', 'SALE', '9000.00', 'T2'))
+        payment.sudo()._sync_status()
+        payment.invalidate_recordset()
+        self.assertEqual(payment.state, 'review')
+        return payment
+
+    def test_od_kabul_sonrasi_fazla_tahsilat_panelden_iade_kismi_iade(self):
+        payment = self.review_multiple()
+        self.assertEqual(payment.last_error_code, 'REVIEW_MULTIPLE')
+        self.assertEqual(payment.paid_amount, 18000.0, 'ödenen = onaylı satışların toplamı')
+        payment.with_user(self.user_mgr).action_review_accept()
+        payment.invalidate_recordset()
+        self.assertEqual((payment.state, payment.paid_amount), ('paid', 18000.0))
+        self.set_query_transactions(tran('AP', 'SALE', '9000.00', 'T1'), tran('AP', 'SALE', '9000.00', 'T2'),
+                                    tran('AP', 'REFUND', '9000.00', 'PANEL-T2'))
+        payment.sudo()._sync_status()
+        payment.invalidate_recordset()
+        self.assertEqual(payment.refunded_amount, 9000.0)
+        self.assertEqual(payment.state, 'partial_refund', 'bir tahsilat hâlâ müşteride')
+        self.assertEqual(payment._refundable_cents(), 900000)
+
+    def test_od_gec_odeme_coklu_satis_toplami_yazar(self):
+        payment = self.review_multiple(late=True)
+        self.assertEqual(payment.last_error_code, 'REVIEW_LATE')
+        self.assertEqual(payment.paid_amount, 18000.0)
