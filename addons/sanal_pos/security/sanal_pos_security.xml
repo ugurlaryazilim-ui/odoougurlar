@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- Sanal POS / Kullanıcı: ödeme taleplerini görür, link oluşturur/yeniden gönderir/iptal eder -->
+    <record id="group_sanal_pos_user" model="res.groups">
+        <field name="name">Sanal POS / Kullanıcı</field>
+        <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
+    </record>
+
+    <!-- Sanal POS / Yönetici: ödeme iptali, iade, inceleme, işlem kayıtları.
+         base.group_system bu gruba OTOMATİK EKLENMEZ (iade para çıkışıdır; en az yetki). -->
+    <record id="group_sanal_pos_manager" model="res.groups">
+        <field name="name">Sanal POS / Yönetici</field>
+        <field name="implied_ids" eval="[(4, ref('group_sanal_pos_user'))]"/>
+    </record>
+</odoo>

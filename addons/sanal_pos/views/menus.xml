@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- Diğer menüler (Ödeme Talepleri, Yeni Ödeme Linki, İşlem Kayıtları) ilgili görevlerde eklenir. -->
+    <menuitem id="menu_sanal_pos_root"
+              name="Sanal POS"
+              groups="sanal_pos.group_sanal_pos_user"
+              sequence="90"/>
+
+    <record id="action_sanal_pos_settings" model="ir.actions.act_window">
+        <field name="name">Ayarlar</field>
+        <field name="res_model">res.config.settings</field>
+        <field name="view_mode">form</field>
+        <field name="target">current</field>
+        <field name="context">{'module': 'sanal_pos', 'bin_size': False}</field>
+    </record>
+
+    <!-- Ayarlar yalnız Odoo sistem yöneticisindedir (tasarım §11, U-1) -->
+    <menuitem id="menu_sanal_pos_settings"
+              name="Ayarlar"
+              parent="menu_sanal_pos_root"
+              action="action_sanal_pos_settings"
+              groups="base.group_system"
+              sequence="90"/>
+</odoo>
