@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- İşlem kayıtları: sağlayıcı API çağrı günlüğü (KK-39). Salt okunur; yalnız yönetici. -->
+
+    <record id="view_sanal_pos_log_list" model="ir.ui.view">
+        <field name="name">sanal.pos.log.list</field>
+        <field name="model">sanal.pos.log</field>
+        <field name="arch" type="xml">
+            <list string="İşlem Kayıtları" create="0" edit="0" delete="0"
+                  decoration-danger="not success">
+                <field name="create_date"/>
+                <field name="action"/>
+                <field name="payment_id"/>
+                <field name="provider" optional="hide"/>
+                <field name="environment" widget="badge" decoration-danger="environment == 'test'"/>
+                <field name="http_status"/>
+                <field name="response_code"/>
+                <field name="error_code"/>
+                <field name="success"/>
+                <field name="duration_ms" optional="show"/>
+                <field name="is_financial" optional="show"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_sanal_pos_log_form" model="ir.ui.view">
+        <field name="name">sanal.pos.log.form</field>
+        <field name="model">sanal.pos.log</field>
+        <field name="arch" type="xml">
+            <form string="İşlem Kaydı" create="0" edit="0" delete="0">
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="action"/>
+                            <field name="payment_id"/>
+                            <field name="provider"/>
+                            <field name="environment"/>
+                            <field name="create_date"/>
+                        </group>
+                        <group>
+                            <field name="success"/>
+                            <field name="http_status"/>
+                            <field name="response_code"/>
+                            <field name="error_code"/>
+                            <field name="duration_ms"/>
+                            <field name="is_financial"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="İstek (maskeli)" name="request">
+                            <field name="request_body" readonly="1"/>
+                        </page>
+                        <page string="Yanıt (maskeli)" name="response">
+                            <field name="response_body" readonly="1"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_sanal_pos_log_search" model="ir.ui.view">
+        <field name="name">sanal.pos.log.search</field>
+        <field name="model">sanal.pos.log</field>
+        <field name="arch" type="xml">
+            <search string="İşlem Kayıtları">
+                <field name="action"/>
+                <field name="payment_id"/>
+                <field name="error_code"/>
+                <filter name="failed" string="Başarısız" domain="[('success', '=', False)]"/>
+                <filter name="financial" string="Finansal (iptal/iade)" domain="[('is_financial', '=', True)]"/>
+                <group>
+                    <filter name="group_action" string="İşlem" context="{'group_by': 'action'}"/>
+                    <filter name="group_payment" string="Ödeme Talebi" context="{'group_by': 'payment_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_sanal_pos_log" model="ir.actions.act_window">
+        <field name="name">İşlem Kayıtları</field>
+        <field name="res_model">sanal.pos.log</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_sanal_pos_log_search"/>
+    </record>
+</odoo>
