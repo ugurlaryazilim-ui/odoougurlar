@@ -455,9 +455,9 @@ class TestRefundHistoryImmutable(SecurityCase):
         line = self.make_refund_line(payment, 100.0, provider_ref='R-1')
         for user in (self.user_sp, self.user_mgr, self.user_sys):
             with self.subTest(user=user.login):
-                with self.assertRaises((AccessError, UserError)):
+                with self.assertRaises(UserError):
                     line.with_user(user).write({'amount': 1.0})
-                with self.assertRaises((AccessError, UserError)):
+                with self.assertRaises(UserError):
                     line.with_user(user).unlink()
         line.invalidate_recordset()
         self.assertEqual(line.amount, 100.0)
@@ -465,7 +465,7 @@ class TestRefundHistoryImmutable(SecurityCase):
     def test_kk48_satir_rpc_ile_olusturulamaz(self):
         payment = self.make_paid()
         for user in (self.user_sp, self.user_mgr):
-            with self.assertRaises((AccessError, UserError)):
+            with self.assertRaises(UserError):
                 self.env['sanal.pos.refund'].with_user(user).create({
                     'payment_id': payment.id, 'kind': 'refund', 'amount': 100.0, 'state': 'done',
                     'source': 'odoo', 'reason': 'sahte kayıt'})

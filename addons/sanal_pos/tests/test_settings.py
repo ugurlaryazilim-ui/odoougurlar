@@ -178,7 +178,7 @@ class TestCopyTailorSettings(SanalPosCase):
     def test_g3_kopyala_yalniz_sistem_yoneticisi(self):
         self._set_tailor()
         Settings = self.env['res.config.settings']
-        with self.assertRaises((AccessError, UserError)):
+        with self.assertRaises(UserError):
             rcs = Settings.with_user(self.user_mgr).create({})
             rcs.action_copy_tailor_mssql()
             rcs.execute()

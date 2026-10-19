@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from psycopg2 import IntegrityError
+from psycopg2.errors import ForeignKeyViolation
 
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tests import tagged
@@ -307,9 +308,9 @@ class TestRefundModel(ModelCase):
         for user in (self.user_mgr, self.user_sp, self.user_sys):
             with self.subTest(user=user.login):
                 env_line = line.with_user(user)
-                with self.assertRaises((AccessError, UserError)):
+                with self.assertRaises(UserError):
                     env_line.write({'amount': 1.0})
-                with self.assertRaises((AccessError, UserError)):
+                with self.assertRaises(UserError):
                     env_line.unlink()
         line.invalidate_recordset()
         self.assertEqual(line.amount, 100.0)
@@ -333,7 +334,7 @@ class TestRefundModel(ModelCase):
     def test_kk48_ondelete_restrict(self):
         """İade satırı olan ödeme kaydı silinemez (finansal iz)."""
         self.make_refund_line(self.paid, 100.0, provider_ref='R1')
-        self.assertDbRejects(lambda: self.paid.sudo().unlink(), exc=(IntegrityError, UserError))
+        self.assertDbRejects(lambda: self.paid.sudo().unlink(), exc=ForeignKeyViolation)
 
     def test_kk48_alanlar_ve_durum_degerleri(self):
         fields = self.env['sanal.pos.refund']._fields
