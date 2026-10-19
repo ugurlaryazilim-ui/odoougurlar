@@ -131,6 +131,8 @@ class SmsSystemContact(models.Model):
             existing.update({c.mobile: c for c in Contact.search([('mobile', 'in', numbers[i:i + UPSERT_CHUNK])])})
         list_cmds = [(4, lst.id) for lst in (lists or [])]
         to_create = []
+        to_bind = Contact.browse()
+        to_activate = Contact.browse()
         for num, row in seen.items():
             contact = existing.get(num)
             if contact:
@@ -142,9 +144,9 @@ class SmsSystemContact(models.Model):
                 if row.get('partner_id') and not contact.partner_id:
                     vals['partner_id'] = row['partner_id']
                 if list_cmds:
-                    vals['list_ids'] = list_cmds
+                    to_bind |= contact
                 if not contact.active:
-                    vals['active'] = True
+                    to_activate |= contact
                 if vals:
                     contact.write(vals)
                 result['updated'] += 1
@@ -154,6 +156,11 @@ class SmsSystemContact(models.Model):
                     'customer_code': row.get('customer_code') or False,
                     'partner_id': row.get('partner_id') or False, 'list_ids': list_cmds,
                 })
+        # Liste bağlama ve aktifleme kişi başına değil, parça başına toplu yazılır.
+        for i in range(0, len(to_bind), UPSERT_CHUNK):
+            to_bind[i:i + UPSERT_CHUNK].write({'list_ids': list_cmds})
+        for i in range(0, len(to_activate), UPSERT_CHUNK):
+            to_activate[i:i + UPSERT_CHUNK].write({'active': True})
         for i in range(0, len(to_create), UPSERT_CHUNK):
             Contact.create(to_create[i:i + UPSERT_CHUNK])
         result['created'] = len(to_create)
