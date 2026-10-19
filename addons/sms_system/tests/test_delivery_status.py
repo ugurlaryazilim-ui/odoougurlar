@@ -1,5 +1,4 @@
 """KK-C7 (kod eşlemesi, model), C13 eki (hesap seti), C16 (belirsiz uzlaştırma), C18 (durum cron'u), C19 (görünümler)."""
-import logging
 from datetime import datetime, time as dtime, timedelta
 from unittest.mock import patch
 
@@ -10,7 +9,7 @@ from odoo.exceptions import AccessError
 from odoo.tests.common import new_test_user, tagged
 
 from ..services.turatel_json import delivery_state as map_delivery_code
-from .common import json_err, json_ok, SmsTestCase
+from .common import json_err, SmsTestCase
 from .test_json_routing import JsonModelMixin, NUMBER
 
 TRACK_FIELDS = ('provider_packet_id', 'delivery_state', 'delivery_code', 'provider_service', 'provider_account_id')
