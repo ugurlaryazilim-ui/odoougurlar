@@ -120,7 +120,7 @@ class SanalPosPayment(models.Model):
     # Sağlayıcıya gönderilen değerler
     customer_name = fields.Char(string='Müşteri Adı')
     customer_phone = fields.Char(string='Telefon')
-    customer_email = fields.Char(string='E-posta')
+    customer_email = fields.Char(string='Müşteri e-postası')
     customer_address = fields.Char(string='Adres')
     customer_city = fields.Char(string='İl')
     customer_zip = fields.Char(string='Posta Kodu')
@@ -133,8 +133,8 @@ class SanalPosPayment(models.Model):
                              readonly=True)
 
     # ---------------------------------------------------------------- link
-    channel_sms = fields.Boolean(string='SMS')
-    channel_email = fields.Boolean(string='E-posta')
+    channel_sms = fields.Boolean(string='SMS ile gönder')
+    channel_email = fields.Boolean(string='E-posta ile gönder')
     channels_display = fields.Char(string='Kanal', compute='_compute_channels_display')
     expiry_hours = fields.Integer(string='Geçerlilik (saat)', default=168)
     state = fields.Selection(
