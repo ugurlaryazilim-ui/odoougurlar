@@ -86,6 +86,13 @@
                                 </div>
                             </div>
                         </setting>
+                        <setting string="Hesap Sorguları" help="Kaydedilmiş kimlik setleriyle Turatel'e okuma isteği gönderir (SMS gönderilmez; test modunda da çalışır). Önce ayarları kaydedin. Her kimlik seti ayrı satırda gösterilir.">
+                            <div class="mt8">
+                                <button name="action_turatel_accounts" type="object" string="Hesapları Getir" class="btn-secondary" icon="fa-plug"/>
+                                <button name="action_turatel_originators" type="object" string="Başlıkları Getir" class="btn-secondary" icon="fa-list"/>
+                                <button name="action_turatel_credit" type="object" string="Krediyi Getir" class="btn-secondary" icon="fa-money"/>
+                            </div>
+                        </setting>
                         <setting string="Adresler ve Geçerlilik" help="Boş bırakılan adresler için varsayılan Turatel adresleri kullanılır.">
                             <div class="content-group">
                                 <div class="row mt8">

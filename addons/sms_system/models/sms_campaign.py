@@ -11,7 +11,8 @@ from odoo import _, api, fields, models
 from odoo.tools import html2plaintext, html_escape
 from odoo.exceptions import UserError
 
-from ..services.turatel import MAX_SEGMENTS, prepare_text, segment_count
+from ..services.turatel import MAX_SEGMENTS, TuratelError, prepare_text, segment_count
+from ..services.turatel_json import TuratelJsonClient, mask_digits
 from .sms_iys import FRESH
 from .sms_message import MAX_RETRY
 from .sms_template import PLACEHOLDER
@@ -22,6 +23,7 @@ PACK_SIZE = 500          # Turatel'e tek istekte giden en fazla numara
 MIN_TIME_LEFT = 20       # cron süresinin sonuna bu kadar saniye kala dur, kalan sonraki çalışmada
 STUCK_MINUTES = 15       # 'gönderiliyor'da bu kadar dakika kalan kayıt belirsiz sayılır (tekrar gönderilmez)
 CREATE_CHUNK = 5000      # büyük kampanyada gönderim kayıtları parça parça oluşturulur
+CREDIT_TIMEOUT = (3, 6)  # onay penceresinde kredi okuması: yavaş Turatel pencereyi uzun bekletmesin
 IYS_REFRESH_SECONDS = 120  # gönderim anı İYS tazelemesine ayrılan süre; yetmezse paket bekler, sonraki çalışma sürdürür
 
 
@@ -214,6 +216,10 @@ class SmsSystemCampaign(models.Model):
             raise UserError(_(
                 'Ticari (kampanya/indirim) SMS için İYS izin kontrolü zorunludur. '
                 'İYS (SmartADM) entegrasyonu henüz etkin değil; bilgilendirme ya da personel türünü kullanın.'))
+        if self.message_type == 'commercial' and self._json_creds_missing():
+            raise UserError(_(
+                'Reklam hesabı kimlik bilgileri (kullanıcı adı/şifre) tanımlı değil. Ayarlar > SMS > Turatel JSON API '
+                'bölümünde reklam kimlik setini doldurun; ticari kampanya bilgi hesabıyla gönderilmez.'))
         if self.preview_segments > MAX_SEGMENTS:
             raise UserError(_('Metin çok uzun (%(n)s parça). En fazla %(max)s parça gönderilebilir.',
                               n=self.preview_segments, max=MAX_SEGMENTS))
@@ -222,6 +228,30 @@ class SmsSystemCampaign(models.Model):
         if not count:
             raise UserError(_('Gönderilecek alıcı yok (listeler boş, kara listede ya da İYS onaylı değil).'))
         self._check_daily_limit(count)
+
+    def _json_creds_missing(self):
+        """JSON modunda ticari kampanyanın reklam kimlik seti boş mu (KK-C29). Bilgi setine düşülmez."""
+        cfg = self.env['sms.system.message']._settings()
+        return cfg['api_mode'] == 'json' and not cfg['json_creds'].get('commercial')
+
+    def _json_credit(self):
+        """json modunda kampanyanın hesabı için kalan kredi: (adet, None) ya da (None, maskeli hata). Legacy: (None, None).
+
+        Hesaba ait kimlik setiyle sorgulanır (ticari = reklam, diğerleri = bilgi). Okuma isteğidir; test modunda da yapılır.
+        """
+        self.ensure_one()
+        cfg = self.env['sms.system.message']._settings()
+        if cfg['api_mode'] != 'json':
+            return None, None
+        creds = cfg['json_creds'].get('commercial' if self.message_type == 'commercial' else 'info')
+        if not creds:
+            return None, _('kimlik seti tanımlı değil')
+        user_id, username, password, account = creds
+        try:
+            client = TuratelJsonClient(cfg['bulk_url'], user_id, username, password, timeout=CREDIT_TIMEOUT)
+            return client.get_credit(account), None
+        except TuratelError as e:
+            return None, mask_digits(str(e))
 
     def _check_daily_limit(self, count):
         """Günlük toplu SMS sınırı: `count` yeni kayıt eklenirse son 24 saatteki toplam sınırı aşıyor mu."""
@@ -580,10 +610,24 @@ class SmsSystemCampaignConfirm(models.TransientModel):
             types = dict(camp._fields['message_type'].selection)
             wiz.summary = _(
                 '<p><b>%(n)s</b> kişiye %(when)s gönderilecek (%(s)s numara atlanacak).</p>'
-                '<p>Tahmini kredi: <b>%(c)s</b> (%(seg)s parça/SMS). Tür: %(t)s.</p>'
-                '<p class="text-muted">Gönderim başladıktan sonra yalnız henüz gitmemiş mesajlar durdurulabilir.</p>',
+                '<p>Tahmini kredi: <b>%(c)s</b> (%(seg)s parça/SMS). Tür: %(t)s.</p>',
                 n=camp.preview_count, when=when, s=camp.preview_skipped, c=camp.preview_credit,
-                seg=camp.preview_segments, t=types[camp.message_type])
+                seg=camp.preview_segments, t=types[camp.message_type]) + wiz._credit_html(camp) + _(
+                '<p class="text-muted">Gönderim başladıktan sonra yalnız henüz gitmemiş mesajlar durdurulabilir.</p>')
+
+    def _credit_html(self, camp):
+        """json modunda kalan kredi satırı (KK-C20); uyarılar onayı engellemez. Legacy modda boş."""
+        remaining, error = camp._json_credit()
+        if remaining is None and error is None:
+            return ''
+        if remaining is None:
+            return _('<p class="text-warning">Kalan kredi alınamadı (%s). Onay engellenmez.</p>') % html_escape(error)
+        text = _('<p>Kalan kredi: <b>%s</b> adet.</p>') % remaining
+        if camp.preview_credit > remaining:
+            text += _('<p class="text-danger">Kredi yetersiz: gerekli %(need)s, kalan %(left)s. '
+                      'Gönderim engellenmez; yetersiz krediyle gönderim eksik kalabilir.</p>',
+                      need=camp.preview_credit, left=remaining)
+        return text
 
     def action_confirm(self):
         self.ensure_one()

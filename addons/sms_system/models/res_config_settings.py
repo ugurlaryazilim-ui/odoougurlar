@@ -3,6 +3,7 @@ from odoo.exceptions import AccessError, UserError
 
 from ..services.smartadm import SmartAdmError
 from ..services.turatel import ERROR_HINTS, TuratelError
+from ..services.turatel_json import TuratelJsonClient, mask_digits
 from .sms_message import (API_MODES, DEFAULT_ACCOUNT_COMMERCIAL, DEFAULT_ACCOUNT_INFO, DEFAULT_BULK_URL,
                           DEFAULT_JSON_USER_ID, DEFAULT_SINGLE_URL, DEFAULT_VALIDITY_MINUTES, parse_user_daily_limit,
                           parse_validity_minutes, resolve_api_mode, test_mode_enabled)
@@ -27,6 +28,8 @@ _JSON_DEFAULTS = {
     'sms_single_url': DEFAULT_SINGLE_URL, 'sms_bulk_url': DEFAULT_BULK_URL,
 }
 _JSON_PASSWORDS = ('sms_json_info_password', 'sms_json_com_password')
+_JSON_SETS = (('info', 'Bilgi'), ('commercial', 'Reklam'))   # düğmelerde her kimlik seti ayrı satır (C6)
+_KIND_RANK = {'success': 0, 'warning': 1, 'danger': 2}
 _JSON_DIGIT_FIELDS = ('sms_json_info_user_id', 'sms_account_info', 'sms_json_com_user_id', 'sms_account_commercial')
 
 
@@ -218,3 +221,80 @@ class ResConfigSettings(models.TransientModel):
             'params': {'title': _('Turatel Bağlantısı'), 'message': message,
                        'type': 'warning' if hint else 'success', 'sticky': True},
         }
+
+    # ── Turatel JSON okuma düğmeleri (C6): iki kimlik seti ayrı satır, test modunda da çalışır, SendSms çağırmaz ──
+
+    def _turatel_json_notify(self, title, probe, single_token=False):
+        """Her kimlik setine `probe(client, account, cfg) -> (metin, tür)` uygular; sonuçları tek bildirimde verir.
+
+        Kaydedilmiş ayarlar kullanılır (web arayüzü kaydedilmemiş değişiklik için önce kaydetmeyi sorar). Set boşsa
+        istek yapılmaz. Hata metinleri istemciden maskeli gelir; ayrıca rakam dizileri yeniden maskelenir.
+        """
+        self.ensure_one()
+        if not (self.env.su or self.env.user.has_group('base.group_system')):
+            raise AccessError(_('Yalnız sistem yöneticileri Turatel hesap sorgusu yapabilir.'))
+        cfg = self.env['sms.system.message']._settings()
+        lines, worst = [], 'success'
+        for key, label in _JSON_SETS:
+            creds = cfg['json_creds'].get(key)
+            if not creds:
+                lines.append(_('%s kimliği tanımlı değil.') % label)
+                text, kind = None, 'warning'
+            else:
+                user_id, username, password, account = creds
+                try:
+                    text, kind = probe(TuratelJsonClient(cfg['bulk_url'], user_id, username, password), account, cfg)
+                except TuratelError as e:
+                    text, kind = self._turatel_json_error_text(str(e), label), 'danger'
+                lines.append('%s (%s): %s' % (label, account, text))
+                if single_token and key == 'info':
+                    # Tekli gönderim yalnız singlesms kullanır; C0 yalnız bulksms'i doğruladı
+                    single = TuratelJsonClient(cfg['single_url'], user_id, username, password)
+                    try:
+                        single.get_token()
+                        lines.append(_('%s: singlesms jetonu alındı.') % label)
+                    except TuratelError as e:
+                        lines.append(_('%s: singlesms jetonu alınamadı: %s') % (
+                            label, self._turatel_json_error_text(str(e), label)))
+                        kind = 'danger'
+            if _KIND_RANK[kind] > _KIND_RANK[worst]:
+                worst = kind
+        return {'type': 'ir.actions.client', 'tag': 'display_notification',
+                'params': {'title': title, 'message': '\n'.join(lines), 'type': worst, 'sticky': True}}
+
+    @api.model
+    def _turatel_json_error_text(self, text, label):
+        text = mask_digits(text or '')
+        if '(-1000)' in text:
+            text += _('; %s hesabı için %s kullanıcı adı/şifresi gerekir') % (label.lower(), label.lower())
+        return text
+
+    def _turatel_probe_accounts(self, client, account, _cfg):
+        accounts = client.get_user_accounts()
+        names = ', '.join('%s (%s)' % (a['accountId'], a['accountName'] or '-') for a in accounts) or _('hiç hesap yok')
+        if str(account) not in {a['accountId'] for a in accounts}:
+            return _('kullanıcı %s hesabını görmüyor; görünen hesaplar: %s') % (account, names), 'warning'
+        return _('hesaplar: %s') % names, 'success'
+
+    def _turatel_probe_originators(self, client, account, cfg):
+        names = client.get_originators(account)
+        listed = ', '.join(names) or _('hiç başlık yok')
+        originator = (cfg['originator'] or '').strip()
+        if not originator:
+            return _('başlıklar: %s; ayarlarda mesaj başlığı tanımlı değil') % listed, 'warning'
+        if originator not in names:
+            return _('başlıklar: %s; ayarlı başlık "%s" listede yok') % (listed, originator), 'warning'
+        return _('başlıklar: %s; ayarlı başlık "%s" tanımlı') % (listed, originator), 'success'
+
+    def _turatel_probe_credit(self, client, account, _cfg):
+        amount = '{:,}'.format(client.get_credit(account)).replace(',', '.')
+        return _('kalan kredi: %s adet') % amount, 'success'
+
+    def action_turatel_accounts(self):
+        return self._turatel_json_notify(_('Turatel Hesapları'), self._turatel_probe_accounts, single_token=True)
+
+    def action_turatel_originators(self):
+        return self._turatel_json_notify(_('Turatel Başlıkları'), self._turatel_probe_originators)
+
+    def action_turatel_credit(self):
+        return self._turatel_json_notify(_('Turatel Kredisi'), self._turatel_probe_credit)
