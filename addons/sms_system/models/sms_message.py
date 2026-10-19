@@ -352,11 +352,15 @@ class SmsSystemMessage(models.Model):
             missing.write({'state': 'error', 'retry_count': MAX_RETRY,
                            'error': _('Mesaj başlığı (Originator) ayarlanmamış.')})
             pending -= missing
-        if cfg['test_mode']:
-            blocked = pending.filtered(lambda m: self._blocked_by_test_mode(cfg, normalize_number(m.number)))
-            blocked.write({'state': 'test', 'sent_at': fields.Datetime.now(), 'provider_answer': 'TEST'})
-            pending -= blocked
-        return pending
+        return pending._settle_test_blocked(cfg)
+
+    def _settle_test_blocked(self, cfg):
+        """Test modunda test listesi dışındaki kayıtları 'test' yap; gönderilmesi gerekenleri döndür."""
+        if not cfg['test_mode']:
+            return self
+        blocked = self.filtered(lambda m: self._blocked_by_test_mode(cfg, normalize_number(m.number)))
+        blocked.write({'state': 'test', 'sent_at': fields.Datetime.now(), 'provider_answer': 'TEST'})
+        return self - blocked
 
     @api.model
     def _blocked_by_test_mode(self, cfg, number):
@@ -430,12 +434,9 @@ class SmsSystemMessage(models.Model):
             self.write({'state': 'error', 'retry_count': MAX_RETRY,
                         'error': _('Mesaj başlığı (Originator) ayarlanmamış.')})
             return
-        if cfg['test_mode']:
-            blocked = self.filtered(lambda m: self._blocked_by_test_mode(cfg, normalize_number(m.number)))
-            blocked.write({'state': 'test', 'sent_at': fields.Datetime.now(), 'provider_answer': 'TEST'})
-            self -= blocked
-            if not self:
-                return
+        self = self._settle_test_blocked(cfg)
+        if not self:
+            return
         if cfg['api_mode'] == 'json':
             self._deliver_pack_json(cfg)
             return
