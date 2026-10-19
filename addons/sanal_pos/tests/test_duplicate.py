@@ -46,9 +46,9 @@ class DupCase(SanalPosCase):
 class TestOpenLinkBlocks(DupCase):
 
     def test_kk18_acik_durumlar_engeller(self):
-        for state in OPEN_STATES:
+        for i, state in enumerate(OPEN_STATES, start=1):
             with self.subTest(state=state):
-                payment = self.make_payment(state=state)
+                payment = self.make_payment(state=state, attempt_no=i)
                 self.assertBlocked(OPEN_MSG)
                 payment.sudo().write({'state': 'link_cancelled'})
 
@@ -119,9 +119,9 @@ class TestOpenLinkBlocks(DupCase):
 class TestPaidBlocks(DupCase):
 
     def test_kk19_odenmis_durumlar_engeller(self):
-        for state in PAID_STATES:
+        for i, state in enumerate(PAID_STATES, start=1):
             with self.subTest(state=state):
-                payment = self.make_payment(state=state)
+                payment = self.make_payment(state=state, attempt_no=i)
                 self.assertBlocked(PAID_MSG)
                 payment.sudo().write({'state': 'link_cancelled'})
 
@@ -142,12 +142,12 @@ class TestReusableStates(DupCase):
     def test_kk20_eski_kayit_durumlari_yeni_linke_izin_verir(self):
         for i, state in enumerate(('expired', 'link_cancelled', 'error'), start=1):
             with self.subTest(state=state):
-                self.make_payment(state=state, attempt_no=i)
+                self.make_payment(state=state, attempt_no=2 * i - 1)
                 self.assertIsNone(self.attempt())
                 new = self.last_payment()
                 self.assertEqual(new.state, 'sent')
-                self.assertEqual(new.attempt_no, i + 1)
-                self.assertEqual(new.merchant_payment_id, '%s-%d' % (INV_NO, i + 1))
+                self.assertEqual(new.attempt_no, 2 * i)
+                self.assertEqual(new.merchant_payment_id, '%s-%d' % (INV_NO, 2 * i))
                 new.sudo().write({'state': 'link_cancelled'})
 
     def test_kk20_sonek_tum_denemelerin_maksimumunun_bir_fazlasi(self):
