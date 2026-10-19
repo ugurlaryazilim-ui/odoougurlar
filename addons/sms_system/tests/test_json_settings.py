@@ -49,7 +49,8 @@ class JsonSettingsMixin:
         return self.icp.get_param('sms_system.' + key)
 
     def creds(self, which):
-        value = self.Message._settings().get('json_creds', {}).get(which)
+        key = {'com': 'commercial'}.get(which, which)   # _settings()['json_creds'] anahtarları: info / commercial
+        value = self.Message._settings().get('json_creds', {}).get(key)
         return tuple(str(x) for x in value) if value else None
 
     def run_button(self, name, **create_vals):
@@ -70,7 +71,7 @@ class TestJsonSettings(JsonSettingsMixin, SmsTestCase):
 
     # ── KK-C1 ──
     def test_kk_c1_alanlar_ve_gruplar(self):
-        self.require_fields(list(FULL) + ['sms_test_numbers'])
+        self.require_fields(list(FULL))   # sms_test_numbers C7'ye aittir (test_test_numbers.py)
         for name in SECRET_FIELDS:
             self.assertEqual(self.Settings._fields[name].groups, 'base.group_system', name)
         mode = self.Settings._fields['sms_api_mode']
@@ -326,7 +327,7 @@ class TestJsonSettingsRpc(JsonSettingsMixin, SmsHttpCase):
     def test_kk_c9_rpc_default_get_ve_web_read_json_sirlarini_dondurmez(self):
         self.configure_json()
         self.require_fields(SECRET_FIELDS)
-        wizard = self.Settings.with_user(self.sms_manager).create({})
+        wizard = self.Settings.create({})   # Config Settings yalnız yönetici oluşturur: test ortamı kullanıcısı
         self.authenticate(self.plain_user.login, self.PW)
         body = self.call_kw('res.config.settings', 'default_get', [list(SECRET_FIELDS) + ['sms_api_mode']])
         for secret in ('info_pw', 'com_pw'):

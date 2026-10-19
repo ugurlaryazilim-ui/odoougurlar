@@ -42,6 +42,67 @@
                             </div>
                         </setting>
                     </block>
+                    <block title="Turatel JSON API" name="sms_turatel_json">
+                        <setting string="API Modu" help="Varsayılan: Eski XML API. JSON API'ye geçmeden önce kimlik setlerini girip Hesapları/Kredi düğmeleriyle deneyin; eski kimlik bilgileri geri dönüş için saklanır.">
+                            <field name="sms_api_mode"/>
+                        </setting>
+                        <setting string="Bilgi Kimlik Seti" help="Tekli SMS ile bilgilendirme/personel kampanyaları. Turatel kullanıcısı bu hesabı görebilmelidir.">
+                            <div class="content-group">
+                                <div class="row mt8">
+                                    <label for="sms_json_info_user_id" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_json_info_user_id" class="col-lg-8"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_json_info_username" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_json_info_username" class="col-lg-8"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_json_info_password" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_json_info_password" password="True" class="col-lg-8"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_account_info" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_account_info" class="col-lg-8"/>
+                                </div>
+                            </div>
+                        </setting>
+                        <setting string="Reklam Kimlik Seti" help="Ticari kampanyalar. Ya tamamı dolu ya tamamı boş olmalı; boşsa JSON modunda ticari kampanya gönderilmez (bilgi kimlikleriyle denenmez).">
+                            <div class="content-group">
+                                <div class="row mt8">
+                                    <label for="sms_json_com_user_id" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_json_com_user_id" class="col-lg-8"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_json_com_username" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_json_com_username" class="col-lg-8"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_json_com_password" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_json_com_password" password="True" class="col-lg-8"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_account_commercial" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_account_commercial" class="col-lg-8"/>
+                                </div>
+                            </div>
+                        </setting>
+                        <setting string="Adresler ve Geçerlilik" help="Boş bırakılan adresler için varsayılan Turatel adresleri kullanılır.">
+                            <div class="content-group">
+                                <div class="row mt8">
+                                    <label for="sms_single_url" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_single_url" class="col-lg-8" placeholder="https://platform.turatel.com/singlesms"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_bulk_url" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_bulk_url" class="col-lg-8" placeholder="https://platform.turatel.com/bulksms"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_validity_minutes" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_validity_minutes" class="col-lg-8"/>
+                                </div>
+                            </div>
+                        </setting>
+                    </block>
                     <block title="İYS İzin Kontrolü (SmartADM)" name="sms_iys">
                         <setting help="Ticari (kampanya/indirim) SMS yalnız İYS onaylı numaralara gider. Rehber yarım saatte bir otomatik senkronlanır.">
                             <field name="sms_iys_enabled"/>

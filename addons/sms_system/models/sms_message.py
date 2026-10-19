@@ -19,6 +19,15 @@ SINGLE_STUCK_MINUTES = 15
 # Cron süresinin sonuna bu kadar saniye kala dur; kalanlar sonraki çalışmada
 SINGLE_MIN_TIME_LEFT = 20
 
+# Turatel JSON API ayarları (C1; tasarım §5.1)
+API_MODES = ('legacy_xml', 'json')
+DEFAULT_JSON_USER_ID = '20219'
+DEFAULT_ACCOUNT_INFO = '9254'
+DEFAULT_ACCOUNT_COMMERCIAL = '65672'
+DEFAULT_SINGLE_URL = 'https://platform.turatel.com/singlesms'
+DEFAULT_BULK_URL = 'https://platform.turatel.com/bulksms'
+DEFAULT_VALIDITY_MINUTES = 1260
+
 
 def test_mode_enabled(value):
     """Test modu tek kaynağı (K2): yalnız tam 'False' kapatır.
@@ -38,6 +47,20 @@ def parse_user_daily_limit(value):
     except (TypeError, ValueError):
         return DEFAULT_USER_DAILY_LIMIT
     return limit if limit >= 0 else DEFAULT_USER_DAILY_LIMIT
+
+
+def resolve_api_mode(value):
+    """API modu: yalnız tam 'json' JSON'dur; yok/boş/bilinmeyen her değer eski XML (legacy_xml) sayılır."""
+    return 'json' if value == 'json' else 'legacy_xml'
+
+
+def parse_validity_minutes(value):
+    """Geçerlilik süresi (dk): yok/boş/0/negatif/bozuk -> 1260."""
+    try:
+        minutes = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_VALIDITY_MINUTES
+    return minutes if minutes > 0 else DEFAULT_VALIDITY_MINUTES
 
 
 class SmsSystemMessage(models.Model):
@@ -78,9 +101,35 @@ class SmsSystemMessage(models.Model):
     # ── Ayarlar ──
 
     @api.model
+    def _json_creds(self, icp, which, default_account):
+        """Bir kimlik seti: (user_id, kullanıcı adı, şifre, hesap_id) ya da set eksikse None.
+
+        which 'info' (bilgi) | 'com' (reklam). Setler arasında geri düşme YOKTUR: reklam seti boşsa
+        bilgi kimlikleri kullanılmaz. userId ve hesap boşsa tasarım varsayılanları geçerlidir.
+        """
+        prefix = 'sms_system.turatel_json_%s_' % which
+        username = (icp.get_param(prefix + 'username') or '').strip()
+        password = icp.get_param(prefix + 'password') or ''
+        if not username or not password.strip():
+            return None
+        user_id = (icp.get_param(prefix + 'user_id') or '').strip() or DEFAULT_JSON_USER_ID
+        account = (icp.get_param('sms_system.turatel_account_%s' % (
+            'info' if which == 'info' else 'commercial')) or '').strip() or default_account
+        return (user_id, username, password, account)
+
+    @api.model
     def _settings(self):
         icp = self.env['ir.config_parameter'].sudo()
         return {
+            'api_mode': resolve_api_mode(icp.get_param('sms_system.api_mode')),
+            # Şifreler yalnız bu sözlükte taşınır; loglanmaz, chatter'a/hata metnine yazılmaz (tasarım §2.4)
+            'json_creds': {
+                'info': self._json_creds(icp, 'info', DEFAULT_ACCOUNT_INFO),
+                'commercial': self._json_creds(icp, 'com', DEFAULT_ACCOUNT_COMMERCIAL),
+            },
+            'single_url': (icp.get_param('sms_system.turatel_single_url') or '').strip() or DEFAULT_SINGLE_URL,
+            'bulk_url': (icp.get_param('sms_system.turatel_bulk_url') or '').strip() or DEFAULT_BULK_URL,
+            'validity_minutes': parse_validity_minutes(icp.get_param('sms_system.turatel_validity_minutes')),
             'url': icp.get_param('sms_system.turatel_url') or None,
             'channel_code': icp.get_param('sms_system.turatel_channel_code', ''),
             'username': icp.get_param('sms_system.turatel_username', ''),
