@@ -143,3 +143,71 @@ class TestReviewO1ContextBeforeSend(JsonModelMixin, SmsTestCase):
         self.assertEqual(seen, [('sending', None, None)])
         self.refresh_all(msg)
         self.assertEqual((msg.state, msg.provider_service), ('sent', 'legacy'), msg.error)
+
+
+@tagged('post_install', '-at_install')
+class TestReviewO2TokenTtl(JsonModelMixin, SmsTestCase):
+    """Ö2: jeton süresiz önbellekte kalmaz; süre dolunca yeni GetToken alınır."""
+
+    def clock(self, api, start=1000.0):
+        now = [start]
+        self.startPatcher(patch.object(api, '_clock', lambda: now[0], create=True))
+        return now
+
+    def test_o2_sabit_sure_30_dk_sonra_yeni_jeton(self):
+        api = self.json_api()
+        client = self.json_client('info')
+        now = self.clock(api)
+        first = client.get_token()
+        now[0] += 29 * 60
+        self.assertEqual(client.get_token(), first, '30 dk dolmadan önbellek kullanılır')
+        now[0] += 2 * 60
+        second = client.get_token()
+        self.assertNotEqual(second, first, '30 dk sonra yeni jeton alınmalı')
+        self.assertEqual(len(self.net.tj.tokens_issued), 2)
+
+    def test_o2_yanittaki_sure_kullanilir_bir_dk_pay_birakilir(self):
+        api = self.json_api()
+        fake = self.net.tj
+
+        def short_lived(call):
+            envelope = fake._normal(call)
+            envelope['data']['expiresIn'] = 120
+            return envelope
+
+        fake.add_script('Auth/GetToken', short_lived, short_lived)
+        client = self.json_client('info')
+        now = self.clock(api)
+        first = client.get_token()
+        now[0] += 59
+        self.assertEqual(client.get_token(), first)
+        now[0] += 2
+        self.assertNotEqual(client.get_token(), first, 'expiresIn - 60 sn dolunca yenilenmeli')
+        self.assertEqual(len(fake.tokens_issued), 2)
+
+    def test_o2_sure_bilgisi_sayi_degilse_sabit_sure(self):
+        api = self.json_api()
+        fake = self.net.tj
+
+        def odd(call):
+            envelope = fake._normal(call)
+            envelope['data']['expiresIn'] = 'yarın'
+            return envelope
+
+        fake.add_script('Auth/GetToken', odd)
+        client = self.json_client('info')
+        now = self.clock(api)
+        first = client.get_token()
+        now[0] += 29 * 60
+        self.assertEqual(client.get_token(), first)
+
+    def test_o2_suresi_dolan_jetonla_gonderim_yeni_jeton_alir(self):
+        api = self.json_api()
+        now = self.clock(api)
+        self.Message.send_sms(NUMBER, 'bir')
+        now[0] += 31 * 60
+        msg = self.Message.send_sms(NUMBER, 'iki')
+        self.assertEqual(msg.state, 'sent', msg.error)
+        self.assertEqual(len(self.net.tj.tokens_issued), 2)
+        self.assertEqual([c['bearer'] for c in self.net.json_sends],
+                         [token for _user, token in self.net.tj.tokens_issued])

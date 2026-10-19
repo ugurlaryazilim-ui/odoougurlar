@@ -36,6 +36,9 @@ TZ = pytz.timezone('Europe/Istanbul')
 AUTH_ERROR = 'Turatel kimlik hatası (kullanıcı adı/şifre/userId ya da jeton reddedildi)'
 AUTH_CODES = {'-1'}
 STATUS_EMPTY_CODES = {'-6'}   # durum uçlarında "kayıt yok" (C0, belgesiz)
+TOKEN_TTL = 30 * 60        # sn; yanıtta süre yoksa jeton en çok bu kadar önbellekte kalır (Ö2)
+TOKEN_MARGIN = 60          # sn; yanıttaki süreden düşülen pay (saat kayması, istek süresi)
+TOKEN_MIN_TTL = 30         # sn
 
 SendResult = namedtuple('SendResult', 'packet_id message_ids raw')
 StatusRow = namedtuple('StatusRow', 'message_id client_id code raw')
@@ -53,7 +56,7 @@ _SCHEMA = {
     'Sms/GetStatusByTwoDates': {'accountId', 'startDate', 'endDate'},
 }
 
-# ── jeton önbelleği (süreç belleği) ──
+# ── jeton önbelleği (süreç belleği): anahtar -> (jeton, geçerlilik sonu _clock() cinsinden) ──
 _TOKEN_CACHE = {}
 _TOKEN_LOCK = threading.Lock()
 
@@ -61,6 +64,25 @@ _TOKEN_LOCK = threading.Lock()
 def clear_token_cache():
     with _TOKEN_LOCK:
         _TOKEN_CACHE.clear()
+
+
+def _clock():
+    return time.monotonic()
+
+
+def _token_lifetime(data):
+    """Jetonun önbellekte kalacağı süre (sn): yanıtta sayısal expiresIn/expires_in/expires varsa ondan 60 sn
+    eksiği (en az 30 sn, en çok TOKEN_TTL), yoksa TOKEN_TTL. Süre biçimi belgesiz; sayı değilse yok sayılır."""
+    value = _ci(data, 'expiresIn', 'expires_in', 'expires')
+    if isinstance(value, bool):
+        return TOKEN_TTL
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return TOKEN_TTL
+    if not math.isfinite(seconds) or seconds <= 0:
+        return TOKEN_TTL
+    return max(TOKEN_MIN_TTL, min(TOKEN_TTL, seconds - TOKEN_MARGIN))
 
 
 # ── maskeleme ──
@@ -201,9 +223,9 @@ class TuratelJsonClient:
         key = self._cache_key
         if not force:
             with _TOKEN_LOCK:
-                token = _TOKEN_CACHE.get(key)
-            if token:
-                return token
+                cached = _TOKEN_CACHE.get(key)
+            if cached and _clock() < cached[1]:
+                return cached[0]
         if not (self.base_url and self.user_id and self.username and self._password):
             raise TuratelError('Turatel JSON kullanıcı bilgileri (userId, kullanıcı adı, şifre) eksik.')
         payload = {'userId': _as_int(self.user_id, 'userId'), 'username': self.username,
@@ -216,14 +238,15 @@ class TuratelJsonClient:
         if not token:
             raise TuratelError('Turatel jeton yanıtı tanımsız.', retryable=True)
         with _TOKEN_LOCK:
-            _TOKEN_CACHE[key] = token
+            _TOKEN_CACHE[key] = (token, _clock() + _token_lifetime(data))
         return token
 
     def _invalidate(self, token):
         """Önbellekteki jeton hâlâ reddedilen jetonsa sil (başka iş parçacığının yeni jetonu korunur)."""
         key = self._cache_key
         with _TOKEN_LOCK:
-            if _TOKEN_CACHE.get(key) == token:
+            cached = _TOKEN_CACHE.get(key)
+            if cached and cached[0] == token:
                 del _TOKEN_CACHE[key]
 
     # ── taşıma ──
