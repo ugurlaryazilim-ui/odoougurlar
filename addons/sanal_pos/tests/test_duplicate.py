@@ -51,6 +51,7 @@ class TestOpenLinkBlocks(DupCase):
                 payment = self.make_payment(state=state, attempt_no=i)
                 self.assertBlocked(OPEN_MSG)
                 payment.sudo().write({'state': 'link_cancelled'})
+                payment.flush_recordset()  # sıradaki INSERT açık-link indeksinde eski satırı görmesin
 
     def test_kk18_mesaj_olusturan_ve_tarihi_icerir(self):
         self.make_payment(state='sent')
