@@ -1,4 +1,5 @@
 from . import test_turatel_client
+from . import test_turatel_legacy
 from . import test_settings
 from . import test_security
 from . import test_delivery
