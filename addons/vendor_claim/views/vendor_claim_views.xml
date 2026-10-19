@@ -49,7 +49,7 @@
                     <button name="action_cancel" string="İptal Et" type="object" class="btn-danger"
                             invisible="state not in ('received', 'sent')" confirm="Kayıt iptal edilecek. Emin misiniz?"/>
                     <button name="action_cancel" string="İptal Et" type="object" class="btn-danger"
-                            invisible="state in ('delivered', 'cancelled')" groups="vendor_claim.group_vendor_claim_manager"
+                            invisible="state != 'returned'" groups="vendor_claim.group_vendor_claim_manager"
                             confirm="Kayıt iptal edilecek. Emin misiniz?"/>
                     <button name="action_reset_to_received" string="Teslim Alındıya Döndür" type="object"
                             invisible="state not in ('sent', 'cancelled')"/>

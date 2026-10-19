@@ -410,3 +410,23 @@ class TestStrictAndLinks(VcCase):
         claim.sudo().write({'photo_ids': [(4, other.id)]})
         other.invalidate_recordset()
         self.assertEqual((other.res_model, other.res_id), ('res.partner', partner.id))
+
+
+@tagged('post_install', '-at_install')
+class TestCancelButtonVisibility(VcCase):
+    """KK-B18 + B-2: form başlığında her durumda en çok bir 'İptal Et' düğmesi görünür."""
+
+    def _visible_cancel_buttons(self, user, state):
+        arch = self.Claim.with_user(user).get_view(view_type='form')['arch']
+        buttons = etree.fromstring(arch).xpath("//header/button[@name='action_cancel']")
+        return [b for b in buttons if not safe_eval(b.get('invisible') or 'False', {'state': state})]
+
+    def test_b18_b2_yonetici_icin_tek_iptal_dugmesi(self):
+        for state, expected in (('received', 1), ('sent', 1), ('returned', 1), ('delivered', 0), ('cancelled', 0)):
+            with self.subTest(state=state):
+                self.assertEqual(len(self._visible_cancel_buttons(self.manager, state)), expected)
+
+    def test_b18_normal_kullanici_yalniz_received_ve_sent(self):
+        for state, expected in (('received', 1), ('sent', 1), ('returned', 0), ('delivered', 0), ('cancelled', 0)):
+            with self.subTest(state=state):
+                self.assertEqual(len(self._visible_cancel_buttons(self.user, state)), expected)
