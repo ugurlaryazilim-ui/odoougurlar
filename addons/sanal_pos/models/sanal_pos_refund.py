@@ -26,16 +26,16 @@ class SanalPosRefund(models.Model):
         'sanal.pos.payment', string='Ödeme Talebi', required=True,
         ondelete='restrict', index=True)
     kind = fields.Selection(
-        [('void', 'Ödeme İptali'), ('refund', 'İade')], string='Tür', required=True)
+        [('void', 'İptal'), ('refund', 'İade')], string='Tür', required=True)
     amount = fields.Monetary(string='Tutar', currency_field='currency_id', required=True)
     currency_id = fields.Many2one(
         'res.currency', string='Para Birimi', related='payment_id.currency_id', store=True)
     state = fields.Selection(
-        [('processing', 'İşlemde'), ('done', 'Tamamlandı'),
+        [('processing', 'İşleniyor'), ('done', 'Başarılı'),
          ('failed', 'Başarısız'), ('unknown', 'Belirsiz')],
         string='Durum', required=True, default='processing', index=True)
     source = fields.Selection(
-        [('odoo', 'Odoo'), ('panel', 'Panel')], string='Kaynak', required=True, default='odoo')
+        [('odoo', 'Odoo'), ('panel', 'Paratika paneli')], string='Kaynak', required=True, default='odoo')
     reason = fields.Char(string='Neden')
     user_id = fields.Many2one(
         'res.users', string='İşlemi Yapan', default=lambda self: self.env.user)
@@ -43,6 +43,10 @@ class SanalPosRefund(models.Model):
     error_code = fields.Char(string='Hata Kodu')
     error_message = fields.Char(string='Hata')
     done_at = fields.Datetime(string='Tamamlanma Zamanı')
+    # Belirsiz uzlaştırması (KK-47, yönetici şartı 1): satır ancak en az 2 ayrı sorguda
+    # bulunamaz ve ilk belirsizlikten 15 dk geçerse 'Başarısız' olur.
+    unknown_since = fields.Datetime(string='Belirsizlik Başlangıcı', copy=False)
+    not_found_count = fields.Integer(string='"Bulunamadı" Sorgu Sayısı', copy=False)
 
     def write(self, vals):
         if not self.env.su:

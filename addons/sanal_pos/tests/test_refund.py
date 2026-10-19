@@ -7,6 +7,7 @@ Gerçek çift-cursor kilit (FOR UPDATE NOWAIT) yarışı TransactionCase'de kuru
 04-kabul-testleri.md "otomatik kapsanamayanlar" bölümünde belirtilmiştir.
 """
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 from odoo.exceptions import AccessError, UserError
 from odoo.tests import tagged
@@ -65,6 +66,15 @@ class RefundCase(SanalPosCase):
         for key, value in filters.items():
             recs = recs.filtered(lambda r, k=key, v=value: r[k] == v)
         return recs
+
+    def age_line(self, line, minutes):
+        """Belirsiz satırı geriye yaşlandırır: create_date ve ilk belirsizlik anı (unknown_since)."""
+        # Saniye hassasiyeti: kod fields.Datetime.now() (mikrosaniyesiz) ile karşılaştırır
+        when = datetime.utcnow().replace(microsecond=0) - timedelta(minutes=minutes)
+        self.env.cr.execute(
+            "UPDATE sanal_pos_refund SET create_date = %s, unknown_since = %s WHERE id IN %s",
+            [when, when, tuple(line.ids)])
+        line.invalidate_recordset()
 
     def assertRejected(self, payment, method, *args, text=None, exc=UserError, user=None):
         target = payment.with_user(user or self.user_mgr)
@@ -249,11 +259,21 @@ class TestRefundSuccess(RefundCase):
         self.assertFalse(self.lines(payment))
 
     def test_kk44_senkron_kaydin_iptal_edildigini_gosterirse_iade_olmaz(self):
+        # Yönetici onaylı düzeltme (G11, TEST ÇELİŞKİSİ): senkron sonucu commit edilip ardından
+        # UserError verilir; assertRaises'in savepoint'i bu yazımı test içinde geri alır. Bu yüzden
+        # "voided" durumu commit anında (_sp_commit) yakalanır; niyet aynı: iade gitmez, kayıt
+        # iptal edildi olarak saklanır.
         payment = self.paid()
         self.set_query_transactions(tran('VD', 'SALE', '9000.00', 'T1'))
-        self.assertRejected(payment, 'action_refund', 100.0, 'Müşteri talebi')
-        payment.invalidate_recordset()
-        self.assertEqual(payment.state, 'voided')
+        seen = []
+        model = type(self.env['sanal.pos.payment'])
+
+        def spy_commit(this):
+            this.env.flush_all()
+            seen.append(payment.sudo().state)
+        with patch.object(model, '_sp_commit', spy_commit):
+            self.assertRejected(payment, 'action_refund', 100.0, 'Müşteri talebi')
+        self.assertIn('voided', seen, 'senkron "iptal edildi" sonucu commit edilmeli')
 
     def test_kk51_iadede_olusturana_bildirim(self):
         payment = self.paid()
@@ -459,25 +479,31 @@ class TestRefundFailures(RefundCase):
         self.assertEqual(payment.refunded_amount, 2500.0)
 
     def test_kk47_uzlastirma_farkli_tutar_eslesmez(self):
+        # Yönetici onaylı düzeltme (G11 şart 1): belirsiz satır tek sorguyla başarısız olmaz;
+        # ≥2 ayrı sorgu + bekleyen işlem yok + ilk belirsizlikten ≥15 dk gerekir.
         payment = self.paid()
         self.mock.queue('REFUND', timeout_exc())
         self.refund(payment, 2500.0)
-        self.set_create_date(self.lines(payment), datetime.utcnow() - timedelta(minutes=15))
+        self.age_line(self.lines(payment), 20)
         self.set_query_transactions(tran('AP', 'SALE', '9000.00', 'T1'), tran('AP', 'REFUND', '999.00', 'R-OTHER'))
+        self.run_cron(CRON_SYNC)
+        self.assertEqual(self.lines(payment, source='odoo').state, 'unknown', 'tek sorgu yetmez')
+        self.assertEqual(self.lines(payment, source='panel').provider_ref, 'R-OTHER')
         self.run_cron(CRON_SYNC)
         by_state = {l.provider_ref or 'x': l.state for l in self.lines(payment)}
         self.assertEqual(self.lines(payment, source='odoo').state, 'failed')
         self.assertEqual(self.lines(payment, source='panel').provider_ref, 'R-OTHER')
         self.assertEqual(payment.refunded_amount, 999.0, by_state)
 
-    def test_kk47_uzlastirma_bulunamazsa_10_dk_sonra_basarisiz(self):
+    def test_kk47_uzlastirma_bulunamazsa_2_sorgu_ve_15_dk_sonra_basarisiz(self):
+        # Yönetici onaylı düzeltme (G11 şart 1): eşik 10 dk değil; ≥2 sorgu + ≥15 dk.
         payment = self.paid()
         self.mock.queue('REFUND', timeout_exc())
         self.refund(payment, 2500.0)
-        # 10 dk dolmadan: belirsiz kalır
+        # 15 dk dolmadan: belirsiz kalır (1. sorgu)
         self.run_cron(CRON_SYNC)
         self.assertEqual(self.lines(payment).state, 'unknown')
-        self.set_create_date(self.lines(payment), datetime.utcnow() - timedelta(minutes=15))
+        self.age_line(self.lines(payment), 15)
         self.run_cron(CRON_SYNC)
         self.assertEqual(self.lines(payment).state, 'failed')
         payment.invalidate_recordset()
@@ -541,8 +567,11 @@ class TestDuplicateRefund(RefundCase):
     def test_kk45_iptal_sonrasi_iade_ve_tersi_yok(self):
         payment = self.paid()
         self.void(payment)
-        self.assertRejected(payment, 'action_void', 'Tekrar deniyorum')
+        # Yönetici onaylı düzeltme (G11, TEST ÇELİŞKİSİ): assertRejected çağrı listesini temizler;
+        # sayım ondan önce yapılır. Reddedilen denemelerde VOID/REFUND gitmediğini assertRejected sınar.
         self.assertEqual(self.mock.count('VOID'), 1)
+        self.assertRejected(payment, 'action_void', 'Tekrar deniyorum')
+        self.assertRejected(payment, 'action_refund', 100.0, 'Tekrar deniyorum', text=NOTHING_LEFT)
 
     def test_kk45_toplam_iade_odenen_tutari_asamaz(self):
         payment = self.paid()

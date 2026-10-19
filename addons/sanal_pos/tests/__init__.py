@@ -11,5 +11,6 @@ from . import test_sync_rules
 from . import test_controllers
 from . import test_link_actions
 from . import test_refund
+from . import test_refund_rules
 from . import test_security
 from . import test_views

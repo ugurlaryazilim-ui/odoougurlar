@@ -61,12 +61,21 @@
                     <button name="action_new_link" type="object" string="Yeni Link Oluştur"
                             class="btn-primary" groups="sanal_pos.group_sanal_pos_user"
                             invisible="state not in ('expired', 'link_cancelled', 'error', 'voided', 'refunded')"/>
+                    <!-- G11: iptal/iade yalnız yönetici; onay sihirbazı açılır (KK-40, KK-41, KK-50) -->
+                    <button name="action_open_void_wizard" type="object" string="Ödemeyi İptal Et"
+                            class="btn-danger" groups="sanal_pos.group_sanal_pos_manager"
+                            invisible="not can_void"/>
+                    <button name="action_open_refund_wizard" type="object" string="İade Et"
+                            class="btn-danger" groups="sanal_pos.group_sanal_pos_manager"
+                            invisible="not can_refund"/>
                     <field name="state" widget="statusbar"
                            statusbar_visible="sent,paid,partial_refund,refunded"/>
                 </header>
                 <sheet>
                     <field name="is_test" invisible="1"/>
                     <field name="can_resend" invisible="1"/>
+                    <field name="can_void" invisible="1"/>
+                    <field name="can_refund" invisible="1"/>
                     <field name="currency_id" invisible="1"/>
                     <div class="alert alert-danger text-center fw-bold" role="alert"
                          invisible="not is_test">
@@ -148,6 +157,7 @@
                                     <field name="reason"/>
                                     <field name="user_id"/>
                                     <field name="provider_ref"/>
+                                    <field name="error_code" optional="show"/>
                                     <field name="error_message" optional="hide"/>
                                     <field name="done_at" optional="hide"/>
                                 </list>
