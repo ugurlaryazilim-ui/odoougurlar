@@ -13,4 +13,5 @@ from . import test_link_actions
 from . import test_refund
 from . import test_refund_rules
 from . import test_security
+from . import test_hardening
 from . import test_views

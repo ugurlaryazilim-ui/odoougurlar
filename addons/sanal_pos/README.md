@@ -1,0 +1,93 @@
+# Sanal POS (`sanal_pos`)
+
+Odoo 19. Fatura numarasıyla Nebim faturasından tutar ve müşteri bilgisini çekip **Paratika ödeme linki** üretir, müşteriye SMS/e-posta ile gönderir (gönderimi Paratika yapar), ödemeyi tek ekranda izler; ödeme iptali (VOID) ve iade (REFUND) buradan yapılır. Sağlayıcı bağımsız tasarlanmıştır; ilk sağlayıcı Paratika'dır.
+
+Başka modüle bağımlılığı yoktur (`ugurlar_tailor` kurulu olmasa da çalışır). Yeni Python bağımlılığı yoktur (`requests`, `pymssql` imajda mevcut).
+
+## 1. Kurulum ve güncelleme
+
+- **İlk kurulum:** `odoo -d <veritabani> -i sanal_pos --stop-after-init`
+- **Sonraki her sürüm:** deploy biter bitmez **hemen** `odoo -d <veritabani> -u sanal_pos --stop-after-init`.
+  Yeni saklanan (stored) alanlar modül güncellenene kadar veritabanında yoktur; arada durum senkronu cron'u (10 dakikada bir) hata verir. Güncellemeyi geciktirmeyin.
+- Test: `odoo -d bc_test -u sanal_pos --test-tags /sanal_pos --stop-after-init --workers=0 --max-cron-threads=0` (Paratika ve MSSQL taklit edilir; gerçek çağrı gitmez).
+
+## 2. Ayarlar (Sanal POS > Ayarlar; yalnız sistem yöneticisi)
+
+| Ayar | Not |
+|---|---|
+| Ortam | **Test** / **Canlı**. Canlıya geçmeden önce 5. bölümü bitirin. |
+| Paratika bilgileri | Üye iş yeri kodu, API kullanıcı adı, API şifresi, gizli anahtar (secretKey). Test ve canlı API adresleri ayrı alanlardır. Şifre ve anahtar yalnız sistem yöneticisi görür. |
+| MSSQL | Sunucu, port, veritabanı, kullanıcı, şifre, görünüm adı (varsayılan `dbo.vw_TerziFaturalar`). **Terzi ayarlarından kopyala** düğmesi `ugurlar_tailor.mssql_*` değerlerini alır (terzi modülü kurulu olmak zorunda değil). Okuma yetkili ayrı bir SQL kullanıcısı önerilir. |
+| Telefon biçimi | `5321112233`, `05321112233`, `905321112233` veya `+905321112233`. Paratika'nın kabul ettiği biçim sandbox'ta belirlenir (5. bölüm). |
+| ASCII modu | Paratika Türkçe karakteri bozarsa açın (ç→c, ş→s ...). Varsayılan kapalı (UTF-8). |
+| E-posta ve telefon zorunlu | Varsayılan açık. Paratika yeni müşteride ikisini de istiyor; faturada yoksa personel ekrandan elle girer. |
+| Link geçerlilik süresi | 1-168 saat (varsayılan 168). |
+| Link adresini göster | Varsayılan kapalı; Paratika link adres biçimi teyit edilene kadar kapalı kalmalı. |
+
+Aynı ekranda bildirim ve dönüş adresleri salt okunur gösterilir (aşağıda).
+
+## 3. Kullanıcı grupları
+
+| Grup | Yapabildikleri |
+|---|---|
+| Grupsuz iç kullanıcı | Hiçbir Sanal POS kaydını ve eylemini göremez. |
+| **Sanal POS / Kullanıcı** | Fatura sorgular, link oluşturur, yeniden gönderir, linki iptal eder, durum yeniler; talepleri okur. |
+| **Sanal POS / Yönetici** | Kullanıcının hepsi + ödeme iptali (VOID), iade (REFUND), inceleme (kabul/kapat), işlem kayıtları. |
+| Sistem yöneticisi (`base.group_system`) | Yalnız **ayarlar**. İade/iptal yetkisi **otomatik gelmez**; gerekirse ayrıca Yönetici grubuna eklenir. |
+
+Sır alanları (API şifresi, secretKey, MSSQL kullanıcı/şifre) hiçbir kayıt, log, chatter, dışa aktarma veya RPC yanıtında görünmez; log gövdelerinde maskelenir.
+
+## 4. Paratika paneli önkoşulları
+
+1. **Bildirim (notify) adresi:** `https://<odoo-alan-adi>/sanal_pos/paratika/notify` (POST). Ayar ekranındaki "Bildirim adresi" ile aynıdır. Bildirim yalnız tetiktir; durum Paratika'ya sorularak doğrulanır. Sabit `200 OK` döner. Reverse proxy'de (nginx/Coolify) bu yola POST ile erişilebildiğini `curl -X POST https://<odoo-alan-adi>/sanal_pos/paratika/notify` ile doğrulayın (yanıt `OK`).
+2. **Dönüş (return) adresi:** `https://<odoo-alan-adi>/sanal_pos/paratika/return` (müşterinin ödeme sonrası döndüğü teşekkür sayfası). Yalnız POST kabul eder.
+3. API kullanıcısında link, sorgu, **VOID ve REFUND** yetkileri açık olmalı (test ve canlı için ayrı kullanıcılar).
+4. Odoo'nun `web.base.url` sistem parametresi gerçek alan adını göstermeli.
+
+## 5. Nebim fatura görünümü
+
+- Kaynak `dbo.vw_TerziFaturalar` **v2**'dir: `data/sql/vw_TerziFaturalar_v2.sql` (SQL Server'da bir kez çalıştırılır; Odoo çalıştırmaz, manifest'e ekli değildir). Terzi modülünün kullandığı ilk 18 sütun aynıdır.
+- Doğrulama: `UGR2026000012587` faturasının toplamı 9000,00 olmalıdır.
+- **Geri alma:** `data/sql/vw_TerziFaturalar_v1_geri_al.sql`. Geri alınırsa Sanal POS "Fatura görünümü güncel değil (v2 gerekli)" der; kayıtlar ve senkron etkilenmez.
+- Modül MSSQL'e yalnız parametreli `SELECT` ile bağlanır; yazma yapmaz.
+
+## 6. CANLIYA ALMADAN ÖNCE (zorunlu)
+
+**Paratika sandbox denemesi (test ortamı, uçtan uca):** link (SMS+e-posta), Türkçe ad görünümü, test kartla ödeme, webhook ile "Ödendi", başarısız kart, link iptali, aynı gün iptal, ertesi gün kısmi ve tam iade. Bu deneme şu belirsizlikleri kapatır; sonuca göre çoğunlukla yalnız ayar veya eşleme değişir:
+
+- **R-3 / REFUND `pgTranId`:** REFUND yanıtındaki `pgTranId` iade işleminin mi, satışın mı? QUERYTRANSACTION VOID/REFUND/PTREFUND'u hangi biçimde döndürüyor? (Eşleşmezse iade satırı `Belirsiz` kalır ve yönetici uyarılır; para çıkışı için kritik.) Gerçek yanıtları `tests/` taklitlerine örnek olarak ekleyin.
+- **P-10 gün sonu saati:** VOID'den REFUND'a geçiş saati ve kısmi iade sayısı sınırı.
+- **Telefon biçimi:** hangi biçim SMS'i ulaştırıyor (Ayarlar > Telefon biçimi).
+- **Link token ve adres:** `sessionToken` = `PAYBYLINKTOKEN` mi (yeniden gönder ve iptal bunu kullanır); link adresi `/merchant/payment/<token>` mı? Doğruysa "Link adresini göster" açılır.
+- **PAYBYLINKSTATUS değerleri:** yalnız `SD` görüldü; tüm değerler listelenip eşleme doğrulanır.
+- Dönüşün POST olduğunu doğrulayın (GET gelirse tasarım değişikliği gerekir).
+
+**Canlı adres:** `paratika_live_url` (varsayılan `https://vpos.paratika.com.tr/paratika/api/v2`) Paratika ile **teyit edilmelidir**. Sonra ortamı Canlı yapın, 1 TL ödeme + aynı gün iptal ile doğrulayın, mağazalara açın.
+
+**Paratika'ya sorulacaklar** (ayrıntı: `.ekip/20261019-sanal-pos/01-gereksinimler.md` §12):
+1. P-1 Canlı API/ödeme sayfası kök adresi; canlı kullanıcı; API kullanıcısında VOID/REFUND yetkisi.
+2. P-2 `sessionToken` ve `PAYBYLINKTOKEN` aynı mı; link URL biçimi.
+3. P-3 SMS telefon biçimi; SMS/e-posta metni ve gönderen adı özelleştirme; SMS ücreti/kredisi; teslim raporu.
+4. P-4 Yalnız SMS seçilince e-posta zorunlu mu (ERR10244)?
+5. P-5 `PAYBYLINKSTATUS` değer listesi; `SESSIONEXPIRY` alt/üst sınırı.
+6. P-6 Aynı `CUSTOMER` koduyla farklı ad/telefon/e-posta gönderilirse hangisi geçerli?
+7. P-7 Bildirim için yeniden deneme, imza/kaynak IP doğrulaması; başarısız ve iptal olayları için bildirim var mı?
+8. P-8 Başarısız denemeden sonra link açık kalıyor mu; ödenmiş linkin `MERCHANTPAYMENTID` değeri yeniden kullanılabilir mi?
+9. P-9 Karakter kodlaması UTF-8 mi; Türkçe ad SMS'te ve ödeme sayfasında doğru mu?
+10. P-10 Gün sonu saati; kısmi iade sınırı; QUERYTRANSACTION iade işlemlerini orijinal `MERCHANTPAYMENTID` ile döndürüyor mu?
+
+## 7. Geri alma planı
+
+1. **Hızlı (veri korunur):** Ayarlarda ortamı Test'e alın veya kullanıcıların Sanal POS grubunu kaldırın; "Sanal POS: durum senkronu" ve "günlük temizlik ve iade senkronu" cron'larını pasif yapın; Paratika panelinden bildirim adresini kaldırın. Açık linkleri Paratika panelinden iptal edin.
+2. **Modül kaldırma:** önce Ödeme Talepleri ve iade geçmişini dışa aktarın (finansal kayıt; kaldırma tabloları siler). Sonra Uygulamalar > Sanal POS > Kaldır. Başka modül sanal_pos'a bağlı değildir.
+3. **Kod:** önceki sürüm etiketine dönüp yeniden deploy edin, ardından `-u sanal_pos`.
+4. **Fatura görünümü:** yalnız terzi modülünde sorun görülürse SSMS'te `vw_TerziFaturalar_v1_geri_al.sql` çalıştırın.
+
+## 8. Yeni sağlayıcı eklemek (PayTR / iyzico)
+
+Çekirdek yalnız `sanal.pos.provider` arayüzünü ve normalize sonuç sözlüklerini bilir (`models/provider.py` modül açıklaması sözleşmeyi tanımlar). Adımlar:
+1. `sanal.pos.payment.provider` alanına `selection_add` ile yeni kodu ekleyin.
+2. `sanal.pos.provider.<kod>` adlı bir `AbstractModel` yazın (`models/provider_paratika.py` örnek); arayüz metotları `create_link`, `resend`, `cancel_link`, `find_link`, `query_status`, `void`, `refund`, `parse_notification`. **Hepsi `@api.private` olmalı** (RPC ile çağrılırsa dış çağrı tetiklenir). Sağlayıcı koduna özgü durum/hata kodları yalnız bu modelde kalır; durum kararını çekirdek verir.
+3. Ayar alanlarını `res.config.settings` içine ekleyin; sır alanlarına `groups='base.group_system'` verin ve `models/res_config_settings.py` içindeki `_SECRET_FIELDS` listesine yazın.
+4. Loglardan sır süzme (`tools.py`) yeni sağlayıcının parola/anahtar alan adlarını kapsamalıdır.
+5. `tests/test_hardening.py` RPC yüzeyi taraması, listelenmemiş her public metotta kırılır; tarama sizi ACL ve rol testlerine yönlendirir.
