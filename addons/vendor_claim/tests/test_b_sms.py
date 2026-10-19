@@ -49,6 +49,14 @@ class TestManualSms(VcCase):
         self.assertTrue(self.controller('send_sms', claim_id=claim.id).get('ok'))
         self.assertEqual(len(self.claim_sms(claim)), 3)
 
+    def test_d5_belirsiz_onceki_kayit_60_sn_korumasini_tetikler(self):
+        claim = self.make_claim()
+        self.assertTrue(self.controller('send_sms', claim_id=claim.id).get('ok'))
+        self.claim_sms(claim).write({'state': 'uncertain'})   # kuyruk ReadTimeout ile belirsiz kaldı
+        res = self.controller('send_sms', claim_id=claim.id)
+        self.assertIn('az önce', res.get('error', ''), res)
+        self.assertEqual(len(self.claim_sms(claim)), 1)
+
     def test_kk_b7_hatali_onceki_kayit_korumayi_tetiklemez(self):
         claim = self.make_claim()
         self.make_message(state='error', res_model='vendor.claim', res_id=claim.id, number='5321234567')
@@ -229,6 +237,22 @@ class TestStateSms(VcCase):
         third = self.make_claim(customer_mobile='05329990000')
         bulk = self.controller('bulk', claim_ids=[third.id], action='send')
         self.assertEqual(bulk['results'][0]['sms']['state'], 'queued')
+
+    def test_d1_bulk_sonucu_env_yeniden_kullaniminda_dogru_kayda_yazilir(self):
+        """Sonuç bağlamdaki değiştirilebilir sözlükle taşınırsa, ilk kaydın env'i canlı kaldığında (eşit bağlam)
+        ikinci kaydın sonucu yanlış sözlüğe yazılırdı."""
+        first = self.make_claim(customer_mobile='')
+        second = self.make_claim(customer_mobile='05329990001')
+        keep = []
+        original = self.registry['vendor.claim']._notify_state_sms
+
+        def spy(records, *args, **kwargs):
+            keep.append(records)   # env'i canlı tut
+            return original(records, *args, **kwargs)
+
+        with patch.object(self.registry['vendor.claim'], '_notify_state_sms', spy):
+            res = self.controller('bulk', claim_ids=[first.id, second.id], action='send')
+        self.assertEqual([r['sms']['state'] for r in res['results']], ['none', 'queued'], res)
 
     def test_kk_b14_otomatik_sms_kapaliysa_none(self):
         self.vc_setup(test_mode='False', auto_sms=False)

@@ -1,6 +1,8 @@
 import base64
 from unittest.mock import patch
 
+from psycopg2 import errors as pg_errors
+
 from odoo.tests import HttpCase, tagged
 from odoo.tests.common import new_test_user
 
@@ -110,6 +112,41 @@ class TestMobileSmsGuards(VcCase):
     def test_gercek_satir_kilidi_alinir(self):
         claim = self.make_claim()
         self.assertTrue(claim._lock_for_manual_sms())
+
+    def test_g6_kilit_satiri_dokunur_boylece_anlik_goruntu_sonrasi_commit_serilestirme_hatasi_verir(self):
+        """Yalnız FOR UPDATE alan istek satırın yeni sürümünü üretmez; REPEATABLE READ'de eşzamanlı ikinci
+        istek ancak satır güncellenmişse SerializationFailure alır. Kilit satırı dokunmalı (yeni tuple sürümü)."""
+        claim = self.make_claim()
+        self.env.flush_all()
+        self.env.cr.execute('SELECT ctid FROM vendor_claim WHERE id = %s', [claim.id])
+        before = self.env.cr.fetchone()[0]
+        self.assertTrue(claim._lock_for_manual_sms())
+        self.env.cr.execute('SELECT ctid FROM vendor_claim WHERE id = %s', [claim.id])
+        self.assertNotEqual(self.env.cr.fetchone()[0], before, 'satır kilitle birlikte güncellenmeli')
+
+    def test_g6_serilestirme_hatasi_kilit_alinamadi_sayilir_ve_istek_sms_uretmez(self):
+        claim = self.make_claim()
+        cr_type = type(self.env.cr)
+        real_execute = cr_type.execute
+
+        def execute(cr, query, *args, **kwargs):
+            if 'FOR UPDATE NOWAIT' in str(query):
+                raise pg_errors.SerializationFailure('could not serialize access due to concurrent update')
+            return real_execute(cr, query, *args, **kwargs)
+
+        with patch.object(cr_type, 'execute', execute):
+            res = self.controller('send_sms', claim_id=claim.id)
+        self.assertIn('SMS işlemi sürüyor', res.get('error', ''), res)
+        self.assertFalse(self.claim_sms(claim))
+
+    def test_d3_kuyruga_alinan_sms_icin_gonderildi_denmez(self):
+        self.set_param('test_mode', 'False')
+        claim = self.make_claim()
+        res = self.controller('send_sms', claim_id=claim.id)
+        self.assertEqual(res['sms']['state'], 'queued')
+        self.assertNotIn('SMS gönderildi', res['message'])
+        self.assertIn('sırasına alındı', res['message'])
+        self.assertIn('5321234567', res['message'])
 
     def test_canli_modda_hatirlatma_kuyruga_alininca_da_sayac_artar(self):
         self.set_param('test_mode', 'False')

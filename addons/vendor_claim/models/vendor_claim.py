@@ -487,33 +487,52 @@ class VendorClaim(models.Model):
         return res
 
     def _set_state(self, new_state, extra=None):
+        """Durumu değiştirir ve durum SMS'ini kuyruğa alır; yeni kuyruğa alınanların {claim_id: {'state',
+        'error'}} sonucunu döner."""
         self._check_transition(new_state)
         self.with_context(vendor_claim_state_ok=True).write(dict(extra or {}, state=new_state))
-        self._notify_state_sms()
+        return self._notify_state_sms(only_new=True)
 
-    def action_send_to_vendor(self):
+    # Düğme metotları (action_*) None döner: web istemcisi dönüş değerini eylem sanır. Denetleyici SMS sonucunu
+    # almak için aynı işi yapan _<ad> karşılıklarını çağırır.
+    def _send_to_vendor(self):
         for claim in self:
             if not claim.vendor_id and claim.vendor_name:
                 claim.vendor_id = self._resolve_vendor(claim.vendor_name)
             if not claim.vendor_id:
                 raise UserError(_('%s: önce tedarikçiyi seçin.') % claim.name)
-        self._set_state('sent', {'sent_at': fields.Datetime.now(), 'returned_at': False, 'overdue_notified': False,
-                                   'reminder_count': 0, 'last_reminder_at': False})
+        sms = self._set_state('sent', {'sent_at': fields.Datetime.now(), 'returned_at': False,
+                                       'overdue_notified': False, 'reminder_count': 0, 'last_reminder_at': False})
         self.activity_unlink(['mail.mail_activity_data_todo'])
+        return sms
 
-    def action_mark_returned(self):
+    def _mark_returned(self):
         for claim in self:
             if not claim.result:
                 raise UserError(_('%s: tedarikçiden gelen sonucu (Tamir / Değişim / İade / Ret) seçin.') % claim.name)
-        self._set_state('returned', {'returned_at': fields.Datetime.now()})
+        sms = self._set_state('returned', {'returned_at': fields.Datetime.now()})
         self.activity_unlink(['mail.mail_activity_data_todo'])
+        return sms
+
+    def _mark_delivered(self):
+        return self._set_state('delivered', {'delivered_at': fields.Datetime.now()})
+
+    def _cancel(self):
+        sms = self._set_state('cancelled', {'cancelled_at': fields.Datetime.now()})
+        self.activity_unlink(['mail.mail_activity_data_todo'])
+        return sms
+
+    def action_send_to_vendor(self):
+        self._send_to_vendor()
+
+    def action_mark_returned(self):
+        self._mark_returned()
 
     def action_mark_delivered(self):
-        self._set_state('delivered', {'delivered_at': fields.Datetime.now()})
+        self._mark_delivered()
 
     def action_cancel(self):
-        self._set_state('cancelled', {'cancelled_at': fields.Datetime.now()})
-        self.activity_unlink(['mail.mail_activity_data_todo'])
+        self._cancel()
 
     def action_reset_to_received(self):
         self._set_state('received', {'sent_at': False, 'returned_at': False, 'delivered_at': False,
@@ -554,32 +573,41 @@ class VendorClaim(models.Model):
     def _lock_for_manual_sms(self):
         """Mobil elle SMS için satırı transaction sonuna kadar kilitler (NOWAIT); alınamazsa False.
 
-        İki cihaz/çift dokunuş aynı anda gelirse ikincisi beklemeden reddedilir. LockNotAvailable Odoo'nun
-        yeniden deneme listesindedir: savepoint içinde yakalanmazsa istek yeniden çalışır (ikinci SMS riski)."""
+        İki cihaz/çift dokunuş aynı anda gelirse ikincisi beklemeden reddedilir. Odoo imleçleri REPEATABLE READ'dir:
+        anlık görüntü isteğin ilk sorgusunda (oturum/kullanıcı okuması) alınır, yani kilitten önce. Yalnız
+        FOR UPDATE alan istek satırın yeni sürümünü üretmediği için, görüntüden sonra commit eden diğer istek
+        (60 sn / günlük sınır sorgusunda görünmeyen SMS kaydı) serileştirme hatası vermez ve ikinci SMS çıkardı.
+        Bu yüzden kilitle birlikte satır güncellenir (yeni sürüm): görüntüden sonra commit eden yarışçı varsa
+        FOR UPDATE SerializationFailure verir ve istek reddedilir; yoksa görüntü kilitten önce alınmış olsa da
+        tüm önceki SMS kayıtları görünür. LockNotAvailable ve SerializationFailure Odoo'nun yeniden deneme
+        listesindedir: savepoint içinde yakalanmazsa istek yeniden çalışır (ikinci SMS riski)."""
         self.ensure_one()
         try:
             with self.env.cr.savepoint(flush=False):
                 self.env.cr.execute('SELECT id FROM vendor_claim WHERE id = %s FOR UPDATE NOWAIT', [self.id])
-        except pg_errors.LockNotAvailable:
+                self.env.cr.execute('UPDATE vendor_claim SET write_date = write_date WHERE id = %s', [self.id])
+        except (pg_errors.LockNotAvailable, pg_errors.SerializationFailure):
             return False
         return True
 
     def _recent_template_sms(self, code, seconds=MANUAL_SMS_GUARD_SECONDS):
-        """Bu kayıt için son `seconds` sn içinde aynı şablonla alınmış (hata olmayan) SMS kaydı var mı (K4)."""
+        """Bu kayıt için son `seconds` sn içinde aynı şablonla alınmış (hata olmayan) SMS kaydı var mı (K4).
+
+        Belirsiz (uncertain) kayıt da sayılır: sağlayıcı isteği işlemiş olabilir."""
         self.ensure_one()
         since = fields.Datetime.now() - timedelta(seconds=seconds)
         return bool(self.env['sms.system.message'].sudo().search_count([
             ('res_model', '=', self._name), ('res_id', '=', self.id), ('template_id.code', '=', code),
-            ('state', 'in', ('queued', 'sending', 'sent', 'test')), ('create_date', '>=', since)]))
+            ('state', 'in', ('queued', 'sending', 'sent', 'uncertain', 'test')), ('create_date', '>=', since)]))
 
-    def _notify_state_sms(self):
+    def _notify_state_sms(self, only_new=False):
         """Durumun otomatik SMS'i: ayar açıksa, numara varsa, o durum için daha önce kuyruğa alınmadıysa.
 
         SMS istek içinde gönderilmez, sms_system tekli kuyruğuna alınır (KK-B11). Döner: {claim_id: {'state',
-        'error'}}; state queued | test | error | none. Bağlamda 'vendor_claim_sms_out' sözlüğü varsa sonuç ona da
-        yazılır (denetleyici yanıtı için; yalnız bu çağrıda yeni kuyruğa alınanlar)."""
+        'error'}}; state queued | test | error | none. Geçişin SMS'i daha önce alınmışsa son kaydın durumu
+        bildirilir; only_new=True ise yalnız bu çağrıda yeni denenenler bildirilir, diğerleri 'none' olur
+        (denetleyici yanıtı). Sonuç dönüş değeriyle taşınır, bağlamla değil."""
         icp = self.env['ir.config_parameter'].sudo()
-        out = self.env.context.get('vendor_claim_sms_out')
         result = {}
         for claim in self:
             res = {'state': 'none', 'error': ''}
@@ -592,7 +620,7 @@ class VendorClaim(models.Model):
                 continue
             if claim[flag]:
                 # Bu geçişin SMS'i zaten alındı: tekrar kuyruğa alınmaz, son kaydın durumu bildirilir
-                last = self.env['sms.system.message'].sudo().search(
+                last = None if only_new else self.env['sms.system.message'].sudo().search(
                     [('res_model', '=', claim._name), ('res_id', '=', claim.id), ('template_id.code', '=', code)],
                     order='id desc', limit=1)
                 if last:
@@ -608,8 +636,6 @@ class VendorClaim(models.Model):
                     res.update(state=msg.state, error=msg.error or '')
                     if msg.state in ('queued', 'test'):
                         claim.sudo()[flag] = True
-            if out is not None:
-                out[claim.id] = dict(res)
         return result
 
     def action_send_sms(self):
