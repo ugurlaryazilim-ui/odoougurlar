@@ -5,13 +5,16 @@ migration'la belirsiz), G-3/D-6 (action_retry yalnız yönetici), G-5 (SmartADM 
 tanımsız yanıt belirsiz), D-7/B-1 (negatif elle sınır reddedilir), D-8 (numaraya özgü İYS hatası kampanyayı
 bekletmez).
 """
+import importlib.util
+from pathlib import Path
 from unittest.mock import patch
 
-from odoo.exceptions import AccessError
+from odoo.exceptions import AccessError, UserError
 from odoo.tests.common import tagged
 
 
 from .common import SmsTestCase
+from .test_campaign import CampaignMixin
 
 MAX_RETRY = 3
 
@@ -77,3 +80,60 @@ class TestG1RecordAccess(SmsTestCase):
         self.env.flush_all()
         self.env.cr.execute('SELECT state, manual FROM sms_system_message WHERE id = %s', (msg.id,))
         self.assertEqual(self.env.cr.fetchone(), ('sent', True), 'SMS kaydı (günlük sınır sayacı) kalmalı')
+
+
+# ==== S2 Ö-1 ====
+@tagged('post_install', '-at_install')
+class TestO1LegacyUncertainMigration(CampaignMixin, SmsTestCase):
+    """Eski kodun ReadTimeout/ConnectionError/HTTP hata metinleriyle 'error' yazdığı kayıtlar belirsiz olur."""
+
+    LEGACY_UNCERTAIN = (
+        'Turatel sunucusuna ulaşılamadı: ReadTimeout',
+        'Turatel sunucusuna ulaşılamadı: ConnectionError',
+        'Turatel sunucusuna ulaşılamadı: ChunkedEncodingError',
+        'Turatel HTTP 503 döndü',
+        'Turatel HTTP 500 döndü',
+        'Turatel HTTP 404 döndü',
+    )
+
+    def _migrate(self):
+        path = Path(__file__).resolve().parents[1] / 'migrations' / '19.0.1.7.0' / 'post-migrate.py'
+        spec = importlib.util.spec_from_file_location('sms_post_migrate_1_7_0_o1', path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.migrate(self.env.cr, '19.0.1.6.0')
+        self.env.invalidate_all()
+
+    def test_o1_eski_belirsiz_metinler_tekli_ve_kampanyada_belirsiz_olur(self):
+        lst = self.make_list()
+        camp = self.make_campaign(lst, 'info')
+        singles, campaign_msgs = [], []
+        for i, text in enumerate(self.LEGACY_UNCERTAIN):
+            singles.append(self.make_message(number='53206000%02d' % i, state='error', retry_count=1, error=text))
+            contact = self.make_contact('53207000%02d' % i, lst)
+            campaign_msgs.append(self.campaign_message(camp, contact, error=text))
+        not_sent = self.make_message(number='5320600099', state='error', retry_count=1,
+                                     error='Turatel sunucusuna ulaşılamadı: ConnectTimeout')
+        no_origin = self.make_message(number='5320600098', state='error', retry_count=0,
+                                      error='Mesaj başlığı (Originator) ayarlanmamış.')
+        new_text = self.make_message(number='5320600097', state='error', retry_count=1,
+                                     error='Turatel HTTP 503 döndü; iletilip iletilmediği belirsiz.')
+        icp_before = {r.key: r.value for r in self.icp.search([('key', '=like', 'sms_system.%')])}
+        self._migrate()
+        for msg in singles + campaign_msgs:
+            self.assertEqual((msg.state, msg.retry_count), ('uncertain', MAX_RETRY), msg.error)
+        self.assertEqual((not_sent.state, not_sent.retry_count), ('error', 1), 'ConnectTimeout kesin gitmedi')
+        self.assertEqual((no_origin.state, no_origin.retry_count), ('error', MAX_RETRY),
+                         'başlık eksik eski kayıt başlık girilince otomatik gitmemeli')
+        self.assertEqual(new_text.state, 'error', 'yalnız eski metinler eşleşmeli')
+        self._migrate()   # idempotent
+        self.assertEqual(singles[0].state, 'uncertain')
+        icp_after = {r.key: r.value for r in self.icp.search([('key', '=like', 'sms_system.%')])}
+        self.assertEqual(icp_after, icp_before, 'migration ayarlara (test_mode) dokunmamalı')
+        # hiçbir yol belirsizleri yeniden göndermez; yalnız kesin gitmemiş ConnectTimeout kaydı denenir
+        new_text.write({'state': 'sent'})
+        self.Message._cron_retry_failed()
+        with self.assertRaisesRegex(UserError, 'belirsiz'):
+            camp.action_retry_errors()   # kampanyada yalnız belirsizler var: hiçbiri kuyruğa alınmaz
+        self.Campaign._cron_process_queue()
+        self.assertEqual(self.net.sent_numbers, [not_sent.number])
