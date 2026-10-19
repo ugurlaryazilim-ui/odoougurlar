@@ -1,6 +1,8 @@
 import logging
 from datetime import timedelta
 
+from psycopg2 import errors as pg_errors
+
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
@@ -11,6 +13,11 @@ _logger = logging.getLogger(__name__)
 
 MAX_RETRY = 3
 DEFAULT_USER_DAILY_LIMIT = 50
+QUEUE_BATCH = 50
+# Tekli kayıt bu kadar dakikadır 'gönderiliyor'daysa belirsiz sayılır (kampanyadaki eşikle aynı)
+SINGLE_STUCK_MINUTES = 15
+# Cron süresinin sonuna bu kadar saniye kala dur; kalanlar sonraki çalışmada
+SINGLE_MIN_TIME_LEFT = 20
 
 
 def test_mode_enabled(value):
@@ -92,11 +99,14 @@ class SmsSystemMessage(models.Model):
 
     @api.model
     @api.private
-    def send_sms(self, numbers, body=None, record=None, template=None, values=None, originator=None):
+    def send_sms(self, numbers, body=None, record=None, template=None, values=None, originator=None,
+                 queue=False):
         """SMS gönder ve kayıtlarını döndür.
 
         numbers: tek numara ya da liste. body verilmezse template + values ile üretilir.
         record: kaynak kayıt (iz için); chatter'ı varsa gönderim notu düşülür.
+        queue: True ise sağlayıcı çağrılmaz; kayıt 'queued' kalır ve tekli kuyruk cron'u tetiklenir
+        (başlık yoksa 'error', test modunda 'test'). İstek süresini sağlayıcıya bağlamamak için (KK-B11).
         Geçersiz numara UserError verir. Sağlayıcı hatası kaydı 'error' bırakır (istisna fırlatmaz).
         RPC'ye kapalıdır (@api.private): yalnız Python'dan çağrılır. Kayıtlar sudo ile oluşturulur
         (normal kullanıcının mesaj ACL'i yalnız okuma) ve gönderen çağıran kullanıcıdır; dönen recordset
@@ -137,7 +147,11 @@ class SmsSystemMessage(models.Model):
             'template_id': template.id if template else False,
             'manual': manual,
         } for num in normalized])
-        messages._deliver(cfg)
+        if queue:
+            if messages._settle_without_provider(cfg):
+                self._trigger_send_queue()
+        else:
+            messages._deliver(cfg)
         if record and hasattr(record, 'message_post'):
             states = dict(self._fields['state'].selection)
             for msg in messages:
@@ -159,21 +173,32 @@ class SmsSystemMessage(models.Model):
         if used + count > limit:
             raise UserError(_('Günlük elle SMS sınırınız doldu (%(limit)s). Yöneticinize başvurun.', limit=limit))
 
+    def _settle_without_provider(self, cfg):
+        """Sağlayıcıya gitmeden sonuçlanan kayıtları kapat, gönderilmesi gerekenleri döndür (sudo).
+
+        Başlık yoksa kalıcı hata; test modunda 'test' (KK-A27). Senkron gönderim, kuyruk ve yeniden
+        deneme aynı kapıdan geçer: test modu tek yerde uygulanır.
+        """
+        pending = self
+        if not cfg['originator']:
+            missing = pending.filtered(lambda m: not m.originator)
+            # Kalıcı hata: başlık sonradan girilse de otomatik gönderilmez (retry_count=MAX)
+            missing.write({'state': 'error', 'retry_count': MAX_RETRY,
+                           'error': _('Mesaj başlığı (Originator) ayarlanmamış.')})
+            pending -= missing
+        if cfg['test_mode']:
+            pending.write({'state': 'test', 'sent_at': fields.Datetime.now(), 'provider_answer': 'TEST'})
+            return self.browse()
+        return pending
+
     def _deliver(self, cfg=None):
         """Kayıtları Turatel'e gönder (sudo ile çağrılır)."""
         cfg = cfg or self._settings()
-        if not cfg['originator']:
-            for msg in self:
-                if not msg.originator:
-                    # Kalıcı hata: başlık sonradan girilse de otomatik gönderilmez (retry_count=MAX)
-                    msg.write({'state': 'error', 'retry_count': MAX_RETRY,
-                               'error': _('Mesaj başlığı (Originator) ayarlanmamış.')})
-            self = self.filtered(lambda m: m.originator)
-        if cfg['test_mode']:
-            self.write({'state': 'test', 'sent_at': fields.Datetime.now(), 'provider_answer': 'TEST'})
+        pending = self._settle_without_provider(cfg)
+        if not pending:
             return
         client = self._client(cfg)
-        for msg in self:
+        for msg in pending:
             try:
                 msg_id, answer = client.send([msg.number], msg.body, msg.originator, msg.sms_type)
                 msg.write({'state': 'sent', 'provider_msg_id': msg_id, 'provider_answer': answer,
@@ -215,7 +240,33 @@ class SmsSystemMessage(models.Model):
     # ── Butonlar / cron ──
 
     def action_retry(self):
-        self.filtered(lambda m: m.state in ('error', 'queued') and not m.campaign_id).sudo()._deliver()
+        """'Yeniden Gönder': kampanyasız 'error' kayıtları kuyruğa alır; senkron göndermez, commit etmez.
+
+        Belirsiz, gönderiliyor ya da başka bir işlemde kilitli kayıtlar atlanır (KK-A16, A17).
+        retry_count değişmez; gönderim kuyruk cron'unun tetiklenmesiyle saniyeler içinde yapılır.
+        """
+        candidates = self.filtered(lambda m: m.state == 'error' and not m.campaign_id)
+        queued = self.sudo()._lock_for_send(candidates.ids, ('error',))
+        if queued:
+            queued.write({'state': 'queued'})
+            self._trigger_send_queue()
+            message = _('%s kayıt kuyruğa alındı; birkaç saniye içinde gönderilir.') % len(queued)
+        else:
+            message = _('Kuyruğa alınacak kayıt yok.')
+        skipped = len(self) - len(queued)
+        if skipped:
+            message += ' ' + _('%s kayıt atlandı (yalnız hatalı kayıtlar yeniden gönderilir; belirsiz, '
+                               'gönderiliyor ya da başka bir işlemde olanlar atlanır).') % skipped
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'message': message,
+                'type': 'success' if queued else 'warning',
+                'sticky': False,
+                'next': {'type': 'ir.actions.client', 'tag': 'soft_reload'},
+            },
+        }
 
     def action_fetch_report(self):
         client = self._client()
@@ -225,13 +276,103 @@ class SmsSystemMessage(models.Model):
             except TuratelError as e:
                 msg.sudo().delivery_report = str(e)
 
+    # ── Tekli kuyruk (KK-A16, A17, B11) ──
+
+    @api.model
+    def _trigger_send_queue(self):
+        """Tekli kuyruk cron'unu hemen çalıştır. Cron kaydı yoksa (redeploy ile -u arası) atla:
+        kuyruktaki kayıtları _cron_retry_failed en geç 15 dk içinde gönderir."""
+        cron = self.env.ref('sms_system.cron_sms_send_queued', raise_if_not_found=False)
+        if cron:
+            cron.sudo()._trigger()
+
+    @api.model
+    def _lock_for_send(self, ids, states):
+        """Kayıtları kilitle ve durumu kilit altında yeniden doğrula; başka işlemin tuttuklarını atla.
+
+        Döner: kilitlenen ve hâlâ `states` içindeki kayıtlar. Kilit, işlem commit edilene kadar sürer.
+        REPEATABLE READ'de kayıt bu işlemin anlık görüntüsünden sonra başkasınca değiştirilmişse
+        PostgreSQL SerializationFailure verir: kayıt şu an başka bir işlemde demektir, atlanır.
+        """
+        ids, states = tuple(ids), tuple(states)
+        if not ids or not states:
+            return self.browse()
+        self.flush_model(['state'])
+        try:
+            with self.env.cr.savepoint(flush=False):
+                self.env.cr.execute(
+                    'SELECT id FROM sms_system_message WHERE id IN %s AND state IN %s '
+                    'ORDER BY id FOR UPDATE SKIP LOCKED', (ids, states))
+                locked_ids = [row[0] for row in self.env.cr.fetchall()]
+        except pg_errors.SerializationFailure:
+            _logger.info('SMS kaydı başka bir işlemde güncellendi, bu çalışmada atlandı (%s kayıt)', len(ids))
+            return self.browse()
+        locked = self.browse(locked_ids)
+        locked.invalidate_recordset(['state'])
+        return locked
+
+    @api.model
+    def _send_one_by_one(self, candidates, states):
+        """Adayları kayıt kayıt gönder: kilit → 'sending' + commit (sağlayıcı çağrısından ÖNCE) → gönder
+        → commit. Kayıt başına yapılır: toplu 'sending' süresi takılı kayıt eşiğini aşabilir ve hiç
+        gönderilmemiş kayıtlar belirsize düşerdi. Döner: cron süresi bitti mi (True: dur)."""
+        IrCron = self.env['ir.cron']
+        cfg = self._settings()
+        for msg_id in candidates.ids:
+            msg = self._lock_for_send([msg_id], states)
+            if not msg:
+                continue
+            msg.write({'state': 'sending'})
+            IrCron._commit_progress()
+            msg._deliver(cfg)
+            if IrCron._commit_progress(1) < SINGLE_MIN_TIME_LEFT:
+                return True
+        return False
+
+    @api.model
+    def _cron_send_queued(self):
+        """Tekli gönderim kuyruğu: kampanyasız 'queued' kayıtları gönderir.
+
+        Önce 15 dk'dan uzun 'sending'de kalan tekli kayıtları belirsiz yapar (gidip gitmediği bilinmez,
+        asla yeniden gönderilmez). Döner: cron süresi bitti mi.
+        """
+        Message = self.sudo()
+        IrCron = self.env['ir.cron']
+        stuck_before = fields.Datetime.now() - timedelta(minutes=SINGLE_STUCK_MINUTES)
+        stuck = Message.search([('campaign_id', '=', False), ('state', '=', 'sending'),
+                                ('write_date', '<', stuck_before)])
+        stuck = Message._lock_for_send(stuck.ids, ('sending',))
+        if stuck:
+            _logger.warning('%s tekli SMS kaydı gönderiliyor durumunda takıldı, belirsiz yapıldı', len(stuck))
+            stuck.write({'state': 'uncertain', 'retry_count': MAX_RETRY,
+                         'error': _('Gönderim yarıda kesildi; iletilip iletilmediği belirsiz. '
+                                    'Tekrar gönderilmedi (mükerrer olmasın diye).')})
+        IrCron._commit_progress()
+        last_id = 0
+        while True:
+            queued = Message.search([('campaign_id', '=', False), ('state', '=', 'queued'), ('id', '>', last_id)],
+                                    order='id', limit=QUEUE_BATCH)
+            if not queued:
+                return False
+            last_id = queued[-1].id
+            if Message._send_one_by_one(queued, ('queued',)):
+                return True
+
     @api.model
     def _cron_retry_failed(self):
-        """Ağ hatası vb. başarısız gönderimleri sınırlı sayıda yeniden dene (son 1 gün)."""
+        """Ağ hatası vb. geçici hatalı gönderimleri sınırlı sayıda yeniden dene (son 1 gün).
+
+        Önce tekli kuyruğu boşaltır (kuyruk cron'u yokken de kuyruk 15 dk içinde gider). Yalnız 'error';
+        belirsiz ve gönderiliyor kayıtlar asla yeniden gönderilmez.
+        """
+        if self._cron_send_queued():
+            return
         since = fields.Datetime.subtract(fields.Datetime.now(), days=1)
-        failed = self.sudo().search([('state', 'in', ('error', 'queued')), ('retry_count', '<', MAX_RETRY),
-                                     ('campaign_id', '=', False), ('create_date', '>=', since)], limit=50)
-        failed._deliver()
+        Message = self.sudo()
+        failed = Message.search([('state', '=', 'error'), ('retry_count', '<', MAX_RETRY),
+                                 ('campaign_id', '=', False), ('create_date', '>=', since)],
+                                order='id', limit=QUEUE_BATCH)
+        Message._send_one_by_one(failed, ('error',))
 
     @api.model
     @api.private

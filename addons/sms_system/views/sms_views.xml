@@ -25,7 +25,7 @@
             <form create="false" edit="false">
                 <header>
                     <button name="action_retry" string="Yeniden Gönder" type="object" class="btn-primary"
-                            invisible="state not in ('error', 'queued')" groups="sms_system.group_sms_manager"/>
+                            invisible="state != 'error'" groups="sms_system.group_sms_manager"/>
                     <button name="action_fetch_report" string="İletim Raporu Al" type="object"
                             invisible="not provider_msg_id" groups="sms_system.group_sms_manager"/>
                     <field name="state" widget="statusbar"/>

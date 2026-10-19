@@ -10,6 +10,15 @@
             <field name="interval_type">minutes</field>
             <field name="active" eval="True"/>
         </record>
+        <record id="cron_sms_send_queued" model="ir.cron">
+            <field name="name">SMS: Tekli gönderim kuyruğu</field>
+            <field name="model_id" ref="model_sms_system_message"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_send_queued()</field>
+            <field name="interval_number">5</field>
+            <field name="interval_type">minutes</field>
+            <field name="active" eval="True"/>
+        </record>
         <record id="cron_sms_campaign_queue" model="ir.cron">
             <field name="name">SMS: Toplu SMS kuyruğu</field>
             <field name="model_id" ref="model_sms_system_campaign"/>
