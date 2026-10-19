@@ -18,6 +18,9 @@ import requests
 
 from .turatel import mask_number
 
+# 10+ haneli rakam dizisi (araya boşluk, tire, nokta, parantez girebilir): sunucu metnindeki telefon numarası
+_PHONE_RUN = re.compile(r'\+?\d(?:[\s\-().]*\d){9,}')
+
 _logger = logging.getLogger(__name__)
 
 DEFAULT_URL = 'https://adm.smartadm.net/webservice/api'
@@ -125,7 +128,8 @@ class SmartAdmClient:
         if not text:
             text = 'SmartADM hatası'
             if value and isinstance(value, str):
-                text += ': %s' % value[:120]
+                # Sunucu metni numara içerebilir: önce maskele, sonra kırp (kırpılan numaranın açık kısmı kalmasın; G-5)
+                text += ': %s' % _PHONE_RUN.sub(lambda m: mask_number(m.group()), value)[:120]
         return '%s (%s/%s)' % (text, code[0], code[1])
 
     def login(self):

@@ -12,8 +12,9 @@ from unittest.mock import patch
 from odoo.exceptions import AccessError, UserError
 from odoo.tests.common import tagged
 
+from odoo.addons.sms_system.services.smartadm import SmartAdmClient, SmartAdmError
 
-from .common import SmsHttpCase, SmsTestCase
+from .common import SmsHttpCase, SmsTestCase, smart_error
 from .test_campaign import CampaignMixin
 
 MAX_RETRY = 3
@@ -168,3 +169,35 @@ class TestG3RetryGroupRpc(SmsHttpCase):
         self.assertIn('AccessError', str(body['error']))
         self.env.invalidate_all()
         self.assertEqual(msg.state, 'error')
+
+
+# ==== S4 G-5 ====
+@tagged('post_install', '-at_install')
+class TestG5SmartAdmUnknownErrorMasked(SmsTestCase):
+
+    @staticmethod
+    def _client():
+        return SmartAdmClient('CUST', 'iysuser', 'iyspass')
+
+    def test_g5_bilinmeyen_kod_value_numarasi_maskeli(self):
+        self.net.smart_query = smart_error(-8, -801, 'Numara 905321234567 islenemedi')
+        with self.assertRaises(SmartAdmError) as ctx:
+            self._client().query('5321234567')
+        text = str(ctx.exception)
+        self.assertNotIn('5321234567', text)
+        self.assertIn('532*****67', text)
+        self.assertIn('islenemedi', text)
+
+    def test_g5_kirpma_maskeden_sonra_kismi_numara_kalmaz(self):
+        text = SmartAdmClient.error_text((-8, -801), 'x' * 112 + '905321234567')
+        self.assertNotRegex(text, r'\d{6,}', 'kırpılan numaranın açık kısmı metinde kaldı')
+
+    def test_g5_log_ve_kampanya_notunda_tam_numara_yok(self):
+        self.configure_sms(iys=True)
+        lst = self.env['sms.system.list'].create({'name': 'L'})
+        contact = self.env['sms.system.contact'].create({'mobile': '5321234567', 'list_ids': [(6, 0, lst.ids)]})
+        self.net.smart_query = smart_error(-8, -801, 'MSISDN 905321234567')
+        with self.assertLogs('odoo.addons.sms_system', level='WARNING') as logs:
+            stats = self.env['sms.system.iys'].refresh_contacts(contact)
+        joined = '\n'.join(logs.output) + '\n' + str(stats.get('error'))
+        self.assertNotIn('5321234567', joined)
