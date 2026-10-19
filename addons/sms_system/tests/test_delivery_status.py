@@ -1,12 +1,15 @@
 """KK-C7 (kod eşlemesi, model), C13 eki (hesap seti), C16 (belirsiz uzlaştırma), C18 (durum cron'u), C19 (görünümler)."""
 import logging
-from datetime import timedelta
+from datetime import datetime, time as dtime, timedelta
+from unittest.mock import patch
 
 import requests
 from lxml import etree
 from odoo import fields
-from odoo.tests.common import tagged
+from odoo.exceptions import AccessError
+from odoo.tests.common import new_test_user, tagged
 
+from ..services.turatel_json import delivery_state as map_delivery_code
 from .common import json_err, json_ok, SmsTestCase
 from .test_json_routing import JsonModelMixin, NUMBER
 
@@ -400,3 +403,124 @@ class TestDeliveryUi(StatusMixin, SmsTestCase):
         new = self.net.calls[before:]
         self.assertTrue(new, 'Eski modda rapor sorgusu yapılmalı')
         self.assertEqual([c for c in new if c['kind'] == 'turatel_json'], [])
+
+
+@tagged('post_install', '-at_install')
+class TestDeliveryStatusExtra(StatusMixin, SmsTestCase):
+    """C5 uygulama ayrıntıları: gece yarısı, süre bütçesi, yetki, açıklama, test modu, bilinmeyen yeniden sorgu."""
+
+    def istanbul_today(self):
+        return (fields.Datetime.now() + timedelta(hours=3)).date()
+
+    def utc_at(self, day, hour, minute=0):
+        """İstanbul günü + saat → UTC naive (UTC+3, DST yok)."""
+        return datetime.combine(day, dtime(hour, minute)) - timedelta(hours=3)
+
+    def make_uncertain(self, number=NUMBER):
+        return self.make_tracked(number, state='uncertain', sent_at=False, delivery_state=False, message_id=False)
+
+    def set_write_at(self, record, when):
+        self.env.flush_all()
+        self.env.cr.execute('UPDATE sms_system_message SET write_date = %s WHERE id = %s', (when, record.id))
+        record.invalidate_recordset()
+
+    def test_c5_belirsiz_kayit_gece_yarisini_asarsa_iki_gun_sorgulanir(self):
+        yesterday = self.istanbul_today() - timedelta(days=1)
+        msg = self.make_uncertain()
+        self.set_write_at(msg, self.utc_at(yesterday, 0, 10))   # dün 00:10 İstanbul: istek önceki güne düşebilir
+        self.cron_status()
+        days = {w[1][:6] for w in self.net.tj.status_windows if w[0] == 9254}
+        self.assertEqual(days, {(yesterday - timedelta(days=1)).strftime('%d%m%y'), yesterday.strftime('%d%m%y')})
+        self.refresh_all(msg)
+        self.assertEqual(msg.state, 'uncertain', 'Raporda yoksa belirsiz kalır')
+
+    def test_c5_belirsiz_kayit_iki_parcada_eslesse_de_bir_kez_yazilir(self):
+        yesterday = self.istanbul_today() - timedelta(days=1)
+        unsure = self.make_uncertain('05321230011')
+        self.set_write_at(unsure, self.utc_at(yesterday, 0, 10))
+        other = self.make_tracked('05321230012', message_id='970001', sent_at=self.utc_at(yesterday, 12))
+        self.register_at_provider(unsure, code=0)
+        self.register_at_provider(other, code=0)
+        written = []
+        Model = self.env.registry['sms.system.message']
+        original = Model.write
+
+        def spy(records, vals):
+            written.extend(records.ids)
+            return original(records, vals)
+
+        with patch.object(Model, 'write', spy):
+            self.cron_status()
+        self.refresh_all(unsure, other)
+        self.assertEqual((unsure.state, unsure.delivery_state, other.delivery_state), ('sent', 'delivered', 'delivered'))
+        self.assertEqual(written.count(unsure.id), 1)
+        self.assertEqual(unsure.sent_at, self.utc_at(yesterday, 0, 10), 'Gönderim zamanı = belirsiz olduğu an')
+
+    def test_c5_sure_butcesi_bitince_kalan_parcalar_sonraki_calismaya(self):
+        a = self.make_tracked('05321230013', hours_ago=30, message_id='970002')
+        b = self.make_tracked('05321230014', hours_ago=2, message_id='970003')
+        self.register_at_provider(a)
+        self.register_at_provider(b)
+        with patch.object(self.env.registry['ir.cron'], '_commit_progress',
+                          lambda cron, processed=0, **kw: 5.0):
+            self.cron_status()
+        self.assertEqual(len(self.net.tj.status_windows), 1, 'Süre azalınca ilk parçadan sonra durur')
+        self.refresh_all(a, b)
+        self.assertEqual((a.delivery_state, b.delivery_state), ('delivered', 'pending'), 'En eski gün önce')
+        self.cron_status()
+        self.refresh_all(b)
+        self.assertEqual(b.delivery_state, 'delivered')
+
+    def test_c5_durumu_sorgula_yonetici_olmayana_kapali_ag_cagrisi_yok(self):
+        sms_user = new_test_user(self.env, login='sms_c5_user', groups='base.group_user,sms_system.group_sms_user')
+        msg = self.make_tracked(message_id='970004', user_id=sms_user.id)   # kayıt kuralı okumaya izin verir
+        self.register_at_provider(msg, code=0)
+        for user in (self.plain_user, sms_user):
+            with self.assertRaises(AccessError):
+                msg.with_user(user).action_fetch_report()
+        self.assertEqual(self.net.calls, [])
+        self.refresh_all(msg)
+        self.assertEqual(msg.delivery_state, 'pending')
+
+    def test_c5_iletim_aciklamasi(self):
+        delivered = self.make_tracked('05321230015', delivery_state='delivered', delivery_code='0')
+        failed = self.make_tracked('05321230016', delivery_state='undelivered', delivery_code='103')
+        odd = self.make_tracked('05321230017', delivery_state='unknown', delivery_code='777')
+        fresh = self.make_tracked('05321230018')
+        self.assertEqual(delivered.delivery_label, 'iletildi')
+        self.assertEqual(failed.delivery_label, map_delivery_code('103')[1])
+        self.assertNotEqual(failed.delivery_label, 'iletildi')
+        self.assertIn('777', odd.delivery_label)
+        self.assertFalse(fresh.delivery_label)
+
+    def test_c5_test_modunda_gercekten_gonderilen_kayit_sorgulanir(self):
+        self.set_param('test_mode', 'True')
+        sent = self.make_tracked('05321230019', message_id='970005')
+        self.register_at_provider(sent, code=0)
+        simulated = self.make_message('05321230020', state='test', provider_service='single',
+                                      provider_account_id='9254')
+        self.register_at_provider(simulated, code=0)
+        self.cron_status()
+        self.refresh_all(sent, simulated)
+        self.assertEqual(sent.delivery_state, 'delivered')
+        self.assertEqual((simulated.state, simulated.delivery_state), ('test', False))
+
+    def test_c5_bilinmeyen_kod_sonraki_calismada_yeniden_sorgulanir(self):
+        msg = self.make_tracked(message_id='970006')
+        self.register_at_provider(msg, code=777)
+        self.cron_status()
+        self.refresh_all(msg)
+        self.assertEqual((msg.delivery_state, msg.delivery_code), ('unknown', '777'))
+        self.net.tj.set_code(msg.provider_msg_id, 0)
+        self.cron_status()
+        self.refresh_all(msg)
+        self.assertEqual((msg.delivery_state, msg.delivery_code), ('delivered', '0'))
+
+    def test_c5_durumu_sorgula_eslesince_bildirim_ve_ham_satir(self):
+        msg = self.make_tracked(message_id='970007', provider_packet_id=False)
+        self.register_at_provider(msg, code=0)
+        result = msg.action_fetch_report()
+        self.assertEqual(result['params']['type'], 'success')
+        self.assertIn('iletildi', result['params']['message'])
+        self.refresh_all(msg)
+        self.assertIn('970007', msg.delivery_report or '')

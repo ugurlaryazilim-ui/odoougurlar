@@ -1,6 +1,8 @@
 import logging
 import re
-from datetime import timedelta
+import time
+from collections import Counter, defaultdict
+from datetime import datetime, time as dtime, timedelta, timezone
 
 from psycopg2 import errors as pg_errors
 
@@ -9,7 +11,8 @@ from odoo.exceptions import AccessError, UserError
 
 from ..services.turatel import (MAX_SEGMENTS, TuratelClient, TuratelError, normalize_number, prepare_text,
                                 segment_count)
-from ..services.turatel_json import MAX_TEXT_LENGTH, TuratelJsonClient, json_segment_count
+from ..services.turatel_json import TZ, MAX_TEXT_LENGTH, TuratelJsonClient, json_segment_count
+from ..services.turatel_json import delivery_state as map_delivery_code
 
 _logger = logging.getLogger(__name__)
 
@@ -38,6 +41,14 @@ NO_OPTOUT_TEXT = 'Ticari SMS için ret metni (çıkış talimatı ve Mersis no) 
 NUMERIC_PLACEHOLDER = re.compile(r'\{\d+\}')
 # KK-C23: Turatel tek SMS metni sınırı (JSON modu); alıcı başına son metin için hata iletisi
 TEXT_TOO_LONG = 'metin %d karakteri aşıyor' % MAX_TEXT_LENGTH
+
+# İletim durumu takibi (C5, tasarım §5.5)
+JSON_SERVICES = ('single', 'bulk')
+STATUS_WINDOW_HOURS = 48          # bu süreyi aşan 'bekliyor' kayıt 'bilinmeyen' olur, sorgulanmaz
+STATUS_TRACKED = ('pending', 'unknown')   # unknown: tanınmayan (belgesiz) kod, 48 saat boyunca yeniden sorulur
+STATUS_UNCERTAIN_LOOKBACK = 30    # dk; belirsiz kaydın gönderimi write_date'ten en çok bu kadar önce olabilir
+STATUS_TIME_BUDGET = 120          # sn; durum cron'u çalışma başına en çok bu kadar sorgu yapar
+STATUS_MIN_TIME_LEFT = 20         # sn; cron süresinin sonuna bu kadar kala dur
 
 
 def test_mode_enabled(value):
@@ -128,6 +139,13 @@ class SmsSystemMessage(models.Model):
         ('bulk', 'bulksms'),
     ], string='Turatel Servisi')
     provider_account_id = fields.Char(string='Turatel Hesap No')
+    # KK-C7: iletim kodunun Türkçe açıklaması (kolon yok)
+    delivery_label = fields.Char(string='İletim Açıklaması', compute='_compute_delivery_label')
+
+    @api.depends('delivery_code')
+    def _compute_delivery_label(self):
+        for msg in self:
+            msg.delivery_label = map_delivery_code(msg.delivery_code)[1] if msg.delivery_code else False
 
     # ── Ayarlar ──
 
@@ -510,12 +528,221 @@ class SmsSystemMessage(models.Model):
         }
 
     def action_fetch_report(self):
-        client = self._legacy_client()
-        for msg in self.filtered('provider_msg_id'):
+        """'Durumu Sorgula': JSON kaydı kendi servis ve hesap setiyle sorgulanır, eski XML kaydı eski rapor ucuyla.
+
+        Yön kayda göre seçilir (gönderildiği servis), API moduna göre değil. Yalnız SMS yöneticisi: düğmedeki
+        groups yalnız görünürlüktür, RPC yolunu sunucu tarafı denetim kapatır (ağdan önce).
+        """
+        if not (self.env.su or self.env.user.has_group('sms_system.group_sms_manager')):
+            raise AccessError(_('Yalnız SMS yöneticileri iletim durumunu sorgulayabilir.'))
+        json_msgs = self.filtered(lambda m: m.provider_service in JSON_SERVICES)
+        legacy = (self - json_msgs).filtered('provider_msg_id')
+        if legacy:
+            client = self._legacy_client()
+            for msg in legacy:
+                try:
+                    msg.sudo().delivery_report = client.report(msg.provider_msg_id)[:2000]
+                except TuratelError as e:
+                    msg.sudo().delivery_report = str(e)
+        if not json_msgs:
+            return None
+        cfg = dict(self._settings(), api_mode='json')
+        results = [msg._fetch_json_status(cfg) for msg in json_msgs.sudo()]
+        levels = {level for _text, level in results}
+        level = next(lvl for lvl in ('danger', 'warning', 'success') if lvl in levels)
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'message': '\n'.join(text for text, _level in results),
+                'type': level,
+                'sticky': False,
+                'next': {'type': 'ir.actions.client', 'tag': 'soft_reload'},
+            },
+        }
+
+    def _fetch_json_status(self, cfg):
+        """Tek JSON kaydının durumunu sorgula ve uygula. Döner: (bildirim metni, düzey)."""
+        self.ensure_one()
+        account = (self.provider_account_id or '').strip()
+        client = self._status_client(cfg, self.provider_service, account)
+        if client is None:
+            return _('Bu kaydın Turatel hesabı (%s) için kimlik seti tanımlı değil.') % (account or '-'), 'warning'
+        try:
+            if self.provider_packet_id:
+                rows = client.get_status(account, self.provider_packet_id,
+                                         [self.provider_msg_id] if self.provider_msg_id else None)
+            else:
+                rows = []
+                for day in self._status_days():
+                    rows += client.get_status_between(account, *self._day_bounds(day))
+        except TuratelError as e:
+            return _('Turatel durum sorgusu başarısız: %s') % e, 'danger'
+        if not rows:   # -6 dahil (istemci boş liste döner)
+            return _("Turatel'de henüz kayıt yok."), 'warning'
+        matched, _changed, _reconciled = self._apply_status_rows(rows)
+        row = matched.get(self.id)
+        if not row:
+            return _('Turatel yanıtında bu kayıt bulunamadı (%s satır).') % len(rows), 'warning'
+        # Ham satır (maskeli, ≤500 karakter): belgesiz alan adları geçişte buradan doğrulanır (R1)
+        self.delivery_report = row.raw
+        return _('İletim durumu: %s') % map_delivery_code(row.code)[1], 'success'
+
+    # ── İletim durumu takibi (C5, tasarım §5.5) ──
+
+    @api.model
+    def _day_bounds(self, day):
+        """İstanbul takvim günü → (00:00:00, 23:59:59) UTC naive (format_date naive'i UTC kabul eder)."""
+        start = TZ.localize(datetime.combine(day, dtime.min))
+        end = TZ.localize(datetime.combine(day, dtime(23, 59, 59)))
+        return tuple(dt.astimezone(timezone.utc).replace(tzinfo=None) for dt in (start, end))
+
+    @staticmethod
+    def _local_day(dt):
+        return dt.replace(tzinfo=timezone.utc).astimezone(TZ).date()
+
+    def _status_days(self):
+        """Kaydın Turatel raporunda arandığı İstanbul günleri.
+
+        Gönderildi: sent_at günü. Belirsiz: gönderim zamanı yazılmaz; isteğin gittiği an write_date'ten
+        en çok STATUS_UNCERTAIN_LOOKBACK dk öncedir (takılı 'gönderiliyor' eşiği + cron aralığı).
+        """
+        self.ensure_one()
+        if self.state != 'uncertain' and self.sent_at:
+            return [self._local_day(self.sent_at)]
+        end = self.write_date or fields.Datetime.now()
+        day, last = self._local_day(end - timedelta(minutes=STATUS_UNCERTAIN_LOOKBACK)), self._local_day(end)
+        days = [day]
+        while days[-1] < last:
+            days.append(days[-1] + timedelta(days=1))
+        return days
+
+    @api.model
+    def _status_client(self, cfg, service, account):
+        """Gönderimde kullanılan hesabın kimlik setiyle istemci (accountId'si bu hesaba eşit olan set).
+
+        Setler arasında geri düşme yok; eşleşen set yoksa None. İstemci seçimi yine _client'tan geçer.
+        """
+        account = (account or '').strip()
+        if not account:
+            return None
+        for purpose in ('info', 'commercial'):
+            creds = cfg['json_creds'].get(purpose)
+            if creds and str(creds[3]).strip() == account:
+                client, _account = self._client(dict(cfg, api_mode='json'), service=service, purpose=purpose)
+                return client
+        return None
+
+    def _apply_status_rows(self, rows):
+        """Turatel durum satırlarını bu aday kayıtlara uygula (cron ve 'Durumu Sorgula' ortak eşleyici).
+
+        Eşleme: messageId → provider_msg_id; yoksa clientId → {db8}-m{id} (başka veritabanının clientId'si
+        eşleşmez). Gönderim durumu değişmez (iletim kodu asla yeniden gönderim tetiklemez); belirsiz kayıt
+        raporda bulunursa 'sent' olur (KK-C16). Döner: ({kayıt id: satır}, değişen kayıt, uzlaşan belirsiz).
+        """
+        by_mid = {m.provider_msg_id: m for m in self if m.provider_msg_id}
+        db8 = self._db8()
+        by_ref = {m._client_ref(db8): m for m in self}
+        matched = {}
+        for row in rows:
+            msg = (row.message_id and by_mid.get(row.message_id)) or (row.client_id and by_ref.get(row.client_id))
+            if msg and msg.id not in matched:
+                matched[msg.id] = row
+        groups = defaultdict(list)
+        reconciled = 0
+        for msg in self:
+            row = matched.get(msg.id)
+            if not row:
+                continue
+            state, _label = map_delivery_code(row.code)
+            vals = {}
+            if state != 'pending':
+                vals.update(delivery_state=state, delivery_code=row.code)
+            if msg.state == 'uncertain':
+                reconciled += 1
+                vals.update(state='sent', error=False, sent_at=msg.sent_at or msg.write_date)
+                vals.setdefault('delivery_state', 'pending')
+            if row.message_id and not msg.provider_msg_id:
+                vals['provider_msg_id'] = row.message_id
+            if any(msg[name] != value for name, value in vals.items()):
+                groups[tuple(sorted(vals.items()))].append(msg.id)
+        for key, ids in groups.items():
+            self.browse(ids).write(dict(key))
+        return matched, sum(len(ids) for ids in groups.values()), reconciled
+
+    @api.model
+    def _cron_fetch_delivery_status(self):
+        """'SMS: İletim durumu' (15 dk; KK-C16, C18).
+
+        1. 48 saati aşan 'bekliyor' kayıtlar 'bilinmeyen' olur (sorgulanmaz).
+        2. JSON modunda adaylar (son 48 saatte gönderildi + bekliyor/bilinmeyen; belirsiz) (servis, hesap,
+           İstanbul günü) parçalarıyla o hesabın kimlik setiyle GetStatusByTwoDates'e sorulur; parça başına
+           commit, süre bütçesi bitince kalanlar sonraki çalışmaya.
+        Turatel hatası cron'u çökertmez; çalışma başına en çok bir uyarı satırı. -6 boş sonuçtur (uyarı yok).
+        Test modunda da çalışır: aday yalnız gerçekten gönderilmiş kayıttır (C7 test numaraları).
+        """
+        Message = self.sudo()
+        IrCron = self.env['ir.cron']
+        started = time.monotonic()
+        since = fields.Datetime.now() - timedelta(hours=STATUS_WINDOW_HOURS)
+        expired = Message.search([('state', '=', 'sent'), ('delivery_state', '=', 'pending'),
+                                  ('sent_at', '<', since)])
+        if expired:
+            expired.write({'delivery_state': 'unknown'})
+        IrCron._commit_progress()
+        cfg = Message._settings()
+        if cfg['api_mode'] != 'json':
+            return   # legacy modda JSON isteği yok (KK-C14)
+        candidates = Message.search([
+            ('provider_service', 'in', JSON_SERVICES), '|',
+            '&', '&', ('state', '=', 'sent'), ('delivery_state', 'in', STATUS_TRACKED), ('sent_at', '>=', since),
+            '&', ('state', '=', 'uncertain'), ('write_date', '>=', since),
+        ], order='id')
+        chunks = defaultdict(list)
+        for msg in candidates:
+            for day in msg._status_days():
+                chunks[(day, msg.provider_service, (msg.provider_account_id or '').strip())].append(msg.id)
+        clients, missing, problems, resolved = {}, set(), [], set()
+        stats = Counter()
+        for day, service, account in sorted(chunks):
+            if time.monotonic() - started > STATUS_TIME_BUDGET:
+                stats['ertelendi'] += 1
+                continue
+            if (service, account) not in clients:
+                clients[(service, account)] = Message._status_client(cfg, service, account)
+            client = clients[(service, account)]
+            if client is None:
+                missing.add((service, account or '-'))
+                continue
+            todo = Message.browse([i for i in chunks[(day, service, account)] if i not in resolved])
+            if not todo:
+                continue
             try:
-                msg.sudo().delivery_report = client.report(msg.provider_msg_id)[:2000]
+                rows = client.get_status_between(account, *Message._day_bounds(day))
             except TuratelError as e:
-                msg.sudo().delivery_report = str(e)
+                problems.append('%s/%s %s: %s' % (service, account, day.isoformat(), e))
+                continue
+            stats['sorgu'] += 1
+            if not rows:
+                stats['boş'] += 1
+            matched, changed, reconciled = todo._apply_status_rows(rows)
+            resolved.update(matched)
+            stats['güncellendi'] += changed
+            stats['uzlaşan belirsiz'] += reconciled
+            if IrCron._commit_progress(len(todo)) < STATUS_MIN_TIME_LEFT:
+                stats['ertelendi'] += 1
+                break
+        if missing or problems:
+            parts = []
+            if missing:
+                parts.append('kimlik seti tanımlı olmayan hesap atlandı (%s)' % ', '.join(
+                    '%s/%s' % key for key in sorted(missing)))
+            if problems:
+                parts.append('%d sorgu başarısız, ilki %s' % (len(problems), problems[0]))
+            _logger.warning('SMS iletim durumu: %s', '; '.join(parts))
+        if stats:
+            _logger.info('SMS iletim durumu: %s (boş = Turatel\'de kayıt yok/-6); süresi dolan bekleyen: %s',
+                         ', '.join('%s %s' % (v, k) for k, v in sorted(stats.items())), len(expired))
 
     # ── Tekli kuyruk (KK-A16, A17, B11) ──
 
