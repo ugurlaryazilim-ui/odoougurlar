@@ -41,10 +41,10 @@ Yeni kolonlar redeploy ile `-u sms_system` arasında yoktur; bu pencerede `sms_s
    ```
 2. Merge + redeploy. Konteyner sağlıklı olur olmaz **hemen** (komut önceden hazır, aynı dakika; otomatik `-u` listesi değişmez):
    ```
-   docker exec <odoo-konteyner> odoo -d ugurlar -u sms_system --stop-after-init --no-http
+   docker exec <odoo-konteyner> odoo -d <veritabanı_adı> -u sms_system --stop-after-init --no-http
    ```
    `<veritabanı_adı>`: canlı veritabanının adı; Coolify'daki Odoo servisinin `DB_NAME`/`POSTGRES_DB` ortam değişkeninde ya da
-   `docker exec <odoo-konteyner> psql -l` çıktısında görünür (emin değilsen komutu çalıştırma, önce adı doğrula).
+   `psql -l` çıktısında görünür (emin değilsen komutu çalıştırma, önce adı doğrula).
    tailor/vendor_claim bağımlı olarak birlikte yükselir. Yeni kolonlar: `provider_packet_id`, `delivery_state`,
    `delivery_code`, `provider_service`, `provider_account_id`.
 3. `-u` biter bitmez **cron'ları aç** (not edilen id'lerle):
