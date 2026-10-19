@@ -505,3 +505,78 @@ class TestTuratelJsonClient(SmsTestCase):
         single.get_credit(9254)
         bulk.get_credit(9254)
         self.assertEqual(len(self.net.json_endpoint_calls('Auth/GetToken')), 2)
+
+    # ── C2 sözleşmesi ek testleri (sozlesme-C2.md) ──
+    def test_c2_yenileme_baska_is_parcaciginin_jetonunu_silmez(self):
+        """-1 sonrası önbellek yalnız hâlâ eski jetonu tutuyorsa silinir (karşılaştır-sil)."""
+        api = self.json_api()
+        client = self.json_client('info')
+        client.get_credit(9254)
+        self.net.tj.expire_tokens('info_user')
+        state = {'done': False}
+
+        def other_thread_refreshes(call):
+            # eski jetonla gelen GetCredit -1 alacak; o sırada "başka iş parçacığı" yeni jeton alıp önbelleğe koyar
+            if call['endpoint'] == 'Sms/GetCredit' and not state['done']:
+                state['done'] = True
+                api.TuratelJsonClient(self.JSON_SINGLE_URL, '20219', 'info_user', 'info_pw').get_token(force=True)
+        self.net.tj.hook = other_thread_refreshes
+        self.assertEqual(client.get_credit(9254), 90680)
+        self.assertEqual(len(self.net.json_endpoint_calls('Auth/GetToken')), 2,
+                         'Başka iş parçacığının aldığı yeni jeton silinmemeli, yeniden GetToken gerekmez')
+        self.assertEqual(self.net.json_endpoint_calls('Sms/GetCredit')[-1]['bearer'], self.net.tj.tokens_issued[-1][1])
+
+    def test_c2_send_oncesi_jeton_alinamazsa_retryable(self):
+        """SendSms'ten önceki GetToken hatası: SMS kesinlikle gitmedi → belirsiz değil, yeniden denenebilir."""
+        client = self.json_client('info')
+        for outcome in (requests.exceptions.ReadTimeout(), 500, '<html>Bakımda</html>'):
+            with self.subTest(sonuc=repr(outcome)[:30]):
+                self.net.tj.add_script('Auth/GetToken', outcome)
+                with self.assertRaises(TuratelError) as ctx:
+                    self.send(client)
+                self.assertTrue(ctx.exception.retryable)
+                self.assertFalse(ctx.exception.uncertain)
+        self.assertEqual(self.net.json_sends, [])
+
+    def test_c2_ham_yanit_sinirli_ve_numara_maskeli(self):
+        client = self.json_client('info', service='bulk')
+        self.net.tj.add_script('Sms/SendSms', json_ok({'packetId': 9003, 'messageIdList': [801, 802, 803],
+                                                       'echo': 'x' * 5000, 'receiver': '905321234567'}))
+        result = self.send(client, NUMBERS, CIDS)
+        self.assertLessEqual(len(result.raw), 2000)
+        self.assertNotIn('5321234567', result.raw)
+        self.assertEqual(str(result.message_ids[CIDS[2]]), '803')
+        self.net.tj.add_script('Sms/SendSms', json_err('-10', 'Numara 905321234567 hatali'))
+        with self.assertRaises(TuratelError) as ctx:
+            self.send(client)
+        self.assertNotIn('5321234567', str(ctx.exception))
+
+    def test_c2_hatali_istek_aga_cikmadan_kalici_hata(self):
+        client = self.json_client('info')
+        cases = (
+            ('alici-kimlik', lambda: client.send_sms(9254, 'TESTBASLIK', 'x', NUMBERS[:2], client_ids=CIDS[:1],
+                                                     reference_id='R')),
+            ('parametre', lambda: client.send_sms(9254, 'TESTBASLIK', 'x', NUMBERS[:2], client_ids=CIDS[:2],
+                                                  reference_id='R', parameters=[['A']])),
+            ('bos-alici', lambda: client.send_sms(9254, 'TESTBASLIK', 'x', [], client_ids=[], reference_id='R')),
+            ('referans', lambda: client.send_sms(9254, 'TESTBASLIK', 'x', NUMBERS[:1], client_ids=CIDS[:1],
+                                                 reference_id='')),
+            ('hesap', lambda: client.get_credit('abc')),
+        )
+        for label, call in cases:
+            with self.subTest(durum=label):
+                with self.assertRaises(TuratelError) as ctx:
+                    call()
+                self.assertPermanent(ctx.exception)
+        self.assertEqual(self.net.json_calls, [], 'Hatalı istek ağa çıkmamalı')
+
+    def test_c2_loglarda_numara_ve_govde_yok(self):
+        with self.capture_logs() as lines:
+            client = self.json_client('info', service='bulk')
+            self.send(client, NUMBERS, CIDS)
+            client.get_status_between(9254, datetime(2026, 10, 18, 21, 0, tzinfo=timezone.utc),
+                                      datetime(2026, 10, 19, 20, 59, 59, tzinfo=timezone.utc))
+        text = '\n'.join(lines)
+        self.assertTrue(text, 'İstemci en az bir DEBUG satırı yazmalı')
+        for secret in ('Merhaba', 'info_pw', 'Bearer', 'TOK-') + tuple(NUMBERS):
+            self.assertNotIn(secret, text)
