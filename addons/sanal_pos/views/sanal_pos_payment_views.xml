@@ -41,6 +41,9 @@
             <form string="Ödeme Talebi" create="0" edit="0" delete="0">
                 <header>
                     <!-- Eylem düğmeleri sonraki görevlerde eklenir (Durumu Sorgula, Yeniden Gönder, ...) -->
+                    <button name="action_new_link" type="object" string="Yeni Link Oluştur"
+                            class="btn-primary" groups="sanal_pos.group_sanal_pos_user"
+                            invisible="state not in ('expired', 'link_cancelled', 'error', 'voided', 'refunded')"/>
                     <field name="state" widget="statusbar"
                            statusbar_visible="sent,paid,partial_refund,refunded"/>
                 </header>

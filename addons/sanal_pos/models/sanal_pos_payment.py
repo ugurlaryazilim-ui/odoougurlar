@@ -9,15 +9,20 @@ kapsamda) yapılır. Chatter'a not yazabilmek için ``_mail_post_access = 'read'
 Dış çağrı kuralı: çağrıdan ÖNCE "işlemde" durumu yazılıp ``_sp_commit()`` edilir;
 ``_sp_commit`` asla bir ``cr.savepoint()`` bloğunun içinden çağrılmaz.
 """
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
+from psycopg2 import errors as pg_errors
+
 from odoo import api, fields, models
-from odoo.exceptions import ValidationError
+from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tools import float_compare
 
 from .res_config_settings import get_bool_param
+
+_logger = logging.getLogger(__name__)
 
 # Durum kümeleri: tüm kontroller bunları kullanır (tek yerde sabit).
 OPEN_STATES = ('sending', 'sent', 'unknown')
@@ -47,6 +52,17 @@ FIELD_MAX_LENGTH = {
     'customer_city': 32,
     'customer_zip': 16,
 }
+
+# Kullanıcı mesajları (01-gereksinimler; metinler testlerle sabit)
+OPEN_LINK_MSG = 'Bu faturaya ait açık bir link var%s. Yeniden gönderin veya iptal edin.'   # KK-18
+PAID_MSG = 'Bu fatura için ödeme alınmış/incelemede; yeni link oluşturulamaz.'             # KK-19
+PRIOR_REFUND_MSG = ('Bu faturanın önceki ödemesi iade/iptal edilmiş. Yeni link için '      # KK-20
+                    '"Önceki iadeyi/iptali biliyorum" kutusunu işaretleyin.')
+UNKNOWN_MSG = 'Paratika yanıt vermedi; link oluşmuş olabilir. Durum otomatik kontrol edilecek.'  # KK-16
+BUSY_MSG = 'Bu kayıt üzerinde başka bir işlem sürüyor; birazdan tekrar deneyin.'
+
+SYNC_CRON_XMLID = 'sanal_pos.cron_sanal_pos_sync'   # G8
+UNKNOWN_SYNC_DELAY = timedelta(minutes=2)
 
 _ISTANBUL = ZoneInfo('Europe/Istanbul')
 _UTC = ZoneInfo('UTC')
@@ -113,7 +129,8 @@ class SanalPosPayment(models.Model):
     currency_id = fields.Many2one(
         'res.currency', string='Para Birimi', required=True,
         default=lambda self: self.env.ref('base.TRY', raise_if_not_found=False))
-    amount = fields.Monetary(string='Tutar', currency_field='currency_id', required=True)
+    amount = fields.Monetary(string='Tutar', currency_field='currency_id', required=True,
+                             readonly=True)
 
     # ---------------------------------------------------------------- link
     channel_sms = fields.Boolean(string='SMS')
@@ -266,6 +283,241 @@ class SanalPosPayment(models.Model):
         """
         self.env.flush_all()
         self.env.cr.commit()
+
+    # ---------------------------------------------------------------- yeni link (G7, tasarım §6.1/§6.2)
+    # Sihirbaz (wizard/payment_create_wizard.py) adım 1-6'yı yürütür; burada ortak kurallar ve
+    # dış çağrı sonrası adımlar (7-9) bulunur. ``sending`` kaydının başlangıç zamanı create_date'tir:
+    # G8 cron'u ``sending`` kaydı yalnız yaş eşiği + FOR UPDATE SKIP LOCKED ile almalıdır.
+    @api.model
+    def _check_sanal_pos_user(self):
+        if not (self.env.su or self.env.user.has_group('sanal_pos.group_sanal_pos_user')):
+            raise AccessError('Bu işlem için Sanal POS kullanıcı yetkisi gerekir.')
+
+    @api.model
+    def _format_local(self, value):
+        """UTC naive -> 'gg.aa.yyyy SS:DD' (Europe/Istanbul)."""
+        if not value:
+            return ''
+        return value.replace(tzinfo=_UTC).astimezone(_ISTANBUL).strftime('%d.%m.%Y %H:%M')
+
+    @api.model
+    def _open_link_message(self, creator_name=None, created_at=None):
+        """KK-18 metni; oluşturan/tarih bilinmiyorsa parantezsiz."""
+        detail = ''
+        if creator_name or created_at:
+            detail = ' (%s, %s)' % (creator_name or '-', self._format_local(created_at) or '-')
+        return OPEN_LINK_MSG % detail
+
+    @api.model
+    def _new_link_blocker(self, invoice_no, confirm_prior_refund=False, refresh=False):
+        """Yeni link engeli mesajı (boş = engel yok). KK-19 > KK-18 > KK-20.
+
+        ORM ile ön kontrol (kullanıcıya erken ve ayrıntılı mesaj); asıl kilit DB'deki kısmi
+        UNIQUE indekstir (``_invoice_open_uniq``). ``refresh`` yalnız oluşturma anında: süresi
+        geçmiş 'Gönderildi' kayıtları için ``_refresh_before_new_link`` kancası çağrılır.
+        """
+        if not invoice_no:
+            return ''
+        Payment = self.sudo()
+        domain = [('invoice_no', '=', invoice_no)]
+        if refresh:
+            stale = Payment.search(
+                domain + [('state', '=', 'sent'), ('expires_at', '<', fields.Datetime.now())])
+            if stale:
+                stale._refresh_before_new_link()
+        records = Payment.search(
+            domain + [('state', 'in', PAID_STATES + OPEN_STATES + REFUNDED_STATES)], order='id desc')
+        if any(rec.state in PAID_STATES for rec in records):
+            return PAID_MSG
+        open_rec = records.filtered(lambda rec: rec.state in OPEN_STATES)[:1]
+        if open_rec:
+            creator = open_rec.user_id or open_rec.create_uid
+            return self._open_link_message(creator.name, open_rec.create_date)
+        if not confirm_prior_refund and any(rec.state in REFUNDED_STATES for rec in records):
+            return PRIOR_REFUND_MSG
+        return ''
+
+    def _refresh_before_new_link(self):
+        """Süresi geçmiş 'Gönderildi' kayıtlarını yeni link öncesi tazeler.
+
+        G7: işlem yok (kayıt açık kalır, KK-18 ile engellenir: güvenli taraf).
+        G8: NOWAIT kilit + ``_sync_status`` (expired/paid) ile doldurulur.
+        """
+        return True
+
+    @api.model
+    def _open_link_message_sql(self, invoice_no):
+        """DB tekillik ihlalinde KK-18 metni; ORM aramasına bağlı değildir (KK-21)."""
+        self.env.cr.execute("""
+            SELECT partner.name, p.create_date
+              FROM sanal_pos_payment p
+              LEFT JOIN res_users u ON u.id = COALESCE(p.user_id, p.create_uid)
+              LEFT JOIN res_partner partner ON partner.id = u.partner_id
+             WHERE p.invoice_no = %s AND p.state IN %s
+             ORDER BY p.id DESC
+             LIMIT 1
+        """, [invoice_no, OPEN_STATES])
+        row = self.env.cr.fetchone()
+        # Eşzamanlı istekte (REPEATABLE READ) diğer işlemin satırı görünmeyebilir: parantezsiz
+        return self._open_link_message(*(row or (None, None)))
+
+    @api.model
+    def _next_attempt_no(self, invoice_no):
+        """Faturanın TÜM denemelerinin en büyük numarası + 1 (KK-20; ORM'den bağımsız)."""
+        self.flush_model(['invoice_no', 'attempt_no'])
+        self.env.cr.execute(
+            "SELECT COALESCE(MAX(attempt_no), 0) + 1 FROM sanal_pos_payment WHERE invoice_no = %s",
+            [invoice_no])
+        return self.env.cr.fetchone()[0]
+
+    @api.model
+    def _insert_sending(self, vals):
+        """'Gönderiliyor' kaydını savepoint içinde açar; tekillik ihlali -> KK-18 UserError.
+
+        Savepoint geri alındığı için işlem (transaction) zehirlenmez; diğer IntegrityError'lar
+        (CHECK vb.) olduğu gibi yükselir.
+        """
+        try:
+            with self.env.cr.savepoint():
+                return self.sudo().create(vals)
+        except pg_errors.UniqueViolation:
+            raise UserError(self._open_link_message_sql(vals['invoice_no'])) from None
+
+    def _post_note(self, body):
+        self.ensure_one()
+        self.message_post(body=body, message_type='comment', subtype_xmlid='mail.mt_note')
+
+    def _lock_for_provider_call(self):
+        """Dış çağrı süresince satırı kilitler (NOWAIT). Kilit alınamazsa False.
+
+        LockNotAvailable Odoo'nun yeniden deneme listesindedir; savepoint içinde yakalanmazsa
+        tüm istek tekrar çalışır (ikinci dış çağrı riski).
+        """
+        self.ensure_one()
+        try:
+            with self.env.cr.savepoint(flush=False):
+                self.env.cr.execute(
+                    'SELECT id FROM sanal_pos_payment WHERE id = %s FOR UPDATE NOWAIT', [self.id])
+        except pg_errors.LockNotAvailable:
+            return False
+        return True
+
+    def _call_create_link(self):
+        """Sağlayıcı ``create_link``; beklenmeyen istisna belirsiz sonuca çevrilir (raise yok)."""
+        self.ensure_one()
+        payment_id = self.id
+        try:
+            with self.env.cr.savepoint():
+                return self._provider().create_link(self)
+        except Exception as exc:  # noqa: BLE001 - dış çağrıdan sonra raise yok (§6.1)
+            # Metin sır içerebilir (KK-37): yalnız sınıf adı loglanır
+            _logger.error('sanal_pos: link oluşturmada beklenmeyen hata (%s), ödeme id=%s',
+                          type(exc).__name__, payment_id)
+            return {'ok': False, 'timeout': True, 'error_code': 'EXCEPTION',
+                    'error_message': UNKNOWN_MSG}
+
+    def _apply_create_result(self, result):
+        """Sağlayıcı sonucunu kayda yazar: sent / unknown / error (+ chatter)."""
+        self.ensure_one()
+        if result.get('ok') and result.get('token'):
+            now = fields.Datetime.now()
+            self.write({
+                'state': 'sent', 'provider_token': result['token'], 'sent_at': now,
+                'expires_at': now + timedelta(hours=self.expiry_hours),
+                'last_error_code': False, 'last_error_message': False,
+            })
+            self._post_note('Link oluşturuldu, %s ile gönderildi' % self.channels_display)
+        elif result.get('ok') or result.get('timeout'):
+            # Token'sız başarı da belirsizdir: link oluşmuş olabilir, 'Gönderildi' yazılmaz
+            self.write({
+                'state': 'unknown', 'last_error_code': result.get('error_code') or 'TIMEOUT',
+                'last_error_message': UNKNOWN_MSG,
+            })
+            self._post_note(UNKNOWN_MSG)
+        else:
+            message = result.get('error_message') or 'Paratika isteği reddetti.'
+            self.write({
+                'state': 'error', 'last_error_code': result.get('error_code') or False,
+                'last_error_message': message,
+            })
+            self._post_note('Link oluşturulamadı: %s' % message)
+
+    def _trigger_sync_cron(self):
+        """Belirsiz sonuçta uzlaştırma cron'unu öne çeker (cron G8'de; yoksa sessiz)."""
+        cron = self.env.ref(SYNC_CRON_XMLID, raise_if_not_found=False)
+        if not cron:
+            return
+        try:
+            with self.env.cr.savepoint():
+                cron.sudo()._trigger(fields.Datetime.now() + UNKNOWN_SYNC_DELAY)
+        except Exception as exc:  # noqa: BLE001 - tetik kurulamazsa periyodik cron toplar
+            _logger.warning('sanal_pos: senkron tetiği kurulamadı (%s)', type(exc).__name__)
+
+    def _run_create_link(self):
+        """Tasarım §6.1 adım 7-9. Kayıt 'sending' olarak COMMIT EDİLMİŞ olmalıdır; raise etmez."""
+        self.ensure_one()
+        if not self._lock_for_provider_call():
+            # Başka işlem (ör. G8 cron) kaydı tutuyor: ikinci dış çağrı yapılmaz, cron uzlaştırır
+            return self._notification_action(BUSY_MSG, 'warning')
+        result = self._call_create_link()
+        self._apply_create_result(result)
+        if self.state == 'unknown':
+            self._trigger_sync_cron()
+        self._sp_commit()
+        if self.state == 'sent':
+            return self._form_action()
+        kind = 'warning' if self.state == 'unknown' else 'danger'
+        return self._notification_action(self.last_error_message or UNKNOWN_MSG, kind)
+
+    def _form_action(self):
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.act_window',
+            'name': self.name,
+            'res_model': 'sanal.pos.payment',
+            'res_id': self.id,
+            'view_mode': 'form',
+            'views': [(False, 'form')],
+            'target': 'current',
+        }
+
+    def _notification_action(self, message, kind):
+        """Kalıcı bildirim + ardından ödeme formu (hata/belirsiz sonuçlar raise edilmez)."""
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Ödeme linki: %s' % self.name,
+                'message': message,
+                'type': kind,
+                'sticky': True,
+                'next': self._form_action(),
+            },
+        }
+
+    def action_new_link(self):
+        """'Yeni Link Oluştur' (REUSABLE_STATES): sihirbazı faturayı yeniden getirip bu kaydın
+        müşteri/kanal değerleriyle açar. Engel kuralları sihirbazda yine uygulanır."""
+        self.ensure_one()
+        self._check_sanal_pos_user()
+        if self.state not in REUSABLE_STATES:
+            raise UserError('Yeni link yalnız süresi dolmuş, iptal edilmiş, hatalı veya '
+                            'iade/iptal edilmiş taleplerden oluşturulabilir.')
+        wizard = self.env['sanal.pos.payment.create.wizard'].create({'invoice_no': self.invoice_no})
+        wizard.action_fetch_invoice()
+        wizard.write({
+            'customer_name': self.customer_name or wizard.customer_name,
+            'customer_phone': self.customer_phone or wizard.customer_phone,
+            'customer_email': self.customer_email or wizard.customer_email,
+            'customer_address': self.customer_address or wizard.customer_address,
+            'customer_city': self.customer_city or wizard.customer_city,
+            'customer_zip': self.customer_zip or wizard.customer_zip,
+            'channel_sms': self.channel_sms,
+            'channel_email': self.channel_email,
+            'expiry_hours': self.expiry_hours or wizard.expiry_hours,
+        })
+        return wizard._reopen_action()
 
     def _recompute_refund_state(self):
         """İade satırlarından durumu yeniden hesaplar (yalnız paid/partial_refund kayıtlara).

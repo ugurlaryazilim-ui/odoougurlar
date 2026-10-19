@@ -1,11 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
-    <!-- 'Yeni Ödeme Linki' menüsü sihirbazla birlikte (G7) eklenir. -->
     <menuitem id="menu_sanal_pos_root"
               name="Sanal POS"
               web_icon="sanal_pos,static/description/icon.png"
               groups="sanal_pos.group_sanal_pos_user"
               sequence="90"/>
+
+    <menuitem id="menu_sanal_pos_new_link"
+              name="Yeni Ödeme Linki"
+              parent="menu_sanal_pos_root"
+              action="action_sanal_pos_payment_create_wizard"
+              groups="sanal_pos.group_sanal_pos_user"
+              sequence="20"/>
 
     <menuitem id="menu_sanal_pos_payments"
               name="Ödeme Talepleri"
