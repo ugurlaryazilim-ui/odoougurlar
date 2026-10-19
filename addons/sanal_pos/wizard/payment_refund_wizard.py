@@ -37,8 +37,12 @@ class SanalPosPaymentRefundWizard(models.TransientModel):
             payment = wiz.payment_id
             if wiz.kind == 'void':
                 wiz.amount = payment.paid_amount or 0.0
+            elif payment:
+                # Ö-A: doğrulamayla aynı kaynak (kuruş tamsayısı: ödenen − başarılı − devam eden);
+                # float çıkarma artığı (100 − 99,9) önerilen tutarı reddettirmesin.
+                wiz.amount = max(payment._refundable_cents(), 0) / 100.0
             else:
-                wiz.amount = max(payment.refundable_amount or 0.0, 0.0)
+                wiz.amount = 0.0
 
     @api.depends('payment_id', 'kind', 'amount')
     def _compute_summary(self):

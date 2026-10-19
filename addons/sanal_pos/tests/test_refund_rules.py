@@ -227,3 +227,29 @@ class TestRefundRefAdoption(RefundCase):
         payment.invalidate_recordset()
         self.assertEqual(len(lines), 1, 'VOID + SALE/VD aynı iptal; tek satır')
         self.assertEqual(payment.state, 'voided')
+
+
+@tagged('post_install', '-at_install', 'sanal_pos')
+class TestRefundWizardRemainder(RefundCase):
+    """Ö-A: sihirbazın önerdiği kalan tutar kuruş tamsayısından türetilir (float çıkarma yok)."""
+
+    def test_oa_kalan_tutar_100_eksi_99_9_tam_0_10(self):
+        payment = self.paid(amount=100.0)
+        self.make_refund_line(payment, 99.9, state='done', provider_ref='R-OA')
+        payment.sudo().write({'state': 'partial_refund'})
+        wiz = self.env[WIZARD].with_user(self.user_mgr).create({
+            'payment_id': payment.id, 'kind': 'refund', 'reason': 'Kalan tutar iadesi'})
+        self.assertEqual(repr(wiz.amount), repr(0.1), 'kalan tutar float artığı taşımamalı')
+        self.mock.calls.clear()
+        try:
+            wiz.action_confirm()
+        except UserError as exc:
+            self.fail('önerilen kalan tutar reddedildi: %s' % exc)
+        self.assertEqual(self.mock.last('REFUND').params['AMOUNT'], '0.10')
+
+    def test_oa_devam_eden_satir_kalandan_dusulur(self):
+        payment = self.paid(amount=100.0)
+        self.make_refund_line(payment, 30.3, state='done', provider_ref='R-OA1')
+        self.make_refund_line(payment, 9.9, state='unknown', provider_ref=False)
+        wiz = self.env[WIZARD].with_user(self.user_mgr).new({'payment_id': payment.id, 'kind': 'refund'})
+        self.assertEqual(repr(wiz.amount), repr(59.8))
