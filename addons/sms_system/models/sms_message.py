@@ -51,6 +51,7 @@ class SmsSystemMessage(models.Model):
         ('sent', 'Gönderildi'),
         ('test', 'Test (gönderilmedi)'),
         ('error', 'Hata'),
+        ('uncertain', 'Belirsiz'),
     ], string='Durum', default='queued', required=True, index=True)
     provider_msg_id = fields.Char(string='Turatel Mesaj No', index=True)
     provider_answer = fields.Char(string='Sağlayıcı Cevabı')
@@ -164,7 +165,9 @@ class SmsSystemMessage(models.Model):
         if not cfg['originator']:
             for msg in self:
                 if not msg.originator:
-                    msg.write({'state': 'error', 'error': _('Mesaj başlığı (Originator) ayarlanmamış.')})
+                    # Kalıcı hata: başlık sonradan girilse de otomatik gönderilmez (retry_count=MAX)
+                    msg.write({'state': 'error', 'retry_count': MAX_RETRY,
+                               'error': _('Mesaj başlığı (Originator) ayarlanmamış.')})
             self = self.filtered(lambda m: m.originator)
         if cfg['test_mode']:
             self.write({'state': 'test', 'sent_at': fields.Datetime.now(), 'provider_answer': 'TEST'})
@@ -177,9 +180,13 @@ class SmsSystemMessage(models.Model):
                            'sent_at': fields.Datetime.now(), 'error': False})
             except TuratelError as e:
                 _logger.warning('SMS gönderilemedi (%s): %s', msg.id, e)
-                # Kalıcı hatalar (hesap/başlık/kredi/numara) otomatik yeniden denenmez
-                msg.write({'state': 'error', 'error': str(e),
-                           'retry_count': msg.retry_count + 1 if e.retryable else MAX_RETRY})
+                if e.uncertain:
+                    # Gidip gitmediği belirsiz: asla otomatik yeniden gönderilmez (mükerrer SMS riski)
+                    msg.write({'state': 'uncertain', 'error': str(e), 'retry_count': MAX_RETRY})
+                else:
+                    # Kalıcı hatalar (hesap/başlık/kredi/numara) otomatik yeniden denenmez
+                    msg.write({'state': 'error', 'error': str(e),
+                               'retry_count': msg.retry_count + 1 if e.retryable else MAX_RETRY})
 
     def _deliver_pack(self, cfg, client):
         """Aynı metni taşıyan kayıtları tek Turatel isteğiyle gönder (toplu SMS kuyruğu, sudo)."""
@@ -187,7 +194,8 @@ class SmsSystemMessage(models.Model):
             return
         first = self[0]
         if not first.originator:
-            self.write({'state': 'error', 'error': _('Mesaj başlığı (Originator) ayarlanmamış.')})
+            self.write({'state': 'error', 'retry_count': MAX_RETRY,
+                        'error': _('Mesaj başlığı (Originator) ayarlanmamış.')})
             return
         if cfg['test_mode']:
             self.write({'state': 'test', 'sent_at': fields.Datetime.now(), 'provider_answer': 'TEST'})
@@ -198,7 +206,11 @@ class SmsSystemMessage(models.Model):
                         'sent_at': fields.Datetime.now(), 'error': False})
         except TuratelError as e:
             _logger.warning('Toplu SMS paketi gönderilemedi (%s numara): %s', len(self), e)
-            self.write({'state': 'error', 'error': str(e)})
+            if e.uncertain:
+                # Paket Turatel'e ulaşmış olabilir: kayıtlar belirsiz kalır, "Hatalıları Yeniden Gönder" almaz
+                self.write({'state': 'uncertain', 'error': str(e), 'retry_count': MAX_RETRY})
+            else:
+                self.write({'state': 'error', 'error': str(e)})
 
     # ── Butonlar / cron ──
 

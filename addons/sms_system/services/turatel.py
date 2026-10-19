@@ -7,6 +7,7 @@ Komutlar:
 
 Başarılı gönderimde cevap "ID:<mesaj id>" biçimindedir; hatada sayısal kod döner.
 """
+import http.client
 import logging
 import re
 from datetime import datetime, timedelta
@@ -14,11 +15,12 @@ from xml.sax.saxutils import escape
 
 import pytz
 import requests
+from urllib3.exceptions import ConnectTimeoutError, NewConnectionError, ProtocolError, ReadTimeoutError
 
 _logger = logging.getLogger(__name__)
 
 DEFAULT_URL = 'https://processor.smsorigin.com/xml/process.aspx'
-TIMEOUT = 15
+TIMEOUT = (5, 15)   # (bağlanma, okuma) saniye: bağlanamama çabuk anlaşılır, yanıt bekleme sınırlı
 
 # Türkçe'ye özgü (GSM 7-bit tabloda olmayan) karakterler: varsa Type=2 gerekir
 TURKISH_CHARS = set('İıĞğŞş')
@@ -41,13 +43,59 @@ MAX_SEGMENTS = 7  # bundan uzun metinler gönderilmez (operatör reddedebilir, k
 class TuratelError(Exception):
     """Turatel'den hata kodu ya da bağlantı hatası.
 
-    retryable: yalnız ağ/sunucu kaynaklı geçici hatalarda True; hesap, başlık, kredi, numara
-    gibi hatalar yeniden denenince düzelmez.
+    retryable: isteğin Turatel'e HİÇ gitmediği kesin olan geçici hatalar (bağlantı kurulamadı, DNS); yeniden
+    denenebilir. uncertain: isteğin gidip gitmediği/işlenip işlenmediği belli olmayan hatalar (okuma zaman aşımı,
+    kopan bağlantı, HTTP 200 dışı); mükerrer SMS olmasın diye asla otomatik yeniden gönderilmez.
+    Hesap, başlık, kredi, numara gibi kalıcı hatalarda ikisi de False. İkisi aynı anda True olamaz.
     """
 
-    def __init__(self, message, retryable=False):
+    def __init__(self, message, retryable=False, uncertain=False):
+        if retryable and uncertain:
+            raise ValueError('retryable ve uncertain aynı anda True olamaz')
         super().__init__(message)
         self.retryable = retryable
+        self.uncertain = uncertain
+
+
+# İstek gövdesi gönderildikten sonra (ya da gönderilirken) kopan bağlantı belirtileri: işlenip işlenmediği bilinmez
+_SENT_MAYBE = (ProtocolError, ReadTimeoutError, http.client.RemoteDisconnected, ConnectionResetError,
+               ConnectionAbortedError, BrokenPipeError)
+# Bağlantı hiç kurulamadı: istek kesinlikle gitmedi (DNS çözülemedi, bağlantı reddedildi, bağlanma zaman aşımı)
+_NOT_SENT = (NewConnectionError, ConnectTimeoutError)
+# İstek oluşturulamadı (adres/başlık hatası): ağa çıkılmadı, yeniden denemek işe yaramaz
+_BAD_REQUEST = (requests.exceptions.InvalidURL, requests.exceptions.MissingSchema,
+                requests.exceptions.InvalidSchema, requests.exceptions.InvalidHeader,
+                requests.exceptions.URLRequired)
+
+
+def _exception_chain(exc, limit=12):
+    """İstisnayı ve nedenlerini (``__cause__``, ``__context__``, urllib3 ``reason``, ``args``) düz liste yap."""
+    seen, stack = [], [exc]
+    while stack and len(seen) < limit:
+        item = stack.pop()
+        if not isinstance(item, BaseException) or any(item is known for known in seen):
+            continue
+        seen.append(item)
+        stack.extend([item.__cause__, item.__context__, getattr(item, 'reason', None)] + list(item.args))
+    return seen
+
+
+def classify_request_exception(exc):
+    """requests istisnasını ``TuratelError``'a çevir: istek gitmediyse geçici, gidip gitmediği belirsizse uncertain.
+
+    Emin olunamayan her durum belirsizdir (yanlışlıkla yeniden göndermek yanlışlıkla beklemekten pahalı).
+    """
+    name = exc.__class__.__name__
+    if isinstance(exc, requests.exceptions.ConnectTimeout):
+        return TuratelError('Turatel sunucusuna ulaşılamadı: %s' % name, retryable=True)
+    if isinstance(exc, _BAD_REQUEST):
+        return TuratelError('Turatel adresi geçersiz: %s' % name)
+    chain = _exception_chain(exc)
+    if (not isinstance(exc, requests.exceptions.Timeout)
+            and not any(isinstance(item, _SENT_MAYBE) for item in chain)
+            and any(isinstance(item, _NOT_SENT) for item in chain)):
+        return TuratelError('Turatel sunucusuna ulaşılamadı: %s' % name, retryable=True)
+    return TuratelError('Turatel yanıtı alınamadı (%s); iletilip iletilmediği belirsiz.' % name, uncertain=True)
 
 
 def normalize_number(raw):
@@ -122,9 +170,11 @@ class TuratelClient:
             resp = requests.post(self.url, data=xml.encode('utf-8'), timeout=self.timeout,
                                  headers={'Content-Type': 'text/xml; charset=utf-8'})
         except requests.RequestException as e:
-            raise TuratelError('Turatel sunucusuna ulaşılamadı: %s' % e.__class__.__name__, retryable=True) from e
+            raise classify_request_exception(e) from e
         if resp.status_code != 200:
-            raise TuratelError('Turatel HTTP %s döndü' % resp.status_code, retryable=resp.status_code >= 500)
+            # İstek sunucuya ulaştı; işlenip işlenmediği bilinmez (5xx dahil): mükerrer riski → belirsiz
+            raise TuratelError('Turatel HTTP %s döndü; iletilip iletilmediği belirsiz.' % resp.status_code,
+                               uncertain=True)
         return (resp.text or '').strip()
 
     @staticmethod
