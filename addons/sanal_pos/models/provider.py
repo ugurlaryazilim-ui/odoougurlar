@@ -38,28 +38,38 @@ class SanalPosProvider(models.AbstractModel):
     _description = 'Sanal POS Sağlayıcı Arayüzü'
 
     # ---------------------------------------------------------------- arayüz
+    # Arayüz metotları @api.private: RPC (call_kw) ile ÇAĞRILAMAZ; yalnız sunucu kodu çağırır.
+    # Aksi halde dış çağrı (VOID/REFUND dahil) tetiklenebilirdi. Yeni sağlayıcı da aynısını yapmalı.
+    @api.private
     def create_link(self, payment):
         raise NotImplementedError()
 
+    @api.private
     def resend(self, payment, channels):
         raise NotImplementedError()
 
+    @api.private
     def cancel_link(self, payment):
         raise NotImplementedError()
 
+    @api.private
     def find_link(self, payment):
         raise NotImplementedError()
 
+    @api.private
     def query_status(self, payment):
         raise NotImplementedError()
 
+    @api.private
     def void(self, payment, refund_line):
         raise NotImplementedError()
 
+    @api.private
     def refund(self, payment, refund_line):
         raise NotImplementedError()
 
     @api.model
+    @api.private
     def parse_notification(self, params):
         raise NotImplementedError()
 

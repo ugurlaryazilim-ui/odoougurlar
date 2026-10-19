@@ -8,7 +8,8 @@ address, city, amount (Decimal), currency.
 """
 from decimal import Decimal
 
-from odoo.exceptions import UserError
+from odoo.exceptions import AccessError, UserError
+from odoo.service.model import get_public_method
 from odoo.tests import tagged
 
 from .common import (
@@ -199,3 +200,37 @@ class TestFindInvoice(SanalPosCase):
         self.set_invoice(invoice_rows(currency=None))
         with self.assertRaises(UserError):
             self.find()
+
+
+@tagged('post_install', '-at_install', 'sanal_pos')
+class TestFindInvoiceAccess(SanalPosCase):
+    """Güvenlik bulgusu: find_invoice müşteri PII'si döndürür ve MSSQL sorgusu tetikler;
+    RPC'ye kapalı olmalı ve yalnız Sanal POS kullanıcıları çağırabilmeli."""
+
+    def test_grupsuz_ic_kullanici_dogrudan_cagrida_accesserror_alir(self):
+        env = self.env(user=self.user_plain)
+        with self.assertRaises(AccessError):
+            env[SOURCE].find_invoice(INV_NO)
+        self.assertEqual(self.mssql_calls, [], 'yetkisiz çağrı MSSQL sorgusu tetiklememeli')
+
+    def test_sanal_pos_kullanicisi_cagirabilir(self):
+        for user in (self.user_sp, self.user_mgr):
+            res = self.env(user=user)[SOURCE].find_invoice(INV_NO)
+            self.assertEqual(res['invoice_no'], INV_NO)
+
+    def test_rpc_ile_cagrilamaz(self):
+        """call_kw yolu (get_public_method) find_invoice'u reddeder - yetkili kullanıcı için bile."""
+        for user in (self.user_plain, self.user_sp, self.user_mgr):
+            with self.subTest(user=user.login):
+                with self.assertRaises(AccessError):
+                    get_public_method(self.env(user=user)[SOURCE], 'find_invoice')
+        self.assertEqual(self.mssql_calls, [])
+
+    def test_saglayici_arayuzu_rpc_ile_cagrilamaz(self):
+        """Dış çağrı tetikleyen sağlayıcı metotları (VOID/REFUND dahil) RPC'ye kapalı."""
+        provider = self.env(user=self.user_mgr)['sanal.pos.provider.paratika']
+        for name in ('create_link', 'resend', 'cancel_link', 'find_link', 'query_status',
+                     'void', 'refund', 'parse_notification'):
+            with self.subTest(method=name):
+                with self.assertRaises(AccessError):
+                    get_public_method(provider, name)

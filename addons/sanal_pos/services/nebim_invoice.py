@@ -13,7 +13,7 @@ import re
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from odoo import api, models
-from odoo.exceptions import UserError
+from odoo.exceptions import AccessError, UserError
 
 from ..tools import clean_text, normalize_phone, scrub
 
@@ -122,12 +122,24 @@ class NebimInvoiceSource(models.AbstractModel):
 
     # ------------------------------------------------------------------ iş kuralları
     @api.model
+    def _check_caller(self):
+        """Sanal POS kullanıcı grubu zorunlu (RPC kapalı olsa da derin savunma)."""
+        if self.env.su or self.env.user.has_group('sanal_pos.group_sanal_pos_user'):
+            return
+        raise AccessError('Bu işlem için Sanal POS kullanıcı yetkisi gerekir.')
+
+    @api.model
+    @api.private
     def find_invoice(self, invoice_no):
         """Faturayı okur, kurallardan geçirir ve normalize sözlük döndürür.
 
         Anahtarlar: invoice_no, invoice_ref, invoice_date, customer_code, name,
         phone, email, address, city, amount (Decimal), currency.
+
+        Müşteri PII'si ve MSSQL sorgusu döndüğü için RPC'ye KAPALIDIR (``@api.private``) ve
+        çağıran Sanal POS kullanıcısı olmalıdır (sudo/sistem çağrıları geçer).
         """
+        self._check_caller()
         invoice_no = invoice_no.strip() if isinstance(invoice_no, str) else ''
         if len(invoice_no) < MIN_INVOICE_NO_LEN:
             raise UserError('En az 3 karakter giriniz.')

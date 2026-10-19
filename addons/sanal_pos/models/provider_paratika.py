@@ -305,6 +305,7 @@ class SanalPosProviderParatika(models.AbstractModel):
             error_message=self._error_message(code, message))
 
     # ---------------------------------------------------------------- arayüz: link
+    @api.private
     def create_link(self, payment):
         payment.ensure_one()
         payment = payment.sudo()
@@ -362,6 +363,7 @@ class SanalPosProviderParatika(models.AbstractModel):
             res['url'] = self._link_url(payment, res['token'])
         return res
 
+    @api.private
     def resend(self, payment, channels):
         payment.ensure_one()
         payment = payment.sudo()
@@ -376,6 +378,7 @@ class SanalPosProviderParatika(models.AbstractModel):
         res.pop('data')
         return res
 
+    @api.private
     def cancel_link(self, payment):
         payment.ensure_one()
         payment = payment.sudo()
@@ -386,6 +389,7 @@ class SanalPosProviderParatika(models.AbstractModel):
         res['already_closed'] = res['error_code'] == 'ERR10143'
         return res
 
+    @api.private
     def find_link(self, payment):
         """Belirsiz linki uzlaştırır (KK-16): MERCHANTNOTE + tarih aralığı ile arar.
 
@@ -436,6 +440,7 @@ class SanalPosProviderParatika(models.AbstractModel):
         return res
 
     # ---------------------------------------------------------------- arayüz: durum
+    @api.private
     def query_status(self, payment):
         payment.ensure_one()
         payment = payment.sudo()
@@ -477,6 +482,7 @@ class SanalPosProviderParatika(models.AbstractModel):
         }
 
     # ---------------------------------------------------------------- arayüz: iptal / iade
+    @api.private
     def void(self, payment, refund_line):
         payment.ensure_one()
         payment = payment.sudo()
@@ -489,6 +495,7 @@ class SanalPosProviderParatika(models.AbstractModel):
         })
         return self._financial_result(res)
 
+    @api.private
     def refund(self, payment, refund_line):
         payment.ensure_one()
         payment = payment.sudo()
@@ -513,6 +520,7 @@ class SanalPosProviderParatika(models.AbstractModel):
 
     # ---------------------------------------------------------------- arayüz: bildirim
     @api.model
+    @api.private
     def parse_notification(self, params):
         """Bildirim/dönüş POST'undan yalnız ödeme numarasını okur (tetik; AMOUNT/STATUS okunmaz)."""
         for key, value in (params or {}).items():
