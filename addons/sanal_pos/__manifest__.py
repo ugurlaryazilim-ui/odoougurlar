@@ -21,6 +21,7 @@
     'data': [
         'security/sanal_pos_security.xml',
         'security/ir.model.access.csv',
+        'data/ir_sequence.xml',
         'views/res_config_settings_views.xml',
         'views/menus.xml',
     ],
