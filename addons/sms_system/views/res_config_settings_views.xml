@@ -31,6 +31,9 @@
                         <setting help="Açıkken SMS gönderilmez, yalnız kayıt oluşur. Canlıya geçince kapatın.">
                             <field name="sms_test_mode"/>
                         </setting>
+                        <setting string="Test Numaraları" help="Test modu açıkken yalnız bu numaralara gerçek SMS gider (en çok 5, virgülle ayırın). Boşsa hiçbirine gitmez.">
+                            <field name="sms_test_numbers" placeholder="5XXXXXXXXX, 5XXXXXXXXX"/>
+                        </setting>
                         <setting help="ı ş ğ İ Ş Ğ harfleri i s g I S G olarak gönderilir; mesaj daha az parçaya bölünür">
                             <field name="sms_ascii_mode"/>
                         </setting>
@@ -39,6 +42,74 @@
                             <div class="mt8">
                                 <button name="action_sms_check_credit" type="object" string="Bağlantıyı Test Et / Kalan Kredi"
                                         class="btn-secondary" icon="fa-plug"/>
+                            </div>
+                        </setting>
+                    </block>
+                    <block title="Turatel JSON API" name="sms_turatel_json">
+                        <setting string="API Modu" help="Varsayılan: Eski XML API. JSON API'ye geçmeden önce kimlik setlerini girip Hesapları/Kredi düğmeleriyle deneyin; eski kimlik bilgileri geri dönüş için saklanır.">
+                            <field name="sms_api_mode"/>
+                        </setting>
+                        <setting string="Bilgi Kimlik Seti" help="Tekli SMS ile bilgilendirme/personel kampanyaları. Turatel kullanıcısı bu hesabı görebilmelidir.">
+                            <div class="content-group">
+                                <div class="row mt8">
+                                    <label for="sms_json_info_user_id" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_json_info_user_id" class="col-lg-8"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_json_info_username" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_json_info_username" class="col-lg-8"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_json_info_password" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_json_info_password" password="True" class="col-lg-8"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_account_info" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_account_info" class="col-lg-8"/>
+                                </div>
+                            </div>
+                        </setting>
+                        <setting string="Reklam Kimlik Seti" help="Ticari kampanyalar. Ya tamamı dolu ya tamamı boş olmalı; boşsa JSON modunda ticari kampanya gönderilmez (bilgi kimlikleriyle denenmez).">
+                            <div class="content-group">
+                                <div class="row mt8">
+                                    <label for="sms_json_com_user_id" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_json_com_user_id" class="col-lg-8"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_json_com_username" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_json_com_username" class="col-lg-8"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_json_com_password" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_json_com_password" password="True" class="col-lg-8"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_account_commercial" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_account_commercial" class="col-lg-8"/>
+                                </div>
+                            </div>
+                        </setting>
+                        <setting string="Hesap Sorguları" help="Kaydedilmiş kimlik setleriyle Turatel'e okuma isteği gönderir (SMS gönderilmez; test modunda da çalışır). Önce ayarları kaydedin. Her kimlik seti ayrı satırda gösterilir.">
+                            <div class="mt8">
+                                <button name="action_turatel_accounts" type="object" string="Hesapları Getir" class="btn-secondary" icon="fa-plug"/>
+                                <button name="action_turatel_originators" type="object" string="Başlıkları Getir" class="btn-secondary" icon="fa-list"/>
+                                <button name="action_turatel_credit" type="object" string="Krediyi Getir" class="btn-secondary" icon="fa-money"/>
+                            </div>
+                        </setting>
+                        <setting string="Adresler ve Geçerlilik" help="Boş bırakılan adresler için varsayılan Turatel adresleri kullanılır.">
+                            <div class="content-group">
+                                <div class="row mt8">
+                                    <label for="sms_single_url" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_single_url" class="col-lg-8" placeholder="https://platform.turatel.com/singlesms"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_bulk_url" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_bulk_url" class="col-lg-8" placeholder="https://platform.turatel.com/bulksms"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_validity_minutes" class="col-lg-4 o_light_label"/>
+                                    <field name="sms_validity_minutes" class="col-lg-8"/>
+                                </div>
                             </div>
                         </setting>
                     </block>

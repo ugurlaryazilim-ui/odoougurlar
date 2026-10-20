@@ -10,3 +10,12 @@ from . import test_contact
 from . import test_code_hygiene
 from . import test_error_classification
 from . import test_review_round1
+from . import test_turatel_json
+from . import test_json_settings
+from . import test_json_routing
+from . import test_json_text
+from . import test_delivery_status
+from . import test_test_numbers
+from . import test_json_buttons
+from . import test_json_c4_extra
+from . import test_review_round1_c

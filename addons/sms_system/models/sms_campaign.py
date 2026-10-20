@@ -11,9 +11,11 @@ from odoo import _, api, fields, models
 from odoo.tools import html2plaintext, html_escape
 from odoo.exceptions import UserError
 
-from ..services.turatel import MAX_SEGMENTS, prepare_text, segment_count
+from ..services.turatel import MAX_SEGMENTS, TuratelError, prepare_text
+from ..services.turatel_json import MAX_TEXT_LENGTH, TuratelJsonClient, mask_digits
 from .sms_iys import FRESH
-from .sms_message import MAX_RETRY
+from .sms_message import (MAX_RETRY, NO_COMMERCIAL_CREDS, NO_OPTOUT_TEXT, NUMERIC_PLACEHOLDER, count_segments,
+                          resolve_api_mode)
 from .sms_template import PLACEHOLDER
 
 _logger = logging.getLogger(__name__)
@@ -22,7 +24,9 @@ PACK_SIZE = 500          # Turatel'e tek istekte giden en fazla numara
 MIN_TIME_LEFT = 20       # cron süresinin sonuna bu kadar saniye kala dur, kalan sonraki çalışmada
 STUCK_MINUTES = 15       # 'gönderiliyor'da bu kadar dakika kalan kayıt belirsiz sayılır (tekrar gönderilmez)
 CREATE_CHUNK = 5000      # büyük kampanyada gönderim kayıtları parça parça oluşturulur
+CREDIT_TIMEOUT = (3, 6)  # onay penceresinde kredi okuması: yavaş Turatel pencereyi uzun bekletmesin
 IYS_REFRESH_SECONDS = 120  # gönderim anı İYS tazelemesine ayrılan süre; yetmezse paket bekler, sonraki çalışma sürdürür
+CONTENT_FIELDS = ('body', 'message_type', 'list_ids', 'template_id')   # yalnız taslakta değişir (G-C2)
 
 
 class SmsSystemCampaign(models.Model):
@@ -77,6 +81,10 @@ class SmsSystemCampaign(models.Model):
                                      help='Sağlayıcıya gidip gitmediği bilinmeyen kayıtlar; mükerrer olmasın diye yeniden gönderilmez')
     pending_count = fields.Integer(string='Bekleyen', compute='_compute_stats')
     progress = fields.Float(string='İlerleme', compute='_compute_stats', help='Gönderilen + hatalı + belirsiz / toplam (%)')
+    delivered_count = fields.Integer(string='İletildi', compute='_compute_delivery_counts',
+                                     help='Turatel iletim raporuna göre alıcıya ulaşan (yalnız JSON API)')
+    undelivered_count = fields.Integer(string='İletilemedi', compute='_compute_delivery_counts',
+                                       help='Turatel iletim raporuna göre alıcıya ulaşmayan (yalnız JSON API)')
     phone_preview = fields.Html(string='Telefonda Görünüm', compute='_compute_phone_preview', sanitize=True)
 
     # ── Hesaplar ──
@@ -92,6 +100,18 @@ class SmsSystemCampaign(models.Model):
             if optout and optout not in body:
                 body = '%s %s' % (body, optout)
         return body
+
+    def _optout_text(self):
+        return (self._icp('sms_system.optout_text') or '').strip()
+
+    def _json_template(self, ascii_mode=False):
+        """JSON gönderim şablonu: (metin, kişiye özel mi). `{ad}` → `{1}` (alıcı başına parameter), diğer
+        yer tutucular boş. Kişiye özel değilse metin son metindir (KK-C21)."""
+        self.ensure_one()
+        body = self._build_body()
+        personalized = any(m.group(1) == 'ad' for m in PLACEHOLDER.finditer(body))
+        text = PLACEHOLDER.sub(lambda m: '{1}' if m.group(1) == 'ad' else '', body)
+        return prepare_text(text, ascii_mode=ascii_mode)[0], personalized
 
     def _recipient_domain(self):
         self.ensure_one()
@@ -128,6 +148,7 @@ class SmsSystemCampaign(models.Model):
     @api.depends('body', 'message_type', 'list_ids')
     def _compute_preview(self):
         ascii_mode = self._icp('sms_system.ascii_mode') == 'True'
+        api_mode = resolve_api_mode(self._icp('sms_system.api_mode'))
         sample_name = _('Ayşe Yılmaz')
         for camp in self:
             body = camp._build_body()
@@ -135,7 +156,7 @@ class SmsSystemCampaign(models.Model):
             sample = PLACEHOLDER.sub(lambda m: sample_name if m.group(1) == 'ad' else '', body)
             text, sms_type = prepare_text(sample, ascii_mode=ascii_mode)
             camp.final_body = text
-            camp.preview_segments = segment_count(text, sms_type) if text else 0
+            camp.preview_segments = count_segments(api_mode, text, sms_type) if text else 0
             if camp.state in ('draft', 'scheduled'):
                 contacts, skipped = camp._recipients()
                 camp.preview_count = len(contacts)
@@ -167,6 +188,18 @@ class SmsSystemCampaign(models.Model):
             camp.pending_count = d.get('queued', 0) + d.get('sending', 0)
             done = camp.sent_count + camp.error_count + camp.uncertain_count
             camp.progress = (100.0 * done / camp.total_count) if camp.total_count else 0.0
+
+    def _compute_delivery_counts(self):
+        Message = self.env['sms.system.message'].sudo()
+        data = {}
+        for camp, state, count in Message._read_group(
+                [('campaign_id', 'in', self.ids), ('delivery_state', 'in', ('delivered', 'undelivered'))],
+                ['campaign_id', 'delivery_state'], ['__count']):
+            data.setdefault(camp.id, {})[state] = count
+        for camp in self:
+            d = data.get(camp.id, {})
+            camp.delivered_count = d.get('delivered', 0)
+            camp.undelivered_count = d.get('undelivered', 0)
 
     @api.depends('final_body', 'preview_segments')
     def _compute_phone_preview(self):
@@ -202,6 +235,52 @@ class SmsSystemCampaign(models.Model):
         if self.template_id:
             self.body = self.template_id.body
 
+    def write(self, vals):
+        if vals.get('state') in ('draft', 'scheduled', 'cancel', 'sending') or any(name in vals for name in CONTENT_FIELDS):
+            self._check_content_locked(vals)
+        return super().write(vals)
+
+    def _check_content_locked(self, vals):
+        """G-C2: onaylanmış kampanyanın metni, türü, listeleri ve şablonu değişmez.
+
+        Ekrandaki readonly yalnız arayüzdür; RPC ile değişiklik ticari kapıyı (tür) ya da onaylanan içeriği
+        atlatırdı. Aynı değerin yeniden yazılması serbesttir. Kilit yalnız o anki duruma bakmaz: kampanyaya ait SMS
+        kaydı varsa (G-C2b) durum ne olursa olsun içerik kilitlidir; böyle bir kampanya kullanıcı yazımıyla
+        taslağa/planlıya/iptale de geri alınamaz (sending -> scheduled/cancel -> draft -> içerik -> sending zinciri).
+        Sistem yazımları (cron, _start/_finish) sudo ile yapılır ve geri alma denetiminden muaftır; bağlam bayrağı
+        kullanılmaz çünkü RPC çağıranı bağlamı kendisi belirler. Meşru akışlar etkilenmez: "Taslağa Al" ve iptal,
+        kayıtsız kampanyada çalışır; kayıtlı kampanyada iptal zaten 'done' yapar.
+        """
+        for camp in self:
+            if vals.get('state') == 'sending' and camp.state != 'sending' and not self.env.su:
+                # G-2c: gönderimi yalnız onay/gönderim akışları (sudo) başlatır; RPC ile taslak/planlı -> sending
+                # onay kapılarını (İYS, ret metni, günlük sınır) atlatırdı
+                raise UserError(_('Toplu SMS gönderimi elle başlatılamaz; "Gönder" akışını kullanın: %s') % camp.name)
+            has_messages = bool(camp.sudo().message_ids_sms)
+            if (vals.get('state') in ('draft', 'scheduled', 'cancel') and vals['state'] != camp.state
+                    and has_messages and not self.env.su):
+                raise UserError(_('Gönderimi başlamış toplu SMS taslağa, plana ya da iptale geri alınamaz: %s')
+                                % camp.name)
+            if vals.get('state') == 'draft' and camp.state in ('sending', 'done'):
+                raise UserError(_('Gönderimi başlamış toplu SMS taslağa alınamaz: %s') % camp.name)
+            if camp.state == 'draft' and not has_messages:
+                continue
+            changed = [name for name in CONTENT_FIELDS if name in vals and not camp._same_content(name, vals[name])]
+            if changed:
+                raise UserError(_("Onaylanmış toplu SMS'in içeriği değiştirilemez (%(fields)s). Değiştirmek için "
+                                  'önce taslağa alın: %(name)s',
+                                  fields=', '.join(self._fields[n].string for n in changed), name=camp.name))
+
+    def _same_content(self, name, value):
+        if name == 'list_ids':
+            # Yalnız aynı kümeyi yeniden kuran komut değişiklik sayılmaz; diğer her komut değişikliktir
+            commands = list(value or [])
+            return (len(commands) == 1 and isinstance(commands[0], (list, tuple)) and commands[0][0] == 6
+                    and set(commands[0][2] or []) == set(self.list_ids.ids))
+        if name == 'template_id':
+            return (getattr(value, 'id', value) or False) == (self.template_id.id or False)
+        return (value or False) == (self[name] or False)
+
     # ── Kontroller ──
 
     def _check_can_send(self, count):
@@ -214,6 +293,14 @@ class SmsSystemCampaign(models.Model):
             raise UserError(_(
                 'Ticari (kampanya/indirim) SMS için İYS izin kontrolü zorunludur. '
                 'İYS (SmartADM) entegrasyonu henüz etkin değil; bilgilendirme ya da personel türünü kullanın.'))
+        if self.message_type == 'commercial' and self._json_creds_missing():
+            raise UserError(_(
+                'Reklam hesabı kimlik bilgileri (kullanıcı adı/şifre) tanımlı değil. Ayarlar > SMS > Turatel JSON API '
+                'bölümünde reklam kimlik setini doldurun; ticari kampanya bilgi hesabıyla gönderilmez.'))
+        if self.message_type == 'commercial' and not self._optout_text():
+            raise UserError(self._no_optout_message())
+        if resolve_api_mode(self._icp('sms_system.api_mode')) == 'json':
+            self._check_json_text()
         if self.preview_segments > MAX_SEGMENTS:
             raise UserError(_('Metin çok uzun (%(n)s parça). En fazla %(max)s parça gönderilebilir.',
                               n=self.preview_segments, max=MAX_SEGMENTS))
@@ -222,6 +309,45 @@ class SmsSystemCampaign(models.Model):
         if not count:
             raise UserError(_('Gönderilecek alıcı yok (listeler boş, kara listede ya da İYS onaylı değil).'))
         self._check_daily_limit(count)
+
+    def _no_optout_message(self):
+        return _('%s. Ayarlar > SMS bölümünde "Ret metni" alanını doldurun.') % NO_OPTOUT_TEXT
+
+    def _check_json_text(self):
+        """JSON modu metin kuralları: kullanıcı {<sayı>} yazamaz (KK-C22); örnek adla hesaplanan metin 402
+        karakteri aşamaz (KK-C23). Aşan tek tek alıcılar gönderimde hataya düşer (_json_pack_content)."""
+        self.ensure_one()
+        if NUMERIC_PLACEHOLDER.search(self._build_body()):
+            raise UserError(_('Metinde {1}, {2} gibi sayılı yer tutucu kullanılamaz (kişiselleştirme için '
+                              'ayrılmıştır). Kişinin adı için {ad} yazın.'))
+        length = len(self.final_body or '')
+        if length > MAX_TEXT_LENGTH:
+            raise UserError(_('Metin çok uzun (örnek adla %(n)s karakter). En fazla %(max)s karakter gönderilebilir; '
+                              'metni kısaltın.', n=length, max=MAX_TEXT_LENGTH))
+
+    def _json_creds_missing(self):
+        """JSON modunda ticari kampanyanın reklam kimlik seti boş mu (KK-C29). Bilgi setine düşülmez."""
+        cfg = self.env['sms.system.message']._settings()
+        return cfg['api_mode'] == 'json' and not cfg['json_creds'].get('commercial')
+
+    def _json_credit(self):
+        """json modunda kampanyanın hesabı için kalan kredi: (adet, None) ya da (None, maskeli hata). Legacy: (None, None).
+
+        Hesaba ait kimlik setiyle sorgulanır (ticari = reklam, diğerleri = bilgi). Okuma isteğidir; test modunda da yapılır.
+        """
+        self.ensure_one()
+        cfg = self.env['sms.system.message']._settings()
+        if cfg['api_mode'] != 'json':
+            return None, None
+        creds = cfg['json_creds'].get('commercial' if self.message_type == 'commercial' else 'info')
+        if not creds:
+            return None, _('kimlik seti tanımlı değil')
+        user_id, username, password, account = creds
+        try:
+            client = TuratelJsonClient(cfg['bulk_url'], user_id, username, password, timeout=CREDIT_TIMEOUT)
+            return client.get_credit(account), None
+        except TuratelError as e:
+            return None, mask_digits(str(e))
 
     def _check_daily_limit(self, count):
         """Günlük toplu SMS sınırı: `count` yeni kayıt eklenirse son 24 saatteki toplam sınırı aşıyor mu."""
@@ -304,6 +430,12 @@ class SmsSystemCampaign(models.Model):
         if self.message_type == 'commercial' and self._icp('sms_system.iys_enabled') != 'True':
             raise UserError(_('Ticari (kampanya/indirim) SMS için İYS izin kontrolü zorunludur. İYS (SmartADM) '
                               'entegrasyonu etkin olmadığı için hatalı kayıtlar yeniden gönderilemez.'))
+        if self.message_type == 'commercial' and self._json_creds_missing():
+            # KK-C29: kuyruğa alınsa da kalıcı hataya düşerdi; ticari kampanya bilgi hesabıyla gönderilmez
+            raise UserError(_('%s. Ayarlar > SMS > Turatel JSON API bölümünde reklam kimlik setini doldurun.')
+                            % NO_COMMERCIAL_CREDS)
+        if self.message_type == 'commercial' and not self._optout_text():
+            raise UserError(self._no_optout_message())
         messages = self.sudo().message_ids_sms
         errors = messages.filtered(lambda m: m.state == 'error')
         uncertain = len(messages.filtered(lambda m: m.state == 'uncertain'))
@@ -318,7 +450,7 @@ class SmsSystemCampaign(models.Model):
         parts = []
         if sendable:
             sendable.write({'state': 'queued', 'error': False})
-            self.write({'state': 'sending', 'finished_at': False})
+            self.sudo().write({'state': 'sending', 'finished_at': False})
             self.env.ref('sms_system.cron_sms_campaign_queue').sudo()._trigger()
             parts.append(_('%s kayıt kuyruğa alındı.') % len(sendable))
         else:
@@ -458,7 +590,7 @@ class SmsSystemCampaign(models.Model):
             text, sms_type = prepare_text(text, ascii_mode=cfg['ascii_mode'])
             vals_list.append({
                 'number': contact.mobile, 'body': text, 'originator': cfg['originator'],
-                'sms_type': sms_type, 'segments': segment_count(text, sms_type),
+                'sms_type': sms_type, 'segments': count_segments(cfg['api_mode'], text, sms_type),
                 'campaign_id': self.id, 'contact_id': contact.id, 'state': 'queued',
                 'res_model': self._name, 'res_id': self.id, 'template_id': self.template_id.id or False,
                 'user_id': self.env.user.id,
@@ -466,7 +598,7 @@ class SmsSystemCampaign(models.Model):
         Message = self.env['sms.system.message'].sudo()
         for i in range(0, len(vals_list), CREATE_CHUNK):
             Message.create(vals_list[i:i + CREATE_CHUNK])
-        self.write({'state': 'sending', 'started_at': fields.Datetime.now(), 'skipped_count': skipped})
+        self.sudo().write({'state': 'sending', 'started_at': fields.Datetime.now(), 'skipped_count': skipped})
         self.message_post(body=_('%(n)s alıcıya gönderim başladı (%(s)s numara atlandı).%(warn)s',
                                  n=len(vals_list), s=skipped, warn=self._commercial_hour_warning()))
 
@@ -478,8 +610,14 @@ class SmsSystemCampaign(models.Model):
         Iys = self.env['sms.system.iys']
         for camp in self.search([('state', '=', 'scheduled'), ('scheduled_at', '<=', now)]):
             if camp.message_type == 'commercial':
+                if not camp._optout_text():
+                    # KK-C26: ret metni silinmişse İYS sorgusuna da başlanmaz; ayar girilip yeniden planlanır
+                    camp.sudo().write({'state': 'draft'})
+                    camp.message_post(body=_('Planlı gönderim başlatılamadı: %s') % camp._no_optout_message())
+                    IrCron._commit_progress()
+                    continue
                 if not Iys._enabled():
-                    camp.write({'state': 'draft'})
+                    camp.sudo().write({'state': 'draft'})
                     camp.message_post(body=_('İYS kontrolü kapalı olduğu için ticari SMS gönderilmedi.'))
                     continue
                 stale = camp._iys_stale()
@@ -490,7 +628,7 @@ class SmsSystemCampaign(models.Model):
                         continue   # geçici hata: planlı kalır, sonraki çalışmada yeniden denenir
                     if not ok:
                         # kalıcı hata: beklemek çözmez; ayar düzeltilip yeniden planlanmalı
-                        camp.write({'state': 'draft'})
+                        camp.sudo().write({'state': 'draft'})
                         camp._note_once(_('İYS kontrolü kalıcı bir hatayla başarısız oldu, planlı gönderim iptal '
                                           'edilip taslağa alındı. Ayarları düzeltip yeniden planlayın: %s') % error)
                         IrCron._commit_progress()
@@ -500,7 +638,7 @@ class SmsSystemCampaign(models.Model):
             try:
                 camp._start()
             except UserError as e:
-                camp.write({'state': 'draft'})
+                camp.sudo().write({'state': 'draft'})
                 camp.message_post(body=_('Planlı gönderim başlatılamadı: %s') % e)
             IrCron._commit_progress()
 
@@ -514,23 +652,41 @@ class SmsSystemCampaign(models.Model):
                                     'Tekrar gönderilmedi (mükerrer olmasın diye).')})
 
         cfg = Message._settings()
-        client = Message._client(cfg)
+        # JSON modunda istemci paket başına kampanya türüne göre seçilir (_deliver_pack_json); burada kurulmaz
+        client = Message._client(cfg) if cfg['api_mode'] != 'json' else None
         campaigns = self.search([('state', '=', 'sending')], order='id')
+        json_mode = cfg['api_mode'] == 'json'
         remaining = Message.search_count([('campaign_id', 'in', campaigns.ids), ('state', '=', 'queued')])
         IrCron._commit_progress(remaining=remaining)
         for camp in campaigns:
-            held = False   # İYS doğrulanamadı: bu kampanyanın kalanı sonraki çalışmaya
+            creds_missing = camp.message_type == 'commercial' and camp._json_creds_missing()
+            if creds_missing:
+                # Kuyruktakiler kalıcı hata; o an kilitli olan kalırsa sonraki çalışmada. Gönderim döngüsüne
+                # girilmez (N5): girilseydi kapı İYS'yi sorgular, paket de reklam seti olmadan denenirdi
+                camp._fail_without_commercial_creds()
+            elif (camp.message_type == 'commercial' and not camp._optout_text()
+                    and Message.search_count([('campaign_id', '=', camp.id), ('state', '=', 'queued')])):
+                # KK-C26: ret metni sonradan silindiyse ticari kayıtlar kuyrukta bekler (ayar girilince sürer)
+                camp._note_once(camp._no_optout_message())
+                continue
+            # JSON + {ad}: tek metin şablonu ({1}) → alıcı adlarına bakmadan aynı pakette toplanır (KK-C21)
+            personalized = json_mode and camp._json_template(cfg['ascii_mode'])[1]
+            held = creds_missing   # True: kampanyanın kalanı sonraki çalışmaya (İYS doğrulanamadı, kilitli, set yok)
             while not held:
                 queued = Message.search([('campaign_id', '=', camp.id), ('state', '=', 'queued')],
                                         order='id', limit=PACK_SIZE * 4)
                 if not queued:
                     break
-                for pack in self._make_packs(queued):
-                    sendable = camp._commercial_gate(pack)
+                for pack in self._make_packs(queued, personalized):
+                    gated = camp._commercial_gate(pack)
                     IrCron._commit_progress()
+                    # Kilit altında yeniden doğrula: başka işlemin tuttuğu/değiştirdiği kayıt bu pakete girmez (KK-C17)
+                    sendable = Message._lock_for_send(gated.ids, ('queued',))
+                    # Kapının beklettiği ya da kilitli olduğu için kuyrukta kalan kayıt varsa kampanyanın kalanı
+                    # sonraki çalışmaya kalır (aynı kayıtları yeniden çekip dönmesin)
                     held = bool(pack.filtered(lambda m: m.state == 'queued') - sendable)
                     if sendable:
-                        sendable.write({'state': 'sending'})
+                        sendable._mark_sending(cfg, 'bulk', sendable._pack_purpose())
                         IrCron._commit_progress()
                         sendable._deliver_pack(cfg, client)
                         if IrCron._commit_progress(len(sendable)) < MIN_TIME_LEFT:
@@ -541,12 +697,31 @@ class SmsSystemCampaign(models.Model):
                 camp._finish()
                 IrCron._commit_progress()
 
+    def _fail_without_commercial_creds(self):
+        """JSON modunda reklam seti boşken kuyruktaki ticari kayıtlar: kalıcı hata, hiçbir istek yok (KK-C29).
+
+        İYS kapısından önce çalışır (SmartADM de çağrılmaz); bilgi setine asla düşülmez. Metin değişmez.
+        """
+        self.ensure_one()
+        Message = self.env['sms.system.message'].sudo()
+        queued = Message.search([('campaign_id', '=', self.id), ('state', '=', 'queued')], order='id')
+        locked = Message._lock_for_send(queued.ids, ('queued',))
+        if locked:
+            locked.write({'state': 'error', 'retry_count': MAX_RETRY, 'error': NO_COMMERCIAL_CREDS})
+            self._note_once(_('%s; ticari kampanyanın bekleyen kayıtları gönderilmedi (bilgi hesabıyla gönderilmez).')
+                            % NO_COMMERCIAL_CREDS)
+            self.env['ir.cron']._commit_progress()
+
     @api.model
-    def _make_packs(self, messages):
-        """Aynı metin/başlık/türdeki numaraları en fazla PACK_SIZE'lık paketlere ayır."""
+    def _make_packs(self, messages, personalized=False):
+        """Aynı metin/başlık/türdeki numaraları en fazla PACK_SIZE'lık paketlere ayır.
+
+        personalized (JSON + {ad}): metin şablonu ortaktır, kişiye özel kısım parameter'dadır; yalnız başlığa
+        göre gruplanır."""
         groups = OrderedDict()
         for msg in messages:
-            groups.setdefault((msg.body, msg.originator, msg.sms_type), []).append(msg.id)
+            key = (None, msg.originator, None) if personalized else (msg.body, msg.originator, msg.sms_type)
+            groups.setdefault(key, []).append(msg.id)
         Message = self.env['sms.system.message'].sudo()
         for ids in groups.values():
             for i in range(0, len(ids), PACK_SIZE):
@@ -580,10 +755,24 @@ class SmsSystemCampaignConfirm(models.TransientModel):
             types = dict(camp._fields['message_type'].selection)
             wiz.summary = _(
                 '<p><b>%(n)s</b> kişiye %(when)s gönderilecek (%(s)s numara atlanacak).</p>'
-                '<p>Tahmini kredi: <b>%(c)s</b> (%(seg)s parça/SMS). Tür: %(t)s.</p>'
-                '<p class="text-muted">Gönderim başladıktan sonra yalnız henüz gitmemiş mesajlar durdurulabilir.</p>',
+                '<p>Tahmini kredi: <b>%(c)s</b> (%(seg)s parça/SMS). Tür: %(t)s.</p>',
                 n=camp.preview_count, when=when, s=camp.preview_skipped, c=camp.preview_credit,
-                seg=camp.preview_segments, t=types[camp.message_type])
+                seg=camp.preview_segments, t=types[camp.message_type]) + wiz._credit_html(camp) + _(
+                '<p class="text-muted">Gönderim başladıktan sonra yalnız henüz gitmemiş mesajlar durdurulabilir.</p>')
+
+    def _credit_html(self, camp):
+        """json modunda kalan kredi satırı (KK-C20); uyarılar onayı engellemez. Legacy modda boş."""
+        remaining, error = camp._json_credit()
+        if remaining is None and error is None:
+            return ''
+        if remaining is None:
+            return _('<p class="text-warning">Kalan kredi alınamadı (%s). Onay engellenmez.</p>') % html_escape(error)
+        text = _('<p>Kalan kredi: <b>%s</b> adet.</p>') % remaining
+        if camp.preview_credit > remaining:
+            text += _('<p class="text-danger">Kredi yetersiz: gerekli %(need)s, kalan %(left)s. '
+                      'Gönderim engellenmez; yetersiz krediyle gönderim eksik kalabilir.</p>',
+                      need=camp.preview_credit, left=remaining)
+        return text
 
     def action_confirm(self):
         self.ensure_one()

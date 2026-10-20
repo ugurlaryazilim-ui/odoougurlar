@@ -158,6 +158,8 @@
                 <field name="sent_count"/>
                 <field name="error_count"/>
                 <field name="uncertain_count" optional="show"/>
+                <field name="delivered_count" optional="hide"/>
+                <field name="undelivered_count" optional="hide"/>
                 <field name="progress" widget="progressbar" optional="show"/>
                 <field name="state" widget="badge" decoration-success="state == 'done'"
                        decoration-info="state in ('scheduled', 'sending')"/>
@@ -231,6 +233,8 @@
                             <field name="error_count"/>
                             <field name="uncertain_count" invisible="not uncertain_count"/>
                             <field name="pending_count" invisible="not pending_count"/>
+                            <field name="delivered_count" invisible="not delivered_count and not undelivered_count"/>
+                            <field name="undelivered_count" invisible="not delivered_count and not undelivered_count"/>
                             <field name="skipped_count"/>
                             <field name="started_at"/>
                             <field name="finished_at"/>

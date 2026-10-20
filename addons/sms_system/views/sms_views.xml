@@ -13,6 +13,10 @@
                 <field name="state" widget="badge" decoration-danger="state == 'error'" decoration-success="state == 'sent'" decoration-warning="state == 'uncertain'"/>
                 <field name="res_model" optional="hide"/>
                 <field name="user_id" optional="show"/>
+                <field name="delivery_state" widget="badge" optional="show"
+                       decoration-success="delivery_state == 'delivered'"
+                       decoration-danger="delivery_state == 'undelivered'"
+                       decoration-muted="delivery_state == 'unknown'"/>
                 <field name="error" optional="hide"/>
             </list>
         </field>
@@ -26,8 +30,9 @@
                 <header>
                     <button name="action_retry" string="Yeniden Gönder" type="object" class="btn-primary"
                             invisible="state != 'error'" groups="sms_system.group_sms_manager"/>
-                    <button name="action_fetch_report" string="İletim Raporu Al" type="object"
-                            invisible="not provider_msg_id" groups="sms_system.group_sms_manager"/>
+                    <button name="action_fetch_report" string="Durumu Sorgula" type="object"
+                            invisible="state not in ('sent', 'uncertain') or (not provider_msg_id and provider_service not in ('single', 'bulk'))"
+                            groups="sms_system.group_sms_manager"/>
                     <field name="state" widget="statusbar"/>
                 </header>
                 <sheet>
@@ -47,6 +52,16 @@
                             <field name="user_id"/>
                             <field name="sent_at"/>
                             <field name="provider_msg_id"/>
+                            <field name="provider_packet_id" invisible="not provider_packet_id"
+                                   groups="sms_system.group_sms_manager"/>
+                            <field name="provider_service" invisible="not provider_service"
+                                   groups="sms_system.group_sms_manager"/>
+                            <field name="provider_account_id" invisible="not provider_account_id"
+                                   groups="sms_system.group_sms_manager"/>
+                            <field name="delivery_state" invisible="not delivery_state"/>
+                            <field name="delivery_code" invisible="not delivery_code"
+                                   groups="sms_system.group_sms_manager"/>
+                            <field name="delivery_label" invisible="not delivery_code"/>
                             <field name="provider_answer"/>
                             <field name="retry_count"/>
                             <field name="res_model"/>
@@ -76,9 +91,14 @@
                 <filter string="Belirsiz" name="uncertain" domain="[('state', '=', 'uncertain')]"/>
                 <filter string="Test" name="test" domain="[('state', '=', 'test')]"/>
                 <separator/>
+                <filter string="İletildi" name="delivered" domain="[('delivery_state', '=', 'delivered')]"/>
+                <filter string="İletilemedi" name="undelivered" domain="[('delivery_state', '=', 'undelivered')]"/>
+                <filter string="İletim Bekliyor" name="delivery_pending" domain="[('delivery_state', '=', 'pending')]"/>
+                <separator/>
                 <filter string="Tarih" name="filter_date" date="create_date"/>
                 <group>
                     <filter string="Durum" name="group_state" context="{'group_by': 'state'}"/>
+                    <filter string="İletim Durumu" name="group_delivery_state" context="{'group_by': 'delivery_state'}"/>
                     <filter string="Kaynak" name="group_model" context="{'group_by': 'res_model'}"/>
                     <filter string="Gönderen" name="group_user" context="{'group_by': 'user_id'}"/>
                     <filter string="Gün" name="group_day" context="{'group_by': 'create_date:day'}"/>
@@ -154,7 +174,7 @@
                 </group>
                 <field name="too_long" invisible="1"/>
                 <div class="text-danger" invisible="number_ok or not number">Numara geçersiz görünüyor.</div>
-                <div class="text-danger" invisible="not too_long">Metin çok uzun: en fazla 7 parça gönderilebilir.</div>
+                <div class="text-danger" invisible="not too_long">Metin çok uzun: JSON modunda en fazla 402 karakter, eski modda en fazla 7 parça gönderilebilir.</div>
                 <footer>
                     <button name="action_send" string="Gönder" type="object" class="btn-primary"/>
                     <button string="Vazgeç" class="btn-secondary" special="cancel"/>
