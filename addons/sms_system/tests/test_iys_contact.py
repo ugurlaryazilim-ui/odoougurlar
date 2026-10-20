@@ -44,18 +44,53 @@ class TestSmartAdmContactClient(SmsTestCase):
         self.assertTrue(call['url'].endswith('/webservice/api/Contact'))
         self.assertEqual(call['payload'], {
             'CommunicationTools': {'Msisdn': '90' + NEW},
-            'ContactDetails': {'Name': 'Ayşe', 'Surname': 'Yılmaz', 'RemoteReferenceId': 'odoo-contact-7'},
+            'ContactDetails': {'AccountType': 1, 'Name': 'Ayşe', 'Surname': 'Yılmaz',
+                               'RemoteReferenceId': 'odoo-contact-7'},
             'SessionId': 'SESS'})
 
     def test_create_contact_bos_alanlar_gonderilmez(self):
         _client().create_contact(NEW, 'Ayşe', None, '')
-        self.assertEqual(self.net.smart_calls('contact')[0]['payload']['ContactDetails'], {'Name': 'Ayşe'})
-        _client().create_contact('5102205009')
-        self.assertNotIn('ContactDetails', self.net.smart_calls('contact')[1]['payload'])
+        self.assertEqual(self.net.smart_calls('contact')[0]['payload']['ContactDetails'],
+                         {'AccountType': 1, 'Name': 'Ayşe'})
 
-    def test_create_contact_613_basari_sayilir(self):
-        self.net.smart_contact = smart_error(-6, -613)
-        self.assertFalse(_client().create_contact(NEW, 'Ayşe'))
+    def test_create_contact_ad_yokken_de_account_type_gonderilir(self):
+        """ContactDetails zorunlu nesne: ad/soyad yoksa bile AccountType'lı gönderilir (canlıda -99/-99 verirdi)."""
+        self.assertTrue(_client().create_contact('5102205009'))
+        self.assertEqual(self.net.smart_calls('contact')[0]['payload']['ContactDetails'], {'AccountType': 1})
+
+    def test_create_contact_account_type_tam_sayi_ve_ayarlanabilir(self):
+        _client().create_contact(NEW, 'Ayşe', account_type=2)
+        account_type = self.net.smart_calls('contact')[0]['payload']['ContactDetails']['AccountType']
+        self.assertEqual(account_type, 2)
+        self.assertIsInstance(account_type, int)
+
+    def test_taklit_canli_sozlesmeyi_uygular(self):
+        """Taklidin dayanağı: ContactDetails yok → -99/-99, AccountType yok → -5/-200 (canlı kanıt)."""
+        client = _client()
+        tools = {'Msisdn': '90' + NEW}
+        for payload, expected in (({'CommunicationTools': tools}, (-99, -99)),
+                                  ({'CommunicationTools': tools,
+                                    'ContactDetails': {'Name': 'Ayşe', 'Surname': 'Yılmaz'}}, (-5, -200))):
+            with self.assertRaises(SmartAdmError) as ctx:
+                client.call('Contact', payload)
+            self.assertEqual(ctx.exception.code, expected)
+        self.assertIn('Zorunlu alan eksik', SmartAdmClient.error_text((-5, -200), 'Alanı zorunludur'))
+
+    def test_create_contact_kart_zaten_var_kodlari_basari_sayilir(self):
+        for code in ((-6, -603), (-6, -613), (-5, -304)):
+            self.net.smart_contact = smart_error(*code)
+            self.assertFalse(_client().create_contact(NEW, 'Ayşe'), code)
+
+    def test_ensure_contact_kart_zaten_var_kodlarinda_akis_surer(self):
+        """Query 'yok' dese bile Contact -603/-613/-304 dönerse hata değil: ensure_contact True, sonra trigger gider."""
+        for code in ((-6, -603), (-6, -613), (-5, -304)):
+            self.net.iys[NEW] = 'missing'
+            self.net.cards.clear()
+            self.net.smart_contact = smart_error(*code)
+            client = _client()
+            self.assertTrue(client.ensure_contact(NEW, 'Ayşe Yılmaz', 'ref-1'), code)
+            self.net.cards.add(NEW)   # kart var: trigger -601 vermez
+            self.assertEqual(client.trigger(NEW), 'TRIG1', code)
 
     def test_create_contact_diger_hata_istisna(self):
         self.net.smart_contact = smart_error(-6, -9999)
@@ -77,7 +112,8 @@ class TestSmartAdmContactClient(SmsTestCase):
         self.assertTrue(_client().ensure_contact(NEW, 'Ayşe Nur Yılmaz', 'ref-1'))
         self.assertEqual(self.net.smart_paths, ['session', 'query', 'contact'])
         self.assertEqual(self.net.smart_calls('contact')[0]['payload']['ContactDetails'],
-                         {'Name': 'Ayşe Nur', 'Surname': 'Yılmaz', 'RemoteReferenceId': 'ref-1'})
+                         {'AccountType': 1, 'Name': 'Ayşe Nur', 'Surname': 'Yılmaz',
+                          'RemoteReferenceId': 'ref-1'})
 
     def test_trigger_607_none_doner(self):
         self.net.smart_trigger = smart_error(-6, -607)
@@ -124,11 +160,11 @@ class TestIysConsentContactFlow(SmsTestCase):
         self.Wizard = self.env['sms.system.iys.consent']
         self.net.iys[NEW] = 'missing'
 
-    def _contact_already_created(self):
-        """Contact -6/-613 döner: kart az önce oluşturulmuş (kart artık var, sonraki uçlar çalışır)."""
+    def _contact_already_created(self, code=(-6, -613)):
+        """Contact "kart zaten var" kodu döner (-613 yakın zamanda, -603 mevcut, -304 Msisdn var): kart artık var."""
         def already(call):
             self.net.cards.add(call['number'])
-            return smart_error(-6, -613)
+            return smart_error(*code)
         self.net.smart_contact = already
 
     def _flow(self):
@@ -166,7 +202,8 @@ class TestIysConsentContactFlow(SmsTestCase):
 
     def test_kod_yolu_adsiz_yalniz_referans(self):
         self._code(mobile='0510 220 50 01')
-        self.assertEqual(self.net.smart_calls('contact')[0]['payload']['ContactDetails'], {'RemoteReferenceId': NEW})
+        self.assertEqual(self.net.smart_calls('contact')[0]['payload']['ContactDetails'],
+                         {'AccountType': 1, 'RemoteReferenceId': NEW})
 
     def test_kod_yolu_rehberdeki_kisinin_kimligi_referans_olur(self):
         old = self.Contact.create({'mobile': NEW, 'name': 'Eski', 'active': False})
@@ -180,6 +217,20 @@ class TestIysConsentContactFlow(SmsTestCase):
         self.assertEqual(self._flow(), ['query', 'contact', 'trigger'])
         self.assertEqual(wiz.step, 'code')
         self.assertTrue(wiz.trigger_id)
+
+    def test_kod_yolu_603_ve_304_akis_surer(self):
+        for code in ((-6, -603), (-5, -304)):
+            self.net.cards.clear()
+            self._contact_already_created(code)
+            wiz = self._code()
+            self.assertEqual(wiz.step, 'code', code)
+            self.assertTrue(wiz.trigger_id, code)
+
+    def test_form_yolu_603_ve_304_akis_surer(self):
+        for code in ((-6, -603), (-5, -304)):
+            self.net.cards.clear()
+            self._contact_already_created(code)
+            self.assertEqual(self._form().step, 'done', code)
 
     def test_kod_yolu_kayitli_kisi_contact_cagrilmaz(self):
         wiz = self._code(mobile=KNOWN)
@@ -226,7 +277,7 @@ class TestIysConsentContactFlow(SmsTestCase):
         self.assertEqual(self._flow(), ['query', 'contact', 'contactapiload'])
         self.assertEqual(wiz.step, 'done')
         self.assertEqual(self.net.smart_calls('contact')[0]['payload']['ContactDetails'],
-                         {'Name': 'Ayşe Nur', 'Surname': 'Yılmaz', 'RemoteReferenceId': NEW})
+                         {'AccountType': 1, 'Name': 'Ayşe Nur', 'Surname': 'Yılmaz', 'RemoteReferenceId': NEW})
         contact = self._contact()
         self.assertEqual((contact.iys_status, contact.iys_source), ('approved', 'HS_WEB'))
 

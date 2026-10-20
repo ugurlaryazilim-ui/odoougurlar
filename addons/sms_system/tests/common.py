@@ -198,7 +198,22 @@ class FakeNet:
     def _smart_missing(self, call):
         return self.iys.get(call['number'], self.default_iys) == 'missing' and call['number'] not in self.cards
 
+    @staticmethod
+    def _contact_contract(call):
+        """Canlıda doğrulanan Contact sözleşmesi: ContactDetails hiç yoksa -99/-99, ContactDetails.AccountType yoksa
+        -5/-200 "Alanı zorunludur". İhlal yoksa None."""
+        details = call['payload'].get('ContactDetails')
+        if not isinstance(details, dict):
+            return smart_error(-99, -99, 'Sunucu Hatası')
+        if details.get('AccountType') in (None, ''):
+            return smart_error(-5, -200, 'Alanı zorunludur')
+        return None
+
     def _smartadm_flow(self, path, call):
+        if path == 'contact':
+            violation = self._contact_contract(call)
+            if violation is not None:
+                return violation
         override = {'contact': self.smart_contact, 'trigger': self.smart_trigger,
                     'contactapiload': self.smart_load, 'approve': self.smart_approve}[path]
         if override is not None:
