@@ -1,20 +1,25 @@
 """Turatel ConfirmSms (kullanıcı kararı 20.10; Turatel cevabı 4): onay zorunlu hesapta SendSms sonrası paket onayı.
 
-Gönderim başarısından ve commit'ten sonra paket başına bir ConfirmSms; hata SMS kaydını bozmaz (delivery_code
-'confirm_pending'), "SMS: İletim durumu" cron'u 24 saat yeniden dener. Confirm hiçbir yoldan SendSms'i tekrarlamaz.
+Cron gönderimlerinde (kuyruk, kampanya) gönderim commit'inden sonra paket başına bir ConfirmSms; kullanıcı isteği
+içindeki senkron gönderim onaylamaz, iletim durumu cron'unu tetikler. Geçici hata 'confirm_pending' bırakır (cron
+yeniden dener), kalıcı hata 'confirm_failed' yapar; hiçbiri SMS kaydını bozmaz ve SendSms'i tekrarlamaz.
 """
+import time
 from unittest.mock import patch
 
 import requests
+from odoo import fields
 from odoo.exceptions import AccessError, UserError
 from odoo.tests.common import tagged
 
+from ..models import sms_message as sms_message_module
 from ..services.turatel import TuratelError
 from .common import json_err, SmsTestCase
 from .test_delivery_status import StatusMixin
 from .test_json_routing import NUMBER
 
 CONFIRM = 'Sms/ConfirmSms'
+STATUS_CRON = 'sms_system.cron_sms_delivery_status'
 
 
 class ConfirmMixin(StatusMixin):
@@ -22,19 +27,45 @@ class ConfirmMixin(StatusMixin):
     def confirms(self, service=None):
         return self.net.tj.calls_to(CONFIRM, service)
 
+    def confirmed_packets(self):
+        return [c['payload']['packetId'] for c in self.confirms()]
+
     def require_confirm(self):
         if not hasattr(self.json_api().TuratelJsonClient, 'confirm_sms'):
             self.fail('ARAYÜZ YOK: TuratelJsonClient.confirm_sms')
 
+    def status_triggers(self):
+        cron = self.env.ref(STATUS_CRON)
+        return self.env['ir.cron.trigger'].sudo().search_count([('cron_id', '=', cron.id)])
+
     def send_with_failing_confirm(self, outcome=None):
-        self.net.tj.add_script(CONFIRM, outcome or json_err(-5, 'Paket onaylanamadi 5321234567'))
-        msg = self.Message.send_sms(NUMBER, 'Onay hatası')
+        """Kuyruk yolu (onay cron içinde, gönderim commit'inden sonra); varsayılan hata geçicidir."""
+        self.net.tj.add_script(CONFIRM, outcome or requests.ReadTimeout('okuma 5321234567'))
+        msg = self.Message.send_sms(NUMBER, 'Onay hatası', queue=True)
+        self.Message._cron_send_queued()
         self.refresh_all(msg)
         return msg
 
-    def assert_pending_confirm(self, msg):
+    def make_pending(self, i, hours_ago=1, known=True, **vals):
+        """Onay bekleyen gönderilmiş kayıt; known: paket Turatel taklidinde var (onay başarılı olur)."""
+        packet = 5000 + i
+        msg = self.make_tracked(message_id=str(992000 + i), provider_packet_id=str(packet),
+                                delivery_code='confirm_pending', number='0532123%04d' % i, hours_ago=hours_ago,
+                                **vals)
+        if known:
+            self.net.tj.messages[992000 + i] = {
+                'message_id': 992000 + i, 'client_id': self.client_id_of(msg), 'number': msg.number,
+                'account': 9254, 'packet_id': packet, 'reference_id': None, 'user': 'info_user', 'code': 0,
+                'when': fields.Datetime.now()}
+        return msg
+
+    def run_confirm_step(self, started=None):
+        Message = self.Message.sudo()
+        return Message._cron_confirm_pending(Message._settings(), time.monotonic() if started is None else started)
+
+    def assert_pending_confirm(self, msg, code='confirm_pending'):
         self.assertEqual(msg.state, 'sent', msg.error)
-        self.assertEqual(msg.delivery_code, 'confirm_pending')
+        self.assertEqual(msg.delivery_code, code)
         self.assertEqual(msg.delivery_state, 'pending')
 
 
@@ -89,11 +120,17 @@ class TestConfirmSmsFlow(ConfirmMixin, SmsTestCase):
         super().setUp()
         self.require_confirm()
 
-    # ── başarılı onay ──
-    def test_tekli_senkron_gonderimde_paket_onaylanir(self):
+    # ── senkron (istek içi) gönderim: onay istekte değil, cron tetiklenir ──
+    def test_senkron_gonderimde_istekte_onay_yok_cron_tetiklenir_ve_onaylar(self):
+        before = self.status_triggers()
         msg = self.Message.send_sms(NUMBER, 'Merhaba')
         self.refresh_all(msg)
-        self.assertEqual(msg.state, 'sent', msg.error)
+        self.assertEqual(self.confirms(), [], 'İstek içinde (commit öncesi) ConfirmSms yok')
+        self.assert_pending_confirm(msg)
+        self.assertEqual(self.status_triggers(), before + 1, 'İletim durumu cron\'u hemen tetiklenir')
+        self.net.tj.status_empty = True
+        self.cron_status()
+        self.refresh_all(msg)
         confirms = self.confirms()
         self.assertEqual(len(confirms), 1)
         self.assertEqual(confirms[0]['payload'], {'accountId': 9254, 'packetId': int(msg.provider_packet_id)})
@@ -102,7 +139,17 @@ class TestConfirmSmsFlow(ConfirmMixin, SmsTestCase):
         self.assertEqual(msg.delivery_state, 'pending')
         self.assertEqual(len(self.net.json_sends), 1)
         endpoints = [e for e in self.net.json_endpoints if e != 'Auth/GetToken']
-        self.assertEqual(endpoints, ['Sms/SendSms', CONFIRM], 'Onay gönderimden SONRA')
+        self.assertEqual(endpoints[:2], ['Sms/SendSms', CONFIRM], 'Onay gönderimden SONRA')
+
+    def test_senkron_gonderim_onay_gerekmezse_tetik_yok(self):
+        self.set_param('turatel_confirm_info', 'False')
+        before = self.status_triggers()
+        msg = self.Message.send_sms(NUMBER, 'Kapalı')
+        self.assertEqual(msg.state, 'sent', msg.error)
+        self.assertEqual(self.status_triggers(), before)
+        self.set_param('turatel_confirm_info', 'True')
+        self.Message.send_sms('05321234568', 'Engelli', queue=True)
+        self.assertEqual(self.status_triggers(), before, 'Kuyruk yolu kuyruk cron\'unu tetikler, durum cron\'unu değil')
 
     def test_kuyruk_yolunda_onay_commit_sonrasi(self):
         msg = self.Message.send_sms(NUMBER, 'Kuyruk', queue=True)
@@ -152,25 +199,40 @@ class TestConfirmSmsFlow(ConfirmMixin, SmsTestCase):
         self.assertEqual(len(confirms), 1)
         self.assertEqual((confirms[0]['user'], confirms[0]['payload']['accountId']), ('com_user', 65672))
 
-    def test_kampanya_deneme_gonderimi_onaylanir(self):
+    def test_kampanya_deneme_gonderimi_istekte_onaylanmaz_cron_onaylar(self):
         camp = self.make_json_campaign(body='Deneme {ad}')
         self.sms_manager.partner_id.phone = NUMBER
+        before = self.status_triggers()
         camp.with_user(self.sms_manager).action_send_test_to_me()
+        self.assertEqual(self.confirms(), [])
+        self.assertEqual(self.status_triggers(), before + 1)
+        self.net.tj.status_empty = True
+        self.cron_status()
         self.assertEqual(len(self.confirms('singlesms')), 1)
 
-    # ── hata: kayıt bozulmaz ──
-    def test_onay_hatasi_kaydi_bozmaz_istisna_yok(self):
-        for outcome in (json_err(-5, 'Paket onaylanamadi 5321234567'), requests.ReadTimeout('okuma'), 503,
-                        requests.ConnectTimeout('baglanti')):
+    # ── hata: kayıt bozulmaz; geçici → bekler, kalıcı → başarısız ──
+    def test_onay_hatasi_kaydi_bozmaz_gecici_bekler_kalici_basarisiz(self):
+        for outcome, code, label in (
+                (requests.ReadTimeout('okuma 5321234567'), 'confirm_pending', 'Turatel onayı bekleniyor'),
+                (503, 'confirm_pending', 'Turatel onayı bekleniyor'),
+                (requests.ConnectTimeout('baglanti'), 'confirm_pending', 'Turatel onayı bekleniyor'),
+                (json_err(-5, 'Paket onaylanamadi 5321234567'), 'confirm_failed', 'Turatel onayı başarısız')):
             with self.subTest(sonuc=repr(outcome)):
                 before = len(self.net.json_sends)
                 msg = self.send_with_failing_confirm(outcome)
-                self.assert_pending_confirm(msg)
+                self.assert_pending_confirm(msg, code)
                 self.assertEqual(len(self.net.json_sends), before + 1, 'Onay hatası SendSms tekrarlatmaz')
                 self.assertIn('ConfirmSms', msg.delivery_report or '')
                 self.assertNotIn('5321234567', msg.delivery_report or '')
-                self.assertEqual(msg.delivery_label, 'Turatel onayı bekleniyor')
+                self.assertEqual(msg.delivery_label, label)
                 self.assertFalse(msg.error)
+
+    def test_kimlik_seti_olmayan_hesap_kalici_hata(self):
+        msg = self.make_pending(1, account='1111')
+        self.run_confirm_step()
+        self.refresh_all(msg)
+        self.assertEqual(self.confirms(), [], 'Set yoksa ağ isteği yok')
+        self.assert_pending_confirm(msg, 'confirm_failed')
 
     def test_onay_hatasi_kuyruk_ve_kampanyada_da_yutulur(self):
         self.net.tj.add_script(CONFIRM, requests.ReadTimeout('a'), requests.ReadTimeout('b'))
@@ -197,6 +259,14 @@ class TestConfirmSmsFlow(ConfirmMixin, SmsTestCase):
         self.assertEqual(msg.state, 'sent')
         self.assertEqual(msg.delivery_code, 'confirm_pending')
 
+    def test_ilgisiz_flush_hatasi_yutulmaz(self):
+        """Onaydan önceki bekleyen yazımların flush hatası onay hatası sayılıp yutulmamalı."""
+        msg = self.send_with_failing_confirm()
+        with patch.object(type(self.env), 'flush_all', side_effect=RuntimeError('ilgisiz flush')):
+            with self.assertRaisesRegex(RuntimeError, 'ilgisiz flush'):
+                msg.sudo()._confirm_sent_packets(msg._settings())
+        self.assertEqual(len(self.confirms()), 1, 'Flush hatasında ağ isteği yapılmaz')
+
     # ── cron yeniden denemesi ──
     def test_cron_yeniden_dener_ve_temizler(self):
         msg = self.send_with_failing_confirm()
@@ -210,19 +280,37 @@ class TestConfirmSmsFlow(ConfirmMixin, SmsTestCase):
         self.assertEqual(len(self.confirms()), 2, 'Onaylanan paket yeniden onaylanmaz')
         self.assertEqual(len(self.net.json_sends), 1, 'Cron SendSms çağırmaz')
 
-    def test_cron_24_saatten_eski_kaydi_denemez(self):
-        old = self.make_tracked(hours_ago=25, message_id='991001', provider_packet_id='4990',
-                                delivery_code='confirm_pending')
-        young = self.make_tracked(hours_ago=23, message_id='991002', provider_packet_id='4991',
-                                  delivery_code='confirm_pending', number='05321234568')
+    def test_kalici_hata_cronla_denenmez_durumu_sorgula_yeniden_dener(self):
+        msg = self.send_with_failing_confirm(json_err(-5, 'Onay yetkisi yok'))
+        self.assert_pending_confirm(msg, 'confirm_failed')
         self.net.tj.status_empty = True
         self.cron_status()
-        packets = [c['payload']['packetId'] for c in self.confirms()]
-        self.assertEqual(packets, [4991])
+        self.cron_status()
+        self.assertEqual(len(self.confirms()), 1, 'confirm_failed cron ile yeniden denenmez')
+        msg.action_fetch_report()
+        self.refresh_all(msg)
+        self.assertEqual(len(self.confirms()), 2, '"Durumu Sorgula" başarısız onayı elle yeniden dener')
+        self.assertFalse(msg.delivery_code)
+        self.assertEqual(len(self.net.json_sends), 1)
+
+    def test_cron_penceresi_24_saat_ve_gecerlilik_suresi(self):
+        self.set_param('turatel_validity_minutes', '1440')
+        old = self.make_pending(1, hours_ago=25)
+        young = self.make_pending(2, hours_ago=23)
+        self.run_confirm_step()
+        self.assertEqual(self.confirmed_packets(), [5002])
         self.refresh_all(old, young)
-        self.assertEqual(old.delivery_code, 'confirm_pending')
-        self.assertEqual(young.delivery_code, 'confirm_pending', 'Taklitte paket yok: hata, kayıt bekler')
-        self.assertIn('ConfirmSms', young.delivery_report or '')
+        self.assertEqual(old.delivery_code, 'confirm_pending', 'Pencere dışı kayıt denenmez, işaret kalır')
+        self.assertFalse(young.delivery_code)
+        # Geçerlilik süresi 24 saatten kısaysa pencere geçerlilik süresidir (süresi dolan SMS onaylanmaz)
+        self.set_param('turatel_validity_minutes', '60')
+        expired = self.make_pending(3, hours_ago=2)
+        fresh = self.make_pending(4, hours_ago=0.5)
+        self.run_confirm_step()
+        self.assertEqual(self.confirmed_packets(), [5002, 5004])
+        self.refresh_all(expired, fresh)
+        self.assertEqual(expired.delivery_code, 'confirm_pending')
+        self.assertFalse(fresh.delivery_code)
 
     def test_cron_paket_basina_bir_onay_ve_commit(self):
         a = self.make_tracked(message_id='991011', provider_packet_id='4995', delivery_code='confirm_pending')
@@ -233,6 +321,47 @@ class TestConfirmSmsFlow(ConfirmMixin, SmsTestCase):
         self.assertEqual([c['payload']['packetId'] for c in self.confirms()], [4995])
         self.assertTrue(any(e[0] == 'commit' and e[1] == 2 for e in self.events), 'Paket sonrası commit(2)')
         self.refresh_all(a, b)
+
+    def test_cron_en_yeniden_baslar_ve_paket_tavanina_uyar(self):
+        limit = sms_message_module.CONFIRM_MAX_PACKETS
+        msgs = [self.make_pending(i) for i in range(limit + 2)]
+        failed, stats = self.run_confirm_step()
+        self.assertEqual(failed, [])
+        expected = [5000 + i for i in reversed(range(limit + 2))][:limit]
+        self.assertEqual(self.confirmed_packets(), expected, 'En yeni paket önce; çalışma başına tavan')
+        self.assertEqual(stats['onay ertelendi'], 1)
+        self.refresh_all(*msgs)
+        self.assertEqual([m.delivery_code for m in msgs[:2]], ['confirm_pending'] * 2, 'En eskiler sonraki çalışmaya')
+        self.run_confirm_step()
+        self.assertEqual(self.confirmed_packets()[limit:], [5001, 5000])
+
+    def test_cron_onay_suresi_tavani_durum_sorgusuna_yer_birakir(self):
+        self.assertLess(sms_message_module.CONFIRM_TIME_BUDGET, sms_message_module.STATUS_TIME_BUDGET)
+        self.make_pending(1)
+        started = time.monotonic() - sms_message_module.CONFIRM_TIME_BUDGET - 1
+        _failed, stats = self.run_confirm_step(started)
+        self.assertEqual(self.confirms(), [])
+        self.assertEqual(stats['onay ertelendi'], 1)
+
+    def test_cron_art_arda_ayni_hata_onayi_keser(self):
+        msgs = [self.make_pending(i) for i in range(5)]
+        self.net.tj.add_script(CONFIRM, *[requests.ReadTimeout('okuma')] * 5)
+        failed, stats = self.run_confirm_step()
+        self.assertEqual(len(self.confirms()), 3, 'Art arda 3 aynı hata: bu çalışmada onay kesilir')
+        self.assertEqual(len(failed), 3)
+        self.assertEqual(stats['onay kesildi (art arda aynı hata)'], 1)
+        self.refresh_all(*msgs)
+        self.assertEqual({m.delivery_code for m in msgs}, {'confirm_pending'}, 'Geçici hata: hepsi bekler')
+
+    def test_cron_farkli_hatalar_kesmez(self):
+        for i in range(5):
+            self.make_pending(i)
+        self.net.tj.add_script(CONFIRM, requests.ReadTimeout('a'), 503, requests.ReadTimeout('b'), 503,
+                               requests.ReadTimeout('c'))
+        failed, stats = self.run_confirm_step()
+        self.assertEqual(len(self.confirms()), 5)
+        self.assertEqual(len(failed), 5)
+        self.assertFalse(stats['onay kesildi (art arda aynı hata)'])
 
     def test_cron_hata_tek_uyari_satiri(self):
         for i in range(3):
@@ -256,15 +385,30 @@ class TestConfirmSmsFlow(ConfirmMixin, SmsTestCase):
         self.assertEqual(msg.delivery_state, 'delivered')
         self.assertEqual(len(self.net.json_sends), 1)
 
-    def test_durum_satiri_bekleyen_onayi_ezmez_nihai_kod_ezer(self):
-        msg = self.make_tracked(message_id='991031', provider_packet_id='4970', delivery_code='confirm_pending')
+    def test_durum_satiri_onay_isaretini_ezmez_nihai_kod_ezer(self):
         Row = self.json_api().StatusRow
-        msg._apply_status_rows([Row('991031', None, '777', '{}')])
-        self.refresh_all(msg)
-        self.assertEqual((msg.delivery_state, msg.delivery_code), ('unknown', 'confirm_pending'))
-        msg._apply_status_rows([Row('991031', None, '0', '{}')])
-        self.refresh_all(msg)
-        self.assertEqual((msg.delivery_state, msg.delivery_code), ('delivered', '0'))
+        for i, code in enumerate(('confirm_pending', 'confirm_failed')):
+            with self.subTest(kod=code):
+                mid = '99103%d' % i
+                msg = self.make_tracked(message_id=mid, provider_packet_id='497%d' % i, delivery_code=code,
+                                        number='0532123457%d' % i)
+                msg._apply_status_rows([Row(mid, None, '777', '{}')])
+                self.refresh_all(msg)
+                self.assertEqual((msg.delivery_state, msg.delivery_code), ('unknown', code))
+                msg._apply_status_rows([Row(mid, None, '0', '{}')])
+                self.refresh_all(msg)
+                self.assertEqual((msg.delivery_state, msg.delivery_code), ('delivered', '0'))
+
+    def test_uzlasan_belirsiz_kayit_paket_yoksa_onay_bilinmiyor_notu(self):
+        Row = self.json_api().StatusRow
+        bare = self.make_tracked(message_id='991071', state='uncertain', provider_packet_id=False)
+        packed = self.make_tracked(message_id='991072', state='uncertain', provider_packet_id='4975',
+                                   number='05321234568')
+        (bare | packed)._apply_status_rows([Row('991071', None, '1', '{}'), Row('991072', None, '1', '{}')])
+        self.refresh_all(bare, packed)
+        self.assertEqual((bare.state, packed.state), ('sent', 'sent'))
+        self.assertIn('onay durumu bilinmiyor', bare.delivery_report or '')
+        self.assertNotIn('onay durumu bilinmiyor', packed.delivery_report or '')
 
     # ── ayar, legacy, test modu ──
     def test_ayar_kapali_onay_cagrilmaz(self):
@@ -296,7 +440,9 @@ class TestConfirmSmsFlow(ConfirmMixin, SmsTestCase):
     def test_legacy_modda_onay_yok(self):
         pending = self.make_tracked(message_id='991051', provider_packet_id='4981', delivery_code='confirm_pending')
         self.set_param('api_mode', 'legacy_xml')
+        before = self.status_triggers()
         self.Message.send_sms(NUMBER, 'Eski')
+        self.assertEqual(self.status_triggers(), before)
         self.launch(self.make_json_campaign(body='Sabit metin'))
         self.cron_status()
         self.assertEqual(self.net.json_calls, [])
@@ -306,15 +452,22 @@ class TestConfirmSmsFlow(ConfirmMixin, SmsTestCase):
     def test_test_modunda_yalniz_test_numarasi_onaylanir(self):
         self.configure_json(test_mode='True')
         self.set_param('test_numbers', '05321234568')
+        before = self.status_triggers()
         blocked = self.Message.send_sms(NUMBER, 'Engel')
         self.assertEqual(blocked.state, 'test')
         self.assertEqual(self.net.json_calls, [])
+        self.assertEqual(self.status_triggers(), before, 'Gönderilmeyen kayıt için tetik yok')
         allowed = self.Message.send_sms('05321234568', 'Serbest')
         self.assertEqual(allowed.state, 'sent', allowed.error)
+        self.assertEqual(self.confirms(), [])
+        self.net.tj.status_empty = True
+        self.cron_status()
         self.assertEqual(len(self.confirms()), 1)
+        self.refresh_all(blocked)
+        self.assertFalse(blocked.delivery_code)
 
     def test_onay_sendsms_i_hicbir_yoldan_tekrarlamaz(self):
-        self.net.tj.add_script(CONFIRM, *([json_err(-5, 'x')] * 6))
+        self.net.tj.add_script(CONFIRM, *[requests.ReadTimeout('x')] * 6)
         self.net.tj.status_empty = True   # iletildi kodu onay beklemeyi bitirirdi
         msg = self.Message.send_sms(NUMBER, 'Tek')
         self.cron_status()
@@ -322,7 +475,7 @@ class TestConfirmSmsFlow(ConfirmMixin, SmsTestCase):
         msg.action_fetch_report()
         self.Message._cron_retry_failed()
         self.assertEqual(len(self.net.json_sends), 1)
-        self.assertEqual(len(self.confirms()), 4, 'gönderim + 2 cron + Durumu Sorgula')
+        self.assertEqual(len(self.confirms()), 3, '2 cron + Durumu Sorgula (senkron gönderim istekte onaylamaz)')
         self.refresh_all(msg)
         self.assert_pending_confirm(msg)
 
@@ -332,6 +485,13 @@ class TestConfirmSmsFlow(ConfirmMixin, SmsTestCase):
         self.assertEqual(labels['pending'], 'Yanıt bekleniyor')
         msg = self.make_tracked(message_id='991061', delivery_code='confirm_pending')
         self.assertEqual(msg.delivery_label, 'Turatel onayı bekleniyor')
+        msg.delivery_code = 'confirm_failed'
+        self.assertEqual(msg.delivery_label, 'Turatel onayı başarısız')
+
+    def test_arama_filtreleri(self):
+        arch = self.env.ref('sms_system.view_sms_message_search').arch
+        for name in ('confirm_pending', 'confirm_failed'):
+            self.assertIn('name="%s"' % name, arch)
 
 
 @tagged('post_install', '-at_install')

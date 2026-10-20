@@ -16,16 +16,23 @@ Kişiselleştirme `{ad}` -> `{1}` + `parameter`; en çok 402 karakter. İletim d
 
 **ConfirmSms (JSON):** Turatel hesabında onay zorunluysa SendSms ile giden paket "Onay Bekliyor"da kalır ve
 telefona ulaşmaz. Bu yüzden her başarılı gönderimden ve commit'ten sonra paket başına bir `Sms/ConfirmSms` çağrılır.
+Kuyruk ve kampanya cron'ları onayı gönderim commit'inden hemen sonra yapar. Kullanıcı isteği içindeki senkron
+gönderim (ör. kampanya deneme SMS'i) isteği bekletmez: kayıt `confirm_pending` işaretlenir ve "SMS: İletim durumu"
+cron'u hemen tetiklenir; onayı commit'ten sonra cron yapar.
 Ayar Ayarlar → SMS → Turatel JSON API → "Gönderimden sonra onayla (ConfirmSms)" bölümündedir ve kimlik seti başına
 ayrıdır (`sms_system.turatel_confirm_info` / `sms_system.turatel_confirm_commercial`). Varsayılan AÇIK'tır;
 parametre yoksa açık sayılır, yalnız tam `'False'` kapatır. Değeri yalnız sistem yöneticisi "Aç / Kapat" düğmesiyle
-değiştirebilir. Onay çağrısı başarısız olursa SMS kaydı `sent` kalır ve hata yükseltilmez. Bu durumda kaydın
-`delivery_code` alanı `confirm_pending` olur; listede "Turatel onayı bekleniyor" görünür ve "Turatel onayı bekleyen"
-filtresiyle bulunur. "SMS: İletim durumu" cron'u bu paketleri 24 saat boyunca yeniden onaylamayı dener.
-"Durumu Sorgula" düğmesi de sorgudan önce onayı dener. Onay hiçbir yoldan SendSms'i yeniden çağırmaz. Legacy XML
-modunda ve test numarası dışındaki numaralara (test modu) onay isteği yapılmaz. Onay zorunlu olmayan hesapta da
-çağrı zararsız sayılır. Hata dönüyorsa kayıtlar 24 saat `confirm_pending` görünür; gerekiyorsa ayar o kimlik seti
-için kapatılır.
+değiştirebilir. Onay çağrısı başarısız olursa SMS kaydı `sent` kalır, hata yükseltilmez ve `delivery_report`'a
+kısa not düşülür. Geçici hatada (ağ, HTTP, zaman aşımı) `delivery_code` `confirm_pending` kalır ("Turatel onayı
+bekleniyor", "Turatel onayı bekleyen" filtresi). Durum cron'u bu paketleri en yeniden başlayarak, gönderimden bu yana
+24 saat ile geçerlilik süresinden kısa olanı kadar yeniden dener; çalışma başına en çok 30 paket ve 60 sn ayırır,
+art arda 3 aynı hata gelirse o çalışmada onayı keser. Kalıcı hatada (Turatel hata kodu, kimlik reddi, hesabın kimlik
+seti yok) `delivery_code` `confirm_failed` olur ("Turatel onayı başarısız" filtresi) ve otomatik deneme biter;
+sorun giderildikten sonra kayıtlar seçilip "Durumu Sorgula" ile yeniden onaylanabilir (düğme sorgudan önce
+bekleyen ve başarısız onayları dener). Paket numarası olmadan uzlaşan belirsiz kayıt onaylanamaz; raporuna "onay
+durumu bilinmiyor" notu düşülür. Onay hiçbir yoldan SendSms'i yeniden çağırmaz. Legacy XML modunda ve test
+numarası dışındaki numaralara (test modu) onay isteği yapılmaz. Onay zorunlu olmayan hesapta da çağrı zararsız
+sayılır; hata dönüyorsa ayar o kimlik seti için kapatılır.
 
 ## JSON geçişi kontrol listesi
 

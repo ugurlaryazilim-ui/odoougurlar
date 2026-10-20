@@ -95,6 +95,7 @@
                 <filter string="İletilemedi" name="undelivered" domain="[('delivery_state', '=', 'undelivered')]"/>
                 <filter string="İletim Bekliyor" name="delivery_pending" domain="[('delivery_state', '=', 'pending')]"/>
                 <filter string="Turatel onayı bekleyen" name="confirm_pending" domain="[('state', '=', 'sent'), ('delivery_code', '=', 'confirm_pending')]"/>
+                <filter string="Turatel onayı başarısız" name="confirm_failed" domain="[('state', '=', 'sent'), ('delivery_code', '=', 'confirm_failed')]"/>
                 <separator/>
                 <filter string="Tarih" name="filter_date" date="create_date"/>
                 <group>
