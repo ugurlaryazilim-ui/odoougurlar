@@ -398,7 +398,20 @@ class BatchApiController(BarcodeApiBase):
             # Sadece draft veya in_progress olanları sildirelim
             if batch.state == 'done':
                 return {'error': 'Tamamlanmış rotalar silinemez'}
-            
+
+            # Toplanmış ama paketlemede doğrulanmamış ürün varsa silme: rota
+            # silinirse toplanan miktar (wave_collected_qty) sahipsiz kalır ve
+            # paketleme bu siparişleri rota üzerinden bulamaz.
+            open_collected = self._get_all_pickings(batch).filtered(
+                lambda p: p.state not in ('done', 'cancel') and any(
+                    (m.wave_collected_qty or 0) > 0 and m.state != 'cancel'
+                    for m in p.move_ids))
+            if open_collected:
+                return {'error': (
+                    f'Bu rotada toplanmış ama paketlenmemiş ürün var '
+                    f'({len(open_collected)} sipariş). Önce paketlemede tamamlayın '
+                    f'ya da "Eksik Onayla" ile kapatın veya toplamayı geri alın.')}
+
             # İçindeki transferleri iptal etmeyelim, sadece rotadan çıkaralım
             if batch.picking_ids:
                 batch.picking_ids.write({'batch_id': False})
@@ -778,7 +791,14 @@ class BatchApiController(BarcodeApiBase):
 
     @http.route('/ugurlar_barcode/api/batch_collect_complete', type='jsonrpc', auth='user')
     def batch_collect_complete(self, batch_id=0, **kw):
-        """Rota toplama tamamla — picking'leri doğrula ve stok aktar."""
+        """Rota toplama tamamla — toplamayı kapatır, sevkiyatı DOĞRULAMAZ.
+
+        Eksik denetimi yapar (toplanmamış ve "Eksik" işaretlenmemiş ürün varsa
+        reddeder), hiç toplanamayan siparişi rotadan çıkarır. Toplanan miktar
+        wave_collected_qty'de kalır; OUT'u paketleme doğrular (okutma, Eksik
+        Onayla ya da Tamamla). Fatura/Nebim/kargo bildirimi o doğrulamadan sonra
+        çalışır; paketlemeye kadar sipariş satırı değiştirilebilir.
+        """
         self._check_internal_user()
         batch = request.env['stock.picking.batch'].sudo().browse(int(batch_id))
         if not batch.exists():
@@ -806,99 +826,75 @@ class BatchApiController(BarcodeApiBase):
                 elif collected == 0:
                     skipped_moves += 1
 
-        # ─── 1-2. Sevk = toplanan; kısmi picking'de kalan için bekleyen sevkiyat ───
-        failed_pickings = []
+        # ─── 1. Hiç toplanamayan siparişi rotadan çıkar (sonraki rotaya kalsın) ───
+        # Sevkiyat burada DOĞRULANMAZ: move.quantity/picked yazılmaz, button_validate
+        # çağrılmaz. Toplanan miktar wave_collected_qty'de kalır; OUT'u paketleme
+        # doğrular. Böylece paketlemeye kadar sipariş satırı değiştirilebilir.
         skipped_pickings = []
-        backorder_pickings = []
         for picking in all_pickings:
-            if picking.state not in ('assigned', 'confirmed'):
+            if picking.state in ('done', 'cancel'):
                 continue
-            if not any((m.wave_collected_qty or 0) > 0 for m in picking.move_ids):
-                # Hiçbir ürünü toplanamadı (tümü "Eksik"): rotadan çıkar, sonraki rotaya kalsın
-                skipped_pickings.append(picking.name)
-                try:
-                    with request.env.cr.savepoint():
-                        picking.write({'batch_id': False})
-                        batch.write({'all_picking_ids': [(3, picking.id)]})
-                except Exception as e:
-                    _logger.warning("Picking %s rotadan çıkarılamadı: %s", picking.name, e)
-                _logger.info("Picking %s (origin: %s) rotadan çıkarıldı — hiçbir ürün toplanmadı",
-                             picking.name, picking.origin)
+            if any((m.wave_collected_qty or 0) > 0 for m in picking.move_ids):
                 continue
+            # Hiçbir ürünü toplanamadı (tümü "Eksik"): rotadan çıkar
+            skipped_pickings.append(picking.name)
             try:
                 with request.env.cr.savepoint():
-                    _total, partial = self._apply_collected_quantities(picking)
-                    done = self._safe_validate_picking(picking, backorder=partial)
-                if not done:
-                    failed_pickings.append(picking.name)
-                    _logger.warning("Picking %s (origin: %s) doğrulama sonrası state=%s",
-                                    picking.name, picking.origin, picking.state)
-                elif partial:
-                    backorder_pickings.append(picking.name)
+                    picking.write({'batch_id': False})
+                    batch.write({'all_picking_ids': [(3, picking.id)]})
             except Exception as e:
-                failed_pickings.append(picking.name)
-                _logger.warning("Picking %s doğrulama hatası: %s", picking.name, e)
+                _logger.warning("Picking %s rotadan çıkarılamadı: %s", picking.name, e)
+            _logger.info("Picking %s (origin: %s) rotadan çıkarıldı — hiçbir ürün toplanmadı",
+                         picking.name, picking.origin)
         all_pickings = self._get_all_pickings(batch)
 
-        # ─── 3. Batch'i tamamla (sadece tüm picking'ler done ise) ───
+        # ─── 2. Rota zaten tamamen sevk edildiyse kapat (normalde paketleme kapatır) ───
         try:
-            if batch.state != 'done':
-                all_done = all(p.state == 'done' for p in all_pickings)
-                if all_done:
-                    batch.action_done()
-                else:
-                    not_done = [p.name for p in all_pickings if p.state != 'done']
-                    _logger.warning(
-                        "Batch %s: %d/%d picking done DEĞİL: %s — batch tamamlanmadı",
-                        batch.name, len(not_done), len(all_pickings), not_done)
-                    failed_pickings.extend(not_done)
+            if batch.state != 'done' and all_pickings \
+                    and all(p.state == 'done' for p in all_pickings):
+                batch.action_done()
         except Exception as e:
             _logger.error("Batch %s tamamlama hatası: %s", batch.name, e)
 
-        # ─── 4. Ürün chatter'larına transfer tamamlanma logu ───
+        # ─── 3. Ürün chatter'larına toplama tamamlanma logu ───
         try:
             user = request.env.user
             for picking in all_pickings:
                 source_name = picking.location_id.display_name or ''
-                dest_name = picking.location_dest_id.display_name or ''
                 for move in picking.move_ids:
                     collected = move.wave_collected_qty or 0
                     if collected > 0 and move.product_id:
                         msg = Markup(
-                            '<b>&#128666; Transfer Tamamlandı:</b> <em>%s</em> tarafından '
+                            '<b>&#128722; Toplama Tamamlandı:</b> <em>%s</em> tarafından '
                             '<b>%s</b> rotasında (Sipariş: %s)<br/>'
-                            '&#128230; <b>%s</b> adet — '
-                            '<b>%s</b> &#10132; <b>%s</b>'
+                            '&#128230; <b>%s</b> adet <b>%s</b> konumundan toplandı; '
+                            'sevkiyat paketlemede doğrulanır'
                         ) % (
                             user.name, batch.name, picking.name,
-                            int(collected),
-                            source_name, dest_name,
+                            int(collected), source_name,
                         )
                         self._log_chatter(move.product_id, msg)
         except Exception as e:
             _logger.warning("Chatter log hatası: %s", e)
 
-        batch_done = all(p.state == 'done' for p in all_pickings)
-        result_msg = f'{batch.name}: {collected_moves}/{total_moves} ürün toplandı ve aktarıldı'
-        if failed_pickings:
-            result_msg += f' ⚠️ ({len(failed_pickings)} picking done olmadı: {", ".join(failed_pickings)})'
-        else:
-            result_msg += ' ✅'
-        if backorder_pickings:
-            result_msg += f' — {len(backorder_pickings)} siparişin eksikleri bekleyen sevkiyata alındı'
+        batch_done = bool(all_pickings) and all(p.state == 'done' for p in all_pickings)
+        result_msg = (f'{batch.name}: {collected_moves}/{total_moves} ürün toplandı; '
+                      f'sevkiyat paketlemede doğrulanır ✅')
         if skipped_pickings:
             result_msg += f' — {len(skipped_pickings)} sipariş hiç toplanamadığı için sonraki rotaya bırakıldı'
 
         return {
             'success': True,
+            'collect_done': True,
             'batch_name': batch.name,
             'batch_done': batch_done,
             'total_moves': total_moves,
             'collected_moves': collected_moves,
             'skipped_moves': skipped_moves,
             'partial_moves': total_moves - collected_moves - skipped_moves,
-            'failed_pickings': failed_pickings,
-            'backorder_pickings': backorder_pickings,
+            # Uyumluluk: Tamamla artık doğrulama yapmadığı için hep boş
+            'failed_pickings': [],
+            'backorder_pickings': [],
             'skipped_pickings': skipped_pickings,
             'message': result_msg,
         }
