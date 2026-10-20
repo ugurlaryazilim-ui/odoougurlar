@@ -184,19 +184,6 @@ class PackingApiController(BarcodeApiBase):
         }
 
     @staticmethod
-    def _order_route_shipped(picking, all_pickings):
-        """Siparişin bu rotadaki iptal olmayan tüm sevkiyatları doğrulandı mı. Fatura (Nebim)
-        sipariş başına bir kez, bu koşulda tetiklenir: kardeş picking'ler ayrı doğrulanınca
-        ilk kardeş tek başına faturalanıyor, sonrakinin ürünü faturaya girmiyordu
-        (`_trigger_nebim_sync` fatura varsa yenisini kesmez)."""
-        if picking.state != 'done':
-            return False
-        if not picking.origin:
-            return True
-        return all(p.state == 'done' for p in all_pickings
-                   if p.origin == picking.origin and p.state != 'cancel')
-
-    @staticmethod
     def _cancelled_sale_origins(pickings):
         """Picking'lerin origin'lerinden iptal edilmiş satış siparişi adları (tek sorgu)."""
         origins = list({p.origin for p in pickings if p.origin})
@@ -747,15 +734,14 @@ class PackingApiController(BarcodeApiBase):
 
         # Doğrulanamayan picking için Nebim ve etiket bayrağı çalışmaz (kullanıcı kararı)
         if picking_completed and not validate_error:
-            # Nebim sync (fatura) yalnız siparişin rotadaki tüm sevkiyatları doğrulanınca:
-            # kardeş açıkken kesilen fatura ondan sonraki ürünü içermiyordu
-            if self._order_route_shipped(target_picking, all_pickings):
-                try:
-                    _logger.info("NEBIM SYNC tetikleniyor: %s (origin=%s)",
-                                 target_picking.name, target_picking.origin)
-                    self._trigger_nebim_sync(target_picking)
-                except Exception as e:
-                    _logger.error("Nebim sync hatası %s: %s", target_picking.name, e)
+            # Nebim sync: cari / sipariş hemen; fatura siparişin tüm giden sevkiyatları
+            # bitince (kapı `_trigger_nebim_sync` içinde, sale.order._ugurlar_outs_closed)
+            try:
+                _logger.info("NEBIM SYNC tetikleniyor: %s (origin=%s)",
+                             target_picking.name, target_picking.origin)
+                self._trigger_nebim_sync(target_picking)
+            except Exception as e:
+                _logger.error("Nebim sync hatası %s: %s", target_picking.name, e)
 
             # Etiket basıldı olarak işaretle
             try:
@@ -983,12 +969,12 @@ class PackingApiController(BarcodeApiBase):
                 _logger.exception("Sipariş Onay/Senkronizasyon Hatası %s:", picking.name)
                 errors.append(f"{picking.name}: {self._error_text(e)}")
 
-        # Nebim / fatura sipariş başına bir kez ve yalnız siparişin rotadaki tüm sevkiyatları
-        # doğrulanınca (kardeşlerden biri doğrulanamadıysa fatura kesilmez)
+        # Nebim sipariş başına bir kez, tüm doğrulamalardan sonra: fatura kapısı
+        # (`_trigger_nebim_sync`) kardeşlerin son durumunu görür
         synced_origins = set()
         for picking in shipped:
             key = picking.origin or picking.id
-            if key in synced_origins or not self._order_route_shipped(picking, all_pickings):
+            if key in synced_origins:
                 continue
             synced_origins.add(key)
             try:
@@ -1643,7 +1629,16 @@ class PackingApiController(BarcodeApiBase):
                     lambda i: i.state == 'draft' and i.move_type == 'out_invoice')
                 with picking.env.cr.savepoint():
                     if not active_invoices and sale_order.invoice_status in ['to invoice', 'invoiced']:
-                        invoices_to_post = sale_order._create_invoices()
+                        # Fatura kapısı (tek yer): sipariş başına tek fatura, iptal olmayan tüm
+                        # giden sevkiyatlar done olunca. Etiket, yeniden okutma, yedek / yumuşak
+                        # eşleşme yolları da buradan geçer; kardeş / backorder açıkken kesilen
+                        # fatura onun ürününü hiç içermiyordu. Son sevkiyat paketleme dışından
+                        # kapanırsa stock.picking._ugurlar_schedule_invoice keser.
+                        if sale_order._ugurlar_outs_closed():
+                            invoices_to_post = sale_order._create_invoices()
+                        else:
+                            _logger.info("Nebim Fatura bekliyor: %s siparişinde açık giden "
+                                         "sevkiyat var (%s)", sale_order.name, picking.name)
 
                     for invoice in invoices_to_post:
                         invoice.action_post()

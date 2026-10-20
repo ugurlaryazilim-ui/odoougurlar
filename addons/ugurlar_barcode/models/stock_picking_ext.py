@@ -64,6 +64,13 @@ class StockMoveExt(models.Model):
         return Domain.AND([domain, ['|', ('batch_id', '=', False), ('move_ids', 'not any', [
             '|', ('wave_collected_qty', '>', 0), ('wave_skipped', '=', True)])]])
 
+    def _action_cancel(self):
+        pickings = self.picking_id
+        res = super()._action_cancel()
+        # İptal edilen backorder / kardeş sevkiyat faturayı bekletmesin
+        pickings._ugurlar_schedule_invoice()
+        return res
+
 
 AVAILABILITY_STATUS = [
     ('available', 'Stokta Mevcut'),
@@ -134,6 +141,51 @@ class StockPickingExt(models.Model):
             if new_batch and picking not in new_batch.all_picking_ids:
                 new_batch.sudo().write({'all_picking_ids': [(4, picking.id)]})
         return res
+
+    def _action_done(self):
+        res = super()._action_done()
+        self._ugurlar_schedule_invoice()
+        return res
+
+    def _ugurlar_schedule_invoice(self):
+        """Paketleme dışından (Odoo arayüzü, başka ekran, iptal) kapanan son giden sevkiyat
+        siparişin faturasını tetikler. Fatura sipariş başına tek ve tüm giden sevkiyatlar
+        bitince kesilir (`sale.order._ugurlar_outs_closed`); paketleme ilk sevkiyatta bekletir,
+        son sevkiyat paketleme dışından kapanırsa fatura hiç kesilmiyordu.
+
+        Commit sonrası (`postcommit`) ayrı cursor'da çalışır: Nebim çağrısı ve commit doğrulama
+        işleminin ortasına girmez, işlem geri alınırsa hiç çalışmaz. Yalnız rotadan geçmiş
+        sevkiyatı olan siparişler (bu akışın faturaladığı siparişler). Paketleme doğrulaması
+        Nebim'i kendisi çağırır, `ugurlar_skip_invoice_hook` ile buraya gelmez."""
+        if self.env.context.get('ugurlar_skip_invoice_hook'):
+            return
+        outs = self.filtered(lambda p: p.picking_type_code == 'outgoing')
+        if not outs:
+            return
+        if self.env['ir.config_parameter'].sudo().get_param(
+                'odoougurlar.nebim_sync_invoice_enabled', 'False') != 'True':
+            return
+        orders = outs.sudo().sale_id.filtered(lambda o: o.state != 'cancel' and any(
+            p.batch_id or p.batch_schedule_time for p in o._ugurlar_customer_outs()))
+        if not orders:
+            return
+        postcommit = self.env.cr.postcommit
+        pending = postcommit.data.get('ugurlar_barcode.invoice_orders')
+        if pending is None:
+            pending = postcommit.data['ugurlar_barcode.invoice_orders'] = set()
+            registry, uid = self.env.registry, self.env.uid
+
+            @postcommit.add
+            def _invoice_after_commit():
+                try:
+                    with registry.cursor() as cr:
+                        env = api.Environment(cr, uid, {})
+                        env['sale.order'].sudo().browse(
+                            sorted(pending)).exists()._ugurlar_invoice_now()
+                except Exception:
+                    # Doğrulama zaten commit edildi: hata kullanıcıya dönmesin
+                    _logger.exception("Commit sonrası fatura tetikleme hatası: %s", sorted(pending))
+        pending.update(orders.ids)
 
     def _check_availability_status(self, primary_warehouse, fallback_warehouse=None, return_warehouse=None,
                                    write=True):

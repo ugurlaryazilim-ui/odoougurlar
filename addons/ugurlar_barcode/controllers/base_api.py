@@ -126,6 +126,9 @@ class BarcodeApiBase(http.Controller):
         }
         if not backorder:
             ctx['picking_ids_not_to_backorder'] = picking.ids
+        if picking.env.context.get('ugurlar_skip_invoice_hook'):
+            # Sihirbazlar request.env'den açılır: bayrak bağlamla taşınmalı
+            ctx['ugurlar_skip_invoice_hook'] = True
         result = picking.with_context(**ctx).button_validate()
 
         # Sihirbaz döndüyse otomatik işle (en fazla 3 — zincirleme sihirbazlar)
@@ -166,6 +169,8 @@ class BarcodeApiBase(http.Controller):
 
         Returns: (done: bool, error: str|None)
         """
+        # Faturayı (Nebim) çağıran paketleme tetikler: commit sonrası fatura kancası atlanır
+        picking = picking.with_context(ugurlar_skip_invoice_hook=True)
         try:
             with picking.env.cr.savepoint():
                 picking.packing_done = True

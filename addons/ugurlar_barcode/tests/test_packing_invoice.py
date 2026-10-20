@@ -33,35 +33,36 @@ class TestPackingInvoice(PackingCase):
         self.assertNotIn('error', res, res)
         return res
 
-    def _first_shipment_invoiced_then_backorder(self):
-        """Sipariş 2 adet: ilk sevk 1 adet (Eksik) tamamlanır ve faturalanır; backorder
-        sevki (1 adet) döner. Returns (sale, backorder picking)."""
+    def _first_shipment_then_backorder(self):
+        """Sipariş 2 adet: ilk sevk 1 adet (Eksik) tamamlanır; backorder açıkken fatura
+        kesilmez (kullanıcı kararı B, 2026-10-20). Returns (sale, backorder picking)."""
         sale, p1 = self._sale(self.prod, 2)
         self._complete(p1, wave=1, skipped=True)
         self.assertEqual(p1.state, 'done', 'ön koşul: ilk sevk tamam')
-        invoices = self._out_invoices(sale)
-        self.assertEqual(len(invoices), 1, 'ön koşul: ilk sevk faturalandı')
-        self.assertTrue(invoices.nebim_sent, "ön koşul: ilk fatura Nebim'e gitti")
+        self.assertEqual(len(self._out_invoices(sale)), 0, 'backorder açıkken fatura yok')
+        self.assertEqual(self.nebim['posts'], 0)
         backorder = (sale.picking_ids - p1).filtered(lambda p: p.state not in ('done', 'cancel'))
         self.assertEqual(len(backorder), 1, 'ön koşul: backorder sevki var')
         backorder.action_assign()
         self.assertEqual(backorder.move_ids.product_uom_qty, 1)
         return sale, backorder
 
-    # ─── KK-B1.1 (kullanıcı kararıyla iptal: backorder faturası elle kesilir) ───
-    def test_b11_backorder_shipment_gets_no_automatic_invoice(self):
-        sale, backorder = self._first_shipment_invoiced_then_backorder()
+    # ─── KK-B1.1 (kullanıcı kararı B ile değişti: önceden ilk sevk faturalanıyor, backorder
+    # faturası elle kesiliyordu; artık tek fatura backorder kapanınca) ───
+    def test_b11_single_invoice_after_backorder_shipped(self):
+        sale, backorder = self._first_shipment_then_backorder()
         self._complete(backorder, wave=1)
         self.assertEqual(backorder.state, 'done')
         sale.invalidate_recordset(['invoice_status'])
-        self.assertEqual(sale.invoice_status, 'to invoice', 'ön koşul: backorder faturalanmamış')
+        self.assertEqual(sale.invoice_status, 'invoiced')
         invoices = self._out_invoices(sale)
-        self.assertEqual(len(invoices), 1, 'backorder sevki otomatik ikinci fatura almamalı')
-        self.assertEqual(self.nebim['posts'], 1, "Nebim'e yalnız ilk fatura gitmeli")
+        self.assertEqual(len(invoices), 1, 'sipariş başına tek fatura')
+        self.assertEqual(sum(invoices.invoice_line_ids.mapped('quantity')), 2)
+        self.assertEqual(self.nebim['posts'], 1)
 
     # ─── KK-B1.2 ───────────────────────────────────────
     def test_b12_second_complete_call_creates_no_extra_invoice(self):
-        sale, backorder = self._first_shipment_invoiced_then_backorder()
+        sale, backorder = self._first_shipment_then_backorder()
         batch = self._route(backorder)
         backorder.move_ids.wave_collected_qty = 1
         self.pack_ctl.packing_complete(batch_id=batch.id)

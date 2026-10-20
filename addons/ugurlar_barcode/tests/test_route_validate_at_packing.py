@@ -346,6 +346,110 @@ class TestRouteValidateAtPacking(PackingCase):
         self.assertEqual(self._invoiced_products(sale), self.prod | self.prod2)
         self.assertEqual(self.nebim['posts'], 1)
 
+    def test_siblings_label_rescan_direct_sync_do_not_invoice_while_sibling_open(self):
+        """Fatura kapısı _trigger_nebim_sync'in fatura aşamasında: kardeş açıkken etiket
+        (label_data trigger_sync), yeniden okutma ve doğrudan Nebim çağrısı (yedek / yumuşak
+        eşleşme yolları böyle çağırır) fatura kesmez."""
+        sale, p1, _p2, batch = self._sale_two_pickings()
+        self._scan(batch, 1, barcode='RVP-1')
+        self.assertEqual(p1.state, 'done')
+        self.pack_ctl.packing_label_data(picking_id=p1.id, trigger_sync=True)
+        again = self.pack_ctl.packing_scan(batch_id=batch.id, barcode='RVP-1')
+        self.assertTrue(again.get('warning'), again)
+        self.pack_ctl._trigger_nebim_sync(p1)
+        self.assertEqual(len(self._out_invoices(sale)), 0, 'kardeş açıkken fatura kesilmemeli')
+        self.assertEqual(self.nebim['posts'], 0)
+
+        self._scan(batch, 1, barcode='RVP-2')
+        self.assertEqual(len(self._out_invoices(sale)), 1)
+        self.assertEqual(self._invoiced_products(sale), self.prod | self.prod2)
+        self.assertEqual(self.nebim['posts'], 1)
+
+    # ─── Fatura kapısı (kullanıcı kararı B): tek fatura, tüm giden sevkiyatlar bitince ───
+    def _run_postcommit(self):
+        """Commit sonrası kancaları (fatura tetikleme) test cursor'ı üzerinde çalıştırır."""
+        with self.enter_registry_test_mode():
+            self.env.cr.postcommit.run()
+
+    def _pending_invoice_orders(self):
+        return self.env.cr.postcommit.data.get('ugurlar_barcode.invoice_orders')
+
+    def _validate_in_odoo(self, picking):
+        picking.action_assign()
+        for move in picking.move_ids:
+            move.write({'quantity': move.product_uom_qty, 'picked': True})
+        picking.button_validate()
+        self.assertEqual(picking.state, 'done')
+
+    def test_added_line_out_validated_outside_packing_invoices_once_with_all_products(self):
+        for product in (self.prod, self.prod2, self.prod3):
+            product.product_tmpl_id.invoice_policy = 'delivery'
+            self._add_stock(product, self.stock, 5)
+        sale = self.env['sale.order'].create({
+            'partner_id': self.customer.id,
+            'order_line': [(0, 0, {'product_id': p.id, 'product_uom_qty': 1, 'price_unit': 10.0})
+                           for p in (self.prod, self.prod2)],
+        })
+        sale.action_confirm()
+        picking = sale.picking_ids
+        picking.action_assign()
+        batch = self._route(picking)
+        picking.move_ids.write({'wave_collected_qty': 1})
+        self.assertTrue(self.batch_ctl.batch_collect_complete(batch_id=batch.id).get('success'))
+        sale.write({'order_line': [(0, 0, {
+            'product_id': self.prod3.id, 'product_uom_qty': 1, 'price_unit': 10.0})]})
+        later = sale.picking_ids - picking
+        self.assertEqual(len(later), 1, 'ön koşul: sonradan eklenen ürün ayrı sevkiyatta')
+
+        res = self.pack_ctl.packing_complete(batch_id=batch.id)
+        self.assertTrue(res.get('success'), res)
+        self.assertEqual(picking.state, 'done')
+        self._run_postcommit()
+        self.assertEqual(len(self._out_invoices(sale)), 0, 'açık sevkiyat varken fatura yok')
+        self.assertEqual(self.nebim['posts'], 0)
+
+        self._validate_in_odoo(later)
+        self.assertEqual(len(self._out_invoices(sale)), 0, 'fatura commit sonrası kesilir')
+        self._run_postcommit()
+        self.assertEqual(len(self._out_invoices(sale)), 1)
+        self.assertEqual(self._invoiced_products(sale), self.prod | self.prod2 | self.prod3)
+        self.assertEqual(self.nebim['posts'], 1)
+        self.pack_ctl._trigger_nebim_sync(picking)
+        self._run_postcommit()
+        self.assertEqual(len(self._out_invoices(sale)), 1)
+        self.assertEqual(self.nebim['posts'], 1, 'ikinci Nebim faturası yok')
+
+    def test_backorder_cancel_releases_invoice(self):
+        sale, picking, batch, _res = self._collected_route(3, wave=1, skipped=True)
+        res = self.pack_ctl.packing_complete(batch_id=batch.id)
+        self.assertTrue(res.get('success'), res)
+        backorder = self.env['stock.picking'].search([('backorder_id', '=', picking.id)])
+        self.assertEqual(len(backorder), 1, 'ön koşul: backorder açık')
+        self.assertEqual(len(self._out_invoices(sale)), 0, 'backorder açıkken fatura yok')
+
+        backorder.action_cancel()
+        self._run_postcommit()
+        invoices = self._out_invoices(sale)
+        self.assertEqual(len(invoices), 1, 'iptal backorder faturayı bekletmez')
+        self.assertEqual(sum(invoices.invoice_line_ids.mapped('quantity')), 1)
+        self.assertEqual(self.nebim['posts'], 1)
+
+    def test_single_out_order_invoiced_at_packing_without_post_commit_hook(self):
+        sale, _picking, batch, _res = self._collected_route(1)
+        self._scan(batch, 1)
+        self.assertEqual(len(self._out_invoices(sale)), 1, 'tek sevkiyat: hemen faturalanır')
+        self.assertEqual(self.nebim['posts'], 1)
+        self.assertFalse(self._pending_invoice_orders(), 'paketleme doğrulaması kancaya düşmez')
+        self._run_postcommit()
+        self.assertEqual(self.nebim['posts'], 1)
+
+    def test_order_never_routed_not_invoiced_by_hook(self):
+        sale, picking = self._sale(self.prod, 1)
+        self._validate_in_odoo(picking)
+        self.assertFalse(self._pending_invoice_orders())
+        self._run_postcommit()
+        self.assertEqual(len(self._out_invoices(sale)), 0)
+
     # ─── İnceleme 3: iki satırlı siparişte satır değişimi ───
     def test_line_change_on_two_line_order_does_not_lock_packing(self):
         """Tamamla sonrası bir satır 0'a düşürülüp yeni ürün eklenir: yeni (toplanmamış) hareket
