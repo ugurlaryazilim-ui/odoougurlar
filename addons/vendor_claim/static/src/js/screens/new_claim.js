@@ -212,6 +212,7 @@ export class VcNewClaim extends Component {
 
     async submit() {
         const s = this.state;
+        if (s.submitting) return; // çift dokunma: ikinci istek hiç gitmez (düğme kilidi çizimi beklemez)
         if (!s.sel.length) {
             this.notification.add(_t("En az bir ürün seçin veya barkodunu okutun."), { type: "warning" });
             return;
