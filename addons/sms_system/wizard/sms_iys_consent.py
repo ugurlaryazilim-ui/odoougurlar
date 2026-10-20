@@ -11,6 +11,7 @@ SOURCES = [
     ('HS_ISLAK_IMZA', 'Islak imzalı form'),
     ('HS_ETKINLIK', 'Etkinlik'),
     ('HS_WEB', 'Web sitesi'),
+    ('HS_MOBIL', 'Mobil uygulama'),
     ('HS_CAGRI_MERKEZI', 'Çağrı merkezi'),
 ]
 MAX_BUSINESS_DAYS = 3  # İYS kuralı H467: 3 iş gününden eski izin yüklenemez
@@ -66,6 +67,20 @@ class SmsIysConsent(models.TransientModel):
         if not self.env['sms.system.iys']._enabled():
             raise UserError(_('İYS bağlantısı kapalı. Ayarlar > SMS > İYS bölümünden açın.'))
 
+    def _remote_ref(self):
+        """SmartADM RemoteReferenceId: rehberdeki kişi (aktif/arşivli) varsa 'odoo-contact-<id>', yoksa normalize
+        numara (5XXXXXXXXX). Kişi kartı İYS'de yalnız bir kez oluşturulur; değer sonradan değişmez."""
+        num = self._number()
+        contact = self.env['sms.system.contact'].sudo().with_context(active_test=False).search(
+            [('mobile', '=', num)], limit=1)
+        return 'odoo-contact-%s' % contact.id if contact else num
+
+    def _client_with_contact(self):
+        """İstemci; kişi İYS'de yoksa önce kişi kartı oluşturulur (yoksa trigger/contactapiload -601 verir)."""
+        client = self.env['sms.system.iys']._client()
+        client.ensure_contact(self._number(), self.name, self._remote_ref())
+        return client
+
     def _reopen(self):
         return {'type': 'ir.actions.act_window', 'res_model': self._name, 'res_id': self.id,
                 'view_mode': 'form', 'target': 'new', 'name': _('İYS İzni Al')}
@@ -86,15 +101,22 @@ class SmsIysConsent(models.TransientModel):
             Contact = env['sms.system.contact']
             Contact.upsert_numbers([{'mobile': num, 'name': name}], 'manual', lists=env['sms.system.list'].browse(list_ids))
             contact = Contact.with_context(active_test=False).search([('mobile', '=', num)], limit=1)
-            contact.write({'iys_status': 'approved', 'iys_checked_at': fields.Datetime.now(), 'iys_source': source})
+            vals = {'iys_status': 'approved', 'iys_checked_at': fields.Datetime.now()}
+            if source:   # izin İYS'de zaten varsa kaynağı bilinmez: rehberdeki mevcut kaynak ezilmez
+                vals['iys_source'] = source
+            contact.write(vals)
 
     def action_send_code(self):
         self.ensure_one()
         self._check_enabled()
         try:
-            trigger_id = self.env['sms.system.iys']._client().trigger(self._number())
+            trigger_id = self._client_with_contact().trigger(self._number())
         except SmartAdmError as e:
             raise UserError(str(e)) from e
+        if trigger_id is None:   # -607: izin zaten İYS'de; kod gönderilmedi, onay adımı yok
+            self._save_contact(None)
+            self.write({'step': 'done', 'result': _('İzin zaten İYS\'de kayıtlı; numara ticari SMS alabilir.')})
+            return self._reopen()
         self.write({'trigger_id': trigger_id, 'step': 'code'})
         return self._reopen()
 
@@ -122,9 +144,13 @@ class SmsIysConsent(models.TransientModel):
             raise UserError(_('İYS kuralı: 3 iş gününden eski izinler yüklenemez.'))
         local = fields.Datetime.context_timestamp(self, when).replace(tzinfo=None)
         try:
-            self.env['sms.system.iys']._client().contact_api_load(self._number(), True, local, self.source)
+            loaded = self._client_with_contact().contact_api_load(self._number(), True, local, self.source)
         except SmartAdmError as e:
             raise UserError(str(e)) from e
-        self._save_contact(self.source)
-        self.write({'step': 'done', 'result': _('İzin İYS\'ye yüklendi; numara ticari SMS alabilir.')})
+        if loaded:
+            self._save_contact(self.source)
+            self.write({'step': 'done', 'result': _('İzin İYS\'ye yüklendi; numara ticari SMS alabilir.')})
+        else:   # -607: izin zaten İYS'de (bilgi); kendi kaynağımızı yazmayız
+            self._save_contact(None)
+            self.write({'step': 'done', 'result': _('İzin zaten İYS\'de kayıtlı; numara ticari SMS alabilir.')})
         return self._reopen()

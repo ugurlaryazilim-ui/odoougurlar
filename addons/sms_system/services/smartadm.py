@@ -3,9 +3,13 @@
 Doküman: https://doc.smartadm.net/
     POST /session          CustomerCode/Username/Password → SessionId (15 dk)
     POST /query            Msisdn ile kişinin izinleri (Authorization.Etk.Msisdn.Sms: "1" onay, "0" ret)
+    POST /Contact          kişi kartı oluştur (kaydı olmayan kişide trigger/contactapiload'dan ÖNCE şart)
     POST /report2          tarih aralığındaki izin hareketleri (en fazla 7 gün, sayfalı)
     POST /contactapiload   izni doğrudan yükle (ONAY/RET + tarih + kaynak)
     POST /trigger, /approve  SMS ile onay kodu göndererek izin alma
+
+Akış: Session → Contact (kişi yoksa) → Trigger → Approve  ya da  Session → Contact → ContactApiLoad.
+Kaydı olmayan kişide Contact çağrılmadan trigger/contactapiload -6/-601 "Kişi kayıtlarda yok" döner.
 
 Tüm cevaplar: {Status, StatusCode, SubStatusCode, Value, MaxPage}; 0/0 başarılı.
 SmartADM SMS göndermez — gönderim Turatel'den yapılır.
@@ -24,6 +28,8 @@ _PHONE_RUN = re.compile(r'\+?\d(?:[\s\-().]*\d){9,}')
 _logger = logging.getLogger(__name__)
 
 DEFAULT_URL = 'https://adm.smartadm.net/webservice/api'
+# RemoteStoreId (HTTP başlığı) boş bırakılması önerilmez; ayar boşsa bu sabit değer tüm çağrılarda gönderilir
+DEFAULT_STORE = 'MERKEZ'
 TIMEOUT = 20
 
 ERROR_TEXTS = {
@@ -38,10 +44,10 @@ ERROR_TEXTS = {
     (-6, -601): 'Kişi İYS/SmartADM kayıtlarında yok',
     (-6, -602): 'Onay kodu bulunamadı',
     (-6, -604): 'Onay SMS\'i gönderilemedi',
-    (-6, -607): 'Bu izinler zaten verilmiş',
+    (-6, -607): 'İstenen izinler İYS\'de zaten mevcut',
     (-6, -609): 'KVKK onayı gerekli',
     (-6, -611): 'ETK (ticari ileti) onayı gerekli',
-    (-6, -613): 'Kişi az önce oluşturuldu, biraz sonra tekrar deneyin',
+    (-6, -613): 'Kişi kartı yakın zamanda zaten oluşturulmuş',
     (-6, -614): 'Marka kodu (BrandCode) gerekli — Ayarlar > SMS > İYS Marka Kodu',
     (-6, -615): 'Marka kodu bulunamadı — Ayarlar > SMS > İYS Marka Kodu',
     (-6, -9999): 'Bu özellik SmartADM hesabınızda kapalı',
@@ -50,6 +56,9 @@ ERROR_TEXTS = {
 }
 SESSION_ERRORS = {(-1, -6), (-1, -7)}
 NOT_FOUND = (-6, -601)
+# Hata değil, bilgi: kişi kartı yakın zamanda zaten oluşturulmuş (kart var sayılır) / istenen izin zaten kayıtlı
+CONTACT_EXISTS = (-6, -613)
+ALREADY_CONSENTED = (-6, -607)
 # Numaraya özgü kalıcı hatalar: hesabı değil yalnız o numarayı ilgilendirir (D-8)
 INVALID_NUMBER_CODES = {(-3, -114)}
 
@@ -83,6 +92,17 @@ def from_msisdn(value):
     return None
 
 
+def split_name(full_name):
+    """'Ad Soyad' → ('Ad', 'Soyad'): son boşluktan bölünür ('Ayşe Nur Yılmaz' → 'Ayşe Nur', 'Yılmaz').
+    Tek kelimede soyad None; boş girdide ikisi de None (boş alan SmartADM'ye gönderilmez)."""
+    parts = (full_name or '').split()
+    if not parts:
+        return None, None
+    if len(parts) == 1:
+        return parts[0], None
+    return ' '.join(parts[:-1]), parts[-1]
+
+
 def etk_sms_status(value):
     """'1' → approved, '0' → rejected, diğer → unknown."""
     return {'1': 'approved', '0': 'rejected'}.get(str(value) if value is not None else '', 'unknown')
@@ -95,7 +115,7 @@ class SmartAdmClient:
         self.username = (username or '').strip()
         self.password = password or ''
         self.url = (url or DEFAULT_URL).strip().rstrip('/')
-        self.store = (store or '').strip()
+        self.store = (store or '').strip() or DEFAULT_STORE
         self.session_id = session_id
         self.timeout = timeout
         self.on_session = on_session  # yeni oturum alınınca çağrılır (önbelleğe yazmak için)
@@ -103,9 +123,7 @@ class SmartAdmClient:
     # ── düşük seviye ──
 
     def _http(self, path, payload):
-        headers = {'Content-Type': 'application/json'}
-        if self.store:
-            headers['RemoteStoreId'] = self.store
+        headers = {'Content-Type': 'application/json', 'RemoteStoreId': self.store}
         try:
             resp = requests.post('%s/%s' % (self.url, path.lstrip('/')), data=json.dumps(payload),
                                  headers=headers, timeout=self.timeout)
@@ -233,8 +251,39 @@ class SmartAdmClient:
             max_page = 0
         return rows, max_page
 
+    def create_contact(self, number, name=None, surname=None, remote_ref=None):
+        """Kişi kartı oluştur (POST /Contact). Dönen: True oluşturuldu, False "yakın zamanda zaten oluşturulmuş"
+        (-6/-613: kart var, hata değil). Ad/soyad/RemoteReferenceId opsiyonel; boş olanlar gönderilmez.
+
+        Yanıt Value alanı belgesiz: kullanılmaz, yalnız durum kodu yorumlanır (0/0 oluştu, -613 var).
+        """
+        msisdn = to_msisdn(number)
+        if not msisdn:
+            raise SmartAdmError('Geçersiz cep telefonu: %s' % mask_number(number), invalid_number=True)
+        details = {key: value for key, value in (('Name', name), ('Surname', surname),
+                                                 ('RemoteReferenceId', remote_ref)) if value}
+        payload = {'CommunicationTools': {'Msisdn': msisdn}}
+        if details:
+            payload['ContactDetails'] = details
+        code, _data = self.call('Contact', payload, allow=(CONTACT_EXISTS,))
+        return code != CONTACT_EXISTS
+
+    def ensure_contact(self, number, full_name=None, remote_ref=None):
+        """Kişi İYS/SmartADM'de yoksa kartını oluştur (önce Query, yoksa Contact). Dönen: Contact çağrıldı mı.
+
+        Kaydı olmayan kişide trigger/contactapiload -6/-601 verdiği için bu, onlardan önce çağrılır.
+        -613 (kart az önce oluşturulmuş) başarı sayılır, akış sürer.
+        """
+        if self.query(number)['found']:
+            return False
+        name, surname = split_name(full_name)
+        self.create_contact(number, name, surname, remote_ref)
+        return True
+
     def contact_api_load(self, number, approved, when, source, kvkk=True):
-        """Mağazada / formla alınan SMS iznini İYS'ye yükle. when: datetime (≤ 3 iş günü önce)."""
+        """Mağazada / formla alınan SMS iznini İYS'ye yükle. when: datetime (≤ 3 iş günü önce).
+
+        Dönen: True yüklendi, False izin zaten İYS'de kayıtlı (-6/-607, bilgi; hata değil)."""
         msisdn = to_msisdn(number)
         if not msisdn:
             raise SmartAdmError('Geçersiz cep telefonu: %s' % mask_number(number), invalid_number=True)
@@ -243,16 +292,20 @@ class SmartAdmClient:
                                     'AuthorizationSpecificData': {'IysRecordSource': source}}}
         if kvkk and approved:
             details['KvkkStore'] = {'Value': '1', 'AuthorizationDate': date}
-        self.call('contactapiload', {'CommunicationTools': {'Msisdn': msisdn}, 'AuthorizationDetails': details})
-        return True
+        code, _data = self.call('contactapiload', {'CommunicationTools': {'Msisdn': msisdn},
+                                                    'AuthorizationDetails': details}, allow=(ALREADY_CONSENTED,))
+        return code != ALREADY_CONSENTED
 
     def trigger(self, number):
-        """Müşteriye onay kodu SMS'i gönder; TriggerId döndürür."""
+        """Müşteriye onay kodu SMS'i gönder; TriggerId döndürür. İzin zaten İYS'de kayıtlıysa (-6/-607, bilgi)
+        None döner: kod gönderilmez, onay adımı gerekmez."""
         msisdn = to_msisdn(number)
         if not msisdn:
             raise SmartAdmError('Geçersiz cep telefonu: %s' % mask_number(number), invalid_number=True)
-        _code, data = self.call('trigger', {'CommunicationToolType': 'Msisdn', 'Value': msisdn,
-                                            'CommunicationType': 'Sms'})
+        code, data = self.call('trigger', {'CommunicationToolType': 'Msisdn', 'Value': msisdn,
+                                           'CommunicationType': 'Sms'}, allow=(ALREADY_CONSENTED,))
+        if code == ALREADY_CONSENTED:
+            return None
         return str(data.get('Value') or '')
 
     def approve(self, trigger_id, activation_key):

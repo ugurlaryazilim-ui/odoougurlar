@@ -35,6 +35,37 @@ durumu bilinmiyor" notu düşülür. Onay hiçbir yoldan SendSms'i yeniden çağ
 numarası dışındaki numaralara (test modu) onay isteği yapılmaz. Onay zorunlu olmayan hesapta da çağrı zararsız
 sayılır; hata dönüyorsa ayar o kimlik seti için kapatılır.
 
+## İYS "İzin Al" (SmartADM)
+
+Rehber > "İYS İzni Al" sihirbazı iki yoldan izin kaydeder; ikisi de önce kişinin SmartADM'de kartı olduğundan emin olur.
+
+**Akış:** `Session` → `Query` → (kişi yoksa) `Contact` → `Trigger` → `Approve` (onay kodu yolu) ya da
+`Session` → `Query` → (kişi yoksa) `Contact` → `ContactApiLoad` (form yolu). Kaydı olmayan kişide `Contact`
+çağrılmadan `Trigger`/`ContactApiLoad` `-6/-601` "Kişi kayıtlarda yok" döner; bu yüzden kart önce açılır.
+- `Contact` (`POST .../webservice/api/Contact`): `CommunicationTools.Msisdn` + opsiyonel `ContactDetails`
+  (`Name`, `Surname`, `RemoteReferenceId`). Boş alan gönderilmez.
+- **Ad/Soyad:** sihirbazdaki "Ad Soyad" son boşluktan bölünür ("Ayşe Nur Yılmaz" → Ad "Ayşe Nur", Soyad "Yılmaz");
+  tek kelimeyse yalnız `Name` gider.
+- **RemoteReferenceId:** rehberde (aktif ya da arşivli) kişi varsa `odoo-contact-<rehber id>`, yoksa normalize
+  numara (`5XXXXXXXXX`). Kart İYS'de bir kez açıldığı için değer sonradan değişmez; rehbere sonradan eklenen kişi
+  için eski kartın referansı numara olarak kalır.
+- `-6/-613` ("kişi kartı yakın zamanda zaten oluşturulmuş") hata değildir: kart var sayılır, akış sürer.
+- `-6/-607` ("istenen izinler mevcut") Trigger/ContactApiLoad'da bilgidir: rehber kaydı **onaylı** yazılır, kullanıcıya
+  "İzin zaten İYS'de kayıtlı" gösterilir, onay kodu gönderilmez. Kaynak bilinmediği için rehberdeki `iys_source` ezilmez.
+- Kişi kartı Odoo tarafında `SmartAdmClient.ensure_contact` ile yönetilir (`services/smartadm.py`); Contact yanıtının
+  `Value` alanı belgesizdir ve kullanılmaz, yalnız durum kodu yorumlanır (0/0 oluştu, -613 var).
+
+**RemoteStoreId** HTTP başlığıdır (istek gövdesinde değil), tüm SmartADM çağrılarında sabit gider. Ayarlar > SMS >
+İYS > "Mağaza Adı (RemoteStoreId)" boşsa `MERKEZ` gönderilir; doluysa o değer. Boş bırakılması önerilmez, değer
+sonradan değiştirilirse eski kayıtlarla mağaza adı ayrışır. `BrandCode` bu hesapta gerekmez, gönderilmez.
+
+**İznin alındığı yer (`IysRecordSource`)** kanala göre seçilir: mağaza `HS_FIZIKSEL_ORTAM`, web `HS_WEB`, mobil
+`HS_MOBIL`, çağrı merkezi `HS_CAGRI_MERKEZI` (ayrıca `HS_ISLAK_IMZA`, `HS_ETKINLIK`). Onay kodu yolunda kaynak
+`HS_MESAJ` yazılır.
+
+**Bilinen eksik (BORÇ, kapsam dışı):** Tacir (şirket) kişide izin `EtkMsisdnSmsBusiness` maddesine yazılmalıdır.
+Bu sürüm tüm kişileri bireysel (`EtkMsisdnSms`) olarak yükler; tacir kişi için ayrı gönderim gerekir.
+
 ## JSON geçişi kontrol listesi
 
 Her deneme adımı en çok 5 SMS ile yapılır. Bir adım başarısızsa sonrakine geçme.

@@ -23,3 +23,4 @@ from . import test_confirm_sms
 from . import test_json_single_receiver
 from . import test_iys_consent
 from . import test_placeholder_widget
+from . import test_iys_contact
