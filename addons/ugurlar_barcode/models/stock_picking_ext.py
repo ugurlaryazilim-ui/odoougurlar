@@ -54,9 +54,9 @@ class StockMoveExt(models.Model):
         Satır azaltma (negatif hareket) yine aynı sevkiyatı bulur: oradaki hareketle
         birleşip miktarı düşürür / iptal eder (ayrı sevkiyata giderse iade hareketine dönerdi).
 
-        Kural yalnız rotadaki picking'e uygulanır: tamamen "Eksik" olup Tamamla ile rotadan
-        çıkarılan picking'in wave_skipped işareti sıfırlanmaz, yeni satıra kapalı kalıp
-        gereksiz ayrı sevkiyat açtırıyordu.
+        Kural yalnız rotadaki picking'e uygulanır. Rotadan çıkan picking'in rota durumu artık
+        `write` içinde sıfırlanır; bu koşul sıfırlamadan önce rotadan çıkmış, işareti
+        kalmış eski kayıtları da yeni satıra açık tutar (gereksiz ayrı sevkiyat açılmaz).
         """
         domain = super()._search_picking_for_assignation_domain()
         if self._is_negative_demand():
@@ -128,19 +128,40 @@ class StockPickingExt(models.Model):
         Önceden yalnız batch.picking_ids yazılınca ekleniyordu, çıkarılan sipariş eski
         rotada kalıyordu: aynı sipariş iki rotada görünüp toplamlar iki kez sayılıyordu.
         Tamamlanmış sevkiyat eski rotasının geçmişinde kalır.
+
+        Açık sevkiyatın rotası değişince (çıkış, giriş, rota değişimi) rota durumu da
+        sıfırlanır (`_ugurlar_reset_route_state`): Eksik Onayla, rota silme, zamanlayıcı
+        birleştirme, Odoo arayüzü ve backorder'ın yeni rotaya girişi aynı kuraldan geçer.
         """
         if 'batch_id' not in vals:
             return super().write(vals)
         old_batches = {p.id: p.batch_id for p in self}
         res = super().write(vals)
         new_batch = self.env['stock.picking.batch'].browse(vals['batch_id'] or [])
+        changed = self.browse()
         for picking in self:
             old = old_batches.get(picking.id)
-            if old and old != new_batch and picking.state not in ('done', 'cancel'):
+            is_open = picking.state not in ('done', 'cancel')
+            if old != new_batch and is_open:
+                changed |= picking
+            if old and old != new_batch and is_open:
                 old.sudo().write({'all_picking_ids': [(3, picking.id)]})
             if new_batch and picking not in new_batch.all_picking_ids:
                 new_batch.sudo().write({'all_picking_ids': [(4, picking.id)]})
+        changed._ugurlar_reset_route_state()
         return res
+
+    def _ugurlar_reset_route_state(self):
+        """Açık move'lardaki rota durumunu (toplanan, "Eksik" işareti, paketleme sayacı)
+        sıfırlar. Bu değerler tek bir rotaya aittir; picking rotadan çıkınca ya da başka
+        rotaya girince taşınırsa yeni rotada eksik denetimi atlanır, paketleme hedefi eski
+        toplanan olur ve operatör karar vermeden eksik sevk/backorder oluşur.
+        Biten/iptal move'lar geçmiş kaydıdır, dokunulmaz. Yalnız değişen satırlar yazılır."""
+        moves = self.move_ids.filtered(lambda m: m.state not in ('done', 'cancel') and (
+            m.wave_collected_qty or m.wave_skipped or m.packing_scanned_qty))
+        if moves:
+            moves.sudo().write({'wave_collected_qty': 0, 'wave_skipped': False,
+                                'packing_scanned_qty': 0})
 
     def _action_done(self):
         res = super()._action_done()

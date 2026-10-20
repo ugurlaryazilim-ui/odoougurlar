@@ -534,6 +534,59 @@ class TestRouteValidateAtPacking(PackingCase):
         self.assertIn(self.prod3, p2.move_ids.product_id)
         self.assertEqual(len(sale2.picking_ids), 1)
 
+    # ─── Rota durumu (wave_* / paketleme sayacı) rotadan çıkınca sıfırlanır ───
+    def _route_state(self, picking):
+        return [(m.wave_collected_qty, m.wave_skipped, m.packing_scanned_qty)
+                for m in picking.move_ids]
+
+    def test_skipped_picking_rerouted_needs_fresh_collection_and_ships_full(self):
+        """Eksik → rotadan çık → yeni rota: eski "Eksik" işareti taşınmaz. Taşınırsa eksik
+        denetimi sessizce geçer, paketleme hedefi toplanan olur, kalan için operatör karar
+        vermeden backorder açılır."""
+        sale, picking = self._sale(self.prod, 2)
+        batch1 = self._route(picking)
+        picking.move_ids.wave_skipped = True
+        self.assertTrue(self.batch_ctl.batch_collect_complete(batch_id=batch1.id).get('success'))
+        self.assertFalse(picking.batch_id, 'ön koşul: rotadan çıkarıldı')
+        self.assertEqual(self._route_state(picking), [(0, False, 0)])
+
+        batch2 = self._route(picking, keep_route_state=False)
+        picking.move_ids.wave_collected_qty = 1
+        res = self.batch_ctl.batch_collect_complete(batch_id=batch2.id)
+        self.assertIn('error', res, 'eksik toplanan ürün yeni rotada sorulmalı')
+        picking.move_ids.wave_collected_qty = 2
+        self.assertTrue(self.batch_ctl.batch_collect_complete(batch_id=batch2.id).get('success'))
+        detail = self.pack_ctl.packing_batch_detail(batch_id=batch2.id)
+        self.assertEqual(detail['items'][0]['target_qty'], 2)
+        self._scan(batch2, 2)
+        self.assertEqual(picking.state, 'done')
+        self.assertEqual(self._shipped_qty(picking), 2)
+        self.assertEqual(self._delivered(sale), 2)
+        self.assertFalse(self.env['stock.picking'].search([('backorder_id', '=', picking.id)]))
+
+    def test_route_state_reset_when_open_picking_changes_route(self):
+        """Tek kural (stock.picking.write): açık picking rotadan çıkınca / başka rotaya
+        geçince / rotaya girerken eski rota durumu silinir (canlıdaki eski işaretler de
+        sonraki rotaya girerken temizlenir). Biten picking'in geçmişi korunur."""
+        _sale, picking = self._sale(self.prod, 2)
+        picking.move_ids.write({'wave_collected_qty': 1, 'wave_skipped': True,
+                                'packing_scanned_qty': 1})
+        batch = self._route(picking, keep_route_state=False)
+        self.assertEqual(self._route_state(picking), [(0, False, 0)], 'rotaya girerken')
+        picking.move_ids.write({'wave_collected_qty': 1, 'wave_skipped': True})
+        self._route(picking, keep_route_state=False)
+        self.assertEqual(self._route_state(picking), [(0, False, 0)], 'rota değişince')
+        self.assertNotIn(picking, batch.all_picking_ids)
+
+        _sale2, done = self._sale(self.prod, 1)
+        batch3 = self._route(done)
+        done.move_ids.wave_collected_qty = 1
+        self.assertTrue(self.batch_ctl.batch_collect_complete(batch_id=batch3.id).get('success'))
+        self._scan(batch3, 1)
+        self.assertEqual(done.state, 'done')
+        done.write({'batch_id': False})
+        self.assertEqual(self._route_state(done), [(1, False, 1)], 'biten picking korunur')
+
     # ─── İnceleme 4: model katmanında silme koruması ───
     def test_model_unlink_blocked_when_collected_not_packed(self):
         _sale, _picking, batch, _res = self._collected_route(1)
