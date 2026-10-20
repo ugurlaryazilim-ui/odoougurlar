@@ -562,6 +562,18 @@ class TestVendorClaimMultiItem(VcCase):
         _r, inv = self._create(data=self._data(customer_mobile='', customer_code='', invoice_no='UGR-7007'))
         self.assertEqual(self._html(inv).count('class="article"'), 1)
 
+    def test_musteri_talebi_metin_olmayan_deger_500_vermez(self):
+        for bad in (['repair'], {'a': 1}, 5, None, 'yok-boyle-secenek'):
+            items = self._items()
+            items[0]['customer_request'] = bad
+            res, claims = self._create(items=items, data=self._data(invoice_no='UGR-%s' % id(bad)))
+            self.assertEqual(claims[0].customer_request, 'inspect', bad)   # geçersiz → varsayılan, hata yok
+        # eski tek kayıtlı çağrı (ortak data yolu) da aynı korumadan geçer
+        res = self.controller('create_claim', data=self._data(
+            product_barcode='8690000000311', defect_description='X', customer_request=['replace']))
+        self.assertNotIn('error', res, res)
+        self.assertEqual(self.Claim.browse(res['id']).customer_request, 'inspect')
+
     def test_coklu_fis_pdf_turkce(self):
         import io
         from odoo.tools.pdf import PdfFileReader

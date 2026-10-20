@@ -247,8 +247,9 @@ class VendorClaimController(http.Controller):
                 # Mobil ortak "Not"u `data.notes` ile yollar; ürüne özel not varsa o önce gelir
                 'notes': _text(item.get('notes')) or _text(data.get('notes')) or False,
             })
-            if item.get('customer_request') in requests:
-                vals['customer_request'] = item['customer_request']
+            request_type = item.get('customer_request')
+            if isinstance(request_type, str) and request_type in requests:   # liste/sözlük hashlenemez → 500
+                vals['customer_request'] = request_type
             vals_list.append(vals)
         try:
             with request.env.cr.savepoint():
