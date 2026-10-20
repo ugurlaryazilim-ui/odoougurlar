@@ -75,27 +75,32 @@
                             <strong style="font-size: 15px;" t-out="o.company_id.name"/><br/>
                             <span>Ürün İnceleme Teslim Fişi</span>
                         </div>
+                        <!-- Barkod: fatura varsa fatura no (listede okutunca kayıt bulunur), yoksa takip no -->
+                        <t t-set="code" t-value="o.invoice_no or o.name"/>
                         <div style="text-align: center; margin: 6px 0;">
-                            <img t-att-src="'/report/barcode/Code128/%s?width=600&amp;height=120' % o.name" style="width: 64mm; height: 14mm;"/>
-                            <div style="font-size: 16px; font-weight: bold;" t-out="o.name"/>
+                            <img t-att-src="'/report/barcode/Code128/%s?width=600&amp;height=120' % code" style="width: 64mm; height: 14mm;"/>
+                            <div style="font-size: 12px;" t-out="code"/>
+                            <div style="font-size: 16px; font-weight: bold; margin-top: 2px;">Takip No: <t t-out="o.name"/></div>
                         </div>
-                        <table style="width: 100%;">
-                            <tr><td>Tarih</td><td><span t-field="o.create_date"/></td></tr>
-                            <tr><td>Müşteri</td><td t-out="o.customer_name"/></tr>
-                            <tr t-if="o.customer_mobile"><td>Telefon</td><td t-out="o.customer_mobile"/></tr>
-                            <tr t-if="o.invoice_no"><td>Fatura</td><td t-out="o.invoice_no"/></tr>
-                            <tr><td>Ürün</td><td t-out="o.product_name or o.product_code or ''"/></tr>
-                            <tr t-if="o.product_barcode"><td>Barkod</td><td t-out="o.product_barcode"/></tr>
+                        <t t-set="lbl" t-value="'width: 19mm; font-weight: bold; vertical-align: top; padding: 1px 4px 1px 0; white-space: nowrap;'"/>
+                        <t t-set="val" t-value="'vertical-align: top; padding: 1px 0;'"/>
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tr><td t-att-style="lbl">Tarih:</td><td t-att-style="val"><span t-field="o.create_date" t-options="{'widget': 'datetime', 'format': 'dd.MM.yyyy HH:mm'}"/></td></tr>
+                            <tr><td t-att-style="lbl">Müşteri:</td><td t-att-style="val" t-out="o.customer_name"/></tr>
+                            <tr t-if="o.customer_mobile"><td t-att-style="lbl">Telefon:</td><td t-att-style="val" t-out="o.customer_mobile"/></tr>
+                            <tr t-if="o.invoice_no"><td t-att-style="lbl">Fatura No:</td><td t-att-style="val" t-out="o.invoice_no"/></tr>
+                            <tr><td t-att-style="lbl">Ürün:</td><td t-att-style="val" t-out="o.product_name or o.product_code or ''"/></tr>
+                            <tr t-if="o.product_barcode"><td t-att-style="lbl">Barkod:</td><td t-att-style="val" t-out="o.product_barcode"/></tr>
                         </table>
-                        <div style="margin-top: 6px;"><strong>Şikayet:</strong>
+                        <div style="margin-top: 6px; border-top: 1px dashed #000; padding-top: 4px;"><strong>Şikayet:</strong>
                             <div style="white-space: pre-line;" t-out="o.defect_description"/>
                         </div>
                         <div style="margin-top: 8px; font-size: 10px;">
                             Ürününüz incelenmek üzere üretici firmaya gönderilecektir. İnceleme sonucu tarafınıza bildirilecektir.
                             Teslim almak için bu fişi getiriniz.
                         </div>
-                        <div style="margin-top: 14px;">Teslim Alan: <span t-out="o.user_id.name or ''"/></div>
-                        <div style="margin-top: 14px;">Müşteri İmza: ..............................</div>
+                        <div style="margin-top: 14px;"><strong>Teslim Alan:</strong> <span t-out="o.user_id.name or ''"/></div>
+                        <div style="margin-top: 14px;"><strong>Müşteri İmza:</strong> ..............................</div>
                     </div>
                 </div>
             </t>
