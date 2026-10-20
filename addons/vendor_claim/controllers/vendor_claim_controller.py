@@ -10,6 +10,7 @@ _logger = logging.getLogger(__name__)
 
 OPEN_STATES = ('received', 'sent', 'returned')
 MAX_PHOTOS = 8
+MAX_ITEMS = 20   # tek kayıt açılışında en fazla ürün
 MAX_PHOTO_BYTES = 6 * 1024 * 1024
 
 
@@ -184,47 +185,75 @@ class VendorClaimController(http.Controller):
     # ─── Kayıt oluşturma ─────────────────────────────
 
     @http.route('/vendor_claim/create', type='jsonrpc', auth='user')
-    def create_claim(self, data=None, photos=None, **kw):
+    def create_claim(self, data=None, photos=None, items=None, **kw):
+        """Kayıt aç. `data`: ortak alanlar (müşteri, fatura). `items`: ürün başına liste (product_barcode,
+        product_code, quantity, defect_description, customer_request, notes, photos) → her ürün ayrı kayıt.
+        `items` yoksa eski tek kayıtlı çağrı: ürün alanları `data` içinde, fotoğraflar `photos`.
+
+        Hepsi ya da hiç: bir üründe doğrulama/kayıt hatası olursa hiçbir kayıt ve SMS oluşmaz. Müşteriye TEK
+        "teslim alındı" SMS'i gider; fiş tek URL'dir."""
         self._check_user()
         data = data or {}
-        if not (data.get('defect_description') or '').strip():
-            return {'error': _('Ayıp / şikayet açıklaması zorunlu.')}
+        if items is None:
+            items = [dict(data, photos=photos)]
+        if not isinstance(items, list) or not items:
+            return {'error': _('En az bir ürün seçin.')}
+        if len(items) > MAX_ITEMS:
+            return {'error': _('Bir seferde en fazla %s ürün kaydedilebilir.') % MAX_ITEMS}
         if not (data.get('customer_name') or '').strip():
             return {'error': _('Müşteri adı zorunlu.')}
-        if not (data.get('product_barcode') or '').strip():
-            return {'error': _('Ürün barkodu zorunlu.')}
-        try:
-            quantity = float(data.get('quantity') or 1)
-        except (TypeError, ValueError):
-            quantity = 1.0
-        vals = {
-            'no_invoice': bool(data.get('no_invoice')),
-            'invoice_no': False if data.get('no_invoice') else (data.get('invoice_no') or False),
-            'invoice_date': False if data.get('no_invoice') else ((data.get('invoice_date') or '')[:10] or False),
+        no_invoice = bool(data.get('no_invoice'))
+        shared = {
+            'no_invoice': no_invoice,
+            'invoice_no': False if no_invoice else (data.get('invoice_no') or False),
+            'invoice_date': False if no_invoice else ((data.get('invoice_date') or '')[:10] or False),
             'customer_code': data.get('customer_code') or False,
             'customer_name': data['customer_name'].strip(),
             'customer_mobile': (data.get('customer_mobile') or '').strip() or False,
             'sales_person': data.get('sales_person') or False,
-            'product_barcode': data['product_barcode'].strip(),
-            'product_code': data.get('product_code') or False,
-            'quantity': max(quantity, 1.0),
-            'defect_description': data['defect_description'].strip(),
-            'notes': (data.get('notes') or '').strip() or False,
         }
-        if data.get('customer_request') in dict(self._claims()._fields['customer_request'].selection):
-            vals['customer_request'] = data['customer_request']
-        if data.get('invoice_items') and not vals['no_invoice']:
-            vals['invoice_items'] = data['invoice_items']
+        if data.get('invoice_items') and not no_invoice:
+            shared['invoice_items'] = data['invoice_items']
+        requests = dict(self._claims()._fields['customer_request'].selection)
+        vals_list = []
+        for idx, item in enumerate(items, 1):
+            item = item if isinstance(item, dict) else {}
+            # Çok ürünlüde hata hangi ürüne ait olduğunu söylesin
+            prefix = _('%s. ürün: ') % idx if len(items) > 1 else ''
+            if not (item.get('defect_description') or '').strip():
+                return {'error': prefix + _('Ayıp / şikayet açıklaması zorunlu.')}
+            if not (item.get('product_barcode') or '').strip():
+                return {'error': prefix + _('Ürün barkodu zorunlu.')}
+            try:
+                quantity = float(item.get('quantity') or 1)
+            except (TypeError, ValueError):
+                quantity = 1.0
+            vals = dict(shared, **{
+                'product_barcode': item['product_barcode'].strip(),
+                'product_code': item.get('product_code') or False,
+                'quantity': max(quantity, 1.0),
+                'defect_description': item['defect_description'].strip(),
+                'notes': (item.get('notes') or '').strip() or False,
+            })
+            if item.get('customer_request') in requests:
+                vals['customer_request'] = item['customer_request']
+            vals_list.append(vals)
         try:
             with request.env.cr.savepoint():
                 # SMS fotoğraflardan sonra kuyruğa alınır: fotoğraf hatası kaydı geri alırsa SMS kaydı kalmaz
-                claim = self._claims().with_context(vendor_claim_defer_sms=True).create(vals)
-                self._attach_photos(claim, photos)
-                sms = claim._notify_state_sms()[claim.id]
+                claims = self._claims().with_context(vendor_claim_defer_sms=True).create(vals_list)
+                for claim, item in zip(claims, items):
+                    self._attach_photos(claim, item.get('photos'))
+                sms = claims._notify_state_sms(group=True)[claims[0].id]   # müşteriye tek SMS
         except Exception as e:
             return self._error(e)
-        return {'id': claim.id, 'name': claim.name, 'vendor': claim.vendor_id.name or '', 'sms': sms,
-                'slip_url': '/report/pdf/vendor_claim.report_vendor_claim_slip/%s' % claim.id}
+        first = claims[0]
+        return {
+            'id': first.id, 'name': first.name, 'vendor': first.vendor_id.name or '', 'sms': sms,
+            'claims': [{'id': c.id, 'name': c.name, 'vendor': c.vendor_id.name or '',
+                        'product_name': c.product_name or c.product_code or ''} for c in claims],
+            'slip_url': '/report/pdf/vendor_claim.report_vendor_claim_slip/%s' % ','.join(map(str, claims.ids)),
+        }
 
     # ─── Liste / detay ───────────────────────────────
 

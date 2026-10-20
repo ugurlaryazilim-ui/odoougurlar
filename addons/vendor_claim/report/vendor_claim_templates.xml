@@ -65,9 +65,13 @@
     </template>
 
     <!-- ═══════════════ Müşteriye verilen teslim fişi (80 mm) ═══════════════ -->
+    <!-- Kayıtlar müşteri bazında gruplanır (_slip_groups): her grup tek fiş. Tek kayıtlı fiş eski görünümdedir;
+         çok kayıtlı grupta başlık / müşteri / barkod bir kez, her ürün için ayrı blok, imza bir kez. -->
     <template id="report_vendor_claim_slip">
         <t t-call="web.html_container">
-            <t t-foreach="docs" t-as="o">
+            <t t-foreach="docs._slip_groups()" t-as="grp">
+                <t t-set="o" t-value="grp[0]"/>
+                <t t-set="multi" t-value="len(grp) &gt; 1"/>
                 <!-- article: Odoo gövdeyi charset=utf-8 içeren rapor düzeniyle sarar; yoksa wkhtmltopdf Latin-1 okur -->
                 <div class="article">
                     <div class="page" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 12px; width: 72mm;">
@@ -75,12 +79,12 @@
                             <strong style="font-size: 15px;" t-out="o.company_id.name"/><br/>
                             <span>Ürün İnceleme Teslim Fişi</span>
                         </div>
-                        <!-- Barkod: fatura varsa fatura no (listede okutunca kayıt bulunur), yoksa takip no -->
+                        <!-- Barkod: fatura varsa fatura no (listede okutunca kayıt bulunur), yoksa (ilk) takip no -->
                         <t t-set="code" t-value="o.invoice_no or o.name"/>
                         <div style="text-align: center; margin: 6px 0;">
                             <img t-att-src="'/report/barcode/Code128/%s?width=600&amp;height=120' % code" style="width: 64mm; height: 14mm;"/>
                             <div style="font-size: 12px;" t-out="code"/>
-                            <div style="font-size: 16px; font-weight: bold; margin-top: 2px;">Takip No: <t t-out="o.name"/></div>
+                            <div t-if="not multi" style="font-size: 16px; font-weight: bold; margin-top: 2px;">Takip No: <t t-out="o.name"/></div>
                         </div>
                         <t t-set="lbl" t-value="'width: 19mm; font-weight: bold; vertical-align: top; padding: 1px 4px 1px 0; white-space: nowrap;'"/>
                         <t t-set="val" t-value="'vertical-align: top; padding: 1px 0;'"/>
@@ -89,18 +93,42 @@
                             <tr><td t-att-style="lbl">Müşteri:</td><td t-att-style="val" t-out="o.customer_name"/></tr>
                             <tr t-if="o.customer_mobile"><td t-att-style="lbl">Telefon:</td><td t-att-style="val" t-out="o.customer_mobile"/></tr>
                             <tr t-if="o.invoice_no"><td t-att-style="lbl">Fatura No:</td><td t-att-style="val" t-out="o.invoice_no"/></tr>
-                            <tr><td t-att-style="lbl">Ürün:</td><td t-att-style="val" t-out="o.product_name or o.product_code or ''"/></tr>
-                            <tr t-if="o.product_barcode"><td t-att-style="lbl">Barkod:</td><td t-att-style="val" t-out="o.product_barcode"/></tr>
+                            <t t-if="not multi">
+                                <tr><td t-att-style="lbl">Ürün:</td><td t-att-style="val" t-out="o.product_name or o.product_code or ''"/></tr>
+                                <tr t-if="o.product_barcode"><td t-att-style="lbl">Barkod:</td><td t-att-style="val" t-out="o.product_barcode"/></tr>
+                            </t>
                         </table>
-                        <div style="margin-top: 6px; border-top: 1px dashed #000; padding-top: 4px;"><strong>Şikayet:</strong>
-                            <div style="white-space: pre-line;" t-out="o.defect_description"/>
+                        <t t-if="not multi">
+                            <div style="margin-top: 6px; border-top: 1px dashed #000; padding-top: 4px;"><strong>Şikayet:</strong>
+                                <div style="white-space: pre-line;" t-out="o.defect_description"/>
+                            </div>
+                        </t>
+                        <t t-else="">
+                            <t t-foreach="grp" t-as="c">
+                                <div style="margin-top: 6px; border-top: 1px dashed #000; padding-top: 4px; page-break-inside: avoid;">
+                                    <div style="font-size: 14px; font-weight: bold;"><t t-out="c_index + 1"/>. Takip No: <t t-out="c.name"/></div>
+                                    <table style="width: 100%; border-collapse: collapse;">
+                                        <tr><td t-att-style="lbl">Ürün:</td><td t-att-style="val" t-out="c.product_name or c.product_code or ''"/></tr>
+                                        <tr t-if="c.product_barcode"><td t-att-style="lbl">Barkod:</td><td t-att-style="val" t-out="c.product_barcode"/></tr>
+                                        <tr t-if="c.customer_request"><td t-att-style="lbl">Talep:</td><td t-att-style="val"><span t-field="c.customer_request"/></td></tr>
+                                    </table>
+                                    <div><strong>Şikayet:</strong> <span style="white-space: pre-line;" t-out="c.defect_description"/></div>
+                                </div>
+                            </t>
+                        </t>
+                        <!-- Bilgilendirme + imza bloğu sayfa sonunda bölünmez (imza satırı tek başına kalmasın) -->
+                        <div style="page-break-inside: avoid;">
+                            <div style="margin-top: 8px; font-size: 10px; border-top: 1px dashed #000; padding-top: 4px;" t-if="multi">
+                                Ürünleriniz incelenmek üzere üretici firmalara gönderilecektir. İnceleme sonucu tarafınıza bildirilecektir.
+                                Teslim almak için bu fişi getiriniz.
+                            </div>
+                            <div style="margin-top: 8px; font-size: 10px;" t-else="">
+                                Ürününüz incelenmek üzere üretici firmaya gönderilecektir. İnceleme sonucu tarafınıza bildirilecektir.
+                                Teslim almak için bu fişi getiriniz.
+                            </div>
+                            <div style="margin-top: 14px;"><strong>Teslim Alan:</strong> <span t-out="o.user_id.name or ''"/></div>
+                            <div style="margin-top: 14px;"><strong>Müşteri İmza:</strong> ..............................</div>
                         </div>
-                        <div style="margin-top: 8px; font-size: 10px;">
-                            Ürününüz incelenmek üzere üretici firmaya gönderilecektir. İnceleme sonucu tarafınıza bildirilecektir.
-                            Teslim almak için bu fişi getiriniz.
-                        </div>
-                        <div style="margin-top: 14px;"><strong>Teslim Alan:</strong> <span t-out="o.user_id.name or ''"/></div>
-                        <div style="margin-top: 14px;"><strong>Müşteri İmza:</strong> ..............................</div>
                     </div>
                 </div>
             </t>

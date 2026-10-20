@@ -6,6 +6,8 @@ from odoo.exceptions import UserError
 from odoo.tests import tagged
 from odoo.tests.common import TransactionCase, new_test_user
 
+from .common import PIXEL, VcCase
+
 
 @tagged('post_install', '-at_install')
 class TestVendorClaim(TransactionCase):
@@ -207,3 +209,223 @@ class TestVendorClaim(TransactionCase):
         self.assertEqual(claim.product_id, self.product)
         self.assertEqual(claim.vendor_id.name, 'ABC Tekstil')   # kart kayıtta oluşur
         self.assertFalse(claim.customer_mobile)
+
+
+@tagged('post_install', '-at_install')
+class TestVendorClaimMultiItem(VcCase):
+    """Mobil 'Yeni İnceleme': fatura ürünlerinden çoklu seçim → ürün başına kayıt, tek SMS, tek fiş."""
+
+    SLIP = 'vendor_claim.action_report_vendor_claim_slip'
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        attr = cls.env['product.attribute'].search([('name', '=', 'Tedarikçi')], limit=1)
+        value = cls.env['product.attribute.value'].create({'name': 'XYZ Deri', 'attribute_id': attr.id})
+        cls.product2 = cls.env['product.template'].create({
+            'name': 'Test Çanta', 'default_code': 'CNT-T2',
+            'attribute_line_ids': [(0, 0, {'attribute_id': attr.id, 'value_ids': [(6, 0, value.ids)]})],
+        }).product_variant_id
+        cls.product2.barcode = '8690000000328'
+
+    def setUp(self):
+        super().setUp()
+        self.icp.set_param('vendor_claim.sms_received_enabled', 'True')
+
+    def _data(self, **extra):
+        data = {'invoice_no': 'UGR-5005', 'invoice_date': '2026-10-05', 'customer_code': 'C-5',
+                'customer_name': 'Ayşe Çelik', 'customer_mobile': '05321234567', 'sales_person': 'Ece'}
+        data.update(extra)
+        return data
+
+    def _items(self):
+        return [
+            {'product_barcode': '8690000000311', 'product_code': 'CKT-T1', 'quantity': 1,
+             'defect_description': 'Fermuar bozuk', 'customer_request': 'repair',
+             'photos': ['data:image/png;base64,' + PIXEL]},
+            {'product_barcode': '8690000000328', 'product_code': 'CNT-T2', 'quantity': 2,
+             'defect_description': 'Sap kopmuş', 'customer_request': 'replace',
+             'photos': ['data:image/png;base64,' + PIXEL, 'data:image/png;base64,' + PIXEL]},
+            {'product_barcode': '8690000000311', 'product_code': 'CKT-T1', 'quantity': 1,
+             'defect_description': 'Dikiş açık'},
+        ]
+
+    def _all_sms(self, claims):
+        return self.env['sms.system.message'].sudo().search(
+            [('res_model', '=', 'vendor.claim'), ('res_id', 'in', claims.ids)])
+
+    def _sms_count(self):
+        return self.env['sms.system.message'].sudo().search_count([('res_model', '=', 'vendor.claim')])
+
+    def _create(self, items=None, data=None):
+        res = self.controller('create_claim', data=data or self._data(), items=items or self._items())
+        self.assertNotIn('error', res, res)
+        return res, self.Claim.browse([c['id'] for c in res['claims']])
+
+    def _html(self, claims):
+        return self.env['ir.actions.report']._render_qweb_html(self.SLIP, claims.ids)[0].decode()
+
+    def test_coklu_urun_n_kayit_acar(self):
+        res, claims = self._create()
+        self.assertEqual(len(claims), 3)
+        self.assertEqual(len(set(claims.mapped('name'))), 3)
+        self.assertTrue(all(n.startswith('INC-') for n in claims.mapped('name')))
+        # ürün başına kendi şikayeti / talebi / tedarikçisi / fotoğrafı
+        self.assertEqual(claims.mapped('defect_description'), ['Fermuar bozuk', 'Sap kopmuş', 'Dikiş açık'])
+        self.assertEqual(claims.mapped('customer_request'), ['repair', 'replace', 'inspect'])
+        self.assertEqual([c.vendor_id.name for c in claims], ['ABC Tekstil', 'XYZ Deri', 'ABC Tekstil'])
+        self.assertEqual([len(c.photo_ids) for c in claims], [1, 2, 0])
+        self.assertEqual(claims.mapped('quantity'), [1.0, 2.0, 1.0])
+        # müşteri / fatura ortak
+        self.assertEqual(set(claims.mapped('customer_name')), {'Ayşe Çelik'})
+        self.assertEqual(set(claims.mapped('invoice_no')), {'UGR-5005'})
+        # yanıt: tüm kayıtlar + tek fiş URL'si
+        self.assertEqual([c['name'] for c in res['claims']], claims.mapped('name'))
+        self.assertEqual(res['claims'][1]['vendor'], 'XYZ Deri')
+        self.assertEqual(res['id'], claims[0].id)
+        self.assertEqual(res['slip_url'], '/report/pdf/vendor_claim.report_vendor_claim_slip/%s'
+                         % ','.join(map(str, claims.ids)))
+
+    def test_tek_sms_ve_takip_nolar_birlesik(self):
+        res, claims = self._create()
+        messages = self._all_sms(claims)
+        self.assertEqual(len(messages), 1, 'müşteriye tek SMS')
+        self.assertIn(', '.join(claims.mapped('name')), messages.body)
+        self.assertEqual(res['sms']['state'], messages.state)
+        self.assertEqual(messages.state, 'test')
+        # diğer kayıtların bayrağı da işaretli: sonradan tekrar SMS gitmez
+        self.assertTrue(all(claims.mapped('sms_received_sent')))
+        claims._notify_state_sms(group=True)
+        claims._notify_state_sms()
+        self.assertEqual(len(self._all_sms(claims)), 1)
+
+    def test_tek_sms_canli_modda_kuyrukta_tek_kayit(self):
+        self.set_param('test_mode', 'False')
+        res, claims = self._create()
+        messages = self._all_sms(claims)
+        self.assertEqual(len(messages), 1)
+        self.assertEqual((messages.state, res['sms']['state']), ('queued', 'queued'))
+        self.assertEqual(self.net.turatel_calls, [], 'istek içinde sağlayıcı çağrısı yok')
+
+    def test_sms_yer_tutuculari_coklu(self):
+        _res, claims = self._create()
+        values = claims._sms_values()
+        self.assertEqual(values['urun'], '3 ürün')
+        self.assertEqual(values['takip'], ', '.join(claims.mapped('name')))
+        self.assertEqual(values['tedarikci'], '', 'farklı tedarikçiler: boş (ilki diğerleri için yanlış olur)')
+        self.assertEqual(values['musteri'], 'Ayşe Çelik')
+        same = (claims[0] | claims[2])._sms_values()
+        self.assertEqual((same['urun'], same['tedarikci']), ('2 ürün', 'ABC Tekstil'))
+        single = claims[1]._sms_values()   # tek kayıt: eski davranış
+        self.assertEqual((single['takip'], single['tedarikci']), (claims[1].name, 'XYZ Deri'))
+
+    def test_bir_oge_hataliysa_hic_kayit_ve_sms_yok(self):
+        before = self.Claim.search_count([])
+        sms_before = self._sms_count()
+        items = self._items()
+        items[1]['defect_description'] = '   '   # ikinci ürünün şikayeti boş
+        res = self.controller('create_claim', data=self._data(), items=items)
+        self.assertIn('2. ürün', res.get('error', ''))
+        self.assertEqual(self.Claim.search_count([]), before)
+        self.assertEqual(self._sms_count(), sms_before)
+        items = self._items()
+        items[2]['product_barcode'] = ''
+        self.assertIn('3. ürün', self.controller('create_claim', data=self._data(), items=items).get('error', ''))
+        self.assertEqual(self.Claim.search_count([]), before)
+
+    def test_kayit_asamasinda_hata_tum_kayitlari_ve_smsi_geri_alir(self):
+        """Üçüncü ürünün fotoğraf adımı patlarsa ilk ikisi ve SMS de kalmaz (tek savepoint)."""
+        from odoo.addons.vendor_claim.controllers.vendor_claim_controller import VendorClaimController
+        real = VendorClaimController._attach_photos
+        calls = []
+
+        def flaky(ctrl, claim, photos):
+            calls.append(claim.id)
+            if len(calls) == 3:
+                raise ValueError('disk dolu')
+            return real(ctrl, claim, photos)
+
+        before = self.Claim.search_count([])
+        sms_before = self._sms_count()
+        with patch.object(VendorClaimController, '_attach_photos', flaky):
+            res = self.controller('create_claim', data=self._data(), items=self._items())
+        self.assertIn('error', res)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(self.Claim.search_count([]), before)
+        self.assertEqual(self._sms_count(), sms_before)
+
+    def test_urun_ve_musteri_zorunlu_alanlar(self):
+        self.assertIn('error', self.controller('create_claim', data=self._data(), items=[]))
+        self.assertIn('error', self.controller('create_claim', data=self._data(customer_name=' '),
+                                               items=self._items()))
+        too_many = [dict(self._items()[0]) for _i in range(21)]
+        self.assertIn('error', self.controller('create_claim', data=self._data(), items=too_many))
+
+    def test_tek_kayitli_eski_cagri_calisir(self):
+        data = self._data(product_barcode='8690000000311', product_code='CKT-T1', quantity=1,
+                          defect_description='Taban ayrıldı', customer_request='replace', notes='iç not')
+        res = self.controller('create_claim', data=data, photos=['data:image/png;base64,' + PIXEL, 'foto-degil'])
+        self.assertNotIn('error', res, res)
+        claim = self.Claim.browse(res['id'])
+        self.assertEqual((res['name'], res['vendor']), (claim.name, 'ABC Tekstil'))
+        self.assertEqual((claim.defect_description, claim.customer_request, claim.notes),
+                         ('Taban ayrıldı', 'replace', 'iç not'))
+        self.assertEqual(len(claim.photo_ids), 1)
+        self.assertEqual(res['claims'], [{'id': claim.id, 'name': claim.name, 'vendor': 'ABC Tekstil',
+                                          'product_name': claim.product_name}])
+        self.assertEqual(res['slip_url'], '/report/pdf/vendor_claim.report_vendor_claim_slip/%s' % claim.id)
+        self.assertEqual(len(self.claim_sms(claim)), 1)
+        self.assertEqual(res['sms']['state'], 'test')
+        self.assertTrue(claim.sms_received_sent)
+        self.assertIn(claim.name, self.claim_sms(claim).body)
+        # eski çağrıda şikayet boşsa hata, kayıt yok
+        before = self.Claim.search_count([])
+        bad = self.controller('create_claim', data=dict(data, defect_description=''))
+        self.assertIn('Ayıp / şikayet', bad['error'])
+        self.assertEqual(self.Claim.search_count([]), before)
+
+    def test_coklu_fis_html_tek_fis(self):
+        _res, claims = self._create()
+        html = self._html(claims)
+        for claim in claims:
+            self.assertIn(claim.name, html)
+        self.assertEqual(html.count('Ayşe Çelik'), 1, 'müşteri bilgisi bir kez')
+        self.assertEqual(html.count('class="article"'), 1)
+        self.assertEqual(html.count('Müşteri İmza'), 1)
+        self.assertEqual(html.count('Teslim Alan'), 1)
+        self.assertEqual(html.count('/report/barcode/Code128/UGR-5005?'), 1)
+        for text in ('Fermuar bozuk', 'Sap kopmuş', 'Dikiş açık', '8690000000328', 'Tamir', 'Değişim'):
+            self.assertIn(text, html)
+
+    def test_coklu_fis_faturasizda_ilk_takip_no_barkod(self):
+        _res, claims = self._create(data=self._data(no_invoice=True))
+        html = self._html(claims)
+        self.assertEqual(html.count('/report/barcode/Code128/'), 1)
+        self.assertIn('/report/barcode/Code128/%s?' % claims[0].name, html)
+
+    def test_farkli_musteriler_ayri_fis(self):
+        _r1, first = self._create()
+        _r2, second = self._create(data=self._data(customer_name='Burak Aydın', customer_mobile='05559998877',
+                                                   invoice_no='UGR-6006'), items=self._items()[:2])
+        html = self._html(first | second)
+        self.assertEqual(html.count('class="article"'), 2)
+        self.assertEqual(html.count('Ayşe Çelik'), 1)
+        self.assertEqual(html.count('Burak Aydın'), 1)
+        # her takip no kendi müşterisinin fişinde
+        first_slip = html.split('class="article"')[1]
+        self.assertTrue(all(n in first_slip for n in first.mapped('name')))
+        self.assertFalse(any(n in first_slip for n in second.mapped('name')))
+
+    def test_coklu_fis_pdf_turkce(self):
+        import io
+        from odoo.tools.pdf import PdfFileReader
+        _res, claims = self._create()
+        pdf = self.env['ir.actions.report'].with_context(force_report_rendering=True)._render_qweb_pdf(
+            self.SLIP, claims.ids)[0]
+        text = '\n'.join(p.extract_text() for p in PdfFileReader(io.BytesIO(pdf)).pages)
+        self.assertIn('Ürün İnceleme Teslim Fişi', text)
+        self.assertIn('Ayşe Çelik', text)
+        self.assertIn('Dikiş açık', text)
+        for name in claims.mapped('name'):
+            self.assertIn(name, text)
+        self.assertNotIn('Ã', text)
