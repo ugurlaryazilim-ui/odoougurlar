@@ -63,7 +63,20 @@ CONFIRM_MAX_PACKETS = 30          # durum cron'u çalışma başına en çok bu 
 CONFIRM_SAME_ERROR_LIMIT = 3      # art arda bu kadar aynı hata: Turatel tarafı sorunlu, bu çalışmada onay kesilir
 RECONCILED_NO_PACKET = ('Belirsiz gönderim durum raporunda bulundu; paket no bilinmediği için Turatel onay '
                         'durumu bilinmiyor.')
+REPORT_LIMIT = 2000               # delivery_report toplam sınırı (eski satırlar kırpılır)
 CONFIRM_PARAMS = {'info': 'sms_system.turatel_confirm_info', 'commercial': 'sms_system.turatel_confirm_commercial'}
+
+
+def append_report(existing, line, limit=REPORT_LIMIT):
+    """İletim raporuna satır ekle (aynı satır tekrar edilmez); toplam ``limit`` karakteri aşarsa önce en eski
+    ham durum satırları ('{' ile başlayan), sonra en eski satırlar atılır."""
+    lines = [ln for ln in (existing or '').split('\n') if ln]
+    if line and line not in lines:
+        lines.append(line)
+    while len('\n'.join(lines)) > limit and len(lines) > 1:
+        raw_rows = [i for i, ln in enumerate(lines[:-1]) if ln.startswith('{')]
+        del lines[raw_rows[0] if raw_rows else 0]
+    return '\n'.join(lines)[-limit:]
 
 
 def test_mode_enabled(value):
@@ -857,20 +870,16 @@ class SmsSystemMessage(models.Model):
                 if legacy or (row.code and not marked):
                     vals['delivery_code'] = row.code or False   # status:0/2 bilgisi; onay işareti ezilmez
             # Ham satır (maskeli, ≤500 karakter) cron'da da yazılır: belgesiz alanlar sonradan doğrulanabilsin.
-            # Onay işareti varsa onay notu silinmesin diye satır eklenir (aynı satır tekrar eklenmez)
-            if marked and msg.delivery_report:
-                if row.raw not in msg.delivery_report:
-                    vals['delivery_report'] = '\n'.join([msg.delivery_report, row.raw])
-            else:
-                vals['delivery_report'] = row.raw
+            # Mevcut not ("ConfirmSms onaylandı" vb.) silinmez, satır eklenir (aynı satır tekrar eklenmez)
+            vals['delivery_report'] = append_report(msg.delivery_report, row.raw)
             if msg.state == 'uncertain':
                 reconciled += 1
                 vals.update(state='sent', error=False, sent_at=msg.sent_at or msg.write_date)
                 vals.setdefault('delivery_state', 'pending')
                 if not msg.provider_packet_id:
                     # Paket no yok: ConfirmSms gönderilemez, onaylanıp onaylanmadığı bilinmez
-                    vals['delivery_report'] = '\n'.join(filter(None, [
-                        vals.get('delivery_report', msg.delivery_report), RECONCILED_NO_PACKET]))
+                    vals['delivery_report'] = append_report(vals.get('delivery_report', msg.delivery_report),
+                                                            RECONCILED_NO_PACKET)
             if row.message_id and not msg.provider_msg_id:
                 vals['provider_msg_id'] = row.message_id
             if any(msg[name] != value for name, value in vals.items()):
@@ -898,6 +907,12 @@ class SmsSystemMessage(models.Model):
                                   ('sent_at', '<', since)])
         if expired:
             expired.write({'delivery_state': 'unknown'})
+        # Eski eşlemenin yanlış 'iletildi' (kod 0) dediği, 48 saati geçmiş kayıtlar: yeniden sorgulanamaz, doğrulanmadı
+        stale = Message.search([('state', '=', 'sent'), ('provider_service', 'in', JSON_SERVICES),
+                                ('delivery_state', '=', 'delivered'), ('delivery_code', '=', LEGACY_DELIVERED_CODE),
+                                ('sent_at', '<', since)])
+        if stale:
+            stale.write({'delivery_state': 'unknown'})
         IrCron._commit_progress()
         cfg = Message._settings()
         if cfg['api_mode'] != 'json':

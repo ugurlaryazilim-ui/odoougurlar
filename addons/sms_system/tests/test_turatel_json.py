@@ -648,3 +648,26 @@ class TestTuratelJsonClient(SmsTestCase):
         self.assertTrue(text, 'İstemci en az bir DEBUG satırı yazmalı')
         for secret in ('Merhaba', 'info_pw', 'Bearer', 'TOK-') + tuple(NUMBERS):
             self.assertNotIn(secret, text)
+
+    def test_teslim_tarihi_yer_tutucusu_kanit_sayilmaz(self):
+        api = self.json_api()
+        for value in (None, '', ' ', '000000000000', '0', '0001-01-01T00:00:00', '0001010000000'):
+            with self.subTest(deger=value):
+                self.assertFalse(api.has_delivery_date(value))
+                self.assertEqual(api.status_code(1, '', value), 'status:1:tarih-yok')
+        self.assertTrue(api.has_delivery_date('201026123000'))
+        self.assertEqual(api.status_code(1, '', '201026123000'), 'status:1')
+
+    def test_eski_yalniz_rakam_status_kodlari_iletilemedi_sayilmaz(self):
+        """Eski sürüm `status` değerini kod diye saklardı ('1', '2'...): ulaşmış SMS 'iletilemedi' görünmesin."""
+        api = self.json_api()
+        for code in ('0', '1', '2', '3', 1, 2):
+            with self.subTest(kod=code):
+                state, label = api.delivery_state(code)
+                self.assertEqual(state, 'unknown')
+                self.assertIn('eski kayıt', label)
+        # Gerçek reason kodları etkilenmez; tek haneli reason 'kod:' önekiyle saklanır ve iletilemedi sayılır
+        self.assertEqual(api.delivery_state('114')[0], 'undelivered')
+        self.assertEqual(api.delivery_state('-8000')[0], 'undelivered')
+        self.assertEqual(api.status_code(2, '5', ''), 'kod:5')
+        self.assertEqual(api.delivery_state('kod:5'), ('undelivered', 'iletilemedi (kod 5)'))

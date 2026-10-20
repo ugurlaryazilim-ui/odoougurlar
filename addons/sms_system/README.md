@@ -131,8 +131,11 @@ Satır alanları: `status`, `reason`, `deliveryDate` (ddMMyyHHmmss). `status` pa
 `confirm_failed` işaretleri yalnız nihai sonuçla değişir. Ham satır (maskeli, en çok 500 karakter) cron'da da
 "İletim Raporu"na yazılır; onay notu varsa altına eklenir.
 **Veri düzeltmesi:** önceki sürüm `status 0`'ı "iletildi" sayıp `delivery_code = 0` yazdı. Migration yoktur; cron,
-son 48 saatte gönderilmiş `delivered` + kod `0` kayıtları bir kez yeniden sorgular ve düzeltir. 48 saati geçen eski
-kayıtlar değişmez (kod `0` görünümü "doğrulanmadı (eski kayıt)").
+son 48 saatte gönderilmiş `delivered` + kod `0` kayıtları bir kez yeniden sorgular ve düzeltir. 48 saati geçen
+`delivered` + kod `0` kayıtlar sorgulanamaz: cron bunları "Bilinmiyor" yapar. Eski sürümün `status` değerini kod diye
+sakladığı tek haneli kodlar (`0`-`9`) "doğrulanmadı (eski kayıt)" görünür. Tek haneli gerçek `reason` `kod:N` olarak
+saklanır. `deliveryDate` tamamen sıfır ya da `0001…` yer tutucuysa teslim kanıtı sayılmaz. Ham satır mevcut rapor
+notunu silmez, altına eklenir (toplam 2000 karakter; önce en eski ham satırlar kırpılır).
 
 - `-6`: durum sorgularında "kayıt yok" (boş liste). Gönderilmiş kayıt varken geliyorsa tarih biçimi/aralığı sorunudur;
   diğer uçlarda normal hatadır.

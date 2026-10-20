@@ -161,6 +161,14 @@ STATUS_LABELS = {
     STATUS_PREFIX + '2': ('pending', 'operatöre iletildi, rapor bekleniyor'),
 }
 CODE_LIMIT = 64
+REASON_PREFIX = 'kod:'   # tek haneli reason: eski sürümün status kodlarından ('1', '2'...) ayırt edilsin diye
+LEGACY_LABEL = 'doğrulanmadı (eski kayıt, yeniden sorgulanıyor)'
+
+
+def has_delivery_date(value):
+    """deliveryDate gerçek bir teslim zamanı mı: boş, tamamen sıfır ya da '0001…' yer tutucusu kanıt sayılmaz."""
+    text = _text(value) or ''
+    return bool(text.strip('0 -:.T')) and not text.startswith('0001')
 
 
 def status_code(status, reason, delivery_date):
@@ -168,7 +176,8 @@ def status_code(status, reason, delivery_date):
     dolu 'status:1' (iletildi), 'status:0', 'status:2'; status boşsa ''. Başka status 'status:N' (bilinmeyen)."""
     reason = mask_digits(_text(reason) or '')[:CODE_LIMIT]
     if reason and reason != '0':
-        return reason
+        # Tek haneli reason eski status kodlarıyla ('1', '2'...) karışmasın
+        return REASON_PREFIX + reason if len(reason) == 1 and reason.isdigit() else reason
     status = _text(status) or ''
     if not status:
         return ''
@@ -176,7 +185,7 @@ def status_code(status, reason, delivery_date):
         status = str(int(status))
     except ValueError:
         status = mask_digits(status)[:CODE_LIMIT]
-    if status == '1' and not _text(delivery_date):
+    if status == '1' and not has_delivery_date(delivery_date):
         return STATUS_NO_DATE
     return STATUS_PREFIX + status
 
@@ -192,8 +201,12 @@ def delivery_state(code):
         return STATUS_LABELS[key]
     if key.startswith(STATUS_PREFIX):
         return 'unknown', 'bilinmeyen (durum %s)' % key[len(STATUS_PREFIX):]
-    if key == LEGACY_DELIVERED_CODE:
-        return 'unknown', 'doğrulanmadı (eski kayıt, yeniden sorgulanıyor)'
+    if key.startswith(REASON_PREFIX):
+        key = key[len(REASON_PREFIX):]
+        return 'undelivered', DELIVERY_LABELS.get(key, 'iletilemedi (kod %s)' % key)
+    if len(key) == 1 and key.isdigit() and key not in DELIVERY_LABELS:
+        # '0' ve '1', '2'...: eski sürüm `status` değerini kod diye saklardı; teslim kanıtı değildir
+        return 'unknown', LEGACY_LABEL
     return 'undelivered', DELIVERY_LABELS.get(key, 'iletilemedi (kod %s)' % key)
 
 

@@ -675,7 +675,8 @@ class TestLiveStatusMapping(StatusMixin, SmsTestCase):
         self.refresh_all(wrong, reached, too_old)
         self.assertEqual((wrong.delivery_state, wrong.delivery_code), ('pending', 'status:0'))
         self.assertEqual((reached.delivery_state, reached.delivery_code), ('delivered', 'status:1'))
-        self.assertEqual((too_old.delivery_state, too_old.delivery_code), ('delivered', '0'), '48 saat dışı dokunulmaz')
+        self.assertEqual((too_old.delivery_state, too_old.delivery_code), ('unknown', '0'),
+                         '48 saat dışı sorgulanmaz, doğrulanmadı olur')
 
     def test_eski_yanlis_delivered_kayit_reason_ile_iletilemediye_gecer(self):
         wrong = self.make_tracked('05321230034', message_id='974004', delivery_state='delivered', delivery_code='0')
@@ -693,3 +694,50 @@ class TestLiveStatusMapping(StatusMixin, SmsTestCase):
         self.refresh_all(msg)
         self.assertEqual((msg.delivery_state, msg.delivery_code), ('pending', 'status:0'))
         self.assertIn('"status":0', msg.delivery_report)
+
+    def test_eski_yanlis_delivered_48_saati_asan_kayit_dogrulanmadi_olur(self):
+        old = self.make_tracked('05321230041', message_id='976001', hours_ago=60, delivery_state='delivered',
+                                delivery_code='0')
+        fresh_ok = self.make_tracked('05321230042', message_id='976002', hours_ago=60, delivery_state='delivered',
+                                     delivery_code='status:1')
+        legacy_service = self.make_tracked('05321230043', message_id='976003', hours_ago=60, service='legacy',
+                                           delivery_state='delivered', delivery_code='0')
+        self.cron_status()
+        self.refresh_all(old, fresh_ok, legacy_service)
+        self.assertEqual(old.delivery_state, 'unknown')
+        self.assertIn('eski kayıt', old.delivery_label)
+        self.assertEqual(fresh_ok.delivery_state, 'delivered', 'Doğrulanmış kayda dokunulmaz')
+        self.assertEqual(legacy_service.delivery_state, 'delivered', 'Eski XML kaydı JSON takibinde değil')
+
+    def test_teslim_tarihi_sifir_yer_tutucu_ise_bekliyor(self):
+        for i, placeholder in enumerate(('000000000000', '0001-01-01T00:00:00')):
+            with self.subTest(deger=placeholder):
+                msg = self.one_cycle(1, '', placeholder, message_id='977%03d' % i, number='053212350%02d' % i)
+                self.assertEqual(msg.delivery_state, 'pending')
+
+    def test_ham_satir_onay_notunu_silmez_ekler_ve_tekrarlamaz(self):
+        msg = self.make_tracked(message_id='978001', delivery_report='ConfirmSms onaylandı: {"isSuccess":true}')
+        mid = self.register_at_provider(msg)
+        self.net.tj.set_status(mid, 2)
+        self.cron_status()
+        self.cron_status()
+        self.refresh_all(msg)
+        lines = msg.delivery_report.split('\n')
+        self.assertEqual(lines[0], 'ConfirmSms onaylandı: {"isSuccess":true}')
+        self.assertEqual(len(lines), 2, 'Aynı ham satır tekrar eklenmez')
+        self.assertIn('"status":2', lines[1])
+        self.net.tj.set_status(mid, 1, '', self.DATE)
+        self.cron_status()
+        self.refresh_all(msg)
+        self.assertEqual(len(msg.delivery_report.split('\n')), 3)
+
+    def test_rapor_2000_karakteri_asmaz_eski_ham_satirlar_kirpilir(self):
+        from ..models.sms_message import append_report
+        note = 'ConfirmSms onaylandı: tamam'
+        report = note
+        for i in range(10):
+            report = append_report(report, '{"i":%d,"x":"%s"}' % (i, 'a' * 480))
+        self.assertLessEqual(len(report), 2000)
+        self.assertIn(note, report, 'Not, ham satırlardan önce kırpılmaz')
+        self.assertTrue(report.endswith('"i":9' + ',"x":"%s"}' % ('a' * 480)), 'En yeni satır kalır')
+        self.assertNotIn('"i":0,', report)
