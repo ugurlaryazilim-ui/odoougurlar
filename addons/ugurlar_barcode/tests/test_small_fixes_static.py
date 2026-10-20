@@ -232,6 +232,11 @@ class TestSmallFixesStatic(TransactionCase):
         self.assertLess(late.find('res.error'), m.start(), 'res.error dalı başarı mantığından önce olmalı')
         self.assertIn('failed_pickings', late)
         self.assertNotRegex(late[:m.start()].split('res.error', 1)[1].split('return;', 1)[0], r'completeDone\s*=\s*true')
+        # Rota Tamamla sevkiyatı doğrulamaz: toplama kapandıysa (collect_done) düğme kilitlenir,
+        # rota state'i yalnız sunucu batch_done derse 'done' olur
+        self._has(late, r'res\.collect_done', 'collect_done yanıtı düğmeyi kilitlemiyor')
+        self._has(late, r"if \(res\.batch_done\)\s*\{\s*this\.state\.batch\.state\s*=\s*'done'",
+                  "batch.state yalnız batch_done ile 'done' yapılmalı")
         # Düğme done / completeDone iken görünmez; yeni rota seçilince sıfırlanır
         self._has(src, r"state\.batch\.state !== 'done' and !state\.completeDone", 'düğme completeDone ile gizlenmiyor')
         sel = _method_body(src, r'async selectBatch\(batchId\)')
