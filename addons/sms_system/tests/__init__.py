@@ -21,3 +21,4 @@ from . import test_json_c4_extra
 from . import test_review_round1_c
 from . import test_confirm_sms
 from . import test_json_single_receiver
+from . import test_iys_consent
