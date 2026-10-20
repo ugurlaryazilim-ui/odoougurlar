@@ -42,18 +42,21 @@ Rehber > "İYS İzni Al" sihirbazı iki yoldan izin kaydeder; ikisi de önce ki�
 **Akış:** `Session` → `Query` → (kişi yoksa) `Contact` → `Trigger` → `Approve` (onay kodu yolu) ya da
 `Session` → `Query` → (kişi yoksa) `Contact` → `ContactApiLoad` (form yolu). Kaydı olmayan kişide `Contact`
 çağrılmadan `Trigger`/`ContactApiLoad` `-6/-601` "Kişi kayıtlarda yok" döner; bu yüzden kart önce açılır.
-- `Contact` (`POST .../webservice/api/Contact`): `CommunicationTools.Msisdn` + opsiyonel `ContactDetails`
-  (`Name`, `Surname`, `RemoteReferenceId`). Boş alan gönderilmez.
+- `Contact` (`POST .../webservice/api/Contact`): `CommunicationTools.Msisdn` + `ContactDetails`
+  (**zorunlu nesne**): `AccountType` (Int, zorunlu; 1 Bireysel, 2 Tacir; biz hep 1) + opsiyonel `Name`, `Surname`,
+  `RemoteReferenceId`. Boş ad/soyad gönderilmez. AccountType yoksa canlıda `-5/-200` "Alanı zorunludur",
+  ContactDetails hiç yoksa `-99/-99` döner.
 - **Ad/Soyad:** sihirbazdaki "Ad Soyad" son boşluktan bölünür ("Ayşe Nur Yılmaz" → Ad "Ayşe Nur", Soyad "Yılmaz");
   tek kelimeyse yalnız `Name` gider.
 - **RemoteReferenceId:** rehberde (aktif ya da arşivli) kişi varsa `odoo-contact-<rehber id>`, yoksa normalize
   numara (`5XXXXXXXXX`). Kart İYS'de bir kez açıldığı için değer sonradan değişmez; rehbere sonradan eklenen kişi
   için eski kartın referansı numara olarak kalır.
-- `-6/-613` ("kişi kartı yakın zamanda zaten oluşturulmuş") hata değildir: kart var sayılır, akış sürer.
+- `-6/-603` (kişi zaten mevcut), `-6/-613` (yakın zamanda oluşturulmuş) ve `-5/-304` (Msisdn zaten var) hata değildir:
+  kart var sayılır, akış sürer.
 - `-6/-607` ("istenen izinler mevcut") Trigger/ContactApiLoad'da bilgidir: rehber kaydı **onaylı** yazılır, kullanıcıya
   "İzin zaten İYS'de kayıtlı" gösterilir, onay kodu gönderilmez. Kaynak bilinmediği için rehberdeki `iys_source` ezilmez.
 - Kişi kartı Odoo tarafında `SmartAdmClient.ensure_contact` ile yönetilir (`services/smartadm.py`); Contact yanıtının
-  `Value` alanı belgesizdir ve kullanılmaz, yalnız durum kodu yorumlanır (0/0 oluştu, -613 var).
+  `Value` alanı belgesizdir ve kullanılmaz, yalnız durum kodu yorumlanır (0/0 oluştu; -603/-613/-304 var).
 
 **RemoteStoreId** HTTP başlığıdır (istek gövdesinde değil), tüm SmartADM çağrılarında sabit gider. Ayarlar > SMS >
 İYS > "Mağaza Adı (RemoteStoreId)" boşsa `MERKEZ` gönderilir; doluysa o değer. Boş bırakılması önerilmez, değer

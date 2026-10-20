@@ -3,7 +3,7 @@
 Doküman: https://doc.smartadm.net/
     POST /session          CustomerCode/Username/Password → SessionId (15 dk)
     POST /query            Msisdn ile kişinin izinleri (Authorization.Etk.Msisdn.Sms: "1" onay, "0" ret)
-    POST /Contact          kişi kartı oluştur (kaydı olmayan kişide trigger/contactapiload'dan ÖNCE şart)
+    POST /Contact          kişi kartı oluştur (ContactDetails.AccountType zorunlu; kaydı olmayan kişide trigger/contactapiload'dan ÖNCE şart)
     POST /report2          tarih aralığındaki izin hareketleri (en fazla 7 gün, sayfalı)
     POST /contactapiload   izni doğrudan yükle (ONAY/RET + tarih + kaynak)
     POST /trigger, /approve  SMS ile onay kodu göndererek izin alma
@@ -40,9 +40,14 @@ ERROR_TEXTS = {
     (-1, -6): 'Oturum geçersiz',
     (-1, -7): 'Oturum süresi doldu',
     (-3, -114): 'Telefon numarası biçimi geçersiz',
+    (-4, -201): 'Geçersiz konum bilgisi',
+    (-4, -202): 'Geçersiz hesap türü (AccountType)',
+    (-5, -200): 'Zorunlu alan eksik (kişi kartı bilgisi)',
+    (-5, -304): 'Telefon numarası SmartADM\'de zaten kayıtlı',
     (-5, -512): 'Tarih aralığı 7 günü geçemez',
     (-6, -601): 'Kişi İYS/SmartADM kayıtlarında yok',
     (-6, -602): 'Onay kodu bulunamadı',
+    (-6, -603): 'Kişi kartı zaten mevcut',
     (-6, -604): 'Onay SMS\'i gönderilemedi',
     (-6, -607): 'İstenen izinler İYS\'de zaten mevcut',
     (-6, -609): 'KVKK onayı gerekli',
@@ -56,8 +61,10 @@ ERROR_TEXTS = {
 }
 SESSION_ERRORS = {(-1, -6), (-1, -7)}
 NOT_FOUND = (-6, -601)
-# Hata değil, bilgi: kişi kartı yakın zamanda zaten oluşturulmuş (kart var sayılır) / istenen izin zaten kayıtlı
-CONTACT_EXISTS = (-6, -613)
+# Hata değil, bilgi: kişi kartı zaten var, akış sürer. Contact "yoksa ekler" der ama canlıda şu kodlarla da dönebilir:
+# -6/-603 kişi zaten mevcut, -6/-613 yakın zamanda oluşturulmuş, -5/-304 Msisdn zaten var
+CONTACT_EXISTS_CODES = ((-6, -603), (-6, -613), (-5, -304))
+# Hata değil, bilgi: istenen izin zaten kayıtlı
 ALREADY_CONSENTED = (-6, -607)
 # Numaraya özgü kalıcı hatalar: hesabı değil yalnız o numarayı ilgilendirir (D-8)
 INVALID_NUMBER_CODES = {(-3, -114)}
@@ -251,28 +258,32 @@ class SmartAdmClient:
             max_page = 0
         return rows, max_page
 
-    def create_contact(self, number, name=None, surname=None, remote_ref=None):
-        """Kişi kartı oluştur (POST /Contact). Dönen: True oluşturuldu, False "yakın zamanda zaten oluşturulmuş"
-        (-6/-613: kart var, hata değil). Ad/soyad/RemoteReferenceId opsiyonel; boş olanlar gönderilmez.
+    def create_contact(self, number, name=None, surname=None, remote_ref=None, account_type=1):
+        """Kişi kartı oluştur (POST /Contact). Dönen: True oluşturuldu, False kart zaten var (-6/-603, -6/-613,
+        -5/-304: hata değil). Ad/soyad opsiyoneldir, boş olanlar gönderilmez.
 
-        Yanıt Value alanı belgesiz: kullanılmaz, yalnız durum kodu yorumlanır (0/0 oluştu, -613 var).
+        ContactDetails ZORUNLU nesnedir ve içindeki AccountType (Int: 1 Bireysel, 2 Tacir) ZORUNLUDUR; canlıda
+        ContactDetails hiç yokken -99/-99, AccountType yokken -5/-200 "Alanı zorunludur" döner. Tacir kapsam dışı:
+        varsayılan 1. RemoteReferenceId Contact parametre tablosunda yok ama ContactDetails modelinde (sorgu/rapor
+        yanıtı) var; gönderilmesi sorun çıkarmadığı sürece kalır (Turatel önerisi, kişi eşlemesi için).
+
+        Yanıt Value alanı belgesiz: kullanılmaz, yalnız durum kodu yorumlanır.
         """
         msisdn = to_msisdn(number)
         if not msisdn:
             raise SmartAdmError('Geçersiz cep telefonu: %s' % mask_number(number), invalid_number=True)
-        details = {key: value for key, value in (('Name', name), ('Surname', surname),
-                                                 ('RemoteReferenceId', remote_ref)) if value}
-        payload = {'CommunicationTools': {'Msisdn': msisdn}}
-        if details:
-            payload['ContactDetails'] = details
-        code, _data = self.call('Contact', payload, allow=(CONTACT_EXISTS,))
-        return code != CONTACT_EXISTS
+        details = {'AccountType': int(account_type)}
+        details.update({key: value for key, value in (('Name', name), ('Surname', surname),
+                                                      ('RemoteReferenceId', remote_ref)) if value})
+        code, _data = self.call('Contact', {'CommunicationTools': {'Msisdn': msisdn}, 'ContactDetails': details},
+                                allow=CONTACT_EXISTS_CODES)
+        return code not in CONTACT_EXISTS_CODES
 
     def ensure_contact(self, number, full_name=None, remote_ref=None):
         """Kişi İYS/SmartADM'de yoksa kartını oluştur (önce Query, yoksa Contact). Dönen: Contact çağrıldı mı.
 
         Kaydı olmayan kişide trigger/contactapiload -6/-601 verdiği için bu, onlardan önce çağrılır.
-        -613 (kart az önce oluşturulmuş) başarı sayılır, akış sürer.
+        -603/-613/-304 (kart zaten var) başarı sayılır, akış sürer.
         """
         if self.query(number)['found']:
             return False
