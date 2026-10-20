@@ -1,8 +1,12 @@
 import base64
 from unittest.mock import patch
 
+from psycopg2 import errors as pg_errors
+
 from odoo.tests import HttpCase, tagged
 from odoo.tests.common import new_test_user
+
+from .common import VcCase
 
 # 1x1 PNG
 PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
@@ -92,3 +96,80 @@ class TestVendorClaimMobileApi(HttpCase):
         resp = self.url_open('/report/html/vendor_claim.report_vendor_claim_slip/%s' % claim.id)
         self.assertEqual(resp.status_code, 200)
         self.assertIn(claim.name, resp.text)
+
+
+@tagged('post_install', '-at_install')
+class TestMobileSmsGuards(VcCase):
+    """B6: mobil SMS ucunun kilit/koruma davranışı (kabul testlerini tamamlar)."""
+
+    def test_satir_kilidi_alinamazsa_hata_ve_sifir_kayit(self):
+        claim = self.make_claim()
+        with patch.object(self.env.registry['vendor.claim'], '_lock_for_manual_sms', return_value=False):
+            res = self.controller('send_sms', claim_id=claim.id)
+        self.assertIn('SMS işlemi sürüyor', res.get('error', ''))
+        self.assertFalse(self.claim_sms(claim))
+
+    def test_gercek_satir_kilidi_alinir(self):
+        claim = self.make_claim()
+        self.assertTrue(claim._lock_for_manual_sms())
+
+    def test_g6_kilit_satiri_dokunur_boylece_anlik_goruntu_sonrasi_commit_serilestirme_hatasi_verir(self):
+        """Yalnız FOR UPDATE alan istek satırın yeni sürümünü üretmez; REPEATABLE READ'de eşzamanlı ikinci
+        istek ancak satır güncellenmişse SerializationFailure alır. Kilit satırı dokunmalı (yeni tuple sürümü)."""
+        claim = self.make_claim()
+        self.env.flush_all()
+        self.env.cr.execute('SELECT ctid FROM vendor_claim WHERE id = %s', [claim.id])
+        before = self.env.cr.fetchone()[0]
+        self.assertTrue(claim._lock_for_manual_sms())
+        self.env.cr.execute('SELECT ctid FROM vendor_claim WHERE id = %s', [claim.id])
+        self.assertNotEqual(self.env.cr.fetchone()[0], before, 'satır kilitle birlikte güncellenmeli')
+
+    def test_g6_serilestirme_hatasi_kilit_alinamadi_sayilir_ve_istek_sms_uretmez(self):
+        claim = self.make_claim()
+        cr_type = type(self.env.cr)
+        real_execute = cr_type.execute
+
+        def execute(cr, query, *args, **kwargs):
+            if 'FOR UPDATE NOWAIT' in str(query):
+                raise pg_errors.SerializationFailure('could not serialize access due to concurrent update')
+            return real_execute(cr, query, *args, **kwargs)
+
+        with patch.object(cr_type, 'execute', execute):
+            res = self.controller('send_sms', claim_id=claim.id)
+        self.assertIn('SMS işlemi sürüyor', res.get('error', ''), res)
+        self.assertFalse(self.claim_sms(claim))
+
+    def test_d3_kuyruga_alinan_sms_icin_gonderildi_denmez(self):
+        self.set_param('test_mode', 'False')
+        claim = self.make_claim()
+        res = self.controller('send_sms', claim_id=claim.id)
+        self.assertEqual(res['sms']['state'], 'queued')
+        self.assertNotIn('SMS gönderildi', res['message'])
+        self.assertIn('sırasına alındı', res['message'])
+        self.assertIn('5321234567', res['message'])
+
+    def test_canli_modda_hatirlatma_kuyruga_alininca_da_sayac_artar(self):
+        self.set_param('test_mode', 'False')
+        claim = self.make_claim()
+        self.force_state(claim, 'returned', sms_returned_sent=True, returned_at=self.ago(days=1))
+        res = self.controller('send_sms', claim_id=claim.id)
+        self.assertTrue(res.get('ok'), res)
+        self.assertEqual(res['sms']['state'], 'queued')
+        claim.invalidate_recordset()
+        self.assertEqual(claim.reminder_count, 1)
+
+    def test_hata_yolunda_sayac_artmaz(self):
+        self.set_param('user_daily_limit', '1')
+        first = self.make_claim(customer_mobile='05321234560')
+        self.assertTrue(self.controller('send_sms', claim_id=first.id).get('ok'))
+        claim = self.make_claim(customer_mobile='05321234561')
+        self.force_state(claim, 'returned', sms_returned_sent=True, returned_at=self.ago(days=1))
+        res = self.controller('send_sms', claim_id=claim.id)
+        self.assertIn('Günlük elle SMS sınırınız doldu', res.get('error', ''))
+        claim.invalidate_recordset()
+        self.assertEqual(claim.reminder_count, 0)
+
+    def test_yanit_sms_durumu_tasir(self):
+        claim = self.make_claim()
+        res = self.controller('send_sms', claim_id=claim.id)
+        self.assertEqual(res['sms'], {'state': 'test', 'error': ''})

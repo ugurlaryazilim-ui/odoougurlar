@@ -23,7 +23,7 @@
                 <div class="vc-stat" t-on-click="() =&gt; this.go('claim_list', { status: 'received' })"><b t-esc="stats.received"/><span>Teslim Alındı</span></div>
                 <div class="vc-stat" t-on-click="() =&gt; this.go('claim_list', { status: 'sent' })"><b t-esc="stats.sent"/><span>Tedarikçide</span></div>
                 <div class="vc-stat" t-on-click="() =&gt; this.go('claim_list', { status: 'returned' })"><b t-esc="stats.returned"/><span>Geldi</span></div>
-                <div t-att-class="'vc-stat' + (stats.overdue ? ' vc-stat-danger' : '')" t-on-click="() =&gt; this.go('claim_list', { status: 'overdue' })"><b t-esc="stats.overdue"/><span>Geciken</span></div>
+                <div t-att-class="'vc-stat' + (stats.overdue &gt; 0 ? ' vc-stat-danger' : '')" t-on-click="() =&gt; this.go('claim_list', { status: 'overdue' })"><b t-esc="stats.overdue"/><span>Geciken</span></div>
             </div>
             <div class="vc-menu-grid">
                 <div class="vc-menu-card vc-card-primary" t-on-click="() =&gt; this.go('new_claim')">
@@ -196,6 +196,12 @@
                         </div>
                     </t>
                 </div>
+                <div class="vc-more" t-if="!state.loading and state.items.length &lt; state.total">
+                    <button class="vc-btn vc-btn-light vc-btn-block" t-on-click="loadMore" t-att-disabled="state.loadingMore">
+                        <t t-if="state.loadingMore">Yükleniyor...</t>
+                        <t t-else="">Daha fazla (<t t-esc="state.items.length"/> / <t t-esc="state.total"/>)</t>
+                    </button>
+                </div>
             </t>
 
             <t t-else="">
@@ -248,7 +254,7 @@
                 </div>
 
                 <div class="vc-actions">
-                    <button class="vc-btn vc-btn-light" t-if="d.customer_mobile and d.state !== 'cancelled'" t-on-click="sendSms"><i class="fa fa-comment"/> SMS</button>
+                    <button class="vc-btn vc-btn-light" t-if="d.customer_mobile and d.state !== 'cancelled'" t-on-click="sendSms" t-att-disabled="state.busy"><i class="fa fa-comment"/> SMS</button>
                     <button class="vc-btn vc-btn-light" t-on-click="() =&gt; this.print('report_vendor_claim_slip')"><i class="fa fa-print"/> Müşteri Fişi</button>
                     <button class="vc-btn vc-btn-light" t-on-click="() =&gt; this.print('report_vendor_claim_form')"><i class="fa fa-print"/> İnceleme Formu</button>
                     <button class="vc-btn vc-btn-light" t-on-click="openInBackend"><i class="fa fa-external-link"/> Formda Aç</button>

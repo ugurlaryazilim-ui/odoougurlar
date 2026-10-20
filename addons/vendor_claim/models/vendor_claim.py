@@ -2,6 +2,7 @@ import logging
 from datetime import timedelta
 
 from markupsafe import Markup, escape
+from psycopg2 import errors as pg_errors
 
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
@@ -11,7 +12,9 @@ from odoo.addons.sms_system.services.turatel import normalize_number
 _logger = logging.getLogger(__name__)
 
 PARAM = 'vendor_claim.'
+MIN_TIME_LEFT = 20   # cron süresinin sonuna bu kadar saniye kala dur, kalan sonraki çalışmada
 VENDOR_ATTRIBUTE = 'Tedarikçi'
+MANUAL_SMS_GUARD_SECONDS = 60   # mobil elle SMS: aynı kayıt + aynı şablon için tekrar engeli
 
 # İzinli durum geçişleri (yönetici her geçişi yapabilir)
 ALLOWED_TRANSITIONS = {
@@ -118,7 +121,7 @@ class VendorClaim(models.Model):
     sms_sent_sent = fields.Boolean(string='Gönderildi SMS', readonly=True, copy=False)
     sms_returned_sent = fields.Boolean(string='İncelemeden Geldi SMS', readonly=True, copy=False)
     sms_delivered_sent = fields.Boolean(string='Teslim Edildi SMS', readonly=True, copy=False)
-    reminder_count = fields.Integer(string='Hatırlatma SMS Sayısı', readonly=True, copy=False)
+    reminder_count = fields.Integer(string='Hatırlatma SMS Sayısı', readonly=True, copy=False, default=0)
     last_reminder_at = fields.Datetime(string='Son Hatırlatma', readonly=True, copy=False)
 
     # ─── Hesaplananlar ───────────────────────────────
@@ -298,15 +301,26 @@ class VendorClaim(models.Model):
         detail['items'] = items
         detail['customer_mobile'] = self._normalize_mobile(detail.get('customer_mobile'))
         if not detail['customer_mobile'] and detail.get('customer_code'):
-            detail['customer_mobile'] = self._mobile_from_history(detail['customer_code'])
+            detail['customer_mobile'] = self._mobile_from_history(detail['customer_code'], detail.get('customer_name'))
         return detail
 
+    @staticmethod
+    def _norm_name(name):
+        return ' '.join((name or '').lower().split())
+
     @api.model
-    def _mobile_from_history(self, customer_code):
-        """Aynı müşteri kodunun önceki kayıtlarında tek bir cep numarası varsa onu öner (kasa kodları ortaktır)."""
+    def _mobile_from_history(self, customer_code, customer_name):
+        """Aynı kod VE aynı adla açılmış önceki kayıtlarda tek bir cep numarası varsa onu öner.
+
+        Kasa kodları ortaktır; yalnız kodla eşleşirse başka müşterinin numarası sızar (kişisel veri).
+        """
+        name = self._norm_name(customer_name)
+        if not name:
+            return ''
         claims = self.sudo().search([('customer_code', '=', customer_code), ('customer_mobile', '!=', False)],
-                                    order='id desc', limit=20)
-        numbers = {normalize_number(c.customer_mobile) for c in claims} - {None}
+                                    order='id desc', limit=50)
+        numbers = {normalize_number(c.customer_mobile) for c in claims
+                   if self._norm_name(c.customer_name) == name} - {None}
         return '0' + numbers.pop() if len(numbers) == 1 else ''
 
     @api.model
@@ -433,14 +447,19 @@ class VendorClaim(models.Model):
                 vals['vendor_id'] = self._resolve_vendor(vals['vendor_name']).id or False
         claims = super().create(vals_list)
         claims._link_attachments()
-        claims._notify_state_sms()
+        if not self.env.context.get('vendor_claim_defer_sms'):   # denetleyici: fotoğraflardan sonra kendisi çağırır
+            claims._notify_state_sms()
         return claims
 
     def _link_attachments(self):
         """Yüklenen fotoğraf / yanıt belgelerini kayda bağla (başka kullanıcılar ve PDF de görebilsin)."""
         for claim in self:
+            uid = self.env.user.id
+            # Yalnız kullanıcının kendi yüklediği, henüz bir kayda bağlanmamış ekler (başkasının kaydedilmemiş
+            # eki, kimliği tahmin edilerek bu kayda çekilemez; çekirdek kural onu yalnız oluşturana gösterir)
             loose = (claim.photo_ids | claim.vendor_report_ids).sudo().filtered(
-                lambda a: not a.res_model or (a.res_model == claim._name and not a.res_id))
+                lambda a: a.create_uid.id == uid
+                and (not a.res_model or (a.res_model == claim._name and not a.res_id)))
             if loose:
                 loose.write({'res_model': claim._name, 'res_id': claim.id})
 
@@ -448,7 +467,8 @@ class VendorClaim(models.Model):
         return self.env.su or self.env.user.has_group('vendor_claim.group_vendor_claim_manager')
 
     def _check_transition(self, new_state):
-        if self._is_claim_manager():
+        # vendor_claim_strict: mobil/toplu uçlarda yönetici/sudo muafiyeti yok
+        if not self.env.context.get('vendor_claim_strict') and self._is_claim_manager():
             return
         labels = dict(self._fields['state'].selection)
         for claim in self:
@@ -467,32 +487,52 @@ class VendorClaim(models.Model):
         return res
 
     def _set_state(self, new_state, extra=None):
+        """Durumu değiştirir ve durum SMS'ini kuyruğa alır; yeni kuyruğa alınanların {claim_id: {'state',
+        'error'}} sonucunu döner."""
         self._check_transition(new_state)
         self.with_context(vendor_claim_state_ok=True).write(dict(extra or {}, state=new_state))
-        self._notify_state_sms()
+        return self._notify_state_sms(only_new=True)
 
-    def action_send_to_vendor(self):
+    # Düğme metotları (action_*) None döner: web istemcisi dönüş değerini eylem sanır. Denetleyici SMS sonucunu
+    # almak için aynı işi yapan _<ad> karşılıklarını çağırır.
+    def _send_to_vendor(self):
         for claim in self:
             if not claim.vendor_id and claim.vendor_name:
                 claim.vendor_id = self._resolve_vendor(claim.vendor_name)
             if not claim.vendor_id:
                 raise UserError(_('%s: önce tedarikçiyi seçin.') % claim.name)
-        self._set_state('sent', {'sent_at': fields.Datetime.now(), 'returned_at': False, 'overdue_notified': False})
+        sms = self._set_state('sent', {'sent_at': fields.Datetime.now(), 'returned_at': False,
+                                       'overdue_notified': False, 'reminder_count': 0, 'last_reminder_at': False})
         self.activity_unlink(['mail.mail_activity_data_todo'])
+        return sms
 
-    def action_mark_returned(self):
+    def _mark_returned(self):
         for claim in self:
             if not claim.result:
                 raise UserError(_('%s: tedarikçiden gelen sonucu (Tamir / Değişim / İade / Ret) seçin.') % claim.name)
-        self._set_state('returned', {'returned_at': fields.Datetime.now()})
+        sms = self._set_state('returned', {'returned_at': fields.Datetime.now()})
         self.activity_unlink(['mail.mail_activity_data_todo'])
+        return sms
+
+    def _mark_delivered(self):
+        return self._set_state('delivered', {'delivered_at': fields.Datetime.now()})
+
+    def _cancel(self):
+        sms = self._set_state('cancelled', {'cancelled_at': fields.Datetime.now()})
+        self.activity_unlink(['mail.mail_activity_data_todo'])
+        return sms
+
+    def action_send_to_vendor(self):
+        self._send_to_vendor()
+
+    def action_mark_returned(self):
+        self._mark_returned()
 
     def action_mark_delivered(self):
-        self._set_state('delivered', {'delivered_at': fields.Datetime.now()})
+        self._mark_delivered()
 
     def action_cancel(self):
-        self._set_state('cancelled', {'cancelled_at': fields.Datetime.now()})
-        self.activity_unlink(['mail.mail_activity_data_todo'])
+        self._cancel()
 
     def action_reset_to_received(self):
         self._set_state('received', {'sent_at': False, 'returned_at': False, 'delivered_at': False,
@@ -518,32 +558,85 @@ class VendorClaim(models.Model):
             'magaza': self.company_id.name or self.env.company.name or '',
         }
 
-    def _send_template_sms(self, code, number=None):
-        """Şablonla SMS gönder; sms.system.message kaydını döndür (numara/şablon yoksa None)."""
+    def _send_template_sms(self, code, number=None, queue=False):
+        """Şablonla SMS gönder; sms.system.message kaydını döndür (numara/şablon yoksa None).
+
+        queue=True: sağlayıcı çağrılmaz, kayıt sms_system tekli kuyruğuna alınır."""
         self.ensure_one()
         number = number or self.customer_mobile
         template = self.env['sms.system.template'].sudo().get_by_code(code)
         if not number or not template:
             return None
         return self.env['sms.system.message'].send_sms(
-            number, template=template, values=self._sms_values(), record=self)
+            number, template=template, values=self._sms_values(), record=self, queue=queue)
 
-    def _notify_state_sms(self):
-        """Durumun otomatik SMS'i (ayar açıksa, numara varsa, o durum için daha önce gönderilmediyse)."""
+    def _lock_for_manual_sms(self):
+        """Mobil elle SMS için satırı transaction sonuna kadar kilitler (NOWAIT); alınamazsa False.
+
+        İki cihaz/çift dokunuş aynı anda gelirse ikincisi beklemeden reddedilir. Odoo imleçleri REPEATABLE READ'dir:
+        anlık görüntü isteğin ilk sorgusunda (oturum/kullanıcı okuması) alınır, yani kilitten önce. Yalnız
+        FOR UPDATE alan istek satırın yeni sürümünü üretmediği için, görüntüden sonra commit eden diğer istek
+        (60 sn / günlük sınır sorgusunda görünmeyen SMS kaydı) serileştirme hatası vermez ve ikinci SMS çıkardı.
+        Bu yüzden kilitle birlikte satır güncellenir (yeni sürüm): görüntüden sonra commit eden yarışçı varsa
+        FOR UPDATE SerializationFailure verir ve istek reddedilir; yoksa görüntü kilitten önce alınmış olsa da
+        tüm önceki SMS kayıtları görünür. LockNotAvailable ve SerializationFailure Odoo'nun yeniden deneme
+        listesindedir: savepoint içinde yakalanmazsa istek yeniden çalışır (ikinci SMS riski)."""
+        self.ensure_one()
+        try:
+            with self.env.cr.savepoint(flush=False):
+                self.env.cr.execute('SELECT id FROM vendor_claim WHERE id = %s FOR UPDATE NOWAIT', [self.id])
+                self.env.cr.execute('UPDATE vendor_claim SET write_date = write_date WHERE id = %s', [self.id])
+        except (pg_errors.LockNotAvailable, pg_errors.SerializationFailure):
+            return False
+        return True
+
+    def _recent_template_sms(self, code, seconds=MANUAL_SMS_GUARD_SECONDS):
+        """Bu kayıt için son `seconds` sn içinde aynı şablonla alınmış (hata olmayan) SMS kaydı var mı (K4).
+
+        Belirsiz (uncertain) kayıt da sayılır: sağlayıcı isteği işlemiş olabilir."""
+        self.ensure_one()
+        since = fields.Datetime.now() - timedelta(seconds=seconds)
+        return bool(self.env['sms.system.message'].sudo().search_count([
+            ('res_model', '=', self._name), ('res_id', '=', self.id), ('template_id.code', '=', code),
+            ('state', 'in', ('queued', 'sending', 'sent', 'uncertain', 'test')), ('create_date', '>=', since)]))
+
+    def _notify_state_sms(self, only_new=False):
+        """Durumun otomatik SMS'i: ayar açıksa, numara varsa, o durum için daha önce kuyruğa alınmadıysa.
+
+        SMS istek içinde gönderilmez, sms_system tekli kuyruğuna alınır (KK-B11). Döner: {claim_id: {'state',
+        'error'}}; state queued | test | error | none. Geçişin SMS'i daha önce alınmışsa son kaydın durumu
+        bildirilir; only_new=True ise yalnız bu çağrıda yeni denenenler bildirilir, diğerleri 'none' olur
+        (denetleyici yanıtı). Sonuç dönüş değeriyle taşınır, bağlamla değil."""
         icp = self.env['ir.config_parameter'].sudo()
+        result = {}
         for claim in self:
+            res = {'state': 'none', 'error': ''}
+            result[claim.id] = res
             spec = STATE_SMS.get(claim.state)
             if not spec or not claim.customer_mobile:
                 continue
             code, flag = spec
-            if claim[flag] or icp.get_param(PARAM + 'sms_%s_enabled' % claim.state) != 'True':
+            if icp.get_param(PARAM + 'sms_%s_enabled' % claim.state) != 'True':
+                continue
+            if claim[flag]:
+                # Bu geçişin SMS'i zaten alındı: tekrar kuyruğa alınmaz, son kaydın durumu bildirilir
+                last = None if only_new else self.env['sms.system.message'].sudo().search(
+                    [('res_model', '=', claim._name), ('res_id', '=', claim.id), ('template_id.code', '=', code)],
+                    order='id desc', limit=1)
+                if last:
+                    res.update(state=last.state, error=last.error or '')
                 continue
             try:
-                msg = claim._send_template_sms(code)
-                if msg and msg.state in ('sent', 'test'):
-                    claim.sudo()[flag] = True
+                msg = claim._send_template_sms(code, queue=True)
             except UserError as e:  # geçersiz numara vb. durum değişikliğini engellemesin
                 claim.message_post(body=_('SMS gönderilemedi: %s') % e)
+                res.update(state='error', error=str(e))
+            else:
+                if msg:
+                    res.update(state=msg.state, error=msg.error or '')
+                    if msg.state in ('queued', 'test'):
+                        claim.sudo()[flag] = True
+        return result
 
     def action_send_sms(self):
         """Formdaki 'SMS Gönder' — şablon seçilebilen pencere."""
@@ -580,13 +673,17 @@ class VendorClaim(models.Model):
             ('reminder_count', '<', max_count), ('returned_at', '<=', limit),
             '|', ('last_reminder_at', '=', False), ('last_reminder_at', '<=', limit),
         ], limit=200)
+        IrCron = self.env['ir.cron']
         for claim in claims:
             try:
-                claim._send_template_sms('vendor_claim_reminder')
+                claim._send_template_sms('vendor_claim_reminder', queue=True)
             except UserError as e:
                 claim.message_post(body=_('Hatırlatma SMS gönderilemedi: %s') % e)
             # Numara geçersiz / şablon yoksa da sayaç artar: her gün yeniden denenmesin
             claim.write({'reminder_count': claim.reminder_count + 1, 'last_reminder_at': fields.Datetime.now()})
+            # Kayıt başına commit: cron kesilse de işlenen kayıtlar kalıcı olur, aynı müşteriye tekrar gitmez
+            if IrCron._commit_progress(1) < MIN_TIME_LEFT:
+                break
 
     @api.model
     def _cron_overdue_alerts(self):

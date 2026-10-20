@@ -217,11 +217,13 @@ class VendorClaimController(http.Controller):
             vals['invoice_items'] = data['invoice_items']
         try:
             with request.env.cr.savepoint():
-                claim = self._claims().create(vals)
+                # SMS fotoğraflardan sonra kuyruğa alınır: fotoğraf hatası kaydı geri alırsa SMS kaydı kalmaz
+                claim = self._claims().with_context(vendor_claim_defer_sms=True).create(vals)
                 self._attach_photos(claim, photos)
+                sms = claim._notify_state_sms()[claim.id]
         except Exception as e:
             return self._error(e)
-        return {'id': claim.id, 'name': claim.name, 'vendor': claim.vendor_id.name or '',
+        return {'id': claim.id, 'name': claim.name, 'vendor': claim.vendor_id.name or '', 'sms': sms,
                 'slip_url': '/report/pdf/vendor_claim.report_vendor_claim_slip/%s' % claim.id}
 
     # ─── Liste / detay ───────────────────────────────
@@ -279,11 +281,14 @@ class VendorClaimController(http.Controller):
     # ─── İşlemler ────────────────────────────────────
 
     def _apply_action(self, claim, action, vals):
+        """İşlemi uygular; durum geçişinde kuyruğa alınan SMS'in özetini ({state, error}) döndürür (yoksa none)."""
         vals = vals or {}
+        claim = claim.with_context(vendor_claim_strict=True)
+        sms = {}
         if action == 'send':
             claim.write({k: (vals.get(k) or '').strip() or claim[k] for k in ('out_carrier', 'out_tracking')
                          if k in vals})
-            claim.action_send_to_vendor()
+            sms = claim._send_to_vendor()
         elif action == 'return':
             write = {k: (vals.get(k) or '').strip() for k in ('in_carrier', 'in_tracking', 'result_note')
                      if (vals.get(k) or '').strip()}
@@ -293,11 +298,11 @@ class VendorClaimController(http.Controller):
                 write['result'] = vals['result']
             if write:
                 claim.write(write)
-            claim.action_mark_returned()
+            sms = claim._mark_returned()
         elif action == 'deliver':
-            claim.action_mark_delivered()
+            sms = claim._mark_delivered()
         elif action == 'cancel':
-            claim.action_cancel()
+            sms = claim._cancel()
         elif action == 'note':
             body = (vals.get('note') or '').strip()
             if not body:
@@ -313,6 +318,7 @@ class VendorClaimController(http.Controller):
             claim.customer_mobile = mobile
         else:
             raise UserError(_('Bilinmeyen işlem.'))
+        return sms.get(claim.id) or {'state': 'none', 'error': ''}
 
     @http.route('/vendor_claim/action', type='jsonrpc', auth='user')
     def action(self, claim_id=None, action='', vals=None, **kw):
@@ -320,8 +326,8 @@ class VendorClaimController(http.Controller):
         try:
             claim = self._get_claim(claim_id)
             with request.env.cr.savepoint():
-                self._apply_action(claim, action, vals)
-            return self._detail(claim)
+                sms = self._apply_action(claim, action, vals)
+            return dict(self._detail(claim), sms=sms)
         except Exception as e:
             return self._error(e)
 
@@ -336,8 +342,8 @@ class VendorClaimController(http.Controller):
             try:
                 claim = self._get_claim(claim_id)
                 with request.env.cr.savepoint():
-                    self._apply_action(claim, action, vals)
-                results.append({'id': claim.id, 'ok': True})
+                    sms = self._apply_action(claim, action, vals)
+                results.append({'id': claim.id, 'ok': True, 'sms': sms})
             except Exception as e:
                 results.append({'id': claim_id, 'ok': False, 'error': self._error(e)['error']})
         return {'results': results}
@@ -348,6 +354,12 @@ class VendorClaimController(http.Controller):
         self._check_user()
         try:
             claim = self._get_claim(claim_id)
+            # Çift dokunuş / ikinci cihaz: satır kilidi (NOWAIT) + 60 sn aynı şablon engeli.
+            # Kilit satırı günceller: anlık görüntüden (kilitten önce alınır) sonra commit eden yarışçı varsa kilit
+            # SerializationFailure verir (bkz. _lock_for_manual_sms); kilitten sonra durum/sayaç yeniden okunur.
+            if not claim._lock_for_manual_sms():
+                return {'error': _('Bu kayıt için SMS işlemi sürüyor. Birkaç saniye sonra tekrar deneyin.')}
+            claim.invalidate_recordset()
             code = {'received': 'vendor_claim_received', 'sent': 'vendor_claim_sent',
                     'returned': 'vendor_claim_reminder' if claim.sms_returned_sent else 'vendor_claim_returned',
                     'delivered': 'vendor_claim_delivered'}.get(claim.state)
@@ -355,11 +367,21 @@ class VendorClaimController(http.Controller):
                 return {'error': _('Bu durumda SMS gönderilmez.')}
             if not claim.customer_mobile:
                 return {'error': _('Müşterinin cep telefonu yok.')}
-            msg = claim._send_template_sms(code)
+            if claim._recent_template_sms(code):
+                return {'error': _('Bu kayıt için az önce SMS gönderildi.')}
+            # sms_manual: kullanıcı başı günlük elle sınır (sms_system; SMS yöneticisi muaf)
+            msg = claim.with_context(sms_manual=True)._send_template_sms(code, queue=True)
             if not msg:
                 return {'error': _('SMS şablonu bulunamadı.')}
             if msg.state == 'error':
                 return {'error': _('SMS gönderilemedi: %s') % (msg.error or '')}
-            return {'ok': True, 'message': _('SMS gönderildi: %s') % msg.number}
+            if code == 'vendor_claim_reminder':   # mobil hatırlatma cron sayacına işlenir (KK-B20)
+                claim.sudo().write({'reminder_count': claim.reminder_count + 1,
+                                    'last_reminder_at': fields.Datetime.now()})
+            sms = {'state': msg.state, 'error': ''}
+            if msg.state == 'test':
+                return {'ok': True, 'sms': sms, 'message': _('Test modu: SMS gönderilmedi (%s)') % msg.number}
+            # Mobil SMS kuyruğa alınır, sağlayıcıya cron ile gider: "gönderildi" denmez (hata sonradan görünür)
+            return {'ok': True, 'sms': sms, 'message': _('SMS gönderim sırasına alındı: %s') % msg.number}
         except Exception as e:
             return self._error(e)

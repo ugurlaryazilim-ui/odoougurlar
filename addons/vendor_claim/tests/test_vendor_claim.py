@@ -133,10 +133,13 @@ class TestVendorClaim(TransactionCase):
         claim.action_mark_returned()
         claim.sudo().returned_at = fields.Datetime.now() - timedelta(days=5)
         Claim = self.env['vendor.claim']
-        Claim._cron_return_reminders()
-        self.assertEqual(claim.reminder_count, 1)
-        Claim._cron_return_reminders()   # aynı gün tekrar gönderilmez
-        self.assertEqual(claim.reminder_count, 1)
+        # Cron kayıt başına commit eder; TransactionCase'te commit yasak
+        with patch.object(self.env.registry['ir.cron'], '_commit_progress',
+                          lambda cron, processed=0, **kw: cron.env.flush_all() or 1000.0):
+            Claim._cron_return_reminders()
+            self.assertEqual(claim.reminder_count, 1)
+            Claim._cron_return_reminders()   # aynı gün tekrar gönderilmez
+            self.assertEqual(claim.reminder_count, 1)
 
     def test_overdue_alert_once(self):
         claim = self._claim()

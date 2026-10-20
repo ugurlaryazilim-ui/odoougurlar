@@ -5,6 +5,9 @@
  * Kaynak: ugurlar_barcode/barcode_scanner.js ile ayni mantik
  * Kamera + El Terminali (keyboard wedge) + Manuel giris destegi
  */
+// Bekleyen okutma ust siniri (dinleyici yavassa dizi kuyrugu bu kadar tutar)
+const MAX_QUEUE = 100;
+
 export class TailorBarcodeScanner {
     constructor() {
         this._buffer = '';
@@ -12,7 +15,8 @@ export class TailorBarcodeScanner {
         this._listeners = [];
         this._keyHandler = this._onKeyDown.bind(this);
         this._isActive = false;
-        this._isScanning = false;
+        this._queue = [];
+        this._draining = false;
     }
 
     start() {
@@ -25,6 +29,8 @@ export class TailorBarcodeScanner {
         document.removeEventListener('keydown', this._keyHandler, true);
         this._isActive = false;
         this._buffer = '';
+        // Ekran kapanirken bekleyen okutmalar yeni ekrana tasinmasin
+        this._queue = [];
     }
 
     onScan(callback) {
@@ -74,18 +80,35 @@ export class TailorBarcodeScanner {
         }
     }
 
-    async _emit(barcode) {
-        if (this._isScanning) return;
-        this._isScanning = true;
+    /**
+     * Okutmayi kuyruga alir; onceki okutma suruyorsa kaybolmaz, sirayla islenir.
+     * Kuyruk dolarsa (MAX_QUEUE) yeni okutma atilir ve uyari yazilir.
+     */
+    _emit(barcode) {
+        if (this._queue.length >= MAX_QUEUE) {
+            console.warn('TailorBarcodeScanner: okutma kuyrugu dolu, okutma atildi:', barcode);
+            return;
+        }
+        this._queue.push(barcode);
+        if (!this._draining) {
+            this._drain();
+        }
+    }
+
+    async _drain() {
+        this._draining = true;
         try {
-            for (const cb of this._listeners) {
-                try {
-                    const res = cb(barcode);
-                    if (res instanceof Promise) await res;
-                } catch (e) { console.error(e); }
+            while (this._queue.length) {
+                const barcode = this._queue.shift();
+                // Dinleyici listesi her okutmada guncel alinir (ekran degisince abonelik iptali)
+                for (const cb of [...this._listeners]) {
+                    try {
+                        await cb(barcode);
+                    } catch (e) { console.error(e); }
+                }
             }
         } finally {
-            setTimeout(() => { this._isScanning = false; }, 150);
+            this._draining = false;
         }
     }
 }

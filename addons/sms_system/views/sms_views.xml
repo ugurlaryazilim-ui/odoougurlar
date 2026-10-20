@@ -5,12 +5,12 @@
         <field name="name">sms.system.message.list</field>
         <field name="model">sms.system.message</field>
         <field name="arch" type="xml">
-            <list create="false" decoration-danger="state == 'error'" decoration-muted="state == 'test'" decoration-success="state == 'sent'">
+            <list create="false" decoration-danger="state == 'error'" decoration-muted="state == 'test'" decoration-success="state == 'sent'" decoration-warning="state == 'uncertain'">
                 <field name="create_date" string="Tarih"/>
                 <field name="number"/>
                 <field name="body"/>
                 <field name="segments" sum="Parça"/>
-                <field name="state" widget="badge" decoration-danger="state == 'error'" decoration-success="state == 'sent'"/>
+                <field name="state" widget="badge" decoration-danger="state == 'error'" decoration-success="state == 'sent'" decoration-warning="state == 'uncertain'"/>
                 <field name="res_model" optional="hide"/>
                 <field name="user_id" optional="show"/>
                 <field name="error" optional="hide"/>
@@ -25,12 +25,16 @@
             <form create="false" edit="false">
                 <header>
                     <button name="action_retry" string="Yeniden Gönder" type="object" class="btn-primary"
-                            invisible="state not in ('error', 'queued')" groups="sms_system.group_sms_manager"/>
+                            invisible="state != 'error'" groups="sms_system.group_sms_manager"/>
                     <button name="action_fetch_report" string="İletim Raporu Al" type="object"
                             invisible="not provider_msg_id" groups="sms_system.group_sms_manager"/>
                     <field name="state" widget="statusbar"/>
                 </header>
                 <sheet>
+                    <div class="alert alert-warning" role="alert" invisible="state != 'uncertain'">
+                        <strong>Belirsiz:</strong> bu SMS'in Turatel'e iletilip iletilmediği bilinmiyor. Aynı mesaj
+                        iki kez gitmesin diye otomatik ya da elle yeniden gönderilmez; gerekirse alıcıya yeni bir SMS yazın.
+                    </div>
                     <group>
                         <group>
                             <field name="number"/>
@@ -69,6 +73,7 @@
                 <field name="provider_msg_id"/>
                 <filter string="Gönderildi" name="sent" domain="[('state', '=', 'sent')]"/>
                 <filter string="Hata" name="error" domain="[('state', '=', 'error')]"/>
+                <filter string="Belirsiz" name="uncertain" domain="[('state', '=', 'uncertain')]"/>
                 <filter string="Test" name="test" domain="[('state', '=', 'test')]"/>
                 <separator/>
                 <filter string="Tarih" name="filter_date" date="create_date"/>

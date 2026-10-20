@@ -1,8 +1,9 @@
-from odoo import _, fields, models
-from odoo.exceptions import UserError
+from odoo import _, api, fields, models
+from odoo.exceptions import AccessError, UserError
 
 from ..services.smartadm import SmartAdmError
 from ..services.turatel import ERROR_HINTS, TuratelError
+from .sms_message import parse_user_daily_limit, test_mode_enabled
 
 
 class ResConfigSettings(models.TransientModel):
@@ -20,13 +21,14 @@ class ResConfigSettings(models.TransientModel):
                                          help='Turatel hesabında onaylı gönderici adı (en fazla 11 karakter)')
     sms_ascii_mode = fields.Boolean(string='Türkçe karakterleri dönüştür', config_parameter='sms_system.ascii_mode',
                                     help='ı ş ğ İ Ş Ğ harflerini i s g I S G yapar; mesaj daha az parçaya bölünür')
-    sms_test_mode = fields.Boolean(string='Test modu', config_parameter='sms_system.test_mode', default=True,
+    # config_parameter KULLANILMAZ: çekirdek set_values False/0 değerinde parametreyi siliyor, get_values ise
+    # 'False' metnini True okuyor. get_values/set_values aşağıda açık yazılır (test modu: K2).
+    sms_test_mode = fields.Boolean(string='Test modu',
                                    help='Açıkken SMS gönderilmez, yalnız kayıt oluşur')
 
     sms_daily_limit = fields.Integer(string='Günlük toplu SMS sınırı', config_parameter='sms_system.daily_limit',
                                      help='Son 24 saatte toplu SMS ile gönderilebilecek en fazla numara (0 = sınırsız)')
-    sms_user_daily_limit = fields.Integer(string='Kullanıcı başı günlük elle SMS', default=50,
-                                          config_parameter='sms_system.user_daily_limit',
+    sms_user_daily_limit = fields.Integer(string='Kullanıcı başı günlük elle SMS',
                                           help='"Yeni SMS" ile bir çalışanın 24 saatte gönderebileceği en fazla SMS '
                                                '(SMS yöneticileri ve otomatik bildirimler hariç; 0 = sınırsız)')
     sms_optout_text = fields.Char(string='Ret metni', config_parameter='sms_system.optout_text',
@@ -44,6 +46,43 @@ class ResConfigSettings(models.TransientModel):
                                 help='İsteğe bağlı; SmartADM kayıtlarında işlemin hangi mağazadan yapıldığı görünür')
     sms_iys_url = fields.Char(string='SmartADM API Adresi', config_parameter='sms_system.iys_url',
                               help='Boşsa https://adm.smartadm.net/webservice/api')
+
+    @api.model
+    def _drop_restricted_sms_values(self, res):
+        """Sistem yöneticisi olmayandan groups'lu sms_* alanlarını düşür (DERSLER 19.10).
+
+        default_get ve get_values RPC'ye açıktır ve config_parameter sırlarını sudo ile okuyabilir.
+        """
+        if not (self.env.su or self.env.user.has_group('base.group_system')):
+            for name, field in self._fields.items():
+                if name.startswith('sms_') and field.groups:
+                    res.pop(name, None)
+        return res
+
+    @api.model
+    def get_values(self):
+        res = super().get_values()
+        icp = self.env['ir.config_parameter'].sudo()
+        res['sms_test_mode'] = test_mode_enabled(icp.get_param('sms_system.test_mode'))
+        res['sms_user_daily_limit'] = parse_user_daily_limit(icp.get_param('sms_system.user_daily_limit'))
+        return self._drop_restricted_sms_values(res)
+
+    def set_values(self):
+        # Çekirdek set_values RPC'ye açıktır (yönetici denetimi yalnız execute'ta): super()'den ÖNCE denetle.
+        if not (self.env.su or self.env.user.has_group('base.group_system')):
+            raise AccessError(_('Yalnız sistem yöneticileri ayarları değiştirebilir.'))
+        # Negatif sınır '0' (sınırsız) olarak kaydedilmemeli: hiçbir parametre yazılmadan reddedilir (D-7)
+        if any((rec.sms_user_daily_limit or 0) < 0 for rec in self):
+            raise UserError(_('Kullanıcı başı günlük SMS sınırı negatif olamaz (0 = sınırsız).'))
+        super().set_values()
+        icp = self.env['ir.config_parameter'].sudo()
+        # 'False' ve '0' açıkça yazılır; set_param(False) parametreyi silerdi
+        icp.set_param('sms_system.test_mode', 'True' if self.sms_test_mode else 'False')
+        icp.set_param('sms_system.user_daily_limit', str(self.sms_user_daily_limit or 0))
+
+    @api.model
+    def default_get(self, fields_list):
+        return self._drop_restricted_sms_values(super().default_get(fields_list))
 
     def action_iys_test(self):
         self.ensure_one()

@@ -1,6 +1,6 @@
 {
     'name': 'Tedarikçi İnceleme Takibi',
-    'version': '19.0.1.1.0',
+    'version': '19.0.1.2.0',
     'category': 'Inventory',
     'summary': 'Müşteriden gelen ayıplı ürünün tedarikçiye inceleme gönderimi ve dönüş takibi',
     'description': """
@@ -33,6 +33,7 @@
         'web.assets_backend': [
             'vendor_claim/static/src/css/vendor_claim.css',
             'vendor_claim/static/src/xml/vendor_claim_templates.xml',
+            'vendor_claim/static/src/js/sms_notice.js',
             'vendor_claim/static/src/js/screens/main_menu.js',
             'vendor_claim/static/src/js/screens/claim_list.js',
             'vendor_claim/static/src/js/screens/new_claim.js',
