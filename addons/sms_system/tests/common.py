@@ -223,6 +223,9 @@ JSON_BODY_SCHEMA = {   # OpenAPI şemasındaki alanlar, kimlik alanları (userId
 CREDENTIAL_KEYS = {'userId', 'username', 'password'}
 
 
+BULK_SINGLE_RECEIVER_MESSAGE = 'Bulk SMS mode requires more than one valid receiver.'
+
+
 def json_ok(data=None):
     return {'isSuccess': True, 'errorCode': None, 'message': None, 'data': data}
 
@@ -441,6 +444,9 @@ class FakeTuratelJson:
         payload = call['payload']
         receivers = payload.get('receiverList') or []
         personal = payload.get('personalMessages') or []
+        if call['service'] == 'bulksms' and len(receivers) < 2:
+            # GERÇEK canlı yanıt (reklam hesabı 65672, isCheckBlackList true/false): bulksms tek alıcıyı reddeder
+            return json_err(-1000, BULK_SINGLE_RECEIVER_MESSAGE)
         self._packets += 1
         packet = self._packets
         ids, objects = [], []

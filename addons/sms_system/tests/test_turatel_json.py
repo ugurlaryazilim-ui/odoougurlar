@@ -103,8 +103,8 @@ class TestTuratelJsonClient(SmsTestCase):
 
     def test_kk_c4_kara_liste_bayragi_iletilir(self):
         client = self.json_client('com', service='bulk')
-        client.send_sms(65672, 'TESTBASLIK', 'Kampanya', NUMBERS[:1], client_ids=CIDS[:1], reference_id='R',
-                        check_blacklist=True)
+        client.send_sms(65672, 'TESTBASLIK', 'Kampanya', NUMBERS[:2], client_ids=CIDS[:2], reference_id='R',
+                        check_blacklist=True)   # bulksms en az 2 alıcı ister
         self.assertIs(self.net.json_sends[0]['payload']['isCheckBlackList'], True)
 
     # ── KK-C25 ──

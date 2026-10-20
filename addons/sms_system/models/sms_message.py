@@ -314,6 +314,11 @@ class SmsSystemMessage(models.Model):
         """Paketin kimlik seti: ticari kampanya → reklam, diğerleri → bilgi (tek karar noktası)."""
         return 'commercial' if self[:1].campaign_id.message_type == 'commercial' else 'info'
 
+    def _pack_service(self):
+        """Paketin Turatel servisi: tek alıcılı paket singlesms'e gider; bulksms 2'den az alıcıyı reddeder
+        (-1000 'Bulk SMS mode requires more than one valid receiver.'), 2+ alıcı bulksms'te kalır."""
+        return 'single' if len(self) == 1 else 'bulk'
+
     @api.model
     def _legacy_client(self, cfg=None):
         cfg = cfg or self._settings()
@@ -586,7 +591,9 @@ class SmsSystemMessage(models.Model):
 
         Her kayıt kendi clientId'siyle gider; yanıttaki mesaj kimliği clientId ile eşlenir (paket içinde
         kimlikler karışmaz). referenceId = {db8}-p{ilk kayıt id}. Kişiselleştirilmiş kampanya tek istekte
-        `{1}` şablonu + alıcı başına parameter ile gider (_json_pack_content).
+        `{1}` şablonu + alıcı başına parameter ile gider (_json_pack_content). Gönderilecek paket tek kayıtsa
+        (küçük kampanya ya da son paketin artığı) aynı kimlik setiyle singlesms'e gider ve kaydın son metni
+        parametresiz gönderilir (_pack_service); ConfirmSms/durum uzlaştırması provider_service'e göre servisi seçer.
         """
         first = self[0]
         purpose = self._pack_purpose()
@@ -599,6 +606,11 @@ class SmsSystemMessage(models.Model):
         pack, message_text, parameters = self._json_pack_content(cfg)
         if not pack:
             return
+        service = pack._pack_service()
+        if service == 'single':
+            # Aynı kimlik seti, singlesms adresi; kişiselleştirilmiş metin zaten body'ye yazıldı
+            client, account = self._client(cfg, service='single', purpose=purpose)
+            message_text, parameters = pack.body, None
         db8 = self._db8()
         refs = [msg._client_ref(db8) for msg in pack]
         try:
@@ -611,14 +623,14 @@ class SmsSystemMessage(models.Model):
             if e.uncertain:
                 # Paket Turatel'e ulaşmış olabilir: C5 durum cron'u bu hesabın setiyle uzlaştırır
                 pack.write({'state': 'uncertain', 'error': str(e), 'retry_count': MAX_RETRY,
-                            'provider_service': 'bulk', 'provider_account_id': account})
+                            'provider_service': service, 'provider_account_id': account})
             elif e.retryable:
                 pack.write({'state': 'error', 'error': str(e)})
             else:
                 pack.write({'state': 'error', 'error': str(e), 'retry_count': MAX_RETRY})
             return
         for msg, ref in zip(pack, refs):
-            msg.write(msg._json_success_vals(result, ref, 'bulk', account, cfg['confirm'][purpose]))
+            msg.write(msg._json_success_vals(result, ref, service, account, cfg['confirm'][purpose]))
 
     # ── ConfirmSms (Turatel cevabı 4) ──
 

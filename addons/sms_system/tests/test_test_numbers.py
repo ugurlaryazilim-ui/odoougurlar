@@ -222,7 +222,8 @@ class TestTestNumbersSend(TestNumbersMixin, SmsTestCase):
         self.listed()
         msgs = self.launch(self.campaign_with([LISTED_A, OTHER], message_type='commercial'))
         self.assertEqual(self.states_by_number(msgs), {LISTED_A: 'sent', OTHER: 'test'})
-        self.assertEqual([c['service'] for c in self.net.json_sends], ['bulksms'])
+        # Test modunda yalnız 1 alıcı gerçekten gider: tek alıcılı paket singlesms'e düşer
+        self.assertEqual([c['service'] for c in self.net.json_sends], ['singlesms'])
         self.assertEqual(len(self.net.json_sends[0]['payload']['personalMessages']), 1)
 
     def test_kk_c27_kampanya_eski_xml_modunda_yalniz_listedekiler(self):

@@ -137,19 +137,19 @@ class TestJsonPersonalization(TextMixin, SmsTestCase):
 
     def test_kk_c21_ad_birden_fazla_yerde_her_biri_1_olur(self):
         """{ad} yinelenirse her biri {1}; parametre listesi alıcı başına tek ad."""
-        self.launch(self.make_json_campaign(names=('Ayşe',), body='{ad}, merhaba {ad}'))
+        self.launch(self.make_json_campaign(names=('Ayşe', 'Can'), body='{ad}, merhaba {ad}'))
         payload = self.net.json_sends[0]['payload']
         self.assertEqual(payload['messageText'], '{1}, merhaba {1}')
-        self.assertEqual(payload['personalMessages'][0]['parameter'], ['Ayşe'])
+        self.assertEqual([p['parameter'] for p in payload['personalMessages']], [['Ayşe'], ['Can']])
 
     def test_kk_c21_guncel_ad_gonderimde_kullanilir(self):
-        camp = self.make_json_campaign(names=('Eski Ad',), body='Selam {ad}')
+        camp = self.make_json_campaign(names=('Eski Ad', 'Eski Ad 2'), body='Selam {ad}')
         camp.action_send()
         self.Contact.search([('list_ids', 'in', camp.list_ids.ids)]).write({'name': 'Yeni Ad'})
         self.run_queue()
-        msg = self.campaign_msgs(camp)
+        msgs = self.campaign_msgs(camp)
         self.assertEqual(self.net.json_sends[0]['payload']['personalMessages'][0]['parameter'], ['Yeni Ad'])
-        self.assertEqual(msg.body, 'Selam Yeni Ad', 'Gönderilen = görünen')
+        self.assertEqual(set(msgs.mapped('body')), {'Selam Yeni Ad'}, 'Gönderilen = görünen')
 
     def test_kk_c21_legacy_modda_kisisellestirme_eski_gibi(self):
         self.set_param('api_mode', 'legacy_xml')
