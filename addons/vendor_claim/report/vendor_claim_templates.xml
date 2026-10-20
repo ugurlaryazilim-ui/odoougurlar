@@ -68,32 +68,35 @@
     <template id="report_vendor_claim_slip">
         <t t-call="web.html_container">
             <t t-foreach="docs" t-as="o">
-                <div class="page" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 12px; width: 72mm;">
-                    <div style="text-align: center;">
-                        <strong style="font-size: 15px;" t-out="o.company_id.name"/><br/>
-                        <span>Ürün İnceleme Teslim Fişi</span>
+                <!-- article: Odoo gövdeyi charset=utf-8 içeren rapor düzeniyle sarar; yoksa wkhtmltopdf Latin-1 okur -->
+                <div class="article">
+                    <div class="page" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 12px; width: 72mm;">
+                        <div style="text-align: center;">
+                            <strong style="font-size: 15px;" t-out="o.company_id.name"/><br/>
+                            <span>Ürün İnceleme Teslim Fişi</span>
+                        </div>
+                        <div style="text-align: center; margin: 6px 0;">
+                            <img t-att-src="'/report/barcode/Code128/%s?width=600&amp;height=120' % o.name" style="width: 64mm; height: 14mm;"/>
+                            <div style="font-size: 16px; font-weight: bold;" t-out="o.name"/>
+                        </div>
+                        <table style="width: 100%;">
+                            <tr><td>Tarih</td><td><span t-field="o.create_date"/></td></tr>
+                            <tr><td>Müşteri</td><td t-out="o.customer_name"/></tr>
+                            <tr t-if="o.customer_mobile"><td>Telefon</td><td t-out="o.customer_mobile"/></tr>
+                            <tr t-if="o.invoice_no"><td>Fatura</td><td t-out="o.invoice_no"/></tr>
+                            <tr><td>Ürün</td><td t-out="o.product_name or o.product_code or ''"/></tr>
+                            <tr t-if="o.product_barcode"><td>Barkod</td><td t-out="o.product_barcode"/></tr>
+                        </table>
+                        <div style="margin-top: 6px;"><strong>Şikayet:</strong>
+                            <div style="white-space: pre-line;" t-out="o.defect_description"/>
+                        </div>
+                        <div style="margin-top: 8px; font-size: 10px;">
+                            Ürününüz incelenmek üzere üretici firmaya gönderilecektir. İnceleme sonucu tarafınıza bildirilecektir.
+                            Teslim almak için bu fişi getiriniz.
+                        </div>
+                        <div style="margin-top: 14px;">Teslim Alan: <span t-out="o.user_id.name or ''"/></div>
+                        <div style="margin-top: 14px;">Müşteri İmza: ..............................</div>
                     </div>
-                    <div style="text-align: center; margin: 6px 0;">
-                        <img t-att-src="'/report/barcode/Code128/%s?width=600&amp;height=120' % o.name" style="width: 64mm; height: 14mm;"/>
-                        <div style="font-size: 16px; font-weight: bold;" t-out="o.name"/>
-                    </div>
-                    <table style="width: 100%;">
-                        <tr><td>Tarih</td><td><span t-field="o.create_date"/></td></tr>
-                        <tr><td>Müşteri</td><td t-out="o.customer_name"/></tr>
-                        <tr t-if="o.customer_mobile"><td>Telefon</td><td t-out="o.customer_mobile"/></tr>
-                        <tr t-if="o.invoice_no"><td>Fatura</td><td t-out="o.invoice_no"/></tr>
-                        <tr><td>Ürün</td><td t-out="o.product_name or o.product_code or ''"/></tr>
-                        <tr t-if="o.product_barcode"><td>Barkod</td><td t-out="o.product_barcode"/></tr>
-                    </table>
-                    <div style="margin-top: 6px;"><strong>Şikayet:</strong>
-                        <div style="white-space: pre-line;" t-out="o.defect_description"/>
-                    </div>
-                    <div style="margin-top: 8px; font-size: 10px;">
-                        Ürününüz incelenmek üzere üretici firmaya gönderilecektir. İnceleme sonucu tarafınıza bildirilecektir.
-                        Teslim almak için bu fişi getiriniz.
-                    </div>
-                    <div style="margin-top: 14px;">Teslim Alan: <span t-out="o.user_id.name or ''"/></div>
-                    <div style="margin-top: 14px;">Müşteri İmza: ..............................</div>
                 </div>
             </t>
         </t>

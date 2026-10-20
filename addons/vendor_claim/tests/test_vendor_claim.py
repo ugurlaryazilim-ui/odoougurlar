@@ -163,6 +163,18 @@ class TestVendorClaim(TransactionCase):
             html = self.env['ir.actions.report']._render_qweb_html(xmlid, claim.ids)[0]
             self.assertIn(claim.name.encode(), html)
 
+    def test_slip_pdf_turkce_karakter(self):
+        """Fiş gerçek PDF'te Türkçe basılır: div.article yoksa Odoo charset'siz HTML verir, wkhtmltopdf Latin-1 okur."""
+        import io
+        from odoo.tools.pdf import PdfFileReader
+        claim = self._claim()
+        pdf = self.env['ir.actions.report'].with_context(force_report_rendering=True)._render_qweb_pdf(
+            'vendor_claim.action_report_vendor_claim_slip', claim.ids)[0]
+        text = '\n'.join(p.extract_text() for p in PdfFileReader(io.BytesIO(pdf)).pages)
+        self.assertIn('Ürün İnceleme Teslim Fişi', text)
+        self.assertIn('Şikayet', text)
+        self.assertNotIn('Ã', text, 'UTF-8 metin Latin-1 okunmuş')
+
     def test_form_onchange_invoice(self):
         from odoo.tests import Form
         detail = {
