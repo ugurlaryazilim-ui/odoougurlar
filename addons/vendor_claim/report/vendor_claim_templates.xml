@@ -68,7 +68,7 @@
     <template id="report_vendor_claim_slip">
         <t t-call="web.html_container">
             <t t-foreach="docs" t-as="o">
-                <div class="page" style="font-family: Arial, sans-serif; font-size: 12px; width: 72mm;">
+                <div class="page" style="font-family: 'DejaVu Sans', Arial, sans-serif; font-size: 12px; width: 72mm;">
                     <div style="text-align: center;">
                         <strong style="font-size: 15px;" t-out="o.company_id.name"/><br/>
                         <span>Ürün İnceleme Teslim Fişi</span>
