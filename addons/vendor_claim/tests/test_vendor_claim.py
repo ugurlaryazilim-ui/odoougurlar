@@ -1,3 +1,4 @@
+import re
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -363,6 +364,45 @@ class TestVendorClaimMultiItem(VcCase):
         items[1]['notes'] = 'Sadece bu ürün'
         _res, claims = self._create(data=self._data(notes='Ortak', invoice_no='UGR-5006'), items=items)
         self.assertEqual(claims.mapped('notes'), ['Ortak', 'Sadece bu ürün', 'Ortak'])
+
+    def test_uzun_takip_listesi_kisaltilir_sms_yine_gider(self):
+        """20 ürün: {takip} birleşimi sınırı aşarsa 'INC-1, INC-2 ve N kayıt daha'; SMS kaydı oluşur."""
+        from odoo.addons.sms_system.services.turatel_json import MAX_TEXT_LENGTH
+        self.configure_json(test_mode='True')
+        template = self.env['sms.system.template'].get_by_code('vendor_claim_received')
+        template.body += ' Ürününüzün durumunu öğrenmek için mağazamızı arayabilir veya mağazaya uğrayabilirsiniz.' * 2
+        items = [dict(self._items()[0]) for _i in range(20)]
+        res, claims = self._create(items=items)
+        self.assertEqual(len(claims), 20)
+        messages = self._all_sms(claims)
+        self.assertEqual(len(messages), 1, 'sınır aşılsa da müşteriye SMS gider')
+        self.assertEqual((res['sms']['state'], res['sms']['error']), ('test', ''))
+        self.assertEqual(messages.state, res['sms']['state'])
+        self.assertLessEqual(len(messages.body), MAX_TEXT_LENGTH)
+        self.assertRegex(messages.body, r'%s.* ve \d+ kayıt daha' % claims[0].name)
+        self.assertNotIn(claims[-1].name, messages.body)
+        self.assertTrue(all(claims.mapped('sms_received_sent')))
+        # kısaltma payı: gösterilen + "N kayıt daha" = toplam
+        shown = messages.body.count('INC-')
+        more = int(re.search(r've (\d+) kayıt daha', messages.body).group(1))
+        self.assertEqual(shown + more, 20)
+
+    def test_kisa_takip_listesi_oldugu_gibi_kalir(self):
+        _res, claims = self._create()
+        self.assertNotIn('kayıt daha', self._all_sms(claims).body)
+        self.assertEqual(claims._sms_values_fit('vendor_claim_received')['takip'], ', '.join(claims.mapped('name')))
+
+    def test_eski_modda_parca_siniri(self):
+        """Eski (XML) modda sınır 7 parça: aşılırsa yine kısaltılır."""
+        self.set_param('api_mode', 'legacy_xml')
+        template = self.env['sms.system.template'].get_by_code('vendor_claim_received')
+        template.body += ' Ürününüzün durumunu öğrenmek için mağazamızı arayabilir.' * 14
+        items = [dict(self._items()[0]) for _i in range(20)]
+        res, claims = self._create(items=items)
+        messages = self._all_sms(claims)
+        self.assertEqual(len(messages), 1)
+        self.assertEqual((res['sms']['state'], res['sms']['error']), ('test', ''))
+        self.assertIn('kayıt daha', messages.body)
 
     def test_metin_olmayan_degerler_500_vermez(self):
         # sayı gelen alanlar metne çevrilir (JS'ten barkod/telefon sayı olarak gelebilir)

@@ -7,7 +7,9 @@ from psycopg2 import errors as pg_errors
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
-from odoo.addons.sms_system.services.turatel import normalize_number
+from odoo.addons.sms_system.models.sms_message import count_segments
+from odoo.addons.sms_system.services.turatel import MAX_SEGMENTS, normalize_number, prepare_text
+from odoo.addons.sms_system.services.turatel_json import MAX_TEXT_LENGTH
 
 _logger = logging.getLogger(__name__)
 
@@ -594,6 +596,31 @@ class VendorClaim(models.Model):
             'magaza': first.company_id.name or first.env.company.name or '',
         }
 
+    def _sms_fits(self, body):
+        """Metin sms_system'in gönderim sınırına sığar mı: send_sms ile aynı hesap (JSON modunda 402 karakter,
+        eski modda 7 parça; Türkçe/ASCII ayarı dahil). Sığmayan metinde send_sms UserError verip hiç SMS gitmez."""
+        cfg = self.env['sms.system.message']._settings()
+        text, sms_type = prepare_text(body, ascii_mode=cfg['ascii_mode'])
+        if cfg['api_mode'] == 'json':
+            return len(text) <= MAX_TEXT_LENGTH
+        return count_segments(cfg['api_mode'], text, sms_type) <= MAX_SEGMENTS
+
+    def _sms_values_fit(self, code):
+        """Çok kayıtlı tek SMS'in yer tutucu değerleri; {takip} birleşimi sınırı aşarsa kısaltılır.
+
+        Önce tüm takip no'lar ("INC-1, INC-2, INC-3"); sığmıyorsa sığana kadar sondan öğe atılır ve
+        "INC-1, INC-2 ve N kayıt daha" yazılır. En az bir takip no her zaman kalır."""
+        values = self._sms_values()
+        template = self.env['sms.system.template'].sudo().get_by_code(code)
+        if len(self) < 2 or not template:
+            return values
+        names = self.mapped('name')
+        shown = len(names)
+        while shown > 1 and not self._sms_fits(template.render(values)):
+            shown -= 1
+            values['takip'] = _('%(names)s ve %(n)s kayıt daha', names=', '.join(names[:shown]), n=len(names) - shown)
+        return values
+
     def _send_template_sms(self, code, number=None, queue=False, values=None):
         """Şablonla SMS gönder; sms.system.message kaydını döndür (numara/şablon yoksa None).
 
@@ -677,7 +704,7 @@ class VendorClaim(models.Model):
             res = result[lead.id]
             try:
                 msg = lead._send_template_sms(
-                    code, queue=True, values=claims._sms_values() if len(claims) > 1 else None)
+                    code, queue=True, values=claims._sms_values_fit(code) if len(claims) > 1 else None)
             except UserError as e:  # geçersiz numara vb. durum değişikliğini engellemesin
                 for claim in claims:
                     claim.message_post(body=_('SMS gönderilemedi: %s') % e)
