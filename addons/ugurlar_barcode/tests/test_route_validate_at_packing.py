@@ -286,3 +286,57 @@ class TestRouteValidateAtPacking(PackingCase):
         pb.move_ids.write({'quantity': 1, 'picked': True})
         pb.button_validate()
         self.assertTrue(finished(pa | pb))
+
+    # ─── İnceleme 2: aynı siparişin kardeş picking'leri tek faturada ───
+    def _sale_two_pickings(self):
+        """2 satırlı sipariş, satırlar ayrı OUT'larda (farklı depodan toplama gibi)."""
+        for product in (self.prod, self.prod2):
+            product.product_tmpl_id.invoice_policy = 'delivery'
+            self._add_stock(product, self.stock, 5)
+        sale = self.env['sale.order'].create({
+            'partner_id': self.customer.id,
+            'order_line': [(0, 0, {'product_id': p.id, 'product_uom_qty': 1, 'price_unit': 10.0})
+                           for p in (self.prod, self.prod2)],
+        })
+        sale.action_confirm()
+        p1 = sale.picking_ids
+        self.assertEqual(len(p1), 1, 'ön koşul')
+        move2 = p1.move_ids.filtered(lambda m: m.product_id == self.prod2)
+        p2 = self.env['stock.picking'].create({
+            'picking_type_id': p1.picking_type_id.id, 'partner_id': p1.partner_id.id,
+            'location_id': p1.location_id.id, 'location_dest_id': p1.location_dest_id.id,
+            'origin': p1.origin})
+        move2.picking_id = p2
+        (p1 | p2).action_assign()
+        batch = self._route(p1 | p2)
+        (p1 | p2).move_ids.write({'wave_collected_qty': 1})
+        res = self.batch_ctl.batch_collect_complete(batch_id=batch.id)
+        self.assertTrue(res.get('success'), res)
+        return sale, p1, p2, batch
+
+    def _invoiced_products(self, sale):
+        return self._out_invoices(sale).invoice_line_ids.product_id
+
+    def test_siblings_scanned_invoice_once_with_both_products(self):
+        sale, p1, p2, batch = self._sale_two_pickings()
+        first = self._scan(batch, 1, barcode='RVP-1')
+        self.assertEqual(p1.state, 'done')
+        self.assertFalse(first['picking_completed'], 'sipariş tamam değil: etiket yok')
+        self.assertEqual(len(self._out_invoices(sale)), 0, 'kardeş açıkken fatura kesilmemeli')
+        self.assertEqual(self.nebim['posts'], 0)
+
+        last = self._scan(batch, 1, barcode='RVP-2')
+        self.assertTrue(last['picking_completed'])
+        self.assertEqual(p2.state, 'done')
+        self.assertEqual(len(self._out_invoices(sale)), 1)
+        self.assertEqual(self._invoiced_products(sale), self.prod | self.prod2)
+        self.assertEqual(self.nebim['posts'], 1)
+
+    def test_siblings_packing_complete_invoice_once_with_both_products(self):
+        sale, p1, p2, batch = self._sale_two_pickings()
+        res = self.pack_ctl.packing_complete(batch_id=batch.id)
+        self.assertTrue(res.get('success'), res)
+        self.assertEqual((p1 | p2).mapped('state'), ['done', 'done'])
+        self.assertEqual(len(self._out_invoices(sale)), 1)
+        self.assertEqual(self._invoiced_products(sale), self.prod | self.prod2)
+        self.assertEqual(self.nebim['posts'], 1)

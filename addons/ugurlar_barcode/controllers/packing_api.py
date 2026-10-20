@@ -184,6 +184,19 @@ class PackingApiController(BarcodeApiBase):
         }
 
     @staticmethod
+    def _order_route_shipped(picking, all_pickings):
+        """Siparişin bu rotadaki iptal olmayan tüm sevkiyatları doğrulandı mı. Fatura (Nebim)
+        sipariş başına bir kez, bu koşulda tetiklenir: kardeş picking'ler ayrı doğrulanınca
+        ilk kardeş tek başına faturalanıyor, sonrakinin ürünü faturaya girmiyordu
+        (`_trigger_nebim_sync` fatura varsa yenisini kesmez)."""
+        if picking.state != 'done':
+            return False
+        if not picking.origin:
+            return True
+        return all(p.state == 'done' for p in all_pickings
+                   if p.origin == picking.origin and p.state != 'cancel')
+
+    @staticmethod
     def _cancelled_sale_origins(pickings):
         """Picking'lerin origin'lerinden iptal edilmiş satış siparişi adları (tek sorgu)."""
         origins = list({p.origin for p in pickings if p.origin})
@@ -727,13 +740,15 @@ class PackingApiController(BarcodeApiBase):
 
         # Doğrulanamayan picking için Nebim ve etiket bayrağı çalışmaz (kullanıcı kararı)
         if picking_completed and not validate_error:
-            # Nebim sync tetikle (fatura oluşsun)
-            try:
-                _logger.info("NEBIM SYNC tetikleniyor: %s (origin=%s)",
-                             target_picking.name, target_picking.origin)
-                self._trigger_nebim_sync(target_picking)
-            except Exception as e:
-                _logger.error("Nebim sync hatası %s: %s", target_picking.name, e)
+            # Nebim sync (fatura) yalnız siparişin rotadaki tüm sevkiyatları doğrulanınca:
+            # kardeş açıkken kesilen fatura ondan sonraki ürünü içermiyordu
+            if self._order_route_shipped(target_picking, all_pickings):
+                try:
+                    _logger.info("NEBIM SYNC tetikleniyor: %s (origin=%s)",
+                                 target_picking.name, target_picking.origin)
+                    self._trigger_nebim_sync(target_picking)
+                except Exception as e:
+                    _logger.error("Nebim sync hatası %s: %s", target_picking.name, e)
 
             # Etiket basıldı olarak işaretle
             try:
@@ -915,6 +930,7 @@ class PackingApiController(BarcodeApiBase):
         if missing:
             return self._missing_error(missing, 'paketlemesi tamamlanamaz')
 
+        shipped = request.env['stock.picking'].sudo().browse()
         for picking in all_pickings:
             try:
                 # Toplamadan sonra satırı değişen siparişin OUT'u iptal olur ama rotanın kalıcı
@@ -939,8 +955,8 @@ class PackingApiController(BarcodeApiBase):
                     continue
 
                 if picking.state == 'done':
-                    # Eğer daha önce onaylanmış ama Nebim'de takılı kalmışsa tekrar dene
-                    self._trigger_nebim_sync(picking)
+                    # Daha önce onaylanmış: Nebim'de takılı kalmışsa aşağıda yeniden denenir
+                    shipped |= picking
                     validated += 1
                     continue
 
@@ -951,13 +967,29 @@ class PackingApiController(BarcodeApiBase):
                     errors.append(f"{picking.name}: {error}")
                     failed_ids.append(picking.id)
                     continue
-                self._trigger_nebim_sync(picking)
+                shipped |= picking
                 validated += 1
 
             except PG_CONCURRENCY_EXCEPTIONS_TO_RETRY:
                 raise
             except Exception as e:
                 _logger.exception("Sipariş Onay/Senkronizasyon Hatası %s:", picking.name)
+                errors.append(f"{picking.name}: {self._error_text(e)}")
+
+        # Nebim / fatura sipariş başına bir kez ve yalnız siparişin rotadaki tüm sevkiyatları
+        # doğrulanınca (kardeşlerden biri doğrulanamadıysa fatura kesilmez)
+        synced_origins = set()
+        for picking in shipped:
+            key = picking.origin or picking.id
+            if key in synced_origins or not self._order_route_shipped(picking, all_pickings):
+                continue
+            synced_origins.add(key)
+            try:
+                self._trigger_nebim_sync(picking)
+            except PG_CONCURRENCY_EXCEPTIONS_TO_RETRY:
+                raise
+            except Exception as e:
+                _logger.exception("Sipariş Senkronizasyon Hatası %s:", picking.name)
                 errors.append(f"{picking.name}: {self._error_text(e)}")
 
         # Rota kapanışı (tek kural). Filtresiz liste: iptal siparişin picking'i yukarıda
