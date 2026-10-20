@@ -550,12 +550,14 @@ class VendorClaim(models.Model):
         sorumlu tek fiş olur; çoklu ürün kaydı (mobil) ya da arka uçtan çoklu seçim böylece müşteriye tek kâğıt
         verir. Farklı gün/kişi/müşteri ayrı fişe düşer: aynı faturanın günler sonraki ayrı teslimi tek kâğıda
         karışmaz. Faturasız VE telefonsuz/kodsuz kayıtta müşteriyi ayırt edecek bir şey yok (aynı ad iki ayrı
-        kişi olabilir): gruplanmaz, her kayıt kendi fişini alır. Sıra: ilk kaydın id'sine göre."""
+        kişi olabilir): yalnız aynı istekte (aynı kullanıcı + aynı create_date) açılanlar tek fiş olur, farklı
+        istek/kullanıcıdakiler ayrışır. Sıra: ilk kaydın id'sine göre."""
         groups = {}
         for claim in self.sorted('id'):
             identity = claim.customer_mobile or claim.customer_code or ''
             if not identity and not claim.invoice_no:
-                key = ('tek', claim.id)
+                # Aynı istekte açılan kayıtlar aynı create_date'i (işlem zamanı) ve aynı kullanıcıyı taşır: tek fiş
+                key = ('tek', claim.company_id.id, claim.create_uid.id, claim.create_date)
             else:
                 day = fields.Datetime.context_timestamp(claim, claim.create_date).date() if claim.create_date else None
                 key = (claim.company_id.id, self._norm_name(claim.customer_name), identity,

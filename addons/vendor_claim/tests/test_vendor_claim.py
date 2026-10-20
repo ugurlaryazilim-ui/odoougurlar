@@ -521,18 +521,45 @@ class TestVendorClaimMultiItem(VcCase):
         first.invalidate_recordset(['create_date'])
         self.assertEqual(len((first | second)._slip_groups()), 1)
 
-    def test_faturasiz_telefonsuz_ayni_adli_kayitlar_ayri_fis(self):
+    def test_faturasiz_telefonsuz_ayni_istekteki_kayitlar_tek_fis(self):
+        """Kimliksiz (faturasız + telefonsuz/kodsuz) kayıtlar aynı istekte açıldıysa tek fiş."""
+        data = self._data(no_invoice=True, customer_mobile='', customer_code='')
+        _res, multi = self._create(data=data)
+        self.assertEqual(len(multi), 3)
+        self.assertFalse(any(multi.mapped('customer_mobile') + multi.mapped('customer_code')
+                             + multi.mapped('invoice_no')))
+        self.assertEqual(len(set(multi.mapped('create_date'))), 1, 'aynı istek: aynı create_date')
+        html = self._html(multi)
+        self.assertEqual(html.count('class="article"'), 1)
+        self.assertEqual(html.count('Ayşe Çelik'), 1)
+        self.assertEqual(html.count('Müşteri İmza'), 1)
+        self.assertEqual(html.count('/report/barcode/Code128/'), 1)
+        for claim in multi:
+            self.assertIn(claim.name, html)
+
+    def test_faturasiz_telefonsuz_ayni_adli_farkli_istekler_ayri_fis(self):
         data = self._data(no_invoice=True, customer_mobile='', customer_code='')
         _r1, first = self._create(data=data, items=self._items()[:1])
         _r2, second = self._create(data=data, items=self._items()[:1])
         self.assertFalse(first.customer_mobile or first.customer_code or first.invoice_no)
-        html = self._html(first | second)
-        self.assertEqual(html.count('class="article"'), 2)
-        # aynı çağrıdaki çoklu ürün de kimliksizse her kayıt kendi fişini alır (güvenli taraf)
-        _r3, multi = self._create(data=data)
-        self.assertEqual(self._html(multi).count('class="article"'), 3)
-        # faturalı ama telefonsuz: fatura kimlik sayılır, tek fiş
-        _r4, inv = self._create(data=self._data(customer_mobile='', customer_code='', invoice_no='UGR-7007'))
+        # testte iki çağrı tek işlemde: create_date aynı → farklı istek simülasyonu için SQL ile ayır
+        self.env.cr.execute("UPDATE vendor_claim SET create_date = create_date + interval '5 seconds' WHERE id = %s",
+                            [second.id])
+        second.invalidate_recordset(['create_date'])
+        self.assertEqual(self._html(first | second).count('class="article"'), 2)
+        self.assertEqual(len((first | second)._slip_groups()), 2)
+        # aynı zamanlı ama farklı kullanıcının kaydı da ayrışır
+        self.env.cr.execute("UPDATE vendor_claim SET create_date = (SELECT create_date FROM vendor_claim WHERE id = %s)"
+                            " WHERE id = %s", [first.id, second.id])
+        second.invalidate_recordset(['create_date'])
+        self.assertEqual(len((first | second)._slip_groups()), 1)
+        self.env.cr.execute("UPDATE vendor_claim SET create_uid = %s WHERE id = %s", [self.user2.id, second.id])
+        second.invalidate_recordset(['create_uid'])
+        self.assertEqual(len((first | second)._slip_groups()), 2)
+
+    def test_faturali_telefonsuz_tek_fis(self):
+        # fatura kimlik sayılır
+        _r, inv = self._create(data=self._data(customer_mobile='', customer_code='', invoice_no='UGR-7007'))
         self.assertEqual(self._html(inv).count('class="article"'), 1)
 
     def test_coklu_fis_pdf_turkce(self):
