@@ -492,6 +492,7 @@ class TestReservedRouteScreens(BarcodeCase):
         self.assertTrue(res.get('not_collected'), res)
         self.assertEqual(repl.move_ids.packing_scanned_qty, 0)
         self.nebim.assert_not_called()
+        self.assertNotIn(repl, batch.all_picking_ids, 'hata dönüşünde rotaya eklenmemeli')
 
     def test_review_o1_replacement_removed_from_route_not_soft_matched(self):
         """Rotada hiç toplanamayıp çıkarılan (batch_id boş, rotadan geçmiş) replacement da aynı."""
@@ -501,6 +502,7 @@ class TestReservedRouteScreens(BarcodeCase):
         res = self.pack_ctl.packing_scan(batch_id=batch.id, barcode='RR-X')
         self.assertFalse(res.get('soft_match'), res)
         self.assertTrue(res.get('not_collected'), res)
+        self.assertNotIn(repl, batch.all_picking_ids, 'hata dönüşünde rotaya eklenmemeli')
 
     def test_review_o1_collected_routed_replacement_counts_scan(self):
         """R2 toplandı (wave 1): okutma replacement sayacına yazılır, soft match değil."""
@@ -511,6 +513,7 @@ class TestReservedRouteScreens(BarcodeCase):
         self.assertFalse(res.get('soft_match'), res)
         self.assertEqual(res.get('picking_id'), repl.id)
         self.assertEqual(repl.move_ids.packing_scanned_qty, 1)
+        self.assertIn(repl, batch.all_picking_ids, 'başarılı okutmada rotaya eklenir')
 
     def test_review_o1_unrouted_reserved_replacement_keeps_soft_match(self):
         """Koruma (eski davranış): rotaya hiç girmemiş, Odoo'nun rezerve ettiği replacement soft match."""

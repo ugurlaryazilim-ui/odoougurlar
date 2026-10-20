@@ -448,6 +448,7 @@ class PackingApiController(BarcodeApiBase):
                 ((p, m) for p, m in active_moves if m.packing_scanned_qty < m.product_uom_qty),
                 (None, None))
 
+        pending_route_add = None
         if not target_move:
             # ─── Fallback: İptal edilmiş move varsa yeniden yönlendirilmiş olabilir ───
             # Odoo stok yeniden yönlendirme yapınca orijinal move'u iptal edip
@@ -487,10 +488,10 @@ class PackingApiController(BarcodeApiBase):
                             _logger.info(
                                 "Replacement move (aktif): %s → %s (origin: %s)",
                                 cancelled_picking.name, rp.name, rp.origin)
-                            try:
-                                batch.sudo().all_picking_ids = [(4, rp.id)]
-                            except Exception:
-                                pass
+                            # Rotaya ekleme toplama kontrolleri geçince yapılır: önceden hata
+                            # dönüşünden (not_collected) önce yazılıyor, okutma reddedildiği
+                            # halde replacement rotada kalıyordu
+                            pending_route_add = rp
                             break
                     if target_move:
                         break
@@ -669,6 +670,9 @@ class PackingApiController(BarcodeApiBase):
                          f'hepsi zaten okutuldu.',
                 'not_collected': True,
             }
+
+        if pending_route_add:
+            batch.sudo().all_picking_ids = [(4, pending_route_add.id)]
 
         # Barkod eşleşti → qty artır (eşleştirme sayacı, stok hareketi değil)
         new_qty = target_move.packing_scanned_qty + 1
