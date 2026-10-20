@@ -53,11 +53,15 @@ class StockMoveExt(models.Model):
 
         Satır azaltma (negatif hareket) yine aynı sevkiyatı bulur: oradaki hareketle
         birleşip miktarı düşürür / iptal eder (ayrı sevkiyata giderse iade hareketine dönerdi).
+
+        Kural yalnız rotadaki picking'e uygulanır: tamamen "Eksik" olup Tamamla ile rotadan
+        çıkarılan picking'in wave_skipped işareti sıfırlanmaz, yeni satıra kapalı kalıp
+        gereksiz ayrı sevkiyat açtırıyordu.
         """
         domain = super()._search_picking_for_assignation_domain()
         if self._is_negative_demand():
             return domain
-        return Domain.AND([domain, [('move_ids', 'not any', [
+        return Domain.AND([domain, ['|', ('batch_id', '=', False), ('move_ids', 'not any', [
             '|', ('wave_collected_qty', '>', 0), ('wave_skipped', '=', True)])]])
 
 

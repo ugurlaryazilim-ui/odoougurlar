@@ -412,6 +412,24 @@ class TestRouteValidateAtPacking(PackingCase):
         self.assertNotEqual(moves.picking_id, picking)
         self.assertEqual(moves.picking_id.picking_type_code, 'outgoing')
 
+    def test_fully_skipped_picking_removed_from_route_accepts_new_lines(self):
+        """Tamamen "Eksik" olup rotadan çıkarılan picking'in wave_skipped işareti kalır; yeni
+        satır yine bu picking'e girer (gereksiz ayrı OUT açılmaz)."""
+        self.prod3.product_tmpl_id.invoice_policy = 'delivery'
+        self._add_stock(self.prod3, self.stock, 5)
+        _s1, p1 = self._sale(self.prod, 1)
+        sale2, p2 = self._sale(self.prod, 1)
+        batch = self._route(p1 | p2)
+        p1.move_ids.wave_collected_qty = 1
+        p2.move_ids.wave_skipped = True
+        res = self.batch_ctl.batch_collect_complete(batch_id=batch.id)
+        self.assertTrue(res.get('success'), res)
+        self.assertFalse(p2.batch_id, 'ön koşul: rotadan çıkarıldı')
+        sale2.write({'order_line': [(0, 0, {
+            'product_id': self.prod3.id, 'product_uom_qty': 1, 'price_unit': 10.0})]})
+        self.assertIn(self.prod3, p2.move_ids.product_id)
+        self.assertEqual(len(sale2.picking_ids), 1)
+
     # ─── İnceleme 4: model katmanında silme koruması ───
     def test_model_unlink_blocked_when_collected_not_packed(self):
         _sale, _picking, batch, _res = self._collected_route(1)
