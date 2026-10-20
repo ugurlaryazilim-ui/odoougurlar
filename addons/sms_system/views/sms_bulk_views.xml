@@ -243,7 +243,8 @@
                     <div class="row">
                         <div class="col-lg-7">
                             <label for="body" string="Metin" class="fw-bold"/>
-                            <field name="body" nolabel="1" readonly="state != 'draft'"
+                            <field name="body" nolabel="1" readonly="state != 'draft'" widget="sms_placeholder_text"
+                                   options="{'placeholders': [{'label': 'Ad', 'value': 'ad'}]}"
                                    placeholder="Sayın {ad}, ... ({ad} yazarsanız her kişinin adı gelir)"/>
                             <field name="final_body" invisible="1"/>
                         </div>

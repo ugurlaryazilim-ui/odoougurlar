@@ -24,6 +24,13 @@
         'views/sms_bulk_views.xml',
         'views/res_config_settings_views.xml',
     ],
+    'assets': {
+        'web.assets_backend': [
+            'sms_system/static/src/js/placeholder_utils.js',
+            'sms_system/static/src/js/sms_placeholder_text.js',
+            'sms_system/static/src/xml/sms_placeholder_text.xml',
+        ],
+    },
     'installable': True,
     'application': True,
     'license': 'LGPL-3',
