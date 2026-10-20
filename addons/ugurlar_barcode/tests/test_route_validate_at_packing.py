@@ -8,6 +8,7 @@ K1-K8 ve rota silme koruması. Gerçek ORM, `request` yamalı; Nebim connector /
 """
 from unittest.mock import patch
 
+from odoo.exceptions import UserError
 from odoo.tests import tagged
 
 from odoo.addons.ugurlar_barcode.controllers import batch_api
@@ -407,3 +408,18 @@ class TestRouteValidateAtPacking(PackingCase):
         self.assertEqual(moves.product_id, self.prod3, 'iade / negatif hareket kalmamalı')
         self.assertNotEqual(moves.picking_id, picking)
         self.assertEqual(moves.picking_id.picking_type_code, 'outgoing')
+
+    # ─── İnceleme 4: model katmanında silme koruması ───
+    def test_model_unlink_blocked_when_collected_not_packed(self):
+        _sale, _picking, batch, _res = self._collected_route(1)
+        with self.assertRaises(UserError):
+            batch.unlink()
+        self.assertTrue(batch.exists())
+
+    def test_model_unlink_not_blocked_by_picking_moved_to_other_route(self):
+        _sale, picking, batch, _res = self._collected_route(1)
+        other = self.env['stock.picking.batch'].create(
+            {'picking_type_id': picking.picking_type_id.id})
+        picking.batch_id = other
+        batch.unlink()
+        self.assertFalse(batch.exists())

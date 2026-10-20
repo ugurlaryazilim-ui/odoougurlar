@@ -399,13 +399,10 @@ class BatchApiController(BarcodeApiBase):
             if batch.state == 'done':
                 return {'error': 'Tamamlanmış rotalar silinemez'}
 
-            # Toplanmış ama paketlemede doğrulanmamış ürün varsa silme: rota
-            # silinirse toplanan miktar (wave_collected_qty) sahipsiz kalır ve
-            # paketleme bu siparişleri rota üzerinden bulamaz.
-            open_collected = self._get_all_pickings(batch).filtered(
-                lambda p: p.state not in ('done', 'cancel') and any(
-                    (m.wave_collected_qty or 0) > 0 and m.state != 'cancel'
-                    for m in p.move_ids))
+            # Toplanmış ama paketlemede doğrulanmamış ürün varsa silme (kural modelde:
+            # stock.picking.batch.unlink de aynı denetimi yapar). Burada, siparişler
+            # rotadan çıkarılmadan önce kontrol edilir.
+            open_collected = batch._collected_unpacked_pickings()
             if open_collected:
                 return {'error': (
                     f'Bu rotada toplanmış ama paketlenmemiş ürün var '
