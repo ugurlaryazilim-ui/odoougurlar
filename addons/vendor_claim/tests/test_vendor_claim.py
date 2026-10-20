@@ -448,6 +448,53 @@ class TestVendorClaimMultiItem(VcCase):
         self.assertTrue(all(n in first_slip for n in first.mapped('name')))
         self.assertFalse(any(n in first_slip for n in second.mapped('name')))
 
+    def test_ayni_fatura_farkli_gunlerde_ayri_fis(self):
+        _r1, first = self._create()
+        _r2, second = self._create(items=self._items()[:1])   # aynı müşteri, aynı fatura
+        self.assertEqual(self._html(first | second).count('class="article"'), 1, 'aynı gün/kişi: tek fiş')
+        # ikincisi başka günde açılmış gibi (create_date magic alan: SQL ile)
+        self.env.cr.execute("UPDATE vendor_claim SET create_date = create_date - interval '3 days' WHERE id = %s",
+                            [second.id])
+        second.invalidate_recordset(['create_date'])
+        html = self._html(first | second)
+        self.assertEqual(html.count('class="article"'), 2)
+        self.assertEqual(len((first | second)._slip_groups()), 2)
+
+    def test_farkli_sorumlu_ayri_fis(self):
+        _r1, first = self._create()
+        _r2, second = self._create(items=self._items()[:1])
+        other = self.env['res.users'].search([('id', '!=', first.user_id.id)], limit=1)
+        second.user_id = other
+        self.assertEqual(self._html(first | second).count('class="article"'), 2)
+
+    def test_gun_kullanici_saat_diliminde_hesaplanir(self):
+        """23:30 UTC ile 00:30 UTC, İstanbul'da (UTC+3) aynı gün: tek fiş; İstanbul gece yarısını aşan ayrı gün."""
+        self.env.user.tz = 'Europe/Istanbul'
+        _r1, first = self._create(items=self._items()[:1])
+        _r2, second = self._create(items=self._items()[:1])
+        stamp = "UPDATE vendor_claim SET create_date = %s WHERE id = %s"
+        self.env.cr.execute(stamp, ['2026-10-05 20:30:00', first.id])    # İstanbul 23:30 (5 Ekim)
+        self.env.cr.execute(stamp, ['2026-10-05 21:30:00', second.id])   # İstanbul 00:30 (6 Ekim)
+        (first | second).invalidate_recordset(['create_date'])
+        self.assertEqual(len((first | second)._slip_groups()), 2)
+        self.env.cr.execute(stamp, ['2026-10-05 21:30:00', first.id])    # ikisi de 6 Ekim (İstanbul)
+        first.invalidate_recordset(['create_date'])
+        self.assertEqual(len((first | second)._slip_groups()), 1)
+
+    def test_faturasiz_telefonsuz_ayni_adli_kayitlar_ayri_fis(self):
+        data = self._data(no_invoice=True, customer_mobile='', customer_code='')
+        _r1, first = self._create(data=data, items=self._items()[:1])
+        _r2, second = self._create(data=data, items=self._items()[:1])
+        self.assertFalse(first.customer_mobile or first.customer_code or first.invoice_no)
+        html = self._html(first | second)
+        self.assertEqual(html.count('class="article"'), 2)
+        # aynı çağrıdaki çoklu ürün de kimliksizse her kayıt kendi fişini alır (güvenli taraf)
+        _r3, multi = self._create(data=data)
+        self.assertEqual(self._html(multi).count('class="article"'), 3)
+        # faturalı ama telefonsuz: fatura kimlik sayılır, tek fiş
+        _r4, inv = self._create(data=self._data(customer_mobile='', customer_code='', invoice_no='UGR-7007'))
+        self.assertEqual(self._html(inv).count('class="article"'), 1)
+
     def test_coklu_fis_pdf_turkce(self):
         import io
         from odoo.tools.pdf import PdfFileReader

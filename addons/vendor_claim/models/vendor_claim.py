@@ -544,13 +544,20 @@ class VendorClaim(models.Model):
     def _slip_groups(self):
         """Müşteri fişi için kayıtları müşteri bazında grupla (her grup tek fiş).
 
-        Aynı müşteri (ad + cep/kod), aynı fatura ve aynı şirket tek fiş olur; çoklu ürün kaydı (mobil) ya da
-        arka uçtan çoklu seçim böylece müşteriye tek kâğıt verir, farklı müşteriler ayrı fişe düşer.
-        Sıra: ilk kaydın id'sine göre."""
+        Aynı müşteri (ad + cep/kod), aynı fatura, aynı şirket, aynı teslim günü (kullanıcı saat diliminde) ve aynı
+        sorumlu tek fiş olur; çoklu ürün kaydı (mobil) ya da arka uçtan çoklu seçim böylece müşteriye tek kâğıt
+        verir. Farklı gün/kişi/müşteri ayrı fişe düşer: aynı faturanın günler sonraki ayrı teslimi tek kâğıda
+        karışmaz. Faturasız VE telefonsuz/kodsuz kayıtta müşteriyi ayırt edecek bir şey yok (aynı ad iki ayrı
+        kişi olabilir): gruplanmaz, her kayıt kendi fişini alır. Sıra: ilk kaydın id'sine göre."""
         groups = {}
         for claim in self.sorted('id'):
-            key = (claim.company_id.id, self._norm_name(claim.customer_name),
-                   claim.customer_mobile or claim.customer_code or '', claim.invoice_no or '')
+            identity = claim.customer_mobile or claim.customer_code or ''
+            if not identity and not claim.invoice_no:
+                key = ('tek', claim.id)
+            else:
+                day = fields.Datetime.context_timestamp(claim, claim.create_date).date() if claim.create_date else None
+                key = (claim.company_id.id, self._norm_name(claim.customer_name), identity,
+                       claim.invoice_no or '', day, claim.user_id.id)
             groups[key] = groups.get(key, self.browse()) | claim
         return list(groups.values())
 
