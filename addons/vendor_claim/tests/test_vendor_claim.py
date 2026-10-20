@@ -174,6 +174,19 @@ class TestVendorClaim(TransactionCase):
         self.assertIn('Ürün İnceleme Teslim Fişi', text)
         self.assertIn('Şikayet', text)
         self.assertNotIn('Ã', text, 'UTF-8 metin Latin-1 okunmuş')
+        self.assertIn('Tarih:', text)
+
+    def test_slip_barcode_invoice_or_name(self):
+        """Fişteki barkod: fatura varsa fatura no (listede okutulunca bulunur), yoksa takip no."""
+        Report = self.env['ir.actions.report']
+        slip = 'vendor_claim.action_report_vendor_claim_slip'
+        with_inv = self._claim(invoice_no='UGR2026000012388')
+        html = Report._render_qweb_html(slip, with_inv.ids)[0]
+        self.assertIn(b'/report/barcode/Code128/UGR2026000012388?', html)
+        self.assertIn(with_inv.name.encode(), html)
+        no_inv = self._claim()
+        html = Report._render_qweb_html(slip, no_inv.ids)[0]
+        self.assertIn(('/report/barcode/Code128/%s?' % no_inv.name).encode(), html)
 
     def test_form_onchange_invoice(self):
         from odoo.tests import Form
