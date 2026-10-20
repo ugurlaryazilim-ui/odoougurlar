@@ -6,6 +6,8 @@ from odoo.exceptions import AccessError, UserError
 
 _logger = logging.getLogger(__name__)
 
+MIN_TIME_LEFT = 20   # cron süresinin sonuna bu kadar saniye kala dur, kalan sonraki çalışmada
+
 # İzinli durum geçişleri: kaynak durum -> gidilebilecek durumlar.
 # Onay bekleyen reyon siparişi yalnız onay/ret ile ilerler (action_approve_reyon / action_reject_reyon).
 ALLOWED_TRANSITIONS = {
@@ -310,15 +312,17 @@ class UgurlarTailorOrder(models.Model):
             'konum': getattr(self, 'location', '') or '',
         }
 
-    def _send_template_sms(self, code, number=None):
-        """Şablonla SMS gönder; sms.system.message kaydını döndür (numara/şablon yoksa None)."""
+    def _send_template_sms(self, code, number=None, queue=False):
+        """Şablonla SMS gönder; sms.system.message kaydını döndür (numara/şablon yoksa None).
+
+        queue=True: sağlayıcı çağrılmaz, kayıt sms_system tekli kuyruğuna alınır."""
         self.ensure_one()
         number = number or self.customer_mobile
         template = self.env['sms.system.template'].sudo().get_by_code(code)
         if not number or not template:
             return None
         return self.env['sms.system.message'].send_sms(
-            number, template=template, values=self._sms_values(), record=self)
+            number, template=template, values=self._sms_values(), record=self, queue=queue)
 
     def _notify_ready_sms(self):
         """'Hazır' olunca otomatik SMS (ayar açıksa, numara varsa, daha önce gönderilmediyse)."""
@@ -354,7 +358,10 @@ class UgurlarTailorOrder(models.Model):
 
     @api.model
     def _cron_ready_reminders(self):
-        """Hazır olup X gündür teslim alınmamış siparişlere hatırlatma SMS'i (en çok N kez)."""
+        """Hazır olup X gündür teslim alınmamış siparişlere hatırlatma SMS'i (en çok N kez).
+
+        SMS kuyruğa alınır (sağlayıcı çağrısı yok; sms_system kuyruk cron'u gönderir) ve kayıt başına commit
+        edilir: cron kesilse de işlenen sipariş kalıcı olur, aynı müşteriye tekrar gitmez."""
         icp = self.env['ir.config_parameter'].sudo()
         if icp.get_param('ugurlar_tailor.sms_reminder_enabled') != 'True':
             return
@@ -366,9 +373,10 @@ class UgurlarTailorOrder(models.Model):
             ('reminder_count', '<', max_count), ('completed_at', '<=', limit),
             '|', ('last_reminder_at', '=', False), ('last_reminder_at', '<=', limit),
         ], limit=200)
+        IrCron = self.env['ir.cron']
         for order in orders:
             try:
-                msg = order._send_template_sms('tailor_reminder')
+                msg = order._send_template_sms('tailor_reminder', queue=True)
             except UserError as e:
                 order.message_post(body=_('Hatırlatma SMS gönderilemedi: %s') % e)
                 msg = None
@@ -377,6 +385,8 @@ class UgurlarTailorOrder(models.Model):
                          'last_reminder_at': fields.Datetime.now()})
             if msg is None:
                 _logger.info('Terzi hatırlatma atlandı (%s)', order.name)
+            if IrCron._commit_progress(1) < MIN_TIME_LEFT:
+                break
 
     def action_mark_delivered(self):
         """Durumu 'Teslim Edildi' olarak güncelle."""
