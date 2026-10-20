@@ -11,7 +11,8 @@ from odoo.exceptions import AccessError, UserError
 
 from ..services.turatel import (MAX_SEGMENTS, TuratelClient, TuratelError, normalize_number, prepare_text,
                                 segment_count)
-from ..services.turatel_json import TZ, MAX_TEXT_LENGTH, TuratelJsonClient, json_segment_count
+from ..services.turatel_json import (TZ, MAX_TEXT_LENGTH, MESSAGE_LIMIT, TuratelJsonClient, json_segment_count,
+                                     mask_digits)
 from ..services.turatel_json import delivery_state as map_delivery_code
 
 _logger = logging.getLogger(__name__)
@@ -49,6 +50,20 @@ STATUS_TRACKED = ('pending', 'unknown')   # unknown: tanınmayan (belgesiz) kod,
 STATUS_UNCERTAIN_LOOKBACK = 30    # dk; belirsiz kaydın gönderimi write_date'ten en çok bu kadar önce olabilir
 STATUS_TIME_BUDGET = 120          # sn; durum cron'u çalışma başına en çok bu kadar sorgu yapar
 STATUS_MIN_TIME_LEFT = 20         # sn; cron süresinin sonuna bu kadar kala dur
+# ConfirmSms (Turatel cevabı 4): onay zorunlu hesapta SendSms sonrası paket onayı; kolon yok, delivery_code işareti
+CONFIRM_PENDING = 'confirm_pending'
+CONFIRM_FAILED = 'confirm_failed'  # kalıcı onay hatası (errorCode, kimlik reddi, set yok): otomatik deneme bitti
+CONFIRM_CODES = (CONFIRM_PENDING, CONFIRM_FAILED)   # nihai olmayan GetStatus kodu bu işaretleri ezmez
+CONFIRM_LABEL = 'Turatel onayı bekleniyor'
+CONFIRM_FAILED_LABEL = 'Turatel onayı başarısız'
+CONFIRM_LABELS = {CONFIRM_PENDING: CONFIRM_LABEL, CONFIRM_FAILED: CONFIRM_FAILED_LABEL}
+CONFIRM_RETRY_HOURS = 24          # onaylanamayan paket durum cron'unda en çok bu kadar saat (ve geçerlilik süresi)
+CONFIRM_TIME_BUDGET = STATUS_TIME_BUDGET // 2   # sn; onay adımı durum sorgusunun süresini yiyip bitirmesin
+CONFIRM_MAX_PACKETS = 30          # durum cron'u çalışma başına en çok bu kadar paket onaylamayı dener
+CONFIRM_SAME_ERROR_LIMIT = 3      # art arda bu kadar aynı hata: Turatel tarafı sorunlu, bu çalışmada onay kesilir
+RECONCILED_NO_PACKET = ('Belirsiz gönderim durum raporunda bulundu; paket no bilinmediği için Turatel onay '
+                        'durumu bilinmiyor.')
+CONFIRM_PARAMS = {'info': 'sms_system.turatel_confirm_info', 'commercial': 'sms_system.turatel_confirm_commercial'}
 
 
 def test_mode_enabled(value):
@@ -57,6 +72,11 @@ def test_mode_enabled(value):
     Parametrenin yokluğu, boş değer, 'True', '0', 'false' ya da başka her değer test modunu AÇIK sayar:
     bozuk/silinmiş bir ayar canlı gönderime yol açmamalı.
     """
+    return value != 'False'
+
+
+def confirm_enabled(value):
+    """ConfirmSms ayarı (kimlik seti başına): parametre yoksa AÇIK; yalnız tam 'False' kapatır."""
     return value != 'False'
 
 
@@ -145,7 +165,7 @@ class SmsSystemMessage(models.Model):
     # Turatel JSON API (C3, tasarım §5.4); legacy ve eski kayıtlarda boş kalır (iletim takibi yok)
     provider_packet_id = fields.Char(string='Turatel Paket No', index='btree_not_null')
     delivery_state = fields.Selection([
-        ('pending', 'Onay Bekliyor'),
+        ('pending', 'Yanıt bekleniyor'),
         ('delivered', 'İletildi'),
         ('undelivered', 'İletilemedi'),
         ('unknown', 'Bilinmiyor'),
@@ -163,7 +183,10 @@ class SmsSystemMessage(models.Model):
     @api.depends('delivery_code')
     def _compute_delivery_label(self):
         for msg in self:
-            msg.delivery_label = map_delivery_code(msg.delivery_code)[1] if msg.delivery_code else False
+            if msg.delivery_code in CONFIRM_LABELS:
+                msg.delivery_label = CONFIRM_LABELS[msg.delivery_code]
+            else:
+                msg.delivery_label = map_delivery_code(msg.delivery_code)[1] if msg.delivery_code else False
 
     # ── Ayarlar ──
 
@@ -205,6 +228,8 @@ class SmsSystemMessage(models.Model):
             'ascii_mode': icp.get_param('sms_system.ascii_mode') == 'True',
             'test_mode': test_mode_enabled(icp.get_param('sms_system.test_mode')),
             'test_numbers': parse_test_numbers(icp.get_param('sms_system.test_numbers')),
+            # Gönderimden sonra ConfirmSms (kimlik seti başına; varsayılan açık)
+            'confirm': {key: confirm_enabled(icp.get_param(param)) for key, param in CONFIRM_PARAMS.items()},
         }
 
     @api.model
@@ -354,6 +379,10 @@ class SmsSystemMessage(models.Model):
                 self._trigger_send_queue()
         else:
             messages._deliver(cfg)
+            # ConfirmSms istek içinde DEĞİL (commit'ten önce paket başına +15 sn olurdu): kayıt onay bekler,
+            # iletim durumu cron'u commit'ten hemen sonra onaylar
+            if any(msg.delivery_code == CONFIRM_PENDING for msg in messages):
+                self._trigger_delivery_status()
         if record and hasattr(record, 'message_post'):
             self._post_sms_note(record, messages)
         return messages.with_env(self.env)
@@ -457,10 +486,13 @@ class SmsSystemMessage(models.Model):
             self.write({'state': 'error', 'error': str(e),
                         'retry_count': self.retry_count + 1 if e.retryable else MAX_RETRY})
 
-    def _json_success_vals(self, result, ref, service, account):
+    def _json_success_vals(self, result, ref, service, account, confirm=False):
+        """confirm: ayar açıksa paket onay bekler (CONFIRM_PENDING); gönderim yazımıyla aynı commit'e girer.
+        Onay çağrısı bundan sonra yapılır; işçi arada ölürse durum cron'u yeniden dener."""
         return {'state': 'sent', 'provider_msg_id': result.message_ids.get(ref) or False,
                 'provider_packet_id': result.packet_id or False, 'provider_service': service,
-                'provider_account_id': account, 'delivery_state': 'pending', 'delivery_code': False,
+                'provider_account_id': account, 'delivery_state': 'pending',
+                'delivery_code': CONFIRM_PENDING if confirm and result.packet_id else False,
                 'provider_answer': result.raw, 'sent_at': fields.Datetime.now(), 'error': False}
 
     def _deliver_json(self, cfg):
@@ -478,7 +510,7 @@ class SmsSystemMessage(models.Model):
                 result = client.send_sms(account, msg.originator, msg.body, [msg.number], client_ids=[ref],
                                          reference_id=ref, check_blacklist=False,
                                          validity_minutes=cfg['validity_minutes'])
-                msg.write(msg._json_success_vals(result, ref, 'single', account))
+                msg.write(msg._json_success_vals(result, ref, 'single', account, cfg['confirm']['info']))
             except TuratelError as e:
                 # Belirsiz kayıt C5 durum cron'unda bu hesabın setiyle uzlaştırılır
                 msg._write_send_error(e, extra={'provider_service': 'single', 'provider_account_id': account})
@@ -573,7 +605,72 @@ class SmsSystemMessage(models.Model):
                 pack.write({'state': 'error', 'error': str(e), 'retry_count': MAX_RETRY})
             return
         for msg, ref in zip(pack, refs):
-            msg.write(msg._json_success_vals(result, ref, 'bulk', account))
+            msg.write(msg._json_success_vals(result, ref, 'bulk', account, cfg['confirm'][purpose]))
+
+    # ── ConfirmSms (Turatel cevabı 4) ──
+
+    @api.model
+    def _confirm_purpose(self, cfg, account):
+        """Hesabın kimlik seti ('info' | 'commercial'); eşleşen set yoksa None (setler arası geri düşme yok)."""
+        account = (account or '').strip()
+        for purpose in ('info', 'commercial'):
+            creds = cfg['json_creds'].get(purpose)
+            if account and creds and str(creds[3]).strip() == account:
+                return purpose
+        return None
+
+    def _confirm_groups(self, codes=(CONFIRM_PENDING,)):
+        """Onay bekleyen gönderilmiş JSON kayıtları: {(servis, hesap, paket): kayıtlar} (kayıt sırasıyla)."""
+        groups = defaultdict(lambda: self.browse())
+        for msg in self:
+            if (msg.state == 'sent' and msg.delivery_code in codes and msg.provider_packet_id
+                    and msg.provider_service in JSON_SERVICES):
+                key = (msg.provider_service, (msg.provider_account_id or '').strip(), msg.provider_packet_id.strip())
+                groups[key] |= msg
+        return groups
+
+    def _confirm_sent_packets(self, cfg, log=True, codes=(CONFIRM_PENDING,)):
+        """Onay bekleyen paketleri paket başına bir ConfirmSms ile onayla (sudo; gönderim commit'inden sonra).
+
+        Onay hatası dışarı sızmaz ve SMS kaydını bozmaz (G-1): başarıda iletim kodu temizlenir (iletim durumu
+        'bekliyor' kalır); hatada delivery_report'a kısa maskeli not düşülür ve kayıt geçici hatada (ağ, HTTP,
+        zaman aşımı) CONFIRM_PENDING kalır (durum cron'u yeniden dener), kalıcı hatada (Turatel errorCode, kimlik
+        reddi, kimlik seti yok) CONFIRM_FAILED olur (otomatik deneme biter). SendSms'i hiçbir yoldan çağırmaz.
+        Legacy modda ve set ayarı kapalıyken istek yok. codes: hangi işaretli kayıtlar denenir ('Durumu Sorgula'
+        başarısızları da dener). Döner: denenen paketler [(paket, kayıt sayısı, hata metni ya da None)].
+        """
+        if cfg['api_mode'] != 'json':
+            return []
+        results = []
+        # Bekleyen yazımlar onay denemesinden ÖNCE ve hata yakalamanın DIŞINDA: ilgisiz flush hatası yutulmasın
+        self.env.flush_all()
+        for (service, account, packet), msgs in self._confirm_groups(codes).items():
+            purpose = self._confirm_purpose(cfg, account)
+            if purpose and not cfg['confirm'].get(purpose):
+                continue
+            error = None
+            try:
+                if not purpose:
+                    raise TuratelError(_('Bu hesap (%s) için kimlik seti tanımlı değil.') % (account or '-'))
+                client, _account = self._client(dict(cfg, api_mode='json'), service=service, purpose=purpose)
+                raw = client.confirm_sms(account, packet)
+                vals = {'delivery_code': False, 'delivery_report': _('ConfirmSms onaylandı: %s') % raw}
+            except Exception as e:  # noqa: BLE001 — onay hatası gönderilmiş SMS kaydını bozmamalı
+                error = mask_digits(str(e))[:MESSAGE_LIMIT] or e.__class__.__name__
+                permanent = isinstance(e, TuratelError) and not e.retryable
+                vals = {'delivery_code': CONFIRM_FAILED if permanent else CONFIRM_PENDING,
+                        'delivery_report': _('ConfirmSms başarısız (%(when)s): %(error)s') % {
+                            'when': fields.Datetime.to_string(fields.Datetime.now()), 'error': error}}
+            try:
+                with self.env.cr.savepoint():
+                    msgs.write(vals)
+            except Exception:  # noqa: BLE001
+                _logger.warning('ConfirmSms sonucu kayda yazılamadı (paket %s, %s kayıt)', packet, len(msgs))
+            if error and log:
+                _logger.warning('ConfirmSms başarısız (%s/%s paket %s, %s kayıt): %s', service, account, packet,
+                                len(msgs), error)
+            results.append((packet, len(msgs), error))
+        return results
 
     # ── Butonlar / cron ──
 
@@ -634,7 +731,12 @@ class SmsSystemMessage(models.Model):
                     msg.sudo().delivery_report = str(e)
         if not json_msgs:
             return None
-        cfg = dict(self._settings(), api_mode='json')
+        settings = self._settings()
+        cfg = dict(settings, api_mode='json')
+        if settings['api_mode'] == 'json':
+            # Onay bekleyen (ve elle denemede kalıcı hatayla kalan) paket önce onaylanır (legacy modda istek yok);
+            # hata sorguyu engellemez
+            json_msgs.sudo()._confirm_sent_packets(cfg, codes=CONFIRM_CODES)
         results = [msg._fetch_json_status(cfg) for msg in json_msgs.sudo()]
         levels = {level for _text, level in results}
         level = next(lvl for lvl in ('danger', 'warning', 'success') if lvl in levels)
@@ -744,12 +846,17 @@ class SmsSystemMessage(models.Model):
                 continue
             state, _label = map_delivery_code(row.code)
             vals = {}
-            if state != 'pending':
+            if state in ('delivered', 'undelivered') or (state != 'pending' and msg.delivery_code not in CONFIRM_CODES):
                 vals.update(delivery_state=state, delivery_code=row.code)
+            elif state != 'pending':
+                vals['delivery_state'] = state   # nihai olmayan kod onay bekleme işaretini ezmez
             if msg.state == 'uncertain':
                 reconciled += 1
                 vals.update(state='sent', error=False, sent_at=msg.sent_at or msg.write_date)
                 vals.setdefault('delivery_state', 'pending')
+                if not msg.provider_packet_id:
+                    # Paket no yok: ConfirmSms gönderilemez, onaylanıp onaylanmadığı bilinmez
+                    vals['delivery_report'] = '\n'.join(filter(None, [msg.delivery_report, RECONCILED_NO_PACKET]))
             if row.message_id and not msg.provider_msg_id:
                 vals['provider_msg_id'] = row.message_id
             if any(msg[name] != value for name, value in vals.items()):
@@ -781,6 +888,7 @@ class SmsSystemMessage(models.Model):
         cfg = Message._settings()
         if cfg['api_mode'] != 'json':
             return   # legacy modda JSON isteği yok (KK-C14)
+        confirm_failed, stats = Message._cron_confirm_pending(cfg, started)
         candidates = Message.search([
             ('provider_service', 'in', JSON_SERVICES), '|',
             '&', '&', ('state', '=', 'sent'), ('delivery_state', 'in', STATUS_TRACKED), ('sent_at', '>=', since),
@@ -791,7 +899,6 @@ class SmsSystemMessage(models.Model):
             for day in msg._status_days():
                 chunks[(day, msg.provider_service, (msg.provider_account_id or '').strip())].append(msg.id)
         clients, missing, problems, resolved = {}, set(), [], set()
-        stats = Counter()
         for day, service, account in sorted(chunks):
             if time.monotonic() - started > STATUS_TIME_BUDGET:
                 stats['ertelendi'] += 1
@@ -820,19 +927,71 @@ class SmsSystemMessage(models.Model):
             if IrCron._commit_progress(len(todo)) < STATUS_MIN_TIME_LEFT:
                 stats['ertelendi'] += 1
                 break
-        if missing or problems:
+        if missing or problems or confirm_failed:
             parts = []
             if missing:
                 parts.append('kimlik seti tanımlı olmayan hesap atlandı (%s)' % ', '.join(
                     '%s/%s' % key for key in sorted(missing)))
             if problems:
                 parts.append('%d sorgu başarısız, ilki %s' % (len(problems), problems[0]))
+            if confirm_failed:
+                parts.append('%d paket ConfirmSms başarısız, ilki %s' % (len(confirm_failed), confirm_failed[0]))
             _logger.warning('SMS iletim durumu: %s', '; '.join(parts))
         if stats:
             _logger.info('SMS iletim durumu: %s (boş = Turatel\'de kayıt yok/-6); süresi dolan bekleyen: %s',
                          ', '.join('%s %s' % (v, k) for k, v in sorted(stats.items())), len(expired))
 
+    @api.model
+    def _cron_confirm_pending(self, cfg, started):
+        """Durum cron'unun ilk adımı: onay bekleyen paketleri en yeniden başlayarak yeniden onaylar (paket başına
+        bir ConfirmSms + commit).
+
+        Pencere: gönderimden bu yana min(CONFIRM_RETRY_HOURS, geçerlilik süresi) (süresi dolan SMS'i onaylamak
+        anlamsız). Kendi tavanı var (CONFIRM_TIME_BUDGET, CONFIRM_MAX_PACKETS) ki durum sorgusu her çalışmada
+        yer bulsun; art arda CONFIRM_SAME_ERROR_LIMIT aynı hata gelirse (Turatel/IP/kimlik sorunu) bu çalışmada
+        onay kesilir. Döner: (hata satırları, sayaçlar).
+        """
+        IrCron = self.env['ir.cron']
+        stats = Counter()
+        failed = []
+        window = min(CONFIRM_RETRY_HOURS * 60, cfg['validity_minutes'])
+        since = fields.Datetime.now() - timedelta(minutes=window)
+        pending = self.search([('state', '=', 'sent'), ('delivery_code', '=', CONFIRM_PENDING),
+                               ('provider_service', 'in', JSON_SERVICES), ('provider_packet_id', '!=', False),
+                               ('sent_at', '>=', since)], order='id desc')
+        tried, last_error, streak = 0, None, 0
+        for msgs in pending._confirm_groups().values():
+            if tried >= CONFIRM_MAX_PACKETS or time.monotonic() - started > CONFIRM_TIME_BUDGET:
+                stats['onay ertelendi'] += 1
+                break
+            results = msgs._confirm_sent_packets(cfg, log=False)
+            if not results:
+                continue   # set ayarı kapalı
+            tried += 1
+            for packet, _count, error in results:
+                stats['onay hatası' if error else 'onaylandı'] += 1
+                if error:
+                    failed.append('%s/%s paket %s: %s' % (msgs[0].provider_service, msgs[0].provider_account_id,
+                                                         packet, error))
+                streak = streak + 1 if error and error == last_error else (1 if error else 0)
+                last_error = error
+            if IrCron._commit_progress(len(msgs)) < STATUS_MIN_TIME_LEFT:
+                stats['onay ertelendi'] += 1
+                break
+            if streak >= CONFIRM_SAME_ERROR_LIMIT:
+                stats['onay kesildi (art arda aynı hata)'] += 1
+                break
+        return failed, stats
+
     # ── Tekli kuyruk (KK-A16, A17, B11) ──
+
+    @api.model
+    def _trigger_delivery_status(self):
+        """İletim durumu cron'unu hemen çalıştır (onay bekleyen senkron gönderim için). Cron kaydı yoksa atla:
+        cron en geç 15 dk içinde zaten çalışır."""
+        cron = self.env.ref('sms_system.cron_sms_delivery_status', raise_if_not_found=False)
+        if cron:
+            cron.sudo()._trigger()
 
     @api.model
     def _trigger_send_queue(self):
@@ -881,7 +1040,11 @@ class SmsSystemMessage(models.Model):
             msg._mark_sending(cfg, 'single')
             IrCron._commit_progress()
             msg._deliver(cfg)
-            if IrCron._commit_progress(1) < SINGLE_MIN_TIME_LEFT:
+            left = IrCron._commit_progress(1)
+            # ConfirmSms gönderim commit'inden SONRA; süre azsa durum cron'u onaylar
+            if left >= SINGLE_MIN_TIME_LEFT and msg._confirm_sent_packets(cfg):
+                left = IrCron._commit_progress()
+            if left < SINGLE_MIN_TIME_LEFT:
                 return True
         return False
 

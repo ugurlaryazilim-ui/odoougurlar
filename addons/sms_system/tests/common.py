@@ -217,6 +217,8 @@ JSON_BODY_SCHEMA = {   # OpenAPI şemasındaki alanlar, kimlik alanları (userId
                     'receiverList', 'personalMessages', 'remoteUserIpAddress'},
     'Sms/GetStatus': {'accountId', 'packetId', 'messageIdList'},
     'Sms/GetStatusByTwoDates': {'accountId', 'startDate', 'endDate'},
+    # Kullanıcı kararı (20.10, Turatel cevabı 4): onay zorunlu hesapta SendSms sonrası paket onayı. Yanıt belgesiz.
+    'Sms/ConfirmSms': {'accountId', 'packetId'},
 }
 CREDENTIAL_KEYS = {'userId', 'username', 'password'}
 
@@ -257,6 +259,7 @@ class FakeTuratelJson:
         self.status_windows = []      # (accountId, startDate, endDate) çağrıları
         self.tokens = {}              # jeton -> kullanıcı adı
         self.tokens_issued = []       # GetToken ile verilen (kullanıcı adı, jeton)
+        self.confirmed = []           # ConfirmSms ile onaylanan (accountId, packetId)
         self._ids = 0
         self._packets = 4000
 
@@ -298,9 +301,12 @@ class FakeTuratelJson:
             self._violate(call, 'zaman aşımı verilmemiş')
         if call['allow_redirects'] is not False:
             self._violate(call, 'yönlendirme izlenmemeli (allow_redirects=False, G-C3)')
-        if endpoint in ('Sms/ConfirmSms', 'Sms/AbortSms'):
+        if endpoint == 'Sms/AbortSms':
             self._violate(call, 'çağrılmamalı (KK-C25)')
             return
+        if endpoint == 'Sms/ConfirmSms' and not all(isinstance(payload.get(k), int) and not isinstance(
+                payload.get(k), bool) for k in ('accountId', 'packetId')):
+            self._violate(call, 'accountId/packetId sayı olmalı (int32/int64)')
         allowed = JSON_BODY_SCHEMA.get(endpoint)
         if allowed is None:
             self._violate(call, 'tasarımda olmayan uç')
@@ -404,7 +410,17 @@ class FakeTuratelJson:
             return self._send(call, account)
         if endpoint in ('Sms/GetStatus', 'Sms/GetStatusByTwoDates'):
             return self._status(call, account)
+        if endpoint == 'Sms/ConfirmSms':
+            return self._confirm(call, account)
         return json_err(-99, 'Bilinmeyen uç')
+
+    def _confirm(self, call, account):
+        """VARSAYIM (belgesiz): bu hesabın paketi onaylanır, zarf data'sı boş; bilinmeyen paket hata."""
+        packet = call['payload'].get('packetId')
+        if not any(m['packet_id'] == packet and m['account'] == account for m in self.messages.values()):
+            return json_err(-99, 'Packet not found')
+        self.confirmed.append((account, packet))
+        return json_ok(None)
 
     def _send(self, call, account):
         payload = call['payload']
