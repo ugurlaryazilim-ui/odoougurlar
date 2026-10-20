@@ -38,7 +38,8 @@ NO_COMMERCIAL_CREDS = 'Reklam hesabı kimlik bilgileri (kullanıcı adı/şifre)
 NO_INFO_CREDS = 'Bilgi hesabı kimlik bilgileri (kullanıcı adı/şifre) tanımlı değil'
 # KK-C26: ticari SMS ret metni (çıkış talimatı + Mersis no) olmadan gitmez; iki modda da geçerli
 NO_OPTOUT_TEXT = 'Ticari SMS için ret metni (çıkış talimatı ve Mersis no) zorunludur'
-# KK-C22: {1}, {2}... Turatel parametre yer tutucularıdır; kullanıcı yazarsa kişiselleştirme bozulur
+# KK-C22: {1}, {2}... sayılı yer tutucular kişiselleştirme için ayrılmıştır (kişi adı {ad} ile yazılır); metne
+# yazılırsa alıcıya olduğu gibi giderdi
 NUMERIC_PLACEHOLDER = re.compile(r'\{\d+\}')
 # KK-C23: Turatel tek SMS metni sınırı (JSON modu); alıcı başına son metin için hata iletisi
 TEXT_TOO_LONG = 'metin %d karakteri aşıyor' % MAX_TEXT_LENGTH
@@ -561,39 +562,28 @@ class SmsSystemMessage(models.Model):
                 self.write({'state': 'error', 'error': str(e)})
 
     def _json_pack_content(self, cfg):
-        """Paketin gönderilecek içeriği: (gönderilebilir kayıtlar, messageText, parametreler ya da None).
+        """Paketin gönderilecek içeriği: (gönderilebilir kayıtlar, messageText).
 
-        Kişiselleştirilmiş kampanyada (JSON, {ad}) messageText `{1}` içeren şablondur; her alıcının parameter'ı
-        `[güncel ad]`dır ve kaydın `body`'si o kişiye giden son metne yazılır (gönderilen = görünen, KK-C21).
-        Son metni 402 karakteri aşan alıcı (uzun ad) gönderilmeden kalıcı hataya alınır, diğerleri gider (KK-C23).
+        Paketteki kayıtların `body`'si aynıdır (_make_packs son metne göre gruplar); gönderilen metin kaydın
+        `body`'sidir (gönderilen = görünen, KK-C21). Turatel `parameter`'ı uygulamadığı için şablon/parametre
+        kullanılmaz. Son metni 402 karakteri aşan paket (uzun ad) gönderilmeden kalıcı hataya alınır; aynı metni
+        taşımayan başka paketler etkilenmez (KK-C23).
         """
-        campaign = self[0].campaign_id
-        template, personalized = campaign._json_template(cfg['ascii_mode']) if campaign else (None, False)
-        if personalized:
-            names = {msg.id: prepare_text(msg.contact_id.name or '', ascii_mode=cfg['ascii_mode'])[0] for msg in self}
-            finals = {msg.id: template.replace('{1}', names[msg.id]) for msg in self}
-            too_long = self.filtered(lambda m: len(finals[m.id]) > MAX_TEXT_LENGTH)
-            sendable = self - too_long
-            for msg in sendable:
-                if msg.body != finals[msg.id]:
-                    msg.body = finals[msg.id]
-            message_text, parameters = template, [[names[msg.id]] for msg in sendable]
-        else:
-            message_text, parameters = self[0].body, None
-            too_long = self if len(message_text) > MAX_TEXT_LENGTH else self.browse()
-            sendable = self - too_long
+        message_text = self[0].body
+        too_long = self if len(message_text) > MAX_TEXT_LENGTH else self.browse()
+        sendable = self - too_long
         if too_long:
             too_long.write({'state': 'error', 'retry_count': MAX_RETRY, 'error': TEXT_TOO_LONG})
-        return sendable, message_text, parameters
+        return sendable, message_text
 
     def _deliver_pack_json(self, cfg):
         """JSON paket yolu: bulksms; ticari kampanya → reklam seti + isCheckBlackList, diğerleri → bilgi seti.
 
         Her kayıt kendi clientId'siyle gider; yanıttaki mesaj kimliği clientId ile eşlenir (paket içinde
-        kimlikler karışmaz). referenceId = {db8}-p{ilk kayıt id}. Kişiselleştirilmiş kampanya tek istekte
-        `{1}` şablonu + alıcı başına parameter ile gider (_json_pack_content). Gönderilecek paket tek kayıtsa
-        (küçük kampanya ya da son paketin artığı) aynı kimlik setiyle singlesms'e gider ve kaydın son metni
-        parametresiz gönderilir (_pack_service); ConfirmSms/durum uzlaştırması provider_service'e göre servisi seçer.
+        kimlikler karışmaz). referenceId = {db8}-p{ilk kayıt id}. Kişiselleştirilmiş metin kayıtta hazırdır
+        (`{ad}` _start'ta çözülür); aynı son metni taşıyanlar bir pakette gider, parametre/şablon gönderilmez.
+        Gönderilecek paket tek kayıtsa (tek alıcı, ya da o adı taşıyan tek kişi) aynı kimlik setiyle singlesms'e
+        gider (_pack_service); ConfirmSms/durum uzlaştırması provider_service'e göre servisi seçer.
         """
         first = self[0]
         purpose = self._pack_purpose()
@@ -603,20 +593,19 @@ class SmsSystemMessage(models.Model):
             # Kimlik seti yok (KK-C29): istek yapılmadı, kalıcı hata
             self.write({'state': 'error', 'error': str(e), 'retry_count': MAX_RETRY})
             return
-        pack, message_text, parameters = self._json_pack_content(cfg)
+        pack, message_text = self._json_pack_content(cfg)
         if not pack:
             return
         service = pack._pack_service()
         if service == 'single':
-            # Aynı kimlik seti, singlesms adresi; kişiselleştirilmiş metin zaten body'ye yazıldı
+            # Aynı kimlik seti, singlesms adresi
             client, account = self._client(cfg, service='single', purpose=purpose)
-            message_text, parameters = pack.body, None
         db8 = self._db8()
         refs = [msg._client_ref(db8) for msg in pack]
         try:
             result = client.send_sms(account, first.originator, message_text, pack.mapped('number'),
                                      client_ids=refs, reference_id='%s-p%d' % (db8, pack[0].id),
-                                     parameters=parameters, check_blacklist=purpose == 'commercial',
+                                     check_blacklist=purpose == 'commercial',
                                      validity_minutes=cfg['validity_minutes'])
         except TuratelError as e:
             _logger.warning('Toplu SMS paketi gönderilemedi (%s numara): %s', len(pack), e)

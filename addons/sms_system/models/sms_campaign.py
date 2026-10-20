@@ -104,15 +104,6 @@ class SmsSystemCampaign(models.Model):
     def _optout_text(self):
         return (self._icp('sms_system.optout_text') or '').strip()
 
-    def _json_template(self, ascii_mode=False):
-        """JSON gönderim şablonu: (metin, kişiye özel mi). `{ad}` → `{1}` (alıcı başına parameter), diğer
-        yer tutucular boş. Kişiye özel değilse metin son metindir (KK-C21)."""
-        self.ensure_one()
-        body = self._build_body()
-        personalized = any(m.group(1) == 'ad' for m in PLACEHOLDER.finditer(body))
-        text = PLACEHOLDER.sub(lambda m: '{1}' if m.group(1) == 'ad' else '', body)
-        return prepare_text(text, ascii_mode=ascii_mode)[0], personalized
-
     def _recipient_domain(self):
         self.ensure_one()
         domain = [('list_ids', 'in', self.list_ids.ids), ('opt_out', '=', False)]
@@ -655,7 +646,6 @@ class SmsSystemCampaign(models.Model):
         # JSON modunda istemci paket başına kampanya türüne göre seçilir (_deliver_pack_json); burada kurulmaz
         client = Message._client(cfg) if cfg['api_mode'] != 'json' else None
         campaigns = self.search([('state', '=', 'sending')], order='id')
-        json_mode = cfg['api_mode'] == 'json'
         remaining = Message.search_count([('campaign_id', 'in', campaigns.ids), ('state', '=', 'queued')])
         IrCron._commit_progress(remaining=remaining)
         for camp in campaigns:
@@ -669,15 +659,13 @@ class SmsSystemCampaign(models.Model):
                 # KK-C26: ret metni sonradan silindiyse ticari kayıtlar kuyrukta bekler (ayar girilince sürer)
                 camp._note_once(camp._no_optout_message())
                 continue
-            # JSON + {ad}: tek metin şablonu ({1}) → alıcı adlarına bakmadan aynı pakette toplanır (KK-C21)
-            personalized = json_mode and camp._json_template(cfg['ascii_mode'])[1]
             held = creds_missing   # True: kampanyanın kalanı sonraki çalışmaya (İYS doğrulanamadı, kilitli, set yok)
             while not held:
                 queued = Message.search([('campaign_id', '=', camp.id), ('state', '=', 'queued')],
                                         order='id', limit=PACK_SIZE * 4)
                 if not queued:
                     break
-                for pack in self._make_packs(queued, personalized):
+                for pack in self._make_packs(queued):
                     gated = camp._commercial_gate(pack)
                     IrCron._commit_progress()
                     # Kilit altında yeniden doğrula: başka işlemin tuttuğu/değiştirdiği kayıt bu pakete girmez (KK-C17)
@@ -717,14 +705,14 @@ class SmsSystemCampaign(models.Model):
             self.env['ir.cron']._commit_progress()
 
     @api.model
-    def _make_packs(self, messages, personalized=False):
-        """Aynı metin/başlık/türdeki numaraları en fazla PACK_SIZE'lık paketlere ayır.
+    def _make_packs(self, messages):
+        """Aynı son metin/başlık/türdeki numaraları en fazla PACK_SIZE'lık paketlere ayır.
 
-        personalized (JSON + {ad}): metin şablonu ortaktır, kişiye özel kısım parameter'dadır; yalnız başlığa
-        göre gruplanır."""
+        Kişiselleştirme (`{ad}`) paket düzeyinde değil, kaydın `body`'sindedir (_start): aynı adı taşıyanlar aynı
+        pakette gider. Turatel `parameter`'ı uygulamıyor (canlıda kanıtlandı); şablon/parametre yolu yoktur."""
         groups = OrderedDict()
         for msg in messages:
-            key = (None, msg.originator, None) if personalized else (msg.body, msg.originator, msg.sms_type)
+            key = (msg.body, msg.originator, msg.sms_type)
             groups.setdefault(key, []).append(msg.id)
         Message = self.env['sms.system.message'].sudo()
         for ids in groups.values():

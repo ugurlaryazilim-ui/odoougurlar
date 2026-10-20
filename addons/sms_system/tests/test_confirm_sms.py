@@ -172,7 +172,7 @@ class TestConfirmSmsFlow(ConfirmMixin, SmsTestCase):
         self.assertEqual(self.events[-1][0], 'commit', 'Onay sonucu da commit edilir')
 
     def test_kampanya_paketinde_paket_basina_tek_onay(self):
-        camp = self.make_json_campaign(names=('Ayşe', 'Mehmet', 'Can'), body='Merhaba {ad}')
+        camp = self.make_json_campaign(names=('Ayşe', 'Mehmet', 'Can'), body='Merhaba')
         seen = []
 
         def on_call(call):

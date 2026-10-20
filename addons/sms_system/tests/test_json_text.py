@@ -93,63 +93,85 @@ class TestJsonCredit(TextMixin, SmsTestCase):
 @tagged('post_install', '-at_install')
 class TestJsonPersonalization(TextMixin, SmsTestCase):
 
-    # ── KK-C21 ──
-    def test_kk_c21_1200_alici_uc_istek_parametreler_sirali(self):
-        lst = self.make_list('Büyük')
-        names = {}
-        vals = []
-        for i in range(1200):
-            mobile = self.new_mobile()
-            names[mobile] = 'Kişi%d' % i
-            vals.append({'name': names[mobile], 'mobile': mobile, 'iys_status': 'unknown',
-                         'list_ids': [(6, 0, lst.ids)]})
-        self.Contact.create(vals)
-        camp = self.make_campaign(lst, 'info', state='draft', body='Merhaba {ad}, hoş geldiniz')
-        msgs = self.launch(camp)
-        self.assertEqual(len(msgs), 1200)
-        self.assertEqual(set(msgs.mapped('state')), {'sent'})
-        sends = self.net.json_sends
-        self.assertEqual(len(sends), 3, 'ceil(1200 / 500) = 3 SendSms')
-        self.assertEqual(sorted(len(c['payload']['receiverList']) for c in sends), [200, 500, 500])
-        seen = 0
-        for call in sends:
-            payload = call['payload']
-            self.assertEqual(payload['messageText'], 'Merhaba {1}, hoş geldiniz')
-            self.assertNotIn('{ad}', payload['messageText'])
-            receivers, personal = payload['receiverList'], payload['personalMessages']
-            self.assertEqual(len(personal), len(receivers))
-            for number, item in zip(receivers, personal):
-                mobile = tail10(number)
-                self.assertEqual(item['parameter'], [names[mobile]], 'parameter sırası receiverList ile aynı olmalı')
-                seen += 1
-        self.assertEqual(seen, 1200)
-        for msg in msgs[:50]:
-            self.assertEqual(msg.body, 'Merhaba %s, hoş geldiniz' % names[msg.number[-10:]],
-                             'body kişiye özel son metni göstermeli')
+    # ── KK-C21 ── (Turatel parameter'ı uygulamıyor: kişiselleştirme kayıttaki son metindedir)
+    def assert_no_template(self, payload):
+        self.assertNotIn('{1}', payload['messageText'])
+        self.assertNotIn('{ad}', payload['messageText'])
+        for item in payload.get('personalMessages') or []:
+            self.assertNotIn('parameter', item)
 
-    def test_kk_c21_kisisel_olmayan_kampanya_parametresiz(self):
+    def test_kk_c21_ayni_adlilar_tek_bulk_paketinde_farkli_ad_single(self):
+        """3 alıcı, 2 farklı ad: aynı adlılar parametresiz son metinle bir bulksms'te, tek kalan singlesms'te."""
+        camp = self.make_json_campaign(names=('Ayşe', 'Can', 'Ayşe'), body='Merhaba {ad}, hoş geldiniz')
+        msgs = self.launch(camp)
+        self.assertEqual(set(msgs.mapped('state')), {'sent'}, msgs.mapped('error'))
+        sends = self.net.json_sends
+        self.assertEqual(sorted(c['service'] for c in sends), ['bulksms', 'singlesms'])
+        bulk = next(c for c in sends if c['service'] == 'bulksms')
+        single = next(c for c in sends if c['service'] == 'singlesms')
+        self.assertEqual(bulk['payload']['messageText'], 'Merhaba Ayşe, hoş geldiniz')
+        self.assertEqual(single['payload']['messageText'], 'Merhaba Can, hoş geldiniz')
+        self.assertEqual(len(bulk['payload']['receiverList']), 2)
+        self.assertEqual(len(single['payload']['receiverList']), 1)
+        for call in sends:
+            self.assert_no_template(call['payload'])
+        by_name = {}
+        for msg in msgs:
+            by_name.setdefault(msg.contact_id.name, []).append(msg)
+        self.assertEqual({m.provider_service for m in by_name['Ayşe']}, {'bulk'})
+        self.assertEqual({m.provider_service for m in by_name['Can']}, {'single'})
+        self.assertEqual({tail10(n) for n in bulk['payload']['receiverList']},
+                         {m.number[-10:] for m in by_name['Ayşe']})
+
+    def test_kk_c21_gonderilen_metin_kayittaki_body_ile_ayni(self):
+        camp = self.make_json_campaign(names=('Ayşe', 'Can', 'Ayşe', 'Can', 'Veli'), body='Selam {ad}!')
+        msgs = self.launch(camp)
+        sent_texts = {}
+        for call in self.net.json_sends:
+            for number in call['payload']['receiverList']:
+                sent_texts[tail10(number)] = call['payload']['messageText']
+        self.assertEqual(len(sent_texts), 5)
+        for msg in msgs:
+            self.assertEqual(sent_texts[msg.number[-10:]], msg.body, 'Gönderilen = kayıttaki body')
+            self.assertEqual(msg.body, 'Selam %s!' % msg.contact_id.name)
+
+    def test_kk_c21_kisisel_olmayan_kampanya_tek_bulk_paketi(self):
         msgs = self.launch(self.make_json_campaign(body='Genel duyuru'))
+        self.assertEqual([c['service'] for c in self.net.json_sends], ['bulksms'])
         call = self.net.json_sends[0]
         self.assertEqual(call['payload']['messageText'], 'Genel duyuru')
-        for item in call['payload']['personalMessages']:
-            self.assertFalse(item.get('parameter'))
+        self.assertEqual(len(call['payload']['receiverList']), 3)
+        self.assert_no_template(call['payload'])
         self.assertEqual(set(msgs.mapped('body')), {'Genel duyuru'})
 
-    def test_kk_c21_ad_birden_fazla_yerde_her_biri_1_olur(self):
-        """{ad} yinelenirse her biri {1}; parametre listesi alıcı başına tek ad."""
-        self.launch(self.make_json_campaign(names=('Ayşe', 'Can'), body='{ad}, merhaba {ad}'))
+    def test_kk_c21_ad_birden_fazla_yerde_son_metne_yazilir(self):
+        self.launch(self.make_json_campaign(names=('Ayşe', 'Ayşe'), body='{ad}, merhaba {ad}'))
         payload = self.net.json_sends[0]['payload']
-        self.assertEqual(payload['messageText'], '{1}, merhaba {1}')
-        self.assertEqual([p['parameter'] for p in payload['personalMessages']], [['Ayşe'], ['Can']])
+        self.assertEqual(payload['messageText'], 'Ayşe, merhaba Ayşe')
+        self.assert_no_template(payload)
 
-    def test_kk_c21_guncel_ad_gonderimde_kullanilir(self):
-        camp = self.make_json_campaign(names=('Eski Ad', 'Eski Ad 2'), body='Selam {ad}')
+    def test_kk_c21_1200_alici_ayni_ad_uc_istek(self):
+        lst = self.make_list('Büyük')
+        self.Contact.create([{'name': 'Ayşe', 'mobile': self.new_mobile(), 'iys_status': 'unknown',
+                              'list_ids': [(6, 0, lst.ids)]} for _i in range(1200)])
+        camp = self.make_campaign(lst, 'info', state='draft', body='Merhaba {ad}, hoş geldiniz')
+        msgs = self.launch(camp)
+        self.assertEqual(set(msgs.mapped('state')), {'sent'})
+        sends = self.net.json_sends
+        self.assertEqual(sorted(len(c['payload']['receiverList']) for c in sends), [200, 500, 500])
+        for call in sends:
+            self.assertEqual(call['payload']['messageText'], 'Merhaba Ayşe, hoş geldiniz')
+            self.assert_no_template(call['payload'])
+
+    def test_kk_c21_ad_degisirse_kayittaki_son_metin_gider(self):
+        """Gönderim onayında (_start) dondurulan metin gider; sonradan değişen ad paketi bölmez."""
+        camp = self.make_json_campaign(names=('Eski Ad', 'Eski Ad'), body='Selam {ad}')
         camp.action_send()
         self.Contact.search([('list_ids', 'in', camp.list_ids.ids)]).write({'name': 'Yeni Ad'})
         self.run_queue()
         msgs = self.campaign_msgs(camp)
-        self.assertEqual(self.net.json_sends[0]['payload']['personalMessages'][0]['parameter'], ['Yeni Ad'])
-        self.assertEqual(set(msgs.mapped('body')), {'Selam Yeni Ad'}, 'Gönderilen = görünen')
+        self.assertEqual(set(msgs.mapped('body')), {'Selam Eski Ad'})
+        self.assertEqual(self.net.json_sends[0]['payload']['messageText'], 'Selam Eski Ad', 'Gönderilen = görünen')
 
     def test_kk_c21_legacy_modda_kisisellestirme_eski_gibi(self):
         self.set_param('api_mode', 'legacy_xml')
@@ -227,7 +249,7 @@ class TestJson402(TextMixin, SmsTestCase):
         long_msg = by_name[long_name]
         self.assertEqual(long_msg.state, 'error')
         self.assertIn('metin 402 karakteri aşıyor', long_msg.error)
-        self.assertEqual(len(self.net.json_sends), 1)
+        self.assertEqual(len(self.net.json_sends), 2, 'Ali ve Veli farklı son metin: ikisi ayrı singlesms')
         sent = [tail10(n) for n in self.net.json_sent_receivers]
         self.assertEqual(sorted(sent), sorted([by_name['Ali'].number[-10:], by_name['Veli'].number[-10:]]))
         self.assertNotIn(long_msg.number[-10:], sent)

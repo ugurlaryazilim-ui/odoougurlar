@@ -88,7 +88,7 @@ class TestReviewO1ContextBeforeSend(JsonModelMixin, SmsTestCase):
     def test_o1_ticari_kampanya_paketi_olen_isci_reklam_hesabiyla_uzlasir(self):
         self.configure_json(iys=True)
         self.set_param('optout_text', RET_TEXT)
-        camp = self.make_json_campaign(message_type='commercial', body='Indirim {ad}')
+        camp = self.make_json_campaign(message_type='commercial', body='Indirim')
         camp.action_send()
         self.run_queue_until_send(camp)
         msgs = self.campaign_msgs(camp)
@@ -269,7 +269,7 @@ class TestReviewGC2CampaignLocked(JsonModelMixin, SmsTestCase):
     def test_gc2_poc_onayli_ticari_kampanya_bilgilendirmeye_cevrilemez(self):
         self.configure_json(iys=True)
         self.set_param('optout_text', RET_TEXT)
-        camp = self.make_json_campaign(message_type='commercial', body='Indirim {ad}')
+        camp = self.make_json_campaign(message_type='commercial', body='Indirim')
         camp.action_send()
         self.assertEqual(camp.state, 'scheduled')
         with self.assertRaises(UserError):

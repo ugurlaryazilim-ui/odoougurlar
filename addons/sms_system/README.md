@@ -11,7 +11,8 @@ durum geçişleri katıdır.
 **C (JSON API):** Ayarlarda API modu (`legacy_xml` varsayılan / `json`). JSON modunda tekli SMS `singlesms`,
 kampanya `bulksms` ile gider. Bilgi ve reklam için iki ayrı kimlik seti vardır; ticari kampanya yalnız reklam setiyle
 gider (set yoksa onay engellenir, bilgi setine düşmez). Ticari SMS için ret metni zorunludur (Mersis no ayrı alan değil, ret metninin içinde yazılır).
-Kişiselleştirme `{ad}` -> `{1}` + `parameter`; en çok 402 karakter. İletim durumu "SMS: İletim durumu" cron'u
+Kişiselleştirme `{ad}` kayıtta çözülür (her alıcının `body`'si son metindir); Turatel `parameter`'ı uygulamadığı için
+şablon/parametre gönderilmez: aynı son metni taşıyanlar `bulksms` paketinde, tek kalan `singlesms` ile gider. En çok 402 karakter. İletim durumu "SMS: İletim durumu" cron'u
 (15 dk) ve "Durumu Sorgula" ile izlenir. Test modunda yalnız "Test numaraları" listesindeki numaralara gerçek SMS gider.
 
 **ConfirmSms (JSON):** Turatel hesabında onay zorunluysa SendSms ile giden paket "Onay Bekliyor"da kalır ve
@@ -86,9 +87,9 @@ Yeni kolonlar redeploy ile `-u sms_system` arasında yoktur; bu pencerede `sms_s
 - [ ] Bilgilendirme kampanyası (listedeki alıcılarla): yalnız listedekiler gider.
 - [ ] **ZORUNLU: kendi numaranla `{ad}` içeren kişiselleştirilmiş kampanya.** Listede kendi numaranı kendi adınla
   kaydet, bilgilendirme kampanyası metninde `{ad}` kullan (ör. "Merhaba {ad}, test mesajıdır"), gönder.
-  Telefondaki SMS'te **adın doğru çözüldüğünü** ve kayıttaki `body` ile aynı olduğunu gör. **`{1}` (ya da başka
-  bir yer tutucu) görünüyorsa test modunu KAPATMA**: `{ad}` -> `{1}` + `parameter` sözdizimi canlıda henüz
-  görülmedi (C0 SendSms'i kapsamadı); yanlışsa ilk gerçek kampanya binlerce alıcıya "Merhaba {1}" olarak gider.
+  Telefondaki SMS'te **adın doğru çözüldüğünü** ve kayıttaki `body` ile aynı olduğunu gör. Yer tutucu
+  (`{ad}`, `{1}`) görünüyorsa test modunu KAPATMA. (Turatel `parameter` alanını uygulamıyor; ad gönderimden önce
+  metne yazılır, istekte `{1}`/`parameter` yoktur.)
 - [ ] **Jeton yenilemesi:** jeton ~30 dk önbellekte tutulur. İlk SMS'ten en az 30 dk sonra bir SMS daha gönder ve
   başarılı gittiğini gör (jeton yenilemesi canlıda yalnız böyle görülür).
 - [ ] **Turatel adresleri** (Ayarlar > tekli/toplu servis adresi) `https://` ile başlamalı; `http://` kaydedilmez.

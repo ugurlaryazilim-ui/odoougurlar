@@ -25,7 +25,7 @@ class JsonModelMixin(CampaignMixin):
         type(self)._contact_seq += 1
         return '5330%06d' % type(self)._contact_seq
 
-    def make_json_campaign(self, names=('Ayşe', 'Mehmet', 'Can'), message_type='info', body='Merhaba {ad}',
+    def make_json_campaign(self, names=('Ayşe', 'Mehmet', 'Can'), message_type='info', body='Merhaba',
                            state='draft', **vals):
         lst = self.make_list()
         fresh = self.ago(hours=1)
@@ -145,7 +145,7 @@ class TestJsonRouting(JsonModelMixin, SmsTestCase):
 
     def test_kk_c11_ticari_kampanya_bulksms_reklam_hesabi_kara_liste_true(self):
         self.configure_json(iys=True)
-        camp = self.make_json_campaign(message_type='commercial', body='Indirim {ad}')
+        camp = self.make_json_campaign(message_type='commercial', body='Indirim')
         msgs = self.launch(camp)
         self.assertEqual(set(msgs.mapped('state')), {'sent'}, msgs.mapped('error'))
         self.assertEqual(len(self.net.json_sends), 1)
@@ -596,7 +596,7 @@ class TestJsonCommercialSet(JsonModelMixin, SmsTestCase):
 
 @tagged('post_install', '-at_install')
 class TestJsonRoutingFixedBody(JsonModelMixin, SmsTestCase):
-    """C3 kanıtı sabit gövdeyle: {ad} kişiselleştirmesi (tek pakette {1} + parametre) C4'tür; buradaki
+    """C3 kanıtı sabit gövdeyle: {ad} kişiselleştirmesi son metne göre paketlenir (test_json_text); buradaki
     kontroller C3'ün yönlendirme, kimlik eşleme ve mükerrer önleme sözleşmesini C4'ten bağımsız doğrular."""
 
     BODY = 'Sabit metin'
