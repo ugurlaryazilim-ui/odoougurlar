@@ -850,8 +850,7 @@ class BatchApiController(BarcodeApiBase):
 
         # ─── 2. Rota zaten tamamen sevk edildiyse kapat (normalde paketleme kapatır) ───
         try:
-            if batch.state != 'done' and all_pickings \
-                    and all(p.state == 'done' for p in all_pickings):
+            if batch.state != 'done' and self._route_finished(all_pickings):
                 batch.action_done()
         except Exception as e:
             _logger.error("Batch %s tamamlama hatası: %s", batch.name, e)
@@ -877,7 +876,7 @@ class BatchApiController(BarcodeApiBase):
         except Exception as e:
             _logger.warning("Chatter log hatası: %s", e)
 
-        batch_done = bool(all_pickings) and all(p.state == 'done' for p in all_pickings)
+        batch_done = self._route_finished(all_pickings)
         result_msg = (f'{batch.name}: {collected_moves}/{total_moves} ürün toplandı; '
                       f'sevkiyat paketlemede doğrulanır ✅')
         if skipped_pickings:

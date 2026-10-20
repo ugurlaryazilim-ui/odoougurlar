@@ -73,6 +73,15 @@ class BarcodeApiBase(http.Controller):
             'missing': missing,
         }
 
+    @staticmethod
+    def _route_finished(pickings):
+        """Rota kapanış kuralı (tek yer): tüm siparişler sevk / iptal edilmiş ve en az biri
+        sevk edilmiş. Toplamadan sonra satırı değişen siparişin OUT'u iptal olur ama rotanın
+        kalıcı listesinde kalır; önceki "hepsi done" kuralı bu rotayı hiç kapatmıyordu.
+        Yalnız iptallerden oluşan rotayı günlük temizlik iptal eder."""
+        states = set(pickings.mapped('state'))
+        return bool(pickings) and states <= {'done', 'cancel'} and 'done' in states
+
     def _apply_collected_quantities(self, picking, qty_field='wave_collected_qty'):
         """Sevk miktarı = toplanan (talebi aşmaz). Önceden ml.reserved_uom_qty (Odoo 17+'da yok)
         hata verip her move line'a tüm talep yazılıyordu: eksik ürün tam / iki katı sevk ediliyordu.

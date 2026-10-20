@@ -170,6 +170,10 @@ class TestRouteValidateAtPacking(PackingCase):
         backorder = self.env['stock.picking'].search([('backorder_id', '=', picking.id)])
         self.assertEqual(sum(backorder.move_ids.mapped('product_uom_qty')), 2)
         self.assertNotEqual(backorder.state, 'done')
+        # Bekleyen sevkiyat bu rotada kalmaz (sonraki rotaya girer); rota kapanır
+        self.assertFalse(backorder.batch_id)
+        self.assertNotIn(backorder, batch.all_picking_ids)
+        self.assertEqual(batch.state, 'done')
 
         res = self.pack_ctl.packing_scan(batch_id=batch.id, barcode='RVP-1')
         self.assertFalse(res.get('success'), 'toplanandan fazlası okutulamaz')
@@ -235,3 +239,50 @@ class TestRouteValidateAtPacking(PackingCase):
         self.assertTrue(res.get('success'), res)
         self.assertFalse(batch.exists())
         self.assertFalse(picking.batch_id)
+
+    # ─── İnceleme 1: satırı değişen siparişin iptal picking'i rotayı kilitlemez ───
+    def _two_orders_one_changed(self):
+        """Rotada A ve B (1'er adet, toplandı, Tamamla). A'nın satırı 0'a düşürülüp yeni ürün
+        eklenir: A'nın OUT'u iptal olur ama rotanın kalıcı listesinde kalır."""
+        sale_a, pa = self._sale(self.prod, 1)
+        _sale_b, pb = self._sale(self.prod, 1)
+        batch = self._route(pa | pb)
+        (pa | pb).move_ids.write({'wave_collected_qty': 1})
+        res = self.batch_ctl.batch_collect_complete(batch_id=batch.id)
+        self.assertTrue(res.get('success'), res)
+        self._add_stock(self.prod2, self.stock, 5)
+        sale_a.order_line.product_uom_qty = 0
+        sale_a.write({'order_line': [(0, 0, {
+            'product_id': self.prod2.id, 'product_uom_qty': 1, 'price_unit': 10.0})]})
+        self.assertEqual(pa.state, 'cancel', 'ön koşul: A iptal')
+        self.assertIn(pa, batch.all_picking_ids, 'ön koşul: iptal picking kalıcı listede')
+        return pa, pb, batch
+
+    def test_k2_changed_order_packing_complete_closes_route(self):
+        _pa, pb, batch = self._two_orders_one_changed()
+        res = self.pack_ctl.packing_complete(batch_id=batch.id)
+        self.assertTrue(res.get('success'), res)
+        self.assertEqual(res['errors'], [])
+        self.assertEqual(pb.state, 'done')
+        self.assertEqual(batch.state, 'done', 'iptal + done picking: rota kapanmalı')
+
+    def test_k2_changed_order_last_scan_closes_route(self):
+        _pa, pb, batch = self._two_orders_one_changed()
+        res = self._scan(batch, 1)
+        self.assertEqual(res['picking_id'], pb.id)
+        self.assertEqual(pb.state, 'done')
+        self.assertEqual(batch.state, 'done')
+
+    def test_route_finished_rule(self):
+        """Tek kural: hepsi done/cancel ve en az biri done."""
+        _sale_a, pa = self._sale(self.prod, 1)
+        _sale_b, pb = self._sale(self.prod, 1)
+        finished = self.pack_ctl._route_finished
+        self.assertFalse(finished(pa.browse()))
+        self.assertFalse(finished(pa | pb))
+        pa.action_cancel()
+        self.assertFalse(finished(pa), 'yalnız iptal: kapanmaz (cron iptal eder)')
+        self.assertFalse(finished(pa | pb))
+        pb.move_ids.write({'quantity': 1, 'picked': True})
+        pb.button_validate()
+        self.assertTrue(finished(pa | pb))

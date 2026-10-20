@@ -754,13 +754,12 @@ class PackingApiController(BarcodeApiBase):
             if m.state != 'cancel'
         )
 
-        # Batch state güncelle — tüm picking'ler done ise batch'i tamamla. Filtresiz liste:
+        # Rota kapanışı (tek kural: hepsi done/cancel, en az biri done). Filtresiz liste:
         # iptal siparişin açık picking'i varken rota kapanmaz (iptali packing_complete yapar)
         try:
             if batch.state != 'done':
                 batch.invalidate_recordset(['picking_ids'])
-                all_done = all(p.state == 'done' for p in all_pickings)
-                if all_done:
+                if self._route_finished(all_pickings):
                     batch.action_done()
                     _logger.info("Batch %s tamamlandı (packing_scan)", batch.name)
         except Exception as e:
@@ -918,9 +917,17 @@ class PackingApiController(BarcodeApiBase):
 
         for picking in all_pickings:
             try:
-                # Güvenlik: Hiç toplanmamış picking'i paketleme/faturala
+                # Toplamadan sonra satırı değişen siparişin OUT'u iptal olur ama rotanın kalıcı
+                # listesinde kalır: doğrulanmaya çalışılıp hata dönüyordu (rota kapanmıyordu)
+                if picking.state == 'cancel':
+                    skipped.append(f"{picking.name} (iptal)")
+                    skipped_ids.append(picking.id)
+                    continue
+                # Güvenlik: Hiç toplanmamış picking'i paketleme/faturala (iptal hareketin
+                # toplanan miktarı sayılmaz)
                 has_collected = any(
-                    (m.wave_collected_qty or 0) > 0 for m in picking.move_ids
+                    (m.wave_collected_qty or 0) > 0 and m.state != 'cancel'
+                    for m in picking.move_ids
                 )
                 if not has_collected:
                     skipped.append(picking.name)
@@ -953,12 +960,12 @@ class PackingApiController(BarcodeApiBase):
                 _logger.exception("Sipariş Onay/Senkronizasyon Hatası %s:", picking.name)
                 errors.append(f"{picking.name}: {self._error_text(e)}")
 
-        # Batch state güncelle — tüm picking'ler done ise batch'i tamamla
+        # Rota kapanışı (tek kural). Filtresiz liste: iptal siparişin picking'i yukarıda
+        # iptal edildi; iptal edilemeyen açık picking varken rota kapanmaz
         try:
             if batch.state != 'done':
                 batch.invalidate_recordset(['picking_ids'])
-                all_done = all(p.state == 'done' for p in all_pickings)
-                if all_done:
+                if self._route_finished(self._get_all_pickings(batch)):
                     batch.action_done()
                     _logger.info("Batch %s tamamlandı (packing_complete)", batch.name)
         except Exception as e:
