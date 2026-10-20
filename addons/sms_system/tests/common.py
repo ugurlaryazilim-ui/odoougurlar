@@ -75,6 +75,13 @@ class FakeNet:
         self.smart_session = None  # None ya da sonuç (hata taklidi)
         self.smart_query = None    # None ya da her /query için sonuç (callable ya da tek değer)
         self.query_cap = None      # bu kadar sorgudan sonra zaman aşımı ver (kırmızı koşuyu kısaltır)
+        # İYS kişi kartı akışı: 'missing' numaraya Contact çağrılana kadar trigger/contactapiload -6/-601 döner.
+        # smart_<uç>: None ya da o uç için sonuç (callable ya da tek değer); Contact sonrası numara `cards`a girer.
+        self.cards = set()
+        self.smart_contact = None
+        self.smart_trigger = None
+        self.smart_load = None
+        self.smart_approve = None
         self._seq = 0
         self.tj = FakeTuratelJson(self)   # Turatel JSON API taklidi (platform.turatel.com)
 
@@ -165,7 +172,8 @@ class FakeNet:
                 call['payload'] = json.loads(text) if text else {}
             except ValueError:
                 call['payload'] = {}
-            value = str((call['payload'] or {}).get('Value') or '')
+            payload = call['payload'] or {}
+            value = str(payload.get('Value') or (payload.get('CommunicationTools') or {}).get('Msisdn') or '')
             call['number'] = value[2:] if value.startswith('90') else value
         self.calls.append(call)
         self.events.append(('post', kind))
@@ -180,8 +188,37 @@ class FakeNet:
         outcome = self.turatel_script.pop(0) if self.turatel_script else 'ID:%d' % (1000 + self._seq)
         return self._resolve(outcome, call)
 
+    def smart_calls(self, path):
+        return [c for c in self.smartadm_calls if c['path'].lower() == path.lower()]
+
+    @property
+    def smart_paths(self):
+        return [c['path'].lower() for c in self.smartadm_calls]
+
+    def _smart_missing(self, call):
+        return self.iys.get(call['number'], self.default_iys) == 'missing' and call['number'] not in self.cards
+
+    def _smartadm_flow(self, path, call):
+        override = {'contact': self.smart_contact, 'trigger': self.smart_trigger,
+                    'contactapiload': self.smart_load, 'approve': self.smart_approve}[path]
+        if override is not None:
+            outcome = self._resolve(override, call)
+            if path == 'contact' and outcome.json().get('StatusCode') == 0:
+                self.cards.add(call['number'])
+            return outcome
+        if path == 'contact':
+            if call['number'] in self.cards:
+                return smart_error(-6, -613)
+            self.cards.add(call['number'])
+            return smart_ok('CARD')
+        if path in ('trigger', 'contactapiload') and self._smart_missing(call):
+            return smart_error(-6, -601)
+        return smart_ok('TRIG1' if path == 'trigger' else None)
+
     def _smartadm(self, call):
         path = call['path']
+        if path.lower() in ('contact', 'trigger', 'contactapiload', 'approve'):
+            return self._smartadm_flow(path.lower(), call)
         if path == 'session':
             if self.smart_session is not None:
                 return self._resolve(self.smart_session, call)
@@ -193,6 +230,8 @@ class FakeNet:
                 return self._resolve(self.smart_query, call)
             status = self.iys.get(call['number'], self.default_iys)
             if status == 'missing':
+                if call['number'] in self.cards:   # kart açıldı ama henüz izni yok
+                    return smart_ok([{'Authorization': {}}])
                 return smart_error(-6, -601)
             return smart_ok([{'Authorization': {'Etk': {'Msisdn': {'Sms': status}}}}])
         if path == 'report2':

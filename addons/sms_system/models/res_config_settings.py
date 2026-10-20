@@ -110,7 +110,8 @@ class ResConfigSettings(models.TransientModel):
     sms_iys_password = fields.Char(string='SmartADM Şifre', config_parameter='sms_system.iys_password',
                                    groups='base.group_system')
     sms_iys_store = fields.Char(string='Mağaza Adı (RemoteStoreId)', config_parameter='sms_system.iys_store',
-                                help='İsteğe bağlı; SmartADM kayıtlarında işlemin hangi mağazadan yapıldığı görünür')
+                                help='SmartADM kayıtlarında işlemin hangi mağazadan yapıldığı görünür (RemoteStoreId başlığı, tüm çağrılarda '
+                                     'sabit). Boş bırakılırsa "MERKEZ" gönderilir.')
     sms_iys_url = fields.Char(string='SmartADM API Adresi', config_parameter='sms_system.iys_url',
                               help='Boşsa https://adm.smartadm.net/webservice/api')
 
