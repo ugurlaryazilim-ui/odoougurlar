@@ -22,6 +22,7 @@ class TestRouteValidateAtPacking(PackingCase):
         super().setUpClass()
         cls.prod = cls._new_product('Rota Doğrulama Ürünü', 'RVP-1')
         cls.prod2 = cls._new_product('Rota Doğrulama Yeni Ürün', 'RVP-2')
+        cls.prod3 = cls._new_product('Rota Doğrulama Sonradan Eklenen', 'RVP-3')
 
     def setUp(self):
         super().setUp()
@@ -340,3 +341,69 @@ class TestRouteValidateAtPacking(PackingCase):
         self.assertEqual(len(self._out_invoices(sale)), 1)
         self.assertEqual(self._invoiced_products(sale), self.prod | self.prod2)
         self.assertEqual(self.nebim['posts'], 1)
+
+    # ─── İnceleme 3: iki satırlı siparişte satır değişimi ───
+    def test_line_change_on_two_line_order_does_not_lock_packing(self):
+        """Tamamla sonrası bir satır 0'a düşürülüp yeni ürün eklenir: yeni (toplanmamış) hareket
+        rotadaki toplanmış picking'e girmez, paketleme kilitlenmez."""
+        for product in (self.prod, self.prod2, self.prod3):
+            product.product_tmpl_id.invoice_policy = 'delivery'
+            self._add_stock(product, self.stock, 5)
+        sale = self.env['sale.order'].create({
+            'partner_id': self.customer.id,
+            'order_line': [(0, 0, {'product_id': p.id, 'product_uom_qty': 1, 'price_unit': 10.0})
+                           for p in (self.prod, self.prod2)],
+        })
+        sale.action_confirm()
+        picking = sale.picking_ids
+        picking.action_assign()
+        batch = self._route(picking)
+        picking.move_ids.write({'wave_collected_qty': 1})
+        res = self.batch_ctl.batch_collect_complete(batch_id=batch.id)
+        self.assertTrue(res.get('success'), res)
+
+        sale.order_line.filtered(lambda line: line.product_id == self.prod).product_uom_qty = 0
+        sale.write({'order_line': [(0, 0, {
+            'product_id': self.prod3.id, 'product_uom_qty': 1, 'price_unit': 10.0})]})
+
+        new_move = self.env['stock.move'].search([
+            ('product_id', '=', self.prod3.id), ('sale_line_id.order_id', '=', sale.id)])
+        self.assertEqual(len(new_move), 1)
+        self.assertNotEqual(new_move.picking_id, picking, 'toplanmış picking e yeni hareket girmemeli')
+        self.assertNotIn(new_move.picking_id, batch.all_picking_ids)
+
+        res = self.pack_ctl.packing_complete(batch_id=batch.id)
+        self.assertTrue(res.get('success'), res)
+        self.assertEqual(picking.state, 'done')
+        self.assertEqual(self._shipped_qty(picking), 1)
+        self.assertEqual(self._delivered(sale, self.prod2), 1)
+        self.assertNotEqual(new_move.picking_id.state, 'done')
+        self.assertEqual(batch.state, 'done')
+
+    def test_line_added_before_collection_still_joins_routed_picking(self):
+        """Toplama başlamadan eklenen satır eskisi gibi aynı picking'e girer (rota listesinde)."""
+        self.prod3.product_tmpl_id.invoice_policy = 'delivery'
+        self._add_stock(self.prod3, self.stock, 5)
+        sale, picking = self._sale(self.prod, 1)
+        self._route(picking)
+        sale.write({'order_line': [(0, 0, {
+            'product_id': self.prod3.id, 'product_uom_qty': 1, 'price_unit': 10.0})]})
+        self.assertIn(self.prod3, picking.move_ids.product_id)
+
+    def test_line_swap_in_single_write_cancels_old_and_opens_new_picking(self):
+        """Azaltma ve yeni satır tek kayıtta: azaltma toplanmış picking'deki hareketi iptal
+        eder (iade hareketine dönmez), yeni ürün ayrı sevkiyata gider."""
+        self.prod3.product_tmpl_id.invoice_policy = 'delivery'
+        self._add_stock(self.prod3, self.stock, 5)
+        sale, picking, _batch, _res = self._collected_route(1)
+        sale.write({'order_line': [
+            (1, sale.order_line.id, {'product_uom_qty': 0}),
+            (0, 0, {'product_id': self.prod3.id, 'product_uom_qty': 1, 'price_unit': 10.0})]})
+        self.assertEqual(picking.move_ids.filtered(
+            lambda m: m.product_id == self.prod).state, 'cancel')
+        self.assertEqual(picking.state, 'cancel')
+        moves = self.env['stock.move'].search([('sale_line_id.order_id', '=', sale.id),
+                                               ('state', '!=', 'cancel')])
+        self.assertEqual(moves.product_id, self.prod3, 'iade / negatif hareket kalmamalı')
+        self.assertNotEqual(moves.picking_id, picking)
+        self.assertEqual(moves.picking_id.picking_type_code, 'outgoing')

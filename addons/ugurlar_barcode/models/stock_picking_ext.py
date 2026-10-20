@@ -2,6 +2,7 @@
 import logging
 
 from odoo import api, fields, models
+from odoo.fields import Domain
 
 _logger = logging.getLogger(__name__)
 
@@ -35,6 +36,30 @@ class StockMoveExt(models.Model):
         help='Rota toplamada operatör "Eksik" dedi: toplanan kadar sevk edilir, '
              'kalan için bekleyen sevkiyat (backorder) açılır.',
     )
+
+    def _is_negative_demand(self):
+        return self.product_uom.compare(self.product_uom_qty, 0) < 0
+
+    def _key_assign_picking(self):
+        # Azaltma (negatif) hareketleri artışlardan ayrı gruplanır: aşağıdaki kural yalnız
+        # artışa uygulanır, grubun ilk hareketi tüm grubun sevkiyatını belirler
+        return super()._key_assign_picking() + (self._is_negative_demand(),)
+
+    def _search_picking_for_assignation_domain(self):
+        """Toplaması başlamış (rota okutması / "Eksik" işareti olan) sevkiyata yeni hareket
+        eklenmez; ayrı sevkiyat açılır. Rota Tamamla doğrulamadığı için paketlemeye kadar
+        satır eklenebiliyor; yeni hareket toplanmış picking'e girerse rotada okutulmamış
+        sayılıp paketleme tamamlamasını (eksik denetimi) kilitliyordu.
+
+        Satır azaltma (negatif hareket) yine aynı sevkiyatı bulur: oradaki hareketle
+        birleşip miktarı düşürür / iptal eder (ayrı sevkiyata giderse iade hareketine dönerdi).
+        """
+        domain = super()._search_picking_for_assignation_domain()
+        if self._is_negative_demand():
+            return domain
+        return Domain.AND([domain, [('move_ids', 'not any', [
+            '|', ('wave_collected_qty', '>', 0), ('wave_skipped', '=', True)])]])
+
 
 AVAILABILITY_STATUS = [
     ('available', 'Stokta Mevcut'),
