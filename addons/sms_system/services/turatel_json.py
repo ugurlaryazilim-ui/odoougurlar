@@ -56,6 +56,7 @@ _SCHEMA = {
                     'receiverList', 'personalMessages', 'remoteUserIpAddress'},
     'Sms/GetStatus': {'accountId', 'packetId', 'messageIdList'},
     'Sms/GetStatusByTwoDates': {'accountId', 'startDate', 'endDate'},
+    'Sms/ConfirmSms': {'accountId', 'packetId'},
 }
 
 # ── jeton önbelleği (süreç belleği): anahtar -> (jeton, geçerlilik sonu _clock() cinsinden) ──
@@ -380,6 +381,18 @@ class TuratelJsonClient:
                    'startDate': format_date(start_dt), 'endDate': format_date(end_dt)}
         data, _env = self._call('Sms/GetStatusByTwoDates', payload, empty_codes=STATUS_EMPTY_CODES)
         return self._status_rows(data)
+
+    def confirm_sms(self, account_id, packet_id):
+        """Onay zorunlu hesapta gönderilmiş paketi onayla (Turatel cevabı 4); maskeli, kısa ham yanıt döner.
+
+        SMS göndermez: okuma ucu gibi sınıflanır (hata hiçbir zaman belirsiz değil). Yanıt şeması belgesiz;
+        yalnız zarf (isSuccess/errorCode) yorumlanır. Paket boşsa ağdan önce kalıcı hata.
+        """
+        if packet_id in (None, '', False):
+            raise TuratelError('Turatel isteği hatalı: packetId boş')
+        payload = {'accountId': _as_int(account_id, 'accountId'), 'packetId': _as_int(packet_id, 'packetId')}
+        _data, envelope = self._call('Sms/ConfirmSms', payload)
+        return safe_raw(envelope, ROW_RAW_LIMIT)
 
     @staticmethod
     def _status_rows(data):

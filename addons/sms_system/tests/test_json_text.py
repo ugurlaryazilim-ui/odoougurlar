@@ -294,7 +294,8 @@ class TestJsonSegments(TextMixin, SmsTestCase):
         self.assertEqual([c['payload']['validityPeriod'] for c in calls], [300, 300, 1260])
         for call in calls:
             self.assertIsNone(call['payload'].get('sendDate'))
-        self.assertEqual(self.net.tj.calls_to('Sms/ConfirmSms'), [])
+        # Kullanıcı kararı (20.10): gönderim sonrası paket başına tek ConfirmSms (varsayılan açık); AbortSms yok
+        self.assertEqual(len(self.net.tj.calls_to('Sms/ConfirmSms')), len(calls))
         self.assertEqual(self.net.tj.calls_to('Sms/AbortSms'), [])
 
 

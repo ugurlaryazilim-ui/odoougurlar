@@ -689,7 +689,11 @@ class SmsSystemCampaign(models.Model):
                         sendable._mark_sending(cfg, 'bulk', sendable._pack_purpose())
                         IrCron._commit_progress()
                         sendable._deliver_pack(cfg, client)
-                        if IrCron._commit_progress(len(sendable)) < MIN_TIME_LEFT:
+                        left = IrCron._commit_progress(len(sendable))
+                        # ConfirmSms paket başına, gönderim commit'inden SONRA; süre azsa durum cron'u onaylar
+                        if left >= MIN_TIME_LEFT and sendable._confirm_sent_packets(cfg):
+                            left = IrCron._commit_progress()
+                        if left < MIN_TIME_LEFT:
                             return
                     if held:
                         break

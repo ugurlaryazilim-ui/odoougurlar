@@ -4,10 +4,11 @@ from odoo.exceptions import AccessError, UserError
 from ..services.smartadm import SmartAdmError
 from ..services.turatel import ERROR_HINTS, TuratelError, normalize_number
 from ..services.turatel_json import TuratelJsonClient, mask_digits
-from .sms_message import (API_MODES, DEFAULT_ACCOUNT_COMMERCIAL, DEFAULT_ACCOUNT_INFO, DEFAULT_BULK_URL,
+from .sms_message import (API_MODES, CONFIRM_PARAMS, DEFAULT_ACCOUNT_COMMERCIAL, DEFAULT_ACCOUNT_INFO, DEFAULT_BULK_URL,
                           DEFAULT_JSON_USER_ID, DEFAULT_SINGLE_URL, DEFAULT_VALIDITY_MINUTES,
                           TEST_NUMBER_SEPARATORS, parse_test_numbers,
-                          parse_user_daily_limit, parse_validity_minutes, resolve_api_mode, test_mode_enabled)
+                          parse_user_daily_limit, parse_validity_minutes, resolve_api_mode, test_mode_enabled,
+                          confirm_enabled)
 
 MAX_TEST_NUMBERS = 5
 
@@ -93,6 +94,12 @@ class ResConfigSettings(models.TransientModel):
     sms_validity_minutes = fields.Integer(string='Geçerlilik Süresi (dk)',
                                           help='SMS operatörde bu süre içinde iletilemezse düşer; boş/0 = %d dk'
                                                % DEFAULT_VALIDITY_MINUTES)
+    # ConfirmSms (Turatel cevabı 4): ir.config_parameter'da; ekranda salt okunur + düğme. Geçici tabloya kolon
+    # eklenmez (alan saklanmaz): redeploy ile -u arası Ayarlar kaydı bozulmasın.
+    sms_confirm_info = fields.Boolean(string='Bilgi: gönderimden sonra onayla (ConfirmSms)',
+                                      compute='_compute_sms_confirm', groups='base.group_system')
+    sms_confirm_commercial = fields.Boolean(string='Reklam: gönderimden sonra onayla (ConfirmSms)',
+                                            compute='_compute_sms_confirm', groups='base.group_system')
 
     sms_iys_enabled = fields.Boolean(string='İYS kontrolü etkin', config_parameter='sms_system.iys_enabled',
                                      help='Açıkken ticari SMS yalnız İYS onaylı numaralara gider ve rehber otomatik senkronlanır')
@@ -106,6 +113,41 @@ class ResConfigSettings(models.TransientModel):
                                 help='İsteğe bağlı; SmartADM kayıtlarında işlemin hangi mağazadan yapıldığı görünür')
     sms_iys_url = fields.Char(string='SmartADM API Adresi', config_parameter='sms_system.iys_url',
                               help='Boşsa https://adm.smartadm.net/webservice/api')
+
+    def _compute_sms_confirm(self):
+        icp = self.env['ir.config_parameter'].sudo()
+        info = confirm_enabled(icp.get_param(CONFIRM_PARAMS['info']))
+        commercial = confirm_enabled(icp.get_param(CONFIRM_PARAMS['commercial']))
+        for rec in self:
+            rec.sms_confirm_info = info
+            rec.sms_confirm_commercial = commercial
+
+    def action_sms_toggle_confirm(self):
+        """ConfirmSms ayarını kimlik seti başına aç/kapat (context sms_confirm_set: 'info' | 'commercial').
+
+        Yalnız sistem yöneticisi: düğmedeki groups yalnız görünürlüktür, RPC yolunu bu denetim kapatır.
+        'False' ve 'True' açıkça yazılır (parametrenin yokluğu açık sayılır).
+        """
+        if not (self.env.su or self.env.user.has_group('base.group_system')):
+            raise AccessError(_('Yalnız sistem yöneticileri ConfirmSms ayarını değiştirebilir.'))
+        which = self.env.context.get('sms_confirm_set')
+        if which not in CONFIRM_PARAMS:
+            raise UserError(_('Geçersiz ConfirmSms kimlik seti.'))
+        icp = self.env['ir.config_parameter'].sudo()
+        enabled = not confirm_enabled(icp.get_param(CONFIRM_PARAMS[which]))
+        icp.set_param(CONFIRM_PARAMS[which], 'True' if enabled else 'False')
+        label = _('Bilgi') if which == 'info' else _('Reklam')
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'message': (_('%s: gönderimden sonra ConfirmSms açıldı.') if enabled
+                            else _('%s: ConfirmSms kapatıldı.')) % label,
+                'type': 'success' if enabled else 'warning',
+                'sticky': False,
+                'next': {'type': 'ir.actions.client', 'tag': 'soft_reload'},
+            },
+        }
 
     @api.model
     def _drop_restricted_sms_values(self, res):

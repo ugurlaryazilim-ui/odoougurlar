@@ -19,3 +19,4 @@ from . import test_test_numbers
 from . import test_json_buttons
 from . import test_json_c4_extra
 from . import test_review_round1_c
+from . import test_confirm_sms

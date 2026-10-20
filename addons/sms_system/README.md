@@ -14,6 +14,19 @@ gider (set yoksa onay engellenir, bilgi setine düşmez). Ticari SMS için ret m
 Kişiselleştirme `{ad}` -> `{1}` + `parameter`; en çok 402 karakter. İletim durumu "SMS: İletim durumu" cron'u
 (15 dk) ve "Durumu Sorgula" ile izlenir. Test modunda yalnız "Test numaraları" listesindeki numaralara gerçek SMS gider.
 
+**ConfirmSms (JSON):** Turatel hesabında onay zorunluysa SendSms ile giden paket "Onay Bekliyor"da kalır ve
+telefona ulaşmaz. Bu yüzden her başarılı gönderimden ve commit'ten sonra paket başına bir `Sms/ConfirmSms` çağrılır.
+Ayar Ayarlar → SMS → Turatel JSON API → "Gönderimden sonra onayla (ConfirmSms)" bölümündedir ve kimlik seti başına
+ayrıdır (`sms_system.turatel_confirm_info` / `sms_system.turatel_confirm_commercial`). Varsayılan AÇIK'tır;
+parametre yoksa açık sayılır, yalnız tam `'False'` kapatır. Değeri yalnız sistem yöneticisi "Aç / Kapat" düğmesiyle
+değiştirebilir. Onay çağrısı başarısız olursa SMS kaydı `sent` kalır ve hata yükseltilmez. Bu durumda kaydın
+`delivery_code` alanı `confirm_pending` olur; listede "Turatel onayı bekleniyor" görünür ve "Turatel onayı bekleyen"
+filtresiyle bulunur. "SMS: İletim durumu" cron'u bu paketleri 24 saat boyunca yeniden onaylamayı dener.
+"Durumu Sorgula" düğmesi de sorgudan önce onayı dener. Onay hiçbir yoldan SendSms'i yeniden çağırmaz. Legacy XML
+modunda ve test numarası dışındaki numaralara (test modu) onay isteği yapılmaz. Onay zorunlu olmayan hesapta da
+çağrı zararsız sayılır. Hata dönüyorsa kayıtlar 24 saat `confirm_pending` görünür; gerekiyorsa ayar o kimlik seti
+için kapatılır.
+
 ## JSON geçişi kontrol listesi
 
 Her deneme adımı en çok 5 SMS ile yapılır. Bir adım başarısızsa sonrakine geçme.
@@ -73,7 +86,7 @@ Yeni kolonlar redeploy ile `-u sms_system` arasında yoktur; bu pencerede `sms_s
   başarılı gittiğini gör (jeton yenilemesi canlıda yalnız böyle görülür).
 - [ ] **Turatel adresleri** (Ayarlar > tekli/toplu servis adresi) `https://` ile başlamalı; `http://` kaydedilmez.
 - [ ] İsteğe bağlı: kendi İYS onaylı numarana ticari kampanya (reklam seti). Mersis no ret metninin içinde olmalı.
-- [ ] "Durumu Sorgula" ve durum cron'u **gerçek satır döndürür** ve "İletildi" yazar; SMS "Onay Bekliyor"da kalmaz.
+- [ ] "Durumu Sorgula" ve durum cron'u **gerçek satır döndürür** ve "İletildi" yazar; SMS "Yanıt bekleniyor"da ya da "Turatel onayı bekleniyor"da kalmaz.
 - [ ] **`-6` doğrulaması:** kayıt varken de `-6` (boş) dönüyorsa durum takibi doğrulanmamıştır; **test modunu kapatma**,
   tarih biçimi/aralığı için takip işi aç. (Kayıt yokken `-6` normaldir ve boş liste sayılır.)
 

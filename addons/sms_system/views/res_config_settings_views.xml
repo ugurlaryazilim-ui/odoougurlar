@@ -96,6 +96,20 @@
                                 <button name="action_turatel_credit" type="object" string="Krediyi Getir" class="btn-secondary" icon="fa-money"/>
                             </div>
                         </setting>
+                        <setting string="Gönderimden sonra onayla (ConfirmSms)" groups="base.group_system" help="Açıkken her başarılı gönderimden sonra paket Turatel'de onaylanır (hesapta onay zorunluysa SMS ancak bundan sonra çıkar). Onaylanamayan paket 'Turatel onayı bekleniyor' görünür ve iletim durumu cron'u 24 saat yeniden dener. Düğme ayarı hemen değiştirir.">
+                            <div class="content-group">
+                                <div class="row mt8">
+                                    <label for="sms_confirm_info" class="col-lg-6 o_light_label"/>
+                                    <field name="sms_confirm_info" class="col-lg-1"/>
+                                    <button name="action_sms_toggle_confirm" type="object" string="Aç / Kapat" class="btn-link col-lg-4" context="{'sms_confirm_set': 'info'}"/>
+                                </div>
+                                <div class="row">
+                                    <label for="sms_confirm_commercial" class="col-lg-6 o_light_label"/>
+                                    <field name="sms_confirm_commercial" class="col-lg-1"/>
+                                    <button name="action_sms_toggle_confirm" type="object" string="Aç / Kapat" class="btn-link col-lg-4" context="{'sms_confirm_set': 'commercial'}"/>
+                                </div>
+                            </div>
+                        </setting>
                         <setting string="Adresler ve Geçerlilik" help="Boş bırakılan adresler için varsayılan Turatel adresleri kullanılır.">
                             <div class="content-group">
                                 <div class="row mt8">
