@@ -95,49 +95,47 @@
                 <label class="vc-label">Cep Telefonu (SMS için)</label>
                 <input type="tel" class="vc-input" t-model="state.customerMobile" placeholder="05xx xxx xx xx"/>
 
-                <label class="vc-label">Ürün</label>
+                <label class="vc-label">Ürünler <small class="vc-muted" t-if="state.invoice">(seçmek için dokunun, birden fazla seçebilirsiniz)</small></label>
                 <div class="vc-search">
                     <input type="text" class="vc-input tailor-barcode-input" t-model="state.barcode"
                            placeholder="Ürün barkodunu okutun" t-on-keydown="onBarcodeKey"/>
                     <button class="vc-btn vc-btn-icon" t-on-click="scanCamera"><i class="fa fa-barcode"/></button>
                 </div>
+                <!-- Faturalı: tüm fatura ürünleri; seçilenin altında kendi şikayet bloğu açılır -->
                 <div class="vc-list" t-if="state.invoice">
                     <t t-foreach="state.invoice.items" t-as="it" t-key="it_index">
-                        <div t-att-class="'vc-card vc-clickable' + (state.item and state.item.barcode === it.barcode ? ' vc-selected' : '')" t-on-click="() =&gt; this.selectItem(it)">
-                            <div class="vc-card-head"><strong t-esc="it.product_name or it.product_code"/><span>x<t t-esc="it.quantity"/></span></div>
+                        <t t-set="e" t-value="getSel('inv:' + it_index)"/>
+                        <div t-att-class="'vc-card vc-clickable' + (e ? ' vc-selected' : '')" t-on-click="() =&gt; this.toggleItem(it_index)">
+                            <div class="vc-card-head">
+                                <strong><i t-att-class="'fa ' + (e ? 'fa-check-square' : 'fa-square-o')"/> <t t-esc="it.product_name or it.product_code"/></strong>
+                                <span>x<t t-esc="it.quantity"/></span>
+                            </div>
                             <div class="vc-muted"><t t-esc="it.barcode"/> · <t t-esc="it.vendor or 'Tedarikçi yok'"/></div>
                         </div>
+                        <t t-if="e" t-call="vendor_claim.VcItemForm"/>
                     </t>
                 </div>
-                <div class="vc-card vc-selected" t-if="!state.invoice and state.item">
-                    <div class="vc-card-head"><strong t-esc="state.item.product_name"/></div>
-                    <div class="vc-muted"><t t-esc="state.item.barcode"/> · <t t-esc="state.item.vendor or 'Tedarikçi yok'"/></div>
+                <!-- Faturasız: okutulan ürünler eklenir -->
+                <div class="vc-list" t-if="!state.invoice">
+                    <t t-foreach="state.sel" t-as="e" t-key="e.key">
+                        <div class="vc-card vc-selected">
+                            <div class="vc-card-head">
+                                <strong t-esc="e.item.product_name or e.item.product_code"/>
+                                <button class="vc-btn vc-btn-light vc-btn-sm" t-on-click="() =&gt; this.removeSel(e)">Kaldır</button>
+                            </div>
+                            <div class="vc-muted"><t t-esc="e.item.barcode"/> · <t t-esc="e.item.vendor or 'Tedarikçi yok'"/></div>
+                        </div>
+                        <t t-call="vendor_claim.VcItemForm"/>
+                    </t>
                 </div>
 
-                <label class="vc-label">Ayıp / Şikayet *</label>
-                <textarea class="vc-input" rows="3" t-model="state.defect" placeholder="Müşterinin bildirdiği sorun, ürünün durumu..."/>
-                <label class="vc-label">Müşteri Talebi</label>
-                <div class="vc-chips">
-                    <t t-foreach="requestOptions" t-as="opt" t-key="opt[0]">
-                        <button t-att-class="'vc-chip' + (state.request === opt[0] ? ' active' : '')"
-                                t-on-click="() =&gt; this.state.request = opt[0]" t-esc="opt[1]"/>
-                    </t>
-                </div>
-                <label class="vc-label">Fotoğraflar</label>
-                <div class="vc-photos">
-                    <t t-foreach="state.photos" t-as="ph" t-key="ph_index">
-                        <div class="vc-photo"><img t-att-src="ph"/><span t-on-click="() =&gt; this.removePhoto(ph_index)">&#215;</span></div>
-                    </t>
-                    <label class="vc-photo vc-photo-add">
-                        <i class="fa fa-camera"/>
-                        <input type="file" accept="image/*" capture="environment" multiple="multiple" t-on-change="onPhoto"/>
-                    </label>
-                </div>
-                <label class="vc-label">Not</label>
+                <label class="vc-label">Not <small class="vc-muted">(tüm kayıtlara, isteğe bağlı)</small></label>
                 <textarea class="vc-input" rows="2" t-model="state.notes" placeholder="İç not (isteğe bağlı)"/>
                 <div class="vc-submit-bar">
                     <button class="vc-btn vc-btn-success vc-btn-block" t-on-click="submit" t-att-disabled="state.submitting">
-                        <t t-if="state.submitting">Kaydediliyor...</t><t t-else="">Kaydet</t>
+                        <t t-if="state.submitting">Kaydediliyor...</t>
+                        <t t-elif="state.sel.length &gt; 1">Kaydet (<t t-esc="state.sel.length"/> ürün)</t>
+                        <t t-else="">Kaydet</t>
                     </button>
                 </div>
             </div>
@@ -145,11 +143,49 @@
             <!-- 3: tamam -->
             <div t-if="state.step === 3" class="vc-done">
                 <i class="fa fa-check-circle"/>
-                <h2 t-esc="state.created.name"/>
-                <p t-if="state.created.vendor">Tedarikçi: <t t-esc="state.created.vendor"/></p>
+                <t t-if="state.created.claims.length &gt; 1">
+                    <h2><t t-esc="state.created.claims.length"/> kayıt oluşturuldu</h2>
+                    <div class="vc-list">
+                        <t t-foreach="state.created.claims" t-as="c" t-key="c.id">
+                            <div class="vc-card vc-clickable" t-on-click="() =&gt; this.openCreated(c.id)">
+                                <div class="vc-card-head"><strong t-esc="c.name"/><span class="vc-muted" t-esc="c.vendor or '-'"/></div>
+                                <div class="vc-muted" t-esc="c.product_name"/>
+                            </div>
+                        </t>
+                    </div>
+                </t>
+                <t t-else="">
+                    <h2 t-esc="state.created.name"/>
+                    <p t-if="state.created.vendor">Tedarikçi: <t t-esc="state.created.vendor"/></p>
+                </t>
                 <button class="vc-btn vc-btn-primary vc-btn-block" t-on-click="printSlip"><i class="fa fa-print"/> Müşteri Fişi Yazdır</button>
-                <button class="vc-btn vc-btn-light vc-btn-block" t-on-click="openCreated">Kaydı Aç</button>
+                <button t-if="state.created.claims.length === 1" class="vc-btn vc-btn-light vc-btn-block" t-on-click="() =&gt; this.openCreated()">Kaydı Aç</button>
                 <button class="vc-btn vc-btn-light vc-btn-block" t-on-click="restart">Yeni Kayıt</button>
+            </div>
+        </div>
+    </t>
+
+    <!-- Seçilen ürünün şikayet bloğu (t-call ile; e = seçili ürün girdisi) -->
+    <t t-name="vendor_claim.VcItemForm">
+        <div class="vc-item-form">
+            <label class="vc-label">Ayıp / Şikayet *</label>
+            <textarea class="vc-input" rows="3" t-model="e.defect" placeholder="Müşterinin bildirdiği sorun, ürünün durumu..."/>
+            <label class="vc-label">Müşteri Talebi</label>
+            <div class="vc-chips">
+                <t t-foreach="requestOptions" t-as="opt" t-key="opt[0]">
+                    <button t-att-class="'vc-chip' + (e.request === opt[0] ? ' active' : '')"
+                            t-on-click="() =&gt; e.request = opt[0]" t-esc="opt[1]"/>
+                </t>
+            </div>
+            <label class="vc-label">Fotoğraflar</label>
+            <div class="vc-photos">
+                <t t-foreach="e.photos" t-as="ph" t-key="ph_index">
+                    <div class="vc-photo"><img t-att-src="ph"/><span t-on-click="() =&gt; this.removePhoto(e, ph_index)">&#215;</span></div>
+                </t>
+                <label class="vc-photo vc-photo-add">
+                    <i class="fa fa-camera"/>
+                    <input type="file" accept="image/*" capture="environment" multiple="multiple" t-on-change="(ev) =&gt; this.onPhoto(e, ev)"/>
+                </label>
             </div>
         </div>
     </t>
