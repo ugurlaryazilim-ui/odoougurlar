@@ -274,7 +274,22 @@ class FakeTuratelJson:
                 del self.tokens[token]
 
     def set_code(self, message_id, code):
-        self.messages[int(message_id)]['code'] = code
+        """Senaryo kısayolu: 0 → teslim edildi (status 1 + deliveryDate); diğer kod → `reason` (operatör/ret kodu)."""
+        msg = self.messages[int(message_id)]
+        msg['code'] = code
+        msg.pop('status_row', None)
+
+    def set_status(self, message_id, status, reason='', delivery_date=''):
+        """Ham GetStatus alanları (canlı veri biçimi): status int, reason ve deliveryDate (ddMMyyHHmmss) metin."""
+        self.messages[int(message_id)]['status_row'] = (status, reason, delivery_date)
+
+    @staticmethod
+    def status_fields(msg):
+        if msg.get('status_row') is not None:
+            return msg['status_row']
+        if str(msg.get('code')) == '0':
+            return 1, '', datetime.now().strftime('%d%m%y%H%M%S')
+        return 2, str(msg['code']), ''
 
     def message_by_client(self, client_id):
         for msg in self.messages.values():
@@ -465,8 +480,11 @@ class FakeTuratelJson:
                 start, end = self._parse_date(payload['startDate']), self._parse_date(payload['endDate'])
                 if not start <= msg['when'] <= end:
                     continue
+            status, reason, delivery_date = self.status_fields(msg)
+            # Canlı satır biçimi: status = paket/teslim aşaması, reason = operatör kodu, deliveryDate = teslim zamanı
             rows.append({'messageId': msg['message_id'], 'clientId': msg['client_id'], 'packetId': msg['packet_id'],
-                         'statusCode': msg['code'], 'status': msg['code']})
+                         'receiver': '+90' + tail10(msg['number']), 'messageSize': 1, 'personalParameter': '[]',
+                         'status': status, 'deliveryDate': delivery_date, 'reason': reason})
         return json_ok(rows if self.status_shape == 'list' else {'statusList': rows})
 
 

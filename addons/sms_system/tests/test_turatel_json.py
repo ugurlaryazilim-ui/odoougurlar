@@ -366,7 +366,8 @@ class TestTuratelJsonClient(SmsTestCase):
 
     # ── KK-C7 ──
     def test_kk_c7_durum_satirlari_kimlik_ve_kodla_doner(self):
-        """VARSAYIM: satır {messageId, clientId, statusCode}; data={'statusList': [...]} ya da çıplak liste."""
+        """Canlı satır: {messageId, packetId, receiver, status, deliveryDate, reason}; clientId varsa eşleşir;
+        data={'statusList': [...]} ya da çıplak liste. Satır kodu: reason doluysa o, değilse status:N."""
         client = self.json_client('info', service='bulk')
         result = self.send(client, NUMBERS, CIDS)
         truth = {cid: self.net.tj.message_by_client(cid) for cid in CIDS}
@@ -378,7 +379,11 @@ class TestTuratelJsonClient(SmsTestCase):
                 by_client = {r.client_id: r for r in rows}
                 self.assertEqual(set(by_client), set(CIDS))
                 self.assertEqual(str(by_client[CIDS[1]].code), '114')
-                self.assertEqual(str(by_client[CIDS[0]].code), '0')
+                self.assertEqual(str(by_client[CIDS[1]].reason), '114')
+                self.assertEqual(str(by_client[CIDS[0]].code), 'status:1')
+                self.assertEqual(str(by_client[CIDS[0]].status), '1')
+                self.assertEqual(len(by_client[CIDS[0]].delivery_date), 12)
+                self.assertFalse(by_client[CIDS[0]].reason)
                 self.assertEqual(str(by_client[CIDS[1]].message_id), str(truth[CIDS[1]]['message_id']))
                 self.assertTrue(by_client[CIDS[1]].raw)
 
@@ -398,9 +403,8 @@ class TestTuratelJsonClient(SmsTestCase):
         self.assertEqual(api.format_date(datetime(2026, 12, 31, 21, 0, 0, tzinfo=timezone.utc)), '010127000000')
 
     def test_kk_c7_iletim_kodlari_eslemesi(self):
+        """Ret/operatör kodları GetStatus `reason` alanında gelir (Turatel cevabı 2) → iletilemedi."""
         api = self.json_api()
-        for code in (0, '0'):
-            self.assertEqual(api.delivery_state(code)[0], 'delivered')
         keywords = {103: ('yetki',), 114: ('kapal', 'kapsam'), -104001: ('kara liste',), -8000: ('iys', 'İYS'),
                     -467: ('uzun', 'concat', 'karakter'), -441: ('başlık', 'originator')}
         labels = set()
@@ -415,12 +419,76 @@ class TestTuratelJsonClient(SmsTestCase):
             labels.add(api.delivery_state(code)[1])
         self.assertEqual(len(labels), 6, 'Her kodun kendi açıklaması olmalı')
 
-    def test_kk_c7_bilinmeyen_kod_ham_haliyle_gorunur(self):
+    def test_kk_c7_bilinmeyen_reason_iletilemedi_ham_kodla(self):
         api = self.json_api()
         for code in (999, '999', -31337):
             state, label = api.delivery_state(code)
-            self.assertEqual(state, 'unknown')
-            self.assertEqual(label, 'bilinmeyen (kod %s)' % code)
+            self.assertEqual(state, 'undelivered')
+            self.assertEqual(label, 'iletilemedi (kod %s)' % code)
+
+    def test_canli_veri_status_reason_delivery_date_eslemesi(self):
+        """Canlı veri: status 1 + deliveryDate dolu = ulaştı; status 0/2 = bekliyor; reason = ret kodu."""
+        api = self.json_api()
+        date = '201026123000'
+        cases = [
+            # (status, reason, deliveryDate, kod, durum)
+            (1, '', date, 'status:1', 'delivered'),
+            ('1', None, date, 'status:1', 'delivered'),
+            (1, '0', date, 'status:1', 'delivered'),
+            (0, '', '', 'status:0', 'pending'),
+            (0, '0', '', 'status:0', 'pending'),
+            (2, '', '', 'status:2', 'pending'),
+            (1, '', '', 'status:1:tarih-yok', 'pending'),
+            (None, '', '', '', 'pending'),
+            (1, '114', '', '114', 'undelivered'),
+            (2, '114', '', '114', 'undelivered'),
+            (1, '-8000', date, '-8000', 'undelivered'),
+            (1, '555', '', '555', 'undelivered'),
+            (5, '', '', 'status:5', 'unknown'),
+            (-3, '', date, 'status:-3', 'unknown'),
+        ]
+        for status, reason, delivery_date, code, state in cases:
+            with self.subTest(status=status, reason=reason, tarih=delivery_date):
+                self.assertEqual(api.status_code(status, reason, delivery_date), code)
+                self.assertEqual(api.delivery_state(code)[0], state)
+
+    def test_canli_veri_etiketler(self):
+        api = self.json_api()
+        self.assertEqual(api.delivery_state('status:1'), ('delivered', 'iletildi'))
+        self.assertIn('onay', api.delivery_state('status:0')[1])
+        self.assertEqual(api.delivery_state('status:0')[0], 'pending')
+        self.assertIn('rapor bekleniyor', api.delivery_state('status:2')[1])
+        self.assertNotEqual(api.delivery_state('status:0')[1], api.delivery_state('status:2')[1])
+        self.assertEqual(api.delivery_state('status:7'), ('unknown', 'bilinmeyen (durum 7)'))
+        self.assertEqual(api.delivery_state(''), ('pending', 'yanıt bekleniyor'))
+        self.assertEqual(api.delivery_state(None), ('pending', 'yanıt bekleniyor'))
+        # Eski sürümün yanlış 'iletildi' işaretlediği ham kod 0: artık doğrulanmamış sayılır
+        self.assertEqual(api.delivery_state('0')[0], 'unknown')
+        self.assertNotEqual(api.delivery_state('0')[1], 'iletildi')
+
+    def test_canli_veri_ham_satir_ayristirma(self):
+        api = self.json_api()
+        row = {'messageId': 9100000001, 'packetId': 4100000001, 'receiver': '+905321234567', 'messageSize': 1,
+               'personalParameter': '[]', 'status': 1, 'deliveryDate': '201026123000', 'reason': ''}
+        for payload, code, state in (
+                (dict(row), 'status:1', 'delivered'),
+                (dict(row, status=0, deliveryDate=''), 'status:0', 'pending'),
+                (dict(row, status=2, deliveryDate=''), 'status:2', 'pending'),
+                (dict(row, status=2, deliveryDate='', reason='114'), '114', 'undelivered'),
+                (dict(row, deliveryDate=''), 'status:1:tarih-yok', 'pending'),
+                (dict(row, status=9), 'status:9', 'unknown'),
+                ({k: v for k, v in row.items() if k not in ('status', 'reason', 'deliveryDate')}, '', 'pending')):
+            with self.subTest(code=code):
+                rows = api.TuratelJsonClient._status_rows({'statusList': [payload]})
+                self.assertEqual(len(rows), 1)
+                self.assertEqual((rows[0].code, api.delivery_state(rows[0].code)[0]), (code, state))
+                self.assertEqual(rows[0].message_id, '9100000001')
+                self.assertNotIn('5321234567', rows[0].raw, 'Telefon ham raporda maskeli olmalı')
+
+    def test_status_row_eski_dort_alanli_cagri_calisir(self):
+        api = self.json_api()
+        row = api.StatusRow('1', None, 'status:2', '{}')
+        self.assertEqual((row.status, row.reason, row.delivery_date), (None, None, None))
 
     # ── KK-C12 / KK-C13 istemci ──
     def test_kk_c12_uc_alicili_paket_kimlikleri_karismaz(self):

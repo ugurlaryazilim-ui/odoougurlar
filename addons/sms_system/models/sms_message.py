@@ -13,7 +13,7 @@ from ..services.turatel import (MAX_SEGMENTS, TuratelClient, TuratelError, norma
                                 segment_count)
 from ..services.turatel_json import (TZ, MAX_TEXT_LENGTH, MESSAGE_LIMIT, TuratelJsonClient, json_segment_count,
                                      mask_digits)
-from ..services.turatel_json import delivery_state as map_delivery_code
+from ..services.turatel_json import LEGACY_DELIVERED_CODE, delivery_state as map_delivery_code
 
 _logger = logging.getLogger(__name__)
 
@@ -774,8 +774,6 @@ class SmsSystemMessage(models.Model):
         row = matched.get(self.id)
         if not row:
             return _('Turatel yanıtında bu kayıt bulunamadı (%s satır).') % len(rows), 'warning'
-        # Ham satır (maskeli, ≤500 karakter): belgesiz alan adları geçişte buradan doğrulanır (R1)
-        self.delivery_report = row.raw
         return _('İletim durumu: %s') % map_delivery_code(row.code)[1], 'success'
 
     # ── İletim durumu takibi (C5, tasarım §5.5) ──
@@ -845,18 +843,34 @@ class SmsSystemMessage(models.Model):
             if not row:
                 continue
             state, _label = map_delivery_code(row.code)
+            marked = msg.delivery_code in CONFIRM_CODES   # onay işareti yalnız nihai sonuçla ezilir
+            # Eski eşlemenin yanlışlıkla 'iletildi' dediği kayıt: yeni satır (bekliyor dahil) doğru kabul edilir
+            legacy = msg.delivery_state == 'delivered' and msg.delivery_code == LEGACY_DELIVERED_CODE
             vals = {}
-            if state in ('delivered', 'undelivered') or (state != 'pending' and msg.delivery_code not in CONFIRM_CODES):
+            if state in ('delivered', 'undelivered') or (state != 'pending' and not marked):
                 vals.update(delivery_state=state, delivery_code=row.code)
             elif state != 'pending':
                 vals['delivery_state'] = state   # nihai olmayan kod onay bekleme işaretini ezmez
+            else:
+                if legacy or msg.delivery_state == 'unknown':
+                    vals['delivery_state'] = 'pending'   # nihai olmayan sonuç bekleyene döner (48 saat kuralı geçerli)
+                if legacy or (row.code and not marked):
+                    vals['delivery_code'] = row.code or False   # status:0/2 bilgisi; onay işareti ezilmez
+            # Ham satır (maskeli, ≤500 karakter) cron'da da yazılır: belgesiz alanlar sonradan doğrulanabilsin.
+            # Onay işareti varsa onay notu silinmesin diye satır eklenir (aynı satır tekrar eklenmez)
+            if marked and msg.delivery_report:
+                if row.raw not in msg.delivery_report:
+                    vals['delivery_report'] = '\n'.join([msg.delivery_report, row.raw])
+            else:
+                vals['delivery_report'] = row.raw
             if msg.state == 'uncertain':
                 reconciled += 1
                 vals.update(state='sent', error=False, sent_at=msg.sent_at or msg.write_date)
                 vals.setdefault('delivery_state', 'pending')
                 if not msg.provider_packet_id:
                     # Paket no yok: ConfirmSms gönderilemez, onaylanıp onaylanmadığı bilinmez
-                    vals['delivery_report'] = '\n'.join(filter(None, [msg.delivery_report, RECONCILED_NO_PACKET]))
+                    vals['delivery_report'] = '\n'.join(filter(None, [
+                        vals.get('delivery_report', msg.delivery_report), RECONCILED_NO_PACKET]))
             if row.message_id and not msg.provider_msg_id:
                 vals['provider_msg_id'] = row.message_id
             if any(msg[name] != value for name, value in vals.items()):
@@ -889,9 +903,12 @@ class SmsSystemMessage(models.Model):
         if cfg['api_mode'] != 'json':
             return   # legacy modda JSON isteği yok (KK-C14)
         confirm_failed, stats = Message._cron_confirm_pending(cfg, started)
+        # Adaylar: bekleyen/bilinmeyen + eski eşlemenin yanlış 'iletildi' (kod 0) dediği son 48 saatlik kayıtlar
         candidates = Message.search([
-            ('provider_service', 'in', JSON_SERVICES), '|',
-            '&', '&', ('state', '=', 'sent'), ('delivery_state', 'in', STATUS_TRACKED), ('sent_at', '>=', since),
+            '&', ('provider_service', 'in', JSON_SERVICES), '|',
+            '&', ('state', '=', 'sent'), '&', ('sent_at', '>=', since), '|',
+            ('delivery_state', 'in', STATUS_TRACKED),
+            '&', ('delivery_state', '=', 'delivered'), ('delivery_code', '=', LEGACY_DELIVERED_CODE),
             '&', ('state', '=', 'uncertain'), ('write_date', '>=', since),
         ], order='id')
         chunks = defaultdict(list)
