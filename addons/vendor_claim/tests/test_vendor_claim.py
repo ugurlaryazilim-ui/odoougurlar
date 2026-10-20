@@ -354,6 +354,38 @@ class TestVendorClaimMultiItem(VcCase):
         self.assertEqual(self.Claim.search_count([]), before)
         self.assertEqual(self._sms_count(), sms_before)
 
+    def test_ortak_not_tum_kayitlara_yazilir(self):
+        """Mobil ortak 'Not' alanını `data.notes` ile yollar; çoklu yolda tüm kayıtlara yazılmalı."""
+        _res, claims = self._create(data=self._data(notes='  Müşteri acil istiyor  '))
+        self.assertEqual(claims.mapped('notes'), ['Müşteri acil istiyor'] * 3)
+        # ürünün kendi notu varsa ortak not onu ezmez
+        items = self._items()
+        items[1]['notes'] = 'Sadece bu ürün'
+        _res, claims = self._create(data=self._data(notes='Ortak', invoice_no='UGR-5006'), items=items)
+        self.assertEqual(claims.mapped('notes'), ['Ortak', 'Sadece bu ürün', 'Ortak'])
+
+    def test_metin_olmayan_degerler_500_vermez(self):
+        # sayı gelen alanlar metne çevrilir (JS'ten barkod/telefon sayı olarak gelebilir)
+        items = [{'product_barcode': 8690000000311, 'defect_description': 12345, 'notes': 7}]
+        res = self.controller('create_claim', data=self._data(customer_name=777, customer_mobile=5321234567),
+                              items=items)
+        self.assertNotIn('error', res, res)
+        claim = self.Claim.browse(res['id'])
+        self.assertEqual((claim.customer_name, claim.defect_description, claim.notes, claim.product_barcode),
+                         ('777', '12345', '7', '8690000000311'))
+        # liste/sözlük/None: istisna değil, dostça hata; kayıt yok
+        before = self.Claim.search_count([])
+        for data, items in (
+                (self._data(customer_name=None), self._items()),
+                (self._data(customer_name=['x']), [{}]),
+                ('metin', self._items()),
+                (self._data(), [None, 5]),
+                (self._data(), [{'product_barcode': {'a': 1}, 'defect_description': 'Y'}]),
+                (self._data(), [{'product_barcode': '8690000000311', 'defect_description': {'a': 1}}])):
+            res = self.controller('create_claim', data=data, items=items)
+            self.assertIn('error', res, (data, items))
+        self.assertEqual(self.Claim.search_count([]), before)
+
     def test_urun_ve_musteri_zorunlu_alanlar(self):
         self.assertIn('error', self.controller('create_claim', data=self._data(), items=[]))
         self.assertIn('error', self.controller('create_claim', data=self._data(customer_name=' '),

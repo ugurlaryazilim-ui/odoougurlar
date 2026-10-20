@@ -21,6 +21,14 @@ def _local_dt(record, value, fmt='%d.%m.%Y %H:%M'):
     return fields.Datetime.context_timestamp(record, fields.Datetime.to_datetime(value)).strftime(fmt)
 
 
+def _text(value):
+    """İstemciden gelen değeri güvenli metne çevir: metin/sayı → kırpılmış str, diğer her şey (None, liste,
+    sözlük...) → ''. `.strip()` metin olmayan değerde 500 vermesin."""
+    if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+        return str(value).strip()
+    return ''
+
+
 class VendorClaimController(http.Controller):
     """Tedarikçi İnceleme mobil ekranı için JSON API."""
 
@@ -193,24 +201,25 @@ class VendorClaimController(http.Controller):
         Hepsi ya da hiç: bir üründe doğrulama/kayıt hatası olursa hiçbir kayıt ve SMS oluşmaz. Müşteriye TEK
         "teslim alındı" SMS'i gider; fiş tek URL'dir."""
         self._check_user()
-        data = data or {}
+        data = data if isinstance(data, dict) else {}
         if items is None:
             items = [dict(data, photos=photos)]
         if not isinstance(items, list) or not items:
             return {'error': _('En az bir ürün seçin.')}
         if len(items) > MAX_ITEMS:
             return {'error': _('Bir seferde en fazla %s ürün kaydedilebilir.') % MAX_ITEMS}
-        if not (data.get('customer_name') or '').strip():
+        customer_name = _text(data.get('customer_name'))
+        if not customer_name:
             return {'error': _('Müşteri adı zorunlu.')}
         no_invoice = bool(data.get('no_invoice'))
         shared = {
             'no_invoice': no_invoice,
-            'invoice_no': False if no_invoice else (data.get('invoice_no') or False),
-            'invoice_date': False if no_invoice else ((data.get('invoice_date') or '')[:10] or False),
-            'customer_code': data.get('customer_code') or False,
-            'customer_name': data['customer_name'].strip(),
-            'customer_mobile': (data.get('customer_mobile') or '').strip() or False,
-            'sales_person': data.get('sales_person') or False,
+            'invoice_no': False if no_invoice else (_text(data.get('invoice_no')) or False),
+            'invoice_date': False if no_invoice else (_text(data.get('invoice_date'))[:10] or False),
+            'customer_code': _text(data.get('customer_code')) or False,
+            'customer_name': customer_name,
+            'customer_mobile': _text(data.get('customer_mobile')) or False,
+            'sales_person': _text(data.get('sales_person')) or False,
         }
         if data.get('invoice_items') and not no_invoice:
             shared['invoice_items'] = data['invoice_items']
@@ -220,20 +229,23 @@ class VendorClaimController(http.Controller):
             item = item if isinstance(item, dict) else {}
             # Çok ürünlüde hata hangi ürüne ait olduğunu söylesin
             prefix = _('%s. ürün: ') % idx if len(items) > 1 else ''
-            if not (item.get('defect_description') or '').strip():
+            defect = _text(item.get('defect_description'))
+            if not defect:
                 return {'error': prefix + _('Ayıp / şikayet açıklaması zorunlu.')}
-            if not (item.get('product_barcode') or '').strip():
+            barcode = _text(item.get('product_barcode'))
+            if not barcode:
                 return {'error': prefix + _('Ürün barkodu zorunlu.')}
             try:
                 quantity = float(item.get('quantity') or 1)
             except (TypeError, ValueError):
                 quantity = 1.0
             vals = dict(shared, **{
-                'product_barcode': item['product_barcode'].strip(),
-                'product_code': item.get('product_code') or False,
+                'product_barcode': barcode,
+                'product_code': _text(item.get('product_code')) or False,
                 'quantity': max(quantity, 1.0),
-                'defect_description': item['defect_description'].strip(),
-                'notes': (item.get('notes') or '').strip() or False,
+                'defect_description': defect,
+                # Mobil ortak "Not"u `data.notes` ile yollar; ürüne özel not varsa o önce gelir
+                'notes': _text(item.get('notes')) or _text(data.get('notes')) or False,
             })
             if item.get('customer_request') in requests:
                 vals['customer_request'] = item['customer_request']
