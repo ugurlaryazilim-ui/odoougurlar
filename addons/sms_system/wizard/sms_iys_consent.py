@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from odoo import _, api, fields, models
+from odoo import SUPERUSER_ID, _, api, fields, models
 from odoo.exceptions import UserError
 
 from ..services.smartadm import SmartAdmError
@@ -71,12 +71,22 @@ class SmsIysConsent(models.TransientModel):
                 'view_mode': 'form', 'target': 'new', 'name': _('İYS İzni Al')}
 
     def _save_contact(self, source):
+        """İzni rehbere yaz: kişi (aktif/arşivli) varsa güncellenir, yoksa eklenir; İYS durumu onaylı olur.
+
+        Bu adım İYS'ye başarılı çağrıdan SONRA çalışır ve kısa, ayrı bir işlemde (taze veri görüntüsüyle) yapılır.
+        Odoo işlemleri REPEATABLE READ'dir: uzak çağrı sürerken aynı numarayı başka bir işlem rehbere eklerse
+        bu işlemin eski görüntüsü onu görmez, INSERT "sms_system_contact_unique_mobile" ile patlar. Ayrı işlem
+        hem bu pencereyi kapatır hem de izin İYS'de kayıtlıyken rehber kaydının geri alınmasını önler.
+        Kara listedeki kişi kara listede kalır (yalnız İYS izni işlenir).
+        """
         num = self._number()
-        Contact = self.env['sms.system.contact'].sudo()
-        Contact.upsert_numbers([{'mobile': num, 'name': self.name}], 'manual', lists=self.list_id or None)
-        contact = Contact.with_context(active_test=False).search([('mobile', '=', num)], limit=1)
-        contact.write({'iys_status': 'approved', 'iys_checked_at': fields.Datetime.now(), 'iys_source': source})
-        return contact
+        name, list_ids = self.name, self.list_id.ids
+        with self.pool.cursor() as cr:
+            env = api.Environment(cr, SUPERUSER_ID, {})
+            Contact = env['sms.system.contact']
+            Contact.upsert_numbers([{'mobile': num, 'name': name}], 'manual', lists=env['sms.system.list'].browse(list_ids))
+            contact = Contact.with_context(active_test=False).search([('mobile', '=', num)], limit=1)
+            contact.write({'iys_status': 'approved', 'iys_checked_at': fields.Datetime.now(), 'iys_source': source})
 
     def action_send_code(self):
         self.ensure_one()

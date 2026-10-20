@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="sms_system.SmsPlaceholderTextField" t-inherit="web.TextField" t-inherit-mode="primary">
+        <xpath expr="//textarea" position="attributes">
+            <attribute name="t-on-drop">onDrop</attribute>
+        </xpath>
+        <xpath expr="//div[@t-ref='div']" position="after">
+            <div t-if="chips.length" class="o_sms_placeholder_chips d-flex flex-wrap align-items-center gap-2 mt-1">
+                <span class="text-muted small">Eklemek için tıklayın ya da metne sürükleyin:</span>
+                <span t-foreach="chips" t-as="chip" t-key="chip.token"
+                      class="o_sms_placeholder_chip badge rounded-pill text-bg-primary user-select-none"
+                      style="cursor: grab;"
+                      role="button" tabindex="0" draggable="true"
+                      t-att-title="'Metne ' + chip.token + ' ekler'"
+                      t-on-click="() => this.onChipClick(chip.token)"
+                      t-on-keydown="(ev) => this.onChipKeydown(ev, chip.token)"
+                      t-on-dragstart="(ev) => this.onChipDragStart(ev, chip.token)">
+                    <t t-out="chip.label"/> <code class="text-white" t-out="chip.token"/>
+                </span>
+            </div>
+        </xpath>
+    </t>
+
+</templates>
