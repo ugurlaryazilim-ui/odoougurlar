@@ -242,6 +242,14 @@ class TestSmallFixesStatic(TransactionCase):
         sel = _method_body(src, r'async selectBatch\(batchId\)')
         self._has(sel, r'completeDone\s*=\s*false', 'rota seçiminde completeDone sıfırlanmıyor')
 
+    def test_rvp6_packing_active_order_units_use_target_qty(self):
+        """Aktif sipariş kutuları paketleme hedefiyle sayılır: "Eksik" işaretli satırda toplanan
+        kadar kutu çizilir (sunucu detail item'ında target_qty), yoksa talep."""
+        body = _method_body(_src('screens/packing.js'), r'get activeOrder\(\)')
+        self.assertTrue(body, 'activeOrder bulunamadı')
+        self._has(body, r'it\.target_qty\s*\?\?\s*it\.demand_qty', 'hedef (target_qty) kullanılmıyor')
+        self.assertNotRegex(body, r'Math\.round\(it\.demand_qty', 'kutu sayısı talepten hesaplanıyor')
+
     # ─── R-F6: küçük ön yüz düzeltmeleri ───────────────
     def test_rf6_sales_discount_failure_drops_pending_placeholder_rows(self):
         """Nebim/sunucu/bağlantı hatasında 'Hesaplanıyor...' (₺0,00) satırı sepette kalmamalı."""

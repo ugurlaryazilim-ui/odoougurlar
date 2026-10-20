@@ -186,6 +186,9 @@ class TestRouteValidateAtPacking(PackingCase):
         detail = self.pack_ctl.packing_batch_detail(batch_id=batch.id)
         self.assertTrue(detail['items'][0]['matched'])
         self.assertTrue(detail['all_matched'])
+        # İstemci aktif sipariş kutularını hedefle çizer (talep 3, hedef toplanan 1)
+        self.assertEqual(detail['items'][0]['target_qty'], 1)
+        self.assertEqual(detail['items'][0]['demand_qty'], 3)
 
     # ─── K7 ────────────────────────────────────────────
     def test_k7_packing_backorder_ships_scanned_on_open_picking(self):
