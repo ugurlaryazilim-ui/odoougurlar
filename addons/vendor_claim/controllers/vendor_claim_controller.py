@@ -10,6 +10,7 @@ _logger = logging.getLogger(__name__)
 
 OPEN_STATES = ('received', 'sent', 'returned')
 MAX_PHOTOS = 8
+MAX_ITEMS = 20   # tek kayıt açılışında en fazla ürün
 MAX_PHOTO_BYTES = 6 * 1024 * 1024
 
 
@@ -18,6 +19,14 @@ def _local_dt(record, value, fmt='%d.%m.%Y %H:%M'):
     if not value:
         return ''
     return fields.Datetime.context_timestamp(record, fields.Datetime.to_datetime(value)).strftime(fmt)
+
+
+def _text(value):
+    """İstemciden gelen değeri güvenli metne çevir: metin/sayı → kırpılmış str, diğer her şey (None, liste,
+    sözlük...) → ''. `.strip()` metin olmayan değerde 500 vermesin."""
+    if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+        return str(value).strip()
+    return ''
 
 
 class VendorClaimController(http.Controller):
@@ -184,47 +193,80 @@ class VendorClaimController(http.Controller):
     # ─── Kayıt oluşturma ─────────────────────────────
 
     @http.route('/vendor_claim/create', type='jsonrpc', auth='user')
-    def create_claim(self, data=None, photos=None, **kw):
+    def create_claim(self, data=None, photos=None, items=None, **kw):
+        """Kayıt aç. `data`: ortak alanlar (müşteri, fatura). `items`: ürün başına liste (product_barcode,
+        product_code, quantity, defect_description, customer_request, notes, photos) → her ürün ayrı kayıt.
+        `items` yoksa eski tek kayıtlı çağrı: ürün alanları `data` içinde, fotoğraflar `photos`.
+
+        Hepsi ya da hiç: bir üründe doğrulama/kayıt hatası olursa hiçbir kayıt ve SMS oluşmaz. Müşteriye TEK
+        "teslim alındı" SMS'i gider; fiş tek URL'dir."""
         self._check_user()
-        data = data or {}
-        if not (data.get('defect_description') or '').strip():
-            return {'error': _('Ayıp / şikayet açıklaması zorunlu.')}
-        if not (data.get('customer_name') or '').strip():
+        data = data if isinstance(data, dict) else {}
+        if items is None:
+            items = [dict(data, photos=photos)]
+        if not isinstance(items, list) or not items:
+            return {'error': _('En az bir ürün seçin.')}
+        if len(items) > MAX_ITEMS:
+            return {'error': _('Bir seferde en fazla %s ürün kaydedilebilir.') % MAX_ITEMS}
+        customer_name = _text(data.get('customer_name'))
+        if not customer_name:
             return {'error': _('Müşteri adı zorunlu.')}
-        if not (data.get('product_barcode') or '').strip():
-            return {'error': _('Ürün barkodu zorunlu.')}
-        try:
-            quantity = float(data.get('quantity') or 1)
-        except (TypeError, ValueError):
-            quantity = 1.0
-        vals = {
-            'no_invoice': bool(data.get('no_invoice')),
-            'invoice_no': False if data.get('no_invoice') else (data.get('invoice_no') or False),
-            'invoice_date': False if data.get('no_invoice') else ((data.get('invoice_date') or '')[:10] or False),
-            'customer_code': data.get('customer_code') or False,
-            'customer_name': data['customer_name'].strip(),
-            'customer_mobile': (data.get('customer_mobile') or '').strip() or False,
-            'sales_person': data.get('sales_person') or False,
-            'product_barcode': data['product_barcode'].strip(),
-            'product_code': data.get('product_code') or False,
-            'quantity': max(quantity, 1.0),
-            'defect_description': data['defect_description'].strip(),
-            'notes': (data.get('notes') or '').strip() or False,
+        no_invoice = bool(data.get('no_invoice'))
+        shared = {
+            'no_invoice': no_invoice,
+            'invoice_no': False if no_invoice else (_text(data.get('invoice_no')) or False),
+            'invoice_date': False if no_invoice else (_text(data.get('invoice_date'))[:10] or False),
+            'customer_code': _text(data.get('customer_code')) or False,
+            'customer_name': customer_name,
+            'customer_mobile': _text(data.get('customer_mobile')) or False,
+            'sales_person': _text(data.get('sales_person')) or False,
         }
-        if data.get('customer_request') in dict(self._claims()._fields['customer_request'].selection):
-            vals['customer_request'] = data['customer_request']
-        if data.get('invoice_items') and not vals['no_invoice']:
-            vals['invoice_items'] = data['invoice_items']
+        if data.get('invoice_items') and not no_invoice:
+            shared['invoice_items'] = data['invoice_items']
+        requests = dict(self._claims()._fields['customer_request'].selection)
+        vals_list = []
+        for idx, item in enumerate(items, 1):
+            item = item if isinstance(item, dict) else {}
+            # Çok ürünlüde hata hangi ürüne ait olduğunu söylesin
+            prefix = _('%s. ürün: ') % idx if len(items) > 1 else ''
+            defect = _text(item.get('defect_description'))
+            if not defect:
+                return {'error': prefix + _('Ayıp / şikayet açıklaması zorunlu.')}
+            barcode = _text(item.get('product_barcode'))
+            if not barcode:
+                return {'error': prefix + _('Ürün barkodu zorunlu.')}
+            try:
+                quantity = float(item.get('quantity') or 1)
+            except (TypeError, ValueError):
+                quantity = 1.0
+            vals = dict(shared, **{
+                'product_barcode': barcode,
+                'product_code': _text(item.get('product_code')) or False,
+                'quantity': max(quantity, 1.0),
+                'defect_description': defect,
+                # Mobil ortak "Not"u `data.notes` ile yollar; ürüne özel not varsa o önce gelir
+                'notes': _text(item.get('notes')) or _text(data.get('notes')) or False,
+            })
+            request_type = item.get('customer_request')
+            if isinstance(request_type, str) and request_type in requests:   # liste/sözlük hashlenemez → 500
+                vals['customer_request'] = request_type
+            vals_list.append(vals)
         try:
             with request.env.cr.savepoint():
                 # SMS fotoğraflardan sonra kuyruğa alınır: fotoğraf hatası kaydı geri alırsa SMS kaydı kalmaz
-                claim = self._claims().with_context(vendor_claim_defer_sms=True).create(vals)
-                self._attach_photos(claim, photos)
-                sms = claim._notify_state_sms()[claim.id]
+                claims = self._claims().with_context(vendor_claim_defer_sms=True).create(vals_list)
+                for claim, item in zip(claims, items):
+                    self._attach_photos(claim, item.get('photos'))
+                sms = claims._notify_state_sms(group=True)[claims[0].id]   # müşteriye tek SMS
         except Exception as e:
             return self._error(e)
-        return {'id': claim.id, 'name': claim.name, 'vendor': claim.vendor_id.name or '', 'sms': sms,
-                'slip_url': '/report/pdf/vendor_claim.report_vendor_claim_slip/%s' % claim.id}
+        first = claims[0]
+        return {
+            'id': first.id, 'name': first.name, 'vendor': first.vendor_id.name or '', 'sms': sms,
+            'claims': [{'id': c.id, 'name': c.name, 'vendor': c.vendor_id.name or '',
+                        'product_name': c.product_name or c.product_code or ''} for c in claims],
+            'slip_url': '/report/pdf/vendor_claim.report_vendor_claim_slip/%s' % ','.join(map(str, claims.ids)),
+        }
 
     # ─── Liste / detay ───────────────────────────────
 

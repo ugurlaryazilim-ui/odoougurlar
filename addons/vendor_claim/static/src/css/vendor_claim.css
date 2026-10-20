@@ -391,3 +391,18 @@
 .vc-app .vc-more {
     margin: 8px 0 16px;
 }
+
+/* Çoklu ürün: seçilen ürünün şikayet bloğu kartın altına girintili iner */
+.vc-app .vc-item-form {
+    margin: -4px 0 6px 10px;
+    padding: 4px 10px 8px;
+    border-left: 3px solid var(--vc-success);
+    background: #f8fffb;
+    border-radius: 0 0 10px 10px;
+}
+.vc-app .vc-card-head .fa-check-square {
+    color: var(--vc-success);
+}
+.vc-app .vc-done .vc-card {
+    text-align: left;
+}

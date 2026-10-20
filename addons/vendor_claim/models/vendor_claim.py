@@ -7,7 +7,9 @@ from psycopg2 import errors as pg_errors
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
-from odoo.addons.sms_system.services.turatel import normalize_number
+from odoo.addons.sms_system.models.sms_message import count_segments
+from odoo.addons.sms_system.services.turatel import MAX_SEGMENTS, normalize_number, prepare_text
+from odoo.addons.sms_system.services.turatel_json import MAX_TEXT_LENGTH
 
 _logger = logging.getLogger(__name__)
 
@@ -541,34 +543,99 @@ class VendorClaim(models.Model):
     def action_print_vendor_form(self):
         return self.env.ref('vendor_claim.action_report_vendor_claim_form').report_action(self)
 
+    def _slip_groups(self):
+        """Müşteri fişi için kayıtları müşteri bazında grupla (her grup tek fiş).
+
+        Aynı müşteri (ad + cep/kod), aynı fatura, aynı şirket, aynı teslim günü (kullanıcı saat diliminde) ve aynı
+        sorumlu tek fiş olur; çoklu ürün kaydı (mobil) ya da arka uçtan çoklu seçim böylece müşteriye tek kâğıt
+        verir. Farklı gün/kişi/müşteri ayrı fişe düşer: aynı faturanın günler sonraki ayrı teslimi tek kâğıda
+        karışmaz. Faturasız VE telefonsuz/kodsuz kayıtta müşteriyi ayırt edecek bir şey yok (aynı ad iki ayrı
+        kişi olabilir): yalnız aynı istekte (aynı kullanıcı + aynı create_date) açılanlar tek fiş olur, farklı
+        istek/kullanıcıdakiler ayrışır. Sıra: ilk kaydın id'sine göre."""
+        groups = {}
+        for claim in self.sorted('id'):
+            identity = claim.customer_mobile or claim.customer_code or ''
+            if not identity and not claim.invoice_no:
+                # Aynı istekte açılan kayıtlar aynı create_date'i (işlem zamanı) ve aynı kullanıcıyı taşır: tek fiş
+                key = ('tek', claim.company_id.id, claim.create_uid.id, claim.create_date)
+            else:
+                day = fields.Datetime.context_timestamp(claim, claim.create_date).date() if claim.create_date else None
+                key = (claim.company_id.id, self._norm_name(claim.customer_name), identity,
+                       claim.invoice_no or '', day, claim.user_id.id)
+            groups[key] = groups.get(key, self.browse()) | claim
+        return list(groups.values())
+
     def action_print_customer_slip(self):
         return self.env.ref('vendor_claim.action_report_vendor_claim_slip').report_action(self)
 
     # ─── SMS (sms_system / Turatel) ──────────────────
 
     def _sms_values(self):
-        """Yer tutucular: {musteri} {takip} {urun} {tedarikci} {sonuc} {magaza}."""
-        self.ensure_one()
+        """Yer tutucular: {musteri} {takip} {urun} {tedarikci} {sonuc} {magaza}.
+
+        Birden fazla kayıt (aynı müşteriye tek SMS): {takip} tüm takip no'ları ", " ile birleştirir; {urun} kısa
+        kalsın diye "N ürün" olur (SMS uzamasın); {tedarikci} hepsi aynıysa o ad, farklıysa boş (ilkini yazmak
+        diğerleri için yanlış bilgi olur); {sonuc} boş (kayıtların sonucu farklı olabilir)."""
+        if not self:
+            raise ValueError('Kayıt yok')
+        first = self[0]
+        if len(self) == 1:
+            return {
+                'musteri': first.customer_name or '',
+                'takip': first.name or '',
+                'urun': first.product_name or first.product_code or '',
+                'tedarikci': first.vendor_id.name or first.vendor_name or '',
+                'sonuc': dict(first._fields['result'].selection).get(first.result, '') if first.result else '',
+                'magaza': first.company_id.name or first.env.company.name or '',
+            }
+        vendors = {c.vendor_id.name or c.vendor_name or '' for c in self}
         return {
-            'musteri': self.customer_name or '',
-            'takip': self.name or '',
-            'urun': self.product_name or self.product_code or '',
-            'tedarikci': self.vendor_id.name or self.vendor_name or '',
-            'sonuc': dict(self._fields['result'].selection).get(self.result, '') if self.result else '',
-            'magaza': self.company_id.name or self.env.company.name or '',
+            'musteri': first.customer_name or '',
+            'takip': ', '.join(self.mapped('name')),
+            'urun': _('%s ürün') % len(self),
+            'tedarikci': vendors.pop() if len(vendors) == 1 else '',
+            'sonuc': '',
+            'magaza': first.company_id.name or first.env.company.name or '',
         }
 
-    def _send_template_sms(self, code, number=None, queue=False):
+    def _sms_fits(self, body):
+        """Metin sms_system'in gönderim sınırına sığar mı: send_sms ile aynı hesap (JSON modunda 402 karakter,
+        eski modda 7 parça; Türkçe/ASCII ayarı dahil). Sığmayan metinde send_sms UserError verip hiç SMS gitmez."""
+        cfg = self.env['sms.system.message']._settings()
+        text, sms_type = prepare_text(body, ascii_mode=cfg['ascii_mode'])
+        if cfg['api_mode'] == 'json':
+            return len(text) <= MAX_TEXT_LENGTH
+        return count_segments(cfg['api_mode'], text, sms_type) <= MAX_SEGMENTS
+
+    def _sms_values_fit(self, code):
+        """Çok kayıtlı tek SMS'in yer tutucu değerleri; {takip} birleşimi sınırı aşarsa kısaltılır.
+
+        Önce tüm takip no'lar ("INC-1, INC-2, INC-3"); sığmıyorsa sığana kadar sondan öğe atılır ve
+        "INC-1, INC-2 ve N kayıt daha" yazılır. En az bir takip no her zaman kalır."""
+        values = self._sms_values()
+        template = self.env['sms.system.template'].sudo().get_by_code(code)
+        if len(self) < 2 or not template:
+            return values
+        names = self.mapped('name')
+        shown = len(names)
+        while shown > 1 and not self._sms_fits(template.render(values)):
+            shown -= 1
+            values['takip'] = _('%(names)s ve %(n)s kayıt daha', names=', '.join(names[:shown]), n=len(names) - shown)
+        return values
+
+    def _send_template_sms(self, code, number=None, queue=False, values=None):
         """Şablonla SMS gönder; sms.system.message kaydını döndür (numara/şablon yoksa None).
 
-        queue=True: sağlayıcı çağrılmaz, kayıt sms_system tekli kuyruğuna alınır."""
+        queue=True: sağlayıcı çağrılmaz, kayıt sms_system tekli kuyruğuna alınır.
+        values: yer tutucu değerleri (çok kayıtlı tek SMS'te `grup._sms_values()`); SMS kaydı bu kayda bağlanır."""
         self.ensure_one()
         number = number or self.customer_mobile
         template = self.env['sms.system.template'].sudo().get_by_code(code)
         if not number or not template:
             return None
         return self.env['sms.system.message'].send_sms(
-            number, template=template, values=self._sms_values(), record=self, queue=queue)
+            number, template=template, values=values if values is not None else self._sms_values(),
+            record=self, queue=queue)
 
     def _lock_for_manual_sms(self):
         """Mobil elle SMS için satırı transaction sonuna kadar kilitler (NOWAIT); alınamazsa False.
@@ -600,15 +667,20 @@ class VendorClaim(models.Model):
             ('res_model', '=', self._name), ('res_id', '=', self.id), ('template_id.code', '=', code),
             ('state', 'in', ('queued', 'sending', 'sent', 'uncertain', 'test')), ('create_date', '>=', since)]))
 
-    def _notify_state_sms(self, only_new=False):
+    def _notify_state_sms(self, only_new=False, group=False):
         """Durumun otomatik SMS'i: ayar açıksa, numara varsa, o durum için daha önce kuyruğa alınmadıysa.
 
         SMS istek içinde gönderilmez, sms_system tekli kuyruğuna alınır (KK-B11). Döner: {claim_id: {'state',
         'error'}}; state queued | test | error | none. Geçişin SMS'i daha önce alınmışsa son kaydın durumu
         bildirilir; only_new=True ise yalnız bu çağrıda yeni denenenler bildirilir, diğerleri 'none' olur
-        (denetleyici yanıtı). Sonuç dönüş değeriyle taşınır, bağlamla değil."""
+        (denetleyici yanıtı). Sonuç dönüş değeriyle taşınır, bağlamla değil.
+
+        group=True: aynı durumda ve aynı numaralı kayıtlar için TEK SMS gider (çoklu ürün kaydı); SMS ilk kayda
+        bağlanır, gönderildi bayrağı gruptaki tüm kayıtlarda işaretlenir (sonradan tekrar SMS gitmesin) ve
+        grubun her kaydı aynı sonucu alır."""
         icp = self.env['ir.config_parameter'].sudo()
         result = {}
+        buckets = {}   # (durum, numara) → gönderilecek kayıtlar; group=False ise kayıt başına ayrı
         for claim in self:
             res = {'state': 'none', 'error': ''}
             result[claim.id] = res
@@ -626,16 +698,29 @@ class VendorClaim(models.Model):
                 if last:
                     res.update(state=last.state, error=last.error or '')
                 continue
+            key = (claim.state, claim.customer_mobile) if group else claim.id
+            buckets[key] = buckets.get(key, self.browse()) | claim
+        for claims in buckets.values():
+            lead = claims[0]
+            code, flag = STATE_SMS[lead.state]
+            res = result[lead.id]
             try:
-                msg = claim._send_template_sms(code, queue=True)
+                msg = lead._send_template_sms(
+                    code, queue=True, values=claims._sms_values_fit(code) if len(claims) > 1 else None)
             except UserError as e:  # geçersiz numara vb. durum değişikliğini engellemesin
-                claim.message_post(body=_('SMS gönderilemedi: %s') % e)
+                for claim in claims:
+                    claim.message_post(body=_('SMS gönderilemedi: %s') % e)
                 res.update(state='error', error=str(e))
             else:
                 if msg:
                     res.update(state=msg.state, error=msg.error or '')
                     if msg.state in ('queued', 'test'):
-                        claim.sudo()[flag] = True
+                        claims.sudo().write({flag: True})
+                        for claim in claims[1:]:
+                            claim.message_post(body=_('Durum SMS bildirimi %s ile birlikte tek mesaj olarak gönderildi.')
+                                               % lead.name)
+            for claim in claims[1:]:
+                result[claim.id] = dict(res)
         return result
 
     def action_send_sms(self):

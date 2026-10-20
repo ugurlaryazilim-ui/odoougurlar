@@ -11,8 +11,8 @@ import { notifySms } from "@vendor_claim/js/sms_notice";
 /**
  * Yeni inceleme kaydı:
  *  1) fatura ara (yaz / okut) ya da "Faturasız"
- *  2) ürünü seç (dokun ya da ürün barkodunu okut), şikayet + fotoğraf
- *  3) kaydedildi → müşteri fişi yazdır
+ *  2) ürünleri seç (dokun / bırak ya da barkodunu okut); seçilen HER ürün için ayrı şikayet, talep, fotoğraf
+ *  3) kaydedildi → tek müşteri fişi yazdır (ürün başına ayrı kayıt ve takip no; müşteriye tek SMS)
  */
 export class VcNewClaim extends Component {
     static template = "vendor_claim.VcNewClaim";
@@ -34,14 +34,13 @@ export class VcNewClaim extends Component {
             invoices: [],
             invoice: null,
             noInvoice: false,
-            item: null,
+            // Seçilen ürünler: {key, item, defect, request, photos}.
+            // key: faturada "inv:<satır sırası>", faturasızda "bc:<barkod>"
+            sel: [],
             customerName: "",
             customerMobile: "",
             barcode: "",
-            defect: "",
-            request: "inspect",
             notes: "",
-            photos: [],
             submitting: false,
             created: null,
         });
@@ -102,7 +101,10 @@ export class VcNewClaim extends Component {
             this.state.invoice = res;
             this.state.customerName = res.customer_name || "";
             this.state.customerMobile = res.customer_mobile || this.state.customerMobile;
-            this.state.item = res.items.length === 1 ? res.items[0] : null;
+            this.state.sel = [];
+            if (res.items.length === 1) {
+                this.addSel("inv:0", res.items[0]); // tek ürünlü faturada ürün otomatik seçili
+            }
             this.state.step = 2;
             if (res.existing && res.existing.length) {
                 this.notification.add(
@@ -118,12 +120,36 @@ export class VcNewClaim extends Component {
     startNoInvoice() {
         this.state.noInvoice = true;
         this.state.invoice = null;
-        this.state.item = null;
+        this.state.sel = [];
         this.state.step = 2;
     }
 
-    selectItem(item) {
-        this.state.item = item;
+    // ── Ürün seçimi ──
+    getSel(key) {
+        return this.state.sel.find((e) => e.key === key);
+    }
+
+    addSel(key, item) {
+        this.state.sel.push({ key, item: { ...item }, defect: "", request: "inspect", photos: [] });
+    }
+
+    /** Fatura ürün kartına dokunma: seç / bırak. */
+    toggleItem(index) {
+        const key = "inv:" + index;
+        const found = this.getSel(key);
+        if (found) {
+            this.removeSel(found);
+        } else {
+            this.addSel(key, this.state.invoice.items[index]);
+        }
+    }
+
+    /** Seçili ürünü listeden çıkar; yazılmış şikayet / eklenmiş fotoğraf varsa onay sorar (yanlışlıkla dokunma). */
+    removeSel(entry) {
+        if ((entry.defect.trim() || entry.photos.length) && !window.confirm(_t("Bu ürün için yazılan şikayet ve fotoğraflar silinecek. Emin misiniz?"))) {
+            return;
+        }
+        this.state.sel.splice(this.state.sel.indexOf(entry), 1);
     }
 
     async selectByBarcode(code) {
@@ -131,12 +157,18 @@ export class VcNewClaim extends Component {
         if (!code) return;
         this.state.barcode = "";
         if (this.state.invoice) {
-            const item = this.state.invoice.items.find((i) => i.barcode === code);
-            if (item) {
-                this.state.item = item;
+            // Aynı barkod faturada birden çok satırsa henüz seçilmemiş ilk satır seçilir
+            const rows = this.state.invoice.items.map((i, n) => (i.barcode === code ? n : -1)).filter((n) => n >= 0);
+            if (!rows.length) {
+                this.notification.add(_t("%(code)s bu faturada yok.", { code }), { type: "warning" });
                 return;
             }
-            this.notification.add(_t("%(code)s bu faturada yok.", { code }), { type: "warning" });
+            const free = rows.find((n) => !this.getSel("inv:" + n));
+            if (free === undefined) {
+                this.notification.add(_t("%(code)s zaten seçili.", { code }), { type: "info" });
+                return;
+            }
+            this.addSel("inv:" + free, this.state.invoice.items[free]);
             return;
         }
         try {
@@ -145,7 +177,12 @@ export class VcNewClaim extends Component {
                 this.notification.add(res.error, { type: "warning" });
                 return;
             }
-            this.state.item = { ...res, quantity: 1 };
+            const key = "bc:" + res.barcode;
+            if (this.getSel(key)) {
+                this.notification.add(_t("%(code)s zaten listede.", { code }), { type: "info" });
+                return;
+            }
+            this.addSel(key, { ...res, quantity: 1 });
         } catch (e) {
             this.notification.add(_t("Ürün aranamadı: %(error)s", { error: e.message }), { type: "danger" });
         }
@@ -157,14 +194,14 @@ export class VcNewClaim extends Component {
         }
     }
 
-    async onPhoto(ev) {
+    async onPhoto(entry, ev) {
         for (const file of ev.target.files || []) {
-            if (this.state.photos.length >= 8) {
-                this.notification.add(_t("En fazla 8 fotoğraf eklenebilir."), { type: "warning" });
+            if (entry.photos.length >= 8) {
+                this.notification.add(_t("Ürün başına en fazla 8 fotoğraf eklenebilir."), { type: "warning" });
                 break;
             }
             try {
-                this.state.photos.push(await readPhoto(file));
+                entry.photos.push(await readPhoto(file));
             } catch {
                 this.notification.add(_t("Fotoğraf okunamadı."), { type: "warning" });
             }
@@ -172,22 +209,27 @@ export class VcNewClaim extends Component {
         ev.target.value = "";
     }
 
-    removePhoto(idx) {
-        this.state.photos.splice(idx, 1);
+    removePhoto(entry, idx) {
+        entry.photos.splice(idx, 1);
     }
 
     async submit() {
         const s = this.state;
-        if (!s.item) {
-            this.notification.add(_t("Ürünü seçin veya barkodunu okutun."), { type: "warning" });
+        if (s.submitting) return; // çift dokunma: ikinci istek hiç gitmez (düğme kilidi çizimi beklemez)
+        if (!s.sel.length) {
+            this.notification.add(_t("En az bir ürün seçin veya barkodunu okutun."), { type: "warning" });
             return;
         }
         if (!s.customerName.trim()) {
             this.notification.add(_t("Müşteri adını girin."), { type: "warning" });
             return;
         }
-        if (!s.defect.trim()) {
-            this.notification.add(_t("Ayıp / şikayet açıklamasını yazın."), { type: "warning" });
+        const missing = s.sel.find((e) => !e.defect.trim());
+        if (missing) {
+            const product = missing.item.product_name || missing.item.product_code || missing.item.barcode;
+            this.notification.add(_t("%(product)s için ayıp / şikayet açıklamasını yazın.", { product }), {
+                type: "warning",
+            });
             return;
         }
         s.submitting = true;
@@ -203,21 +245,27 @@ export class VcNewClaim extends Component {
                     sales_person: inv.sales_person,
                     customer_name: s.customerName,
                     customer_mobile: s.customerMobile,
-                    product_barcode: s.item.barcode,
-                    product_code: s.item.product_code,
-                    quantity: s.item.quantity,
-                    defect_description: s.defect,
-                    customer_request: s.request,
                     notes: s.notes,
                 },
-                photos: s.photos,
+                items: s.sel.map((e) => ({
+                    product_barcode: e.item.barcode,
+                    product_code: e.item.product_code,
+                    quantity: e.item.quantity,
+                    defect_description: e.defect,
+                    customer_request: e.request,
+                    photos: e.photos,
+                })),
             });
             if (res.error) {
                 this.notification.add(res.error, { type: "danger" });
             } else {
                 s.created = res;
                 s.step = 3;
-                this.notification.add(_t("%(name)s kaydedildi.", { name: res.name }), { type: "success" });
+                const n = (res.claims || []).length;
+                this.notification.add(
+                    n > 1 ? _t("%(n)s kayıt kaydedildi.", { n }) : _t("%(name)s kaydedildi.", { name: res.name }),
+                    { type: "success" }
+                );
                 notifySms(this.notification, res.sms);
             }
         } catch (e) {
@@ -232,14 +280,23 @@ export class VcNewClaim extends Component {
         }
     }
 
-    openCreated() {
-        this.props.onNavigate("claim_list", { openId: this.state.created.id });
+    openCreated(claimId) {
+        this.props.onNavigate("claim_list", { openId: claimId || this.state.created.id });
     }
 
     restart() {
         Object.assign(this.state, {
-            step: 1, query: "", invoices: [], invoice: null, noInvoice: false, item: null, customerName: "",
-            customerMobile: "", barcode: "", defect: "", request: "inspect", notes: "", photos: [], created: null,
+            step: 1,
+            query: "",
+            invoices: [],
+            invoice: null,
+            noInvoice: false,
+            sel: [],
+            customerName: "",
+            customerMobile: "",
+            barcode: "",
+            notes: "",
+            created: null,
         });
     }
 
