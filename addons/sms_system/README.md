@@ -116,5 +116,26 @@ Yeni kolonlar redeploy ile `-u sms_system` arasında yoktur; bu pencerede `sms_s
 ### Hata kodları
 - `-1000`: kimlik seti yanlış ya da hesap o kullanıcıya ait değil (bilgi kullanıcısıyla reklam hesabı gibi) -> seti düzelt.
 - `-22`: sunucunun IP'si Turatel'de yetkili değil -> IP iznini ekletin.
+### İletim durumu kodları (GetStatus satırı, canlı veriye göre)
+Satır alanları: `status`, `reason`, `deliveryDate` (ddMMyyHHmmss). `status` paket/teslim aşamasıdır, ret kodu değildir;
+**`0` "başarılı" demek değildir** (telefona hiç ulaşmayan onaysız SMS de `status 0` döner). Kural sırayla:
+1. `reason` dolu ve `0` değilse **İletilemedi**, `delivery_code` = reason (103 SMS yetkisi yok, 114 telefon
+   kapalı/kapsama dışı, -104001 kara liste, -8000 İYS reddi, -467 metin çok uzun, -441 başlık tanımsız;
+   bilinmeyen kod "iletilemedi (kod X)").
+2. `status 1` **ve** `deliveryDate` dolu -> **İletildi** (`status:1`).
+3. `status 0` -> Yanıt bekleniyor, "Turatel'de bekliyor/onay" (`status:0`); `status 2` -> Yanıt bekleniyor,
+   "operatöre iletildi, rapor bekleniyor" (`status:2`); `status 1` ama `deliveryDate` boş -> bekliyor
+   (`status:1:tarih-yok`); `status` boş -> bekliyor.
+4. Diğer `status` -> Bilinmiyor, "bilinmeyen (durum X)" (`status:X`).
+İletildi/İletilemedi nihaidir; bekliyor/bilinmiyor 48 saat boyunca yeniden sorulur (sonra Bilinmiyor). `confirm_pending` /
+`confirm_failed` işaretleri yalnız nihai sonuçla değişir. Ham satır (maskeli, en çok 500 karakter) cron'da da
+"İletim Raporu"na yazılır; onay notu varsa altına eklenir.
+**Veri düzeltmesi:** önceki sürüm `status 0`'ı "iletildi" sayıp `delivery_code = 0` yazdı. Migration yoktur; cron,
+son 48 saatte gönderilmiş `delivered` + kod `0` kayıtları bir kez yeniden sorgular ve düzeltir. 48 saati geçen
+`delivered` + kod `0` kayıtlar sorgulanamaz: cron bunları "Bilinmiyor" yapar. Eski sürümün `status` değerini kod diye
+sakladığı tek haneli kodlar (`0`-`9`) "doğrulanmadı (eski kayıt)" görünür. Tek haneli gerçek `reason` `kod:N` olarak
+saklanır. `deliveryDate` tamamen sıfır ya da `0001…` yer tutucuysa teslim kanıtı sayılmaz. Ham satır mevcut rapor
+notunu silmez, altına eklenir (toplam 2000 karakter; önce en eski ham satırlar kırpılır).
+
 - `-6`: durum sorgularında "kayıt yok" (boş liste). Gönderilmiş kayıt varken geliyorsa tarih biçimi/aralığı sorunudur;
   diğer uçlarda normal hatadır.

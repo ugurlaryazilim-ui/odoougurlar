@@ -43,7 +43,10 @@ TOKEN_MARGIN = 60          # sn; yanıttaki süreden düşülen pay (saat kaymas
 TOKEN_MIN_TTL = 30         # sn
 
 SendResult = namedtuple('SendResult', 'packet_id message_ids raw')
-StatusRow = namedtuple('StatusRow', 'message_id client_id code raw')
+# code = saklanan iletim kodu (status_code(): reason ya da 'status:N'); status/reason/delivery_date ham alanlar.
+# Son üç alan varsayılanlı: eski 4 alanlı çağrılar çalışır.
+StatusRow = namedtuple('StatusRow', 'message_id client_id code raw status reason delivery_date',
+                       defaults=(None, None, None))
 
 # Uç başına gövde beyaz listesi (OpenAPI şeması; kimlik alanları yalnız GetToken'da)
 _SCHEMA = {
@@ -145,17 +148,66 @@ DELIVERY_LABELS = {
     '-441': 'Başlık tanımsız',
 }
 
+# GetStatus satırı (canlı veri): `status` paket/teslim aşaması (0 Turatel'de bekliyor/onay, 1 operatör teslim
+# aşaması, 2 operatöre iletildi), `deliveryDate` yalnız telefona ulaşınca dolar, `reason` ret/operatör kodudur
+# (boş ya da '0' = hata yok). Telefona ulaşmayan SMS'te de status 0 döner: 0 "başarılı" değildir.
+STATUS_PREFIX = 'status:'
+STATUS_NO_DATE = STATUS_PREFIX + '1:tarih-yok'   # status 1 ama deliveryDate boş: teslim kanıtı yok
+LEGACY_DELIVERED_CODE = '0'   # eski eşlemenin 'iletildi' dediği ham kod; doğrulanmamıştır, yeniden sorgulanır
+STATUS_LABELS = {
+    STATUS_PREFIX + '0': ('pending', "Turatel'de bekliyor/onay"),
+    STATUS_PREFIX + '1': ('delivered', 'iletildi'),
+    STATUS_NO_DATE: ('pending', 'teslim tarihi bekleniyor'),
+    STATUS_PREFIX + '2': ('pending', 'operatöre iletildi, rapor bekleniyor'),
+}
+CODE_LIMIT = 64
+REASON_PREFIX = 'kod:'   # tek haneli reason: eski sürümün status kodlarından ('1', '2'...) ayırt edilsin diye
+LEGACY_LABEL = 'doğrulanmadı (eski kayıt, yeniden sorgulanıyor)'
+
+
+def has_delivery_date(value):
+    """deliveryDate gerçek bir teslim zamanı mı: boş, tamamen sıfır ya da '0001…' yer tutucusu kanıt sayılmaz."""
+    text = _text(value) or ''
+    return bool(text.strip('0 -:.T')) and not text.startswith('0001')
+
+
+def status_code(status, reason, delivery_date):
+    """GetStatus satırı → saklanacak iletim kodu: reason dolu ve '0' değilse reason; yoksa status 1 + deliveryDate
+    dolu 'status:1' (iletildi), 'status:0', 'status:2'; status boşsa ''. Başka status 'status:N' (bilinmeyen)."""
+    reason = mask_digits(_text(reason) or '')[:CODE_LIMIT]
+    if reason and reason != '0':
+        # Tek haneli reason eski status kodlarıyla ('1', '2'...) karışmasın
+        return REASON_PREFIX + reason if len(reason) == 1 and reason.isdigit() else reason
+    status = _text(status) or ''
+    if not status:
+        return ''
+    try:
+        status = str(int(status))
+    except ValueError:
+        status = mask_digits(status)[:CODE_LIMIT]
+    if status == '1' and not has_delivery_date(delivery_date):
+        return STATUS_NO_DATE
+    return STATUS_PREFIX + status
+
 
 def delivery_state(code):
-    """İletim kodu → (durum, etiket). 0 iletildi; bilinen ret kodları iletilemedi; boş bekliyor; diğeri bilinmeyen."""
+    """Saklanan iletim kodu → (durum, etiket). Boş/status:0/status:2 bekliyor; status:1 iletildi; reason kodu
+    iletilemedi (bilinen kodun Türkçe açıklamasıyla); diğer status değeri bilinmeyen; ham '0' eski sürümün
+    doğrulanmamış 'iletildi'si (bilinmeyen)."""
     key = '' if code is None else str(code).strip()
     if not key:
         return 'pending', 'yanıt bekleniyor'
-    if key == '0':
-        return 'delivered', 'iletildi'
-    if key in DELIVERY_LABELS:
-        return 'undelivered', DELIVERY_LABELS[key]
-    return 'unknown', 'bilinmeyen (kod %s)' % key
+    if key in STATUS_LABELS:
+        return STATUS_LABELS[key]
+    if key.startswith(STATUS_PREFIX):
+        return 'unknown', 'bilinmeyen (durum %s)' % key[len(STATUS_PREFIX):]
+    if key.startswith(REASON_PREFIX):
+        key = key[len(REASON_PREFIX):]
+        return 'undelivered', DELIVERY_LABELS.get(key, 'iletilemedi (kod %s)' % key)
+    if len(key) == 1 and key.isdigit() and key not in DELIVERY_LABELS:
+        # '0' ve '1', '2'...: eski sürüm `status` değerini kod diye saklardı; teslim kanıtı değildir
+        return 'unknown', LEGACY_LABEL
+    return 'undelivered', DELIVERY_LABELS.get(key, 'iletilemedi (kod %s)' % key)
 
 
 # ── zarf / toleranslı okuma ──
@@ -405,8 +457,10 @@ class TuratelJsonClient:
             client_id = _text(_ci(row, 'clientId'))
             if not (message_id or client_id):
                 continue
-            code = _text(_ci(row, 'statusCode', 'status', 'deliveryStatus', 'code'))
-            out.append(StatusRow(message_id, client_id, code, safe_raw(row, ROW_RAW_LIMIT)))
+            status, reason = _text(_ci(row, 'status')), _text(_ci(row, 'reason'))
+            delivery_date = _text(_ci(row, 'deliveryDate'))
+            out.append(StatusRow(message_id, client_id, status_code(status, reason, delivery_date),
+                                 safe_raw(row, ROW_RAW_LIMIT), status, reason, delivery_date))
         return out
 
     # ── gönderim ──

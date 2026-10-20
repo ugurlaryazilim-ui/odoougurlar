@@ -392,19 +392,19 @@ class TestConfirmSmsFlow(ConfirmMixin, SmsTestCase):
                 mid = '99103%d' % i
                 msg = self.make_tracked(message_id=mid, provider_packet_id='497%d' % i, delivery_code=code,
                                         number='0532123457%d' % i)
-                msg._apply_status_rows([Row(mid, None, '777', '{}')])
+                msg._apply_status_rows([Row(mid, None, 'status:5', '{}')])
                 self.refresh_all(msg)
                 self.assertEqual((msg.delivery_state, msg.delivery_code), ('unknown', code))
-                msg._apply_status_rows([Row(mid, None, '0', '{}')])
+                msg._apply_status_rows([Row(mid, None, 'status:1', '{}')])
                 self.refresh_all(msg)
-                self.assertEqual((msg.delivery_state, msg.delivery_code), ('delivered', '0'))
+                self.assertEqual((msg.delivery_state, msg.delivery_code), ('delivered', 'status:1'))
 
     def test_uzlasan_belirsiz_kayit_paket_yoksa_onay_bilinmiyor_notu(self):
         Row = self.json_api().StatusRow
         bare = self.make_tracked(message_id='991071', state='uncertain', provider_packet_id=False)
         packed = self.make_tracked(message_id='991072', state='uncertain', provider_packet_id='4975',
                                    number='05321234568')
-        (bare | packed)._apply_status_rows([Row('991071', None, '1', '{}'), Row('991072', None, '1', '{}')])
+        (bare | packed)._apply_status_rows([Row('991071', None, 'status:2', '{}'), Row('991072', None, 'status:2', '{}')])
         self.refresh_all(bare, packed)
         self.assertEqual((bare.state, packed.state), ('sent', 'sent'))
         self.assertIn('onay durumu bilinmiyor', bare.delivery_report or '')
