@@ -78,7 +78,8 @@ class TestConfirmSmsClient(ConfirmMixin, SmsTestCase):
 
     def test_confirm_govdesi_hesap_ve_paket_sayi_bearer(self):
         client = self.json_client('info', 'bulk')
-        result = client.send_sms('9254', 'TESTBASLIK', 'Metin', ['5321234567'], client_ids=['c1'], reference_id='r1')
+        result = client.send_sms('9254', 'TESTBASLIK', 'Metin', ['5321234567', '5321234568'], client_ids=['c1', 'c2'],
+                                 reference_id='r1')   # bulksms en az 2 alıcı ister
         raw = client.confirm_sms('9254', result.packet_id)
         call = self.confirms()[-1]
         self.assertEqual(call['payload'], {'accountId': 9254, 'packetId': int(result.packet_id)})

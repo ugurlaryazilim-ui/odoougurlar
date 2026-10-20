@@ -320,8 +320,8 @@ class ResConfigSettings(models.TransientModel):
                 except TuratelError as e:
                     text, kind = self._turatel_json_error_text(str(e), label), 'danger'
                 lines.append('%s (%s): %s' % (label, account, text))
-                if single_token and key == 'info':
-                    # Tekli gönderim yalnız singlesms kullanır; C0 yalnız bulksms'i doğruladı
+                if single_token:
+                    # Tekli gönderim ve tek alıcılı paket singlesms kullanır (iki set de); C0 yalnız bulksms'i doğruladı
                     single = TuratelJsonClient(cfg['single_url'], user_id, username, password)
                     try:
                         single.get_token()

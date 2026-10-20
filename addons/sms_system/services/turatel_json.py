@@ -35,6 +35,7 @@ TZ = pytz.timezone('Europe/Istanbul')
 
 AUTH_ERROR = 'Turatel kimlik hatası (kullanıcı adı/şifre/userId ya da jeton reddedildi)'
 AUTH_CODES = {'-1'}
+ACCOUNT_NOT_FOUND = 'Account not found'   # -1000 mesajı: hesap bu kullanıcıda tanımlı değil
 STATUS_EMPTY_CODES = {'-6'}   # durum uçlarında "kayıt yok" (C0, belgesiz)
 # 301/307/308: hedef taşınmış, istek işlenmeden geri çevrildi (RFC 9110 §15.4). 302/303 işlenmiş olabilir.
 REDIRECT_NOT_PROCESSED = frozenset({301, 307, 308})
@@ -372,7 +373,12 @@ class TuratelJsonClient:
         if code == '-22':
             return TuratelError("Sunucu IP'si Turatel'de yetkili değil (-22)")
         if code == '-1000':
-            return TuratelError('Hesap bu Turatel kullanıcısında tanımlı değil (-1000)')
+            # -1000 birden çok nedenle döner (hesap bu kullanıcıda yok, bulksms'e tek alıcı...): Turatel'in
+            # kendi mesajı atılmaz; yalnız bilinen hesap mesajı Türkçe açıklanır
+            text = mask_digits(message)[:MESSAGE_LIMIT]
+            if not text or text.lower().startswith(ACCOUNT_NOT_FOUND.lower()):
+                return TuratelError('Hesap bu Turatel kullanıcısında tanımlı değil (-1000)')
+            return TuratelError('Turatel hatası -1000: %s' % text)
         label = 'Turatel hatası %s' % (code or '(kodsuz)')
         if message:
             return TuratelError('%s: %s' % (label, mask_digits(message)[:MESSAGE_LIMIT]))

@@ -223,6 +223,10 @@ class TestJsonSettings(JsonSettingsMixin, SmsTestCase):
         self.assertEqual({c['user'] for c in self.net.tj.calls_to('Sms/GetUserAccounts')}, {'info_user', 'com_user'})
         self.assertTrue(self.net.tj.calls_to('Auth/GetToken', 'singlesms'),
                         'Bilgi seti için singlesms GetToken da denenir (tekli yol)')
+        self.assertEqual({c['payload']['username'] for c in self.net.tj.calls_to('Auth/GetToken', 'singlesms')},
+                         {'info_user', 'com_user'},
+                         'Reklam seti de tek alıcıda singlesms kullanır: onun jetonu da denenir')
+        self.assertEqual(text.count('singlesms jetonu alındı'), 2, text)
         self.assertEqual(self.net.json_sends, [])
 
     def test_kk_c3_kredi_dugmesi_iki_hesap_icin_adet_gosterir(self):
