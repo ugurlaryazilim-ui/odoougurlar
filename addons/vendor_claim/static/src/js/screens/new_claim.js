@@ -138,14 +138,17 @@ export class VcNewClaim extends Component {
         const key = "inv:" + index;
         const found = this.getSel(key);
         if (found) {
-            this.state.sel.splice(this.state.sel.indexOf(found), 1);
+            this.removeSel(found);
         } else {
             this.addSel(key, this.state.invoice.items[index]);
         }
     }
 
-    /** Faturasız akış: okutulan ürünü listeden çıkar. */
+    /** Seçili ürünü listeden çıkar; yazılmış şikayet / eklenmiş fotoğraf varsa onay sorar (yanlışlıkla dokunma). */
     removeSel(entry) {
+        if ((entry.defect.trim() || entry.photos.length) && !window.confirm(_t("Bu ürün için yazılan şikayet ve fotoğraflar silinecek. Emin misiniz?"))) {
+            return;
+        }
         this.state.sel.splice(this.state.sel.indexOf(entry), 1);
     }
 
