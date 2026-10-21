@@ -8,6 +8,7 @@ import io
 import os
 import random
 import re
+import sys
 import requests
 from datetime import timedelta
 from PIL import Image, ImageDraw, Image as PILImage
@@ -26,12 +27,29 @@ _logger = logging.getLogger(__name__)
 # işlenir (data/cron.xml). Her slot cron'u aynı anda tek iş yürütür; slot numarası
 # concurrent_limit'i aşan cron çalışmaz → eşzamanlılık tüm worker'lar için globaldir.
 AI_QUEUE_CRONS = ('ugurlar_ai_studio.cron_ai_queue_1', 'ugurlar_ai_studio.cron_ai_queue_2')
-# NEDEN: cron worker'ı limit_time_real (2400 sn) aşarsa süreç öldürülür. Oturum işi bu
-# süreden sonra yeni görünüme başlamaz; kalanlar 'pending' kalır ve kuyruk yeniden
-# tetiklenir. Tek görünüm (hazırlık + try-on 180 sn + denetim/yeniden üretim) en kötü
-# ~15 dk sürdüğünden 900 + 900 < 2400.
+# NEDEN: cron worker'ı limit_time_real (2400 sn) aşarsa süreç öldürülür. Odoo 19'da
+# ir_cron._process_jobs_loop bir turda hazır TÜM cron işlerini sırayla koşar ve watchdog
+# yalnız turlar arasında sıfırlanır; iki kuyruk slotu aynı turda art arda koşabilir. Bu
+# yüzden bütçe iş başına değil tur başınadır (bkz. _cron_round_cursor): bütçe dolduktan
+# sonra yeni iş alınmaz, oturum işi yeni görünüme başlamaz. Tek görünüm (hazırlık +
+# try-on 180 sn + denetim/yeniden üretim) en kötü ~15 dk → tur ≤ 900 + hazırlık + 900 < 2400.
 QUEUE_JOB_BUDGET_SECONDS = 900
 _queue_limit_warned = False
+
+
+def _cron_round_cursor():
+    """Şu an koşan ir.cron turunun cron_cr'ı (tur kimliği); cron dışında None."""
+    # DIKKAT: Odoo 19 çekirdek iç yapısına bağlı (base/models/ir_cron.py
+    # _process_jobs_loop(cron_cr, ...)). Sürüm yükseltmesinde çerçeve bulunamazsa None döner
+    # ve bütçe iş başına uygulanır (eski davranış); test_round_cursor_found_in_core_loop yakalar.
+    from odoo.addons.base.models.ir_cron import IrCron
+    code = IrCron._process_jobs_loop.__code__
+    frame = sys._getframe(1)
+    while frame is not None:
+        if frame.f_code is code:
+            return frame.f_locals.get('cron_cr')
+        frame = frame.f_back
+    return None
 
 # Oturum kirası: bir kuyruk işi oturumu işlerken her adımda yenilenir. Süresi
 # dolmuş kira = ölü iş → cron devralabilir.
@@ -41,6 +59,8 @@ SUBMITTED_TIMEOUT_MINUTES = 30
 # Manken üretimi (3 görünüm, her biri ≤ ~2 dk fal çağrısı) bu süreyi aşarsa iş ölmüş sayılır
 MANNEQUIN_STUCK_MINUTES = 60
 _UTC_NOW_SQL = "(now() at time zone 'UTC')"
+# Oturum işinin görünüm sırası (_process_ai_thread_body: ordered_gens)
+VIEW_ORDER = ('front', 'back', 'side', 'detail')
 
 
 def _lease_owner():
@@ -2273,9 +2293,10 @@ class AiStudioSession(models.Model):
         try:
             with cr.savepoint():
                 # NEDEN: REPEATABLE READ'de iki slot aynı adayı seçebilir; kilitli satır
-                # atlanır, bizim snapshot'tan sonra kiralanmışsa SerializationFailure gelir
+                # atlanır, bizim snapshot'tan sonra kiralanmışsa SerializationFailure gelir.
+                # Beklenen yarış: odoo.sql_db 'bad query' ERROR'u basmasın (izleme gürültüsü)
                 cr.execute("SELECT id FROM ai_studio_session WHERE id = %s "
-                           "FOR NO KEY UPDATE SKIP LOCKED", (session_id,))
+                           "FOR NO KEY UPDATE SKIP LOCKED", (session_id,), log_exceptions=False)
                 if not cr.fetchone():
                     return False
                 return _try_acquire_lease(cr, session_id, owner)
@@ -2308,14 +2329,18 @@ class AiStudioSession(models.Model):
         if self._budget_status()[0]:
             _logger.warning('AI kuyruğu: aylık AI bütçesi dolu, yeni üretim başlatılmıyor')
         else:
-            for session in self.search(self._queue_session_domain(),
-                                       order='date_processing_start asc, id asc', limit=20):
-                if self._queue_lock_and_lease(session.id, owner):
-                    return ('session', session.id, False)
+            # NEDEN: revizyon (red, Tekrar Dene) tek görünümlük kısa iştir ve onaycı ekranda
+            # bekler; oturum işi 5-15 dk sürer. Oturumlar önce alınırsa toplu yeniden işleme
+            # (20 oturum) revizyonları saatlerce bekletir. Revizyon akışı sürekli olamayacağı
+            # için (insan tetikler) oturum işleri aç kalmaz.
             for gen in self.env['ai.studio.generation'].search(
                     self._queue_revision_domain(), order='write_date asc, id asc', limit=20):
                 if self._queue_lock_and_lease(gen.session_id.id, owner):
                     return ('revision', gen.session_id.id, gen.id)
+            for session in self.search(self._queue_session_domain(),
+                                       order='date_processing_start asc, id asc', limit=20):
+                if self._queue_lock_and_lease(session.id, owner):
+                    return ('session', session.id, False)
         preset_id = self.env['ai.studio.model.preset']._queue_claim_mannequin()
         if preset_id:
             return ('mannequin', preset_id, False)
@@ -2327,6 +2352,18 @@ class AiStudioSession(models.Model):
 
         Uzun AI işi (dakikalar) HTTP worker'ında değil burada, cron worker'ında koşar.
         """
+        round_cr = _cron_round_cursor()
+        round_start = getattr(round_cr, '_ai_queue_round_start', None) or time.time()
+        if round_cr is not None:
+            # DIKKAT: tur bütçesi cron_cr nesnesinde tutulur; tur bitince cursor ile birlikte gider
+            round_cr._ai_queue_round_start = round_start
+        deadline = round_start + QUEUE_JOB_BUDGET_SECONDS
+        if time.time() > deadline:
+            # Bu turun bütçesi önceki kuyruk işinde bitti: iş yeni turda (yeni watchdog süresi) alınsın
+            _logger.info('AI kuyruğu: cron turu süre bütçesi dolu (slot %s), iş sonraki tura bırakıldı', slot)
+            if self._queue_has_work():
+                self._trigger_ai_queue()
+            return
         owner = _lease_owner()
         job = self._queue_claim_job(slot, owner)
         if not job:
@@ -2334,7 +2371,7 @@ class AiStudioSession(models.Model):
         # DIKKAT: kira commit edilmeden diğer slot aynı oturumu görür; ayrıca iş boyunca
         # bu cursor'da açık snapshot / satır kilidi kalmamalı (iş kendi cursor'larını açar)
         self.env.cr.commit()
-        self._queue_run_job(job, owner, deadline=time.time() + QUEUE_JOB_BUDGET_SECONDS)
+        self._queue_run_job(job, owner, deadline=deadline)
         self.env.invalidate_all()
         if self._queue_has_work():
             self._trigger_ai_queue()
@@ -2347,6 +2384,9 @@ class AiStudioSession(models.Model):
             self.env['ai.studio.model.preset']._run_mannequin_job(res_id)
             return
         api_key = self._get_active_api_key()
+        # DIKKAT: okuma cron cursor'ında yeni transaction açar; iş (dakikalar) boyunca
+        # idle-in-transaction snapshot kalmasın
+        self.env.cr.commit()
         _logger.info('AI kuyruğu: iş başlıyor (%s, session=%s, gen=%s)', kind, res_id, gen_id)
         try:
             if kind == 'session':
@@ -2462,6 +2502,14 @@ class AiStudioSession(models.Model):
             generations = session.generation_ids.filtered(
                 lambda g: g.state == 'pending'
             )
+            # NEDEN: tipi bilinmeyen bekleyen üretim aşağıdaki sıralamaya (ordered_gens) girmez;
+            # 'pending' kalırsa kuyruk oturumu her tur yeniden alır ve ücretli analizi tekrarlar
+            unknown = generations.filtered(lambda g: g.photo_type not in VIEW_ORDER)
+            if unknown:
+                unknown.write({'state': 'failed', 'is_retryable': False,
+                               'error_message': _('Fotoğraf tipi belirsiz; üretim yapılamadı.')})
+                cr.commit()
+                generations -= unknown
             # Ön yüz fal kuyruğunda sürüyorsa diğer görünümler onun sonucunu (referans +
             # analiz) bekler; cron ön yüzü kurtarınca oturum yeniden başlatılır
             if session.generation_ids.filtered(
@@ -2486,7 +2534,8 @@ class AiStudioSession(models.Model):
                         lambda g: g.photo_type == 'front' and g.state == 'done'
                     )
                 front_img = front_gen and (front_gen[0].original_image or (front_gen[0].source_photo_id and front_gen[0].source_photo_id.image_original))
-                if front_gen and front_img:
+                # İşlenecek görünüm yoksa ücretli analiz/yükleme yapılmaz
+                if generations and front_gen and front_img:
                     from ..services.garment_preprocessor import preprocess_garment_image
                     _pre = preprocess_garment_image(front_img, target_long_edge=1600)
                     _pre_url = provider.upload_image(_pre['image_base64'])
@@ -2545,14 +2594,11 @@ class AiStudioSession(models.Model):
             global_prompt_locks = [l.prompt_text for l in all_locks]
 
             # Sıralama: front → back → side → detail
-            ordered_gens = (
-                generations.filtered(lambda g: g.photo_type == 'front')
-                + generations.filtered(lambda g: g.photo_type == 'back')
-                + generations.filtered(lambda g: g.photo_type == 'side')
-                + generations.filtered(lambda g: g.photo_type == 'detail')
-            )
+            ordered_gens = env['ai.studio.generation'].concat(*(
+                generations.filtered(lambda g, t=t: g.photo_type == t) for t in VIEW_ORDER))
 
             front_failed = False
+            started_views = 0
             for gen in ordered_gens:
                 photo_type = gen.photo_type or 'front'
                 set_usage_context(generation_id=gen.id)
@@ -2560,8 +2606,10 @@ class AiStudioSession(models.Model):
                 # sonucunu (ör. ön yüz görselini) bu generation'a yazmamalı.
                 gen_b64 = tryon_result = None
                 elapsed = 0.0
-                # Ön yüz başarısızsa kalanlar yalnız 'failed' işaretlenir (anlık); bölünmemeli
-                if deadline and not front_failed and time.time() > deadline:
+                # Ön yüz başarısızsa kalanlar yalnız 'failed' işaretlenir (anlık); bölünmemeli.
+                # NEDEN: en az bir görünüm işlenir; yoksa hazırlık bütçeyi yediğinde iş hiç
+                # ilerlemeden yeniden tetiklenir ve her turda analiz ücreti ödenir
+                if deadline and started_views and not front_failed and time.time() > deadline:
                     _logger.info('Kuyruk süre bütçesi doldu (session_id=%s); kalan görünümler '
                                  'sonraki kuyruk çalıştırmasında işlenecek', session_id)
                     break
@@ -2574,6 +2622,7 @@ class AiStudioSession(models.Model):
                     _logger.info('Oturum artık aktif değil (session_id=%s, state=%s), AI döngüsü durduruluyor',
                                  session_id, row and row[0])
                     break
+                started_views += 1
                 if front_failed:
                     gen.write({
                         'state': 'failed',
@@ -3899,6 +3948,19 @@ class AiStudioSession(models.Model):
             _logger.warning('Stuck cron: manken üretimi yarıda kalmış (preset=%s), başarısız sayıldı', preset.id)
             self._stuck_step('takılmış manken üretimi', preset,
                              lambda preset=preset: preset.write({'mannequin_generation_state': 'failed'}))
+        # NEDEN: kuyruk hiç çalışamıyorsa (API anahtarı silindi / concurrent_limit=0) 'queued' manken
+        # sonsuza dek bekler ve "Manken Oluştur" gizli kalır. Kuyruk çalışırken uzun bekleme meşru
+        # (toplu yeniden üretim, oturum işleri önce alınır) → yalnız durmuş kuyrukta kapatılır.
+        queue_stalled = not self._get_active_api_key() or int(
+            self.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.concurrent_limit', '2') or 2) < 1
+        if queue_stalled:
+            for preset in self.env['ai.studio.model.preset'].search([
+                    ('mannequin_generation_state', '=', 'queued'),
+                    ('write_date', '<', now - timedelta(minutes=MANNEQUIN_STUCK_MINUTES))]):
+                _logger.warning('Stuck cron: kuyruk çalışamıyor, sıradaki manken başarısız sayıldı (preset=%s)',
+                                preset.id)
+                self._stuck_step('kuyrukta kalmış manken', preset,
+                                 lambda preset=preset: preset.write({'mannequin_generation_state': 'failed'}))
 
         # ═══ 4: kuyruk cron'larını uyandır (kurtarılan ön yüz, yeniden kuyruğa alınanlar) ═══
         if self._queue_has_work():

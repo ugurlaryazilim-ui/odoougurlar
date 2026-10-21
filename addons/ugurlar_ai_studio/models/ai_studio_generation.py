@@ -3,7 +3,7 @@ import time
 from collections import OrderedDict
 
 from odoo import models, fields, api, _
-from odoo.exceptions import UserError
+from odoo.exceptions import UserError, ValidationError
 
 from ..services.garment_analyzer import report_gemini_usage
 
@@ -122,6 +122,15 @@ class AiStudioGeneration(models.Model):
         compute='_compute_original_image',
         help='Karşılaştırma için orijinal fotoğraf',
     )
+
+    @api.constrains('session_id', 'source_photo_id', 'parent_generation_id')
+    def _check_same_session_refs(self):
+        # NEDEN: kuyruk işi cron (sistem) kullanıcısıyla koşar; başka oturumun fotoğrafı/üretimi
+        # bağlanırsa operatör kendi oturumunda yabancı ürün fotoğrafını işletip görebilir
+        for gen in self:
+            for ref in (gen.source_photo_id, gen.parent_generation_id):
+                if ref and ref.session_id != gen.session_id:
+                    raise ValidationError(_('Kaynak fotoğraf ve önceki versiyon aynı oturuma ait olmalıdır.'))
 
     @api.depends('source_photo_id.image_original')
     def _compute_original_image(self):

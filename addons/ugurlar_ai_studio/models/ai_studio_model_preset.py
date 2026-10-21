@@ -527,7 +527,7 @@ class AiStudioModelPreset(models.Model):
                                   WHERE mannequin_generation_state = 'queued'
                                   ORDER BY write_date, id LIMIT 1 FOR NO KEY UPDATE SKIP LOCKED)
                        AND mannequin_generation_state = 'queued'
-                 RETURNING id""")
+                 RETURNING id""", log_exceptions=False)  # beklenen yarış ERROR logu basmasın
                 row = cr.fetchone()
         except (pg_errors.SerializationFailure, pg_errors.LockNotAvailable):
             return False
@@ -542,9 +542,12 @@ class AiStudioModelPreset(models.Model):
         provider_type = self.env['ir.config_parameter'].sudo().get_param(
             'ugurlar_ai_studio.default_provider', 'fashn')
         api_key = self.env['ai.studio.session']._get_active_api_key()
-        self._generate_mannequin_thread(preset.id, preset.mannequin_prompt, api_key, preset.gender,
-                                        preset.body_type, preset.background_type, provider_type,
-                                        self.env.uid)
+        args = (preset.id, preset.mannequin_prompt, api_key, preset.gender, preset.body_type,
+                preset.background_type, provider_type, self.env.uid)
+        # DIKKAT: okumalar cron cursor'ında transaction açar; ~10 dk'lık üretim boyunca
+        # idle-in-transaction snapshot kalmasın (iş kendi cursor'larını açar)
+        self.env.cr.commit()
+        self._generate_mannequin_thread(*args)
 
     def _generate_mannequin_thread(self, preset_id, prompt, api_key,
                                     gender, body_type, bg_type, provider_type, uid):
